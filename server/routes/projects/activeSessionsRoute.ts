@@ -15,17 +15,15 @@ import {
   searchSessionMessages,
   stat,
 } from "../../helpers"
-import { agentKindForDirName, projectDirNameFor } from "../../../shared/session/agent-descriptors"
-import { storeFor } from "../../agents"
+import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
+import { allStores } from "../../agents"
+import { runtimeFor } from "../../agents/runtimes"
 import type { NextFn } from "../../http"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
-import { getSessionInventory } from "../../lib/sessionInventory"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { projectLabel } from "./projectLabel"
-import { codexAppServer } from "../../agents/codexAppServer"
-import { copilotRuntime } from "../../agents/copilotTransport"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -38,38 +36,6 @@ interface ActiveSessionCandidate {
   size: number
   projectPath?: string
   sessionId?: string
-}
-
-interface ExternalSessionFile {
-  cwd: string
-  fileName: string
-  filePath: string
-  mtimeMs: number
-  size: number
-  sessionId: string
-  isSubagent: boolean
-}
-
-function appendExternalCandidates(
-  candidates: ActiveSessionCandidate[],
-  files: ExternalSessionFile[],
-  encodeDirName: (cwd: string) => string,
-  projectFilter: string,
-): void {
-  for (const file of files) {
-    if (file.isSubagent) continue
-    const dirName = encodeDirName(file.cwd)
-    if (projectFilter && dirName !== projectFilter) continue
-    candidates.push({
-      dirName,
-      fileName: file.fileName,
-      filePath: file.filePath,
-      mtimeMs: file.mtimeMs,
-      size: file.size,
-      projectPath: file.cwd,
-      sessionId: file.sessionId,
-    })
-  }
 }
 
 /**
@@ -131,25 +97,19 @@ export async function handleActiveSessions(
     // First pass: collect all session files with their mtime (cheap stat only)
     const candidates: ActiveSessionCandidate[] = []
 
-    for (const file of await storeFor("claude").listSessionFiles()) {
-      if (!file.dirName) continue
-      if (projectFilter && file.dirName !== projectFilter) continue
-      candidates.push({
-        dirName: file.dirName,
-        fileName: file.fileName,
-        filePath: file.filePath,
-        mtimeMs: file.mtimeMs,
-        size: file.size,
-      })
-    }
-
-    for (const kind of ["codex", "copilot"] as const) {
-      appendExternalCandidates(
-        candidates,
-        await getSessionInventory(kind),
-        (cwd) => projectDirNameFor(kind, cwd),
-        projectFilter,
-      )
+    for (const store of allStores()) {
+      for (const session of await store.listTopLevelSessions()) {
+        if (projectFilter && session.dirName !== projectFilter) continue
+        candidates.push({
+          dirName: session.dirName,
+          fileName: session.fileName,
+          filePath: session.filePath,
+          mtimeMs: session.mtimeMs,
+          size: session.size,
+          projectPath: session.projectPath,
+          sessionId: session.sessionId,
+        })
+      }
     }
 
     // Sort by mtime descending within each project, then pick top N per project
@@ -268,10 +228,10 @@ export async function handleActiveSessions(
           ? await resolveTeamLead(meta.teamName)
           : null
         const sessionId = c.sessionId || meta.sessionId || c.fileName.replace(".jsonl", "")
-        const agentKind = agentKindForDirName(c.dirName)
-        const isRuntimeActive = agentKind === "codex"
-          ? codexAppServer.getActiveTurnId(sessionId) !== undefined
-          : agentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)
+        const descriptor = descriptorForDirName(c.dirName)
+        // The runtime's own turn state, for an agent whose transcript lags it.
+        const isRuntimeActive = descriptor.capabilities.turnLiveness === "runtime"
+          && runtimeFor(descriptor.kind).activity(sessionId).running
         const hasRunningAgents = statusInfo.status === "awaiting_agents"
           && await hasFreshAgentTranscripts(c.filePath)
 

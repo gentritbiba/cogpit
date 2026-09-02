@@ -1,13 +1,17 @@
 import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { formatFor, turnBoundaryLines } from "../../shared/session/agents"
 import {
   copilotRuntime as transport,
   type CopilotPendingPermission,
   type CopilotPendingUserInput,
   type CopilotPermissionDecision,
 } from "./copilotTransport"
+import { fetchCopilotModels } from "./copilotModels"
 import { join, randomUUID, readFile } from "../helpers"
 import { storeFor } from "./index"
+import { withTimeout } from "./timeout"
 import { resolveSessionCwd } from "./sessionCwd"
+import { initialCopilotScanState, parseCopilotUsageMetrics, type UsageCostRecord } from "./usageScanners"
 import {
   AgentRuntimeError,
   selectAvailableDecision,
@@ -42,6 +46,42 @@ const IMAGE_ONLY_PROMPT = "Describe the attached image(s)."
 /** How long to wait for the CLI to write the first events of a new session. */
 const TRANSCRIPT_POLL_ATTEMPTS = 20
 const TRANSCRIPT_POLL_INTERVAL_MS = 50
+/** A stuck `session.usage.getMetrics` must not hold the whole cost page. */
+const LIVE_USAGE_TIMEOUT_MS = 5_000
+
+/**
+ * Map a turn position onto the durable event id the CLI forks at.
+ *
+ * Copilot does not truncate a transcript — `sessions.fork` takes the id of the
+ * first event to drop. Three encodings of `turnUuid` reach here because the
+ * client builds turn ids from whichever of them the transcript carried.
+ */
+function forkBoundary(
+  lines: string[],
+  turnIndex?: number,
+  turnUuid?: string,
+): string | undefined {
+  const turns = turnBoundaryLines(formatFor("copilot"), lines).map((line) => {
+    const event = JSON.parse(lines[line]) as Record<string, unknown>
+    const data = event.data as Record<string, unknown>
+    return {
+      eventId: String(event.id),
+      turnId: typeof data.turnId === "string" ? data.turnId : "",
+    }
+  })
+
+  let targetIndex = -1
+  if (turnUuid) {
+    targetIndex = turns.findIndex(({ eventId, turnId }) => (
+      turnUuid === eventId
+      || turnUuid.endsWith(`@${eventId}`)
+      || (turnId.length > 0 && turnUuid === `${turnId}@${eventId}`)
+    ))
+  }
+  if (targetIndex < 0 && turnIndex !== undefined) targetIndex = turnIndex
+  if (targetIndex < 0 || targetIndex >= turns.length - 1) return undefined
+  return turns[targetIndex + 1].eventId
+}
 
 /** Images ride beside the prompt as blob attachments rather than in it. */
 function buildAttachments(
@@ -530,6 +570,38 @@ export const copilotRuntime: AgentRuntime = {
       )
     }
     return true
+  },
+
+  listModels: fetchCopilotModels,
+
+  async liveUsageRecords(alreadyCounted) {
+    // Detailed token metrics reach the transcript only at shutdown. While a
+    // session is still open, its cumulative snapshot is folded in after
+    // subtracting every durable snapshot already counted.
+    const records: UsageCostRecord[] = []
+    await Promise.all(transport.getActiveSessionIds().map(async (sessionId) => {
+      try {
+        const metrics = await withTimeout(
+          transport.getSessionUsage(sessionId),
+          LIVE_USAGE_TIMEOUT_MS,
+          "copilot session usage",
+        )
+        const state = initialCopilotScanState(sessionId)
+        for (const [model, totals] of alreadyCounted.get(sessionId) ?? []) {
+          state.lastUsageByModel.set(model, totals)
+        }
+        records.push(...parseCopilotUsageMetrics(metrics, state, Date.now()))
+      } catch {
+        // Live usage is additive; a failed control RPC must not hide durable data.
+      }
+    }))
+    return records
+  },
+
+  async fork(sessionId, at) {
+    const toEventId = forkBoundary(at.lines, at.turnIndex, at.turnUuid)
+    const forked = await transport.forkSession(sessionId, toEventId ? { toEventId } : {})
+    return { sessionId: forked.sessionId, fileName: descriptor.sessionFile.name(forked.sessionId) }
   },
 
   async describeRuntime() {

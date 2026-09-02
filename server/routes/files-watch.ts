@@ -3,8 +3,9 @@ import {
   open,
   watch,
 } from "../helpers"
-import { agentKindForDirName } from "../../shared/session/agent-descriptors"
+import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import { storeForPath } from "../agents"
+import { runtimeForDirName } from "../agents/runtimes"
 import { resolveSessionFilePath } from "../sessionPaths"
 import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -13,7 +14,6 @@ import { StringDecoder } from "node:string_decoder"
 import type { UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
-import { copilotRuntime } from "../agents/copilotTransport"
 
 // Allowlist of roots that background task output may be read from. Windows has
 // no /tmp, so nothing would ever pass containment there without %TEMP%.
@@ -22,21 +22,16 @@ const TASK_OUTPUT_BASES: readonly string[] = process.platform === "win32"
   : ["/private/tmp", "/tmp"]
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
-const SESSION_UUID_RE = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/
 let canonicalTaskOutputBases: Promise<string[]> | null = null
 
+/**
+ * The id the stream bus and the runtime know a transcript by: its session id,
+ * which a rollout name buries behind a timestamp and date directories. A
+ * transcript no agent claims by name keeps the bare file stem.
+ */
 function streamSessionId(dirName: string, fileName: string): string {
-  const agentKind = agentKindForDirName(dirName)
-  if (agentKind === "copilot") {
-    return fileName.split("/")[0] || fileName.replace(/\.jsonl$/, "")
-  }
-  if (agentKind === "codex") {
-    // Codex rollout filenames include timestamps and nested date directories;
-    // app-server notifications use only the trailing thread UUID.
-    const match = SESSION_UUID_RE.exec(fileName)
-    if (match) return match[1]
-  }
-  return fileName.replace(/\.jsonl$/, "")
+  return descriptorForDirName(dirName).sessionFile.sessionId(fileName)
+    ?? fileName.replace(/\.jsonl$/, "")
 }
 
 async function getCanonicalTaskOutputBases(): Promise<string[]> {
@@ -268,7 +263,7 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     const filePath = await resolveSessionFilePath(dirName, fileName)
     if (res.destroyed || res.writableEnded) return
-    if (!filePath || storeForPath(filePath)?.kind !== agentKindForDirName(dirName)) {
+    if (!filePath || storeForPath(filePath)?.kind !== descriptorForDirName(dirName).kind) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied" }))
       return
@@ -374,14 +369,19 @@ export function registerFileWatchRoutes(use: UseFn) {
     }
 
     // ── Token-level streaming ──────────────────────────────────────────
-    // The stream bus carries partial messages from Claude's SDK and Codex's
-    // app-server. External/fallback sessions never publish, so subscribing is
-    // inert for them and they continue to rely on JSONL file updates.
+    // The stream bus carries partial messages from the runtimes that publish
+    // them. External/fallback sessions never publish, so subscribing is inert
+    // for them and they continue to rely on JSONL file updates.
     const sessionId = streamSessionId(dirName, fileName)
-    const streamAgentKind = agentKindForDirName(dirName)
+    const descriptor = descriptorForDirName(dirName)
+    // An agent that publishes no tokens gives the client nothing to keep a
+    // turn "live" by, so its runtime's own turn state is reported instead.
+    const runtimeTurnActive = () =>
+      !descriptor.capabilities.tokenStreaming
+      && runtimeForDirName(dirName).activity(sessionId).running
     const sendHeartbeat = () => {
-      if (streamAgentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)) {
-        res.write(`data: ${JSON.stringify({ type: "copilot_activity" })}\n\n`)
+      if (runtimeTurnActive()) {
+        res.write(`data: ${JSON.stringify({ type: "runtime_activity" })}\n\n`)
       } else {
         res.write(": heartbeat\n\n")
       }
@@ -422,9 +422,7 @@ export function registerFileWatchRoutes(use: UseFn) {
         initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
-        if (streamAgentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)) {
-          sendHeartbeat()
-        }
+        if (runtimeTurnActive()) sendHeartbeat()
         void flushNewLines()
       })
       .catch(() => {
@@ -484,7 +482,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     let subagentTick = 0
 
     // Only Claude writes sub-agent transcripts as sibling files to poll for.
-    const subagentPoller = streamAgentKind !== "claude"
+    const subagentPoller = descriptor.kind !== "claude"
       ? null
       : setInterval(async () => {
         if (closed) return

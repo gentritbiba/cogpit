@@ -5,6 +5,13 @@ import { join, resolve } from "node:path"
 import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 import { resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
+import { readCopilotSessionIdentity, readCopilotSessionMeta } from "./copilotMetadata"
+import {
+  addressFromTranscript,
+  projectSessionFilesFromInventory,
+  projectsFromInventory,
+  topLevelSessionsFromInventory,
+} from "./transcriptProjects"
 import type { AgentStore, SessionFileInfo } from "./types"
 
 /**
@@ -74,5 +81,24 @@ export const copilotStore: AgentStore = {
     if (!isSessionUuid(sessionId)) return null
     const { sessionDir, filePath } = transcriptPath(sessionId)
     return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
+  },
+
+  readIdentity: readCopilotSessionIdentity,
+
+  readSessionMeta: readCopilotSessionMeta,
+
+  listProjects: () => projectsFromInventory(copilotStore),
+
+  listProjectSessionFiles: (dirName) => projectSessionFilesFromInventory(copilotStore, dirName),
+
+  listTopLevelSessions: () => topLevelSessionsFromInventory(copilotStore),
+
+  // Sub-agents are `subagent.*` events inside the parent transcript, not files.
+  listSubagentFiles: async () => [],
+
+  sessionAddress: (filePath) => addressFromTranscript(copilotStore, filePath),
+
+  transcriptPath(_dirName, sessionId) {
+    return { filePath: transcriptPath(sessionId).filePath, fileName: descriptor.sessionFile.name(sessionId) }
   },
 }

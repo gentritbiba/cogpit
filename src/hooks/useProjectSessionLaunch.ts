@@ -5,6 +5,7 @@ import type { ParsedSession } from "../../shared/session/types"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import {
+  DISCOVERED_DIRNAME_KIND,
   agentKindForDirName,
   findProjectDirNameForCwd,
   projectDirNameFor,
@@ -23,13 +24,16 @@ interface UseProjectSessionLaunchOptions {
   fastMode: boolean
   ultracode: boolean
   mcpConfig: string | null
-  onCodexModelRejected: (rejectedModel: string) => void
+  onModelRejected: (rejectedModel: string) => void
 }
 
 /**
- * Owns lazy new-session launch state and provider-aware project resolution.
- * External-provider projects remember their matching Claude directory so the
- * pending composer can switch agents without losing the real cwd.
+ * Owns lazy new-session launch state and agent-aware project resolution.
+ *
+ * One agent's dirName is a lossy encoding of the cwd that can only be looked
+ * up, never recomputed, so a pending session remembers that agent's matching
+ * directory — whichever agent it starts in — and the composer can switch
+ * agents without losing the real cwd.
  */
 export function useProjectSessionLaunch({
   permissionsConfig,
@@ -43,7 +47,7 @@ export function useProjectSessionLaunch({
   fastMode,
   ultracode,
   mcpConfig,
-  onCodexModelRejected,
+  onModelRejected,
 }: UseProjectSessionLaunchOptions) {
   const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
   const liveSessionsRefreshRef = useRef<(() => void) | null>(null)
@@ -60,7 +64,7 @@ export function useProjectSessionLaunch({
       setTimeout(() => liveSessionsRefreshRef.current?.(), 2000)
     },
     onCreateStarted: setPendingFirstMessage,
-    onCodexModelRejected,
+    onModelRejected,
     model,
     effort,
     fastMode,
@@ -70,13 +74,15 @@ export function useProjectSessionLaunch({
   const beginNewSession = newSession.handleNewSession
 
   const [pendingAgentSource, setPendingAgentSource] = useState<{
-    claudeDirName: string
+    /** The lossy-encoded agent's directory for `cwd`, as the server knows it. */
+    discoveredDirName: string
     cwd: string
   } | null>(null)
-  const claudeProjectDirCacheRef = useRef(new Map<string, string | null>())
+  const discoveredDirNameCacheRef = useRef(new Map<string, string | null>())
 
-  const resolveClaudeProjectDirName = useCallback(async (cwd: string): Promise<string | null> => {
-    const cache = claudeProjectDirCacheRef.current
+  const resolveDiscoveredDirName = useCallback(async (cwd: string): Promise<string | null> => {
+    if (DISCOVERED_DIRNAME_KIND === null) return null
+    const cache = discoveredDirNameCacheRef.current
     if (cache.has(cwd)) {
       return cache.get(cwd) ?? null
     }
@@ -88,7 +94,7 @@ export function useProjectSessionLaunch({
         return null
       }
       const projects = await response.json() as Array<{ dirName: string; path: string }>
-      const match = findProjectDirNameForCwd(projects, cwd, "claude")
+      const match = findProjectDirNameForCwd(projects, cwd, DISCOVERED_DIRNAME_KIND)
       cache.set(cwd, match)
       return match
     } catch {
@@ -105,17 +111,22 @@ export function useProjectSessionLaunch({
       return
     }
 
-    const startsInExternalProvider = agentKindForDirName(dirName) !== "claude"
-    const claudeDirName = startsInExternalProvider
-      ? await resolveClaudeProjectDirName(normalizedCwd)
-      : projectDirNameFor("claude", normalizedCwd)
+    // Starting in the lossy agent's own project re-derives its dirName from
+    // the cwd, which normalises a stale one; starting anywhere else has to
+    // look it up.
+    const startsInLossyKind = agentKindForDirName(dirName) === DISCOVERED_DIRNAME_KIND
+      ? DISCOVERED_DIRNAME_KIND
+      : null
+    const discoveredDirName = startsInLossyKind
+      ? projectDirNameFor(startsInLossyKind, normalizedCwd)
+      : await resolveDiscoveredDirName(normalizedCwd)
 
-    setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
+    setPendingAgentSource(discoveredDirName ? { discoveredDirName, cwd: normalizedCwd } : null)
     beginNewSession(
-      startsInExternalProvider || !claudeDirName ? dirName : claudeDirName,
+      startsInLossyKind && discoveredDirName ? discoveredDirName : dirName,
       normalizedCwd,
     )
-  }, [beginNewSession, resolveClaudeProjectDirName])
+  }, [beginNewSession, resolveDiscoveredDirName])
 
   const handleStartNewFolder = useCallback((cwd: string) => {
     const dirName = projectDirNameFor(defaultAgentKind, cwd)
@@ -127,7 +138,7 @@ export function useProjectSessionLaunch({
     const nextDirName = projectDirNameFor(
       agentKind,
       pendingAgentSource.cwd,
-      pendingAgentSource.claudeDirName,
+      pendingAgentSource.discoveredDirName,
     )
     beginNewSession(nextDirName, pendingAgentSource.cwd)
   }, [pendingAgentSource, beginNewSession])

@@ -6,6 +6,7 @@
  * bug that let Copilot fall out of the config badge map.
  */
 import { Bot, Code2, Github, type LucideIcon } from "lucide-react"
+import type { PermissionMode } from "../permissions"
 import { AGENT_KINDS, descriptorForDirName, type AgentKind } from "."
 
 const ICONS: Record<AgentKind, LucideIcon> = {
@@ -57,6 +58,42 @@ const INTERRUPT_LABELS: Record<AgentKind, string> = {
   claude: "Interrupt agent",
   codex: "Stop active turn",
   copilot: "Stop Copilot turn",
+}
+
+export interface PermissionModeOption {
+  value: PermissionMode
+  label: string
+  description: string
+}
+
+/**
+ * Cogpit's access picker, in each agent's own words: the same wire modes,
+ * labelled the way that CLI's policy actually behaves.
+ */
+const PERMISSION_MODES: Record<AgentKind, readonly PermissionModeOption[]> = {
+  claude: [
+    { value: "default", label: "Ask", description: "Ask before sensitive actions" },
+    { value: "plan", label: "Plan", description: "Read and plan without changing files" },
+    { value: "acceptEdits", label: "Accept Edits", description: "Allow file edits; ask for other actions" },
+    { value: "auto", label: "Auto", description: "Run autonomously with classifier safeguards" },
+    { value: "dontAsk", label: "Don't Ask", description: "Deny actions that need approval" },
+    { value: "bypassPermissions", label: "Full access", description: "Skip permission checks" },
+  ],
+  codex: [
+    { value: "default", label: "Workspace", description: "Write inside the project sandbox" },
+    { value: "plan", label: "Read only", description: "Inspect and plan without writing" },
+    { value: "bypassPermissions", label: "Full access", description: "No sandbox or approval checks" },
+  ],
+  copilot: [
+    { value: "default", label: "Ask", description: "Ask before running tools or changing files" },
+    { value: "plan", label: "Plan", description: "Explore and plan without changing project files" },
+    { value: "auto", label: "Autopilot", description: "Implement autonomously until the task is complete" },
+    { value: "bypassPermissions", label: "Full access", description: "Allow tools, paths, and URLs without asking" },
+  ],
+}
+
+export function agentPermissionModes(kind: AgentKind): readonly PermissionModeOption[] {
+  return PERMISSION_MODES[kind]
 }
 
 export function agentIcon(kind: AgentKind): LucideIcon {

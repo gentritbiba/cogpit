@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Check, Flag, Pencil, Trash2, X } from "lucide-react"
 import type { ParsedSession } from "../../../shared/session/types"
-import { extractClaudeGoalState, type ClaudeGoalState } from "@/lib/goals"
+import type { AgentKind } from "@/lib/agents"
+import { extractTranscriptGoalState, type TranscriptGoalState } from "@/lib/agents/goals"
+import { agentShortName } from "@/lib/agents/presentation"
 import { formatTokenCount } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { GoalContext, type GoalControls } from "./context"
 import { GOAL_EDITOR_CLASS, GOAL_PANEL_CLASS } from "./styles"
 
-function statusLabel(status: ClaudeGoalState["status"]): string {
+function statusLabel(status: TranscriptGoalState["status"]): string {
   switch (status) {
     case "active": return "Goal active"
     case "achieved": return "Achieved"
@@ -18,7 +20,7 @@ function statusLabel(status: ClaudeGoalState["status"]): string {
   }
 }
 
-function statusVariant(status: ClaudeGoalState["status"]): "secondary" | "destructive" | "outline" {
+function statusVariant(status: TranscriptGoalState["status"]): "secondary" | "destructive" | "outline" {
   switch (status) {
     case "failed": return "destructive"
     case "achieved": return "secondary"
@@ -26,18 +28,24 @@ function statusVariant(status: ClaudeGoalState["status"]): "secondary" | "destru
   }
 }
 
-interface ClaudeGoalProviderProps {
+interface TranscriptGoalProviderProps {
+  agentKind: AgentKind
   session: ParsedSession
   onSendCommand: (command: string) => void
   children: ReactNode
 }
 
-export function ClaudeGoalProvider({ session, onSendCommand, children }: ClaudeGoalProviderProps) {
+/**
+ * Goal controls for an agent whose goal state is read back from its own
+ * transcript and set with a `/goal` slash command.
+ */
+export function TranscriptGoalProvider({ agentKind, session, onSendCommand, children }: TranscriptGoalProviderProps) {
+  const agentName = agentShortName(agentKind)
   const parsedGoal = useMemo(
-    () => extractClaudeGoalState(session.rawMessages),
+    () => extractTranscriptGoalState(session.rawMessages),
     [session.rawMessages],
   )
-  const [optimisticGoal, setOptimisticGoal] = useState<ClaudeGoalState | null | undefined>()
+  const [optimisticGoal, setOptimisticGoal] = useState<TranscriptGoalState | null | undefined>()
   const [editing, setEditing] = useState(false)
   const [condition, setCondition] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -89,18 +97,18 @@ export function ClaudeGoalProvider({ session, onSendCommand, children }: ClaudeG
 
   if (editing) {
     section = (
-      <section className={GOAL_EDITOR_CLASS} aria-label="Claude goal editor">
+      <section className={GOAL_EDITOR_CLASS} aria-label={`${agentName} goal editor`}>
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-foreground">
           <Flag className="size-3.5" data-icon="inline-start" />
           {goal ? "Replace goal" : "Set a long-running goal"}
         </div>
         <Field data-invalid={Boolean(error)}>
-          <FieldLabel className="sr-only" htmlFor="claude-goal-condition">Goal condition</FieldLabel>
+          <FieldLabel className="sr-only" htmlFor="goal-condition">Goal condition</FieldLabel>
           <Textarea
-            id="claude-goal-condition"
+            id="goal-condition"
             value={condition}
             onChange={(event) => setCondition(event.target.value)}
-            placeholder="A measurable condition Claude should keep working toward…"
+            placeholder={`A measurable condition ${agentName} should keep working toward…`}
             rows={2}
             maxLength={4_000}
             aria-invalid={Boolean(error)}
@@ -122,7 +130,7 @@ export function ClaudeGoalProvider({ session, onSendCommand, children }: ClaudeG
     )
   } else if (goal) {
     section = (
-      <section className={GOAL_PANEL_CLASS} aria-label="Claude goal">
+      <section className={GOAL_PANEL_CLASS} aria-label={`${agentName} goal`}>
         <div className="flex items-center gap-2">
           <Flag className="size-3.5 shrink-0 text-primary" data-icon="inline-start" />
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={goal.condition}>

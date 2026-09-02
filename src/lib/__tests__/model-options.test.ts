@@ -1,8 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
+import { fallbackModelsFor } from "@/lib/agents/models"
 import {
-  CLAUDE_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
-  COPILOT_MODEL_OPTIONS,
   getEffortOptions,
   getModelOptions,
   supportsImageInput,
@@ -17,13 +15,13 @@ afterEach(() => {
 
 describe("model options store", () => {
   it("returns the static fallback lists before any dynamic catalog loads", () => {
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
-    expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
+    expect(getModelOptions("codex")).toBe(fallbackModelsFor("codex"))
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
   it("includes the GPT-5.6 generation in the codex fallback list", () => {
-    const values = CODEX_MODEL_OPTIONS.map((o) => o.value)
+    const values = fallbackModelsFor("codex").map((o) => o.value)
     expect(values).toContain("gpt-5.6-sol")
     expect(values).toContain("gpt-5.6-terra")
     expect(values).toContain("gpt-5.6-luna")
@@ -31,7 +29,7 @@ describe("model options store", () => {
   })
 
   it("keeps Copilot fallbacks minimal and conservative until the live catalog loads", () => {
-    expect(COPILOT_MODEL_OPTIONS.map((option) => option.value)).toEqual(["", "auto"])
+    expect(fallbackModelsFor("copilot").map((option) => option.value)).toEqual(["", "auto"])
     expect(getEffortOptions("copilot", "")).toEqual([])
     expect(getEffortOptions("copilot", "auto")).toEqual([])
     expect(getEffortOptions("copilot", "stale-model")).toEqual([])
@@ -67,8 +65,8 @@ describe("model options store", () => {
 
     expect(getModelOptions("codex")).toBe(dynamic)
     // Claude keeps its fallback — only codex was updated
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
     expect(listener).toHaveBeenCalledTimes(1)
 
     unsubscribe()
@@ -78,14 +76,14 @@ describe("model options store", () => {
 
   it("ignores empty dynamic catalogs", () => {
     setDynamicModelOptions("codex", [])
-    expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
+    expect(getModelOptions("codex")).toBe(fallbackModelsFor("codex"))
   })
 
   it("restores fallbacks on reset", () => {
     setDynamicModelOptions("claude", [{ value: "", label: "Default" }])
     setDynamicModelOptions("copilot", [{ value: "auto", label: "Auto" }])
     resetDynamicModelOptions()
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 })

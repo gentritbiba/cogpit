@@ -1,15 +1,23 @@
 import type { Dirent } from "node:fs"
-import { readdir } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { readdir, stat } from "node:fs/promises"
+import { basename, dirname, join, resolve } from "node:path"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { dirs } from "../dirs"
 import { isWithinDir } from "../pathSafety"
+import { readClaudeSessionMeta } from "./claudeMetadata"
 import {
   isSinglePathSegment,
   resolveCanonicalFileWithinRoot,
   statContainedFile,
 } from "./containment"
-import type { AgentStore, SessionFileInfo } from "./types"
+import { readTranscriptHead } from "./transcriptHead"
+import type {
+  AgentProjectEntry,
+  AgentStore,
+  ProjectSessionFileInfo,
+  SessionFileInfo,
+  SubagentFileInfo,
+} from "./types"
 
 /**
  * Claude Code keeps one directory per project under `~/.claude/projects`, named
@@ -49,6 +57,106 @@ async function listProjectDirNames(root: string): Promise<string[]> {
     .map((entry) => entry.name)
 }
 
+async function listSessionFiles(): Promise<SessionFileInfo[]> {
+  const root = sessionsRoot()
+  if (!root) return []
+
+  const files: SessionFileInfo[] = []
+  for (const dirName of await listProjectDirNames(root)) {
+    const projectDir = join(root, dirName)
+    let names: string[]
+    try {
+      names = await readdir(projectDir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) continue
+      const filePath = join(projectDir, name)
+      const stats = await statContainedFile(root, filePath)
+      if (!stats) continue
+      files.push({ filePath, fileName: name, dirName, ...stats })
+    }
+  }
+  return files
+}
+
+/** The project directories, each carrying the sessions listed under it. */
+async function listProjects(): Promise<AgentProjectEntry[]> {
+  const byDirName = new Map<string, SessionFileInfo[]>()
+  for (const file of await listSessionFiles()) {
+    if (file.dirName === null) continue
+    const bucket = byDirName.get(file.dirName)
+    if (bucket) bucket.push(file)
+    else byDirName.set(file.dirName, [file])
+  }
+
+  const projects: AgentProjectEntry[] = []
+  for (const [dirName, files] of byDirName) {
+    const newest = files.reduce((a, b) => a.mtimeMs >= b.mtimeMs ? a : b)
+    // The dirName encoding is lossy for paths containing hyphens, so the cwd
+    // the newest session recorded is the better answer when readable.
+    let cwd: string | null = null
+    try {
+      const meta = await readClaudeSessionMeta(newest.filePath, await readTranscriptHead(newest.filePath))
+      cwd = meta.cwd || null
+    } catch { /* ignore, fall back to the derived path */ }
+
+    projects.push({
+      dirName,
+      path: cwd ?? descriptor.dirName.decode(dirName) ?? dirName,
+      sessionCount: files.length,
+      lastModified: newest.mtimeMs ? new Date(newest.mtimeMs).toISOString() : null,
+    })
+  }
+  return projects
+}
+
+async function listProjectSessionFiles(dirName: string): Promise<ProjectSessionFileInfo[] | null> {
+  const root = sessionsRoot()
+  if (!root || !isSinglePathSegment(dirName)) return null
+  const projectDir = join(root, dirName)
+  if (!isWithinDir(root, projectDir)) return null
+
+  const names = await readdir(projectDir)
+  return Promise.all(names.filter((name) => name.endsWith(".jsonl")).map(async (fileName) => {
+    const filePath = join(projectDir, fileName)
+    try {
+      const fileStat = await stat(filePath)
+      return { filePath, fileName, dirName, mtimeMs: fileStat.mtimeMs, size: fileStat.size }
+    } catch {
+      return { filePath, fileName, dirName, mtimeMs: 0, size: 0 }
+    }
+  }))
+}
+
+/** Sub-agent transcripts sit beside their parent: `<session>/subagents/agent-<id>.jsonl`. */
+async function listSubagentFiles(dirName: string, sessionId: string): Promise<SubagentFileInfo[] | null> {
+  const root = sessionsRoot()
+  if (!root) return null
+  const subagentsDir = join(root, dirName, sessionId, "subagents")
+  if (!isWithinDir(root, subagentsDir)) return null
+
+  let names: string[]
+  try {
+    names = await readdir(subagentsDir)
+  } catch {
+    return []
+  }
+  const listing: SubagentFileInfo[] = []
+  for (const name of names) {
+    if (!name.startsWith("agent-") || !name.endsWith(".jsonl")) continue
+    const agentId = name.replace("agent-", "").replace(".jsonl", "")
+    try {
+      const fileStat = await stat(join(subagentsDir, name))
+      listing.push({ agentId, size: fileStat.size, modifiedAt: fileStat.mtimeMs })
+    } catch {
+      continue
+    }
+  }
+  return listing
+}
+
 export const claudeStore: AgentStore = {
   kind: "claude",
   descriptor,
@@ -61,29 +169,7 @@ export const claudeStore: AgentStore = {
     return resolve(filePath) !== resolve(root) && isWithinDir(root, filePath)
   },
 
-  async listSessionFiles(): Promise<SessionFileInfo[]> {
-    const root = sessionsRoot()
-    if (!root) return []
-
-    const files: SessionFileInfo[] = []
-    for (const dirName of await listProjectDirNames(root)) {
-      const projectDir = join(root, dirName)
-      let names: string[]
-      try {
-        names = await readdir(projectDir)
-      } catch {
-        continue
-      }
-      for (const name of names) {
-        if (!name.endsWith(".jsonl")) continue
-        const filePath = join(projectDir, name)
-        const stats = await statContainedFile(root, filePath)
-        if (!stats) continue
-        files.push({ filePath, fileName: name, dirName, ...stats })
-      }
-    }
-    return files
-  },
+  listSessionFiles,
 
   async resolveSessionFile(dirName: string, fileName: string): Promise<string | null> {
     const root = sessionsRoot()
@@ -113,5 +199,35 @@ export const claudeStore: AgentStore = {
       }
     }
     return null
+  },
+
+  // No head-only fast path: the full read is what the listings need anyway.
+  readIdentity: async () => null,
+
+  readSessionMeta: readClaudeSessionMeta,
+
+  listProjects,
+
+  listProjectSessionFiles,
+
+  // The path names the project and the file names the session, so the listing
+  // is already every top-level session.
+  async listTopLevelSessions() {
+    return (await listSessionFiles()).flatMap((file) =>
+      file.dirName === null ? [] : [{ ...file, dirName: file.dirName }],
+    )
+  },
+
+  listSubagentFiles,
+
+  async sessionAddress(filePath) {
+    return { dirName: basename(dirname(filePath)), fileName: basename(filePath) }
+  },
+
+  transcriptPath(dirName, sessionId) {
+    const root = sessionsRoot()
+    if (!root) return null
+    const fileName = descriptor.sessionFile.name(sessionId)
+    return { filePath: join(root, dirName, fileName), fileName }
   },
 }

@@ -4,12 +4,13 @@ import { findJsonlPath } from "../sessionPaths"
 import type { ToolCall, ToolUseBlock } from "../../shared/session/types"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
 import { expandEditToolCalls } from "../../shared/session/edit-calls"
+import { formatForRecords, formatForText } from "../../shared/session/agents"
 import {
   findFailedNestedPatchCallIds,
   parseCustomToolOutput,
   parseCodexToolPatches,
 } from "../../shared/session/codex"
-import { isCopilotSessionText, parseCopilotSession } from "../../shared/session/copilot"
+import { parseCopilotSession } from "../../shared/session/copilot"
 
 export interface ComputedFileChange {
   filePath: string
@@ -91,7 +92,7 @@ export async function parseSessionFileChanges(
   jsonlContent: string,
   includeContent: boolean,
 ): Promise<{ changes: ComputedFileChange[]; cwd: string }> {
-  if (isCopilotSessionText(jsonlContent)) {
+  if (formatForText(jsonlContent).kind === "copilot") {
     return parseSessionFileChanges(normalizeCopilotFileChangeEvents(jsonlContent), includeContent)
   }
 
@@ -122,10 +123,10 @@ export async function parseSessionFileChanges(
   // Bash rm paths: { path, turnIndex, isDir }
   const rmPaths: Array<{ path: string; turnIndex: number; isDir: boolean }> = []
 
-  // Detect Codex vs Claude Code format from first record
+  // The first record's shape names the format the rest of the file is in.
   let firstObj: Record<string, unknown> | null = null
   try { firstObj = JSON.parse(lines[0]) as Record<string, unknown> } catch { /* skip */ }
-  const isCodex = firstObj?.type === "session_meta" || firstObj?.type === "turn_context" || firstObj?.type === "event_msg"
+  const isCodex = formatForRecords(firstObj ? [firstObj] : []).kind === "codex"
 
   for (const line of lines) {
     let obj: Record<string, unknown>

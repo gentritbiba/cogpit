@@ -1,12 +1,15 @@
 import { getSessionMeta, getSessionStatus } from "../helpers"
 import { projectDirToReadableName, shortNameFromPath } from "./projectNames"
-import { projectDirNameFor, type AgentKind } from "../../shared/session/agent-descriptors"
+import {
+  descriptorFor,
+  projectDirNameFor,
+  type AgentKind,
+} from "../../shared/session/agent-descriptors"
 import { allStores } from "../agents"
+import { runtimeFor } from "../agents/runtimes"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
-import { codexAppServer } from "../agents/codexAppServer"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
-import { copilotRuntime } from "../agents/copilotTransport"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -20,9 +23,9 @@ import { copilotRuntime } from "../agents/copilotTransport"
  *
  * Cost model: a sweep is stat-only for unchanged files — transcripts are read
  * (via the mtime-keyed session meta cache, shared with the routes) only when
- * their mtime moved since the last sweep. Codex rollouts go through the same
- * gate: the stat-level listing is cheap, identity/status reads happen per
- * change, never per sweep.
+ * their mtime moved since the last sweep. Every agent's storage goes through
+ * the same gate: the stat-level listing is cheap, identity/status reads happen
+ * per change, never per sweep.
  *
  * Deliberate limits:
  * - A turn shorter than one sweep interval may never be observed "working" and
@@ -43,12 +46,14 @@ interface SessionSnapshot extends TrackedSessionSnapshot {
   agentKind: AgentKind
   dirName: string
   cwd: string | null
-  /** Codex thread id — the key codexAppServer tracks active turns by. */
+  /** Short project name for the notification title. */
+  projectName: string
+  /** The id the runtime tracks turns by. */
   threadId: string | null
 }
 
 interface Candidate {
-  /** Known upfront for Claude files; resolved from meta for Codex rollouts. */
+  /** Known upfront where the path names the project; resolved from meta otherwise. */
   dirName: string | null
   fileName: string
   filePath: string
@@ -152,23 +157,26 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
       return { meta, status }
     })
 
-    // External-provider transcripts derive their project key from the cwd.
+    // A transcript whose path does not name the project derives its project
+    // key — and its label — from the recorded cwd.
     let dirName = candidate.dirName
+    let projectName: string
     if (dirName === null) {
       if (meta.isSubagent || !meta.cwd) return null
       dirName = projectDirNameFor(candidate.agentKind, meta.cwd)
+      projectName = shortNameFromPath(meta.cwd)
+    } else {
+      projectName = projectDirToReadableName(dirName).shortName
     }
 
     const snapshot: SessionSnapshot = {
-      // The URL scheme addresses a session by its fileName stem (useUrlSync
-      // appends ".jsonl"), so nav must use that — not meta.sessionId, which
-      // for Codex is the bare thread id.
-      sessionId: candidate.agentKind === "copilot"
-        ? candidate.fileName.split("/")[0]
-        : candidate.fileName.replace(/\.jsonl$/, ""),
+      // Nav must carry the id the URL scheme uses for this transcript, which
+      // is not necessarily meta.sessionId.
+      sessionId: descriptorFor(candidate.agentKind).sessionFile.urlId(candidate.fileName),
       dirName,
       agentKind: candidate.agentKind,
       cwd: meta.cwd ?? null,
+      projectName,
       threadId: meta.sessionId || null,
       status: status.status,
       isTeammate: Boolean(meta.teamName && meta.agentName),
@@ -180,20 +188,13 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
   }
 }
 
+/** The runtime's own turn state, for an agent whose transcript lags behind it. */
 function isActiveTurn(snapshot: SessionSnapshot): boolean {
-  if (snapshot.agentKind === "copilot" && snapshot.threadId) {
-    return copilotRuntime.isTurnActive(snapshot.threadId)
-  }
-  if (snapshot.agentKind !== "codex" || !snapshot.threadId) return false
-  return codexAppServer.getActiveTurnId(snapshot.threadId) !== undefined
+  if (!snapshot.threadId) return false
+  if (descriptorFor(snapshot.agentKind).capabilities.turnLiveness !== "runtime") return false
+  return runtimeFor(snapshot.agentKind).activity(snapshot.threadId).running
 }
 
 function titleFor(session: SessionSnapshot): string {
-  if (session.agentKind === "codex") {
-    return `Codex — ${session.cwd ? shortNameFromPath(session.cwd) : "Codex"}`
-  }
-  if (session.agentKind === "copilot") {
-    return `Copilot — ${session.cwd ? shortNameFromPath(session.cwd) : "Copilot"}`
-  }
-  return `Claude Code — ${projectDirToReadableName(session.dirName).shortName}`
+  return `${descriptorFor(session.agentKind).displayName} — ${session.projectName}`
 }

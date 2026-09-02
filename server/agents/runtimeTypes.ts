@@ -1,9 +1,12 @@
 import type { MissionControlQuestion } from "../../shared/contracts/missionControl"
+import type { UsageCostTokenTotals } from "../../shared/contracts/usageCost"
 import type {
   AgentDescriptor,
   AgentKind,
+  ModelOption,
   PermissionsConfig,
 } from "../../shared/session/agent-descriptors"
+import type { UsageCostRecord } from "./usageScanners"
 
 /**
  * The live side of an agent: the CLI process or RPC connection Cogpit talks to,
@@ -136,6 +139,22 @@ export interface ApprovalBatchResult {
 
 export type UserQuestionAnswers = Record<string, string> | string[] | string
 
+/** Where to fork a session: the transcript as loaded, and the turn to keep through. */
+export interface ForkPoint {
+  lines: string[]
+  turnIndex?: number
+  turnUuid?: string
+}
+
+export interface ForkedSession {
+  sessionId: string
+  /** Transcript path relative to the agent's sessions root. */
+  fileName: string
+}
+
+/** Token totals already attributed per session and model by the durable scan. */
+export type CountedUsage = ReadonlyMap<string, ReadonlyMap<string, UsageCostTokenTotals>>
+
 /**
  * A failure a route can turn into an HTTP response without knowing which agent
  * produced it. Anything else that escapes an adapter is an unexpected error and
@@ -203,6 +222,24 @@ export interface AgentRuntime {
   ): Promise<boolean>
   /** Account, usage and capability snapshot, in this agent's own wire shape. */
   describeRuntime(force?: boolean): Promise<unknown>
+  /**
+   * Models the CLI offers right now, or null when it cannot be asked (missing,
+   * offline, erroring) so the caller keeps whatever list it last had.
+   */
+  listModels(): Promise<ModelOption[] | null>
+  /**
+   * Usage from sessions this runtime holds open that has not reached their
+   * transcripts yet. A runtime that reports cumulative totals returns only the
+   * growth over `alreadyCounted`; one whose CLI appends usage as it goes has
+   * nothing to add.
+   */
+  liveUsageRecords(alreadyCounted: CountedUsage): Promise<UsageCostRecord[]>
+  /**
+   * Fork a session through the CLI's own API, keeping the turns through the
+   * fork point. Only offered by a runtime whose `capabilities.nativeFork`
+   * is set; the rest branch by copying and cutting the transcript.
+   */
+  fork(sessionId: string, at: ForkPoint): Promise<ForkedSession>
   /** Tear down the transport itself. */
   shutdown(): Promise<void>
 }

@@ -7,9 +7,9 @@
  * ccusage).
  */
 import { basename, dirname } from "node:path"
-import type { AgentKind } from "../../../shared/session/agent-descriptors"
-import type { UsageCostProvider, UsageCostTokenTotals } from "../../../shared/contracts/usageCost"
-import { totalUsageCostTokens } from "../../../shared/contracts/usageCost"
+import type { AgentKind } from "../../shared/session/agent-descriptors"
+import type { UsageCostProvider, UsageCostTokenTotals } from "../../shared/contracts/usageCost"
+import { totalUsageCostTokens } from "../../shared/contracts/usageCost"
 
 export interface UsageCostRecord {
   provider: UsageCostProvider

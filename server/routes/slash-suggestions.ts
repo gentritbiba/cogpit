@@ -1,3 +1,4 @@
+import { soleDescriptorWhere } from "../../shared/session/agent-descriptors"
 import { readdir, readFile } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 import { homedir } from "node:os"
@@ -137,9 +138,19 @@ async function scanMdFiles(
   return results
 }
 
+/**
+ * The agent whose slash commands these are. Its config layout says where
+ * commands, skills and plugins live under the home and under a project.
+ */
+const SLASH_AGENT = soleDescriptorWhere(
+  (descriptor) => descriptor.capabilities.slashCommands,
+  "slash commands",
+)
+const LAYOUT = SLASH_AGENT.config
+
 /** Scan installed plugins for skills, commands, and agents */
 async function scanPluginSkills(): Promise<SlashSuggestion[]> {
-  const pluginsDir = join(homedir(), ".claude", "plugins")
+  const pluginsDir = join(homedir(), LAYOUT.rootDirName, LAYOUT.pluginsDir ?? "plugins")
   const installedPath = join(pluginsDir, "installed_plugins.json")
 
   let data: Record<string, unknown>
@@ -208,11 +219,11 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
   return results
 }
 
-/** Check if a file path is safe to read (inside a .claude directory, .md extension) */
+/** Check if a file path is safe to read (inside the agent's config directory, .md extension) */
 export function isAllowedCommandPath(filePath: string): boolean {
   const resolved = resolve(filePath)
-  const claudeSegment = `${sep}.claude${sep}`
-  return resolved.includes(claudeSegment) && resolved.endsWith(".md")
+  const configSegment = `${sep}${LAYOUT.rootDirName}${sep}`
+  return resolved.includes(configSegment) && resolved.endsWith(".md")
 }
 
 /** Expand a command file: strip frontmatter, replace $ARGUMENTS */
@@ -239,20 +250,22 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
     const url = new URL(req.url || "/", "http://localhost")
     const cwd = url.searchParams.get("cwd") || ""
 
-    const globalClaudeDir = join(homedir(), ".claude")
+    const globalConfigDir = join(homedir(), LAYOUT.rootDirName)
+    const commandsDir = LAYOUT.commandsDir ?? "commands"
+    const skillsDir = LAYOUT.skillsDir ?? "skills"
 
     const nameFromFile = (_fm: Record<string, string>, file: string) => file.replace(/\.md$/, "")
 
     // Scan all sources in parallel
     const [userCommands, projectCommands, userSkills, projectSkills, pluginSkills] =
       await Promise.all([
-        scanMdFiles(join(globalClaudeDir, "commands"), "command", "user", nameFromFile),
+        scanMdFiles(join(globalConfigDir, commandsDir), "command", "user", nameFromFile),
         cwd
-          ? scanMdFiles(join(cwd, ".claude", "commands"), "command", "project", nameFromFile)
+          ? scanMdFiles(join(cwd, LAYOUT.rootDirName, commandsDir), "command", "project", nameFromFile)
           : Promise.resolve([]),
-        scanSkillsDir(join(globalClaudeDir, "skills"), "user"),
+        scanSkillsDir(join(globalConfigDir, skillsDir), "user"),
         cwd
-          ? scanSkillsDir(join(cwd, ".claude", "skills"), "project")
+          ? scanSkillsDir(join(cwd, LAYOUT.rootDirName, skillsDir), "project")
           : Promise.resolve([]),
         scanPluginSkills(),
       ])
@@ -290,7 +303,7 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
           return
         }
 
-        // Security: only allow .md files inside .claude directories
+        // Security: only allow .md files inside the agent's config directories
         if (!isAllowedCommandPath(filePath)) {
           res.statusCode = 403
           res.setHeader("Content-Type", "application/json")

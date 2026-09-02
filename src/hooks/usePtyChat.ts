@@ -3,7 +3,7 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 import { type PermissionsConfig, DEFAULT_PERMISSIONS } from "@/lib/permissions"
 import { authFetch } from "@/lib/auth"
 import { agentKindForDirName, sessionIdFromFileName } from "@/lib/agents"
-import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
+import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 
 export type PtyChatStatus = "idle" | "connected" | "error"
 
@@ -19,7 +19,7 @@ interface UsePtyChatOpts {
   fastMode?: boolean
   ultracode?: boolean
   mcpConfig?: string | null
-  onCodexModelRejected?: (model: string) => void
+  onModelRejected?: (model: string) => void
   /** Prevent all session mutations while another process owns the session. */
   readOnly?: boolean
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
@@ -29,7 +29,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -145,7 +145,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           mcpConfig: mcpConfig || undefined,
         }
 
-        const { res, errorMessage } = await fetchWithCodexModelFallback(
+        const { res, errorMessage } = await fetchWithModelFallback(
           (modelOverride) => authFetch("/api/send-message", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -156,7 +156,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             model,
             agentKind,
             errorFallback: (r) => `Request failed (${r.status})`,
-            onModelRejected: onCodexModelRejected,
+            onModelRejected,
           },
         )
 
@@ -182,7 +182,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, readOnly, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onModelRejected, readOnly, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.

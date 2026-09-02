@@ -167,16 +167,16 @@ describe("useComposerSettings", () => {
 
   it("clears only the rejected Codex model and keeps its callback stable", () => {
     const { result } = renderSettings({ agentKind: "codex", source: sessionSource })
-    const reject = result.current.handleCodexModelRejected
+    const reject = result.current.handleModelRejected
 
     act(() => result.current.setSelectedModel("gpt-5.6-sol"))
-    act(() => result.current.handleCodexModelRejected("another-model"))
+    act(() => result.current.handleModelRejected("another-model"))
     expect(result.current.selectedModel).toBe("gpt-5.6-sol")
 
-    act(() => result.current.handleCodexModelRejected("gpt-5.6-sol"))
+    act(() => result.current.handleModelRejected("gpt-5.6-sol"))
     expect(result.current.selectedModel).toBe("")
     expect(result.current.modelFallbackNotice).toContain("gpt-5.6-sol is unavailable")
-    expect(result.current.handleCodexModelRejected).toBe(reject)
+    expect(result.current.handleModelRejected).toBe(reject)
   })
 
   it("reports the latest live Claude fallback once and supports dismissal", async () => {

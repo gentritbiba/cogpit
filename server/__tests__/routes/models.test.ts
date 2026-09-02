@@ -2,12 +2,9 @@
 import { describe, it, expect } from "vitest"
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk"
 
-import {
-  mapClaudeModels,
-  mapCodexModels,
-  mapCopilotModels,
-  type CodexModel,
-} from "../../routes/models"
+import { mapClaudeModels } from "../../agents/claudeModels"
+import { mapCodexModels, type CodexModel } from "../../agents/codexModels"
+import { mapCopilotModels } from "../../agents/copilotModels"
 
 describe("mapClaudeModels", () => {
   const sdkModels: ModelInfo[] = [

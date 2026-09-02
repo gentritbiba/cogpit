@@ -3,9 +3,9 @@ import { describe, it, expect, afterEach } from "vitest"
 import { writeFile, rm, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { readCodexSessionIdentity } from "../agents/codexMetadata"
+import { readCopilotSessionIdentity } from "../agents/copilotMetadata"
 import {
-  getCodexSessionIdentity,
-  getCopilotSessionIdentity,
   getSessionMeta,
   getSessionStatus,
   searchSessionMessages,
@@ -37,7 +37,7 @@ function userLine(text: string, timestamp = "2026-06-10T10:00:00Z") {
   }
 }
 
-describe("getCodexSessionIdentity", () => {
+describe("readCodexSessionIdentity", () => {
   it("extracts project and subagent identity from the rollout header", async () => {
     const filePath = await writeSession([
       {
@@ -53,7 +53,7 @@ describe("getCodexSessionIdentity", () => {
       { type: "event_msg", payload: { type: "user_message", message: "ignored" } },
     ])
 
-    await expect(getCodexSessionIdentity(filePath)).resolves.toEqual({
+    await expect(readCodexSessionIdentity(filePath)).resolves.toEqual({
       sessionId: "codex-sub-1",
       cwd: "/code/cogpit",
       gitBranch: "feature/cold-load",
@@ -64,7 +64,7 @@ describe("getCodexSessionIdentity", () => {
 
   it("returns null for non-Codex JSONL", async () => {
     const filePath = await writeSession([userLine("regular Claude session")])
-    await expect(getCodexSessionIdentity(filePath)).resolves.toBeNull()
+    await expect(readCodexSessionIdentity(filePath)).resolves.toBeNull()
   })
 })
 
@@ -93,7 +93,7 @@ describe("Copilot session metadata", () => {
       },
     ])
 
-    await expect(getCopilotSessionIdentity(filePath)).resolves.toEqual({
+    await expect(readCopilotSessionIdentity(filePath)).resolves.toEqual({
       sessionId: "8b62e405-4685-4548-8fa8-35ea66337737",
       cwd: "/code/copilot-project",
       gitBranch: "feat/copilot",

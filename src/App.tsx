@@ -382,7 +382,7 @@ export default function App() {
     imageInputAvailable,
     modelFallbackNotice,
     dismissModelFallbackNotice,
-    handleCodexModelRejected,
+    handleModelRejected,
   } = useComposerSettings({
     agentKind: currentAgentKind,
     session: state.session,
@@ -460,7 +460,7 @@ export default function App() {
     defaultAgentKind: config.defaultAgentKind,
     pendingDirName: state.pendingDirName,
     pendingCwd: state.pendingCwd,
-    onCodexModelRejected: handleCodexModelRejected,
+    onModelRejected: handleModelRejected,
     model: selectedModel,
     effort: effectiveEffort,
     fastMode: fastModeActive,
@@ -469,7 +469,7 @@ export default function App() {
   })
 
   // Active agent chat
-  const claudeChat = usePtyChat({
+  const agentChat = usePtyChat({
     sessionSource: state.sessionSource,
     parsedSessionId: state.session?.sessionId ?? null,
     cwd: state.session?.cwd,
@@ -480,7 +480,7 @@ export default function App() {
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
-    onCodexModelRejected: handleCodexModelRejected,
+    onModelRejected: handleModelRejected,
     readOnly: isReadOnlySession,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
@@ -513,8 +513,8 @@ export default function App() {
   const scroll = useChatScroll({
     session: state.session,
     isLive,
-    pendingMessages: claudeChat.pendingMessages,
-    consumePending: claudeChat.consumePending,
+    pendingMessages: agentChat.pendingMessages,
+    consumePending: agentChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
     partialContentLen: streamingContentLen,
   })
@@ -554,10 +554,10 @@ export default function App() {
   // Pre-session-switch cleanup: abort in-flight send-message and session creation
   // requests to free HTTP connections before fetching the new session data.
   const handlePreSessionSwitch = useCallback(() => {
-    claudeChat.disconnect()
+    agentChat.disconnect()
     cancelCreation()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claudeChat.disconnect, cancelCreation])
+  }, [agentChat.disconnect, cancelCreation])
 
   // Session action handlers
   const actions = useSessionActions({
@@ -839,19 +839,19 @@ export default function App() {
   // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
   const sessionChatValue = useMemo<SessionChatContextValue>(() => ({
     chat: {
-      status: claudeChat.status,
-      error: claudeChat.error,
-      pendingMessages: claudeChat.pendingMessages,
-      isConnected: claudeChat.isConnected,
-      sendMessage: claudeChat.sendMessage,
-      interrupt: claudeChat.interrupt,
-      stopAgent: claudeChat.stopAgent,
-      consumePending: claudeChat.consumePending,
+      status: agentChat.status,
+      error: agentChat.error,
+      pendingMessages: agentChat.pendingMessages,
+      isConnected: agentChat.isConnected,
+      sendMessage: agentChat.sendMessage,
+      interrupt: agentChat.interrupt,
+      stopAgent: agentChat.stopAgent,
+      consumePending: agentChat.consumePending,
     },
     scroll,
   }), [
-    claudeChat.status, claudeChat.error, claudeChat.pendingMessages, claudeChat.isConnected,
-    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.consumePending,
+    agentChat.status, agentChat.error, agentChat.pendingMessages, agentChat.isConnected,
+    agentChat.sendMessage, agentChat.interrupt, agentChat.stopAgent, agentChat.consumePending,
     scroll,
   ])
 
@@ -1093,7 +1093,7 @@ export default function App() {
     <GoalProvider
       agentKind={currentAgentKind}
       session={goalSession}
-      onSendCommand={claudeChat.sendMessage}
+      onSendCommand={agentChat.sendMessage}
     >
       {composer}
     </GoalProvider>
@@ -1113,7 +1113,7 @@ export default function App() {
     </div>
   )
 
-  const pendingPreviewList = claudeChat.pendingMessages.map((msg, i) => (
+  const pendingPreviewList = agentChat.pendingMessages.map((msg, i) => (
     <PendingTurnPreview
       key={i}
       message={msg}

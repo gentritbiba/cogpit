@@ -12,7 +12,7 @@ import type {
 } from "../../../shared/contracts/usageCost"
 import { addUsageCostTotals, emptyUsageCostTotals } from "../../../shared/contracts/usageCost"
 import { cacheSavingsUsd, priceUsage, type RateTable } from "../../../shared/usageCost/pricing"
-import type { UsageCostRecord } from "./transcripts"
+import type { UsageCostRecord } from "../../agents/usageScanners"
 
 /**
  * Formats an instant as a `YYYY-MM-DD` day in `timeZone`. `en-CA` yields

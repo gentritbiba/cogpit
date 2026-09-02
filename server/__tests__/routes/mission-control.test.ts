@@ -2,16 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  getSessionInventory: vi.fn(),
-  listClaudeSessionFiles: vi.fn(),
+  listTopLevelSessions: vi.fn(),
   summarizeSession: vi.fn(),
 }))
 
 vi.mock("../../agents", () => ({
-  storeFor: () => ({ listSessionFiles: mocks.listClaudeSessionFiles }),
-}))
-vi.mock("../../lib/sessionInventory", () => ({
-  getSessionInventory: mocks.getSessionInventory,
+  allStores: () => [{ listTopLevelSessions: mocks.listTopLevelSessions }],
 }))
 vi.mock("../../lib/missionControlSummary", () => ({
   summarizeSession: mocks.summarizeSession,
@@ -20,48 +16,66 @@ vi.mock("../../lib/missionControlSummary", () => ({
 import { handleMissionControl } from "../../routes/mission-control"
 import { asIncomingMessage, asServerResponse } from "../http-fixtures"
 
+async function run(url: string): Promise<{ body: string; next: ReturnType<typeof vi.fn> }> {
+  let body = ""
+  const req = asIncomingMessage({ method: "GET", url })
+  const res = asServerResponse({
+    statusCode: 0,
+    setHeader: vi.fn(),
+    end: (chunk?: string) => { body = chunk ?? "" },
+  })
+  const next = vi.fn()
+  await handleMissionControl(req, res, next)
+  return { body, next }
+}
+
 describe("GET /api/mission-control", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.listClaudeSessionFiles.mockResolvedValue([])
-    mocks.getSessionInventory.mockResolvedValue([])
+    mocks.listTopLevelSessions.mockResolvedValue([])
     mocks.summarizeSession.mockImplementation(async (sessionId: string) => ({ sessionId }))
   })
 
-  it("includes root Copilot sessions and skips nested agents", async () => {
-    mocks.getSessionInventory.mockImplementation(async (kind: string) => kind !== "copilot" ? [] : [
-      {
-        sessionId: "11111111-1111-4111-8111-111111111111",
-        filePath: "/tmp/copilot/11111111-1111-4111-8111-111111111111/events.jsonl",
-        mtimeMs: 200,
-        isSubagent: false,
-      },
+  it("summarises the sessions every store lists, newest first", async () => {
+    mocks.listTopLevelSessions.mockResolvedValue([
       {
         sessionId: "22222222-2222-4222-8222-222222222222",
+        fileName: "22222222-2222-4222-8222-222222222222/events.jsonl",
         filePath: "/tmp/copilot/22222222-2222-4222-8222-222222222222/events.jsonl",
         mtimeMs: 100,
-        isSubagent: true,
+      },
+      {
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+        filePath: "/tmp/copilot/11111111-1111-4111-8111-111111111111/events.jsonl",
+        mtimeMs: 200,
       },
     ])
-    let responseBody = ""
-    const req = asIncomingMessage({ method: "GET", url: "/?limit=10" })
-    const res = asServerResponse({
-      statusCode: 0,
-      setHeader: vi.fn(),
-      end: (body?: string) => { responseBody = body ?? "" },
-    })
-    const next = vi.fn()
 
-    await handleMissionControl(req, res, next)
+    const { body, next } = await run("/?limit=10")
 
-    expect(mocks.summarizeSession).toHaveBeenCalledOnce()
-    expect(mocks.summarizeSession).toHaveBeenCalledWith(
-      "11111111-1111-4111-8111-111111111111",
-      "/tmp/copilot/11111111-1111-4111-8111-111111111111/events.jsonl",
-    )
-    expect(JSON.parse(responseBody).summaries).toEqual([
+    expect(mocks.summarizeSession).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(body).summaries).toEqual([
       { sessionId: "11111111-1111-4111-8111-111111111111" },
+      { sessionId: "22222222-2222-4222-8222-222222222222" },
     ])
     expect(next).not.toHaveBeenCalled()
+  })
+
+  it("names a session after its file when the listing carries no id", async () => {
+    mocks.listTopLevelSessions.mockResolvedValue([
+      {
+        fileName: "33333333-3333-4333-8333-333333333333.jsonl",
+        filePath: "/tmp/projects/proj/33333333-3333-4333-8333-333333333333.jsonl",
+        mtimeMs: 300,
+      },
+    ])
+
+    await run("/?limit=10")
+
+    expect(mocks.summarizeSession).toHaveBeenCalledWith(
+      "33333333-3333-4333-8333-333333333333",
+      "/tmp/projects/proj/33333333-3333-4333-8333-333333333333.jsonl",
+    )
   })
 })

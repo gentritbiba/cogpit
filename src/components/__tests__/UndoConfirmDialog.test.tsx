@@ -55,7 +55,7 @@ describe("UndoConfirmDialog", () => {
       <UndoConfirmDialog
         state={{
           ...confirmState,
-          copilot: {
+          nativeRewind: {
             eventId: "event-2",
             mode: "conversation",
             filesAvailable: true,

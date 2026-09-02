@@ -40,8 +40,11 @@ export interface AgentCapabilities {
   readonly subagentTranscripts: boolean
   /** Sessions can be published as read-only shares. */
   readonly sharing: boolean
-  /** Long-running goals are tracked by the CLI itself. */
-  readonly goals: boolean
+  /**
+   * How a long-running goal is tracked: read back from the transcript and set
+   * with a slash command, through the CLI's own goal API, or not at all.
+   */
+  readonly goals: "transcript" | "thread-api" | false
   /** Transcript-rewinding undo is available. */
   readonly undo: boolean
   /** Undo history is persisted, so redo and branches work. */
@@ -83,11 +86,27 @@ export interface AgentCapabilities {
   readonly autoPermissionMode: "never" | "per-model" | "always"
   /** Whether composer settings take effect immediately or on the next turn. */
   readonly settingsApply: "live" | "next-turn"
+  /**
+   * Where turn liveness is read for listings and notifications: the transcript
+   * tail, or the runtime's own turn state for a CLI whose transcript lags it.
+   */
+  readonly turnLiveness: "transcript" | "runtime"
+  /** Partial assistant output is published on the stream bus while a turn runs. */
+  readonly tokenStreaming: boolean
+  /** Branching is a fork RPC on the CLI rather than a copied and cut transcript. */
+  readonly nativeFork: boolean
+  /** A title can be given to a session when it is created. */
+  readonly namedSessions: boolean
 }
 
 // ── Descriptor ──────────────────────────────────────────────────────────────
 
 export interface AgentDirNameCodec {
+  /**
+   * True when `decode(encode(cwd))` can differ from `cwd`, so a caller holding
+   * the real dirName must pass it along rather than recompute it.
+   */
+  readonly lossy: boolean
   /** True when `dirName` belongs to this agent. */
   owns(dirName: string | null | undefined): boolean
   /** Encode a project path as this agent's dirName. */
@@ -139,6 +158,18 @@ export interface AgentSelfUpdate {
   matches(normalizedPath: string): boolean
 }
 
+/** How a CLI shows up in the machine's process listing. */
+export interface AgentProcessMatch {
+  /**
+   * `"command"`: any command line naming the binary is this CLI, launchers and
+   * helpers included. `"executable"`: only a process whose executable is the
+   * binary, for a name too common to match loosely.
+   */
+  readonly by: "command" | "executable"
+  /** The session a resumed process was started with, read from its command line. */
+  sessionIdFromCommand(command: string): string | null
+}
+
 /**
  * Everything Cogpit needs to find, version and upgrade one CLI, plus where that
  * CLI keeps its own state. Cogpit never vendors an agent: it drives whatever
@@ -168,6 +199,7 @@ export interface AgentCli {
    * location and can be found on a first run.
    */
   readonly homeIsDiscoverable: boolean
+  readonly process: AgentProcessMatch
 }
 
 // ── Config-file layout ──────────────────────────────────────────────────────
@@ -266,6 +298,39 @@ export interface AgentServiceTier {
   readonly cliConfigValue: string
 }
 
+// ── Model catalog ───────────────────────────────────────────────────────────
+
+export interface EffortOption {
+  value: string
+  label: string
+  description?: string
+}
+
+export interface ServiceTierOption {
+  value: string
+  label: string
+  description?: string
+}
+
+/** One row of a model picker, and one entry of the `/api/models` catalog. */
+export interface ModelOption {
+  value: string
+  label: string
+  description?: string
+  /** Canonical wire model id this option resolves to (`""` is the default). */
+  resolvedModel?: string
+  isDefault?: boolean
+  defaultReasoningEffort?: string
+  supportedReasoningEfforts?: EffortOption[]
+  inputModalities?: string[]
+  supportsPersonality?: boolean
+  serviceTiers?: ServiceTierOption[]
+  availabilityMessage?: string
+  supportsEffort?: boolean
+  supportsAdaptiveThinking?: boolean
+  supportsAutoMode?: boolean
+}
+
 export interface AgentDescriptor {
   readonly kind: AgentKind
   /** Human-facing product name. */
@@ -322,6 +387,7 @@ function decodeBase64DirName(prefix: string, dirName: string): string | null {
 
 function base64DirNameCodec(prefix: string): AgentDirNameCodec {
   return {
+    lossy: false,
     owns: (dirName) => typeof dirName === "string" && dirName.startsWith(prefix),
     encode: (cwd) => encodeBase64DirName(prefix, cwd),
     decode: (dirName) => decodeBase64DirName(prefix, dirName),
@@ -355,6 +421,36 @@ function flag(name: string, value?: string): string[] {
   return value ? [name, value] : []
 }
 
+/** First capture of `pattern` in `command`, or null. */
+function commandCapture(command: string, pattern: RegExp): string | null {
+  return pattern.exec(command)?.[1] ?? null
+}
+
+/** Session ids as they appear in argv: a UUID, matched loosely by shape. */
+const ARGV_SESSION_ID = "[0-9a-f-]{36}"
+
+/** The executable of a command line, without its directory. */
+function commandExecutableName(command: string): string {
+  const match = /^(?:"([^"]+)"(?=\s|$)|'([^']+)'(?=\s|$)|(\S+))/.exec(command.trimStart())
+  const executable = match?.[1] ?? match?.[2] ?? match?.[3] ?? ""
+  return executable.split(/[\\/]/).pop() ?? ""
+}
+
+/** True when a process listing's command line belongs to this CLI. */
+export function matchesAgentProcess(descriptor: AgentDescriptor, command: string): boolean {
+  if (descriptor.cli.process.by === "executable") {
+    return new RegExp(`^${descriptor.binName}(?:\\.exe)?$`, "i").test(commandExecutableName(command))
+  }
+  return command.includes(descriptor.binName)
+}
+
+/** The `Win32_Process` name filter that lists this CLI, for `Get-CimInstance`. */
+export function windowsProcessNameFilter(descriptor: AgentDescriptor): string {
+  return descriptor.cli.process.by === "executable"
+    ? `name = '${descriptor.binName}.exe'`
+    : `name like '%${descriptor.binName}%'`
+}
+
 export const CODEX_DIR_PREFIX = "codex__"
 export const COPILOT_DIR_PREFIX = "copilot__"
 
@@ -368,6 +464,7 @@ const claude: AgentDescriptor = {
   displayName: "Claude Code",
   binName: "claude",
   dirName: {
+    lossy: true,
     // Claude has no prefix: it owns every dirName no other agent claims. The
     // registry checks the prefixed agents first, so this is only ever reached
     // as the terminal arm.
@@ -437,6 +534,12 @@ const claude: AgentDescriptor = {
     homeEnvVar: null,
     installMarker: "projects",
     homeIsDiscoverable: false,
+    process: {
+      by: "command",
+      sessionIdFromCommand: (command) =>
+        commandCapture(command, new RegExp(`--resume(?:=|\\s+)(${ARGV_SESSION_ID})`))
+        ?? commandCapture(command, new RegExp(`--session-id(?:=|\\s+)(${ARGV_SESSION_ID})`)),
+    },
   },
   config: {
     rootDirName: ".claude",
@@ -479,7 +582,7 @@ const claude: AgentDescriptor = {
     agentTeams: true,
     subagentTranscripts: true,
     sharing: true,
-    goals: true,
+    goals: "transcript",
     undo: true,
     redo: true,
     nativeRewind: false,
@@ -496,6 +599,10 @@ const claude: AgentDescriptor = {
     modelFallbackNotices: true,
     autoPermissionMode: "per-model",
     settingsApply: "live",
+    turnLiveness: "transcript",
+    tokenStreaming: true,
+    nativeFork: false,
+    namedSessions: true,
   },
 }
 
@@ -588,6 +695,13 @@ const codex: AgentDescriptor = {
     homeEnvVar: "CODEX_HOME",
     installMarker: "",
     homeIsDiscoverable: true,
+    process: {
+      by: "command",
+      sessionIdFromCommand: (command) => commandCapture(
+        command,
+        new RegExp(`codex(?:\\s+\\S+)*\\s+exec\\s+resume\\s+(${ARGV_SESSION_ID})`),
+      ),
+    },
   },
   config: {
     rootDirName: ".codex",
@@ -616,7 +730,7 @@ const codex: AgentDescriptor = {
     agentTeams: false,
     subagentTranscripts: true,
     sharing: false,
-    goals: true,
+    goals: "thread-api",
     undo: true,
     redo: true,
     nativeRewind: false,
@@ -633,6 +747,11 @@ const codex: AgentDescriptor = {
     modelFallbackNotices: false,
     autoPermissionMode: "never",
     settingsApply: "next-turn",
+    turnLiveness: "runtime",
+    tokenStreaming: true,
+    nativeFork: false,
+    // Codex derives its own thread name.
+    namedSessions: false,
   },
 }
 
@@ -696,6 +815,13 @@ const copilot: AgentDescriptor = {
     homeEnvVar: "COPILOT_HOME",
     installMarker: "session-state",
     homeIsDiscoverable: true,
+    // `copilot` is too common a word to match loosely: editor extensions and
+    // unrelated tools name it in their argv.
+    process: {
+      by: "executable",
+      sessionIdFromCommand: (command) =>
+        commandCapture(command, new RegExp(`--resume(?:=|\\s+)(${ARGV_SESSION_ID})`)),
+    },
   },
   config: {
     rootDirName: ".copilot",
@@ -746,6 +872,10 @@ const copilot: AgentDescriptor = {
     modelFallbackNotices: false,
     autoPermissionMode: "always",
     settingsApply: "next-turn",
+    turnLiveness: "runtime",
+    tokenStreaming: false,
+    nativeFork: true,
+    namedSessions: true,
   },
 }
 
@@ -763,6 +893,23 @@ export function descriptorFor(kind: AgentKind): AgentDescriptor {
 
 export function allDescriptors(): readonly AgentDescriptor[] {
   return AGENT_KINDS.map((kind) => DESCRIPTORS[kind])
+}
+
+/**
+ * The one agent with a given property, for code that only makes sense while
+ * exactly one has it — the configured home, the slash-command palette. Fails
+ * loudly on zero or several rather than silently picking the first, so a
+ * capability a second agent gains is noticed instead of misrouted.
+ */
+export function soleDescriptorWhere(
+  predicate: (descriptor: AgentDescriptor) => boolean,
+  what: string,
+): AgentDescriptor {
+  const matches = allDescriptors().filter(predicate)
+  if (matches.length !== 1) {
+    throw new Error(`Expected exactly one agent with ${what}, found ${matches.length}`)
+  }
+  return matches[0]
 }
 
 /**
@@ -791,17 +938,18 @@ export function agentKindForDirName(dirName: string | null | undefined): AgentKi
 }
 
 /**
- * Encode a project path for a given agent. Claude's encoding is lossy, so a
- * caller that already knows the canonical Claude dirName should pass it as
- * `claudeDirName` rather than let it be re-derived.
+ * Encode a project path for a given agent. An agent whose encoding is lossy
+ * cannot recover its canonical dirName from the path, so a caller that already
+ * holds it passes it as `knownDirName` rather than let it be re-derived.
  */
 export function projectDirNameFor(
   kind: AgentKind,
   cwd: string,
-  claudeDirName?: string,
+  knownDirName?: string,
 ): string {
-  if (kind === "claude" && claudeDirName) return claudeDirName
-  return DESCRIPTORS[kind].dirName.encode(cwd)
+  const codec = DESCRIPTORS[kind].dirName
+  if (knownDirName && codec.lossy) return knownDirName
+  return codec.encode(cwd)
 }
 
 /** True when `fileName` looks like a session transcript for `kind`. */

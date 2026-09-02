@@ -6,8 +6,8 @@ import type { ParsedSession } from "../../shared/session/types"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
-import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
-import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
+import { agentKindForDirName, descriptorFor } from "@/lib/agents"
+import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 import { rename as renameSession } from "@/hooks/useSessionNames"
 
 interface UseNewSessionOpts {
@@ -17,7 +17,7 @@ interface UseNewSessionOpts {
   onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
   /** Called when the user sends the first message and session creation begins */
   onCreateStarted?: (message: string) => void
-  onCodexModelRejected?: (model: string) => void
+  onModelRejected?: (model: string) => void
   model: string
   effort: string
   fastMode?: boolean
@@ -227,7 +227,7 @@ export function useNewSession({
   isMobile,
   onSessionFinalized,
   onCreateStarted,
-  onCodexModelRejected,
+  onModelRejected,
   model,
   effort,
   fastMode,
@@ -282,24 +282,25 @@ export function useNewSession({
 
       try {
         const sessionName = deriveSessionName(message)
-        const capabilities = capabilitiesFor(agentKind)
+        const descriptor = descriptorFor(agentKind)
+        const { capabilities } = descriptor
         const requestBody = {
           dirName,
-          cwd: agentKind === "claude" ? (cwd ?? undefined) : undefined,
+          // A lossy dirName cannot be decoded back to the cwd, so the server
+          // has to be told it.
+          cwd: descriptor.dirName.lossy ? (cwd ?? undefined) : undefined,
           message,
           images,
           permissions: permissionsConfig,
           effort: effort || undefined,
           fastMode: fastMode ? true : undefined,
           ultracode: capabilities.ultracode && ultracode ? true : undefined,
-          name: agentKind === "claude" || agentKind === "copilot"
-            ? (sessionName || undefined)
-            : undefined,
+          name: capabilities.namedSessions ? (sessionName || undefined) : undefined,
           worktreeName: capabilities.worktrees && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           mcpConfig: capabilities.mcp ? (mcpConfig || undefined) : undefined,
         }
 
-        const { res, errorMessage } = await fetchWithCodexModelFallback(
+        const { res, errorMessage } = await fetchWithModelFallback(
           (modelOverride) => authFetch("/api/create-and-send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -310,7 +311,7 @@ export function useNewSession({
             model,
             agentKind,
             errorFallback: "Unknown error",
-            onModelRejected: onCodexModelRejected,
+            onModelRejected,
           },
         )
 
@@ -348,7 +349,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onCodexModelRejected]
+    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

@@ -9,6 +9,7 @@ import {
   stat,
   unlink,
 } from "../helpers"
+import { fetchClaudeModels } from "./claudeModels"
 import { friendlySpawnError } from "./spawnError"
 import { resolveAgentCommand } from "../lib/binaryResolver"
 import { activeProcesses, terminateTrackedSession } from "../processRegistry"
@@ -33,6 +34,7 @@ import {
 } from "../sdk-session"
 import { findJsonlPath } from "../sessionPaths"
 import { resolveSessionCwd } from "./sessionCwd"
+import { withTimeout } from "./timeout"
 import {
   AgentRuntimeError,
   type AgentRuntime,
@@ -269,19 +271,6 @@ interface ClaudeRuntimeSnapshot {
 let cachedSnapshot: ClaudeRuntimeSnapshot | null = null
 let snapshotInFlight: Promise<ClaudeRuntimeSnapshot> | null = null
 
-function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${CONTROL_TIMEOUT_MS}ms`)),
-      CONTROL_TIMEOUT_MS,
-    )
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value) },
-      (error) => { clearTimeout(timer); reject(error) },
-    )
-  })
-}
-
 async function bestEffort<T>(promise: Promise<T>): Promise<T | null> {
   try {
     return await promise
@@ -326,6 +315,7 @@ async function describeClaudeRuntime(force = false): Promise<ClaudeRuntimeSnapsh
           bestEffort(control.supportedModels()),
           bestEffort(control.supportedAgents()),
         ]),
+        CONTROL_TIMEOUT_MS,
         "claude runtime",
       )
       cachedSnapshot = {
@@ -478,6 +468,18 @@ export const claudeRuntime: AgentRuntime = {
 
   async answerQuestion(sessionId, questionId, answers: UserQuestionAnswers) {
     return resolveUserQuestion(sessionId, questionId, answers).found
+  },
+
+  listModels: fetchClaudeModels,
+
+  // Usage is written to the transcript as the turn runs, so an open session is
+  // already fully on disk.
+  async liveUsageRecords() {
+    return []
+  },
+
+  async fork() {
+    throw new AgentRuntimeError(400, "FORK_UNSUPPORTED", "Sessions branch by copying the transcript")
   },
 
   describeRuntime(force) {

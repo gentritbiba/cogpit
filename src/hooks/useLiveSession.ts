@@ -285,7 +285,7 @@ export function useLiveSession(
           // parent stream goes quiet while they run. Keep the session live.
           setIsLive(true)
           resetStaleTimer()
-        } else if (data.type === "copilot_activity") {
+        } else if (data.type === "runtime_activity") {
           setIsLive(true)
           resetStaleTimer()
         } else if (data.type === "stream_snapshot") {

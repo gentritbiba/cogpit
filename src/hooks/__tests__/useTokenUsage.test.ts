@@ -13,8 +13,8 @@ import {
   mapClaudeRuntimeResponse,
   mapCodexRuntimeResponse,
   mapCopilotRuntimeResponse,
-  useTokenUsage,
-} from "../useTokenUsage"
+} from "@/lib/agents/quota"
+import { useTokenUsage } from "../useTokenUsage"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 

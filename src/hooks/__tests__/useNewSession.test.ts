@@ -187,12 +187,12 @@ describe("useNewSession", () => {
   })
 
   it("retries Codex session creation without a rejected model override", async () => {
-    const onCodexModelRejected = vi.fn()
+    const onModelRejected = vi.fn()
     const { result } = renderHook(() =>
       useNewSession({
         ...defaultOpts,
         model: "gpt-5.4-mini",
-        onCodexModelRejected,
+        onModelRejected,
       })
     )
 
@@ -225,7 +225,7 @@ describe("useNewSession", () => {
       await result.current.createAndSend("hello")
     })
 
-    expect(onCodexModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
+    expect(onModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
 
     const firstBody = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     const secondBody = JSON.parse((mockedAuthFetch.mock.calls[1][1] as RequestInit).body as string)

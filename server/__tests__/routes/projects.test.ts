@@ -1,16 +1,35 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Stats, Dirent } from "node:fs"
 
-const mockGetActiveCodexTurnId = vi.hoisted(() => vi.fn())
-const mockGetSessionInventory = vi.hoisted(() => vi.fn())
-const mockGetSessionPrSearchSnapshot = vi.hoisted(() => vi.fn())
-const mockListClaudeSessionFiles = vi.hoisted(() => vi.fn())
-const mockListCodexSessionFiles = vi.hoisted(() => vi.fn())
+/**
+ * The project routes compose the agent stores; what each store answers about
+ * its own layout is pinned in `agents/store-projects.test.ts`. Here every
+ * store is a fake, so these tests cover the routes' own work: sorting, paging,
+ * status and metadata joins, and how the registries are asked.
+ */
+
+const mocks = vi.hoisted(() => {
+  const perKind = () => ({
+    claude: vi.fn(),
+    codex: vi.fn(),
+    copilot: vi.fn(),
+  }) as Record<string, ReturnType<typeof vi.fn>>
+  return {
+    listProjects: perKind(),
+    listProjectSessionFiles: perKind(),
+    listTopLevelSessions: perKind(),
+    listSubagentFiles: perKind(),
+    sessionAddress: perKind(),
+    listSessionFiles: perKind(),
+    runtimeRunning: vi.fn(),
+    getSessionPrSearchSnapshot: vi.fn(),
+  }
+})
 
 vi.mock("../../helpers", () => ({
   dirs: {
     PROJECTS_DIR: "/tmp/test-projects",
+    TEAMS_DIR: "/tmp/test-teams",
   },
   isWithinDir: vi.fn(),
   getSessionMeta: vi.fn(),
@@ -34,78 +53,66 @@ vi.mock("../../sessionPaths", () => ({
   ),
 }))
 
-vi.mock("../../agents", () => {
+vi.mock("../../agents", async () => {
+  const { descriptorFor, descriptorForDirName } = await vi.importActual<
+    typeof import("../../../shared/session/agent-descriptors")
+  >("../../../shared/session/agent-descriptors")
   const roots: Record<string, string> = {
     claude: "/tmp/test-projects",
     codex: "/tmp/codex-sessions",
     copilot: "/tmp/copilot-sessions",
   }
-  const listers: Record<string, unknown> = {
-    claude: mockListClaudeSessionFiles,
-    codex: mockListCodexSessionFiles,
-    copilot: vi.fn().mockResolvedValue([]),
-  }
   const storeFor = (kind: string) => ({
     kind,
+    descriptor: descriptorFor(kind as "claude"),
     sessionsRoot: () => roots[kind],
     ownsPath: (filePath: string) => filePath.startsWith(`${roots[kind]}/`),
-    listSessionFiles: listers[kind],
+    listSessionFiles: mocks.listSessionFiles[kind],
+    listProjects: mocks.listProjects[kind],
+    listProjectSessionFiles: mocks.listProjectSessionFiles[kind],
+    listTopLevelSessions: mocks.listTopLevelSessions[kind],
+    listSubagentFiles: mocks.listSubagentFiles[kind],
+    sessionAddress: mocks.sessionAddress[kind],
   })
+  const kinds = ["codex", "copilot", "claude"]
   return {
     storeFor,
-    storeForPath: (filePath: string) => ["codex", "copilot", "claude"]
+    allStores: () => kinds.map(storeFor),
+    storeForDirName: (dirName: string) => storeFor(descriptorForDirName(dirName).kind),
+    storeForPath: (filePath: string) => kinds
       .map(storeFor)
       .find((store) => store.ownsPath(filePath)) ?? null,
   }
 })
 
-vi.mock("../../agents/codexAppServer", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../agents/codexAppServer")>()
-  return {
-    ...actual,
-    codexAppServer: { getActiveTurnId: mockGetActiveCodexTurnId },
-  }
-})
-
-vi.mock("../../lib/sessionInventory", () => ({
-  getSessionInventory: mockGetSessionInventory,
+vi.mock("../../agents/runtimes", () => ({
+  runtimeFor: () => ({
+    activity: (sessionId: string) => ({ live: false, running: mocks.runtimeRunning(sessionId) === true }),
+  }),
 }))
 
 vi.mock("../../lib/sessionPrSearchIndex", () => ({
-  getSessionPrSearchSnapshot: mockGetSessionPrSearchSnapshot,
+  getSessionPrSearchSnapshot: mocks.getSessionPrSearchSnapshot,
 }))
 
 import {
-  isWithinDir,
   getSessionMeta,
   getSessionStatus,
-  readdir,
   readFile,
-  stat,
 } from "../../helpers"
 import { projectDirToReadableName } from "../../lib/projectNames"
 import { findJsonlPath, resolveSessionFilePath } from "../../sessionPaths"
 
 const mockedFindJsonlPath = vi.mocked(findJsonlPath)
-const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedProjectDirToReadableName = vi.mocked(projectDirToReadableName)
 const mockedGetSessionMeta = vi.mocked(getSessionMeta)
 const mockedGetSessionStatus = vi.mocked(getSessionStatus)
-const mockedListCodexSessionFiles = mockListCodexSessionFiles
-const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedReadFile = vi.mocked(readFile)
 const mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
-const mockedStat = vi.mocked(stat)
-
-/** Inventory entries the route asks for by agent kind. */
-function inventoryByKind(entries: Record<string, unknown[]>): void {
-  mockGetSessionInventory.mockImplementation(async (kind: string) => entries[kind] ?? [])
-}
 
 import type { UseFn, Middleware } from "../../helpers"
 import {
   asIncomingMessage,
-  asReaddirMock,
   asServerResponse,
   getRouteHandler,
   makeSessionMeta,
@@ -115,7 +122,7 @@ import { descriptorFor } from "../../../shared/session/agent-descriptors"
 
 const COPILOT_SESSION_ID = "68596e24-db5d-46a4-86fe-9d82425f36d7"
 
-/** A transcript as the Claude store lists it. */
+/** A transcript as the Claude store lists it: the path names the project. */
 function claudeFile(dirName: string, fileName: string, mtimeMs: number, size = 100) {
   return { dirName, fileName, filePath: `/tmp/test-projects/${dirName}/${fileName}`, mtimeMs, size }
 }
@@ -151,19 +158,23 @@ describe("project routes", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
-    // getSessionStatus always returns idle by default
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
-    mockListClaudeSessionFiles.mockResolvedValue([])
-    mockedListCodexSessionFiles.mockResolvedValue([])
-    mockGetSessionInventory.mockResolvedValue([])
-    mockGetSessionPrSearchSnapshot.mockResolvedValue({
+    for (const kind of ["claude", "codex", "copilot"]) {
+      mocks.listProjects[kind].mockResolvedValue([])
+      mocks.listProjectSessionFiles[kind].mockResolvedValue([])
+      mocks.listTopLevelSessions[kind].mockResolvedValue([])
+      mocks.listSubagentFiles[kind].mockResolvedValue([])
+      mocks.listSessionFiles[kind].mockResolvedValue([])
+      mocks.sessionAddress[kind].mockResolvedValue(null)
+    }
+    mocks.runtimeRunning.mockReturnValue(false)
+    mocks.getSessionPrSearchSnapshot.mockResolvedValue({
       byFile: new Map(),
       pending: 0,
       total: 0,
     })
     mockedResolveSessionFilePath.mockImplementation(async (dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
     mockedFindJsonlPath.mockResolvedValue(null)
-    mockGetActiveCodexTurnId.mockReturnValue(undefined)
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
@@ -188,81 +199,37 @@ describe("project routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("returns project list sorted by last modified", async () => {
+    it("returns every store's projects sorted by last modified", async () => {
       const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
-      mockListClaudeSessionFiles.mockResolvedValue([
-        claudeFile("proj-a", "session1.jsonl", 1000),
-        claudeFile("proj-b", "session2.jsonl", 2000),
+      mocks.listProjects.claude.mockResolvedValue([
+        { dirName: "proj-a", path: "/proj/a", sessionCount: 1, lastModified: new Date(1000).toISOString() },
+        { dirName: "proj-b", path: "/proj/b", sessionCount: 2, lastModified: new Date(2000).toISOString() },
       ])
-
-      mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/a", shortName: "a" })
-      mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/b", shortName: "b" })
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response).toHaveLength(2)
-      // proj-b is more recent, should be first
-      expect(response[0].shortName).toBe("b")
-      expect(response[1].shortName).toBe("a")
-    })
-
-    it("skips non-directory entries", async () => {
-      const handler = getRouteHandler(handlers, "/api/projects")
-      const { req, res, next } = createMockReqRes("GET", "/")
-
-      mockListClaudeSessionFiles.mockResolvedValue([])
+      mocks.listProjects.codex.mockResolvedValue([
+        { dirName: codexDirName("/code/codex-only"), path: "/code/codex-only", sessionCount: 1, lastModified: new Date(3000).toISOString() },
+      ])
+      mockedProjectDirToReadableName.mockImplementation((dirName: string) => ({
+        path: `/${dirName}`,
+        shortName: dirName.replace("proj-", ""),
+      }))
 
       await handler(req, res, next)
 
-      const response = JSON.parse(res._getData())
-      expect(response).toEqual([])
-    })
-
-    it("returns Codex projects when the Claude projects directory is missing", async () => {
-      const handler = getRouteHandler(handlers, "/api/projects")
-      const { req, res, next } = createMockReqRes("GET", "/")
-      inventoryByKind({ codex: [{
-        fileName: "rollout-codex-1.jsonl",
-        filePath: "/tmp/codex-sessions/rollout-codex-1.jsonl",
-        mtimeMs: 2000,
-        size: 300,
-        sessionId: "codex-1",
-        cwd: "/code/codex-only",
-        gitBranch: "main",
-        isSubagent: false,
-        parentSessionId: null,
-      }] })
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(200)
       expect(JSON.parse(res._getData())).toEqual([
-        expect.objectContaining({
-          dirName: codexDirName("/code/codex-only"),
-          path: "/code/codex-only",
-          shortName: "codex-only (Codex)",
-          sessionCount: 1,
-        }),
+        expect.objectContaining({ dirName: codexDirName("/code/codex-only"), shortName: "codex-only (Codex)", sessionCount: 1 }),
+        expect.objectContaining({ dirName: "proj-b", shortName: "b", sessionCount: 2 }),
+        expect.objectContaining({ dirName: "proj-a", shortName: "a", sessionCount: 1 }),
       ])
     })
 
-    it("groups Copilot sessions by their working directory", async () => {
+    it("labels Copilot projects with their suffix", async () => {
       const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
-      inventoryByKind({ copilot: [{
-        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
-        filePath: `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
-        mtimeMs: 3000,
-        size: 500,
-        sessionId: COPILOT_SESSION_ID,
-        cwd: "/code/copilot",
-        gitBranch: "main",
-        isSubagent: false,
-        parentSessionId: null,
-      }] })
+      mocks.listProjects.copilot.mockResolvedValue([
+        { dirName: copilotDirName("/code/copilot"), path: "/code/copilot", sessionCount: 1, lastModified: null },
+      ])
 
       await handler(req, res, next)
 
@@ -276,11 +243,10 @@ describe("project routes", () => {
       ])
     })
 
-    it("returns 500 on non-missing-directory readdir errors", async () => {
+    it("returns 500 when a store cannot list its projects", async () => {
       const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
-
-      mockListClaudeSessionFiles.mockRejectedValueOnce(
+      mocks.listProjects.claude.mockRejectedValueOnce(
         Object.assign(new Error("EPERM"), { code: "EPERM" }),
       )
 
@@ -293,12 +259,9 @@ describe("project routes", () => {
       const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "")
 
-      mockListClaudeSessionFiles.mockResolvedValue([])
-
       await handler(req, res, next)
 
-      const response = JSON.parse(res._getData())
-      expect(response).toEqual([])
+      expect(JSON.parse(res._getData())).toEqual([])
     })
   })
 
@@ -306,7 +269,7 @@ describe("project routes", () => {
     it("returns Codex subagents with read-only virtual paths", async () => {
       const handler = getRouteHandler(handlers, "/api/codex-subagents")
       const { req, res, next } = createMockReqRes("GET", "/")
-      mockedListCodexSessionFiles.mockResolvedValueOnce([
+      mocks.listSessionFiles.codex.mockResolvedValueOnce([
         {
           fileName: "2026/07/14/rollout-sub-older.jsonl",
           filePath: "/tmp/codex-sessions/2026/07/14/rollout-sub-older.jsonl",
@@ -357,23 +320,24 @@ describe("project routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("returns 403 for paths outside PROJECTS_DIR", async () => {
+    it("returns 403 when the store refuses the dirName", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
-      const { req, res, next } = createMockReqRes("GET", "../../etc")
-      mockedIsWithinDir.mockReturnValueOnce(false)
+      const { req, res, next } = createMockReqRes("GET", "..%2F..%2Fetc")
+      mocks.listProjectSessionFiles.claude.mockResolvedValueOnce(null)
 
       await handler(req, res, next)
 
       expect(res._getStatus()).toBe(403)
+      expect(mocks.listProjectSessionFiles.claude).toHaveBeenCalledWith("../../etc")
     })
 
-    it("lists sessions with pagination", async () => {
+    it("lists sessions with pagination, newest first", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a?page=1&limit=10")
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReaddir.mockResolvedValueOnce(["s1.jsonl", "s2.jsonl", "readme.md"] as unknown as Dirent[])
-      mockedStat.mockResolvedValueOnce({ mtime: new Date(2000), size: 100 } as unknown as Stats)
-      mockedStat.mockResolvedValueOnce({ mtime: new Date(1000), size: 200 } as unknown as Stats)
+      mocks.listProjectSessionFiles.claude.mockResolvedValueOnce([
+        claudeFile("proj-a", "s2.jsonl", 1000, 200),
+        claudeFile("proj-a", "s1.jsonl", 2000, 100),
+      ])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "s1", version: "", gitBranch: "", model: "", slug: "",
         cwd: "", firstUserMessage: "", lastUserMessage: "", timestamp: "",
@@ -391,16 +355,15 @@ describe("project routes", () => {
       expect(response.sessions).toHaveLength(2)
       expect(response.total).toBe(2)
       expect(response.page).toBe(1)
-      // Most recent first (s1 has mtime 2000)
       expect(response.sessions[0].sessionId).toBe("s1")
     })
 
     it("reports each session's agent status and last activity", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-status")
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReaddir.mockResolvedValueOnce(["live.jsonl"] as unknown as Dirent[])
-      mockedStat.mockResolvedValueOnce({ mtime: new Date(5000), size: 120 } as unknown as Stats)
+      mocks.listProjectSessionFiles.claude.mockResolvedValueOnce([
+        claudeFile("proj-status", "live.jsonl", 5000, 120),
+      ])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "live", aiTitle: "Densify the rows", model: "claude-opus-4-1",
         gitBranch: "main", cwd: "/code/cogpit", firstUserMessage: "start",
@@ -422,11 +385,10 @@ describe("project routes", () => {
       }))
     })
 
-    it("returns 500 on readdir error", async () => {
+    it("returns 500 when the store cannot list the project", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a")
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReaddir.mockRejectedValueOnce(new Error("EPERM"))
+      mocks.listProjectSessionFiles.claude.mockRejectedValueOnce(new Error("EPERM"))
 
       await handler(req, res, next)
 
@@ -436,9 +398,9 @@ describe("project routes", () => {
     it("falls back gracefully when getSessionMeta fails", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a")
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReaddir.mockResolvedValueOnce(["bad.jsonl"] as unknown as Dirent[])
-      mockedStat.mockResolvedValueOnce({ mtime: new Date(1000), size: 50 } as unknown as Stats)
+      mocks.listProjectSessionFiles.claude.mockResolvedValueOnce([
+        claudeFile("proj-a", "bad.jsonl", 1000, 50),
+      ])
       mockedGetSessionMeta.mockRejectedValueOnce(new Error("parse error"))
 
       await handler(req, res, next)
@@ -449,31 +411,56 @@ describe("project routes", () => {
       expect(response.sessions[0].fileName).toBe("bad.jsonl")
     })
 
-    it("keeps Copilot file names nested while returning the UUID as sessionId", async () => {
+    it("keeps a listing's own session id when it carries one", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
-      const { req, res, next } = createMockReqRes("GET", copilotDirName("/code/copilot"))
-      const filePath = `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`
-      inventoryByKind({ copilot: [{
+      const dirName = copilotDirName("/code/copilot")
+      const { req, res, next } = createMockReqRes("GET", dirName)
+      mocks.listProjectSessionFiles.copilot.mockResolvedValueOnce([{
+        dirName,
         fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
-        filePath,
+        filePath: `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
         mtimeMs: 4000,
         size: 700,
         sessionId: COPILOT_SESSION_ID,
-        cwd: "/code/copilot",
-        gitBranch: "main",
-        isSubagent: false,
-        parentSessionId: null,
-      }] })
+      }])
       mockedGetSessionMeta.mockRejectedValueOnce(new Error("incomplete write"))
 
       await handler(req, res, next)
 
+      expect(mocks.listProjectSessionFiles.copilot).toHaveBeenCalledWith(dirName)
       expect(JSON.parse(res._getData()).sessions).toEqual([
         expect.objectContaining({
           fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
           sessionId: COPILOT_SESSION_ID,
         }),
       ])
+    })
+  })
+
+  // ── GET /api/sessions/:dirName/:sessionId/subagents ──────────────────
+
+  describe("GET /api/sessions/:dirName/:sessionId/subagents", () => {
+    it("returns the store's listing", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const { req, res, next } = createMockReqRes("GET", "proj-a/session-1/subagents")
+      mocks.listSubagentFiles.claude.mockResolvedValueOnce([
+        { agentId: "abc", size: 10, modifiedAt: 5 },
+      ])
+
+      await handler(req, res, next)
+
+      expect(mocks.listSubagentFiles.claude).toHaveBeenCalledWith("proj-a", "session-1")
+      expect(JSON.parse(res._getData())).toEqual([{ agentId: "abc", size: 10, modifiedAt: 5 }])
+    })
+
+    it("returns 403 when the store refuses the address", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const { req, res, next } = createMockReqRes("GET", "..%2F..%2Fetc/session-1/subagents")
+      mocks.listSubagentFiles.claude.mockResolvedValueOnce(null)
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(403)
     })
   })
 
@@ -502,7 +489,6 @@ describe("project routes", () => {
     it("serves .jsonl file content", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a/session.jsonl")
-      mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReadFile.mockResolvedValueOnce('{"line":1}\n{"line":2}\n' as unknown as Buffer)
 
       await handler(req, res, next)
@@ -511,18 +497,21 @@ describe("project routes", () => {
       expect(res._getHeaders()["Content-Type"]).toBe("text/plain")
     })
 
-    it("resolves a virtual Codex subagent path to its flat rollout file", async () => {
+    it("serves a nested path exactly as the owning store resolves it", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes(
         "GET",
         "codex__project/parent-1/subagents/agent-sub-1.jsonl"
       )
-      mockedFindJsonlPath.mockResolvedValueOnce("/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl")
+      mockedResolveSessionFilePath.mockResolvedValueOnce("/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl")
       mockedReadFile.mockResolvedValueOnce('{"type":"session_meta"}\n' as unknown as Buffer)
 
       await handler(req, res, next)
 
-      expect(mockedFindJsonlPath).toHaveBeenCalledWith("sub-1")
+      expect(mockedResolveSessionFilePath).toHaveBeenCalledWith(
+        "codex__project",
+        "parent-1/subagents/agent-sub-1.jsonl",
+      )
       expect(mockedReadFile).toHaveBeenCalledWith(
         "/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl",
         "utf-8"
@@ -553,7 +542,6 @@ describe("project routes", () => {
     it("returns 404 when file not found", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a/missing.jsonl")
-      mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
 
       await handler(req, res, next)
@@ -576,7 +564,7 @@ describe("project routes", () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?limit=10")
 
-      mockListClaudeSessionFiles.mockResolvedValue([
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
         claudeFile("proj-a", "s1.jsonl", Date.now(), 500),
       ])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
@@ -599,7 +587,7 @@ describe("project routes", () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?search=honest-cms%20%23157")
 
-      mockListClaudeSessionFiles.mockResolvedValue([
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
         claudeFile("-work-honest-cms", "worked-on-pr.jsonl", Date.now(), 500),
       ])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
@@ -612,7 +600,7 @@ describe("project routes", () => {
         shortName: "honest-cms",
       })
       const filePath = "/tmp/test-projects/-work-honest-cms/worked-on-pr.jsonl"
-      mockGetSessionPrSearchSnapshot.mockResolvedValueOnce({
+      mocks.getSessionPrSearchSnapshot.mockResolvedValueOnce({
         byFile: new Map([[filePath, {
           pullRequests: [],
           references: [{ number: 157, repo: "HonestCMS/cms" }],
@@ -630,7 +618,7 @@ describe("project routes", () => {
           matchedPullRequestNumber: 157,
         }),
       ])
-      expect(mockGetSessionPrSearchSnapshot).toHaveBeenCalledWith([
+      expect(mocks.getSessionPrSearchSnapshot).toHaveBeenCalledWith([
         expect.objectContaining({ filePath, size: 500 }),
       ])
       expect(res._getHeaders()["X-Cogpit-PR-Index-Pending"]).toBe("0")
@@ -640,7 +628,7 @@ describe("project routes", () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?limit=10")
 
-      mockListClaudeSessionFiles.mockResolvedValue([
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
         claudeFile("proj-a", "mtime-newer.jsonl", Date.parse("2026-03-21T12:00:00.000Z"), 200),
         claudeFile("proj-a", "activity-newer.jsonl", Date.parse("2026-03-21T11:00:00.000Z"), 200),
       ])
@@ -685,38 +673,33 @@ describe("project routes", () => {
       expect(response[1].sessionId).toBe("mtime-newer")
     })
 
-    it("lists nothing when the store finds no transcripts", async () => {
+    it("lists nothing when no store finds transcripts", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
-
-      mockListClaudeSessionFiles.mockResolvedValue([])
 
       await handler(req, res, next)
 
-      const response = JSON.parse(res._getData())
-      expect(response).toEqual([])
+      expect(JSON.parse(res._getData())).toEqual([])
     })
 
-    it("returns Codex sessions when the Claude projects directory is missing", async () => {
+    it("marks a session active from its runtime's own turn state", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
-      inventoryByKind({ codex: [{
+      mocks.listTopLevelSessions.codex.mockResolvedValue([{
+        dirName: codexDirName("/code/codex-only"),
         fileName: "rollout-codex-active.jsonl",
         filePath: "/tmp/codex-sessions/rollout-codex-active.jsonl",
         mtimeMs: Date.now(),
         size: 400,
+        projectPath: "/code/codex-only",
         sessionId: "codex-active",
-        cwd: "/code/codex-only",
-        gitBranch: "main",
-        isSubagent: false,
-        parentSessionId: null,
-      }] })
+      }])
       mockedGetSessionMeta.mockResolvedValue(makeSessionMeta({
         sessionId: "codex-active", version: "", gitBranch: "main", model: "gpt-5.6-terra",
         slug: "", cwd: "/code/codex-only", firstUserMessage: "hello", lastUserMessage: "bye",
         timestamp: "", turnCount: 2, lineCount: 4,
       }))
-      mockGetActiveCodexTurnId.mockReturnValue("turn-codex-active")
+      mocks.runtimeRunning.mockImplementation((sessionId: string) => sessionId === "codex-active")
 
       await handler(req, res, next)
 
@@ -730,20 +713,34 @@ describe("project routes", () => {
       ])
     })
 
+    it("does not consult the runtime for an agent whose transcript is authoritative", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
+        claudeFile("proj-a", "s1.jsonl", Date.now(), 500),
+      ])
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({ sessionId: "s1", cwd: "/code" }))
+      mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/a", shortName: "a" })
+      mocks.runtimeRunning.mockReturnValue(true)
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())[0].isActive).toBe(false)
+      expect(mocks.runtimeRunning).not.toHaveBeenCalled()
+    })
+
     it("returns Copilot rows with nested file identity and a UUID sessionId", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
-      inventoryByKind({ copilot: [{
+      mocks.listTopLevelSessions.copilot.mockResolvedValue([{
+        dirName: copilotDirName("/code/copilot"),
         fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
         filePath: `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
         mtimeMs: Date.now(),
         size: 700,
+        projectPath: "/code/copilot",
         sessionId: COPILOT_SESSION_ID,
-        cwd: "/code/copilot",
-        gitBranch: "main",
-        isSubagent: false,
-        parentSessionId: null,
-      }] })
+      }])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "events",
         version: "1.0.81",
@@ -770,11 +767,11 @@ describe("project routes", () => {
       ])
     })
 
-    it("returns 500 on non-missing-directory top-level errors", async () => {
+    it("returns 500 when a store cannot list its sessions", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
 
-      mockListClaudeSessionFiles.mockRejectedValueOnce(
+      mocks.listTopLevelSessions.claude.mockRejectedValueOnce(
         Object.assign(new Error("EPERM"), { code: "EPERM" }),
       )
 
@@ -790,7 +787,7 @@ describe("project routes", () => {
       const { req, res, next } = createMockReqRes("GET", "/")
 
       const oldTime = Date.now() - 10 * 60 * 1000 // 10 minutes ago
-      mockListClaudeSessionFiles.mockResolvedValue([
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
         claudeFile("proj-a", "old.jsonl", oldTime, 100),
       ])
       mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
@@ -817,31 +814,32 @@ describe("project routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("finds session by ID across projects", async () => {
+    it("answers with the owning store's address for the found transcript", async () => {
       const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
       mockedFindJsonlPath.mockResolvedValueOnce("/tmp/test-projects/proj-b/abc-123.jsonl")
+      mocks.sessionAddress.claude.mockResolvedValueOnce({ dirName: "proj-b", fileName: "abc-123.jsonl" })
 
       await handler(req, res, next)
 
-      const response = JSON.parse(res._getData())
-      expect(response.dirName).toBe("proj-b")
-      expect(response.fileName).toBe("abc-123.jsonl")
+      expect(mocks.sessionAddress.claude).toHaveBeenCalledWith("/tmp/test-projects/proj-b/abc-123.jsonl")
+      expect(JSON.parse(res._getData())).toEqual({ dirName: "proj-b", fileName: "abc-123.jsonl" })
     })
 
-    it("returns a forward-slash filename for Copilot sessions", async () => {
+    it("asks the store whose root holds the transcript", async () => {
       const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", COPILOT_SESSION_ID)
-      mockedFindJsonlPath.mockResolvedValueOnce(
-        `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
-      )
-      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
-        sessionId: COPILOT_SESSION_ID,
-        cwd: "/code/copilot",
-      }))
+      const filePath = `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`
+      mockedFindJsonlPath.mockResolvedValueOnce(filePath)
+      mocks.sessionAddress.copilot.mockResolvedValueOnce({
+        dirName: copilotDirName("/code/copilot"),
+        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+      })
 
       await handler(req, res, next)
 
+      expect(mocks.sessionAddress.copilot).toHaveBeenCalledWith(filePath)
+      expect(mocks.sessionAddress.claude).not.toHaveBeenCalled()
       expect(JSON.parse(res._getData())).toEqual({
         dirName: copilotDirName("/code/copilot"),
         fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
@@ -858,7 +856,7 @@ describe("project routes", () => {
       expect(res._getStatus()).toBe(404)
     })
 
-    it("returns 500 on readdir error", async () => {
+    it("returns 500 on lookup errors", async () => {
       const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
       mockedFindJsonlPath.mockRejectedValueOnce(new Error("ENOENT"))
@@ -866,16 +864,6 @@ describe("project routes", () => {
       await handler(req, res, next)
 
       expect(res._getStatus()).toBe(500)
-    })
-
-    it("skips memory directory", async () => {
-      const handler = getRouteHandler(handlers, "/api/find-session/")
-      const { req, res, next } = createMockReqRes("GET", "abc-123")
-      mockedFindJsonlPath.mockResolvedValueOnce(null)
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
     })
 
     it("calls next when URL has multiple path segments", async () => {

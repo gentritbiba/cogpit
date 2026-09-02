@@ -507,7 +507,7 @@ describe("useUndoRedo", () => {
       act(() => result.current.requestUndo(1))
 
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())
-      expect(result.current.confirmState?.copilot).toEqual({
+      expect(result.current.confirmState?.nativeRewind).toEqual({
         eventId: "event-2",
         mode: "conversation",
         filesAvailable: true,

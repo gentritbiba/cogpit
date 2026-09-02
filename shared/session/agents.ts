@@ -22,6 +22,7 @@
 import { descriptorFor } from "./agent-descriptors"
 import {
   appendClaudeSession,
+  brandClaudeBranch,
   claudeTurnBoundaries,
   deriveClaudeSessionStatus,
   extractClaudeMetadataFromLines,
@@ -30,6 +31,7 @@ import {
 } from "./claude"
 import {
   appendCodexSession,
+  brandCodexBranch,
   codexTurnBoundaries,
   deriveCodexSessionStatus,
   extractCodexMetadataFromLines,
@@ -39,6 +41,7 @@ import {
 } from "./codex"
 import {
   appendCopilotSession,
+  brandCopilotBranch,
   copilotTurnBoundaries,
   deriveCopilotSessionStatus,
   extractCopilotMetadataFromLines,
@@ -111,6 +114,17 @@ export interface AgentFormat {
   /** Status derived from raw records. */
   status(records: readonly RawRecord[]): SessionStatusInfo
   /**
+   * The first record of a transcript, rewritten for a branch: it now names
+   * `sessionId` and records the session and turn it was cut from. Returns the
+   * id the record carried before, which is what the branch reports as its
+   * origin.
+   */
+  brandBranch(
+    firstRecord: Record<string, unknown>,
+    sessionId: string,
+    turnIndex: number | null,
+  ): { record: Record<string, unknown>; originalId: string }
+  /**
    * Indexes of the records at which a turn starts, in file order.
    *
    * The **one** implementation of turn-boundary detection. Undo cuts a
@@ -141,6 +155,7 @@ const codexFormat: AgentFormat = {
   append: appendCodexSession,
   metadataFromLines: extractCodexMetadataFromLines,
   status: deriveCodexSessionStatus,
+  brandBranch: brandCodexBranch,
   turnBoundaries: codexTurnBoundaries,
 }
 
@@ -153,6 +168,7 @@ const copilotFormat: AgentFormat = {
   append: appendCopilotSession,
   metadataFromLines: extractCopilotMetadataFromLines,
   status: deriveCopilotSessionStatus,
+  brandBranch: brandCopilotBranch,
   turnBoundaries: copilotTurnBoundaries,
 }
 
@@ -166,6 +182,7 @@ const claudeFormat: AgentFormat = {
   append: appendClaudeSession,
   metadataFromLines: extractClaudeMetadataFromLines,
   status: deriveClaudeSessionStatus,
+  brandBranch: brandClaudeBranch,
   turnBoundaries: claudeTurnBoundaries,
 }
 

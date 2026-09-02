@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Check, Flag, Pause, Pencil, Play, Trash2, X } from "lucide-react"
 import { authFetch } from "@/lib/auth"
+import type { AgentKind } from "@/lib/agents"
+import { threadGoalPath } from "@/lib/agents/goals"
+import { agentShortName } from "@/lib/agents/presentation"
 import { formatTokenCount } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { GoalContext, type GoalControls } from "./context"
 import { GOAL_EDITOR_CLASS, GOAL_PANEL_CLASS } from "./styles"
 
-interface CodexGoal {
+interface ThreadGoal {
   threadId: string
   objective: string
   status: string
@@ -21,7 +24,7 @@ interface CodexGoal {
 }
 
 interface GoalResponse {
-  goal: CodexGoal | null
+  goal: ThreadGoal | null
 }
 
 function statusLabel(status: string): string {
@@ -37,8 +40,14 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
   return "default"
 }
 
-export function CodexGoalProvider({ threadId, children }: { threadId: string; children: ReactNode }) {
-  const [goal, setGoal] = useState<CodexGoal | null>(null)
+/** Goal controls for an agent that keeps goals on the CLI, behind a proxied thread API. */
+export function ThreadGoalProvider({
+  agentKind,
+  threadId,
+  children,
+}: { agentKind: AgentKind; threadId: string; children: ReactNode }) {
+  const agentName = agentShortName(agentKind)
+  const [goal, setGoal] = useState<ThreadGoal | null>(null)
   const [available, setAvailable] = useState(true)
   const [editing, setEditing] = useState(false)
   const [objective, setObjective] = useState("")
@@ -51,7 +60,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
   // edit form, which is the only place it renders.
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await authFetch(`/api/codex/goals/${encodeURIComponent(threadId)}`, { signal })
+      const res = await authFetch(threadGoalPath(threadId), { signal })
       if (res.status === 404 || res.status === 501) {
         setAvailable(false)
         return
@@ -68,7 +77,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
   useEffect(() => {
     const controller = new AbortController()
     void refresh(controller.signal)
-    // A 404/501 means this build of Codex has no goals endpoint, so polling it
+    // A 404/501 means this build of the CLI has no goals endpoint, so polling it
     // again never starts working. Stop instead of retrying forever.
     const interval = available ? setInterval(() => void refresh(), 10_000) : undefined
     return () => {
@@ -95,7 +104,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
     setSaving(true)
     setError(null)
     try {
-      const res = await authFetch(`/api/codex/goals/${encodeURIComponent(threadId)}`, {
+      const res = await authFetch(threadGoalPath(threadId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -119,7 +128,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
     if (!goal) return
     setSaving(true)
     try {
-      const res = await authFetch(`/api/codex/goals/${encodeURIComponent(threadId)}`, {
+      const res = await authFetch(threadGoalPath(threadId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -133,7 +142,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
   const clearGoal = async () => {
     setSaving(true)
     try {
-      const res = await authFetch(`/api/codex/goals/${encodeURIComponent(threadId)}`, { method: "DELETE" })
+      const res = await authFetch(threadGoalPath(threadId), { method: "DELETE" })
       if (res.ok) {
         setGoal(null)
         setEditing(false)
@@ -164,20 +173,20 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
         </div>
         <FieldGroup className="gap-2">
           <Field>
-            <FieldLabel className="sr-only" htmlFor="codex-goal-objective">Goal objective</FieldLabel>
+            <FieldLabel className="sr-only" htmlFor="goal-objective">Goal objective</FieldLabel>
             <Textarea
-              id="codex-goal-objective"
+              id="goal-objective"
               value={objective}
               onChange={(event) => setObjective(event.target.value)}
-              placeholder="What should Codex keep working toward?"
+              placeholder={`What should ${agentName} keep working toward?`}
               rows={2}
               autoFocus
             />
           </Field>
           <Field orientation="horizontal" data-invalid={Boolean(error)}>
-            <FieldLabel className="text-xs text-muted-foreground" htmlFor="codex-goal-budget">Token budget</FieldLabel>
+            <FieldLabel className="text-xs text-muted-foreground" htmlFor="goal-budget">Token budget</FieldLabel>
             <Input
-              id="codex-goal-budget"
+              id="goal-budget"
               type="number"
               min={1}
               step={1}
@@ -206,7 +215,7 @@ export function CodexGoalProvider({ threadId, children }: { threadId: string; ch
     const isPaused = goal.status === "paused"
     const isComplete = goal.status === "complete"
     section = (
-      <section className={GOAL_PANEL_CLASS} aria-label="Codex goal">
+      <section className={GOAL_PANEL_CLASS} aria-label={`${agentName} goal`}>
         <div className="flex items-center gap-2">
           <Flag className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={goal.objective}>
