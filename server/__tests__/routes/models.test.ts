@@ -46,6 +46,33 @@ describe("mapClaudeModels", () => {
     expect(options.map((o) => o.value)).toEqual(["", "claude-fable-5[1m]", "sonnet", "haiku"])
   })
 
+  it("tells same-labelled rows apart by version, newest first", () => {
+    // Enterprise orgs expose both Fable generations under the label "Fable",
+    // and the CLI describes the 5.1 row as "Fable 5" too.
+    const options = mapClaudeModels([
+      sdkModels[0],
+      {
+        value: "claude-fable-5[1m]",
+        resolvedModel: "claude-fable-5",
+        displayName: "Fable",
+        description: "Fable 5 · Most capable for your hardest tasks",
+      },
+      {
+        value: "claude-fable-5-1[1m]",
+        resolvedModel: "claude-fable-5-1",
+        displayName: "Fable",
+        description: "Fable 5 · Most capable for your hardest tasks",
+      },
+      { value: "sonnet", resolvedModel: "claude-sonnet-5", displayName: "Sonnet", description: "Sonnet 5 · Efficient" },
+    ])!
+    expect(options.map((o) => [o.value, o.label])).toEqual([
+      ["", "Default (recommended)"],
+      ["claude-fable-5-1[1m]", "Fable 5.1"],
+      ["claude-fable-5[1m]", "Fable 5"],
+      ["sonnet", "Sonnet"],
+    ])
+  })
+
   it("preserves Claude capability flags for effort, Fast, and Auto controls", () => {
     const options = mapClaudeModels([sdkModels[0], {
       value: "opus",

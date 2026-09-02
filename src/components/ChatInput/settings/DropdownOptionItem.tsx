@@ -4,7 +4,7 @@ import type { DropdownOption } from "./types"
 
 interface DropdownOptionItemProps {
   option: DropdownOption
-  descriptionWidth?: "max-w-64" | "max-w-72"
+  descriptionWidth?: "max-w-64" | "max-w-80"
 }
 
 export function DropdownOptionItem({

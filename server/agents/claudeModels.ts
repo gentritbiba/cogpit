@@ -2,6 +2,7 @@ import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude
 import { claudeCliPath } from "../sdk-session"
 import { effortLabel, MODEL_FETCH_TIMEOUT_MS, type ModelOption } from "./modelCatalog"
 import { withTimeout } from "./timeout"
+import { shortenModel } from "../../shared/session/model-names"
 
 /**
  * Map Claude SDK supportedModels() output to dropdown options, verbatim — the
@@ -43,6 +44,7 @@ export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
       ...capabilities,
     })
   }
+  disambiguateLabels(options)
   // Ensure a "" Default entry always exists and comes first
   if (!options.some((o) => o.value === "")) {
     options.unshift({ value: "", label: "Default" })
@@ -50,6 +52,27 @@ export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
     options.sort((a, b) => (a.value === "" ? -1 : b.value === "" ? 1 : 0))
   }
   return options.length > 1 ? options : null
+}
+
+/**
+ * Enterprise catalogs can list several generations under one displayName
+ * ("Fable" for both claude-fable-5 and claude-fable-5-1). Relabel those rows
+ * from their wire id ("Fable 5", "Fable 5.1") and put the newest first, so the
+ * picker shows the current one without reading descriptions.
+ */
+function disambiguateLabels(options: ModelOption[]): void {
+  const byLabel = new Map<string, ModelOption[]>()
+  for (const option of options) {
+    byLabel.set(option.label, [...(byLabel.get(option.label) ?? []), option])
+  }
+  for (const group of byLabel.values()) {
+    if (group.length < 2) continue
+    const slots = group.map((option) => options.indexOf(option))
+    const relabelled = group
+      .map((option) => ({ ...option, label: shortenModel(option.resolvedModel ?? option.value) }))
+      .sort((a, b) => b.label.localeCompare(a.label, undefined, { numeric: true }))
+    slots.forEach((slot, index) => { options[slot] = relabelled[index] })
+  }
 }
 
 /**

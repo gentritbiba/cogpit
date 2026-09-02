@@ -270,7 +270,7 @@ describe("FloatingChrome", () => {
 
     renderChrome({ workflowCount: 2 })
 
-    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.getByText("Opus 4.5")).toBeInTheDocument()
     expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
     // opus-4-5 is a 200k model: 65k used of the 167k usable before auto-compact.
     expect(screen.getByText(/61%/)).toBeInTheDocument()

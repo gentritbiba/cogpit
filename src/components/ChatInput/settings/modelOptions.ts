@@ -1,4 +1,5 @@
 import type { ModelOption } from "@/lib/utils"
+import { shortenModel } from "@/lib/format"
 
 export { AGENT_OPTIONS } from "@/lib/agents/presentation"
 
@@ -23,20 +24,7 @@ export function resolveDefaultModelName(options: readonly ModelOption[]): string
   return resolved ? friendlyModelName(resolved, options) : "Default"
 }
 
-/** Extract a friendly model name from a model ID like "claude-opus-4-6". */
+/** Friendly model name for a model id like "claude-opus-4-6", preferring the catalog's own label. */
 export function friendlyModelName(modelId: string, options?: readonly ModelOption[]): string {
-  const match = findModelOption(modelId, options)
-  if (match) return match.label
-
-  const lower = modelId.toLowerCase()
-  if (lower.includes("opus")) return "Opus"
-  if (lower.includes("sonnet")) return "Sonnet"
-  if (lower.includes("haiku")) return "Haiku"
-  if (lower.includes("fable")) return "Fable"
-  if (lower.startsWith("gpt-")) {
-    const [version, ...rest] = lower.slice(4).split("-")
-    const suffix = rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")
-    return `GPT-${version}${suffix ? ` ${suffix}` : ""}`
-  }
-  return modelId
+  return findModelOption(modelId, options)?.label ?? shortenModel(modelId)
 }

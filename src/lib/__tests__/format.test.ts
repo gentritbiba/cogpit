@@ -27,27 +27,36 @@ describe("shortenModel", () => {
     expect(shortenModel("")).toBe("unknown")
   })
 
-  it("shortens fable model ids to the family name (including [1m] variant)", () => {
-    expect(shortenModel("claude-fable-5")).toBe("fable")
-    expect(shortenModel("claude-fable-5[1m]")).toBe("fable")
+  it("keeps the version and 1M context marker for fable ids", () => {
+    expect(shortenModel("claude-fable-5")).toBe("Fable 5")
+    expect(shortenModel("claude-fable-5-1")).toBe("Fable 5.1")
+    expect(shortenModel("claude-fable-5[1m]")).toBe("Fable 5 1M")
   })
 
-  it("shortens versioned opus model ids to 'opus'", () => {
-    expect(shortenModel("claude-opus-4-8")).toBe("opus")
-    expect(shortenModel("claude-opus-4-6-20250115")).toBe("opus")
-    expect(shortenModel("claude-opus-4-0-20250101")).toBe("opus")
-    expect(shortenModel("claude-opus-future")).toBe("opus")
+  it("keeps the version for opus ids and drops the date suffix", () => {
+    expect(shortenModel("claude-opus-4-8")).toBe("Opus 4.8")
+    expect(shortenModel("claude-opus-4-6-20250115")).toBe("Opus 4.6")
+    expect(shortenModel("claude-opus-5")).toBe("Opus 5")
+    expect(shortenModel("claude-opus-future")).toBe("Opus")
   })
 
-  it("shortens versioned sonnet model ids to 'sonnet'", () => {
-    expect(shortenModel("claude-sonnet-4-6-20250115")).toBe("sonnet")
-    expect(shortenModel("claude-sonnet-4-0-20250101")).toBe("sonnet")
-    expect(shortenModel("claude-sonnet-future")).toBe("sonnet")
+  it("handles sonnet and haiku ids the same way", () => {
+    expect(shortenModel("claude-sonnet-4-6-20250115")).toBe("Sonnet 4.6")
+    expect(shortenModel("claude-sonnet-5")).toBe("Sonnet 5")
+    expect(shortenModel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5")
+    expect(shortenModel("claude-haiku-future")).toBe("Haiku")
   })
 
-  it("shortens versioned haiku model ids to 'haiku'", () => {
-    expect(shortenModel("claude-haiku-4-5-20250101")).toBe("haiku")
-    expect(shortenModel("claude-haiku-future")).toBe("haiku")
+  it("capitalizes bare CLI aliases", () => {
+    expect(shortenModel("opus")).toBe("Opus")
+    expect(shortenModel("opus[1m]")).toBe("Opus 1M")
+  })
+
+  it("formats GPT ids with their variant", () => {
+    expect(shortenModel("gpt-5.6-sol")).toBe("GPT-5.6 Sol")
+    expect(shortenModel("gpt-5.4-mini")).toBe("GPT-5.4 Mini")
+    expect(shortenModel("gpt-5.3-codex-spark")).toBe("GPT-5.3 Codex Spark")
+    expect(shortenModel("gpt-4o")).toBe("GPT-4o")
   })
 
   it("truncates long unknown model names", () => {
@@ -56,7 +65,7 @@ describe("shortenModel", () => {
   })
 
   it("returns short unknown model names as-is", () => {
-    expect(shortenModel("gpt-4")).toBe("gpt-4")
+    expect(shortenModel("<synthetic>")).toBe("<synthetic>")
   })
 })
 

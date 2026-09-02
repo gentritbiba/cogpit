@@ -3,17 +3,7 @@ import { computeContextUsage, type ContextUsage } from "../../shared/session/con
 import { descriptorForDirName } from "@/lib/agents"
 
 export { formatCost } from "../../shared/session/token-costs"
-
-/** General model family name ("opus", not "opus 4.8") from any model id. */
-export function shortenModel(model: string): string {
-  if (!model) return "unknown"
-  if (model.includes("fable")) return "fable"
-  if (model.includes("mythos")) return "mythos"
-  if (model.includes("opus")) return "opus"
-  if (model.includes("sonnet")) return "sonnet"
-  if (model.includes("haiku")) return "haiku"
-  return model.length > 20 ? model.slice(0, 20) + "..." : model
-}
+export { shortenModel } from "../../shared/session/model-names"
 
 export function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`

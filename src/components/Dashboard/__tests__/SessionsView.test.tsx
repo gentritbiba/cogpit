@@ -116,7 +116,7 @@ describe("SessionsView", () => {
     expect(screen.getByText("now make the rows denser")).toBeInTheDocument()
 
     expect(screen.getByText("Using Bash")).toBeInTheDocument()
-    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.getByText("Opus 4.1")).toBeInTheDocument()
     expect(screen.getByText("5 turns")).toBeInTheDocument()
     expect(screen.getByText("main")).toBeInTheDocument()
     expect(screen.getByText("1h 30m")).toBeInTheDocument()

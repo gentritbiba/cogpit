@@ -41,7 +41,7 @@ export function AgentModelDropdown({
         <span className="truncate">{`${agentLabel} / ${selectedLabel}`}</span>
         <ChevronDown data-icon="inline-end" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent aria-label="Agent and model" className="w-72">
+      <DropdownMenuContent aria-label="Agent and model" className="w-80">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Agent</DropdownMenuLabel>
           <DropdownMenuRadioGroup
@@ -67,7 +67,7 @@ export function AgentModelDropdown({
               <DropdownOptionItem
                 key={option.value}
                 option={option}
-                descriptionWidth="max-w-72"
+                descriptionWidth="max-w-80"
               />
             ))}
           </DropdownMenuRadioGroup>
