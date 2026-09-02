@@ -49,6 +49,7 @@ const CANONICAL_ROUTE_IDS = [
   "project-file",
   "git-status",
   "github-actions",
+  "vercel-deployments",
   "project-icon",
   "git-diff",
   "mcp",
