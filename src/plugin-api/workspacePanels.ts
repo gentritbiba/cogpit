@@ -17,6 +17,7 @@ export interface WorkspacePanelContext {
   projectPath: string | null
   hasFileChanges: boolean
   canAccessHostFiles: boolean
+  supportsWorktrees?: boolean
 }
 
 export interface WorkspacePanelProps {

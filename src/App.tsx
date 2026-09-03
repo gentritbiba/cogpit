@@ -244,10 +244,16 @@ export default function App() {
 
   // Derive the current project dirName from session, pending session, or dashboard selection
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
+  const { activeWorkspacePanel, closeWorkspacePanel, showWorkflows } = panels
 
-  // Worktree data — only fetched when panel is open
+  // Worktree data is only fetched while its workspace panel is visible.
   const worktreeData = useWorktrees(
-    identityReady && supportsWorktrees && panels.showWorktrees ? currentDirName : null,
+    identityReady
+      && supportsWorktrees
+      && state.mainView === "sessions"
+      && activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.worktrees
+      ? currentDirName
+      : null,
   )
 
   // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
@@ -422,13 +428,14 @@ export default function App() {
     supportsMcp && configAdminEnabled ? sessionConfigKey ?? undefined : undefined,
     configAdminEnabled,
   )
-  const { showWorktrees, setShowWorktrees, showWorkflows } = panels
-
   useEffect(() => {
-    if (!supportsWorktrees && showWorktrees) {
-      setShowWorktrees(false)
+    if (
+      !supportsWorktrees
+      && activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.worktrees
+    ) {
+      closeWorkspacePanel()
     }
-  }, [supportsWorktrees, showWorktrees, setShowWorktrees])
+  }, [supportsWorktrees, activeWorkspacePanel, closeWorkspacePanel])
 
   // Close the workflows panel when navigating to a session without workflows.
   useEffect(() => {

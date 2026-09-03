@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -37,6 +37,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  FilterChip,
+  FilterChipCount,
   ScrollArea,
   Skeleton,
   Spinner,
@@ -420,39 +422,6 @@ export function GitHubActionsIndicator({ context }: WorkspacePanelIndicatorProps
   return null
 }
 
-function FilterChip({
-  pressed,
-  disabled,
-  onClick,
-  children,
-  ...rest
-}: {
-  pressed: boolean
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-  "aria-label"?: string
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] leading-none outline-none transition-colors",
-        "focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:opacity-40",
-        pressed
-          ? "border-foreground/20 bg-foreground/[0.06] text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
-
 function applyFilter(runs: readonly GitHubActionsRun[], filter: Filter, branch: string | null): GitHubActionsRun[] {
   if (filter === "branch") return runs.filter((run) => run.branch === branch)
   if (filter === "failed") return runs.filter((run) => isFailed(run.conclusion))
@@ -551,7 +520,7 @@ export function GitHubActionsPanel({ context, active, closePanel }: WorkspacePan
         <div className="flex shrink-0 items-center gap-1 border-b px-3 py-1.5" role="group" aria-label="Filter runs">
           <FilterChip pressed={effectiveFilter === "all"} onClick={() => setFilter("all")}>
             All
-            <span className="font-mono text-[10px] tabular-nums opacity-70">{runs.length}</span>
+            <FilterChipCount>{runs.length}</FilterChipCount>
           </FilterChip>
           {branch && (
             <FilterChip
@@ -562,7 +531,7 @@ export function GitHubActionsPanel({ context, active, closePanel }: WorkspacePan
             >
               <GitBranch className="size-3" />
               <span className="max-w-28 truncate">{branch}</span>
-              <span className="font-mono text-[10px] tabular-nums opacity-70">{branchCount}</span>
+              <FilterChipCount>{branchCount}</FilterChipCount>
             </FilterChip>
           )}
           <FilterChip
@@ -571,7 +540,8 @@ export function GitHubActionsPanel({ context, active, closePanel }: WorkspacePan
             onClick={() => setFilter("failed")}
           >
             <span className={cn(failedCount > 0 && "text-destructive")}>Failed</span>
-            <span className="font-mono text-[10px] tabular-nums opacity-70">{failedCount}</span>
+            {" "}
+            <FilterChipCount>{failedCount}</FilterChipCount>
           </FilterChip>
         </div>
       )}

@@ -28,8 +28,6 @@ vi.mock("@/components/ChatArea", async (importOriginal) => ({
 vi.mock("@/components/ConfigDialog", () => ({ ConfigDialog: () => null }))
 vi.mock("@/components/ProjectSwitcherModal", () => ({ ProjectSwitcherModal: () => null }))
 vi.mock("@/components/ThemeSelectorModal", () => ({ ThemeSelectorModal: () => null }))
-vi.mock("@/components/WorktreePanel", () => ({ WorktreePanel: () => null }))
-
 vi.mock("@/components/KeyboardShortcutsDialog", () => ({
   KeyboardShortcutsDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="shortcuts-dialog" /> : null,
@@ -103,12 +101,10 @@ function makeProps(): Pick<DesktopAppShellProps, "navigation" | "project" | "chr
     navigation: {
       panels: {
         showSidebar: true,
-        showWorktrees: false,
         activeWorkspacePanel: null,
         showProjectSwitcher: false,
         showThemeSelector: false,
         handleToggleSidebar: vi.fn(),
-        handleToggleWorktrees: vi.fn(),
         toggleWorkspacePanel: vi.fn(),
         openWorkspacePanel: vi.fn(),
         closeWorkspacePanel: vi.fn(),
@@ -118,7 +114,6 @@ function makeProps(): Pick<DesktopAppShellProps, "navigation" | "project" | "chr
         handleCloseProjectSwitcher: vi.fn(),
         handleToggleThemeSelector: vi.fn(),
         handleCloseThemeSelector: vi.fn(),
-        setShowWorktrees: vi.fn(),
       },
       actions: {
         handleDashboardSelect: vi.fn(),

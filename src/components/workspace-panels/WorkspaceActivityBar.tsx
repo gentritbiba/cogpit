@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -13,6 +14,54 @@ interface WorkspaceActivityBarProps {
   context: WorkspacePanelContext
   activePanelId: string | null
   onTogglePanel: (panelId: string) => void
+  actions?: readonly WorkspaceActivityAction[]
+}
+
+export interface WorkspaceActivityAction {
+  id: string
+  title: string
+  icon: LucideIcon
+  active: boolean
+  onSelect: () => void
+}
+
+function ActivityBarButton({
+  title,
+  icon: Icon,
+  active,
+  onClick,
+  children,
+}: {
+  title: string
+  icon: LucideIcon
+  active: boolean
+  onClick: () => void
+  children?: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={title}
+            aria-pressed={active}
+            onClick={onClick}
+            className={cn(
+              "relative rounded-md",
+              active && "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 hover:text-sidebar-primary-foreground",
+            )}
+          />
+        )}
+      >
+        <Icon data-icon="inline-start" />
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side="left">{title}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function availableWorkspacePanels(
@@ -27,46 +76,50 @@ export function WorkspaceActivityBar({
   context,
   activePanelId,
   onTogglePanel,
+  actions = [],
 }: WorkspaceActivityBarProps) {
   const available = availableWorkspacePanels(panels, context)
-  if (available.length === 0) return null
+  if (available.length === 0 && actions.length === 0) return null
 
   return (
     <aside
       aria-label="Workspace panels"
       className="electron-no-drag flex w-11 shrink-0 flex-col items-center gap-1 border-l bg-sidebar py-2 text-sidebar-foreground"
     >
+      {actions.map((action) => (
+        <ActivityBarButton
+          key={action.id}
+          title={action.title}
+          icon={action.icon}
+          active={action.active}
+          onClick={action.onSelect}
+        />
+      ))}
+
+      {actions.length > 0 && available.length > 0 && (
+        <div aria-hidden className="my-1 h-px w-6 bg-sidebar-border" />
+      )}
+
       {available.map((panel) => {
         const active = panel.id === activePanelId
         const badge = panel.badge?.(context)
         const Indicator = panel.indicator
-        const Icon = panel.icon
         return (
-          <Tooltip key={panel.id}>
-            <TooltipTrigger
-              render={(
-                <Button
-                  type="button"
-                  variant={active ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  aria-label={panel.title}
-                  aria-pressed={active}
-                  onClick={() => onTogglePanel(panel.id)}
-                  className="relative rounded-md"
-                />
-              )}
-            >
-              <Icon data-icon="inline-start" />
-              {Indicator ? (
-                <Indicator context={context} active={active} />
-              ) : badge !== null && badge !== undefined && (
-                <Badge className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]" variant="secondary">
-                  {badge}
-                </Badge>
-              )}
-            </TooltipTrigger>
-            <TooltipContent side="left">{panel.title}</TooltipContent>
-          </Tooltip>
+          <ActivityBarButton
+            key={panel.id}
+            title={panel.title}
+            icon={panel.icon}
+            active={active}
+            onClick={() => onTogglePanel(panel.id)}
+          >
+            {Indicator ? (
+              <Indicator context={context} active={active} />
+            ) : badge !== null && badge !== undefined && (
+              <Badge className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]" variant="secondary">
+                {badge}
+              </Badge>
+            )}
+          </ActivityBarButton>
         )
       })}
     </aside>

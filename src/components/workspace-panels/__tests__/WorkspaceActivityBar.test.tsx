@@ -26,6 +26,7 @@ const context: WorkspacePanelContext = {
   projectPath: "/repo",
   hasFileChanges: false,
   canAccessHostFiles: true,
+  supportsWorktrees: true,
 }
 
 function StatefulPanel(_props: WorkspacePanelProps) {
@@ -81,6 +82,27 @@ describe("WorkspaceActivityBar", () => {
     expect(onTogglePanel).toHaveBeenCalledWith("test.second")
   })
 
+  it("renders global destinations with the same active treatment as panels", () => {
+    const openConfig = vi.fn()
+    render(
+      <WorkspaceActivityBar
+        panels={panels}
+        context={context}
+        activePanelId={null}
+        onTogglePanel={vi.fn()}
+        actions={[
+          { id: "mission", title: "Mission Control", icon: Circle, active: true, onSelect: vi.fn() },
+          { id: "config", title: "Config", icon: Circle, active: false, onSelect: openConfig },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Mission Control" })).toHaveClass("bg-sidebar-primary")
+    fireEvent.click(screen.getByRole("button", { name: "Config" }))
+    expect(openConfig).toHaveBeenCalledOnce()
+  })
+
   it("keeps opted-in panels mounted while another panel is active", () => {
     const props = {
       panels,
@@ -115,6 +137,9 @@ describe("WorkspaceActivityBar", () => {
         toggleServer: vi.fn(),
         serversChanged: vi.fn(),
         loadSession: vi.fn(),
+        worktrees: { worktrees: [], loading: false, refetch: vi.fn() },
+        worktreeDirName: "test",
+        openWorktreeSession: vi.fn(),
       },
       onClosePanel: vi.fn(),
       onOpenPanel: vi.fn(),

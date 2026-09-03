@@ -47,6 +47,14 @@ vi.mock("@/components/StatsPanel", () => ({
   StatsPanel: () => <div data-testid="stats-panel" />,
 }))
 
+vi.mock("@/components/MissionControl", () => ({
+  MissionControl: () => <div data-testid="mission-control" />,
+}))
+
+vi.mock("@/components/WorktreePanel", () => ({
+  WorktreePanel: () => <div data-testid="worktrees-panel" />,
+}))
+
 vi.mock("@/components/FileChangesPanel", () => ({
   FileChangesPanel: () => <div data-testid="file-changes" />,
 }))
@@ -150,12 +158,10 @@ function makeProps(
     navigation: {
       panels: {
         showSidebar: true,
-        showWorktrees: false,
         activeWorkspacePanel: null,
         showProjectSwitcher: false,
         showThemeSelector: false,
         handleToggleSidebar: vi.fn(),
-        handleToggleWorktrees: vi.fn(),
         toggleWorkspacePanel: vi.fn(),
         openWorkspacePanel: vi.fn(),
         closeWorkspacePanel: vi.fn(),
@@ -165,7 +171,6 @@ function makeProps(
         handleCloseProjectSwitcher: vi.fn(),
         handleToggleThemeSelector: vi.fn(),
         handleCloseThemeSelector: vi.fn(),
-        setShowWorktrees: vi.fn(),
       },
       actions: {
         handleDashboardSelect: vi.fn(),
@@ -270,6 +275,8 @@ describe("DesktopWorkspace", () => {
 
     expect(await screen.findByTestId("config-browser")).toHaveTextContent("/fresh/session")
     expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Config" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "false")
   })
 
   it("renders pending turns and the pending composer before the dashboard", () => {
@@ -333,6 +340,7 @@ describe("DesktopWorkspace", () => {
     const { rerender } = render(<DesktopWorkspace {...props} />)
 
     expect(screen.getByRole("button", { name: "Project files" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Worktrees" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "File changes" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Session details" })).toBeInTheDocument()
     expect(screen.getByTestId("file-changes")).toBeInTheDocument()
@@ -343,6 +351,30 @@ describe("DesktopWorkspace", () => {
 
     expect(screen.queryByTestId("file-changes")).not.toBeInTheDocument()
     expect(screen.getByTestId("stats-panel")).toBeInTheDocument()
+  })
+
+  it("moves Mission Control and Config into the activity rail", async () => {
+    setContexts({ mainView: "mission" })
+    const props = makeProps()
+
+    render(<DesktopWorkspace {...props} />)
+
+    expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Mission Control" })).toHaveClass("bg-sidebar-primary")
+    expect(screen.getByRole("button", { name: "Config" })).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("opens worktrees inside the resizable workspace panel", async () => {
+    setContexts({ session: makeSession() })
+    const props = makeProps()
+    props.navigation.panels.activeWorkspacePanel = "cogpit.worktrees"
+
+    render(<DesktopWorkspace {...props} />)
+
+    expect(screen.getByRole("button", { name: "Worktrees" })).toHaveAttribute("aria-pressed", "true")
+    expect(await screen.findByTestId("worktrees-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("resize-handle")).toBeInTheDocument()
   })
 
 })

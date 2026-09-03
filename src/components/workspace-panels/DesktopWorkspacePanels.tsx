@@ -12,7 +12,11 @@ import {
   BuiltInPanelServicesProvider,
   type BuiltInPanelServices,
 } from "./BuiltInPanelServices"
-import { WorkspaceActivityBar, WorkspacePanelHost } from "./WorkspaceActivityBar"
+import {
+  WorkspaceActivityBar,
+  WorkspacePanelHost,
+  type WorkspaceActivityAction,
+} from "./WorkspaceActivityBar"
 
 interface DesktopWorkspacePanelsProps {
   children: ReactNode
@@ -23,6 +27,7 @@ interface DesktopWorkspacePanelsProps {
   onClosePanel: () => void
   onOpenPanel: (panelId: string) => void
   onTogglePanel: (panelId: string) => void
+  actions?: readonly WorkspaceActivityAction[]
 }
 
 function mainPanelDefaultSize(panelSize?: string): string {
@@ -41,6 +46,7 @@ export function DesktopWorkspacePanels({
   onClosePanel,
   onOpenPanel,
   onTogglePanel,
+  actions,
 }: DesktopWorkspacePanelsProps) {
   return (
     <>
@@ -81,6 +87,7 @@ export function DesktopWorkspacePanels({
         context={context}
         activePanelId={activePanel?.id ?? null}
         onTogglePanel={onTogglePanel}
+        actions={actions}
       />
     </>
   )

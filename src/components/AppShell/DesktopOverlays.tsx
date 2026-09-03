@@ -19,7 +19,6 @@ const DevicesDialog = lazy(() => import("@/components/DevicesDialog").then((modu
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then((module) => ({ default: module.KeyboardShortcutsDialog })))
 const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModal").then((module) => ({ default: module.ProjectSwitcherModal })))
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then((module) => ({ default: module.ThemeSelectorModal })))
-const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then((module) => ({ default: module.WorktreePanel })))
 
 type DesktopOverlaysProps = Pick<
   DesktopAppShellProps,
@@ -39,10 +38,7 @@ export function DesktopOverlays({
   const canManageDevices = can("manageDevices")
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
-  const currentDirName = sessionSource?.dirName
-    ?? state.pendingDirName
-    ?? state.dashboardProject
-    ?? null
+  const currentDirName = sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
   const renderedDevicesDialogMode = devicesDialogMode ?? lastDevicesDialogMode
 
   useEffect(() => {
@@ -91,23 +87,6 @@ export function DesktopOverlays({
 
   return (
     <>
-      <Suspense fallback={null}>
-        <WorktreePanel
-          open={project.supportsWorktrees && navigation.panels.showWorktrees}
-          onOpenChange={navigation.panels.setShowWorktrees}
-          worktrees={project.worktrees.worktrees}
-          loading={project.worktrees.loading}
-          dirName={currentDirName}
-          onRefetch={project.worktrees.refetch}
-          onOpenSession={(sessionId) => {
-            if (currentDirName) {
-              navigation.actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
-            }
-            navigation.panels.setShowWorktrees(false)
-          }}
-        />
-      </Suspense>
-
       {chrome.processPanel}
       {chrome.workflowsPanel}
       {chrome.undoDialog}
@@ -159,7 +138,9 @@ export function DesktopOverlays({
           onToggleFileChanges={() => navigation.panels.toggleWorkspacePanel(
             BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges,
           )}
-          onToggleWorktrees={navigation.panels.handleToggleWorktrees}
+          onToggleWorktrees={() => navigation.panels.toggleWorkspacePanel(
+            BUILT_IN_WORKSPACE_PANEL_IDS.worktrees,
+          )}
           onToggleMissionControl={navigation.panels.handleToggleMission}
           onDuplicateSession={session ? navigation.handlers.handleDuplicateSession : undefined}
           onCopyResumeCommand={session ? handleCopyResumeCommand : undefined}
@@ -194,7 +175,7 @@ export function DesktopOverlays({
           showStats={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo}
           showProjectFiles={project.showProjectFiles}
           showFileChanges={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges}
-          showWorktrees={navigation.panels.showWorktrees}
+          showWorktrees={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.worktrees}
           showConfig={state.mainView === "config"}
           showMission={state.mainView === "mission"}
           currentProjectDirName={currentDirName}

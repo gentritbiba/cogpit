@@ -3,16 +3,12 @@ import type { LucideIcon } from "lucide-react"
 import {
   Activity,
   ChartColumn,
-  Check,
   ChevronRight,
-  GitBranch,
   Globe,
-  LayoutGrid,
   MoreHorizontal,
   PanelLeftOpen,
   Settings,
   Skull,
-  SlidersHorizontal,
   Workflow as WorkflowIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -23,7 +19,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -62,7 +57,6 @@ interface FloatingChromeProps {
    */
   sidebarRendered?: boolean
   sidebarShortcut: string
-  showWorktrees?: boolean
   killing: boolean
   creatingSession: boolean
   onNewSession: (dirName: string, cwd?: string) => void
@@ -72,13 +66,8 @@ interface FloatingChromeProps {
   onShowWorkflows?: () => void
   workflowCount?: number
   onToggleSidebar: () => void
-  onToggleWorktrees?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
-  showConfig?: boolean
-  onToggleConfig?: () => void
-  showMission?: boolean
-  onToggleMission?: () => void
 }
 
 const PILL_ROW = "flex h-8 items-center px-0.5"
@@ -92,7 +81,6 @@ export const FloatingChrome = memo(function FloatingChrome({
   showSidebar,
   sidebarRendered = showSidebar,
   sidebarShortcut,
-  showWorktrees,
   killing,
   creatingSession,
   onNewSession,
@@ -102,13 +90,8 @@ export const FloatingChrome = memo(function FloatingChrome({
   onShowWorkflows,
   workflowCount,
   onToggleSidebar,
-  onToggleWorktrees,
   onKillAll,
   onOpenSettings,
-  showConfig,
-  onToggleConfig,
-  showMission,
-  onToggleMission,
 }: FloatingChromeProps) {
   const { config: { networkUrl, defaultAgentKind } } = useAppContext()
   const { session, sessionSource, isLive } = useSessionContext()
@@ -246,31 +229,6 @@ export const FloatingChrome = memo(function FloatingChrome({
                 <MoreHorizontal data-icon="inline-start" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={6} className="w-64">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Workspace</DropdownMenuLabel>
-                  {onToggleMission && (
-                    <DropdownMenuItem onClick={onToggleMission}>
-                      <LayoutGrid />
-                      Mission Control
-                      {showMission && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  )}
-                  {onToggleConfig && (
-                    <DropdownMenuItem onClick={onToggleConfig}>
-                      <SlidersHorizontal />
-                      Config
-                      {showConfig && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  )}
-                  {onToggleWorktrees && (
-                    <DropdownMenuItem onClick={onToggleWorktrees}>
-                      <GitBranch />
-                      Worktrees
-                      {showWorktrees && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   {canViewUsage && (
                     <DropdownMenuItem onClick={() => setUsageOpen(true)}>

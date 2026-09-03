@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react"
 import type { ReactNode } from "react"
-import { Code2, FolderSearch, TerminalSquare } from "lucide-react"
+import { Code2, FolderSearch, LayoutGrid, SlidersHorizontal, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
@@ -212,7 +212,7 @@ export function DesktopWorkspace({
   chrome,
 }: DesktopAppShellProps) {
   const { state, config } = useAppContext()
-  const { session } = useSessionContext()
+  const { session, sessionSource } = useSessionContext()
 
   function addProjectContext({
     path,
@@ -251,13 +251,16 @@ export function DesktopWorkspace({
     projectPath: project.currentCwd ?? null,
     hasFileChanges: project.hasFileChanges,
     canAccessHostFiles: can("hostFiles"),
+    supportsWorktrees: project.supportsWorktrees,
   }
-  const visiblePanels = state.mainView === "config"
-    ? []
-    : availableWorkspacePanels(workspacePanels, panelContext)
-  const activePanel = visiblePanels.find(
-    (panel) => panel.id === navigation.panels.activeWorkspacePanel,
-  )
+  const visiblePanels = availableWorkspacePanels(workspacePanels, panelContext)
+  const activePanel = state.mainView === "sessions"
+    ? visiblePanels.find((panel) => panel.id === navigation.panels.activeWorkspacePanel)
+    : null
+  const worktreeDirName = sessionSource?.dirName
+    ?? state.pendingDirName
+    ?? state.dashboardProject
+    ?? null
 
   function toggleWorkspacePanel(panelId: string): void {
     if (project.showPreview) project.onCloseRightWorkspace()
@@ -269,12 +272,17 @@ export function DesktopWorkspace({
     navigation.panels.openWorkspacePanel(panelId)
   }
 
+  function openWorktreeSession(sessionId: string): void {
+    if (!worktreeDirName) return
+    navigation.actions.handleDashboardSelect(worktreeDirName, `${sessionId}.jsonl`)
+    navigation.panels.closeWorkspacePanel()
+  }
+
   const floatingChrome = (
     <FloatingChrome
       showSidebar={navigation.panels.showSidebar}
       sidebarRendered={sidebarRendered}
       sidebarShortcut={shortcutLabel("toggleSidebar")}
-      showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
       killing={chrome.killing}
       creatingSession={navigation.creatingSession}
       onNewSession={navigation.onStartNewSession}
@@ -284,11 +292,6 @@ export function DesktopWorkspace({
       onShowWorkflows={sessionView.onShowWorkflows}
       workflowCount={sessionView.workflowCount}
       onToggleSidebar={navigation.panels.handleToggleSidebar}
-      onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
-      showConfig={state.mainView === "config"}
-      onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
-      showMission={state.mainView === "mission"}
-      onToggleMission={navigation.panels.handleToggleMission}
       onKillAll={chrome.onKillAll}
       onOpenSettings={config.openConfigDialog}
     />
@@ -316,10 +319,29 @@ export function DesktopWorkspace({
           toggleServer: project.processPanel.handleToggleServer,
           serversChanged: project.processPanel.handleServersChanged,
           loadSession: navigation.handlers.handleLoadSessionScrollAware,
+          worktrees: project.worktrees,
+          worktreeDirName,
+          openWorktreeSession,
         }}
         onClosePanel={navigation.panels.closeWorkspacePanel}
         onOpenPanel={openWorkspacePanel}
         onTogglePanel={toggleWorkspacePanel}
+        actions={[
+          {
+            id: "mission-control",
+            title: "Mission Control",
+            icon: LayoutGrid,
+            active: state.mainView === "mission",
+            onSelect: navigation.panels.handleToggleMission,
+          },
+          ...(can("configWrite") ? [{
+            id: "config",
+            title: "Config",
+            icon: SlidersHorizontal,
+            active: state.mainView === "config",
+            onSelect: navigation.panels.handleToggleConfig,
+          }] : []),
+        ]}
       >
         <main className="app-view-transition relative flex size-full min-w-0 flex-col overflow-hidden">
           {view !== "session" && floatingChrome}

@@ -632,7 +632,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.queryByRole("button", { name: /^\+\d+ lines$/ })).toBeNull()
   })
 
-  it("clamps errors without boxing away their red state", () => {
+  it("keeps command errors readable without adding another box", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Bash", { command: "failing-command" }),
       result: Array.from({ length: 10 }, (_, index) => `error ${index + 1}`).join("\n"),
@@ -641,12 +641,12 @@ describe("ToolCallCard desktop disclosure", () => {
 
     render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    fireEvent.click(screen.getByRole("button", { name: /failing-command section/ }))
 
     const resultBlock = screen.getByText(/error 1/).closest("pre")
-    expect(resultBlock).toHaveClass("pl-3", "border-l", "border-destructive/20", "text-destructive")
-    expect(resultBlock).not.toHaveClass("rounded", "p-2", "max-h-96", "overflow-y-auto", "border", "bg-red-50", "dark:bg-red-950/30")
-    expect(screen.getByRole("button", { name: "+2 lines" })).toBeInTheDocument()
-    expect(screen.queryByText(/error 9/)).toBeNull()
+    expect(resultBlock).toHaveClass("pl-3", "border-l", "border-destructive/30", "text-destructive", "max-h-96", "overflow-y-auto")
+    expect(resultBlock).not.toHaveClass("rounded", "p-2", "bg-red-50", "dark:bg-red-950/30")
+    expect(screen.getByText(/error 10/)).toBeInTheDocument()
   })
 
   it("keeps raw JSON input behind the nested input link", () => {
@@ -687,7 +687,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.getByRole("button", { name: "input" })).toHaveAttribute("aria-expanded", "false")
   })
 
-  it("does not collapse when a nested copy control is used", () => {
+  it("does not collapse when a nested copy control is used", async () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Bash", { command: "bun test" }),
       result: "all tests passed",
@@ -699,7 +699,8 @@ describe("ToolCallCard desktop disclosure", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy command" }))
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByText("all tests passed")).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Commands copied" })).toBeTruthy())
+    expect(screen.getByRole("region", { name: "Bash command" })).toBeTruthy()
   })
 
   it("keeps a live Task transcript visible independently of the disclosure", () => {
@@ -718,7 +719,7 @@ describe("ToolCallCard Bash input rendering", () => {
 
     render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
 
-    expect(screen.queryByLabelText("Bash command")).toBeNull()
+    expect(screen.queryByRole("region", { name: "Bash command" })).toBeNull()
   })
 
   it("renders Bash input as a readable command card", () => {
@@ -733,9 +734,9 @@ describe("ToolCallCard Bash input rendering", () => {
 
     render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
-    expect(screen.getByLabelText("Bash command").textContent).toContain("cd /workspace && npm test")
+    expect(screen.getByRole("region", { name: "Bash command" }).textContent).toContain("cd /workspace && npm test")
     expect(screen.getByText("Run the focused test suite")).toBeTruthy()
-    expect(screen.getByText("10 min")).toBeTruthy()
+    expect(screen.getByText("10 min timeout")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy()
     expect(screen.queryByText('"command"')).toBeNull()
     expect(screen.getByText("18 tests passed")).toBeTruthy()
@@ -750,10 +751,9 @@ describe("ToolCallCard Bash input rendering", () => {
 
     render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
-    expect(screen.getByLabelText("Bash command").textContent).toContain("npm run build")
+    expect(screen.getByRole("region", { name: "Bash command" }).textContent).toContain("npm run build")
     expect(screen.getByText("Background")).toBeTruthy()
-    expect(screen.getByText("Sandbox")).toBeTruthy()
-    expect(screen.getByText("strict")).toBeTruthy()
+    expect(screen.getByText("Sandbox strict")).toBeTruthy()
   })
 })
 
@@ -1100,6 +1100,84 @@ describe("ToolCallCard AskUserQuestion history", () => {
 })
 
 describe("CollapsibleToolCalls", () => {
+  it("groups adjacent Bash calls into one command card", () => {
+    const first: ToolCall = {
+      ...makeToolCall("Bash", { command: "bun test", description: "Run tests" }),
+      id: "bash-one",
+      result: "passed",
+    }
+    const second: ToolCall = {
+      ...makeToolCall("Bash", { command: "bun run build", description: "Build app" }),
+      id: "bash-two",
+      result: "built",
+    }
+
+    render(
+      <CollapsibleToolCalls
+        toolCalls={[first, second]}
+        activityItems={[
+          { kind: "tool_calls", toolCalls: [first] },
+          { kind: "tool_calls", toolCalls: [second] },
+        ]}
+        expandAll
+        expandToolPayloads
+        activeToolCallId={null}
+      />,
+    )
+
+    expect(screen.getAllByRole("region", { name: "Bash commands" })).toHaveLength(1)
+    expect(screen.getByText("2 commands")).toBeInTheDocument()
+    expect(screen.getByText("2 calls")).toBeInTheDocument()
+    expect(screen.getByText("Run tests")).toBeInTheDocument()
+    expect(screen.getByText("Build app")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Bash ×2 details/ })).toBeInTheDocument()
+  })
+
+  it("marks every pending call in an active Bash group as running", () => {
+    const first: ToolCall = {
+      ...makeToolCall("Bash", { command: "bun test" }),
+      id: "bash-one",
+      result: null,
+    }
+    const second: ToolCall = {
+      ...makeToolCall("Bash", { command: "bun run build" }),
+      id: "bash-two",
+      result: null,
+    }
+
+    render(
+      <CollapsibleToolCalls
+        toolCalls={[first, second]}
+        expandAll
+        expandToolPayloads={false}
+        activeToolCallId={null}
+        isAgentActive
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Bash ×2 details/ }))
+    expect(screen.getAllByText("running")).toHaveLength(2)
+    expect(screen.queryByText("not run")).toBeNull()
+  })
+
+  it("starts a new Bash card after a different tool", () => {
+    const first: ToolCall = { ...makeToolCall("Bash", { command: "bun test" }), id: "bash-one", result: "passed" }
+    const read: ToolCall = { ...makeToolCall("Read", { file_path: "/tmp/a.ts" }), id: "read", result: "source" }
+    const second: ToolCall = { ...makeToolCall("Bash", { command: "bun run build" }), id: "bash-two", result: "built" }
+
+    render(
+      <CollapsibleToolCalls
+        toolCalls={[first, read, second]}
+        expandAll
+        expandToolPayloads
+        activeToolCallId={null}
+      />,
+    )
+
+    expect(screen.getAllByRole("region", { name: "Bash command" })).toHaveLength(2)
+    expect(screen.queryByRole("region", { name: "Bash commands" })).toBeNull()
+  })
+
   it("lets the user collapse a group while a tool call is still in progress", () => {
     const completedCall: ToolCall = {
       id: "completed-call-id",
@@ -1352,13 +1430,13 @@ describe("ToolCallCard sectioned Bash commands", () => {
     render(<ToolCallCard toolCall={sectioned} expandAll={false} />)
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
 
-    expect(screen.getByText("5 commands in one call")).toBeInTheDocument()
+    expect(screen.getByText("5 commands")).toBeInTheDocument()
     expect(screen.getByText("Survey settings infrastructure")).toBeInTheDocument()
     const config = screen.getByRole("button", { name: "CONFIG section: cat src/a.tsx" })
     expect(config.textContent).toContain("3 lines")
     expect(screen.queryByRole("button", { name: "CAPS section: grep -n configWrite src" })).toBeNull()
     expect(screen.getByLabelText("CAPS section: grep -n configWrite src").textContent).toContain("no output")
-    expect(screen.queryByLabelText("Bash command")).toBeNull()
+    expect(screen.getByRole("region", { name: "Bash commands" })).toBeInTheDocument()
     expect(screen.queryByText("line1")).toBeNull()
 
     fireEvent.click(config)
@@ -1370,8 +1448,8 @@ describe("ToolCallCard sectioned Bash commands", () => {
     const truncated: ToolCall = { ...sectioned, result: "---HOTSWAP\nserver/lib/cliProcess.ts\n---CONFIG\nline1" }
     render(<ToolCallCard toolCall={truncated} expandAll={false} />)
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
-    expect(screen.getByLabelText(/ROUTE section/).textContent).toContain("not reached")
-    expect(screen.getByText(/3 not reached/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/ROUTE section/).textContent).toContain("not run")
+    expect(screen.getByText(/3 not run/)).toBeInTheDocument()
   })
 
   it("names unlabelled sections after their leading command word", () => {
@@ -1383,10 +1461,10 @@ describe("ToolCallCard sectioned Bash commands", () => {
     expect(screen.getByLabelText("Sections: ls, grep")).toBeInTheDocument()
   })
 
-  it("summarises output volume per section in a share bar", () => {
+  it("summarises output volume without a color-coded share bar", () => {
     render(<ToolCallCard toolCall={sectioned} expandAll={false} />)
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
-    expect(screen.getByRole("img", { name: "Output share: HOTSWAP 1, CONFIG 3, CAPS 0, ROUTE 1, TESTS 1" })).toBeInTheDocument()
+    expect(screen.queryByRole("img", { name: /Output share/ })).toBeNull()
     expect(screen.getByText("6 lines")).toBeInTheDocument()
   })
 
@@ -1398,7 +1476,9 @@ describe("ToolCallCard sectioned Bash commands", () => {
       result: "---SRC\nconst a = 1\n---FIND\nsrc/b.ts:4:foo\n---PATCH\n---TEST\nok",
     }
     render(<ToolCallCard toolCall={mixed} expandAll={false} />)
-    expect(screen.getByLabelText("Sections: SRC, FIND, PATCH, TEST").querySelector(".text-foreground")?.textContent).toBe("PATCH")
+    const headerChips = screen.getByLabelText("Sections: SRC, FIND, PATCH, TEST")
+    expect(headerChips.querySelector(".text-destructive")).toBeNull()
+    expect(headerChips.textContent).toBe("SRCFINDPATCHTEST")
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
     expect(screen.getByText("1 read · 1 search · 1 run · 1 write")).toBeInTheDocument()
     expect(screen.getByLabelText("write")).toBeInTheDocument()
@@ -1437,11 +1517,12 @@ describe("ToolCallCard sectioned Bash commands", () => {
     )
   })
 
-  it("keeps the plain command card for an ordinary Bash call", () => {
+  it("uses the same command UI for an ordinary Bash call", () => {
     const plain: ToolCall = { ...makeToolCall("Bash", { command: "bun test" }), result: "ok" }
     render(<ToolCallCard toolCall={plain} expandAll={false} />)
     fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
-    expect(screen.getByLabelText("Bash command")).toBeInTheDocument()
-    expect(screen.queryByText(/commands in one call/)).toBeNull()
+    expect(screen.getByRole("region", { name: "Bash command" })).toBeInTheDocument()
+    expect(screen.getByText("1 command")).toBeInTheDocument()
+    expect(screen.getByLabelText("bun section: bun test")).toBeInTheDocument()
   })
 })

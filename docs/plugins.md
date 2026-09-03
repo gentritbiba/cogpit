@@ -65,7 +65,7 @@ Plugin and panel IDs use lowercase letters, numbers, dots, and hyphens. Cogpit q
 
 Each panel receives:
 
-- `context`: the current session, project path, file-change state, and host-file capability
+- `context`: the current session, project path, file-change state, host-file capability, and worktree availability
 - `active`: whether the panel is currently visible
 - `closePanel()`: close the right workspace
 - `openPanel(id)`: open another fully qualified panel ID
@@ -80,5 +80,7 @@ A panel definition may also set:
 - `indicator`: render a live status component on the rail icon for data that cannot be derived synchronously from panel context
 
 Plugins may import shared contracts from `shared/` and the sanctioned application surface from `@/plugin-api`. The architecture check rejects direct imports into the rest of `src/`, which keeps plugins isolated from private implementation details.
+
+The public API also exports `FilterChip` and `FilterChipCount` for the compact filter controls shared by the bundled panels.
 
 The first extension point is intentionally limited to right-workspace UI. The bundled GitHub Actions and Vercel Deployments plugins use core routes registered by Cogpit itself; third-party plugins cannot contribute backend routes yet. Runtime plugin loading, plugin settings, backend route contributions, and bottom-bar contributions remain future work.

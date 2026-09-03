@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -14,7 +14,7 @@ const storeMocks = vi.hoisted(() => ({
 
 vi.mock("../vercelDeploymentsStore", () => storeMocks)
 
-import { VercelDeploymentsIndicator, VercelDeploymentsPanel } from "../VercelDeploymentsPanel"
+import { VercelDeploymentsIndicator, VercelDeploymentsPanel, productionSummary } from "../VercelDeploymentsPanel"
 
 const deploymentsResponse: VercelDeploymentsResponse = {
   projectId: "prj_project123",
@@ -114,6 +114,23 @@ function renderPanel() {
   )
 }
 
+describe("productionSummary", () => {
+  it("separates the ready production deployment from a newer one that has not landed", () => {
+    const { live, pending } = productionSummary([
+      { ...deploymentsResponse.deployments[0], state: "BUILDING" },
+      { ...deploymentsResponse.deployments[1], id: "dpl_live", target: "production" },
+    ])
+    expect(live?.id).toBe("dpl_live")
+    expect(pending?.id).toBe("dpl_building123")
+  })
+
+  it("reports no pending deploy when the newest production deployment is the live one", () => {
+    const { live, pending } = productionSummary([deploymentsResponse.deployments[1]].map((d) => ({ ...d, target: "production" })))
+    expect(live?.id).toBe("dpl_ready123")
+    expect(pending).toBeNull()
+  })
+})
+
 describe("VercelDeploymentsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -121,15 +138,47 @@ describe("VercelDeploymentsPanel", () => {
     storeMocks.fetchVercelBuildLogs.mockResolvedValue(logsResponse)
   })
 
-  it("shows normalized project deployments and environments", () => {
+  it("shows normalized project deployments and marks only production rows", () => {
     renderPanel()
 
     expect(screen.getByRole("heading", { name: "Vercel Deployments" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /web/ })).toHaveAttribute("href", "https://vercel.com/acme/web")
-    expect(screen.getByRole("article", { name: "Ship production" })).toBeInTheDocument()
-    expect(screen.getByRole("article", { name: "Add search" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "web" })).toHaveAttribute("href", "https://vercel.com/acme/web")
+    expect(within(screen.getByRole("article", { name: "Ship production" })).getByText("prod")).toBeInTheDocument()
+    expect(within(screen.getByRole("article", { name: "Add search" })).queryByText("prod")).not.toBeInTheDocument()
     expect(screen.getByRole("article", { name: "Break the build" })).toBeInTheDocument()
-    expect(screen.getAllByText("preview")).toHaveLength(2)
+  })
+
+  it("puts the failure reason on the row so nobody has to expand it", () => {
+    renderPanel()
+    const broken = screen.getByRole("article", { name: "Break the build" })
+    expect(within(broken).getByText("BUILD_FAILED: Command exited with 1")).toBeInTheDocument()
+  })
+
+  it("leads with what is live on production and flags a newer deploy still building", () => {
+    renderPanel()
+    const production = screen.getByRole("region", { name: "Production" })
+    expect(within(production).getByText("Production is down")).toBeInTheDocument()
+    expect(within(production).getByRole("heading", { name: "Ship production" })).toBeInTheDocument()
+  })
+
+  it("titles CLI deploys by their host when Vercel has no commit for them", () => {
+    storeMocks.useVercelDeployments.mockReturnValue(state({
+      data: {
+        ...deploymentsResponse,
+        deployments: [{
+          ...deploymentsResponse.deployments[1],
+          state: "READY",
+          target: "production",
+          branch: "",
+          commitSha: "",
+          commitMessage: "",
+        }],
+      },
+    }))
+    renderPanel()
+
+    expect(screen.getByRole("article", { name: "web-preview-acme.vercel.app" })).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Production" })).getByText("Live on production")).toBeInTheDocument()
   })
 
   it("loads build output only after a deployment is expanded", async () => {

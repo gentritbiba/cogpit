@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
   Ban,
   Check,
-  ChevronRight,
   Clock3,
-  GitBranch,
   RefreshCw,
   Rocket,
   SquareTerminal,
@@ -34,17 +32,15 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  FilterChip,
+  FilterChipCount,
   ScrollArea,
   Skeleton,
   Spinner,
-  ToggleGroup,
-  ToggleGroupItem,
   type WorkspacePanelIndicatorProps,
   type WorkspacePanelProps,
 } from "@/plugin-api"
 import { fetchVercelBuildLogs, useVercelDeployments } from "./vercelDeploymentsStore"
-
-const RELATIVE_TIME = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 
 type Filter = "all" | "failed" | "preview" | "production"
 type Tone = "live" | "fail" | "pass"
@@ -63,6 +59,10 @@ function isFailed(state: VercelDeploymentState): boolean {
   return state === "BLOCKED" || state === "CANCELED" || state === "ERROR"
 }
 
+function isProduction(deployment: VercelDeployment): boolean {
+  return deployment.target === "production"
+}
+
 function toneOf(state: VercelDeploymentState): Tone {
   if (isActive(state)) return "live"
   if (isFailed(state)) return "fail"
@@ -79,18 +79,16 @@ function statusLabel(state: VercelDeploymentState): string {
   return "Failed"
 }
 
-function environmentLabel(deployment: VercelDeployment): string {
-  return deployment.target || "preview"
-}
-
-function relativeTime(timestamp: number, now: number): string {
-  const seconds = Math.round((timestamp - now) / 1000)
-  if (Math.abs(seconds) < 60) return RELATIVE_TIME.format(seconds, "second")
-  const minutes = Math.round(seconds / 60)
-  if (Math.abs(minutes) < 60) return RELATIVE_TIME.format(minutes, "minute")
-  const hours = Math.round(minutes / 60)
-  if (Math.abs(hours) < 24) return RELATIVE_TIME.format(hours, "hour")
-  return RELATIVE_TIME.format(Math.round(hours / 24), "day")
+/** Sidebar-style age: "now", "4m", "5h", "2d", then a date. */
+function age(timestamp: number, now: number): string {
+  const minutes = Math.floor((now - timestamp) / 60_000)
+  if (minutes < 1) return "now"
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d`
+  return new Date(timestamp).toLocaleDateString()
 }
 
 function duration(deployment: VercelDeployment, now: number): string | null {
@@ -115,15 +113,44 @@ function useNow(ticking: boolean): number {
   return now
 }
 
-function StatusGlyph({ state }: { state: VercelDeploymentState }) {
-  const label = statusLabel(state)
-  if (state === "BUILDING") return <Spinner className="size-3.5 text-info" aria-label={label} />
-  if (state === "INITIALIZING" || state === "QUEUED") {
-    return <Clock3 className="size-3.5 text-info" aria-label={label} />
+function hostOf(url: string | null): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return null
   }
-  if (state === "READY") return <Check className="size-3.5 text-success" aria-label={label} />
-  if (state === "BLOCKED") return <Ban className="size-3.5 text-destructive" aria-label={label} />
-  return <X className="size-3.5 text-destructive" aria-label={label} />
+}
+
+/** The commit subject when Vercel knows it; otherwise the deployment's own host, which is all a CLI deploy has. */
+function deploymentTitle(deployment: VercelDeployment): string {
+  return deployment.commitMessage.split("\n")[0]
+    || hostOf(deployment.url)
+    || `${statusLabel(deployment.state)} deployment`
+}
+
+function errorText(deployment: VercelDeployment): string | null {
+  return [deployment.errorCode, deployment.errorMessage].filter(Boolean).join(": ") || null
+}
+
+function StatusGlyph({ state, className }: { state: VercelDeploymentState; className?: string }) {
+  const label = statusLabel(state)
+  const size = cn("size-3.5 shrink-0", className)
+  if (state === "BUILDING") return <Spinner className={cn(size, "text-info")} aria-label={label} />
+  if (state === "INITIALIZING" || state === "QUEUED") {
+    return <Clock3 className={cn(size, "text-info")} aria-label={label} />
+  }
+  if (state === "READY") return <Check className={cn(size, "text-success")} aria-label={label} />
+  if (state === "BLOCKED") return <Ban className={cn(size, "text-destructive")} aria-label={label} />
+  return <X className={cn(size, "text-destructive")} aria-label={label} />
+}
+
+function ProductionMark() {
+  return (
+    <span className="shrink-0 rounded-sm border border-foreground/25 px-1 font-mono text-[9px] uppercase leading-[14px] tracking-wide text-foreground/80">
+      prod
+    </span>
+  )
 }
 
 function errorHelp(error: VercelDeploymentsErrorResponse): string {
@@ -138,13 +165,15 @@ function errorHelp(error: VercelDeploymentsErrorResponse): string {
 function LoadingDeployments() {
   return (
     <div className="flex flex-col gap-4 px-3 py-4" aria-label="Loading Vercel deployments">
+      <div className="flex flex-col gap-2 rounded-md border px-3 py-2.5">
+        <Skeleton className="h-2.5 w-16" />
+        <Skeleton className="h-3.5 w-3/4" />
+        <Skeleton className="h-2.5 w-1/2" />
+      </div>
       {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="flex items-start gap-3 border-l-2 border-border pl-3">
-          <Skeleton className="mt-1 size-3.5 rounded-full" />
-          <div className="flex flex-1 flex-col gap-2">
-            <Skeleton className="h-3.5 w-3/4" />
-            <Skeleton className="h-2.5 w-1/2" />
-          </div>
+        <div key={item} className="flex flex-col gap-2 border-l-2 border-border pl-3">
+          <Skeleton className="h-3.5 w-4/5" />
+          <Skeleton className="h-2.5 w-1/2" />
         </div>
       ))}
     </div>
@@ -161,7 +190,7 @@ const EMPTY_LOGS: LogsState = { data: null, error: null, loading: false }
 
 function BuildLogs({ logs }: { logs: VercelBuildLogsResponse }) {
   if (logs.events.length === 0) {
-    return <p className="py-2 text-[11px] text-muted-foreground">Vercel reported no build output.</p>
+    return <p className="py-1 text-[11px] text-muted-foreground">Vercel reported no build output.</p>
   }
   return (
     <div className="max-h-64 overflow-auto rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[10px] leading-4">
@@ -177,8 +206,18 @@ function BuildLogs({ logs }: { logs: VercelBuildLogsResponse }) {
   )
 }
 
-function deploymentTitle(deployment: VercelDeployment): string {
-  return deployment.commitMessage.split("\n")[0] || `${statusLabel(deployment.state)} deployment`
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex min-w-0 items-center gap-0.5 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:underline"
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpRight className="size-3 shrink-0" />
+    </a>
+  )
 }
 
 function DeploymentRow({
@@ -195,6 +234,8 @@ function DeploymentRow({
   const tone = toneOf(deployment.state)
   const elapsed = duration(deployment, now)
   const title = deploymentTitle(deployment)
+  const failure = errorText(deployment)
+  const host = hostOf(deployment.url)
 
   async function loadLogs(): Promise<void> {
     if (logsState.loading) return
@@ -223,52 +264,44 @@ function DeploymentRow({
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
       <article className="group/deployment relative pl-3" aria-label={title}>
-        <span
-          aria-hidden
-          className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[tone])}
-        />
+        <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[tone])} />
         <div className="flex items-start gap-1">
           <CollapsibleTrigger
-            className="flex min-w-0 flex-1 items-start gap-2 rounded-sm px-1 py-1 text-left outline-none hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/20"
+            className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/20"
             aria-label={`${title}: ${statusLabel(deployment.state)}`}
+            aria-expanded={open}
           >
-            <ChevronRight
-              className={cn("mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
-            />
-            <StatusGlyph state={deployment.state} />
-            <span className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className={cn("truncate text-xs font-medium", tone === "fail" && "text-destructive")} title={title}>
+            <span className="flex w-full min-w-0 items-center gap-2">
+              <StatusGlyph state={deployment.state} />
+              <span className={cn("min-w-0 flex-1 truncate text-xs font-medium", tone === "fail" && "text-destructive")}>
                 {title}
               </span>
-              <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-                {deployment.branch && (
-                  <span className="flex min-w-0 items-center gap-1">
-                    <GitBranch className="size-3 shrink-0" />
-                    <span className="max-w-28 truncate">{deployment.branch}</span>
-                  </span>
-                )}
-                {deployment.commitSha && <span className="font-mono">{deployment.commitSha.slice(0, 7)}</span>}
-                {deployment.creator && <span className="max-w-20 truncate">{deployment.creator}</span>}
+              {isProduction(deployment) && <ProductionMark />}
+              <span className="w-7 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">
+                {age(deployment.createdAt, now)}
               </span>
             </span>
-            <span className="flex shrink-0 flex-col items-end gap-1">
-              <Badge
-                variant={tone === "fail" ? "destructive" : "outline"}
-                className="h-4 px-1.5 text-[9px] capitalize"
-              >
-                {environmentLabel(deployment)}
-              </Badge>
-              <span className="font-mono text-[9px] text-muted-foreground tabular-nums">
-                {elapsed ? `${elapsed} · ` : ""}{relativeTime(deployment.createdAt, now)}
-              </span>
+            <span className="flex w-full min-w-0 items-center gap-2 pl-[22px] font-mono text-[10px] leading-4 text-muted-foreground">
+              {deployment.branch && <span className="min-w-0 truncate">{deployment.branch}</span>}
+              {deployment.commitSha && <span className="shrink-0">{deployment.commitSha.slice(0, 7)}</span>}
+              {!deployment.branch && !deployment.commitSha && <span className="min-w-0 truncate">deployed from CLI</span>}
+              <span className="min-w-0 flex-1" />
+              {elapsed && (
+                <span className={cn("shrink-0 tabular-nums", tone === "live" && "text-info")}>{elapsed}</span>
+              )}
             </span>
+            {failure && (
+              <span className="w-full min-w-0 truncate pl-[22px] text-[11px] leading-4 text-destructive" title={failure}>
+                {failure}
+              </span>
+            )}
           </CollapsibleTrigger>
           {deployment.url && (
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="mt-0.5 text-muted-foreground opacity-0 transition-opacity group-hover/deployment:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+              className="mt-0.5 size-6 text-muted-foreground opacity-0 transition-opacity group-hover/deployment:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label={`Open ${title}`}
               onClick={() => window.open(deployment.url ?? "", "_blank", "noopener,noreferrer")}
             >
@@ -278,25 +311,13 @@ function DeploymentRow({
         </div>
         <CollapsibleContent>
           <div className="ml-[7px] flex flex-col gap-2 border-l border-border py-2 pl-4 pr-1">
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span className="font-mono">{deployment.id}</span>
-              {deployment.inspectorUrl && (
-                <a
-                  href={deployment.inspectorUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-auto inline-flex items-center gap-1 outline-none hover:text-foreground focus-visible:underline"
-                >
-                  Inspect on Vercel
-                  <ArrowUpRight className="size-3" />
-                </a>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              {deployment.url && host && <ExternalLink href={deployment.url}>{host}</ExternalLink>}
+              {deployment.inspectorUrl && <ExternalLink href={deployment.inspectorUrl}>Inspect on Vercel</ExternalLink>}
+              {deployment.creator && (
+                <span className="text-[11px] text-muted-foreground">by {deployment.creator}</span>
               )}
             </div>
-            {(deployment.errorCode || deployment.errorMessage) && (
-              <p className="text-[11px] text-destructive">
-                {[deployment.errorCode, deployment.errorMessage].filter(Boolean).join(": ")}
-              </p>
-            )}
             {logsState.loading && !logsState.data && (
               <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground" role="status">
                 <Spinner className="size-3" />
@@ -312,10 +333,84 @@ function DeploymentRow({
   )
 }
 
+/** What visitors get right now, plus a newer production deployment if one is still on its way or fell over. */
+export function productionSummary(deployments: readonly VercelDeployment[]): {
+  live: VercelDeployment | null
+  pending: VercelDeployment | null
+} {
+  const production = deployments.filter(isProduction)
+  const live = production.find((deployment) => deployment.state === "READY") ?? null
+  const newest = production[0] ?? null
+  const pending = newest && newest !== live && newest.state !== "READY" ? newest : null
+  return { live, pending }
+}
+
+function LiveProduction({ deployments, now }: { deployments: readonly VercelDeployment[]; now: number }) {
+  const { live, pending } = productionSummary(deployments)
+  const shown = live ?? pending
+  if (!shown) return null
+  const title = deploymentTitle(shown)
+  const host = hostOf(shown.url)
+  const pendingTone = pending ? toneOf(pending.state) : null
+
+  return (
+    <section
+      aria-label="Production"
+      className={cn(
+        "mx-3 mt-3 rounded-md border px-3 py-2.5",
+        live ? "border-success/30 bg-success/[0.05]" : "border-destructive/30 bg-destructive/[0.05]",
+      )}
+    >
+      <p className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span
+          aria-hidden
+          className={cn("size-1.5 rounded-full", live ? "bg-success" : "bg-destructive")}
+        />
+        {live ? "Live on production" : "Production is down"}
+        <span className="ml-auto font-mono normal-case tracking-normal tabular-nums">
+          {age(shown.readyAt ?? shown.createdAt, now)}
+        </span>
+      </p>
+      <h3 className="truncate text-[13px] font-medium leading-5" title={title}>{title}</h3>
+      <p className="mt-0.5 flex min-w-0 items-center gap-2 font-mono text-[10px] text-muted-foreground">
+        {shown.branch && <span className="truncate">{shown.branch}</span>}
+        {shown.commitSha && <span className="shrink-0">{shown.commitSha.slice(0, 7)}</span>}
+        <span className="min-w-0 flex-1" />
+        {shown.url && host && (
+          <a
+            href={shown.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-0 max-w-[60%] items-center gap-0.5 font-sans text-[11px] text-foreground/80 outline-none hover:text-foreground focus-visible:underline"
+          >
+            <span className="truncate">{host}</span>
+            <ArrowUpRight className="size-3 shrink-0" />
+          </a>
+        )}
+      </p>
+      {live && pending && pendingTone && (
+        <p
+          className={cn(
+            "mt-1.5 flex items-center gap-1.5 border-t border-border/60 pt-1.5 text-[11px]",
+            pendingTone === "fail" ? "text-destructive" : "text-info",
+          )}
+        >
+          <StatusGlyph state={pending.state} className="size-3" />
+          <span className="min-w-0 truncate">
+            {pendingTone === "fail" ? "Newer production deploy failed" : "Newer production deploy in progress"}
+            {" · "}
+            {deploymentTitle(pending)}
+          </span>
+        </p>
+      )}
+    </section>
+  )
+}
+
 function applyFilter(deployments: readonly VercelDeployment[], filter: Filter): VercelDeployment[] {
   if (filter === "failed") return deployments.filter((deployment) => isFailed(deployment.state))
-  if (filter === "production") return deployments.filter((deployment) => deployment.target === "production")
-  if (filter === "preview") return deployments.filter((deployment) => deployment.target !== "production")
+  if (filter === "production") return deployments.filter(isProduction)
+  if (filter === "preview") return deployments.filter((deployment) => !isProduction(deployment))
   return [...deployments]
 }
 
@@ -329,7 +424,7 @@ function DeploymentLedger({
   projectPath: string
 }) {
   const deployments = useMemo(() => applyFilter(data.deployments, filter), [data.deployments, filter])
-  const now = useNow(deployments.some((deployment) => isActive(deployment.state)))
+  const now = useNow(data.deployments.some((deployment) => isActive(deployment.state)))
 
   if (data.deployments.length === 0) {
     return (
@@ -342,16 +437,18 @@ function DeploymentLedger({
       </Empty>
     )
   }
-  if (deployments.length === 0) {
-    return <p className="px-4 py-6 text-center text-xs text-muted-foreground">No recent {filter} deployments.</p>
-  }
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="flex flex-col gap-3 px-3 py-3">
-        {deployments.map((deployment) => (
-          <DeploymentRow key={deployment.id} deployment={deployment} projectPath={projectPath} now={now} />
-        ))}
-      </div>
+      <LiveProduction deployments={data.deployments} now={now} />
+      {deployments.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-muted-foreground">No recent {filter} deployments.</p>
+      ) : (
+        <div className="flex flex-col gap-3 px-3 py-3">
+          {deployments.map((deployment) => (
+            <DeploymentRow key={deployment.id} deployment={deployment} projectPath={projectPath} now={now} />
+          ))}
+        </div>
+      )}
     </ScrollArea>
   )
 }
@@ -392,8 +489,8 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
   const deployments = data?.deployments ?? []
   const counts: Record<Filter, number> = {
     all: deployments.length,
-    production: deployments.filter((deployment) => deployment.target === "production").length,
-    preview: deployments.filter((deployment) => deployment.target !== "production").length,
+    production: deployments.filter(isProduction).length,
+    preview: deployments.filter((deployment) => !isProduction(deployment)).length,
     failed: deployments.filter((deployment) => isFailed(deployment.state)).length,
   }
   const effectiveFilter = filter !== "all" && counts[filter] === 0 ? "all" : filter
@@ -433,28 +530,33 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
       </header>
 
       {data && data.deployments.length > 0 && (
-        <div className="shrink-0 overflow-x-auto border-b px-3 py-1.5">
-          <ToggleGroup
-            value={[effectiveFilter]}
-            onValueChange={(value) => { if (value[0]) setFilter(value[0] as Filter) }}
-            variant="outline"
-            size="sm"
-            spacing={0}
-            aria-label="Filter deployments"
+        <div className="flex shrink-0 items-center gap-1 border-b px-3 py-1.5" role="group" aria-label="Filter deployments">
+          <FilterChip pressed={effectiveFilter === "all"} onClick={() => setFilter("all")}>
+            All <FilterChipCount>{counts.all}</FilterChipCount>
+          </FilterChip>
+          <FilterChip
+            pressed={effectiveFilter === "production"}
+            disabled={counts.production === 0}
+            onClick={() => setFilter("production")}
           >
-            <ToggleGroupItem value="all" className="h-6 gap-1 px-2 text-[10px]">
-              All <span className="font-mono opacity-70">{counts.all}</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="production" disabled={counts.production === 0} className="h-6 gap-1 px-2 text-[10px]">
-              Production <span className="font-mono opacity-70">{counts.production}</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="preview" disabled={counts.preview === 0} className="h-6 gap-1 px-2 text-[10px]">
-              Preview <span className="font-mono opacity-70">{counts.preview}</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="failed" disabled={counts.failed === 0} className="h-6 gap-1 px-2 text-[10px]">
-              Failed <span className="font-mono opacity-70">{counts.failed}</span>
-            </ToggleGroupItem>
-          </ToggleGroup>
+            Production <FilterChipCount>{counts.production}</FilterChipCount>
+          </FilterChip>
+          <FilterChip
+            pressed={effectiveFilter === "preview"}
+            disabled={counts.preview === 0}
+            onClick={() => setFilter("preview")}
+          >
+            Preview <FilterChipCount>{counts.preview}</FilterChipCount>
+          </FilterChip>
+          <FilterChip
+            pressed={effectiveFilter === "failed"}
+            disabled={counts.failed === 0}
+            onClick={() => setFilter("failed")}
+          >
+            <span className={cn(counts.failed > 0 && "text-destructive")}>Failed</span>
+            {" "}
+            <FilterChipCount>{counts.failed}</FilterChipCount>
+          </FilterChip>
         </div>
       )}
 

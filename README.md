@@ -71,6 +71,8 @@ Create persistent goals above the composer and monitor status, tokens, elapsed t
 ### Conversation Timeline
 Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, compact tool rows, LCS-based edit diffs, and compaction markers. Mutating calls use normal text, read-only calls stay muted, and red is reserved for failures. Virtualized for smooth scrolling across long sessions.
 
+Adjacent Bash calls share one command card. Single commands and labeled command batches use the same compact layout, with output and failures kept on the command that produced them.
+
 Agent work stays open while a turn is live. Completed turns with a final answer fold that work behind a duration row, and each turn's file summary is a separate collapsed disclosure.
 
 ### Sub-Agent Viewer
@@ -114,7 +116,7 @@ Create branches from earlier turns. Claude Code and Codex sessions use Cogpit's 
 Track all modifications across a session. Net-diff view (aggregated) or per-edit view (chronological). Sub-agent attribution. Open files in your editor or view git diffs directly.
 
 ### Worktree Management
-List active git worktrees with dirty/clean status, commits-ahead count, and linked sessions. Create PRs directly. Bulk cleanup of stale worktrees.
+Open Worktrees from the desktop right activity rail to list active git worktrees with dirty/clean status, commits-ahead count, and linked sessions. Create PRs directly. Bulk cleanup of stale worktrees.
 
 ### Permissions & MCP Server Selector
 Use provider-specific access profiles and tool-level policies. Full access is the default; select a more restrictive mode to enforce approval workflows or limit operations. Native Codex command, file, and network approval requests—including requests raised by nested subagents—appear in the composer, expose only decisions allowed by the runtime, and resume directly when answered. Choose which MCP servers to enable per session from a searchable selector.

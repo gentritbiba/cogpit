@@ -8,6 +8,7 @@ import {
   Sparkles,
   ChevronRight,
   FileCode2,
+  X,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,13 +35,7 @@ import { formatRelativeTime } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
 import { useCapability } from "@/hooks/useCapability"
 import { toast } from "sonner"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { Separator } from "@/components/ui/separator"
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -49,13 +44,12 @@ import {
 import type { WorktreeInfo } from "../../shared/contracts/worktrees"
 
 interface WorktreePanelProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
   worktrees: WorktreeInfo[]
   loading: boolean
   dirName: string | null
   onRefetch: () => void
   onOpenSession: (sessionId: string) => void
+  onClose: () => void
 }
 
 const statusColors: Record<string, string> = {
@@ -71,13 +65,12 @@ interface DeleteConfirmation {
 }
 
 export function WorktreePanel({
-  open,
-  onOpenChange,
   worktrees,
   loading,
   dirName,
   onRefetch,
   onOpenSession,
+  onClose,
 }: WorktreePanelProps) {
   const canManageHostFiles = useCapability("hostFiles")
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -201,41 +194,40 @@ export function WorktreePanel({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
-        <SheetHeader>
-          <div className="flex items-center justify-between pr-8">
-            <SheetTitle className="flex items-center gap-2">
-              <GitBranch data-icon="inline-start" className="size-4" />
-              Worktrees
-            </SheetTitle>
-            <div className="flex items-center gap-1">
-              {canManageHostFiles && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={handleCleanup}
-                  disabled={cleaningUp}
-                  aria-label="Cleanup stale worktrees"
-                >
-                  <Sparkles data-icon="inline-start" />
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={onRefetch}
-                disabled={loading}
-                aria-label="Refresh worktrees"
-              >
-                <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
-              </Button>
-            </div>
-          </div>
-          <SheetDescription>Review isolated branches and their file changes.</SheetDescription>
-        </SheetHeader>
+    <>
+      <aside aria-label="Worktrees" className="flex size-full min-h-0 flex-col bg-background">
+        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+          <GitBranch data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Worktrees</h2>
+          <div className="flex-1" />
+          {canManageHostFiles && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleCleanup}
+              disabled={cleaningUp}
+              aria-label="Cleanup stale worktrees"
+            >
+              <Sparkles data-icon="inline-start" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRefetch}
+            disabled={loading}
+            aria-label="Refresh worktrees"
+          >
+            <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close worktrees">
+            <X data-icon="inline-start" />
+          </Button>
+        </div>
 
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+        <Separator />
+
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
           {!dirName && (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               Select a project to view worktrees
@@ -264,10 +256,9 @@ export function WorktreePanel({
                 key={wt.name}
                 className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/40"
               >
-                {/* Header row */}
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-foreground truncate">{wt.name}</span>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">{wt.name}</span>
                     {wt.isDirty && (
                       <span className="flex size-2 shrink-0 rounded-full bg-warning" title="Uncommitted changes" />
                     )}
@@ -277,7 +268,7 @@ export function WorktreePanel({
                       </Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex shrink-0 items-center gap-0.5">
                     {wt.linkedSessions.length > 0 && (
                       <Button
                         variant="ghost"
@@ -314,9 +305,8 @@ export function WorktreePanel({
                   </div>
                 </div>
 
-                {/* Commit info */}
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-mono shrink-0">{wt.head}</span>
+                  <span className="shrink-0 font-mono">{wt.head}</span>
                   <span className="truncate">{wt.headMessage}</span>
                 </div>
 
@@ -326,7 +316,6 @@ export function WorktreePanel({
                   </div>
                 )}
 
-                {/* File changes accordion */}
                 {fileCount > 0 && (
                   <Collapsible className="mt-2">
                     <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
@@ -364,7 +353,7 @@ export function WorktreePanel({
             )
           })}
         </div>
-      </SheetContent>
+      </aside>
 
       <AlertDialog
         open={deleteConfirmation !== null}
@@ -421,6 +410,6 @@ export function WorktreePanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Sheet>
+    </>
   )
 }

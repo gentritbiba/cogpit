@@ -18,12 +18,10 @@ import type { BuiltInEditorRequest, ProjectRef } from "@/lib/fileOpener"
 export type DesktopPanels = Pick<
   ReturnType<typeof usePanelState>,
   | "showSidebar"
-  | "showWorktrees"
   | "activeWorkspacePanel"
   | "showProjectSwitcher"
   | "showThemeSelector"
   | "handleToggleSidebar"
-  | "handleToggleWorktrees"
   | "toggleWorkspacePanel"
   | "openWorkspacePanel"
   | "closeWorkspacePanel"
@@ -33,7 +31,6 @@ export type DesktopPanels = Pick<
   | "handleCloseProjectSwitcher"
   | "handleToggleThemeSelector"
   | "handleCloseThemeSelector"
-  | "setShowWorktrees"
 >
 
 export type DesktopSessionActions = Pick<

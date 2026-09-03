@@ -32,14 +32,12 @@ function usePersistedFlag(key: string, defaultValue: boolean) {
 
 interface PanelState {
   showSidebar: boolean
-  showWorktrees: boolean
   showWorkflows: boolean
   activeWorkspacePanel: string | null
   showProjectSwitcher: boolean
   showThemeSelector: boolean
 
   handleToggleSidebar: () => void
-  handleToggleWorktrees: () => void
   handleToggleWorkflows: () => void
   toggleWorkspacePanel: (panelId: string) => void
   openWorkspacePanel: (panelId: string) => void
@@ -53,13 +51,15 @@ interface PanelState {
   handleCloseThemeSelector: () => void
 
   setShowSidebar: React.Dispatch<React.SetStateAction<boolean>>
-  setShowWorktrees: React.Dispatch<React.SetStateAction<boolean>>
   setShowWorkflows: React.Dispatch<React.SetStateAction<boolean>>
 }
 
 function initialWorkspacePanel(): string | null {
   if (typeof window === "undefined") return BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges
   try {
+    if (JSON.parse(localStorage.getItem("panel-worktrees-visible") ?? "false") === true) {
+      return BUILT_IN_WORKSPACE_PANEL_IDS.worktrees
+    }
     if (JSON.parse(localStorage.getItem("panel-stats-visible") ?? "false") === true) {
       return BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
     }
@@ -77,7 +77,6 @@ export function usePanelState(
   dispatch: React.Dispatch<SessionAction>,
 ): PanelState {
   const [showSidebar, setShowSidebar] = usePersistedFlag("panel-sidebar-visible", true)
-  const [showWorktrees, setShowWorktrees] = usePersistedFlag("panel-worktrees-visible", false)
   const [showWorkflows, setShowWorkflows] = usePersistedFlag("panel-workflows-visible", false)
   const [storedWorkspacePanel, setStoredWorkspacePanel] = useLocalStorage<string | null>(
     "workspace-panel-active",
@@ -93,16 +92,24 @@ export function usePanelState(
   const handleToggleSidebar = useCallback(() => {
     startTransition(() => setShowSidebar(!showSidebar))
   }, [setShowSidebar, showSidebar])
-  const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [setShowWorktrees])
   const handleToggleWorkflows = useCallback(() => setShowWorkflows((p) => !p), [setShowWorkflows])
   const toggleWorkspacePanel = useCallback((panelId: string) => {
     startTransition(() => {
-      setStoredWorkspacePanel((current) => current === panelId ? null : panelId)
+      const returningToSessions = state.mainView === "config" || state.mainView === "mission"
+      if (state.mainView === "config") dispatch({ type: "CLOSE_CONFIG" })
+      if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
+      setStoredWorkspacePanel((current) => (
+        returningToSessions || current !== panelId ? panelId : null
+      ))
     })
-  }, [setStoredWorkspacePanel])
+  }, [dispatch, setStoredWorkspacePanel, state.mainView])
   const openWorkspacePanel = useCallback((panelId: string) => {
-    startTransition(() => setStoredWorkspacePanel(panelId))
-  }, [setStoredWorkspacePanel])
+    startTransition(() => {
+      if (state.mainView === "config") dispatch({ type: "CLOSE_CONFIG" })
+      if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
+      setStoredWorkspacePanel(panelId)
+    })
+  }, [dispatch, setStoredWorkspacePanel, state.mainView])
   const closeWorkspacePanel = useCallback(() => {
     startTransition(() => setStoredWorkspacePanel(null))
   }, [setStoredWorkspacePanel])
@@ -130,13 +137,11 @@ export function usePanelState(
 
   return {
     showSidebar,
-    showWorktrees,
     showWorkflows,
     activeWorkspacePanel,
     showProjectSwitcher,
     showThemeSelector,
     handleToggleSidebar,
-    handleToggleWorktrees,
     handleToggleWorkflows,
     toggleWorkspacePanel,
     openWorkspacePanel,
@@ -149,7 +154,6 @@ export function usePanelState(
     handleToggleThemeSelector,
     handleCloseThemeSelector,
     setShowSidebar,
-    setShowWorktrees,
     setShowWorkflows,
   }
 }

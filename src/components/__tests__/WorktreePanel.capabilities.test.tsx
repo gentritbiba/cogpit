@@ -9,13 +9,6 @@ import { WorktreePanel } from "../WorktreePanel"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
-vi.mock("@/components/ui/sheet", () => ({
-  Sheet: ({ children, open }: { children: ReactNode; open: boolean }) => open ? <div>{children}</div> : null,
-  SheetContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  SheetHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  SheetTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
-  SheetDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
-}))
 vi.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <button>{children}</button>,
@@ -37,8 +30,6 @@ describe("WorktreePanel capability gating", () => {
     })
 
     render(<WorktreePanel
-      open
-      onOpenChange={vi.fn()}
       worktrees={[{
         name: "feature",
         path: "/srv/project/.claude/worktrees/feature",
@@ -55,6 +46,7 @@ describe("WorktreePanel capability gating", () => {
       dirName="project"
       onRefetch={vi.fn()}
       onOpenSession={vi.fn()}
+      onClose={vi.fn()}
     />)
 
     expect(screen.getByText("feature")).toBeInTheDocument()
@@ -71,8 +63,6 @@ describe("WorktreePanel capability gating", () => {
     mocks.authFetch.mockResolvedValue({ ok: true })
 
     render(<WorktreePanel
-      open
-      onOpenChange={vi.fn()}
       worktrees={[{
         name: "feature",
         path: "/srv/project/.claude/worktrees/feature",
@@ -89,6 +79,7 @@ describe("WorktreePanel capability gating", () => {
       dirName="project"
       onRefetch={onRefetch}
       onOpenSession={vi.fn()}
+      onClose={vi.fn()}
     />)
 
     await user.click(screen.getByRole("button", { name: "Delete worktree" }))

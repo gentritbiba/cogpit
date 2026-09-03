@@ -121,18 +121,21 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     [toolCalls, thoughtForMs]
   )
 
-  function renderToolCallCard(tc: ToolCall, isLast: boolean) {
-    const isLastWithoutResult = isAgentActive && isLast && tc.result === null
+  function renderToolCallCard(tc: ToolCall, isLast: boolean, groupedBashCalls?: ToolCall[]) {
+    const renderedCalls = groupedBashCalls ?? [tc]
+    const isLastWithoutResult = isAgentActive && isLast && renderedCalls.some((call) => call.result === null)
+    const isActive = activeToolCallId !== null && renderedCalls.some((call) => call.id === activeToolCallId)
     return (
       <div
         key={tc.id}
-        ref={tc.id === activeToolCallId ? targetRef : undefined}
+        ref={isActive ? targetRef : undefined}
         className={cn(
-          tc.id === activeToolCallId && "rounded-md ring-1 ring-ring"
+          isActive && "rounded-md ring-1 ring-ring"
         )}
       >
         <ToolCallCard
           toolCall={tc}
+          groupedBashCalls={groupedBashCalls}
           expandAll={expandAll}
           expandToolPayloads={expandToolPayloads}
           isAgentActive={isLastWithoutResult}
@@ -142,9 +145,33 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     )
   }
 
+  function renderToolCallCards(calls: ToolCall[], isLastGroup: boolean) {
+    const cards: React.ReactNode[] = []
+    let index = 0
+    while (index < calls.length) {
+      const toolCall = calls[index]
+      if (toolCall.name !== "Bash") {
+        cards.push(renderToolCallCard(toolCall, isLastGroup && index === calls.length - 1))
+        index++
+        continue
+      }
+
+      let end = index + 1
+      while (end < calls.length && calls[end].name === "Bash") end++
+      const groupedBashCalls = calls.slice(index, end)
+      cards.push(renderToolCallCard(
+        toolCall,
+        isLastGroup && end === calls.length,
+        groupedBashCalls.length > 1 ? groupedBashCalls : undefined,
+      ))
+      index = end
+    }
+    return cards
+  }
+
   // Single tool call with no thinking → render directly, no collapsible wrapper
   if (toolCalls.length === 1 && thinkingCount === 0 && !activityItems) {
-    return <div className="flex flex-col gap-2">{renderToolCallCard(toolCalls[0], true)}</div>
+    return <div className="flex flex-col gap-2">{renderToolCallCards(toolCalls, true)}</div>
   }
 
   if (isOpen) {
@@ -176,17 +203,29 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
                 {tail.hidden > 0 && (
                   <EarlierSteps count={tail.hidden} onReveal={() => setOpenOverride(true)} />
                 )}
-                {tail.visible.map((item, idx) => {
-                  if (item.kind === "thinking") {
-                    return (
-                      <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll={false} />
-                    )
+                {(() => {
+                  const content: React.ReactNode[] = []
+                  let index = 0
+                  while (index < tail.visible.length) {
+                    const item = tail.visible[index]
+                    if (item.kind === "thinking") {
+                      content.push(<ThinkingBlock key={`thinking-${index}`} blocks={item.blocks} expandAll={false} />)
+                      index++
+                      continue
+                    }
+
+                    const calls = [...item.toolCalls]
+                    let end = index + 1
+                    while (end < tail.visible.length && tail.visible[end].kind === "tool_calls") {
+                      const next = tail.visible[end]
+                      if (next.kind === "tool_calls") calls.push(...next.toolCalls)
+                      end++
+                    }
+                    content.push(...renderToolCallCards(calls, end === tail.visible.length))
+                    index = end
                   }
-                  const isLastGroup = idx === tail.visible.length - 1
-                  return item.toolCalls.map((tc, ti) =>
-                    renderToolCallCard(tc, isLastGroup && ti === item.toolCalls.length - 1)
-                  )
-                })}
+                  return content
+                })()}
               </>
             )
           })()
@@ -198,9 +237,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
                 {tail.hidden > 0 && (
                   <EarlierSteps count={tail.hidden} onReveal={() => setOpenOverride(true)} />
                 )}
-                {tail.visible.map((tc, i) =>
-                  renderToolCallCard(tc, i === tail.visible.length - 1)
-                )}
+                {renderToolCallCards(tail.visible, true)}
               </>
             )
           })()

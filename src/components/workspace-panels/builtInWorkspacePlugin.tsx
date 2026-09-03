@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react"
-import { FileCode2, FolderTree, PanelRight } from "lucide-react"
+import { FileCode2, FolderTree, GitBranch, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { Spinner } from "@/components/ui/Spinner"
@@ -9,6 +9,9 @@ import { useBuiltInPanelServices } from "./BuiltInPanelServices"
 
 const ProjectFilesPanel = lazy(() =>
   import("@/components/ProjectFilesPanel").then((module) => ({ default: module.ProjectFilesPanel })),
+)
+const WorktreePanel = lazy(() =>
+  import("@/components/WorktreePanel").then((module) => ({ default: module.WorktreePanel })),
 )
 
 function PanelFallback() {
@@ -63,9 +66,35 @@ function SessionInfoWorkspacePanel() {
   )
 }
 
+function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
+  const services = useBuiltInPanelServices()
+  return (
+    <Suspense fallback={<PanelFallback />}>
+      <WorktreePanel
+        worktrees={services.worktrees.worktrees}
+        loading={services.worktrees.loading}
+        dirName={services.worktreeDirName}
+        onRefetch={services.worktrees.refetch}
+        onOpenSession={services.openWorktreeSession}
+        onClose={closePanel}
+      />
+    </Suspense>
+  )
+}
+
 export const builtInWorkspacePlugin = definePlugin({
   id: BUILT_IN_PLUGIN_ID,
   workspacePanels: [
+    {
+      id: "worktrees",
+      title: "Worktrees",
+      icon: GitBranch,
+      component: WorktreesWorkspacePanel,
+      order: 5,
+      defaultSize: "36%",
+      minSize: "320px",
+      when: (context) => context.supportsWorktrees === true,
+    },
     {
       id: "project-files",
       title: "Project files",

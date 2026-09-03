@@ -20,7 +20,6 @@ describe("usePanelState", () => {
     const { result } = render()
     expect(result.current.showSidebar).toBe(true)
     expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
-    expect(result.current.showWorktrees).toBe(false)
     expect(result.current.showWorkflows).toBe(false)
   })
 
@@ -79,11 +78,62 @@ describe("usePanelState", () => {
     expect(result.current.activeWorkspacePanel).toBeNull()
   })
 
+  it("returns to the session view when a workspace panel opens from Config", () => {
+    const dispatch = vi.fn()
+    const configState = { mainView: "config" } as SessionState
+    const { result } = renderHook(() => usePanelState(configState, dispatch))
+
+    act(() => {
+      result.current.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.worktrees)
+    })
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "CLOSE_CONFIG" })
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.worktrees)
+  })
+
+  it("keeps a persisted panel open when its rail button is selected from Config", () => {
+    const dispatch = vi.fn()
+    const configState = { mainView: "config" } as SessionState
+    const { result } = renderHook(() => usePanelState(configState, dispatch))
+
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+
+    act(() => {
+      result.current.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+    })
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "CLOSE_CONFIG" })
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+  })
+
+  it.each([
+    ["config", { type: "CLOSE_CONFIG" }],
+    ["mission", { type: "CLOSE_MISSION" }],
+  ] as const)("opens an already-selected panel when toggled from %s", (mainView, closeAction) => {
+    const dispatch = vi.fn()
+    const alternateState = { mainView } as SessionState
+    const { result } = renderHook(() => usePanelState(alternateState, dispatch))
+
+    act(() => {
+      result.current.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+    })
+
+    expect(dispatch).toHaveBeenCalledWith(closeAction)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+  })
+
   it("migrates the legacy panel visibility preference", () => {
     localStorage.setItem("panel-stats-visible", "true")
     const { result } = render()
 
     expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
+  })
+
+  it("migrates an open legacy worktree sheet into the workspace panel", () => {
+    localStorage.setItem("panel-worktrees-visible", "true")
+    const { result } = render()
+
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.worktrees)
   })
 
   it("updates shell panels and lazy views without forcing synchronous commits", () => {

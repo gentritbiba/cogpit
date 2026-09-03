@@ -31,6 +31,7 @@ export {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+export { FilterChip, FilterChipCount } from "@/components/ui/filter-chip"
 export {
   Empty,
   EmptyContent,
