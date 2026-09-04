@@ -4,6 +4,13 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-09-04 22:47 UTC - Tool rendering and iOS parity (32de20d)
+- **File:** `audit-history/audit-20260904T224712Z-32de20d.md`
+- **Status:** PASS AFTER UPDATES
+- **Scope:** Structured Claude/Codex tool calls across desktop/mobile/native iOS and the pending iOS design, session, and human-input parity pass.
+- **Documentation:** Corrected tool/image disclosures, Markdown, live prompt handling, provider streaming, and paging-preserving reconnects; linked the rendering contract and updated the native parity ledger.
+- **Validation:** 5,426 parent tests, lint/typecheck, generated-module sync, 446 native checks, and 12 simulator UI tests passed.
+
 ### 2026-09-02 09:05 UTC - Agent and session architecture release (68acd29)
 - **File:** `audit-history/audit-20260902T090554Z-68acd29.md`
 - **Status:** PASS AFTER UPDATES
