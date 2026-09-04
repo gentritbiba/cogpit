@@ -12,6 +12,7 @@ import {
 } from "../../lib/clickupConfig"
 
 const TOKEN = "pk_12345678_ABCDEFGHIJKLMNOP"
+const POSIX_MODES_UNSUPPORTED = process.platform === "win32"
 let root = ""
 let file = ""
 
@@ -38,7 +39,7 @@ describe("ClickUp config", () => {
   it("persists the token owner-only and keeps project links across token changes", async () => {
     await saveClickUpProjectLink("/repo", "901711539677")
     await saveClickUpToken(TOKEN)
-    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    if (!POSIX_MODES_UNSUPPORTED) expect((await stat(file)).mode & 0o777).toBe(0o600)
     expect(await loadClickUpConfig()).toEqual({
       token: TOKEN,
       tokenFromEnv: false,
