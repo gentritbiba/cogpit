@@ -136,7 +136,6 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         <ToolCallCard
           toolCall={tc}
           groupedBashCalls={groupedBashCalls}
-          expandAll={expandAll}
           expandToolPayloads={expandToolPayloads}
           isAgentActive={isLastWithoutResult}
           skillMetadata={skillMetadata}

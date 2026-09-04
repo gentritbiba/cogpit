@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { parseCustomToolOutput as facadeParseCustomToolOutput } from "../../../shared/session/codex"
 import {
   inferToolError,
+  normalizeFunctionName,
   normalizePlanToTodos,
   parseCustomToolOutput,
 } from "../../../shared/session/codex-tool-normalization"
@@ -11,6 +12,24 @@ describe("Codex tool-normalization facade", () => {
     expect(facadeParseCustomToolOutput).toBe(parseCustomToolOutput)
     const output = JSON.stringify({ output: "done", metadata: { exit_code: 0 } })
     expect(facadeParseCustomToolOutput(output)).toEqual(parseCustomToolOutput(output))
+  })
+})
+
+describe("normalizeFunctionName", () => {
+  it.each([
+    ["functions.exec_command", "exec_command"],
+    ["functions__update_plan", "update_plan"],
+    ["functions/apply_patch", "apply_patch"],
+    ["collaboration.spawnAgent", "spawn_agent"],
+    ["collaboration:followupTask", "followup_task"],
+  ])("normalizes %s to %s", (raw, expected) => {
+    expect(normalizeFunctionName(raw)).toBe(expected)
+  })
+
+  it("preserves MCP names even when the leaf matches a native tool", () => {
+    expect(normalizeFunctionName("mcp__server__exec_command")).toBe("mcp__server__exec_command")
+    expect(normalizeFunctionName("mcp__server__spawnAgent")).toBe("mcp__server__spawnAgent")
+    expect(normalizeFunctionName("custom.unknown_tool")).toBe("custom.unknown_tool")
   })
 })
 
@@ -80,10 +99,52 @@ describe("parseCustomToolOutput boundaries", () => {
       text: "{ malformed error",
       isError: true,
     })
-    expect(parseCustomToolOutput({ output: "not directly supported" })).toEqual({
-      text: "",
+    expect(parseCustomToolOutput({ output: "structured output" })).toEqual({
+      text: "structured output",
       isError: false,
     })
     expect(parseCustomToolOutput(undefined)).toEqual({ text: "", isError: false })
+  })
+
+  it("preserves Claude, MCP, and data URL images without printing their payloads", () => {
+    const images = [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "claude-pixels" } },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "mcp-pixels" } },
+      { type: "image", source: { type: "base64", media_type: "image/webp", data: "codex-pixels" } },
+    ]
+    expect(parseCustomToolOutput([
+      { type: "text", text: "Preview" },
+      images[0],
+      { type: "image", mimeType: "image/jpeg", data: "mcp-pixels" },
+      { type: "input_image", image_url: "data:image/webp;base64,codex-pixels" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "" } },
+    ])).toEqual({ text: "Preview", images, isError: false })
+  })
+
+  it.each([false, true])("reads content envelopes serialized=%s", (serialized) => {
+    const envelope = {
+      content: [
+        { type: "text", text: "Error-handling reference" },
+        { type: "image", mimeType: "image/png", data: "pixels" },
+      ],
+      isError: false,
+    }
+    expect(parseCustomToolOutput(serialized ? JSON.stringify(envelope) : envelope)).toEqual({
+      text: "Error-handling reference",
+      images: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "pixels" } }],
+      isError: false,
+    })
+  })
+
+  it("honors explicit errors and top-level exit codes", () => {
+    expect(parseCustomToolOutput({ content: [], isError: true })).toEqual({ text: "", isError: true })
+    expect(parseCustomToolOutput({ output: "No matching resource", is_error: true })).toEqual({ text: "No matching resource", isError: true })
+    expect(parseCustomToolOutput({ output: "error in diagnostic sample", exit_code: 0 })).toEqual({ text: "error in diagnostic sample", isError: false })
+    expect(parseCustomToolOutput({ output: "Stopped", exit_code: 2 })).toEqual({ text: "Stopped", isError: true })
+  })
+
+  it("keeps ordinary JSON results intact", () => {
+    const output = JSON.stringify({ agent_id: "agent-1", nickname: "reviewer" })
+    expect(parseCustomToolOutput(output)).toEqual({ text: output, isError: false })
   })
 })

@@ -13,6 +13,7 @@ import {
   JsonResultHighlighted,
   ReadResultHighlighted,
   tryPrettyJson,
+  previewToolResult,
 } from "../ToolCallResult"
 
 describe("tryPrettyJson", () => {
@@ -83,5 +84,57 @@ describe("highlighted tool results", () => {
 
     expect(await screen.findByText("const")).toHaveStyle({ color: "rgb(255, 0, 0)" })
     expect(screen.getByText("value")).toHaveStyle({ color: "rgb(0, 255, 0)" })
+  })
+})
+
+
+describe("tool result preview", () => {
+  it("bounds a single line without losing the expansion affordance", () => {
+    const preview = previewToolResult("a".repeat(1001))
+    expect(preview).toEqual({ text: "a".repeat(1000), hiddenLines: 0, truncated: true })
+  })
+
+  it("counts logical lines across platform newline formats", () => {
+    const result = Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\r\n")
+    const preview = previewToolResult(result)
+    expect(preview.text.split("\n")).toHaveLength(8)
+    expect(preview.hiddenLines).toBe(2)
+    expect(preview.truncated).toBe(true)
+  })
+
+  it("applies the character bound even when there are many lines", () => {
+    const preview = previewToolResult(`${"x".repeat(1200)}\n${Array(10).fill("next").join("\n")}`)
+    expect(preview.text).toHaveLength(1000)
+    expect(preview.hiddenLines).toBe(10)
+    expect(preview.truncated).toBe(true)
+  })
+
+  it("does not shorten exactly eight short lines", () => {
+    const result = Array(8).fill("line").join("\n")
+    expect(previewToolResult(result)).toEqual({ text: result, hiddenLines: 0, truncated: false })
+  })
+})
+
+describe("highlight updates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    highlightCode.mockResolvedValue([])
+  })
+
+  it("shows new text immediately while replacement tokens are loading", async () => {
+    highlightCode.mockResolvedValueOnce([[{ content: "before", color: "#ff0000" }]])
+    const { rerender } = render(<ReadResultHighlighted result="before" filePath="example.ts" expanded />)
+    await waitFor(() => expect(screen.getByText("before")).toHaveStyle({ color: "rgb(255, 0, 0)" }))
+    highlightCode.mockReturnValueOnce(new Promise(() => {}))
+    rerender(<ReadResultHighlighted result="after" filePath="example.ts" expanded />)
+    expect(screen.getByText("after")).toBeTruthy()
+    expect(screen.queryByText("before")).toBeNull()
+  })
+
+  it("keeps plain text when syntax highlighting rejects", async () => {
+    highlightCode.mockRejectedValueOnce(new Error("Grammar unavailable"))
+    render(<ReadResultHighlighted result="readable source" filePath="example.ts" expanded />)
+    await waitFor(() => expect(highlightCode).toHaveBeenCalled())
+    expect(screen.getByText("readable source")).toBeTruthy()
   })
 })

@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
+import { getCommandText } from "../../../shared/session/toolSummary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -99,12 +100,8 @@ interface CommandRowView {
   pending: boolean
 }
 
-function commandFor(toolCall: ToolCall): string {
-  return String(toolCall.input.command ?? toolCall.input.cmd ?? "")
-}
-
 export function bashSections(toolCall: ToolCall): CommandSection[] {
-  const command = commandFor(toolCall)
+  const command = getCommandText(toolCall.input)
   return parseSectionedCommand(command, toolCall.result) ?? [{ label: "", command, output: toolCall.result }]
 }
 
@@ -159,7 +156,7 @@ function toCallView(toolCall: ToolCall, isAgentActive: boolean): BashCallView {
   const outerFailure = failedRowIndex(toolCall, sections, analyses)
   return {
     toolCall,
-    command: commandFor(toolCall),
+    command: getCommandText(toolCall.input),
     description: typeof toolCall.input.description === "string" ? toolCall.input.description : undefined,
     rows: sections.map((section, index) => ({
       section,
@@ -247,7 +244,7 @@ function CommandText({
 
 const GREP_LINE_RE = /^([^\s:]+):(\d+)([:-])/
 const OUTPUT_CLASS =
-  "mb-1.5 ml-6 max-h-96 overflow-y-auto whitespace-pre-wrap break-all border-l pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
+  "mb-1.5 ml-6 min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-l pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
 
 function CommandOutput({ row, cwd }: { row: CommandRowView; cwd: string | undefined }): React.ReactElement {
   const output = row.section.output ?? ""
@@ -312,7 +309,7 @@ function CommandRow({
   const hasOutput = row.section.output !== null && row.section.output !== ""
   const rowLabel = `${name} section: ${row.section.command}`
   const KindIcon = KIND_META[row.analysis.kind].icon
-  const rowClass = "group/row flex w-full items-center gap-2 py-2 text-left"
+  const rowClass = "group/row flex min-w-0 w-full items-center gap-2 py-2 text-left"
 
   const content = (
     <>
@@ -424,13 +421,13 @@ export function BashCommandCard({
   const singleOptions = calls.length === 1 ? calls[0].options : []
 
   return (
-    <Card size="sm" className="mt-1.5" role="region" aria-label={commandCount === 1 ? "Bash command" : "Bash commands"}>
+    <Card size="sm" className="mt-1.5 min-w-0" role="region" aria-label={commandCount === 1 ? "Bash command" : "Bash commands"}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex min-w-0 items-center gap-2">
           <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
           {commandCount} {commandCount === 1 ? "command" : "commands"}
         </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <CardDescription className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 [overflow-wrap:anywhere]">
           {calls.length > 1 && <span>{calls.length} calls</span>}
           <span>{kindSummary(rows)}</span>
           {singleDescription && <span className="text-foreground/70">{singleDescription}</span>}

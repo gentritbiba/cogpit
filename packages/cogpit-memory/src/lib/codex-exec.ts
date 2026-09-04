@@ -11,6 +11,11 @@ export interface CodexExecInvocation {
   startIndex: number
 }
 
+export interface CodexExecCall {
+  name: string
+  input: Record<string, unknown>
+}
+
 const JS_SIMPLE_ESCAPES: Readonly<Record<string, string>> = {
   "0": "\0",
   b: "\b",
@@ -166,8 +171,21 @@ function resolveAssignedArgument(source: string, invocationStart: number, argume
   if (!identifier) return argumentSource
 
   const prefix = source.slice(0, invocationStart)
-  const assignment = new RegExp(`\\b(?:const|let|var)\\s+${identifier.replace(/[$]/g, "\\$")}\\s*=`, "g")
-  const lastMatch = [...prefix.matchAll(assignment)].at(-1)
+  const assignment = new RegExp(`\\b(?:const|let|var)\\s+${identifier.replace(/[$]/g, "\\$")}\\s*=`, "y")
+  let lastMatch: RegExpExecArray | null = null
+  for (let index = 0; index < prefix.length; index++) {
+    const skipped = skipStringOrComment(prefix, index)
+    if (skipped) {
+      index = skipped.endIndex - 1
+      continue
+    }
+    assignment.lastIndex = index
+    const match = assignment.exec(prefix)
+    if (match) {
+      lastMatch = match
+      index += match[0].length - 1
+    }
+  }
   if (!lastMatch || lastMatch.index === undefined) return argumentSource
 
   const valueStart = skipTrivia(prefix, lastMatch.index + lastMatch[0].length)
@@ -191,15 +209,19 @@ function resolveAssignedArgument(source: string, invocationStart: number, argume
  */
 export function extractCodexExecInvocations(source: string): CodexExecInvocation[] {
   const calls: CodexExecInvocation[] = []
+  let previousSignificant = ""
 
   for (let index = 0; index < source.length; index++) {
     const skipped = skipStringOrComment(source, index)
     if (skipped) {
+      if (skipped.isString) previousSignificant = "literal"
       index = skipped.endIndex - 1
       continue
     }
 
-    if (!source.startsWith("tools", index) || isIdentifierPart(source[index - 1]) || isIdentifierPart(source[index + 5])) {
+    const isPropertyAccess = previousSignificant === "."
+    if (!/\s/.test(source[index])) previousSignificant = source[index]
+    if (isPropertyAccess || !source.startsWith("tools", index) || isIdentifierPart(source[index - 1]) || isIdentifierPart(source[index + 5])) {
       continue
     }
 
@@ -385,4 +407,48 @@ export function countJsCollectionEntries(source: string): number {
     }
   }
   return count + (hasValue ? 1 : 0)
+}
+
+const EXEC_INPUT_FIELDS = [
+  "cmd", "command", "workdir", "description", "timeout", "yield_time_ms", "max_output_tokens",
+  "session_id", "chars", "tty", "login", "shell", "path", "file_path", "pattern", "query",
+  "url", "prompt", "message", "target", "task_name", "agent_id", "agent_ids", "model",
+  "agent_type", "fork_turns", "reasoning_effort", "questions", "plan", "explanation",
+  "search_query", "image_query", "open", "click", "find", "screenshot", "finance", "weather",
+  "sports", "time", "response_length", "server", "uri", "cursor", "name", "code",
+  "old_string", "new_string", "content", "replace_all", "patch", "input",
+] as const
+
+function staticArgumentValue(source: string): { value: unknown } | null {
+  try {
+    return { value: JSON.parse(source) as unknown }
+  } catch { /* JavaScript literals may use single quotes or bare object keys. */ }
+  if (source.startsWith("`") && source.includes("${")) return null
+  const literal = readJsStringLiteral(source, 0)
+  return literal && literal.endIndex === source.length ? { value: literal.value } : null
+}
+
+/** Decode literal call inputs for presentation; expressions remain available as source. */
+export function getCodexExecCalls(input: Record<string, unknown>): CodexExecCall[] {
+  if (typeof input.raw !== "string") return []
+  return extractCodexExecInvocations(input.raw).map(({ name, argumentSource }) => {
+    const source = argumentSource.trim()
+    const literal = staticArgumentValue(source)
+    if (literal) {
+      const value = literal.value
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return { name, input: value as Record<string, unknown> }
+      }
+      return { name, input: typeof value === "string" ? { raw: value } : { value } }
+    }
+
+    const fields: Record<string, unknown> = { raw: argumentSource }
+    for (const field of EXEC_INPUT_FIELDS) {
+      const valueSource = extractJsPropertySource(source, field)
+      if (valueSource === null) continue
+      const value = staticArgumentValue(valueSource)
+      if (value) fields[field] = value.value
+    }
+    return { name, input: fields }
+  })
 }

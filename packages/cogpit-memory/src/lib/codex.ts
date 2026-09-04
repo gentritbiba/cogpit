@@ -6,10 +6,10 @@ import {
   parseCodexToolPatches,
 } from "./codex-patches"
 import {
-  inferToolError,
   normalizeFunctionName,
   normalizePlanToTodos,
   parseCustomToolOutput,
+  type CodexToolOutput,
 } from "./codex-tool-normalization"
 import type {
   AudioBlock,
@@ -347,18 +347,19 @@ function isCodeModeChild(callId: string): boolean {
   return callId.startsWith("exec-")
 }
 
-function parseMcpEventResult(value: unknown): { text: string; isError: boolean } {
+function parseMcpEventResult(value: unknown): CodexToolOutput {
   if (!isObject(value)) return { text: safeStringify(value), isError: false }
   if ("Err" in value) return { text: safeStringify(value.Err), isError: true }
   const ok = isObject(value.Ok) ? value.Ok : null
   if (!ok) return { text: safeStringify(value), isError: false }
 
-  const parsedContent = parseCustomToolOutput(ok.content)
+  const parsedContent = parseCustomToolOutput({ ...ok, content: ok.content })
   const text = parsedContent.text
-    || (ok.structuredContent !== undefined ? safeStringify(ok.structuredContent) : safeStringify(ok))
+    || (parsedContent.images?.length ? "" : ok.structuredContent !== undefined ? safeStringify(ok.structuredContent) : safeStringify(ok))
   return {
+    ...parsedContent,
     text,
-    isError: ok.isError === true || parsedContent.isError,
+    isError: parsedContent.isError,
   }
 }
 
@@ -831,6 +832,7 @@ function walkCodexRecords(
       if (existing) {
         existing.result = result.text
         existing.isError = result.isError
+        if (result.images) existing.resultImages = result.images
         pendingToolCalls.delete(payload.call_id)
       } else if (!isCodeModeChild(payload.call_id)) {
         appendToolCall(current, {
@@ -839,6 +841,7 @@ function walkCodexRecords(
           input,
           result: result.text,
           isError: result.isError,
+          ...(result.images ? { resultImages: result.images } : {}),
           timestamp,
         }, timestamp)
       }
@@ -1046,9 +1049,11 @@ function walkCodexRecords(
     if (payload.type === "function_call_output" && typeof payload.call_id === "string") {
       const toolCall = pendingToolCalls.get(payload.call_id)
       if (!toolCall) continue
-      const output = typeof payload.output === "string" ? payload.output : null
+      const parsedOutput = parseCustomToolOutput(payload.output)
+      const output = parsedOutput.text
       toolCall.result = output
-      toolCall.isError = inferToolError(output)
+      toolCall.isError = parsedOutput.isError
+      if (parsedOutput.images) toolCall.resultImages = parsedOutput.images
       pendingToolCalls.delete(payload.call_id)
 
       // Resolve spawn_agent result → create sub-agent entry
@@ -1125,7 +1130,7 @@ function walkCodexRecords(
 
     // Handle custom_tool_call (direct apply_patch, exec wrappers, exec_command)
     if (payload.type === "custom_tool_call" && typeof payload.call_id === "string") {
-      const name = typeof payload.name === "string" ? payload.name : "tool"
+      const name = normalizeFunctionName(typeof payload.name === "string" ? payload.name : "tool")
       const rawInput = typeof payload.input === "string" ? payload.input : ""
       const callId = payload.call_id as string
       const perFileCalls = rawInput
@@ -1163,7 +1168,7 @@ function walkCodexRecords(
 
     if (payload.type === "custom_tool_call_output" && typeof payload.call_id === "string") {
       const callId = payload.call_id as string
-      const { text, isError } = parseCustomToolOutput(payload.output)
+      const { text, isError, images } = parseCustomToolOutput(payload.output)
 
       // Check if this is an apply_patch result (maps to multiple per-file calls)
       const patchCalls = patchCallIds.get(callId)
@@ -1186,6 +1191,7 @@ function walkCodexRecords(
       if (toolCall) {
         toolCall.result = text
         toolCall.isError = isError
+        if (images) toolCall.resultImages = images
         pendingToolCalls.delete(callId)
       }
       continue

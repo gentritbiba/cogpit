@@ -1,9 +1,71 @@
 import { describe, expect, it } from "vitest"
-import { getToolSummary } from "../../../shared/session/toolSummary"
+import { getCommandText, getToolPresentation, getToolSummary, getToolTier } from "../../../shared/session/toolSummary"
 
 function summarize(name: string, input: Record<string, unknown>): string {
   return getToolSummary({ name, input })
 }
+
+describe("consistent tool presentation", () => {
+  it.each([
+    ["Bash", "functions.exec_command", { cmd: "bun run test" }, "Run command", "Bash"],
+    ["Task", "collaboration.spawn_agent", { description: "Check rendering", task_name: "Check rendering" }, "Spawn agent", "Task"],
+    ["AskUserQuestion", "functions.request_user_input_async", { questions: [{ question: "Which theme?", title: "Which theme?" }] }, "Ask question", "AskUserQuestion"],
+    ["ToolSearch", "functions.tool_search", { query: "search docs" }, "Find tools", "ToolSearch"],
+  ])("presents %s and %s as the same operation", (claudeName, codexName, input, label, styleName) => {
+    const claude = getToolPresentation({ name: claudeName, input })
+    expect(claude).toMatchObject({ label, styleName })
+    expect(getToolPresentation({ name: codexName, input })).toEqual(claude)
+  })
+
+  it("counts both Claude todos and Codex plan steps", () => {
+    expect(getToolPresentation({ name: "TodoWrite", input: { todos: [{ content: "Inspect" }, { content: "Fix" }] } }))
+      .toEqual(getToolPresentation({ name: "functions.update_plan", input: { plan: [{ step: "Inspect" }, { step: "Fix" }] } }))
+    expect(summarize("TodoWrite", { todos: [{ content: "Inspect" }] })).toBe("1 step")
+  })
+
+  it("keeps unknown tool summaries readable and excludes raw orchestration", () => {
+    expect(getToolPresentation({ name: "custom_lookup", input: { limit: 10, query: "find\n the\tfile" } }))
+      .toMatchObject({ label: "Custom lookup", summary: "find the file" })
+    expect(summarize("custom_lookup", { raw: "const internal = 1" })).toBe("")
+    expect(summarize("Read", { path: "x".repeat(500) })).toHaveLength(140)
+    expect(() => summarize("AskUserQuestion", { questions: [null, 5, {}] })).not.toThrow()
+  })
+
+  it("uses the same style for native aliases and keeps read-only operations quiet", () => {
+    expect(getToolTier("functions.exec_command")).toBe(getToolTier("Bash"))
+    expect(getToolTier("functions.apply_patch")).toBe(getToolTier("Edit"))
+    expect(getToolTier("collaboration.list_agents")).toBe("readOnly")
+    expect(getToolTier("collaboration.wait_agent")).toBe("readOnly")
+    expect(getToolTier("functions.get_goal")).toBe("readOnly")
+    expect(getToolTier("mcp__server__exec_command")).toBe("readOnly")
+  })
+
+  it("presents direct and wrapped web requests consistently", () => {
+    const input = { search_query: [{ q: "rendering tools" }] }
+    expect(getToolPresentation({ name: "web__run", input })).toEqual(
+      getToolPresentation({ name: "exec", input: { raw: `text(await tools.web__run(${JSON.stringify(input)}))` } }),
+    )
+  })
+
+  it("does not display encrypted agent message content in summaries", () => {
+    const message = "gAAAAABencrypted_payload_123=="
+    expect(summarize("send_message", { target: "reviewer", message })).toBe("reviewer · Encrypted message")
+    expect(summarize("spawn_agent", { message })).toBe("Encrypted message")
+    expect(summarize("SendMessage", { to: "reviewer", message })).toBe("reviewer · Encrypted message")
+    expect(summarize("exec", { raw: `tools.send_message({ target: "reviewer", message: "${message}" })` }))
+      .toBe("reviewer · Encrypted message")
+  })
+})
+
+describe("command display", () => {
+  it("preserves string commands and argv boundaries", () => {
+    expect(getCommandText({ cmd: "bun run test && bun run lint" })).toBe("bun run test && bun run lint")
+    expect(getCommandText({ command: ["git", "show", "HEAD:src/a b.ts"] })).toBe("git show 'HEAD:src/a b.ts'")
+    expect(getCommandText({ command: ["echo", "", "it's", "$(whoami)"] })).toBe(`echo '' 'it'"'"'s' '$(whoami)'`)
+    expect(getCommandText({ command: ["git", 5] })).toBe("")
+    expect(summarize("Bash", { command: ["git", "show", "HEAD:src/a b.ts"] })).toBe("git show 'HEAD:src/a b.ts'")
+  })
+})
 
 // Inputs below are trimmed copies of real tool calls in ~/.claude/projects
 // transcripts, so the field names are the ones Claude Code actually writes.

@@ -1,21 +1,20 @@
-import { useState, useMemo, memo, useCallback, useId } from "react"
+import { useState, useMemo, memo, useId } from "react"
 import {
   XCircle,
   ChevronRight,
-  ChevronDown,
   Loader2,
   ExternalLink,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
-import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
 import { LocalImage, isLocalImagePath } from "./LocalImage"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { ToolCallInput } from "./ToolCallInput"
 import { CodexExecToolInput } from "./CodexExecToolInput"
 import {
   BashCommandCard,
@@ -26,142 +25,20 @@ import {
 } from "./BashCommandCard"
 import { Badge } from "@/components/ui/badge"
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
-import {
-  JsonResultHighlighted,
-  ReadResultHighlighted,
-  type ToolResultVariant,
-  tryPrettyJson,
-} from "./ToolCallResult"
-import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
+import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
+import { getCommandText, getToolPresentation, getToolSummary, getToolTier, isCodexExecCall } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 
-export { getToolSummary }
+export { getToolSummary, getToolTier }
 
-/**
- * Timeline tool name styles — used in the live session timeline (ToolCallCard).
- *
- * Colour encodes what a call does, never which tool it is: the name is spelled
- * out in words right beside it, so hue never carried identity in the first
- * place. Calls that change the world read at full strength, read-only calls
- * stay muted, and red is reserved for failures so it keeps meaning one thing.
- */
-type ToolTier = "mutating" | "readOnly"
-
-const TOOL_TIER_STYLES: Record<ToolTier, string> = {
-  mutating: "text-foreground",
-  readOnly: "text-muted-foreground",
-}
-
-const FAILED_TOOL_TEXT_STYLE = "text-destructive"
-const DESKTOP_RESULT_LINE_LIMIT = 8
 const HEADER_SECTION_CHIP_LIMIT = 4
-const DESKTOP_RESULT_CLASS =
-  "whitespace-pre-wrap break-all border-l border-border pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
-const MOBILE_RESULT_CLASS =
-  "max-h-96 overflow-y-auto whitespace-pre-wrap break-all rounded-md border p-2 font-mono text-xs leading-relaxed"
 
-function splitLogicalLines(text: string): string[] {
-  return text.split(/\r\n|\r|\n/)
-}
-
-const TOOL_TIERS: Record<string, ToolTier> = {
-  // Mutating — writes files, runs commands, spawns work, sends things out.
-  Write: "mutating",
-  Edit: "mutating",
-  Bash: "mutating",
-  exec: "mutating",
-  Task: "mutating",
-  Skill: "mutating",
-  TodoWrite: "mutating",
-  Image: "mutating",
-  AskUserQuestion: "mutating",
-  CronCreate: "mutating",
-  CronDelete: "mutating",
-  ScheduleWakeup: "mutating",
-  RemoteTrigger: "mutating",
-  PushNotification: "mutating",
-  EnterWorktree: "mutating",
-  ExitWorktree: "mutating",
-  Agent: "mutating",
-  SendMessage: "mutating",
-  EndConversation: "mutating",
-  TaskCreate: "mutating",
-  TaskUpdate: "mutating",
-  TaskStop: "mutating",
-  // A workflow run spawns a whole fleet of agents that edit the repo.
-  Workflow: "mutating",
-  // Read-only — inspects the world without changing it.
-  Read: "readOnly",
-  Grep: "readOnly",
-  Glob: "readOnly",
-  WebFetch: "readOnly",
-  WebSearch: "readOnly",
-  ToolSearch: "readOnly",
-  Monitor: "readOnly",
-  CronList: "readOnly",
-  Mcp: "readOnly",
-  EnterPlanMode: "readOnly",
-  ExitPlanMode: "readOnly",
-  ListAgents: "readOnly",
-  TaskList: "readOnly",
-  TaskOutput: "readOnly",
-  LSP: "readOnly",
-  StructuredOutput: "readOnly",
-  ReportFindings: "readOnly",
-}
-
-/** Unknown tools stay quiet rather than claim attention they may not deserve. */
-const DEFAULT_TOOL_TIER: ToolTier = "readOnly"
-
-/** What a call does, which is what its colour encodes. */
-export function getToolTier(name: string): ToolTier {
-  return TOOL_TIERS[name] ?? DEFAULT_TOOL_TIER
-}
-
-/** Tool name color. Bare text — no pill, no background, no border. */
 export function getToolTextStyle(name: string, isError = false): string {
-  if (isError) return FAILED_TOOL_TEXT_STYLE
-  return TOOL_TIER_STYLES[getToolTier(name)]
+  if (isError) return "text-destructive"
+  return getToolTier(name) === "mutating" ? "text-foreground" : "text-muted-foreground"
 }
 
-// ── Reusable toggle button for expand/collapse sections ──────────────────
-
-function ToggleButton({
-  isOpen,
-  onClick,
-  label,
-  controlsId,
-}: {
-  isOpen: boolean
-  onClick: () => void
-  label: string
-  controlsId: string
-}): React.ReactElement {
-  const Chevron = isOpen ? ChevronDown : ChevronRight
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="xs"
-      onClick={onClick}
-      className="-ml-2 text-muted-foreground"
-      aria-expanded={isOpen}
-      aria-controls={controlsId}
-    >
-      <Chevron data-icon="inline-start" />
-      {label}
-    </Button>
-  )
-}
-
-// ── Status icon for tool call completion state ───────────────────────────
-
-/**
- * Success draws nothing. It is the ~98% case, and a marker that is almost never
- * actionable teaches the eye to skip exactly the column where failures appear.
- * Only the exceptions — failed, and still running — get ink.
- */
 function StatusIcon({
   toolCall,
   isAgentActive,
@@ -176,86 +53,6 @@ function StatusIcon({
     return <Loader2 role="img" aria-label="Tool call running" className="size-4 animate-spin text-info" data-icon="icon" />
   }
   return null
-}
-
-function ToolResultPanel({
-  toolCall,
-  resultExpanded,
-  onToggleExpanded,
-  isMobile,
-}: {
-  toolCall: ToolCall
-  resultExpanded: boolean
-  onToggleExpanded: () => void
-  isMobile: boolean
-}): React.ReactElement {
-  const resultText = toolCall.result ?? ""
-  const isLongResult = resultText.length > 1000
-  const mobileVisibleResult = isLongResult && !resultExpanded
-    ? resultText.slice(0, 500) + "..."
-    : resultText
-  const prettyJson = useMemo(
-    () => (!toolCall.isError && toolCall.name !== "Read") ? tryPrettyJson(resultText) : null,
-    [toolCall.isError, toolCall.name, resultText],
-  )
-  const desktopResult = prettyJson ?? resultText
-  const desktopLines = useMemo(() => splitLogicalLines(desktopResult), [desktopResult])
-  const hiddenLineCount = Math.max(0, desktopLines.length - DESKTOP_RESULT_LINE_LIMIT)
-  const desktopVisibleResult = resultExpanded
-    ? desktopResult
-    : desktopLines.slice(0, DESKTOP_RESULT_LINE_LIMIT).join("\n")
-  const showExpander = isMobile ? isLongResult : hiddenLineCount > 0
-  const highlightedExpanded = !isMobile || !isLongResult || resultExpanded
-  const highlightedVariant: ToolResultVariant = isMobile ? "boxed" : "unboxed"
-
-  return (
-    <div className="mt-1.5">
-      {toolCall.name === "Read" &&
-      !toolCall.isError &&
-      typeof toolCall.input.file_path === "string" ? (
-        <ReadResultHighlighted
-          result={isMobile ? resultText : desktopVisibleResult}
-          filePath={toolCall.input.file_path}
-          expanded={highlightedExpanded}
-          variant={highlightedVariant}
-        />
-      ) : prettyJson !== null ? (
-        <JsonResultHighlighted
-          result={isMobile ? prettyJson : desktopVisibleResult}
-          expanded={highlightedExpanded}
-          alreadyPretty
-          variant={highlightedVariant}
-        />
-      ) : (
-        <pre
-          className={cn(
-            isMobile ? MOBILE_RESULT_CLASS : DESKTOP_RESULT_CLASS,
-            toolCall.isError
-              ? cn(
-                  "border-destructive/20 text-destructive",
-                  isMobile && "bg-destructive/5",
-                )
-              : isMobile && "border-border bg-muted/30 text-muted-foreground",
-          )}
-        >
-          {isMobile ? mobileVisibleResult : desktopVisibleResult}
-        </pre>
-      )}
-      {showExpander && (
-        <button
-          type="button"
-          onClick={onToggleExpanded}
-          className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {resultExpanded
-            ? "Show less"
-            : isMobile
-              ? "Show more"
-              : `+${hiddenLineCount} lines`}
-        </button>
-      )}
-    </div>
-  )
 }
 
 function SectionChips({ chips }: { chips: SectionChip[] }): React.ReactElement {
@@ -279,16 +76,14 @@ function SectionChips({ chips }: { chips: SectionChip[] }): React.ReactElement {
 function HeaderSummary({
   chips,
   summary,
-  isMobile,
 }: {
   chips?: SectionChip[]
   summary: string
-  isMobile?: boolean
 }): React.ReactElement | null {
   if (chips) return <SectionChips chips={chips} />
   if (!summary) return null
   return (
-    <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
+    <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
       {summary}
     </span>
   )
@@ -296,7 +91,6 @@ function HeaderSummary({
 
 function ToolCallHeaderContent({
   toolCall,
-  isMobile,
   isAgentActive,
   displayName,
   summary,
@@ -307,7 +101,6 @@ function ToolCallHeaderContent({
   timeIso,
 }: {
   toolCall: ToolCall
-  isMobile: boolean
   isAgentActive?: boolean
   displayName: string
   summary: string
@@ -320,25 +113,24 @@ function ToolCallHeaderContent({
   return (
     <>
       {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
-      <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <span
           className={cn(
-            "shrink-0 font-mono",
-            isMobile ? "text-[10px]" : "text-[11px]",
+            "max-w-[50%] shrink-0 truncate font-mono text-xs",
             nameClass,
           )}
           title={nameTitle}
         >
           {displayName}
         </span>
-        <HeaderSummary chips={chips} summary={summary} isMobile={isMobile} />
+        <HeaderSummary chips={chips} summary={summary} />
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
-        {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
+        {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && (
           <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
         )}
         {toolCall.outputReplacedByHook && (
-          <span className="text-[10px] text-blue-400" title="Output replaced by hook">hook</span>
+          <span className="text-[10px] text-info" title="Output replaced by hook">hook</span>
         )}
         <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
       </div>
@@ -351,7 +143,7 @@ function imageReadPath(toolCall: ToolCall): string | null {
   if (toolCall.isError) return null
   const path = toolCall.name === "Read"
     ? toolCall.input.file_path
-    : toolCall.name === "view_image"
+    : /(?:^|[._])view_image$/.test(toolCall.name)
       ? toolCall.input.path
       : null
   return typeof path === "string" && isLocalImagePath(path) ? path : null
@@ -372,69 +164,38 @@ function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement 
 interface ToolCallCardProps {
   toolCall: ToolCall
   groupedBashCalls?: ToolCall[]
-  expandAll: boolean
   expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
 }
 
-const MOBILE_TOOL_LABELS: Record<string, string> = {
-  AskUserQuestion: "Question",
-  Bash: "Command",
-  exec: "Command",
-  Task: "Agent",
-  WebFetch: "Fetch",
-  WebSearch: "Search",
-  EnterPlanMode: "Plan mode",
-  ExitPlanMode: "Plan review",
-  ToolSearch: "Tool search",
-}
-
 export const ToolCallCard = memo(function ToolCallCard({
   toolCall,
   groupedBashCalls,
-  expandAll,
   expandToolPayloads = false,
   isAgentActive,
   skillMetadata,
 }: ToolCallCardProps) {
   const { session, pendingInteraction } = useSessionContext()
-  const isMobile = useIsMobile()
+  const [panelOpen, setPanelOpen] = useState(false)
   const [inputOpen, setInputOpen] = useState(false)
-  const [resultOpen, setResultOpen] = useState(false)
-  const [resultExpanded, setResultExpanded] = useState(false)
-  const [diffOpen, setDiffOpen] = useState(false)
-  const [desktopPanelOpen, setDesktopPanelOpen] = useState(false)
-  const [desktopInputOpen, setDesktopInputOpen] = useState(false)
-  const mobileDiffId = useId()
-  const mobileInputId = useId()
-  const mobileResultId = useId()
-  const desktopPanelId = useId()
-  const desktopInputId = useId()
-  // Historical tool calls are one-line rows on mobile. Live tools remain open
-  // so questions, approvals, and streaming output stay actionable.
-  const [mobileExpanded, setMobileExpanded] = useState(false)
-  const bashCalls = useMemo(
-    () => groupedBashCalls ?? (toolCall.name === "Bash" ? [toolCall] : []),
-    [groupedBashCalls, toolCall],
-  )
-  const isHistoricalTool = (bashCalls.length > 0
-    ? bashCalls.every((call) => call.result !== null)
-    : toolCall.result !== null) || !isAgentActive
-  const isCompactMobile = isMobile && isHistoricalTool && !expandAll && !mobileExpanded
-  const presentation = useMemo(() => getToolPresentation(toolCall), [toolCall])
+  const panelId = useId()
+  const inputId = useId()
   const isCodexExec = isCodexExecCall(toolCall)
+  const hasCommand = !isCodexExec &&
+    (toolCall.name === "Bash" || /(?:^|[._])exec_command$/.test(toolCall.name)) &&
+    Boolean(getCommandText(toolCall.input))
+  const bashCalls = useMemo(
+    () => groupedBashCalls ?? (hasCommand ? [toolCall] : []),
+    [groupedBashCalls, hasCommand, toolCall],
+  )
+  const presentation = useMemo(() => getToolPresentation(toolCall), [toolCall])
   const sections = useMemo(
     () => bashCalls.length > 0 ? bashCalls.flatMap(bashSections) : null,
     [bashCalls],
   )
-  const chips = useMemo(() => (sections ? sectionChips(sections) : undefined), [sections])
-  // Abbreviate only when the presentation kept the raw tool name. A derived
-  // label is already short and more accurate than the mobile stand-in.
-  const baseDisplayName = isMobile && presentation.label === toolCall.name
-    ? MOBILE_TOOL_LABELS[toolCall.name] ?? toolCall.name
-    : presentation.label
-  const displayName = bashCalls.length > 1 ? `${baseDisplayName} ×${bashCalls.length}` : baseDisplayName
+  const chips = useMemo(() => (sections && (sections.length > 1 || sections.some((section) => section.label)) ? sectionChips(sections) : undefined), [sections])
+  const displayName = bashCalls.length > 1 ? `${presentation.label} ×${bashCalls.length}` : presentation.label
   const nameTitle = presentation.label === toolCall.name
     ? toolCall.name
     : `${presentation.label} (${toolCall.name})`
@@ -452,18 +213,12 @@ export const ToolCallCard = memo(function ToolCallCard({
       hookDurationMs: bashCalls.reduce((sum, call) => sum + (call.hookDurationMs ?? 0), 0),
     }
   }, [bashCalls, toolCall])
-  // Wall-clock time is almost never scanned, but is occasionally needed. Hover
-  // carries it so it costs no ink on every row. `title` is mouse-only, so the
-  // desktop row also renders it as screen-reader-only text.
   const timeLabel = toolCall.timestamp
     ? new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : undefined
   const timeIso = toolCall.timestamp ? new Date(toolCall.timestamp).toISOString() : undefined
 
-  const payloadsExpanded = expandToolPayloads || (isMobile && expandAll)
-  const showMobileInput = payloadsExpanded || inputOpen
-  const showMobileResult = payloadsExpanded || resultOpen
-  const showMobileDiff = payloadsExpanded || diffOpen
+  const showPanel = expandToolPayloads || panelOpen
 
   const summary = bashCalls.length > 1
     ? `${sections?.length ?? bashCalls.length} commands`
@@ -478,30 +233,12 @@ export const ToolCallCard = memo(function ToolCallCard({
     typeof toolCall.input.new_string === "string" &&
     typeof toolCall.input.file_path === "string"
 
-  const desktopPrimaryPanel = hasEditDiff
-    ? "diff"
-    : toolCall.name === "Bash" || isCodexExec
-      ? "command"
-      : "result"
-  const showDesktopPanel = expandToolPayloads || desktopPanelOpen
-  // An image read returns its pixels as a block the text parser drops, so the
-  // preview below stands in for a result well that would always be empty.
   const imagePath = imageReadPath(toolCall)
-  const hasImagePreview = imagePath !== null && toolCall.result?.trim() === ""
-  // A sectioned call interleaves each command with its own output, so the
-  // flat result well would only repeat what the sections already show.
-  const renderedResult = toolCall.result !== null && !hasImagePreview && bashCalls.length === 0 ? (
-    <ToolResultPanel
-      toolCall={toolCall}
-      resultExpanded={resultExpanded}
-      onToggleExpanded={() => setResultExpanded(!resultExpanded)}
-      isMobile={isMobile}
-    />
-  ) : null
-
-  const handleCompactTap = useCallback(() => {
-    if (isCompactMobile) setMobileExpanded(true)
-  }, [isCompactMobile])
+  const hasResultImages = Boolean(toolCall.resultImages?.length)
+  const hasImagePreview = imagePath !== null && toolCall.result?.trim() === "" && !hasResultImages
+  const showResult = toolCall.result !== null && !hasImagePreview && bashCalls.length === 0 &&
+    (!hasResultImages || Boolean(toolCall.result?.trim())) &&
+    (!hasEditDiff || toolCall.isError)
 
   if (toolCall.name === "AskUserQuestion") {
     // Answerability comes from the session's pending interaction, never from
@@ -510,7 +247,7 @@ export const ToolCallCard = memo(function ToolCallCard({
     return (
       <AskUserQuestionCard
         toolCall={toolCall}
-        expandToolPayloads={payloadsExpanded}
+        expandToolPayloads={expandToolPayloads}
         isAwaitingAnswer={
           pendingInteraction?.type === "question" &&
           pendingInteraction.toolUseId === toolCall.id
@@ -521,77 +258,33 @@ export const ToolCallCard = memo(function ToolCallCard({
   }
 
   return (
-    <div
-      className={cn(
-        isCompactMobile ? "py-1" : "py-1.5",
-        statusToolCall.isError && !isCompactMobile && "rounded-md bg-destructive/5 px-2",
-      )}
-    >
-      {isCompactMobile ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          className="h-auto w-full justify-start px-1 py-1 text-left"
-          onClick={handleCompactTap}
-          aria-label={`Expand ${displayName} tool call`}
-          title={timeLabel}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span
-              className={cn("shrink-0 font-mono text-xs", nameClass)}
-              title={nameTitle}
-            >
-              {displayName}
-            </span>
-            <HeaderSummary chips={chips} summary={summary} />
-          </div>
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-end" />
-          <StatusIcon toolCall={statusToolCall} isAgentActive={isAgentActive} />
-        </Button>
-      ) : isMobile ? (
-        <div className="flex items-center gap-1.5" title={timeLabel}>
-          <ToolCallHeaderContent
-            toolCall={statusToolCall}
-            isMobile
-            isAgentActive={isAgentActive}
-            displayName={displayName}
-            summary={summary}
-            sectionChips={chips}
-            nameTitle={nameTitle}
-            nameClass={nameClass}
-            timeLabel={timeLabel}
-            timeIso={timeIso}
-          />
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-sm text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title={timeLabel}
-          aria-label={`Toggle ${displayName} details${summary ? `: ${summary}` : ""}`}
-          aria-expanded={showDesktopPanel}
-          aria-controls={desktopPanelId}
-          onClick={() => {
-            if (!expandToolPayloads) setDesktopPanelOpen((open) => !open)
-          }}
-        >
-          <ToolCallHeaderContent
-            toolCall={statusToolCall}
-            isMobile={false}
-            isAgentActive={isAgentActive}
-            displayName={displayName}
-            summary={summary}
-            sectionChips={chips}
-            nameTitle={nameTitle}
-            nameClass={nameClass}
-            timeLabel={timeLabel}
-            timeIso={timeIso}
-          />
-        </button>
-      )}
+    <div className={cn("min-w-0 py-1", statusToolCall.isError && "rounded-md bg-destructive/5 px-2")}>
+      <button
+        type="button"
+        className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-sm text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:min-h-7"
+        title={timeLabel}
+        aria-label={`Toggle ${displayName} details${summary ? `: ${summary}` : ""}`}
+        aria-expanded={showPanel}
+        aria-controls={panelId}
+        onClick={() => {
+          if (!expandToolPayloads) setPanelOpen((open) => !open)
+        }}
+      >
+        <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground transition-transform", showPanel && "rotate-90")} aria-hidden="true" />
+        <ToolCallHeaderContent
+          toolCall={statusToolCall}
+          isAgentActive={isAgentActive}
+          displayName={displayName}
+          summary={summary}
+          sectionChips={chips}
+          nameTitle={nameTitle}
+          nameClass={nameClass}
+          timeLabel={timeLabel}
+          timeIso={timeIso}
+        />
+      </button>
 
-      {hasImagePreview && !isCompactMobile && (
+      {hasImagePreview && (
         <LocalImage
           src={imagePath}
           alt={imagePath.slice(imagePath.lastIndexOf("/") + 1)}
@@ -601,7 +294,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         />
       )}
 
-      {!isCompactMobile && toolCall.resultImages?.map((image, index) => (
+      {toolCall.resultImages?.map((image, index) => (
         <LocalImage
           key={`${image.source.media_type}-${image.source.data.length}-${image.source.data.slice(0, 32)}-${image.source.data.slice(-32)}`}
           src={`data:${image.source.media_type};base64,${image.source.data}`}
@@ -612,19 +305,15 @@ export const ToolCallCard = memo(function ToolCallCard({
         />
       ))}
 
-      {skillMeta && !isCompactMobile && (
-        <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">
+      {skillMeta && (
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
           <span>source: {skillMeta.source}</span>
           {skillFilePath && (!isRemoteDeviceActive() || isBuiltInEditorEnabled()) && (
             <Button
               type="button"
               variant="link"
               size="xs"
-              onClick={(e) => {
-                e.stopPropagation()
-                openFile(skillFilePath)
-              }}
-              className="h-auto px-0 text-muted-foreground"
+              onClick={() => openFile(skillFilePath)}
               title={skillFilePath}
             >
               <ExternalLink data-icon="inline-start" />
@@ -634,123 +323,51 @@ export const ToolCallCard = memo(function ToolCallCard({
         </div>
       )}
 
-      {isMobile && !isCompactMobile && (
-        <div className="flex gap-3 mt-1">
-          {hasEditDiff && (
-            <ToggleButton
-              isOpen={showMobileDiff}
-              onClick={() => setDiffOpen(!diffOpen)}
-              label="Diff"
-              controlsId={mobileDiffId}
+      <Collapsible open={showPanel}>
+        <CollapsibleContent id={panelId}>
+          {hasEditDiff && <EditToolDiff toolCall={toolCall} />}
+          {bashCalls.length > 0 ? (
+            <BashCommandCard
+              toolCalls={bashCalls}
+              cwd={session?.cwd}
+              expandAll={expandToolPayloads}
+              isAgentActive={Boolean(isAgentActive)}
+            />
+          ) : isCodexExec ? (
+            <CodexExecToolInput input={toolCall.input} />
+          ) : !hasEditDiff ? <ToolCallInput input={toolCall.input} /> : null}
+          {showResult && (
+            <ToolResultPanel
+              result={toolCall.result ?? ""}
+              isError={toolCall.isError}
+              filePath={toolCall.name === "Read" && typeof toolCall.input.file_path === "string" ? toolCall.input.file_path : undefined}
             />
           )}
-          <ToggleButton
-            isOpen={showMobileInput}
-            onClick={() => setInputOpen(!inputOpen)}
-            label="Input"
-            controlsId={mobileInputId}
-          />
-          {renderedResult && (
-            <ToggleButton
-              isOpen={showMobileResult}
-              onClick={() => setResultOpen(!resultOpen)}
-              label="Result"
-              controlsId={mobileResultId}
-            />
-          )}
-        </div>
-      )}
-
-      {isMobile && !isCompactMobile && hasEditDiff && (
-        <Collapsible open={showMobileDiff}>
-          <CollapsibleContent id={mobileDiffId}>
-            <EditToolDiff toolCall={toolCall} />
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
-      {isMobile && !isCompactMobile && (
-        <Collapsible open={showMobileInput}>
-          <CollapsibleContent id={mobileInputId}>
-            {bashCalls.length > 0 ? (
-              <BashCommandCard
-                toolCalls={bashCalls}
-                cwd={session?.cwd}
-                expandAll={payloadsExpanded}
-                isAgentActive={Boolean(isAgentActive)}
-              />
-            ) : isCodexExec ? (
-              <CodexExecToolInput input={toolCall.input} />
-            ) : (
-              <JsonResultHighlighted
-                result={JSON.stringify(toolCall.input)}
-                expanded={true}
-              />
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
-      {(toolCall.name === "Task" || toolCall.name === "Agent") &&
-        toolCall.result === null && (
-          <LiveSubagentTranscript toolUseId={toolCall.id} />
-        )}
-
-      {isMobile && !isCompactMobile && renderedResult && (
-        <Collapsible open={showMobileResult}>
-          <CollapsibleContent id={mobileResultId}>
-            {renderedResult}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
-      {!isMobile && (
-        <Collapsible open={showDesktopPanel}>
-          <CollapsibleContent
-            id={desktopPanelId}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {desktopPrimaryPanel === "diff" && hasEditDiff && (
-              <EditToolDiff toolCall={toolCall} />
-            )}
-
-            {desktopPrimaryPanel === "command" &&
-              (bashCalls.length > 0 ? (
-                <BashCommandCard
-                  toolCalls={bashCalls}
-                  cwd={session?.cwd}
-                  expandAll={expandToolPayloads}
-                  isAgentActive={Boolean(isAgentActive)}
-                />
-              ) : (
-                <CodexExecToolInput input={toolCall.input} />
-              ))}
-
-            {(desktopPrimaryPanel === "result" ||
-              desktopPrimaryPanel === "command") && renderedResult}
-
-            <button
+          <Collapsible open={inputOpen}>
+            <Button
               type="button"
-              className="mt-1 text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-              aria-expanded={desktopInputOpen}
-              aria-controls={desktopInputId}
-              onClick={(event) => {
-                event.stopPropagation()
-                setDesktopInputOpen((open) => !open)
-              }}
+              variant="ghost"
+              size="xs"
+              className="mt-1"
+              aria-expanded={inputOpen}
+              aria-controls={inputId}
+              onClick={() => setInputOpen((open) => !open)}
             >
-              input
-            </button>
-            <Collapsible open={desktopInputOpen}>
-              <CollapsibleContent id={desktopInputId}>
-                <JsonResultHighlighted
-                  result={JSON.stringify(bashCalls.length > 1 ? bashCalls.map((call) => call.input) : toolCall.input)}
-                  expanded
-                />
-              </CollapsibleContent>
-            </Collapsible>
-          </CollapsibleContent>
-        </Collapsible>
+              <ChevronRight data-icon="inline-start" className={cn(inputOpen && "rotate-90")} />
+              Input
+            </Button>
+            <CollapsibleContent id={inputId}>
+              <JsonResultHighlighted
+                result={JSON.stringify(bashCalls.length > 1 ? bashCalls.map((call) => call.input) : toolCall.input)}
+                expanded
+              />
+            </CollapsibleContent>
+          </Collapsible>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {(toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null && (
+        <LiveSubagentTranscript toolUseId={toolCall.id} />
       )}
     </div>
   )

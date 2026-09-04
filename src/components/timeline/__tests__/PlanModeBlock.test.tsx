@@ -231,7 +231,7 @@ describe("PlanModeBlock", () => {
 
     // The Skill tool call card should be rendered — presence of the tool name badge is sufficient
     // (the exact skill source rendering is tested in ToolCallCard.test.tsx)
-    expect(screen.getByText("Skill")).toBeInTheDocument()
+    expect(screen.getByText("Use skill")).toBeInTheDocument()
   })
 
   it("opens embedded tool groups without opening payloads at level one", () => {
@@ -276,7 +276,7 @@ describe("PlanModeBlock", () => {
     expect(screen.getByText("file content here")).toBeInTheDocument()
     expect(screen.queryByText(/"file_path"/)).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "input" }))
+    fireEvent.click(screen.getByRole("button", { name: "Input" }))
     expect(screen.getByText(/"file_path"/)).toBeInTheDocument()
   })
 })

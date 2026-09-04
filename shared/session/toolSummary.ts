@@ -16,6 +16,7 @@ import {
   readJsStringLiteral,
   type CodexExecInvocation,
 } from "./codex-exec"
+import { normalizeFunctionName } from "./codex-tool-normalization"
 
 /** Minimal shape needed to present a call — satisfied by a parsed ToolCall. */
 export interface SummarizableToolCall {
@@ -39,12 +40,45 @@ interface WebOperation {
   noun: string
 }
 
-const CODEX_TOOL_LABELS: Readonly<Record<string, { label: string; styleName: string }>> = {
+const TOOL_LABELS: Readonly<Record<string, { label: string; styleName: string }>> = {
+  Read: { label: "Read file", styleName: "Read" },
+  Write: { label: "Write file", styleName: "Write" },
+  Edit: { label: "Edit file", styleName: "Edit" },
+  Bash: { label: "Run command", styleName: "Bash" },
+  Grep: { label: "Search files", styleName: "Grep" },
+  Glob: { label: "Find files", styleName: "Glob" },
+  Task: { label: "Spawn agent", styleName: "Task" },
+  Agent: { label: "Spawn agent", styleName: "Task" },
+  WebFetch: { label: "Open page", styleName: "WebFetch" },
+  TodoWrite: { label: "Update plan", styleName: "TodoWrite" },
+  AskUserQuestion: { label: "Ask question", styleName: "AskUserQuestion" },
+  Skill: { label: "Use skill", styleName: "Skill" },
+  ToolSearch: { label: "Find tools", styleName: "ToolSearch" },
+  SendMessage: { label: "Message agent", styleName: "SendMessage" },
+  ListAgents: { label: "List agents", styleName: "ListAgents" },
+  TaskCreate: { label: "Create task", styleName: "TaskCreate" },
+  TaskUpdate: { label: "Update task", styleName: "TaskUpdate" },
+  TaskList: { label: "List tasks", styleName: "TaskList" },
+  TaskOutput: { label: "Read task output", styleName: "TaskOutput" },
+  TaskStop: { label: "Stop task", styleName: "TaskStop" },
+  NotebookEdit: { label: "Edit notebook", styleName: "Edit" },
+  EnterPlanMode: { label: "Enter plan mode", styleName: "EnterPlanMode" },
+  ExitPlanMode: { label: "Exit plan mode", styleName: "ExitPlanMode" },
+  EnterWorktree: { label: "Enter worktree", styleName: "EnterWorktree" },
+  ExitWorktree: { label: "Exit worktree", styleName: "ExitWorktree" },
+  Workflow: { label: "Run workflow", styleName: "Workflow" },
+  exec_command: { label: "Run command", styleName: "Bash" },
+  write_stdin: { label: "Continue command", styleName: "Bash" },
+  apply_patch: { label: "Apply patch", styleName: "Edit" },
+  update_plan: { label: "Update plan", styleName: "TodoWrite" },
+  request_user_input: { label: "Ask question", styleName: "AskUserQuestion" },
+  request_user_input_async: { label: "Ask question", styleName: "AskUserQuestion" },
+  wait: { label: "Wait for tools", styleName: "Mcp" },
   spawn_agent: { label: "Spawn agent", styleName: "Task" },
-  wait_agent: { label: "Wait for agents", styleName: "Task" },
-  send_message: { label: "Message agent", styleName: "Task" },
+  wait_agent: { label: "Wait for agents", styleName: "TaskOutput" },
+  send_message: { label: "Message agent", styleName: "SendMessage" },
   followup_task: { label: "Follow up", styleName: "Task" },
-  list_agents: { label: "List agents", styleName: "Task" },
+  list_agents: { label: "List agents", styleName: "ListAgents" },
   interrupt_agent: { label: "Interrupt agent", styleName: "Task" },
   tool_search: { label: "Find tools", styleName: "ToolSearch" },
   list_mcp_resources: { label: "List MCP resources", styleName: "Mcp" },
@@ -52,9 +86,23 @@ const CODEX_TOOL_LABELS: Readonly<Record<string, { label: string; styleName: str
   read_mcp_resource: { label: "Read MCP resource", styleName: "Mcp" },
   request_plugin_install: { label: "Install plugin", styleName: "Mcp" },
   create_goal: { label: "Create goal", styleName: "TodoWrite" },
-  get_goal: { label: "Check goal", styleName: "TodoWrite" },
+  get_goal: { label: "Check goal", styleName: "TaskList" },
   update_goal: { label: "Update goal", styleName: "TodoWrite" },
   view_image: { label: "View image", styleName: "Read" },
+}
+
+export type ToolTier = "mutating" | "readOnly"
+
+const MUTATING_TOOLS = new Set([
+  "Write", "Edit", "Bash", "exec", "Task", "Agent", "Skill", "TodoWrite", "Image",
+  "AskUserQuestion", "CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger",
+  "PushNotification", "EnterWorktree", "ExitWorktree", "SendMessage", "EndConversation",
+  "TaskCreate", "TaskUpdate", "TaskStop", "Workflow",
+])
+
+export function getToolTier(name: string): ToolTier {
+  const normalized = normalizeFunctionName(name)
+  return MUTATING_TOOLS.has(TOOL_LABELS[normalized]?.styleName ?? normalized) ? "mutating" : "readOnly"
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -63,6 +111,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function firstString(...values: unknown[]): string {
   return values.find((value): value is string => typeof value === "string") ?? ""
+}
+
+export function readableToolText(value: unknown): string {
+  if (typeof value !== "string") return ""
+  return /^gAAAAA[A-Za-z0-9_-]+={0,2}$/.test(value.trim()) ? "Encrypted message" : value
+}
+
+export function getCommandText(input: Record<string, unknown>): string {
+  const command = input.command ?? input.cmd
+  if (typeof command === "string") return command
+  if (!Array.isArray(command) || !command.every((value) => typeof value === "string")) return ""
+  return command.map((value: string) => /^[A-Za-z0-9_./:@%+=,-]+$/.test(value)
+    ? value
+    : `'${value.replace(/'/g, `'"'"'`)}'`).join(" ")
 }
 
 function truncate(value: string, length = 140): string {
@@ -303,7 +365,7 @@ function patchSummary(args: string): string {
 
 function presentExecInvocation(invocation: CodexExecInvocation): ToolPresentation {
   const args = invocation.argumentSource
-  switch (invocation.name) {
+  switch (normalizeFunctionName(invocation.name)) {
     case "exec_command":
       return { label: "Run command", summary: argumentString(args, "cmd", "command"), styleName: "Bash" }
     case "write_stdin": {
@@ -334,7 +396,7 @@ function presentExecInvocation(invocation: CodexExecInvocation): ToolPresentatio
     case "create_goal":
       return { label: "Create goal", summary: argumentString(args, "objective"), styleName: "TodoWrite" }
     case "get_goal":
-      return { label: "Check goal", summary: "", styleName: "TodoWrite" }
+      return { label: "Check goal", summary: "", styleName: "TaskList" }
     case "update_goal":
       return { label: "Update goal", summary: argumentString(args, "status"), styleName: "TodoWrite" }
     case "list_mcp_resources":
@@ -353,14 +415,25 @@ function presentExecInvocation(invocation: CodexExecInvocation): ToolPresentatio
       return { label: "Find tools", summary: argumentString(args, "query"), styleName: "ToolSearch" }
     case "image_gen__imagegen":
       return { label: "Generate image", summary: argumentString(args, "prompt"), styleName: "Image" }
-    default:
-      return invocation.name.startsWith("mcp__")
-        ? presentMcpInvocation(invocation.name, args)
+    case "spawn_agent":
+      return { label: "Spawn agent", summary: readableToolText(argumentString(args, "task_name", "message")), styleName: "Task" }
+    case "send_message":
+    case "followup_task":
+      return {
+        ...TOOL_LABELS[normalizeFunctionName(invocation.name)],
+        summary: [argumentString(args, "target"), readableToolText(argumentString(args, "message"))].filter(Boolean).join(" · "),
+      }
+    default: {
+      const name = normalizeFunctionName(invocation.name)
+      const definition = TOOL_LABELS[name]
+      return name.startsWith("mcp__")
+        ? presentMcpInvocation(name, args)
         : {
-            label: humanizeIdentifier(invocation.name),
-            summary: invocationDetail(args),
-            styleName: invocation.name,
+            label: definition?.label ?? humanizeIdentifier(name),
+            summary: readableToolText(invocationDetail(args)),
+            styleName: definition?.styleName ?? name,
           }
+    }
   }
 }
 
@@ -456,13 +529,15 @@ function workflowSummary(input: Record<string, unknown>): string {
   return metaName || firstString(input.scriptPath)
 }
 
-/** Last resort for an unrecognised tool: the first string its input carries. */
+/** Prefer a useful target over transport identifiers or raw scripts. */
 function firstStringValue(input: Record<string, unknown>): string {
-  const keys = Object.keys(input)
-  if (keys.length === 0) return ""
-  const first = input[keys[0]]
-  if (typeof first !== "string") return ""
-  return first.length > 80 ? first.slice(0, 80) + "..." : first
+  const detail = firstString(...[
+    "description", "summary", "query", "q", "command", "cmd", "file_path", "path",
+    "url", "uri", "pattern", "prompt", "objective", "message", "title", "name",
+  ].map((key) => input[key]))
+  if (detail) return truncate(detail)
+  const entry = Object.entries(input).find(([key, value]) => key !== "raw" && key !== "script" && typeof value === "string")
+  return entry ? truncate(entry[1] as string) : ""
 }
 
 function defaultToolSummary(tc: SummarizableToolCall): string {
@@ -473,13 +548,23 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
     case "Edit":
       return String(input.file_path ?? input.path ?? "")
     case "Bash":
-      return String(input.command ?? input.cmd ?? "")
+    case "exec_command":
+      return getCommandText(input)
+    case "write_stdin":
+      return [input.session_id !== undefined ? `session ${input.session_id}` : "", firstString(input.chars)].filter(Boolean).join(" · ")
+    case "apply_patch":
+      return patchSummary(firstString(input.patch, input.raw, input.input))
+    case "TodoWrite":
+    case "update_plan": {
+      const steps = Array.isArray(input.todos) ? input.todos : Array.isArray(input.plan) ? input.plan : []
+      return steps.length > 0 ? plural(steps.length, "step") : firstString(input.explanation)
+    }
     case "Grep":
     case "Glob":
       return String(input.pattern ?? "")
     case "Task":
     case "Agent":
-      return String(input.description ?? input.prompt ?? "")
+      return readableToolText(input.description ?? input.prompt)
     case "WebFetch":
       return String(input.url ?? "")
     case "NotebookEdit":
@@ -488,9 +573,11 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return "Entered plan mode"
     case "ExitPlanMode":
       return "Waiting for plan approval"
-    case "AskUserQuestion": {
-      const questions = input.questions as Array<{ question?: string }> | undefined
-      return questions?.[0]?.question ?? ""
+    case "AskUserQuestion":
+    case "request_user_input":
+    case "request_user_input_async": {
+      const question = Array.isArray(input.questions) ? input.questions.find(isObject) : null
+      return firstString(question?.question, question?.title)
     }
     case "Monitor": {
       const bashId = String(input.bash_id ?? "")
@@ -534,7 +621,7 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return String(input.query ?? "")
     case "SendMessage": {
       const recipient = firstString(input.to, input.recipient)
-      const gist = truncate(firstString(input.summary, input.message, input.content))
+      const gist = truncate(readableToolText(firstString(input.summary, input.message, input.content)))
       return [recipient, gist].filter(Boolean).join(" · ")
     }
     case "ListAgents":
@@ -563,14 +650,14 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
     case "LSP":
       return schemaFreeSummary(input) || firstStringValue(input)
     case "spawn_agent":
-      return String(input.task_name ?? input.message ?? "")
+      return readableToolText(input.task_name ?? input.message)
     case "wait_agent": {
       const targets = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === "string") : []
       return compactValues(targets)
     }
     case "send_message":
     case "followup_task":
-      return [input.target, input.message].filter((value): value is string => typeof value === "string").join(" · ")
+      return [input.target, readableToolText(input.message)].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ")
     case "list_agents":
       return String(input.path_prefix ?? "")
     case "interrupt_agent":
@@ -595,7 +682,9 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
 
 export function getToolPresentation(tc: SummarizableToolCall): ToolPresentation {
   if (isCodexExecCall(tc)) return presentExecScript(tc.input.raw)
-  if (tc.name === "WebSearch") return nativeWebPresentation(tc.input)
+  const name = normalizeFunctionName(tc.name)
+  if (name === "WebSearch" || name === "web_search") return nativeWebPresentation(tc.input)
+  if (name === "web__run" || name === "web.run") return presentWebInvocation(JSON.stringify(tc.input))
 
   const mcp = mcpParts(tc.name)
   if (mcp) {
@@ -606,11 +695,11 @@ export function getToolPresentation(tc: SummarizableToolCall): ToolPresentation 
     }
   }
 
-  const codex = CODEX_TOOL_LABELS[tc.name]
+  const definition = TOOL_LABELS[name]
   return {
-    label: codex?.label ?? tc.name,
-    summary: defaultToolSummary(tc),
-    styleName: codex?.styleName ?? tc.name,
+    label: definition?.label ?? humanizeIdentifier(name),
+    summary: truncate(defaultToolSummary({ name, input: tc.input })),
+    styleName: definition?.styleName ?? name,
   }
 }
 

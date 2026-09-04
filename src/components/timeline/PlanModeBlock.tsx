@@ -106,7 +106,6 @@ export const PlanModeBlock = memo(function PlanModeBlock({
                     <ToolCallCard
                       key={tc.id}
                       toolCall={tc}
-                      expandAll={expandAll}
                       expandToolPayloads={expandToolPayloads}
                       isAgentActive={isAgentActive}
                       skillMetadata={skillMetadata}

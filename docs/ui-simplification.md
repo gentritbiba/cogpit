@@ -3,6 +3,8 @@
 Scope: desktop only. Nothing here touches `MobileAppShell`, `Mobile*.tsx` or `ios/`.
 Every file path below was verified to exist on `master` at v1.4.0.
 
+This is the original desktop design plan. The current cross-platform tool-call contract is in [Tool call rendering](tool-call-rendering.md).
+
 ---
 
 ## The diagnosis

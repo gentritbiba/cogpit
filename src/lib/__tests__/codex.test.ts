@@ -227,6 +227,99 @@ const BRANCHED_SESSION = [
 
 // ── isCodexSessionText ─────────────────────────────────────────────────────
 
+describe("structured Codex tool results", () => {
+  const image = {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "synthetic-pixels" },
+  }
+
+  it.each(["function_call", "custom_tool_call"])("retains text and images from %s output", (type) => {
+    const session = parseCodexSession([
+      sessionMeta(),
+      turnContext(),
+      userMessage("Inspect the preview"),
+      JSON.stringify({
+        type: "response_item",
+        payload: { type, call_id: "image-call", name: "functions.view_image", arguments: "{}", input: "{}" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: `${type}_output`,
+          call_id: "image-call",
+          output: [{ type: "text", text: "Preview ready" }, image],
+        },
+      }),
+    ].join("\n"))
+
+    expect(session.turns[0].toolCalls[0]).toMatchObject({
+      name: "view_image",
+      result: "Preview ready",
+      isError: false,
+      resultImages: [image],
+    })
+  })
+
+  it("completes image-only function calls and respects structured error flags", () => {
+    const session = parseCodexSession([
+      sessionMeta(),
+      turnContext(),
+      userMessage("Inspect the preview"),
+      functionCall("image-call", "view_image", "{}"),
+      JSON.stringify({ type: "response_item", payload: {
+        type: "function_call_output", call_id: "image-call", output: [image],
+      } }),
+      functionCall("failed-call", "mcp__server__search", "{}"),
+      JSON.stringify({ type: "response_item", payload: {
+        type: "function_call_output", call_id: "failed-call",
+        output: { content: [{ type: "text", text: "Access denied" }], isError: true },
+      } }),
+    ].join("\n"))
+
+    expect(session.turns[0].toolCalls[0]).toMatchObject({ result: "", isError: false, resultImages: [image] })
+    expect(session.turns[0].toolCalls[1]).toMatchObject({ result: "Access denied", isError: true })
+  })
+
+  it.each([false, true])("preserves MCP event images with existing call=%s", (existingCall) => {
+    const session = parseCodexSession([
+      sessionMeta(),
+      turnContext(),
+      userMessage("Show a screenshot"),
+      ...(existingCall ? [functionCall("mcp-image", "mcp__browser__screenshot", "{}")] : []),
+      JSON.stringify({ type: "event_msg", payload: {
+        type: "mcp_tool_call_end",
+        call_id: "mcp-image",
+        invocation: { server: "browser", tool: "screenshot", arguments: {} },
+        result: { Ok: { content: [{ type: "image", mimeType: "image/png", data: "synthetic-pixels" }], isError: false } },
+      } }),
+    ].join("\n"))
+
+    expect(session.turns[0].toolCalls).toHaveLength(1)
+    expect(session.turns[0].toolCalls[0]).toMatchObject({
+      name: "mcp__browser__screenshot", result: "", isError: false, resultImages: [image],
+    })
+  })
+
+  it("normalizes prefixed commands, plans, and direct patches before rendering", () => {
+    const session = parseCodexSession([
+      sessionMeta(),
+      turnContext(),
+      userMessage("Update the file"),
+      functionCall("command", "functions.exec_command", JSON.stringify({ cmd: "bun run test" })),
+      functionCall("plan", "functions.update_plan", JSON.stringify({ plan: [{ step: "Verify", status: "in_progress" }] })),
+      JSON.stringify({ type: "response_item", payload: {
+        type: "custom_tool_call", call_id: "patch", name: "functions.apply_patch",
+        input: "*** Begin Patch\n*** Add File: src/new.ts\n+export const ready = true\n*** End Patch",
+      } }),
+    ].join("\n"))
+
+    const [command, plan, patch] = session.turns[0].toolCalls
+    expect(command).toMatchObject({ name: "Bash", input: { cmd: "bun run test" } })
+    expect(plan).toMatchObject({ name: "TodoWrite", input: { todos: [{ content: "Verify", status: "in_progress", activeForm: "Verify" }] } })
+    expect(patch).toMatchObject({ name: "Write", input: { file_path: "/home/user/project/src/new.ts" } })
+  })
+})
+
 describe("isCodexSessionText", () => {
   it("returns true for Codex JSONL starting with session_meta", () => {
     expect(isCodexSessionText(SIMPLE_SESSION)).toBe(true)
