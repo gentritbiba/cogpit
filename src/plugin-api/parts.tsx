@@ -1,16 +1,14 @@
 import { useState, type ReactNode } from "react"
 import { ChevronRight, MessageCircle, type LucideIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
-  cn,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/plugin-api"
+} from "@/components/ui/empty"
 
 /** The chip row every tab hangs its filters in. */
 export function FilterBar({ label, children }: { label: string; children: ReactNode }) {

@@ -157,6 +157,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "git-status": admin("/api/git-status"),
   github: admin("/api/github"),
   "vercel-deployments": admin("/api/vercel-deployments"),
+  clickup: admin("/api/clickup"),
   "project-icon": admin("/api/project-icon"),
   "git-diff": admin("/api/git-diff"),
   mcp: admin("/api/mcp-servers"),

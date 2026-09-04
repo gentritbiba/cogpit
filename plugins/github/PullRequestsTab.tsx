@@ -35,11 +35,15 @@ import {
   FilterChipCount,
   ScrollArea,
   Spinner,
+  relativeTime,
+  useNow,
+  ClosedFold,
+  CommentCount,
+  FilterBar,
+  TabEmpty,
+  Description,
 } from "@/plugin-api"
-import { Description } from "./Description"
 import { fetchGitHubPullFiles } from "./githubStore"
-import { ClosedFold, CommentCount, FilterBar, TabEmpty } from "./parts"
-import { relativeTime, useNow } from "./time"
 import { useExpandable, type LazyResourceState } from "./useExpandable"
 
 type Filter = "all" | "mine" | "branch"

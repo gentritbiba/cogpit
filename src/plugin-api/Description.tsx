@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { cn, StreamingMarkdown } from "@/plugin-api"
+import { cn } from "@/lib/utils"
+import { StreamingMarkdown } from "@/components/timeline/StreamingMarkdown"
 
 /** Descriptions past this size start folded so what follows them stays within reach. */
 const LONG_BODY_CHARS = 700

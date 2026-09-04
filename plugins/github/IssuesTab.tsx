@@ -28,10 +28,14 @@ import {
   FilterChip,
   FilterChipCount,
   ScrollArea,
+  relativeTime,
+  useNow,
+  ClosedFold,
+  CommentCount,
+  FilterBar,
+  TabEmpty,
+  Description,
 } from "@/plugin-api"
-import { Description } from "./Description"
-import { ClosedFold, CommentCount, FilterBar, TabEmpty } from "./parts"
-import { relativeTime, useNow } from "./time"
 
 type Who = "all" | "assigned" | "opened" | "unassigned"
 

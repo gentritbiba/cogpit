@@ -28,10 +28,13 @@ import {
   FilterChipCount,
   ScrollArea,
   Spinner,
+  duration,
+  relativeTime,
+  useNow,
+  FilterBar,
+  TabEmpty,
 } from "@/plugin-api"
 import { fetchGitHubActionsJobs } from "./githubStore"
-import { FilterBar, TabEmpty } from "./parts"
-import { duration, relativeTime, useNow } from "./time"
 import { useExpandable } from "./useExpandable"
 
 /** Visual weight of a run, from the one that needs attention to the one that needs none. */
