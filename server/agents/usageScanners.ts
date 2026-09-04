@@ -18,6 +18,8 @@ export interface UsageCostRecord {
   sessionId: string
   totals: UsageCostTokenTotals
   reportedCostUsd: number | null
+  /** Provider-recorded request tier. Null prices at the standard rate. */
+  speed: "standard" | "fast" | null
   /** Key for cross-file de-duplication, or null when inherently unique. */
   dedupeKey: string | null
 }
@@ -34,6 +36,12 @@ function parseTimestampMs(value: unknown): number | null {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null
+}
+
+function requestSpeed(value: unknown): UsageCostRecord["speed"] {
+  if (value === "fast" || value === "priority") return "fast"
+  if (value === "standard" || value === "default") return "standard"
+  return null
 }
 
 function parseJsonRecord(line: string): Record<string, unknown> | null {
@@ -103,6 +111,7 @@ export function parseClaudeUsageLine(line: string): UsageCostRecord | null {
     sessionId: typeof record.sessionId === "string" ? record.sessionId : "",
     totals,
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
+    speed: requestSpeed(usage.speed ?? usage.service_tier),
     dedupeKey,
   }
 }
@@ -119,6 +128,7 @@ export interface CodexScanState {
   /** While true, leading usage events are re-stamped copies of parent history. */
   suppressingForkCopies: boolean
   forkCopyAnchorMs: number
+  speed: UsageCostRecord["speed"]
 }
 
 export function initialCodexScanState(): CodexScanState {
@@ -129,6 +139,7 @@ export function initialCodexScanState(): CodexScanState {
     sawSessionMeta: false,
     suppressingForkCopies: false,
     forkCopyAnchorMs: 0,
+    speed: null,
   }
 }
 
@@ -174,6 +185,14 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
 
   if (record.type === "turn_context") {
     if (typeof payload.model === "string") state.model = payload.model
+    return null
+  }
+
+  if (payload.type === "thread_settings_applied") {
+    const settings = asRecord(payload.thread_settings)
+    if (settings && Object.hasOwn(settings, "service_tier")) {
+      state.speed = requestSpeed(settings.service_tier)
+    }
     return null
   }
 
@@ -232,6 +251,7 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
     totals,
     // Codex does not report cost in the rollout.
     reportedCostUsd: null,
+    speed: state.speed,
     // Events surviving fork-copy suppression are unique to this rollout.
     dedupeKey: null,
   }
@@ -308,6 +328,7 @@ export function parseCopilotUsageMetrics(
       sessionId: state.sessionId,
       totals,
       reportedCostUsd: null,
+      speed: null,
       dedupeKey: null,
     })
   }
@@ -375,7 +396,8 @@ const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> 
       wantsLine: (line) =>
         line.includes('"token_count"')
         || line.includes('"turn_context"')
-        || line.includes('"session_meta"'),
+        || line.includes('"session_meta"')
+        || line.includes('"thread_settings_applied"'),
       accept: (line) => {
         const record = parseCodexUsageLine(line, state)
         return record === null ? [] : [record]

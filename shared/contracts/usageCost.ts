@@ -75,6 +75,57 @@ export interface UsageCostSummary {
   scanDurationMs: number
 }
 
+/** Cost assigned to each billable token class. Provider-reported totals are
+ * distributed by the current model-rate proportions so these rows still add
+ * up to the authoritative total. `unallocatedUsd` covers a reported total for
+ * a model absent from the rate table. */
+export interface SessionUsageCostBreakdown {
+  uncachedInputUsd: number
+  cachedInputUsd: number
+  cacheCreationUsd: number
+  outputUsd: number
+  unallocatedUsd: number
+}
+
+export interface SessionUsageCostModel {
+  model: string
+  totals: UsageCostTokenTotals
+  costUsd: number
+  cacheSavingsUsd: number
+  costSource: UsageCostSource
+  records: number
+}
+
+/** One model response in transcript order. */
+export interface SessionUsageCostCall {
+  timestamp: string
+  model: string
+  totals: UsageCostTokenTotals
+  costUsd: number
+  costSource: UsageCostSource
+  isSubagent: boolean
+}
+
+/** Full-fidelity cost report for one transcript and its child-agent files. */
+export interface SessionUsageCostSummary {
+  provider: UsageCostProvider
+  sessionId: string
+  totals: UsageCostTokenTotals
+  costUsd: number
+  cacheSavingsUsd: number
+  breakdown: SessionUsageCostBreakdown
+  models: SessionUsageCostModel[]
+  calls: SessionUsageCostCall[]
+  records: number
+  providerReportedRecords: number
+  modelPricedRecords: number
+  unpricedRecords: number
+  includedFiles: number
+  includedSubagents: number
+  pricing: UsageCostSummary["pricing"]
+  scanDurationMs: number
+}
+
 export function emptyUsageCostTotals(): UsageCostTokenTotals {
   return {
     uncachedInputTokens: 0,

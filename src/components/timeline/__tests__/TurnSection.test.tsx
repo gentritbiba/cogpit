@@ -6,6 +6,7 @@ import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/t
 const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
   isLive: true,
+  undoEnabled: false,
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -20,8 +21,12 @@ vi.mock("@/contexts/SessionContext", () => ({
     session: makeSession(),
     isLive: mocks.isLive,
     isSubAgentView: false,
-    undoRedo: { enabled: false },
-    actions: {},
+    undoRedo: mocks.undoEnabled
+      ? { enabled: true, requestUndo: vi.fn(), branchesAtTurn: () => [] }
+      : { enabled: false },
+    actions: mocks.undoEnabled
+      ? { handleOpenBranches: vi.fn(), handleBranchFromHere: vi.fn() }
+      : {},
   }),
 }))
 
@@ -215,5 +220,37 @@ describe("TurnSection agent messages", () => {
 
     expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
     expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("TurnSection prompt context menu", () => {
+  beforeEach(() => {
+    mocks.isLive = true
+    mocks.status = "completed"
+    mocks.undoEnabled = true
+  })
+
+  const promptTurn: Turn = { ...turn, id: "turn-prompt", userMessage: "Do the thing" }
+
+  const triggerFor = (text: string) =>
+    screen.getByText(text).closest("[data-slot='context-menu-trigger']")
+
+  it("hangs the turn actions off the user message", () => {
+    render(<TurnSection turn={promptTurn} index={0} />)
+
+    expect(triggerFor("Do the thing")).not.toBeNull()
+  })
+
+  it("leaves the rest of the turn to the platform's own context menu", () => {
+    render(<TurnSection turn={promptTurn} index={0} />)
+
+    expect(triggerFor("Final response")).toBeNull()
+  })
+
+  it("skips redo ghosts, which sit past the last restorable turn", () => {
+    // The mocked session holds one turn, so index 1 can only be a ghost.
+    render(<TurnSection turn={promptTurn} index={1} />)
+
+    expect(triggerFor("Do the thing")).toBeNull()
   })
 })

@@ -18,7 +18,7 @@ import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerFileRoutes } from "./routes/files"
 import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
-import { registerGitHubActionsRoutes } from "./routes/github-actions"
+import { registerGitHubRoutes } from "./routes/github"
 import { registerVercelDeploymentRoutes } from "./routes/vercel-deployments"
 import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
@@ -123,7 +123,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("project-files", registerProjectFileRoutes),
   apiRoute("project-file", registerProjectFileContentRoutes),
   apiRoute("git-status", registerGitStatusRoutes),
-  apiRoute("github-actions", registerGitHubActionsRoutes),
+  apiRoute("github", registerGitHubRoutes),
   apiRoute("vercel-deployments", registerVercelDeploymentRoutes),
   apiRoute("project-icon", registerProjectIconRoutes),
   apiRoute("git-diff", registerGitDiffRoutes),

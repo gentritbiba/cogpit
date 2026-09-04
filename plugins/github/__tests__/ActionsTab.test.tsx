@@ -4,17 +4,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   GitHubActionsJobsResponse,
   GitHubActionsRunsResponse,
-} from "../../../shared/contracts/githubActions"
+} from "../../../shared/contracts/github"
 import type { WorkspacePanelContext } from "@/plugin-api"
 
 const storeMocks = vi.hoisted(() => ({
   useGitHubActions: vi.fn(),
+  useGitHubPulls: vi.fn(),
+  useGitHubPullSessions: vi.fn(),
+  useGitHubIssues: vi.fn(),
   fetchGitHubActionsJobs: vi.fn(),
+  fetchGitHubPullFiles: vi.fn(),
+  toErrorResponse: vi.fn((_error: unknown, fallback: string) => ({ error: fallback, code: "github_api_failed" })),
 }))
 
-vi.mock("../githubActionsStore", () => storeMocks)
+vi.mock("../githubStore", () => storeMocks)
 
-import { GitHubActionsIndicator, GitHubActionsPanel, groupRunsByCommit } from "../GitHubActionsPanel"
+import { GitHubIndicator, GitHubPanel } from "../GitHubPanel"
+import { groupRunsByCommit } from "../ActionsTab"
 
 const runsResponse: GitHubActionsRunsResponse = {
   repository: "acme/app",
@@ -122,7 +128,7 @@ function state(overrides: Record<string, unknown> = {}) {
 
 function renderPanel() {
   return render(
-    <GitHubActionsPanel
+    <GitHubPanel
       context={context}
       active
       closePanel={vi.fn()}
@@ -141,17 +147,21 @@ describe("groupRunsByCommit", () => {
   })
 })
 
-describe("GitHubActionsPanel", () => {
+describe("GitHubPanel actions tab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     storeMocks.useGitHubActions.mockReturnValue(state())
+    storeMocks.useGitHubPulls.mockReturnValue(state({ data: null, loading: true }))
+    storeMocks.useGitHubPullSessions.mockReturnValue(state({ data: null }))
+    storeMocks.useGitHubIssues.mockReturnValue(state({ data: null }))
     storeMocks.fetchGitHubActionsJobs.mockResolvedValue(jobsResponse)
   })
 
   it("groups workflow runs under their commit with real GitHub statuses", () => {
     renderPanel()
 
-    expect(screen.getByRole("heading", { name: "GitHub Actions" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /Actions/ })).toHaveAttribute("aria-selected", "true")
     expect(screen.getByRole("link", { name: /acme\/app/ })).toHaveAttribute(
       "href",
       "https://github.com/acme/app/actions",
@@ -215,7 +225,7 @@ describe("GitHubActionsPanel", () => {
   })
 
   it("renders the active workflow count on the workspace rail", () => {
-    render(<GitHubActionsIndicator context={context} active={false} />)
+    render(<GitHubIndicator context={context} active={false} />)
     expect(screen.getByLabelText("1 active GitHub Actions run")).toHaveTextContent("1")
   })
 })

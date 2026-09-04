@@ -38,6 +38,12 @@ export interface AgentCapabilities {
   readonly agentTeams: boolean
   /** Sub-agent transcripts are written as separate readable files. */
   readonly subagentTranscripts: boolean
+  /**
+   * Whether a sub-agent can itself own sub-agents that are addressed under its
+   * own session id. When false, every descendant is filed under the root
+   * session, so listing the root's children already yields the whole tree.
+   */
+  readonly nestedSubagents: boolean
   /** Sessions can be published as read-only shares. */
   readonly sharing: boolean
   /**
@@ -589,6 +595,7 @@ const claude: AgentDescriptor = {
     workflows: true,
     agentTeams: true,
     subagentTranscripts: true,
+    nestedSubagents: false,
     sharing: true,
     goals: "transcript",
     undo: true,
@@ -738,6 +745,7 @@ const codex: AgentDescriptor = {
     workflows: false,
     agentTeams: false,
     subagentTranscripts: true,
+    nestedSubagents: true,
     sharing: false,
     goals: "thread-api",
     undo: true,
@@ -861,6 +869,7 @@ const copilot: AgentDescriptor = {
     workflows: false,
     agentTeams: false,
     subagentTranscripts: false,
+    nestedSubagents: false,
     sharing: false,
     goals: false,
     undo: true,

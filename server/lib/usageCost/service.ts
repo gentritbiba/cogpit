@@ -9,22 +9,30 @@
  * Rates come from LiteLLM's public table, refreshed daily and snapshotted to
  * disk so cost keeps working offline.
  */
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
   addUsageCostTotals,
   emptyUsageCostTotals,
+  type SessionUsageCostSummary,
   type UsageCostPricingStatus,
   type UsageCostProvider,
   type UsageCostSummary,
   type UsageCostTokenTotals,
 } from "../../../shared/contracts/usageCost"
+import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { parseRateTable, type RateTable } from "../../../shared/usageCost/pricing"
-import { allRuntimes } from "../../agents/runtimes"
+import { storeForDirName } from "../../agents"
+import { allRuntimes, runtimeFor } from "../../agents/runtimes"
 import type { UsageCostRecord } from "../../agents/usageScanners"
 import { getDataRoot } from "../../config"
-import { sessionStorageRoots } from "../../sessionPaths"
-import { UsageCostAggregator, makeDayFormatter } from "./aggregate"
+import { resolveSessionFilePath, sessionStorageRoots } from "../../sessionPaths"
+import {
+  aggregateSessionUsage,
+  UsageCostAggregator,
+  makeDayFormatter,
+  type ScopedUsageCostRecord,
+} from "./aggregate"
 import {
   dedupeWithinFile,
   listTranscriptFiles,
@@ -167,6 +175,18 @@ async function readFileRecords(
   return records
 }
 
+/** What a scan has already attributed, per session and model. */
+type CountedUsage = Map<string, Map<string, UsageCostTokenTotals>>
+
+function addCountedUsage(counted: CountedUsage, record: UsageCostRecord): void {
+  const byModel = counted.get(record.sessionId) ?? new Map<string, UsageCostTokenTotals>()
+  byModel.set(
+    record.model,
+    addUsageCostTotals(byModel.get(record.model) ?? emptyUsageCostTotals(), record.totals),
+  )
+  counted.set(record.sessionId, byModel)
+}
+
 /** Inclusive `[sinceDay, untilDay]` covering the trailing `days` in `timeZone`. */
 export function makeWindow(days: number, timeZone: string, nowMs = Date.now()): {
   sinceDay: string
@@ -205,7 +225,7 @@ export async function readUsageCostSummary(input: {
   const liveSessionIds = new Set(
     runtimes.flatMap((runtime) => runtime.listActive().map((active) => active.sessionId)),
   )
-  const durableTotals = new Map<string, Map<string, UsageCostTokenTotals>>()
+  const durableTotals: CountedUsage = new Map()
   let scannedFiles = 0
   for (const { kind: provider, root } of sources) {
     const files = await listTranscriptFiles(root, windowStartMs)
@@ -214,16 +234,7 @@ export async function readUsageCostSummary(input: {
       scannedFiles += 1
       for (const record of records) {
         aggregator.add(record)
-        if (!liveSessionIds.has(record.sessionId)) continue
-        const byModel = durableTotals.get(record.sessionId) ?? new Map()
-        byModel.set(
-          record.model,
-          addUsageCostTotals(
-            byModel.get(record.model) ?? emptyUsageCostTotals(),
-            record.totals,
-          ),
-        )
-        durableTotals.set(record.sessionId, byModel)
+        if (liveSessionIds.has(record.sessionId)) addCountedUsage(durableTotals, record)
       }
     }
   }
@@ -254,6 +265,145 @@ export async function readUsageCostSummary(input: {
     },
     scannedFiles,
     distinctSessions,
+    scanDurationMs: Math.max(0, Date.now() - startedAtMs),
+  }
+}
+
+async function transcriptFile(filePath: string): Promise<TranscriptFile | null> {
+  try {
+    const fileStat = await stat(filePath)
+    return { path: filePath, size: fileStat.size, mtimeMs: fileStat.mtimeMs }
+  } catch {
+    return null
+  }
+}
+
+function isSubagentAddress(fileName: string): boolean {
+  return fileName.split("/").includes("subagents")
+}
+
+/** Resolves every child transcript that belongs to the selected top-level session. */
+async function childTranscripts(
+  dirName: string,
+  rootSessionId: string,
+  provider: UsageCostProvider,
+): Promise<TranscriptFile[]> {
+  const store = storeForDirName(dirName)
+  // When descendants carry their own session ids the tree has to be walked;
+  // otherwise every one of them is already filed under the root session.
+  const nested = descriptorFor(provider).capabilities.nestedSubagents
+  const found: TranscriptFile[] = []
+  const queuedSessionIds = [rootSessionId]
+  const visitedSessionIds = new Set<string>()
+  const visitedPaths = new Set<string>()
+
+  while (queuedSessionIds.length > 0) {
+    const parentSessionId = queuedSessionIds.shift()!
+    if (visitedSessionIds.has(parentSessionId)) continue
+    visitedSessionIds.add(parentSessionId)
+
+    const children = await store.listSubagentFiles(dirName, parentSessionId)
+    if (!children) continue
+    const resolvedChildren = await Promise.all(children.map(async (child) => {
+      const fileName = child.fileName
+        ?? `${rootSessionId}/subagents/agent-${child.agentId}.jsonl`
+      const filePath = await resolveSessionFilePath(dirName, fileName)
+      if (!filePath) return null
+      const file = await transcriptFile(filePath)
+      return file ? { agentId: child.agentId, file } : null
+    }))
+    for (const child of resolvedChildren) {
+      if (!child || visitedPaths.has(child.file.path)) continue
+      const { file } = child
+      visitedPaths.add(file.path)
+      found.push(file)
+      if (nested) queuedSessionIds.push(child.agentId)
+    }
+  }
+
+  return found
+}
+
+function countedUsageBySession(
+  scopedRecords: readonly ScopedUsageCostRecord[],
+): CountedUsage {
+  const counted: CountedUsage = new Map()
+  for (const { record } of scopedRecords) {
+    if (record.sessionId) addCountedUsage(counted, record)
+  }
+  return counted
+}
+
+/**
+ * Reads one selected session at transcript fidelity. A top-level session also
+ * includes every child-agent transcript the provider can relate to it.
+ */
+export async function readSessionUsageCostSummary(input: {
+  dirName: string
+  fileName: string
+}): Promise<SessionUsageCostSummary | null> {
+  const startedAtMs = Date.now()
+  await ensureRates()
+
+  const filePath = await resolveSessionFilePath(input.dirName, input.fileName)
+  if (!filePath) return null
+  const directFile = await transcriptFile(filePath)
+  if (!directFile) return null
+
+  const store = storeForDirName(input.dirName)
+  const provider = store.kind
+  const directRecords = await readFileRecords(directFile, provider)
+  const sessionId =
+    store.descriptor.sessionFile.sessionId(input.fileName)
+    ?? directRecords.find((record) => record.sessionId.length > 0)?.sessionId
+    ?? ""
+
+  const files: Array<{ file: TranscriptFile; isSubagent: boolean }> = [
+    { file: directFile, isSubagent: isSubagentAddress(input.fileName) },
+  ]
+  if (sessionId && !isSubagentAddress(input.fileName)) {
+    for (const file of await childTranscripts(input.dirName, sessionId, provider)) {
+      if (file.path !== filePath) files.push({ file, isSubagent: true })
+    }
+  }
+
+  const recordsByFile = await Promise.all(files.map(async ({ file, isSubagent }) => ({
+    isSubagent,
+    records: await readFileRecords(file, provider),
+  })))
+  const scopedRecords: ScopedUsageCostRecord[] = recordsByFile.flatMap(
+    ({ records, isSubagent }) => records.map((record) => ({ record, isSubagent })),
+  )
+
+  // A CLI whose detailed snapshot is durable only at shutdown leaves the
+  // transcript behind while the session is open; its runtime supplies the
+  // growth since the latest snapshot.
+  const sessionIds = new Set<string>()
+  for (const { record } of scopedRecords) {
+    if (record.sessionId) sessionIds.add(record.sessionId)
+  }
+  if (sessionId) sessionIds.add(sessionId)
+  const runtime = runtimeFor(provider)
+  if ([...sessionIds].some((id) => runtime.hasSession(id))) {
+    const liveRecords = await runtime.liveUsageRecords(countedUsageBySession(scopedRecords))
+    for (const record of liveRecords) {
+      if (!sessionIds.has(record.sessionId)) continue
+      scopedRecords.push({ record, isSubagent: record.sessionId !== sessionId })
+    }
+  }
+
+  const aggregated = aggregateSessionUsage(scopedRecords, rates)
+  return {
+    provider,
+    sessionId,
+    ...aggregated,
+    includedFiles: files.length,
+    includedSubagents: files.length - 1,
+    pricing: {
+      status: ratesStatus,
+      knownModels: rates.size,
+      fetchedAt: ratesFetchedAt(),
+    },
     scanDurationMs: Math.max(0, Date.now() - startedAtMs),
   }
 }

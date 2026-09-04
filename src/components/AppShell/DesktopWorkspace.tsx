@@ -214,6 +214,12 @@ export function DesktopWorkspace({
   const { state, config } = useAppContext()
   const { session, sessionSource } = useSessionContext()
 
+  function composePrompt(text: string): void {
+    const current = sessionView.chatInputRef.current?.getText().trimEnd() ?? ""
+    sessionView.chatInputRef.current?.setText(current ? `${current}\n\n${text}\n` : `${text}\n`)
+    sessionView.chatInputRef.current?.focus()
+  }
+
   function addProjectContext({
     path,
     text,
@@ -221,10 +227,7 @@ export function DesktopWorkspace({
     endLine,
     comment,
   }: ProjectPromptContext): void {
-    const context = formatProjectPromptContext({ path, text, startLine, endLine, comment })
-    const current = sessionView.chatInputRef.current?.getText().trimEnd() ?? ""
-    sessionView.chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
-    sessionView.chatInputRef.current?.focus()
+    composePrompt(formatProjectPromptContext({ path, text, startLine, endLine, comment }))
   }
 
   const view = resolveDesktopMainView({
@@ -252,6 +255,8 @@ export function DesktopWorkspace({
     hasFileChanges: project.hasFileChanges,
     canAccessHostFiles: can("hostFiles"),
     supportsWorktrees: project.supportsWorktrees,
+    openSession: navigation.handlers.handleLoadSessionScrollAware,
+    composePrompt,
   }
   const visiblePanels = availableWorkspacePanels(workspacePanels, panelContext)
   const activePanel = state.mainView === "sessions"

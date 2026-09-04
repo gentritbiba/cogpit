@@ -3,12 +3,19 @@
  *
  * - `GET /api/usage-cost?days=30&tz=<IANA>` — scans the provider CLIs' on-disk
  *   transcripts and returns priced `(day, provider, model)` buckets.
+ * - `GET /api/usage-cost/session?dirName=&fileName=` — prices one selected
+ *   transcript plus its child-agent transcripts.
  * - `GET /api/usage-cost/rates` — the LiteLLM model rate table snapshot, for
  *   client-side per-turn pricing.
  */
 import { sendJson } from "../http"
 import type { UseFn } from "../http"
-import { getModelRates, makeWindow, readUsageCostSummary } from "../lib/usageCost/service"
+import {
+  getModelRates,
+  makeWindow,
+  readSessionUsageCostSummary,
+  readUsageCostSummary,
+} from "../lib/usageCost/service"
 
 const MAX_WINDOW_DAYS = 365
 
@@ -21,6 +28,26 @@ export function registerUsageCostRoutes(use: UseFn) {
       fetchedAt,
       rates: Object.fromEntries(rates),
     })
+  })
+
+  use("/api/usage-cost/session", async (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const url = new URL(req.url ?? "/", "http://localhost")
+    if (url.pathname !== "/" && url.pathname !== "") return next()
+
+    const dirName = url.searchParams.get("dirName")
+    const fileName = url.searchParams.get("fileName")
+    if (!dirName || !fileName) {
+      sendJson(res, 400, { error: "dirName and fileName are required" })
+      return
+    }
+
+    const summary = await readSessionUsageCostSummary({ dirName, fileName })
+    if (!summary) {
+      sendJson(res, 404, { error: "Session transcript not found" })
+      return
+    }
+    sendJson(res, 200, summary)
   })
 
   use("/api/usage-cost", async (req, res, next) => {

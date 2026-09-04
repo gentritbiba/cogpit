@@ -7,8 +7,7 @@
  */
 import type { UsageCostSource, UsageCostTokenTotals } from "../contracts/usageCost"
 
-/** USD per token. Tiered LiteLLM variants are deliberately ignored: the
- * transcripts don't record which tier served a request. */
+/** USD per token, including the context tier selected by each request. */
 export interface ModelRate {
   inputCostPerToken: number
   outputCostPerToken: number
@@ -16,9 +15,27 @@ export interface ModelRate {
   cacheCreationCostPerToken: number
   /** Writes at the 1-hour TTL cost more than the default 5-minute one. */
   cacheCreation1hCostPerToken: number
+  inputCostPerTokenAboveThreshold: number | null
+  outputCostPerTokenAboveThreshold: number | null
+  cacheReadCostPerTokenAboveThreshold: number | null
+  cacheCreationCostPerTokenAboveThreshold: number | null
+  longContextThresholdTokens: number | null
+  /** OpenAI's non-200k tiers switch the whole request; legacy 200k fields are marginal. */
+  longContextPricing: "wholeRequest" | "marginal"
+  /** Multiplier for a transcript-recorded priority/fast request. */
+  fastCostMultiplier: number
 }
 
 export type RateTable = ReadonlyMap<string, ModelRate>
+
+export interface UsageCostBreakdown {
+  uncachedInputUsd: number
+  cachedInputUsd: number
+  cacheCreationUsd: number
+  outputUsd: number
+}
+
+export type UsageCostSpeed = "standard" | "fast" | null
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null
@@ -34,6 +51,29 @@ function finiteNumber(value: unknown): number | null {
  */
 function entryRank(name: string, normalized: string, hasCacheRates: boolean): number {
   return (hasCacheRates ? 2 : 0) + (name === normalized ? 1 : 0)
+}
+
+interface TieredRate {
+  cost: number
+  thresholdTokens: number
+}
+
+function tieredRate(entry: Record<string, unknown>, baseKey: string): TieredRate | null {
+  const escapedKey = baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const pattern = new RegExp(`^${escapedKey}_above_(\\d+)k_tokens$`)
+  for (const [key, value] of Object.entries(entry)) {
+    const match = pattern.exec(key)
+    const cost = finiteNumber(value)
+    if (!match || cost === null) continue
+    return { cost, thresholdTokens: Number(match[1]) * 1000 }
+  }
+  return null
+}
+
+function positiveRatio(numerator: number | null, denominator: number): number | null {
+  if (numerator === null || numerator <= 0 || denominator <= 0) return null
+  const ratio = numerator / denominator
+  return Number.isFinite(ratio) && ratio >= 1 ? ratio : null
 }
 
 /**
@@ -55,8 +95,24 @@ export function parseRateTable(document: unknown): RateTable {
 
     const cacheRead = finiteNumber(entry.cache_read_input_token_cost)
     const cacheCreation = finiteNumber(entry.cache_creation_input_token_cost)
-
+    const inputTier = tieredRate(entry, "input_cost_per_token")
+    const outputTier = tieredRate(entry, "output_cost_per_token")
+    const cacheReadTier = tieredRate(entry, "cache_read_input_token_cost")
+    const cacheCreationTier = tieredRate(entry, "cache_creation_input_token_cost")
+    const threshold = inputTier?.thresholdTokens
+      ?? outputTier?.thresholdTokens
+      ?? cacheReadTier?.thresholdTokens
+      ?? cacheCreationTier?.thresholdTokens
+      ?? null
     const normalized = normalizeModelName(name)
+    const fastMultiplier = positiveRatio(
+      finiteNumber(entry.input_cost_per_token_priority),
+      input,
+    ) ?? positiveRatio(
+      finiteNumber(entry.output_cost_per_token_priority),
+      output,
+    ) ?? 1
+
     const rank = entryRank(name.trim().toLowerCase(), normalized, cacheRead !== null)
     // Ties keep the first entry seen, so the table does not depend on where
     // LiteLLM happens to append new aliases.
@@ -74,6 +130,13 @@ export function parseRateTable(document: unknown): RateTable {
       // Models that sell only one cache TTL publish no premium rate.
       cacheCreation1hCostPerToken:
         finiteNumber(entry.cache_creation_input_token_cost_above_1hr) ?? cacheCreation ?? input,
+      inputCostPerTokenAboveThreshold: inputTier?.cost ?? null,
+      outputCostPerTokenAboveThreshold: outputTier?.cost ?? null,
+      cacheReadCostPerTokenAboveThreshold: cacheReadTier?.cost ?? null,
+      cacheCreationCostPerTokenAboveThreshold: cacheCreationTier?.cost ?? null,
+      longContextThresholdTokens: threshold,
+      longContextPricing: threshold !== null && threshold !== 200_000 ? "wholeRequest" : "marginal",
+      fastCostMultiplier: fastMultiplier,
     })
   }
   return table
@@ -111,6 +174,80 @@ export function lookupRate(table: RateTable, model: string): ModelRate | null {
 }
 
 /**
+ * Which context tier a request falls into is a property of the whole request,
+ * so resolve it once and price each token class against the result.
+ */
+function contextTierPricer(
+  rate: ModelRate,
+  totals: UsageCostTokenTotals,
+): (tokens: number, base: number, above: number | null) => number {
+  const threshold = rate.longContextThresholdTokens
+  const contextTokens =
+    totals.uncachedInputTokens + totals.cachedInputTokens + totals.cacheCreationTokens
+  const wholeRequestIsLong = threshold !== null && contextTokens > threshold
+
+  return function tierCost(tokens, base, above) {
+    if (tokens <= 0) return 0
+    if (above === null || threshold === null) return tokens * base
+    if (rate.longContextPricing === "wholeRequest") {
+      return tokens * (wholeRequestIsLong ? above : base)
+    }
+    if (tokens <= threshold) return tokens * base
+    return threshold * base + (tokens - threshold) * above
+  }
+}
+
+/** Sum of the priced token classes. */
+export function totalUsageCostBreakdown(breakdown: UsageCostBreakdown): number {
+  return breakdown.uncachedInputUsd
+    + breakdown.cachedInputUsd
+    + breakdown.cacheCreationUsd
+    + breakdown.outputUsd
+}
+
+/** Prices each billable token class separately, or returns null for an unknown model. */
+export function usageCostBreakdown(
+  table: RateTable,
+  model: string,
+  totals: UsageCostTokenTotals,
+  speed: UsageCostSpeed = null,
+): UsageCostBreakdown | null {
+  const rate = lookupRate(table, model)
+  if (rate === null) return null
+
+  const cacheCreation1h = Math.min(totals.cacheCreation1hTokens, totals.cacheCreationTokens)
+  const cacheCreation5m = totals.cacheCreationTokens - cacheCreation1h
+  const tierCost = contextTierPricer(rate, totals)
+  const multiplier = speed === "fast" ? rate.fastCostMultiplier : 1
+
+  return {
+    uncachedInputUsd: multiplier * tierCost(
+      totals.uncachedInputTokens,
+      rate.inputCostPerToken,
+      rate.inputCostPerTokenAboveThreshold,
+    ),
+    cachedInputUsd: multiplier * tierCost(
+      totals.cachedInputTokens,
+      rate.cacheReadCostPerToken,
+      rate.cacheReadCostPerTokenAboveThreshold,
+    ),
+    cacheCreationUsd: multiplier * (
+      tierCost(
+        cacheCreation5m,
+        rate.cacheCreationCostPerToken,
+        rate.cacheCreationCostPerTokenAboveThreshold,
+      )
+      + cacheCreation1h * rate.cacheCreation1hCostPerToken
+    ),
+    outputUsd: multiplier * tierCost(
+      totals.outputTokens,
+      rate.outputCostPerToken,
+      rate.outputCostPerTokenAboveThreshold,
+    ),
+  }
+}
+
+/**
  * Prices a record's tokens. `reasoningTokens` is not charged separately: it is
  * already counted inside `outputTokens`.
  */
@@ -119,25 +256,15 @@ export function priceUsage(
   model: string,
   totals: UsageCostTokenTotals,
   reportedCostUsd: number | null,
+  speed: UsageCostSpeed = null,
 ): { costUsd: number; costSource: UsageCostSource } {
   if (reportedCostUsd !== null && Number.isFinite(reportedCostUsd)) {
     return { costUsd: reportedCostUsd, costSource: "providerReported" }
   }
 
-  const rate = lookupRate(table, model)
-  if (rate === null) return { costUsd: 0, costSource: "unpriced" }
-
-  // The 1h slice sits inside cacheCreationTokens, so bill the remainder at the
-  // 5m rate and only the slice at the premium one.
-  const cacheCreation1h = Math.min(totals.cacheCreation1hTokens, totals.cacheCreationTokens)
-  const costUsd =
-    totals.uncachedInputTokens * rate.inputCostPerToken
-    + totals.cachedInputTokens * rate.cacheReadCostPerToken
-    + (totals.cacheCreationTokens - cacheCreation1h) * rate.cacheCreationCostPerToken
-    + cacheCreation1h * rate.cacheCreation1hCostPerToken
-    + totals.outputTokens * rate.outputCostPerToken
-
-  return { costUsd, costSource: "modelPriced" }
+  const breakdown = usageCostBreakdown(table, model, totals, speed)
+  if (breakdown === null) return { costUsd: 0, costSource: "unpriced" }
+  return { costUsd: totalUsageCostBreakdown(breakdown), costSource: "modelPriced" }
 }
 
 /**
@@ -148,8 +275,21 @@ export function cacheSavingsUsd(
   table: RateTable,
   model: string,
   totals: UsageCostTokenTotals,
+  speed: UsageCostSpeed = null,
 ): number {
   const rate = lookupRate(table, model)
   if (rate === null) return 0
-  return totals.cachedInputTokens * (rate.inputCostPerToken - rate.cacheReadCostPerToken)
+  const tierCost = contextTierPricer(rate, totals)
+  const fullInputCost = tierCost(
+    totals.cachedInputTokens,
+    rate.inputCostPerToken,
+    rate.inputCostPerTokenAboveThreshold,
+  )
+  const cachedInputCost = tierCost(
+    totals.cachedInputTokens,
+    rate.cacheReadCostPerToken,
+    rate.cacheReadCostPerTokenAboveThreshold,
+  )
+  const multiplier = speed === "fast" ? rate.fastCostMultiplier : 1
+  return Math.max(0, multiplier * (fullInputCost - cachedInputCost))
 }

@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { Loader2, Redo2 } from "lucide-react"
-import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
@@ -21,37 +20,6 @@ interface VirtualizedTimelineProps {
   /** False until the initial bottom placement for this session has happened. */
   pagingEnabled?: boolean
   onLoadMore?: () => void
-}
-
-// ── Context menu wrapper ─────────────────────────────────────────────────────
-
-/** Conditionally wraps children in a TurnContextMenu when undo callbacks are available. */
-function MaybeContextMenuTurn({
-  index,
-  children,
-}: {
-  index: number
-  children: React.ReactNode
-}) {
-  const { isSubAgentView, undoRedo, actions } = useSessionContext()
-  const { requestUndo, branchesAtTurn } = undoRedo
-  const { handleOpenBranches, handleBranchFromHere } = actions
-
-  if (!undoRedo.enabled || isSubAgentView || !requestUndo || !handleOpenBranches) {
-    return <>{children}</>
-  }
-
-  return (
-    <TurnContextMenu
-      turnIndex={index}
-      branches={branchesAtTurn(index)}
-      onRestoreToHere={requestUndo}
-      onOpenBranches={handleOpenBranches}
-      onBranchFromHere={handleBranchFromHere}
-    >
-      {children}
-    </TurnContextMenu>
-  )
 }
 
 // ── Redo section ─────────────────────────────────────────────────────────────
@@ -229,22 +197,18 @@ export function VirtualizedTimeline({
         >
           {keyedTurns.map(({ turn, index, key }) => (
             <div key={key} data-turn-index={index}>
-              <MaybeContextMenuTurn index={index}>
-                <div>
-                  {(turn.compactionSummary || turn.compactionMeta) && (
-                    <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} />
-                  )}
-                  {/* A compaction opens a turn of its own; suppress the empty
-                      turn chrome until the conversation resumes into it. */}
-                  {!isCompactionOnlyTurn(turn) && (
-                    <TurnSection
-                      turn={turn}
-                      index={index}
-                      branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
-                    />
-                  )}
-                </div>
-              </MaybeContextMenuTurn>
+              {(turn.compactionSummary || turn.compactionMeta) && (
+                <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} />
+              )}
+              {/* A compaction opens a turn of its own; suppress the empty
+                  turn chrome until the conversation resumes into it. */}
+              {!isCompactionOnlyTurn(turn) && (
+                <TurnSection
+                  turn={turn}
+                  index={index}
+                  branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
+                />
+              )}
             </div>
           ))}
         </Virtualizer>

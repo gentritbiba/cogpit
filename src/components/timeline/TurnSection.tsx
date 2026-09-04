@@ -14,6 +14,7 @@ import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
+import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { LiveElapsed } from "./AgentStatusIndicator"
@@ -99,6 +100,43 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       onEditCommand={actions.handleEditCommand}
       onExpandCommand={actions.handleExpandCommand}
     />
+  )
+}
+
+// ── Prompt context menu ──────────────────────────────────────────────────────
+
+/**
+ * Turn actions hang off the user message only: right-clicking anywhere else in
+ * a turn keeps the platform's own menu.
+ */
+function MaybePromptContextMenu({
+  index,
+  children,
+}: {
+  index: number
+  children: React.ReactNode
+}) {
+  const { session, isSubAgentView, undoRedo, actions } = useSessionContext()
+  const { requestUndo, branchesAtTurn } = undoRedo
+  const { handleOpenBranches, handleBranchFromHere } = actions
+
+  // Redo ghosts render past the last real turn — there is nothing to restore to.
+  const isGhostTurn = index >= (session?.turns.length ?? 0)
+
+  if (!undoRedo.enabled || isSubAgentView || isGhostTurn || !requestUndo || !handleOpenBranches) {
+    return <>{children}</>
+  }
+
+  return (
+    <TurnContextMenu
+      turnIndex={index}
+      branches={branchesAtTurn(index)}
+      onRestoreToHere={requestUndo}
+      onOpenBranches={handleOpenBranches}
+      onBranchFromHere={handleBranchFromHere}
+    >
+      {children}
+    </TurnContextMenu>
   )
 }
 
@@ -232,18 +270,20 @@ const TurnSectionInner = memo(function TurnSectionInner({
       {isNear ? (
         <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
           {turn.userMessage && (
-            <div data-turn-prompt className={cn(
-              isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
-              PROMPT_CARD,
-            )}>
-              <UserMessage
-                content={turn.userMessage}
-                timestamp={turn.timestamp}
-                onEditCommand={onEditCommand}
-                onExpandCommand={onExpandCommand}
-                compact={isMobile}
-              />
-            </div>
+            <MaybePromptContextMenu index={index}>
+              <div data-turn-prompt className={cn(
+                isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
+                PROMPT_CARD,
+              )}>
+                <UserMessage
+                  content={turn.userMessage}
+                  timestamp={turn.timestamp}
+                  onEditCommand={onEditCommand}
+                  onExpandCommand={onExpandCommand}
+                  compact={isMobile}
+                />
+              </div>
+            </MaybePromptContextMenu>
           )}
 
           {foldPlan.foldable ? (

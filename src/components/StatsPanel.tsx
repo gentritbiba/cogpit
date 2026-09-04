@@ -12,10 +12,7 @@ import {
 } from "@/components/ui/input-group"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { InputOutputChart } from "@/components/stats/InputOutputChart"
-import { ActivityHeatmap } from "@/components/stats/ActivityHeatmap"
-import { ModelDistribution } from "@/components/stats/ModelDistribution"
-import { AttributionPanel } from "@/components/stats/AttributionPanel"
+import { SessionCostPanel } from "@/components/stats/SessionCostPanel"
 import { ErrorLog } from "@/components/stats/ErrorLog"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { AgentsPanel } from "@/components/stats/AgentsPanel"
@@ -98,6 +95,13 @@ export const StatsPanel = memo(function StatsPanel({
   const { session: sessionOrNull, sessionSource } = useSessionContext()
   const session = sessionOrNull!
   const { turns } = session
+  const costRevision = [
+    session.stats.totalInputTokens,
+    session.stats.totalOutputTokens,
+    session.stats.totalCacheCreationTokens,
+    session.stats.totalCacheReadTokens,
+    turns.length,
+  ].join(":")
 
   return (
     <aside className={cn(
@@ -118,7 +122,7 @@ export const StatsPanel = memo(function StatsPanel({
         <TabsList variant="line" className="grid w-full grid-cols-4">
           <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="metrics">Metrics</TabsTrigger>
+          <TabsTrigger value="cost">Cost</TabsTrigger>
           <TabsTrigger value="issues">Issues</TabsTrigger>
         </TabsList>
         <TabsContent value="activity" className="flex flex-col gap-6 pt-3">
@@ -139,11 +143,12 @@ export const StatsPanel = memo(function StatsPanel({
             onLoadSession={onLoadSession}
           />
         </TabsContent>
-        <TabsContent value="metrics" className="flex flex-col gap-6 pt-3">
-          <InputOutputChart turns={turns} />
-          <ActivityHeatmap turns={turns} />
-          <ModelDistribution turns={turns} />
-          <AttributionPanel turns={turns} />
+        <TabsContent value="cost" className="pt-3">
+          <SessionCostPanel
+            dirName={sessionSource?.dirName ?? null}
+            fileName={sessionSource?.fileName ?? null}
+            revision={costRevision}
+          />
         </TabsContent>
         <TabsContent value="issues" className="flex flex-col gap-6 pt-3">
           <ErrorLog turns={turns} onJumpToTurn={onJumpToTurn} />

@@ -145,6 +145,18 @@ describe("capabilities", () => {
     expect(capabilitiesFor("codex").ultracode).toBe(false)
     expect(capabilitiesFor("copilot").ultracode).toBe(false)
   })
+
+  it("only nests sub-agents where they own a session id", () => {
+    // Usage cost walks the child tree transitively when this is set. Claude
+    // repeats the root session id in every descendant, so listing the root's
+    // children already yields all of them; a walk there would loop.
+    expect(capabilitiesFor("codex").nestedSubagents).toBe(true)
+    expect(capabilitiesFor("claude").nestedSubagents).toBe(false)
+    expect(capabilitiesFor("copilot").nestedSubagents).toBe(false)
+    for (const { capabilities } of allDescriptors()) {
+      if (capabilities.nestedSubagents) expect(capabilities.subagentTranscripts).toBe(true)
+    }
+  })
 })
 
 describe("presentation", () => {

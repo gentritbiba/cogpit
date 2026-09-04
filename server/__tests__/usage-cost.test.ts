@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  aggregateSessionUsage,
   UsageCostAggregator,
   makeDayFormatter,
 } from "../lib/usageCost/aggregate"
@@ -22,6 +23,7 @@ import {
   normalizeModelName,
   parseRateTable,
   priceUsage,
+  usageCostBreakdown,
 } from "../../shared/usageCost/pricing"
 
 const RATES = parseRateTable({
@@ -35,6 +37,15 @@ const RATES = parseRateTable({
   "anthropic/claude-sonnet-4-5": {
     input_cost_per_token: 0.000003,
     output_cost_per_token: 0.000015,
+  },
+  "gpt-tiered": {
+    input_cost_per_token: 0.000004,
+    output_cost_per_token: 0.00002,
+    cache_read_input_token_cost: 0.0000004,
+    input_cost_per_token_above_272k_tokens: 0.000008,
+    output_cost_per_token_above_272k_tokens: 0.00003,
+    cache_read_input_token_cost_above_272k_tokens: 0.0000008,
+    input_cost_per_token_priority: 0.000008,
   },
   "broken-model": { input_cost_per_token: 0.000001 },
 })
@@ -156,6 +167,24 @@ describe("pricing", () => {
     )
   })
 
+  it("returns a reconciled token-class breakdown", () => {
+    const breakdown = usageCostBreakdown(RATES, "claude-opus-4-6", {
+      uncachedInputTokens: 100,
+      cachedInputTokens: 1000,
+      cacheCreationTokens: 200,
+      cacheCreation1hTokens: 50,
+      outputTokens: 50,
+      reasoningTokens: 20,
+    })
+
+    expect(breakdown).toEqual({
+      uncachedInputUsd: 100 * 0.00001,
+      cachedInputUsd: 1000 * 0.000001,
+      cacheCreationUsd: 150 * 0.0000125 + 50 * 0.00002,
+      outputUsd: 50 * 0.00005,
+    })
+  })
+
   it("prefers a provider-reported cost over the table", () => {
     const priced = priceUsage(
       RATES,
@@ -245,6 +274,42 @@ describe("pricing", () => {
       1000 * (0.00001 - 0.000001),
       12,
     )
+  })
+
+  it("switches an entire OpenAI request to its long-context tier", () => {
+    const short = {
+      uncachedInputTokens: 10,
+      cachedInputTokens: 271_990,
+      cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
+      outputTokens: 100,
+      reasoningTokens: 0,
+    }
+    const long = { ...short, cachedInputTokens: 272_001 }
+
+    expect(priceUsage(RATES, "gpt-tiered", short, null).costUsd).toBeCloseTo(
+      10 * 0.000004 + 271_990 * 0.0000004 + 100 * 0.00002,
+      12,
+    )
+    expect(priceUsage(RATES, "gpt-tiered", long, null).costUsd).toBeCloseTo(
+      10 * 0.000008 + 272_001 * 0.0000008 + 100 * 0.00003,
+      12,
+    )
+  })
+
+  it("applies the recorded fast-tier multiplier after context pricing", () => {
+    const totals = {
+      uncachedInputTokens: 10,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
+      outputTokens: 10,
+      reasoningTokens: 0,
+    }
+    const standard = priceUsage(RATES, "gpt-tiered", totals, null, "standard")
+    const fast = priceUsage(RATES, "gpt-tiered", totals, null, "fast")
+
+    expect(fast.costUsd).toBeCloseTo(standard.costUsd * 2, 12)
   })
 })
 
@@ -403,6 +468,37 @@ describe("parseCodexUsageLine", () => {
     const line = tokenCount("2026-08-19T10:01:00.000Z", { input_tokens: 10, output_tokens: 5 })
     expect(parseCodexUsageLine(line, state)).not.toBeNull()
     expect(parseCodexUsageLine(line, state)).toBeNull()
+  })
+
+  it("carries recorded service-tier changes onto following usage", () => {
+    const state = initialCodexScanState()
+    parseCodexUsageLine(turnContext, state)
+    parseCodexUsageLine(JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-08-19T10:00:10.000Z",
+      payload: {
+        type: "thread_settings_applied",
+        thread_settings: { service_tier: "priority" },
+      },
+    }), state)
+
+    expect(parseCodexUsageLine(
+      tokenCount("2026-08-19T10:00:11.000Z", { input_tokens: 10, output_tokens: 1 }),
+      state,
+    )?.speed).toBe("fast")
+
+    parseCodexUsageLine(JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-08-19T10:00:12.000Z",
+      payload: {
+        type: "thread_settings_applied",
+        thread_settings: { service_tier: "default" },
+      },
+    }), state)
+    expect(parseCodexUsageLine(
+      tokenCount("2026-08-19T10:00:13.000Z", { input_tokens: 20, output_tokens: 1 }),
+      state,
+    )?.speed).toBe("standard")
   })
 
   it("suppresses the fork-copy burst but keeps genuine child usage", () => {
@@ -571,6 +667,7 @@ describe("aggregation", () => {
         reasoningTokens: 0,
       },
       reportedCostUsd: null,
+      speed: null,
       dedupeKey: null,
       ...overrides,
     }
@@ -643,6 +740,47 @@ describe("aggregation", () => {
     const { buckets } = aggregator.finish()
     expect(buckets[0]).toMatchObject({ costSource: "unpriced", costUsd: 0 })
     expect(buckets[0].totals.uncachedInputTokens).toBe(100)
+  })
+
+  it("builds a detailed session report with global dedupe and agent attribution", () => {
+    const summary = aggregateSessionUsage([
+      { record: record({ dedupeKey: "request-a" }), isSubagent: false },
+      { record: record({ dedupeKey: "request-a" }), isSubagent: true },
+      {
+        record: record({
+          dedupeKey: "request-b",
+          timestampMs: Date.parse("2026-08-19T12:01:00.000Z"),
+          reportedCostUsd: 0.03,
+        }),
+        isSubagent: true,
+      },
+      {
+        record: record({
+          dedupeKey: "request-c",
+          timestampMs: Date.parse("2026-08-19T12:02:00.000Z"),
+          model: "mystery-model",
+          reportedCostUsd: 0.5,
+        }),
+        isSubagent: false,
+      },
+    ], RATES)
+
+    expect(summary.records).toBe(3)
+    expect(summary.calls.map((call) => call.isSubagent)).toEqual([false, true, false])
+    expect(summary.models).toHaveLength(2)
+    expect(summary.models[0]).toMatchObject({ model: "mystery-model", costUsd: 0.5 })
+    expect(summary.providerReportedRecords).toBe(2)
+    expect(summary.modelPricedRecords).toBe(1)
+    expect(summary.unpricedRecords).toBe(0)
+    expect(summary.costUsd).toBeCloseTo(0.5315, 12)
+    expect(summary.breakdown.unallocatedUsd).toBe(0.5)
+    expect(
+      summary.breakdown.uncachedInputUsd
+      + summary.breakdown.cachedInputUsd
+      + summary.breakdown.cacheCreationUsd
+      + summary.breakdown.outputUsd
+      + summary.breakdown.unallocatedUsd,
+    ).toBeCloseTo(summary.costUsd, 12)
   })
 })
 

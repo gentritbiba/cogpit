@@ -4,7 +4,7 @@
     "These numbers may only go DOWN. check-agents.ts fails if a file exceeds",
     "its budget, and also if it comes in under — so a cleanup must lower the",
     "number in the same commit. Delete the entry once a file reaches zero.",
-    "Seeded at 140 files / 497 lines."
+    "Seeded at 138 files / 495 lines."
   ],
   "files": {
     "electron/main.ts": 2,
@@ -74,7 +74,6 @@
     "shared/contracts/usageCost.ts": 2,
     "shared/notifications.ts": 2,
     "shared/session/agentEnvelope.ts": 2,
-    "shared/session/attributionStats.ts": 1,
     "shared/session/contextWindow.ts": 4,
     "shared/session/edit-calls.ts": 3,
     "shared/session/interactiveState.ts": 1,
@@ -115,7 +114,6 @@
     "src/components/SessionInfoBar.tsx": 1,
     "src/components/SetupScreen.tsx": 3,
     "src/components/stats/AgentsPanel.tsx": 1,
-    "src/components/stats/AttributionPanel.tsx": 1,
     "src/components/stats/ToolCallIndex.tsx": 1,
     "src/components/timeline/CodexExecToolInput.tsx": 4,
     "src/components/timeline/CollapsibleToolCalls.tsx": 1,

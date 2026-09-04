@@ -18,6 +18,10 @@ export interface WorkspacePanelContext {
   hasFileChanges: boolean
   canAccessHostFiles: boolean
   supportsWorktrees?: boolean
+  /** Navigate to a session by its storage address; absent where the host cannot switch sessions. */
+  openSession?: (dirName: string, fileName: string) => void
+  /** Append text to the message composer and focus it; absent where there is no composer. */
+  composePrompt?: (text: string) => void
 }
 
 export interface WorkspacePanelProps {

@@ -139,6 +139,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   // transcript directories, which is a host capability.
   "usage-cost": [
     ...authed("/api/usage-cost/rates"),
+    ...authed("/api/usage-cost/session"),
     ...admin("/api/usage-cost"),
   ],
   "slash-suggestions": [
@@ -154,7 +155,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "project-files": admin("/api/project-files"),
   "project-file": admin("/api/project-file"),
   "git-status": admin("/api/git-status"),
-  "github-actions": admin("/api/github-actions"),
+  github: admin("/api/github"),
   "vercel-deployments": admin("/api/vercel-deployments"),
   "project-icon": admin("/api/project-icon"),
   "git-diff": admin("/api/git-diff"),

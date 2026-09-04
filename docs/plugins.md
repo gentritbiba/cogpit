@@ -4,7 +4,7 @@ Cogpit plugins can contribute panels to the right workspace rail. Plugins are bu
 
 The repository includes two first-party plugins:
 
-- `plugins/github-actions` uses GitHub CLI on the Cogpit host to show recent workflow runs, jobs, and steps. Install `gh`, then run `gh auth login` once.
+- `plugins/github` uses GitHub CLI on the Cogpit host. Its Actions tab shows recent workflow runs, jobs, and steps; its Pull requests tab lists open pull requests (closed and merged ones fold away underneath) with check, review, conflict and comment signals, each description and changed-file list, the Cogpit sessions that worked on them, and links out to GitHub. Its Issues tab lists open issues (closed ones fold away) filtered by assignee, author or label, and can drop an issue into the message composer as a prompt. Install `gh`, then run `gh auth login` once.
 - `plugins/vercel-deployments` uses Vercel CLI 50.5.1 or newer to show recent deployments and on-demand build output for the project linked at the exact active-session root. Run `vercel login` and `vercel link` once. It only uses the read-only `vercel api` command; it never deploys, promotes, redeploys, or rolls back.
 
 If a required CLI is missing, outdated, or signed out, its panel shows setup guidance without affecting the rest of Cogpit.
@@ -65,7 +65,7 @@ Plugin and panel IDs use lowercase letters, numbers, dots, and hyphens. Cogpit q
 
 Each panel receives:
 
-- `context`: the current session, project path, file-change state, host-file capability, and worktree availability
+- `context`: the current session, project path, file-change state, host-file capability, worktree availability, plus `openSession(dirName, fileName)` and `composePrompt(text)` where the host can switch sessions or has a composer
 - `active`: whether the panel is currently visible
 - `closePanel()`: close the right workspace
 - `openPanel(id)`: open another fully qualified panel ID
@@ -81,6 +81,6 @@ A panel definition may also set:
 
 Plugins may import shared contracts from `shared/` and the sanctioned application surface from `@/plugin-api`. The architecture check rejects direct imports into the rest of `src/`, which keeps plugins isolated from private implementation details.
 
-The public API also exports `FilterChip` and `FilterChipCount` for the compact filter controls shared by the bundled panels.
+The public API also exports `FilterChip` and `FilterChipCount` for the compact filter controls shared by the bundled panels, `Tabs` for panels with more than one view, and `StreamingMarkdown` for rendering untrusted markdown such as pull request descriptions without syntax highlighting or image fetches.
 
-The first extension point is intentionally limited to right-workspace UI. The bundled GitHub Actions and Vercel Deployments plugins use core routes registered by Cogpit itself; third-party plugins cannot contribute backend routes yet. Runtime plugin loading, plugin settings, backend route contributions, and bottom-bar contributions remain future work.
+The first extension point is intentionally limited to right-workspace UI. The bundled GitHub and Vercel Deployments plugins use core routes registered by Cogpit itself; third-party plugins cannot contribute backend routes yet. Runtime plugin loading, plugin settings, backend route contributions, and bottom-bar contributions remain future work.

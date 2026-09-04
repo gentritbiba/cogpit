@@ -6,7 +6,7 @@ import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 import { readCodexSessionIdentity, readCodexSessionMeta } from "./codexMetadata"
 import { resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
-import { readTranscriptHead } from "./transcriptHead"
+import { inventoryFor } from "./sessionInventory"
 import {
   addressFromTranscript,
   projectSessionFilesFromInventory,
@@ -114,19 +114,14 @@ export const codexStore: AgentStore = {
     // Rollouts are flat: a sub-agent is any rollout whose header names this
     // session as the one it was spawned from.
     const listing: SubagentFileInfo[] = []
-    for (const file of await walk(SESSIONS_DIR, 0)) {
-      try {
-        const meta = await readCodexSessionMeta(file.filePath, await readTranscriptHead(file.filePath))
-        if (!meta.isSubagent || meta.parentSessionId !== parentSessionId) continue
-        listing.push({
-          agentId: meta.sessionId,
-          fileName: file.fileName,
-          size: file.size,
-          modifiedAt: file.mtimeMs,
-        })
-      } catch {
-        continue
-      }
+    for (const file of await inventoryFor(codexStore)) {
+      if (!file.isSubagent || file.parentSessionId !== parentSessionId) continue
+      listing.push({
+        agentId: file.sessionId,
+        fileName: file.fileName,
+        size: file.size,
+        modifiedAt: file.mtimeMs,
+      })
     }
     return listing
   },
