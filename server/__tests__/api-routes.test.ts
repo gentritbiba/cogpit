@@ -66,6 +66,7 @@ const CANONICAL_ROUTE_IDS = [
   "agent-runtime",
   "provider-updates",
   "agent-executable",
+  "agent-accounts",
 ] as const
 
 function captureRegistrations(mode: HubMode): Array<{

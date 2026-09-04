@@ -29,6 +29,7 @@ import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 import { ExecutableSection } from "./ExecutableSection"
+import { AccountSection } from "./AccountSection"
 import {
   DEFAULT_EXECUTABLE_CHOICE,
   parseExecutableChoice,
@@ -39,6 +40,10 @@ import { allDescriptors } from "../../../shared/session/agent-descriptors"
 /** Agents with more than one binary on offer, so a picker is worth showing. */
 const EXECUTABLE_CHOICE_KINDS = allDescriptors()
   .filter((descriptor) => descriptor.cli.bundledBySdk)
+  .map((descriptor) => descriptor.kind)
+
+const ACCOUNT_SWITCHING_KINDS = allDescriptors()
+  .filter((descriptor) => descriptor.capabilities.accountSwitching)
   .map((descriptor) => descriptor.kind)
 
 function sameChoice(a: ExecutableChoice, b: ExecutableChoice): boolean {
@@ -311,6 +316,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               disabled={!canWriteConfig}
               reportVersion={executableReportVersion}
             />
+          ))}
+
+          {ACCOUNT_SWITCHING_KINDS.map((kind) => (
+            <AccountSection key={kind} kind={kind} disabled={!canWriteConfig} />
           ))}
 
           {/* Network Access — hidden for remote devices: changing it through the

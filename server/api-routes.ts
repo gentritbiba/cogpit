@@ -36,6 +36,7 @@ import { registerProjectFileRoutes } from "./routes/project-files"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerAgentExecutableRoutes } from "./routes/agent-executable"
+import { registerAgentAccountRoutes } from "./routes/agent-accounts"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
@@ -142,6 +143,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("agent-runtime", registerAgentRuntimeRoutes),
   apiRoute("provider-updates", registerProviderUpdateRoutes),
   apiRoute("agent-executable", registerAgentExecutableRoutes),
+  apiRoute("agent-accounts", registerAgentAccountRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 
 export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {

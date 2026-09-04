@@ -191,6 +191,10 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "agent-executable": [
     { prefix: "/api/agent-executable", methods: ["GET"], requires: "authed" },
   ],
+  "agent-accounts": [
+    { prefix: "/api/agent-accounts", methods: ["GET"], requires: "authed" },
+    { prefix: "/api/agent-accounts", requires: "admin" },
+  ],
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()

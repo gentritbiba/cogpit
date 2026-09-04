@@ -17,8 +17,20 @@ const SAVED_CONFIG = {
   useBuiltInEditor: false,
 }
 
-function mockConfig(overrides: Partial<typeof SAVED_CONFIG> = {}) {
+const ACCOUNTS_REPORT = {
+  status: "ok",
+  tool: "claude-swap",
+  version: "0.26.0",
+  activeSlot: 2,
+  accounts: [
+    { slot: 1, alias: "work", email: "work@example.com", organization: null, active: false, disabled: false, usageStatus: "ok", usage: null },
+    { slot: 2, alias: null, email: "me@example.com", organization: null, active: true, disabled: false, usageStatus: "ok", usage: null },
+  ],
+}
+
+function mockConfig(overrides: Partial<typeof SAVED_CONFIG> = {}, accounts: unknown = { status: "missing" }) {
   mocks.authFetch.mockImplementation((url: string, init?: RequestInit) => {
+    if (url === "/api/agent-accounts/claude") return Promise.resolve({ ok: true, json: async () => accounts })
     if (url === "/api/config" && init?.method === "POST") {
       return Promise.resolve({ ok: true, json: async () => ({ success: true, claudeDir: SAVED_CONFIG.claudeDir }) })
     }
@@ -177,5 +189,28 @@ describe("ConfigDialog executable picker", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Global npm install" })).toBeChecked())
     expect(screen.getByRole("radio", { name: "Global npm install" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+})
+
+describe("ConfigDialog account switcher", () => {
+  beforeEach(() => {
+    mocks.authFetch.mockReset()
+  })
+
+  it("shows no accounts section when the switcher is not installed", async () => {
+    mockConfig()
+    renderDialog()
+
+    await screen.findByRole("button", { name: /Claude Code executable/ })
+    await waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith("/api/agent-accounts/claude"))
+    expect(screen.queryByRole("button", { name: /Claude Code accounts/ })).not.toBeInTheDocument()
+  })
+
+  it("shows the managed accounts when the switcher is installed", async () => {
+    mockConfig({}, ACCOUNTS_REPORT)
+    renderDialog()
+
+    const trigger = await screen.findByRole("button", { name: /Claude Code accounts/ })
+    expect(trigger).toHaveTextContent("me@example.com · 2 accounts")
   })
 })

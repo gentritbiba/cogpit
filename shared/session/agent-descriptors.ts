@@ -86,6 +86,8 @@ export interface AgentCapabilities {
    * is view-only.
    */
   readonly externalProcesses: boolean
+  /** Several logins are managed by a switcher tool Cogpit can drive. */
+  readonly accountSwitching: boolean
   /** The transcript records model substitutions the composer surfaces. */
   readonly modelFallbackNotices: boolean
   /** Whether an unattended "auto" permission mode can be offered. */
@@ -611,6 +613,7 @@ const claude: AgentDescriptor = {
     ultracode: true,
     contextWindow: true,
     externalProcesses: false,
+    accountSwitching: true,
     modelFallbackNotices: true,
     autoPermissionMode: "per-model",
     settingsApply: "live",
@@ -761,6 +764,7 @@ const codex: AgentDescriptor = {
     ultracode: false,
     contextWindow: false,
     externalProcesses: false,
+    accountSwitching: false,
     modelFallbackNotices: false,
     autoPermissionMode: "never",
     settingsApply: "next-turn",
@@ -888,6 +892,7 @@ const copilot: AgentDescriptor = {
     ultracode: false,
     contextWindow: false,
     externalProcesses: true,
+    accountSwitching: false,
     modelFallbackNotices: false,
     autoPermissionMode: "always",
     settingsApply: "next-turn",
