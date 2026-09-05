@@ -1,6 +1,12 @@
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { fallbackModelsFor } from "@/lib/agents/models"
-import { loadModelCatalog, resetModelCatalogFetch } from "../useModelOptions"
+import {
+  CATALOG_RETRY_MS,
+  CATALOG_TTL_MS,
+  loadModelCatalog,
+  refreshModelCatalogOnFocus,
+  resetModelCatalogFetch,
+} from "../useModelOptions"
 import {
   getModelOptions,
   resetDynamicModelOptions,
@@ -17,10 +23,15 @@ function jsonResponse(body: unknown, ok = true): Response {
   return { ok, json: async () => body } as Response
 }
 
+beforeEach(() => {
+  vi.useFakeTimers()
+})
+
 afterEach(() => {
   resetModelCatalogFetch()
   resetDynamicModelOptions()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
 
 describe("loadModelCatalog", () => {
@@ -83,12 +94,99 @@ describe("loadModelCatalog", () => {
     expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
-  it("only fetches once per page load", async () => {
+  it("shares one request between concurrent callers", async () => {
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ claude: null, codex: null }))
+
+    await Promise.all([loadModelCatalog(), loadModelCatalog()])
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not refetch while the catalog is fresh", async () => {
     mockedAuthFetch.mockResolvedValue(jsonResponse({ claude: null, codex: null }))
 
     await loadModelCatalog()
+    vi.advanceTimersByTime(CATALOG_TTL_MS - 1)
     await loadModelCatalog()
 
     expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("refetches once the catalog is stale so a CLI upgrade shows up", async () => {
+    const before = [{ value: "", label: "Default" }, { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" }]
+    const after = [{ value: "", label: "Default" }, { value: "gpt-6-astra", label: "GPT-6 Astra" }]
+    mockedAuthFetch
+      .mockResolvedValueOnce(jsonResponse({ codex: before }))
+      .mockResolvedValueOnce(jsonResponse({ codex: after }))
+
+    await loadModelCatalog()
+    expect(getModelOptions("codex")).toEqual(before)
+
+    vi.advanceTimersByTime(CATALOG_TTL_MS)
+    await loadModelCatalog()
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+    expect(getModelOptions("codex")).toEqual(after)
+  })
+
+  it("retries a failed fetch after a short backoff instead of never", async () => {
+    const codex = [{ value: "", label: "Default" }, { value: "gpt-6-astra", label: "GPT-6 Astra" }]
+    mockedAuthFetch
+      .mockRejectedValueOnce(new Error("server not up yet"))
+      .mockResolvedValueOnce(jsonResponse({ codex }))
+
+    await loadModelCatalog()
+    await loadModelCatalog()
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(CATALOG_RETRY_MS)
+    await loadModelCatalog()
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+    expect(getModelOptions("codex")).toEqual(codex)
+  })
+
+  it("treats a non-OK response like a failure and retries after the backoff", async () => {
+    mockedAuthFetch
+      .mockResolvedValueOnce(jsonResponse(null, false))
+      .mockResolvedValueOnce(jsonResponse({ codex: null }))
+
+    await loadModelCatalog()
+    vi.advanceTimersByTime(CATALOG_RETRY_MS)
+    await loadModelCatalog()
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("refreshModelCatalogOnFocus", () => {
+  it("reloads a stale catalog when the window regains focus", async () => {
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ codex: null }))
+    const stop = refreshModelCatalogOnFocus()
+
+    await loadModelCatalog()
+    window.dispatchEvent(new Event("focus"))
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(CATALOG_TTL_MS)
+    window.dispatchEvent(new Event("focus"))
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+
+    stop()
+    vi.advanceTimersByTime(CATALOG_TTL_MS)
+    window.dispatchEvent(new Event("focus"))
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("reloads a stale catalog when the document becomes visible again", async () => {
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ codex: null }))
+    const stop = refreshModelCatalogOnFocus()
+
+    await loadModelCatalog()
+    vi.advanceTimersByTime(CATALOG_TTL_MS)
+    document.dispatchEvent(new Event("visibilitychange"))
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+    stop()
   })
 })

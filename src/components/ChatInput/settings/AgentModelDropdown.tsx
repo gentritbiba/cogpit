@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { AgentKind } from "@/lib/agents"
+import { loadModelCatalog } from "@/hooks/useModelOptions"
 import { AGENT_OPTIONS } from "./modelOptions"
 import { DropdownOptionItem } from "./DropdownOptionItem"
 import type { DropdownOption } from "./types"
@@ -36,7 +37,7 @@ export function AgentModelDropdown({
   const selectedLabel = options.find((option) => option.value === value)?.label ?? fallbackLabel
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => { if (open) void loadModelCatalog() }}>
       <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="xs" />}>
         <span className="truncate">{`${agentLabel} / ${selectedLabel}`}</span>
         <ChevronDown data-icon="inline-end" />
