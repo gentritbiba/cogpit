@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, FileCode2, FolderTree, GitBranch, MessageSquarePlus, RefreshCw, Save, Search, X } from "lucide-react"
+import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -37,6 +38,9 @@ import { Separator } from "@/components/ui/separator"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { HighlightedEditor } from "@/components/shared/HighlightedEditor"
 import { EditDiffView } from "@/components/timeline/EditDiffView"
+import { LocalImage } from "@/components/timeline/LocalImage"
+import { markdownComponents, markdownPlugins } from "@/components/timeline/markdown-components"
+import { ProjectFileTree, type FileStatusMark } from "@/components/ProjectFileTree"
 import { Spinner } from "@/components/ui/Spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -91,6 +95,8 @@ interface GitStatusData {
   files: GitStatusFile[]
 }
 
+type ViewMode = "edit" | "diff" | "preview"
+
 /** A file to show in the right pane, and how to show it. */
 interface OpenTarget {
   path: string
@@ -121,6 +127,31 @@ const GIT_STATUS_STYLES: Record<string, { label: string; className: string }> = 
 function gitStatusStyle(file: GitStatusFile) {
   const significant = file.workTreeStatus.trim() || file.indexStatus.trim()
   return GIT_STATUS_STYLES[significant] ?? { label: "Changed", className: "text-muted-foreground" }
+}
+
+/** The two porcelain columns as one badge, `?` for untracked. */
+function gitStatusCode(file: GitStatusFile): string {
+  return `${file.indexStatus}${file.workTreeStatus}`.trim() || "?"
+}
+
+const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"])
+
+function isMarkdownPath(path: string): boolean {
+  const dot = path.lastIndexOf(".")
+  return dot !== -1 && MARKDOWN_EXTENSIONS.has(path.slice(dot).toLowerCase())
+}
+
+/** Resolve a markdown image `src` relative to the file's directory inside the project. */
+function resolveMarkdownImage(src: string | undefined, cwd: string, filePath: string): string | undefined {
+  if (!src || /^(?:[a-z]+:|\/|#)/i.test(src)) return src
+  const directory = filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : ""
+  const resolved: string[] = []
+  for (const segment of [...directory.split("/"), ...src.split("/")]) {
+    if (segment === "..") resolved.pop()
+    else if (segment && segment !== ".") resolved.push(segment)
+  }
+  const separator = cwd.includes("\\") ? "\\" : "/"
+  return [cwd.replace(/[\\/]+$/, ""), ...resolved].join(separator)
 }
 
 function loadWidth(): number {
@@ -195,7 +226,7 @@ export function ProjectFilesPanel({
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null)
   const [gitLoading, setGitLoading] = useState(false)
   const [gitError, setGitError] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<"edit" | "diff">("edit")
+  const [viewMode, setViewMode] = useState<ViewMode>("edit")
   const [diff, setDiff] = useState<GitFileDiff | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -233,7 +264,10 @@ export function ProjectFilesPanel({
     void loadGitStatus()
   }, [loadGitStatus])
 
+  const showTree = fileScope === "all" && query.trim() === ""
+
   useEffect(() => {
+    if (showTree) return
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       setFilesLoading(true)
@@ -269,7 +303,7 @@ export function ProjectFilesPanel({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [cwd, query, reloadToken])
+  }, [cwd, query, reloadToken, showTree])
 
   useEffect(() => {
     setSelectedPath(null)
@@ -368,11 +402,13 @@ export function ProjectFilesPanel({
 
   const openFile = useCallback(({ path, mode, line }: OpenTarget) => {
     setSelectedPath(path)
-    setViewMode(mode)
     if (mode === "edit") {
+      // Markdown reads best rendered; a caret target means the caller wants the source.
+      setViewMode(isMarkdownPath(path) && !line ? "preview" : "edit")
       void loadFile(path, line)
       return
     }
+    setViewMode(mode)
     // The editor is loaded lazily on the first switch to edit, so clear whatever
     // the previously opened file left behind.
     setContent("")
@@ -417,9 +453,9 @@ export function ProjectFilesPanel({
     }
   }, [changedFiles, diff?.path, diffLoading, loadDiff, selectedPath, viewMode])
 
-  const showEditor = useCallback(() => {
-    if (!selectedPath || viewMode === "edit") return
-    setViewMode("edit")
+  const showContent = useCallback((mode: "edit" | "preview") => {
+    if (!selectedPath || viewMode === mode) return
+    setViewMode(mode)
     if (mtimeMs === null && !fileLoading) void loadFile(selectedPath)
   }, [fileLoading, loadFile, mtimeMs, selectedPath, viewMode])
 
@@ -551,6 +587,17 @@ export function ProjectFilesPanel({
 
   const selectedName = useMemo(() => selectedPath?.split("/").at(-1) ?? null, [selectedPath])
   const selectedGitFile = selectedPath ? changedFiles.get(selectedPath) : undefined
+  const selectedIsMarkdown = selectedPath !== null && isMarkdownPath(selectedPath)
+  const fileStatusMark = useCallback((path: string): FileStatusMark | null => {
+    const file = changedFiles.get(path)
+    return file ? { code: gitStatusCode(file), ...gitStatusStyle(file) } : null
+  }, [changedFiles])
+  const previewComponents = useMemo(() => ({
+    ...markdownComponents,
+    img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+      <LocalImage src={resolveMarkdownImage(props.src, cwd, selectedPath ?? "")} alt={props.alt} />
+    ),
+  }), [cwd, selectedPath])
   const diffCounts = useMemo(
     () => (diff && !diff.binary && !diff.tooLarge ? diffLineCount(diff.original ?? "", diff.current ?? "") : null),
     [diff],
@@ -678,7 +725,15 @@ export function ProjectFilesPanel({
           </div>
           <Separator />
           <ScrollArea className="min-h-0 flex-1">
-            {listLoading ? (
+            {showTree ? (
+              <ProjectFileTree
+                cwd={cwd}
+                selectedPath={selectedPath}
+                onSelect={selectFile}
+                fileStatus={fileStatusMark}
+                reloadToken={reloadToken}
+              />
+            ) : listLoading ? (
               <div className="flex items-center justify-center gap-2 p-6 text-xs text-muted-foreground" role="status">
                 <Spinner />
                 Loading files…
@@ -706,9 +761,7 @@ export function ProjectFilesPanel({
                 {displayedFiles.map((path) => {
                   const name = path.split("/").at(-1) ?? path
                   const directory = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
-                  const gitFile = changedFiles.get(path)
-                  const status = gitFile ? `${gitFile.indexStatus}${gitFile.workTreeStatus}`.trim() || "?" : null
-                  const statusStyle = gitFile ? gitStatusStyle(gitFile) : null
+                  const status = fileStatusMark(path)
                   const FileIcon = fileTypeIcon(path)
                   return (
                     <Button
@@ -724,9 +777,9 @@ export function ProjectFilesPanel({
                         <span className="block truncate text-xs">{name}</span>
                         {directory && <span className="block truncate font-mono text-xs text-muted-foreground">{directory}</span>}
                       </span>
-                      {status && statusStyle && (
-                        <Badge variant="outline" className={cn("font-mono", statusStyle.className)} title={statusStyle.label}>
-                          {status}
+                      {status && (
+                        <Badge variant="outline" className={cn("font-mono", status.className)} title={status.label}>
+                          {status.code}
                         </Badge>
                       )}
                     </Button>
@@ -754,19 +807,20 @@ export function ProjectFilesPanel({
                   <p className="truncate text-xs font-medium" title={selectedPath}>{selectedName}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{selectedPath}</p>
                 </div>
-                {(selectedGitFile || viewMode === "diff") && (
+                {(selectedGitFile || viewMode === "diff" || selectedIsMarkdown) && (
                   <ToggleGroup
                     aria-label="File view"
                     value={[viewMode]}
                     onValueChange={(values) => {
                       if (values[0] === "diff") showDiff()
-                      else if (values[0] === "edit") showEditor()
+                      else if (values[0] === "edit" || values[0] === "preview") showContent(values[0])
                     }}
                     variant="outline"
                     size="sm"
                     spacing={0}
                   >
-                    <ToggleGroupItem value="diff">Diff</ToggleGroupItem>
+                    {(selectedGitFile || viewMode === "diff") && <ToggleGroupItem value="diff">Diff</ToggleGroupItem>}
+                    {selectedIsMarkdown && <ToggleGroupItem value="preview">Preview</ToggleGroupItem>}
                     <ToggleGroupItem value="edit">Edit</ToggleGroupItem>
                   </ToggleGroup>
                 )}
@@ -776,9 +830,9 @@ export function ProjectFilesPanel({
                   </Badge>
                 )}
                 {viewMode === "diff" && diffCounts && <LineCounts add={diffCounts.add} del={diffCounts.del} />}
-                {viewMode === "edit" && dirty && <Badge variant="outline">Unsaved</Badge>}
-                {viewMode === "edit" && !dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
-                {viewMode === "edit" && mtimeMs !== null && (
+                {viewMode !== "diff" && dirty && <Badge variant="outline">Unsaved</Badge>}
+                {viewMode !== "diff" && !dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
+                {viewMode !== "diff" && mtimeMs !== null && (
                   <span className="text-xs text-muted-foreground">{displayBytes(size)}</span>
                 )}
                 {onAddToPrompt && (
@@ -811,7 +865,7 @@ export function ProjectFilesPanel({
                 >
                   <RefreshCw data-icon="inline-start" />
                 </Button>
-                {viewMode === "edit" && (
+                {viewMode !== "diff" && (
                   <Button size="sm" disabled={!dirty || fileLoading || saving || mtimeMs === null} onClick={() => void saveFile()}>
                     {saving ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" />}
                     {saving ? "Saving…" : "Save"}
@@ -819,7 +873,7 @@ export function ProjectFilesPanel({
                 )}
               </div>
               <Separator />
-              {viewMode === "edit" && fileError && (
+              {viewMode !== "diff" && fileError && (
                 <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
                   <AlertTriangle data-icon="inline-start" aria-hidden="true" className="size-4 shrink-0" />
                   <span>{fileError}</span>
@@ -874,12 +928,20 @@ export function ProjectFilesPanel({
                 </div>
               ) : (
               <div className="flex min-h-0 flex-1 flex-col">
-                {fileLoading ? (
+                {fileLoading && (
                   <div className="flex size-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
                     <Spinner />
                     Opening file…
                   </div>
-                ) : mtimeMs !== null ? (
+                )}
+                {!fileLoading && mtimeMs !== null && (viewMode === "preview" ? (
+                  <div
+                    aria-label={`Preview of ${selectedPath}`}
+                    className="min-h-0 flex-1 overflow-auto break-words px-6 py-4 text-sm"
+                  >
+                    <ReactMarkdown components={previewComponents} remarkPlugins={markdownPlugins}>{content}</ReactMarkdown>
+                  </div>
+                ) : (
                   <HighlightedEditor
                     textareaRef={editorRef}
                     ariaLabel={`Editing ${selectedPath}`}
@@ -894,7 +956,7 @@ export function ProjectFilesPanel({
                     onKeyDown={handleEditorKeyDown}
                     onSelect={captureEditorSelection}
                   />
-                ) : null}
+                ))}
               </div>
               )}
             </>
