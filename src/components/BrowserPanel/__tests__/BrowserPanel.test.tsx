@@ -6,7 +6,7 @@ import { BrowserPanel } from "@/components/BrowserPanel"
 import type { UseBrowserSessions } from "@/hooks/useBrowserSessions"
 import type { BrowserFrame, BrowserSocketStatus, UseBrowserSocket } from "@/hooks/useBrowserSocket"
 import type { WorkspacePanelContext } from "@/plugin-api"
-import type { BrowserClientMessage } from "../../../../shared/browser/protocol"
+import type { BrowserClientMessage, BrowserTab } from "../../../../shared/browser/protocol"
 import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../../shared/browser/types"
 import { AGENT_KINDS } from "../../../../shared/session/agent-descriptors"
 import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
@@ -52,6 +52,7 @@ const openPanel = vi.fn()
 const socketSessions: (string | null)[] = []
 
 let installed = true
+let unsupportedReason: string | undefined
 let browsers: BrowserSessionInfo[] = []
 let socketState: "not-installed" | "stopped" | "connecting" | "live" = "live"
 let socketStatus: BrowserSocketStatus = "connected"
@@ -59,12 +60,13 @@ let socketError: string | null = null
 let listError: string | null = null
 let lastFrameAt: number | null = null
 let frame: BrowserFrame | null = null
+let tabs: BrowserTab[] = []
 let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
   return {
     status: enabled
-      ? { installed, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
+      ? { installed, unsupportedReason, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
       : null,
     loading: false,
     error: listError,
@@ -85,7 +87,7 @@ function socketDouble(session: string | null): UseBrowserSocket {
     status: session === null ? "idle" : socketStatus,
     state: session === null ? null : { type: "status", state: socketState, session },
     page: null,
-    tabs: [],
+    tabs,
     followed: null,
     frame,
     lastFrameAt,
@@ -203,6 +205,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   socketSessions.length = 0
   installed = true
+  unsupportedReason = undefined
   browsers = [browserOf()]
   socketState = "live"
   socketStatus = "connected"
@@ -210,6 +213,7 @@ beforeEach(() => {
   listError = null
   lastFrameAt = Date.now()
   frame = null
+  tabs = []
   sessionBarRenders = 0
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -218,6 +222,25 @@ beforeEach(() => {
 })
 
 describe("BrowserPanel", () => {
+  it("explains an unsupported host without offering installation or browser actions", async () => {
+    installed = false
+    unsupportedReason = "The Browser panel is not supported on native Windows yet."
+    const { user } = setup()
+    expect(screen.getByText(unsupportedReason)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Copy install command" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("application", { name: "Browser viewport" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Close browser panel" }))
+    expect(closePanel).toHaveBeenCalledOnce()
+  })
+  it("sends the chosen tab id when closing a tab", async () => {
+    tabs = [{ targetId: "t2", url: "https://example.test", title: "Example" }]
+    const { user } = setup()
+    await user.click(screen.getByRole("button", { name: "Close tab: Example" }))
+    expect(send).toHaveBeenCalledWith({ type: "close-tab", targetId: "t2" })
+    expect(closePanel).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
+  })
+
   it("offers the install command and the agent skill when the CLI is missing", async () => {
     installed = false
     const { user } = setup()

@@ -675,7 +675,7 @@ describe("defaultDaemonDeps.spawn", () => {
   it("kills a shim call that never finishes and rejects", async () => {
     vi.useFakeTimers()
     try {
-      const running = defaultDaemonDeps.spawn("/bin/sh", ["-c", "sleep 60"], process.env)
+      const running = defaultDaemonDeps.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], process.env)
       const settled = expect(running).rejects.toThrow(/did not finish in 30s/)
       await vi.advanceTimersByTimeAsync(30_000)
       await settled
@@ -685,7 +685,7 @@ describe("defaultDaemonDeps.spawn", () => {
   })
 
   it("resolves with the exit code and stderr of a command that does finish", async () => {
-    const result = await defaultDaemonDeps.spawn("/bin/sh", ["-c", "echo boom >&2; exit 3"], process.env)
+    const result = await defaultDaemonDeps.spawn(process.execPath, ["-e", "console.error('boom'); process.exit(3)"], process.env)
     expect(result.code).toBe(3)
     expect(result.stderr.trim()).toBe("boom")
   })
@@ -697,7 +697,7 @@ describe("defaultDaemonDeps.kill", () => {
   })
 
   it("returns false for a pid that has already exited", () => {
-    const exited = spawnSync("true").pid
+    const exited = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid
     expect(exited).toBeGreaterThan(0)
     expect(defaultDaemonDeps.kill(exited, "SIGTERM")).toBe(false)
   })

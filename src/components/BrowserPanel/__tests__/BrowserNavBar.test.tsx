@@ -32,6 +32,7 @@ function setup(props: Partial<Props> = {}) {
     onForward: vi.fn(),
     onReload: vi.fn(),
     onFollow: vi.fn(),
+    onCloseTab: vi.fn(),
   }
   const merged: Props = {
     page: pageOf(),
@@ -113,8 +114,38 @@ describe("BrowserNavBar", () => {
     expect(url).toHaveValue("https://example.org/")
   })
 
-  it("hides the tab strip until a second tab exists", () => {
-    setup()
+  it("keeps the last tab visible and closable", async () => {
+    const { user, onCloseTab } = setup()
+    expect(screen.getByRole("button", { name: "One" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Close tab: One" }))
+    expect(onCloseTab).toHaveBeenCalledWith("tab-1")
+  })
+
+  it("closes a background tab without following it", async () => {
+    const { user, onCloseTab, onFollow } = setup({ tabs: TABS })
+    await user.click(screen.getByRole("button", { name: "Close tab: other.test" }))
+    expect(onCloseTab).toHaveBeenCalledExactlyOnceWith("tab-2")
+    expect(onFollow).not.toHaveBeenCalled()
+  })
+
+  it("closes a tab with middle-click but not right-click", () => {
+    const { onCloseTab, onFollow } = setup({ tabs: TABS })
+    const tab = screen.getByRole("button", { name: "other.test" })
+    fireEvent(tab, new MouseEvent("auxclick", { button: 2, bubbles: true }))
+    expect(onCloseTab).not.toHaveBeenCalled()
+    fireEvent(tab, new MouseEvent("auxclick", { button: 1, bubbles: true }))
+    expect(onCloseTab).toHaveBeenCalledExactlyOnceWith("tab-2")
+    expect(onFollow).not.toHaveBeenCalled()
+  })
+
+  it.each(["", "about:blank"])("labels the blank replacement page as a new tab with title '%s'", (title) => {
+    setup({ tabs: [{ targetId: "blank", url: "about:blank", title }] })
+    expect(screen.getByRole("button", { name: "New tab" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Close tab: New tab" })).toBeInTheDocument()
+  })
+
+  it("hides the tab strip when there are no tabs", () => {
+    setup({ tabs: [] })
     expect(screen.queryByRole("button", { name: /One/ })).not.toBeInTheDocument()
   })
 

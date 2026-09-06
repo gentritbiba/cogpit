@@ -111,11 +111,27 @@ async function startFakeCdp(targets: TargetInfo[] = [page("t1"), page("t2")]): P
       "Page.navigate": () => ({ frameId: "main", loaderId: "loader" }),
       "Page.navigateToHistoryEntry": () => ({}),
       "Page.reload": () => ({}),
+      "Target.closeTarget": (message, self) => {
+        const targetInfo = self.targets.find((target) => target.targetId === message.params.targetId)
+        if (targetInfo) self.push("Target.targetInfoChanged", { targetInfo: { ...targetInfo, attached: false } })
+        self.targets = self.targets.filter((target) => target.targetId !== message.params.targetId)
+        self.push("Target.targetDestroyed", { targetId: message.params.targetId })
+        return { success: true }
+      },
+      "Target.createTarget": (message, self) => {
+        const targetInfo = page("blank", message.params.url, "")
+        self.targets.push(targetInfo)
+        self.push("Target.targetCreated", { targetInfo })
+        return { targetId: targetInfo.targetId }
+      },
       "Input.dispatchMouseEvent": () => ({}),
       "Input.dispatchKeyEvent": () => ({}),
     },
     push(method, params, sessionId) {
-      fake.socket?.send(JSON.stringify(sessionId === undefined ? { method, params } : { method, params, sessionId }))
+      const message = JSON.stringify(sessionId === undefined ? { method, params } : { method, params, sessionId })
+      if (method.startsWith("Target.")) {
+        for (const client of wss.clients) client.send(message)
+      } else fake.socket?.send(message)
     },
     pushFrame(frameId, sessionId) {
       const data = Buffer.from(JPEG).toString("base64")
@@ -676,6 +692,147 @@ describe("BrowserViewer", () => {
 
     await viewer.setViewport(0, 907, 2)
     expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(0)
+  })
+
+  it("closes a background tab without changing the followed page", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await viewer.closeTab("t1")
+    await vi.waitFor(() => expect(tabIds(last(events.tabLists))).toEqual(["t2"]))
+    expect(fake.sent("Target.closeTarget")[0].params).toEqual({ targetId: "t1" })
+    expect(last(events.tabLists)).toEqual({
+      tabs: [{ targetId: "t2", url: "https://t2.test/", title: "Title t2" }], followed: "t2",
+    })
+    expect(fake.sent("Target.createTarget")).toHaveLength(0)
+    expect(fake.sent("Target.attachToTarget").map((message) => message.params.targetId)).toEqual(["t1", "t2"])
+  })
+
+  it("moves the stream and input to a remaining tab when closing the followed page", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await viewer.setViewport(800, 600, 1)
+    await viewer.closeTab("t2")
+    await vi.waitFor(() => expect(last(events.tabLists).followed).toBe("t1"))
+    expect(last(events.tabLists).followed).toBe("t1")
+    expect(last(fake.sent("Page.startScreencast")).sessionId).toBe(sessionFor("t1"))
+    await viewer.reload()
+    expect(last(fake.sent("Page.reload")).sessionId).toBe(sessionFor("t1"))
+  })
+
+  it("creates a blank page before closing the last tab and keeps it usable", async () => {
+    const { fake, viewer, events } = await openViewer([page("t1")])
+    await viewer.closeTab("t1")
+    await vi.waitFor(() => expect(tabIds(last(events.tabLists))).toEqual(["blank"]))
+    const actions = fake.messages.filter((message) => ["Target.createTarget", "Target.closeTarget"].includes(message.method))
+    expect(actions.map((message) => message.method)).toEqual(["Target.createTarget", "Target.closeTarget"])
+    expect(actions[0].params).toEqual({ url: "about:blank" })
+    expect(last(events.tabLists)).toEqual({
+      tabs: [{ targetId: "blank", url: "about:blank", title: "" }], followed: "blank",
+    })
+    await viewer.navigate("https://example.test")
+    expect(last(fake.sent("Page.navigate")).sessionId).toBe(sessionFor("blank"))
+    expect(events.closeReasons).toEqual([])
+  })
+
+  it("preserves a blank page when multiple tabs are closed before destruction events arrive", async () => {
+    const { fake, viewer, events } = await openViewer()
+    fake.handlers["Target.closeTarget"] = () => ({ success: true })
+    await Promise.all([viewer.closeTab("t1"), viewer.closeTab("t2")])
+    expect(fake.sent("Target.createTarget")).toHaveLength(1)
+    fake.push("Target.targetDestroyed", { targetId: "t1" })
+    fake.push("Target.targetDestroyed", { targetId: "t2" })
+    await vi.waitFor(() => expect(last(events.tabLists)).toEqual({
+      tabs: [{ targetId: "blank", url: "about:blank", title: "" }], followed: "blank",
+    }))
+  })
+
+  it("rejects closing unknown targets and preserves a tab when Chromium rejects closing", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await expect(viewer.closeTab("outside-this-viewer")).rejects.toThrow("Unknown tab")
+    expect(fake.sent("Target.closeTarget")).toHaveLength(0)
+    fake.handlers["Target.closeTarget"] = () => new CdpError("Cannot close target")
+    await expect(viewer.closeTab("t2")).rejects.toThrow("Cannot close target")
+    expect(tabIds(last(events.tabLists))).toEqual(["t1", "t2"])
+    expect(last(events.tabLists).followed).toBe("t2")
+  })
+
+  it("coordinates simultaneous last-tab closes from two viewers before destruction arrives", async () => {
+    const { fake, viewer, events } = await openViewer()
+    const secondEvents = record()
+    const second = await BrowserViewer.open(fake.url, secondEvents)
+    viewers.push(second)
+    fake.handlers["Target.closeTarget"] = () => ({ success: true })
+    await Promise.all([viewer.closeTab("t1"), second.closeTab("t2")])
+    const actions = fake.messages.filter((message) => ["Target.createTarget", "Target.closeTarget"].includes(message.method))
+    expect(actions.map((message) => message.method)).toEqual(["Target.closeTarget", "Target.createTarget", "Target.closeTarget"])
+    fake.targets = fake.targets.filter((target) => target.targetId === "blank")
+    fake.push("Target.targetDestroyed", { targetId: "t1" })
+    fake.push("Target.targetDestroyed", { targetId: "t2" })
+    for (const recorded of [events, secondEvents]) {
+      await vi.waitFor(() => expect(last(recorded.tabLists)).toEqual({ tabs: [{ targetId: "blank", url: "about:blank", title: "" }], followed: "blank" }))
+    }
+    await Promise.all([viewer.reload(), second.reload()])
+    expect(fake.sent("Page.reload").map((message) => message.sessionId)).toEqual([sessionFor("blank"), sessionFor("blank")])
+  })
+
+  it("releases rejected close reservations so another viewer can retry", async () => {
+    const { fake, viewer } = await openViewer()
+    const second = await BrowserViewer.open(fake.url, record())
+    viewers.push(second)
+    const close = fake.handlers["Target.closeTarget"]
+    fake.handlers["Target.closeTarget"] = () => ({ success: false })
+    await expect(viewer.closeTab("t1")).rejects.toThrow("Could not close tab t1")
+    fake.handlers["Target.closeTarget"] = close
+    await second.closeTab("t1")
+    expect(fake.sent("Target.closeTarget")).toHaveLength(2)
+    expect(fake.sent("Target.createTarget")).toHaveLength(0)
+  })
+
+  it("recovers both viewers when detach precedes stale info and another followed tab is closing", async () => {
+    const { fake, viewer, events } = await openViewer()
+    const secondEvents = record()
+    const second = await BrowserViewer.open(fake.url, secondEvents)
+    viewers.push(second)
+    await viewer.follow("t1")
+    await second.follow("t2")
+    const history = fake.handlers["Page.getNavigationHistory"]
+    fake.handlers["Page.getNavigationHistory"] = (message, self) => [sessionFor("t1"), sessionFor("t2")].includes(message.sessionId ?? "")
+      ? new CdpError("Cannot read a page another viewer is closing") : history(message, self)
+    fake.handlers["Target.attachToTarget"] = (message, self) => self.targets.some((target) => target.targetId === message.params.targetId)
+      ? { sessionId: sessionFor(message.params.targetId) } : new CdpError("No target with given id found")
+    fake.handlers["Target.closeTarget"] = (message, self) => {
+      const targetInfo = self.targets.find((target) => target.targetId === message.params.targetId)!
+      self.targets = self.targets.filter((target) => target.targetId !== message.params.targetId)
+      self.push("Target.detachedFromTarget", { targetId: targetInfo.targetId, sessionId: sessionFor(targetInfo.targetId) })
+      self.push("Target.targetInfoChanged", { targetInfo: { ...targetInfo, attached: false } })
+      self.push("Target.targetDestroyed", { targetId: targetInfo.targetId })
+      return { success: true }
+    }
+    await Promise.all([viewer.closeTab("t1"), second.closeTab("t2")])
+    for (const recorded of [events, secondEvents]) {
+      await vi.waitFor(() => expect(last(recorded.tabLists)).toEqual({ tabs: [{ targetId: "blank", url: "about:blank", title: "" }], followed: "blank" }))
+      expect(recorded.errors).toEqual([])
+    }
+    await Promise.all([viewer.reload(), second.reload()])
+    expect(fake.sent("Page.reload").map((message) => message.sessionId)).toEqual([sessionFor("blank"), sessionFor("blank")])
+  })
+
+  it("drops shared close state after the last viewer disconnects", async () => {
+    const { fake, viewer } = await openViewer()
+    fake.handlers["Target.closeTarget"] = () => ({ success: true })
+    await viewer.closeTab("t1")
+    await viewer.close()
+    const reopened = await BrowserViewer.open(fake.url, record())
+    viewers.push(reopened)
+    await reopened.closeTab("t1")
+    expect(fake.sent("Target.closeTarget")).toHaveLength(2)
+    expect(fake.sent("Target.createTarget")).toHaveLength(0)
+  })
+
+  it("does not replace the last tab when the agent closes it externally", async () => {
+    const { fake, events } = await openViewer([page("t1")])
+    fake.targets = []
+    fake.push("Target.targetDestroyed", { targetId: "t1" })
+    await vi.waitFor(() => expect(last(events.tabLists)).toEqual({ tabs: [], followed: null }))
+    expect(fake.sent("Target.createTarget")).toHaveLength(0)
   })
 
   it("follow moves the screencast and input to the chosen tab", async () => {

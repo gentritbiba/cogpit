@@ -11,10 +11,11 @@ import { existsSync } from "node:fs"
 import { delimiter } from "node:path"
 import { binDir, pluginDir, shimPath } from "./paths"
 import { pluginManifestFile } from "./skill"
+import { browserUnsupportedReason } from "./platform"
 
 /** True once agent-browser is installed: the shim is written only then. */
 export function browserShimInstalled(): boolean {
-  return existsSync(shimPath())
+  return browserUnsupportedReason() === null && existsSync(shimPath())
 }
 
 export function browserAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string): NodeJS.ProcessEnv {
@@ -28,6 +29,7 @@ export function browserAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string
 }
 
 export function browserPluginPaths(): string[] {
+  if (browserUnsupportedReason()) return []
   const manifest = pluginManifestFile()
   return manifest !== null && existsSync(manifest) ? [pluginDir()] : []
 }

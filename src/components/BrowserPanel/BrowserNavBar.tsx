@@ -1,5 +1,5 @@
 import { memo, useState, type FormEvent, type KeyboardEvent } from "react"
-import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from "lucide-react"
+import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -35,9 +35,11 @@ interface BrowserNavBarProps {
   onForward: () => void
   onReload: () => void
   onFollow: (targetId: string) => void
+  onCloseTab: (targetId: string) => void
 }
 
 function tabLabel(tab: BrowserTab): string {
+  if (tab.url === "about:blank" && (!tab.title.trim() || tab.title === "about:blank")) return "New tab"
   if (tab.title.trim()) return tab.title.trim()
   try {
     return new URL(tab.url).hostname || tab.url
@@ -105,6 +107,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
   onForward,
   onReload,
   onFollow,
+  onCloseTab,
 }: BrowserNavBarProps) {
   // `null` means "show the live url"; a string is the user's own text.
   const [draft, setDraft] = useState<string | null>(null)
@@ -185,22 +188,45 @@ export const BrowserNavBar = memo(function BrowserNavBar({
         {status && <FrameStatus status={status} />}
       </div>
 
-      {tabs.length > 1 && (
+      {tabs.length > 0 && (
         <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
           {tabs.map((tab) => (
-            <Button
+            <div
               key={tab.targetId}
-              size="xs"
-              variant={tab.targetId === followed ? "secondary" : "ghost"}
               className={cn(
-                "max-w-40 shrink-0 font-normal text-muted-foreground",
-                tab.targetId === followed && "text-foreground",
+                "flex max-w-48 shrink-0 items-center rounded-md",
+                tab.targetId === followed && "bg-secondary",
               )}
-              aria-current={tab.targetId === followed ? "page" : undefined}
-              onClick={() => onFollow(tab.targetId)}
             >
-              <span className="truncate">{tabLabel(tab)}</span>
-            </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="min-w-0 shrink rounded-r-none"
+                aria-current={tab.targetId === followed ? "page" : undefined}
+                title={tab.title || tab.url}
+                onClick={() => onFollow(tab.targetId)}
+                onMouseDown={(event) => {
+                  if (event.button === 1) event.preventDefault()
+                }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return
+                  event.preventDefault()
+                  onCloseTab(tab.targetId)
+                }}
+              >
+                <span className="truncate">{tabLabel(tab)}</span>
+              </Button>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="rounded-l-none"
+                aria-label={`Close tab: ${tabLabel(tab)}`}
+                title="Close tab"
+                onClick={() => onCloseTab(tab.targetId)}
+              >
+                <X data-icon="inline-start" />
+              </Button>
+            </div>
           ))}
         </div>
       )}

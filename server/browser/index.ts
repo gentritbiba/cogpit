@@ -17,6 +17,7 @@ import { shutdownBrowsers, startSweeper } from "./daemons"
 import { profilesDir, sharedRunDir } from "./paths"
 import { ensureShim, findRealAgentBrowser } from "./shim"
 import { ensurePlugin } from "./skill"
+import { browserUnsupportedReason } from "./platform"
 
 export interface BrowserSupport {
   shutdown(): Promise<void>
@@ -31,6 +32,7 @@ function attempt(step: string, run: () => void): void {
 }
 
 export function initBrowserSupport(isCogpitSessionLive: (id: string) => boolean): BrowserSupport {
+  if (browserUnsupportedReason()) return { shutdown: async () => {} }
   let stopSweeper: (() => void) | null = null
 
   attempt("creating the browser directories", () => {

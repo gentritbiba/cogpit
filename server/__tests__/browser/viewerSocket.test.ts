@@ -95,6 +95,10 @@ class FakeViewer implements BrowserViewerLike {
     return this.record("follow", targetId)
   }
 
+  closeTab(targetId: string): Promise<void> {
+    return this.record("closeTab", targetId)
+  }
+
   mouse(message: Extract<BrowserClientMessage, { type: "mouse" }>): Promise<void> {
     return this.record("mouse", message)
   }
@@ -605,10 +609,11 @@ describe("BrowserViewerManager", () => {
       ws.receive({ type: "forward" })
       ws.receive({ type: "reload" })
       ws.receive({ type: "follow", targetId: "t2" })
+      ws.receive({ type: "close-tab", targetId: "t1" })
       await settle()
 
       expect(viewer.names()).toEqual([
-        "setViewport", "mouse", "wheel", "key", "navigate", "back", "forward", "reload", "follow",
+        "setViewport", "mouse", "wheel", "key", "navigate", "back", "forward", "reload", "follow", "closeTab",
       ])
       expect(viewer.calls[0].args).toEqual([900, 600, 2])
       expect(viewer.calls[1].args).toEqual([mouse])
@@ -616,6 +621,7 @@ describe("BrowserViewerManager", () => {
       expect(viewer.calls[3].args).toEqual([key])
       expect(viewer.calls[4].args).toEqual(["example.com"])
       expect(viewer.calls[8].args).toEqual(["t2"])
+      expect(viewer.calls[9].args).toEqual(["t1"])
       expect(ws.errors()).toEqual([])
     })
 

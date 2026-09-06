@@ -9,12 +9,13 @@ export type BrowserClientMessage =
   | { type: "navigate"; url: string }
   | { type: "back" } | { type: "forward" } | { type: "reload" }
   | { type: "follow"; targetId: string }
+  | { type: "close-tab"; targetId: string }
   | { type: "launch"; url: string }
 
 export interface BrowserTab { targetId: string; url: string; title: string }
 
 export type BrowserServerMessage =
-  | { type: "status"; state: "not-installed" | "stopped" | "connecting" | "live"; session: string; message?: string }
+  | { type: "status"; state: "unsupported" | "not-installed" | "stopped" | "connecting" | "live"; session: string; message?: string }
   | { type: "tabs"; tabs: BrowserTab[]; followed: string | null }
   | { type: "page"; targetId: string; url: string; title: string; canGoBack: boolean; canGoForward: boolean }
   | { type: "error"; message: string }
@@ -49,6 +50,7 @@ const CLIENT_MESSAGE_FIELDS: { [T in ClientMessageType]: FieldChecks<ClientMessa
   forward: {},
   reload: {},
   follow: { targetId: string },
+  "close-tab": { targetId: (value) => string(value) && (value as string).trim().length > 0 },
   launch: { url },
 }
 

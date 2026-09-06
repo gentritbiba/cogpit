@@ -23,14 +23,16 @@ import { isRunning, launch, readDevToolsEndpoint } from "./daemons"
 import { assertNamedBrowser } from "./paths"
 import { touchLastUrl } from "./registry"
 import { findRealAgentBrowser } from "./shim"
+import { browserUnsupportedReason } from "./platform"
 
 /** The slice of `BrowserViewer` a connection drives, so tests can stand in for it. */
 export type BrowserViewerLike = Pick<
   BrowserViewer,
-  "setViewport" | "follow" | "mouse" | "wheel" | "key" | "navigate" | "back" | "forward" | "reload" | "close"
+  "setViewport" | "follow" | "closeTab" | "mouse" | "wheel" | "key" | "navigate" | "back" | "forward" | "reload" | "close"
 >
 
 export interface ViewerSocketDeps {
+  unsupportedReason?: () => string | null
   installed: () => boolean
   isRunning: (name: string) => Promise<boolean>
   endpoint: (name: string) => { browserWsUrl: string } | null
@@ -48,6 +50,7 @@ const AUTHORIZATION_RECHECK_MS = 5_000
 const ATTACH_TIMEOUT_MS = 10_000
 
 export const defaultViewerSocketDeps: ViewerSocketDeps = {
+  unsupportedReason: browserUnsupportedReason,
   installed: () => findRealAgentBrowser() !== null,
   isRunning: (name) => isRunning(name),
   endpoint: (name) => readDevToolsEndpoint(name),
@@ -127,6 +130,12 @@ export class BrowserViewerManager {
     ws.on("close", () => this.teardown(connection))
     ws.on("error", () => this.teardown(connection))
 
+    const unsupportedReason = this.deps.unsupportedReason?.()
+    if (unsupportedReason) {
+      connection.terminal = true
+      this.setStatus(connection, "unsupported", unsupportedReason)
+      return
+    }
     if (!this.deps.installed()) {
       connection.terminal = true
       this.setStatus(connection, "not-installed")
@@ -339,6 +348,9 @@ export class BrowserViewerManager {
           break
         case "follow":
           await viewer.follow(message.targetId)
+          break
+        case "close-tab":
+          await viewer.closeTab(message.targetId)
           break
         default: {
           // Exhaustiveness guard: a new client message must fail typecheck here

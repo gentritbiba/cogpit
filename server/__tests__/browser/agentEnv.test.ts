@@ -2,7 +2,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
 import { binDir, NO_COGPIT_SESSION, pluginDir, shimPath } from "../../browser/paths"
 import { ensurePlugin } from "../../browser/skill"

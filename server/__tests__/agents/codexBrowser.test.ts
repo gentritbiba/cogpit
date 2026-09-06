@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 import { codexBrowserConfig } from "../../agents/codexBrowser"
 import { BROWSER_CONTEXT_APPEND } from "../../browser/agentContext"
 import { binDir, shimPath } from "../../browser/paths"

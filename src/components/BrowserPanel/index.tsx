@@ -102,12 +102,14 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const goForward = useCallback(() => send({ type: "forward" }), [send])
   const reload = useCallback(() => send({ type: "reload" }), [send])
   const follow = useCallback((targetId: string) => send({ type: "follow", targetId }), [send])
+  const closeTab = useCallback((targetId: string) => send({ type: "close-tab", targetId }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
   const state = socket.state?.state ?? null
-  const notInstalled = status?.installed === false || state === "not-installed"
-  const live = !notInstalled && state === "live"
-  const stopped = !notInstalled && state === "stopped"
+  const unsupported = status?.unsupportedReason ?? (state === "unsupported" ? socket.state?.message ?? "The Browser panel is unavailable on this host." : null)
+  const notInstalled = !unsupported && (status?.installed === false || state === "not-installed")
+  const live = !unsupported && !notInstalled && state === "live"
+  const stopped = !unsupported && !notInstalled && state === "stopped"
   const selectedInfo = sessions.find((session) => session.name === selected) ?? null
   // The transport dropped under a page that was live: the last frame is still
   // worth looking at, as long as the panel stops calling it the live one.
@@ -118,7 +120,12 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <BrowserSessionBar
+      {unsupported && (
+        <div className="flex justify-end border-b p-1">
+          <Button variant="ghost" size="icon-xs" aria-label="Close browser panel" onClick={closePanel}><X /></Button>
+        </div>
+      )}
+      {!unsupported && <BrowserSessionBar
         sessions={sessions}
         selected={selected}
         currentSessionId={context.session?.sessionId ?? null}
@@ -132,7 +139,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
         onStop={handleStop}
         onShowDefault={showDefault}
         onClose={closePanel}
-      />
+      />}
 
       {live && (
         <BrowserNavBar
@@ -145,6 +152,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           onForward={goForward}
           onReload={reload}
           onFollow={follow}
+          onCloseTab={closeTab}
         />
       )}
 
@@ -159,6 +167,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {unsupported && <BrowserEmptyState kind="unsupported" message={unsupported} />}
         {notInstalled && (
           <BrowserEmptyState kind="not-installed" onOpenSkill={openSkill} />
         )}
@@ -182,7 +191,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
             <AgentCaption activity={activity && activity.session === selected ? activity : null} />
           </>
         )}
-        {!notInstalled && !stopped && !live && (
+        {!unsupported && !notInstalled && !stopped && !live && (
           <div
             role="status"
             className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"

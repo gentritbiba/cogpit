@@ -109,6 +109,7 @@ describe("parseClientMessage", () => {
     { type: "forward" },
     { type: "reload" },
     { type: "follow", targetId: "tab-1" },
+    { type: "close-tab", targetId: "tab-1" },
     { type: "launch", url: "about:blank" },
   ]
 
@@ -161,6 +162,10 @@ describe("parseClientMessage", () => {
     ["overlong launch url", { type: "launch", url: `https://x/${"a".repeat(2048)}` }],
     ["missing follow targetId", { type: "follow" }],
     ["numeric follow targetId", { type: "follow", targetId: 1 }],
+    ["missing close targetId", { type: "close-tab" }],
+    ["numeric close targetId", { type: "close-tab", targetId: 1 }],
+    ["empty close targetId", { type: "close-tab", targetId: "" }],
+    ["blank close targetId", { type: "close-tab", targetId: "  " }],
   ])("returns null for %s", (_label, message) => {
     expect(parseClientMessage(JSON.stringify(message))).toBeNull()
   })

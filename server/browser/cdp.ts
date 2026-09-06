@@ -151,6 +151,7 @@ interface TargetInfo {
   type: string
   url: string
   title: string
+  attached?: boolean
 }
 
 interface NavigationHistory {
@@ -335,6 +336,15 @@ function sameMetrics(a: PageMetrics, b: PageMetrics): boolean {
   return a.width === b.width && a.height === b.height && a.deviceScaleFactor === b.deviceScaleFactor
 }
 
+interface TabCloseCoordinator {
+  queue: Promise<unknown>
+  closing: Set<string>
+  requested: Set<string>
+  viewers: number
+}
+
+const tabCloseCoordinators = new Map<string, TabCloseCoordinator>()
+
 /**
  * One viewer per socket client. Follows the most recently created page target
  * until `follow()` pins one; a pinned tab stays followed until it is destroyed,
@@ -344,6 +354,7 @@ function sameMetrics(a: PageMetrics, b: PageMetrics): boolean {
  */
 export class BrowserViewer {
   private readonly targets = new Map<string, PageTarget>()
+  private readonly closingTargets = new Set<string>()
   private followed: string | null = null
   private pinned = false
   private ready = false
@@ -355,19 +366,27 @@ export class BrowserViewer {
   private readonly captured = new Map<string, PageMetrics>()
   private buttons = 0
   private queue: Promise<unknown> = Promise.resolve()
+  private readonly tabCloses: TabCloseCoordinator
+  private releasedTabCloses = false
 
-  private constructor(private readonly cdp: CdpConnection, private readonly events: ViewerEvents) {}
+  private constructor(private readonly cdp: CdpConnection, private readonly events: ViewerEvents, private readonly browserWsUrl: string) {
+    this.tabCloses = tabCloseCoordinators.get(browserWsUrl) ?? { queue: Promise.resolve(), closing: new Set(), requested: new Set(), viewers: 0 }
+    this.tabCloses.viewers++
+    tabCloseCoordinators.set(browserWsUrl, this.tabCloses)
+  }
 
   static async open(browserWsUrl: string, events: ViewerEvents): Promise<BrowserViewer> {
     const cdp = await CdpConnection.connect(browserWsUrl)
-    const viewer = new BrowserViewer(cdp, events)
+    const viewer = new BrowserViewer(cdp, events, browserWsUrl)
     try {
       await viewer.start()
     } catch (error) {
+      viewer.releaseTabCloses()
       cdp.close()
       throw error
     }
     cdp.onClose((reason) => {
+      viewer.releaseTabCloses()
       if (!viewer.closed) events.closed(reason)
     })
     return viewer
@@ -384,6 +403,50 @@ export class BrowserViewer {
       await this.setFollowed(targetId)
       this.pinned = true
     })
+  }
+
+  closeTab(targetId: string): Promise<void> {
+    this.tabCloses.requested.add(targetId)
+    return this.enqueue(() => {
+      const run = this.tabCloses.queue.then(() => this.closeCoordinatedTab(targetId))
+      this.tabCloses.queue = run.catch(() => {})
+      return run
+    }).finally(() => { this.tabCloses.requested.delete(targetId) })
+  }
+
+  private async closeCoordinatedTab(targetId: string): Promise<void> {
+    if (this.closed) return
+    if (!this.targets.has(targetId)) throw new Error(`Unknown tab ${targetId}`)
+    const { targetInfos } = await this.cdp.send<{ targetInfos: TargetInfo[] }>("Target.getTargets")
+    if (this.closed) return
+    const pages = targetInfos.filter(isPageTarget)
+    const present = new Set(pages.map((target) => target.targetId))
+    for (const closing of this.tabCloses.closing) {
+      if (!present.has(closing)) this.tabCloses.closing.delete(closing)
+    }
+    if (!present.has(targetId) || this.tabCloses.closing.has(targetId)) return
+    if (pages.filter((target) => !this.tabCloses.closing.has(target.targetId)).length === 1) {
+      const { targetId: blankId } = await this.cdp.send<{ targetId: string }>(
+        "Target.createTarget", { url: "about:blank" },
+      )
+      await this.attach({ targetId: blankId, type: "page", url: "about:blank", title: "" })
+    }
+    this.closingTargets.add(targetId)
+    this.tabCloses.closing.add(targetId)
+    try {
+      const result = await this.cdp.send<{ success: boolean }>("Target.closeTarget", { targetId })
+      if (!result.success) throw new Error(`Could not close tab ${targetId}`)
+    } catch (error) {
+      this.closingTargets.delete(targetId)
+      this.tabCloses.closing.delete(targetId)
+      throw error
+    }
+  }
+
+  private releaseTabCloses(): void {
+    if (this.releasedTabCloses) return
+    this.releasedTabCloses = true
+    if (--this.tabCloses.viewers === 0) tabCloseCoordinators.delete(this.browserWsUrl)
   }
 
   async mouse(msg: ClientMessage<"mouse">): Promise<void> {
@@ -444,6 +507,7 @@ export class BrowserViewer {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.releaseTabCloses()
     if (this.resizeTimer) clearTimeout(this.resizeTimer)
     this.resizeTimer = null
     this.buttons = 0
@@ -522,7 +586,9 @@ export class BrowserViewer {
 
   private newestTarget(): string | null {
     let newest: string | null = null
-    for (const targetId of this.targets.keys()) newest = targetId
+    for (const targetId of this.targets.keys()) {
+      if (!this.closingTargets.has(targetId) && !this.tabCloses.closing.has(targetId) && !this.tabCloses.requested.has(targetId)) newest = targetId
+    }
     return newest
   }
 
@@ -553,6 +619,10 @@ export class BrowserViewer {
     // A tab that navigates into devtools:// stops being ours to show; one that
     // navigates back out of an extension page is ours again.
     if (!target) {
+      if (info.attached === false) {
+        const { targetInfos } = await this.cdp.send<{ targetInfos: TargetInfo[] }>("Target.getTargets")
+        if (!targetInfos.some((candidate) => candidate.targetId === info.targetId)) return
+      }
       await this.onTargetCreated(info)
       return
     }
@@ -579,6 +649,7 @@ export class BrowserViewer {
     const target = this.targets.get(targetId)
     if (!target) return
     this.targets.delete(targetId)
+    this.closingTargets.delete(targetId)
     if (this.screencast?.sessionId === target.sessionId) this.screencast = null
     if (this.override?.sessionId === target.sessionId) this.override = null
     this.captured.delete(target.sessionId)

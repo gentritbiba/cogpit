@@ -1,5 +1,11 @@
 # Browser Panel
 
+Managed browsers are supported on macOS and Linux. Native Windows support is not
+available yet: the routing shim and daemon lifecycle require POSIX facilities.
+On a Windows host, Cogpit shows this limitation instead of offering installation,
+and does not install the shim, inject browser guidance, or start browser daemons.
+A Windows client can still view a browser hosted by a supported remote device.
+
 A workspace panel that streams the agent's live `agent-browser` session, lets you click and type in it, and manages persistent named browsers with automatic login persistence across restarts.
 
 ## What It Does
@@ -175,10 +181,11 @@ The standard `agent-browser` skill still applies for all commands.
 ## REST API
 
 All routes require admin trust (same as PTY). Failures send JSON errors with status codes.
+On unsupported hosts, status includes `unsupportedReason`, `installed: false`, `binaryPath: null` and an empty session list. Other browser routes return 503.
 
 | Method | Route | Body | Response | Notes |
 |--------|-------|------|----------|-------|
-| GET | `/api/browser` | — | `{installed, binaryPath, sessions:[...]}` | Status for the panel |
+| GET | `/api/browser` | — | `{installed, binaryPath, sessions:[...], unsupportedReason?}` | Status for the panel |
 | POST | `/api/browser/sessions` | `{name, note?}` | 201 info / 400 invalid / 409 exists | Create named browser |
 | PATCH | `/api/browser/sessions/:name` | `{note?}` | info / 404 not found | Update note |
 | DELETE | `/api/browser/sessions/:name` | — | 204 / 400 if default | Delete browser (stops it first) |

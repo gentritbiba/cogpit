@@ -27,12 +27,14 @@ import {
   type BrowserPatch,
 } from "../browser/registry"
 import { findRealAgentBrowser } from "../browser/shim"
+import { browserUnsupportedReason } from "../browser/platform"
 import { installSkill, installSkillEverywhere, skillTargets } from "../browser/skill"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn, type NextFn } from "../http"
 
 type RunningProbe = (name: string) => Promise<boolean>
 
 export interface BrowserRouteDeps {
+  unsupportedReason?: () => string | null
   binaryPath: () => string | null
   listBrowsers: (isRunning: RunningProbe) => Promise<BrowserSessionInfo[]>
   readBrowser: (name: string, isRunning: RunningProbe) => Promise<BrowserSessionInfo>
@@ -48,6 +50,7 @@ export interface BrowserRouteDeps {
 }
 
 export const defaultBrowserRouteDeps: BrowserRouteDeps = {
+  unsupportedReason: browserUnsupportedReason,
   binaryPath: () => findRealAgentBrowser(),
   listBrowsers: (running) => listBrowsers(running),
   readBrowser: (name, running) => readBrowser(name, running),
@@ -103,6 +106,10 @@ function messageOf(error: unknown): string {
 }
 
 async function sendStatus(res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
+  const unsupportedReason = deps.unsupportedReason?.()
+  if (unsupportedReason) {
+    return sendJson(res, 200, { installed: false, binaryPath: null, sessions: [], unsupportedReason } satisfies BrowserStatus)
+  }
   const binaryPath = deps.binaryPath()
   const status: BrowserStatus = {
     installed: binaryPath !== null,
@@ -219,6 +226,8 @@ async function dispatch(
     if (method !== "GET") return next()
     return sendStatus(res, deps)
   }
+  const unsupportedReason = deps.unsupportedReason?.()
+  if (unsupportedReason) return sendJson(res, 503, { error: unsupportedReason })
   if (path === "/sessions") {
     if (method !== "POST") return next()
     return createSession(await readBody(req), res, deps)

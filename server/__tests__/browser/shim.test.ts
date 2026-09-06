@@ -93,7 +93,8 @@ describe("renderShim", () => {
   })
 })
 
-describe("shim routing", () => {
+// Native Windows does not execute the POSIX browser shim or implement its mode bits.
+describe.skipIf(process.platform === "win32")("shim routing", () => {
   it("defaults to the shared default profile with a debugging port", () => {
     const run = runShim([], { COGPIT_SESSION_ID: "s1" })
     const profile = join(home, "profiles", "default")
@@ -228,11 +229,11 @@ describe("ensureShim", () => {
     expect(ensureShim(fakeBinary)).toEqual({ path: shimPath() })
     expect(shimPath().startsWith(binDir())).toBe(true)
     expect(() => accessSync(shimPath(), fsConstants.X_OK)).not.toThrow()
-    expect(statSync(shimPath()).mode & 0o111).toBe(0o111)
+    if (process.platform !== "win32") expect(statSync(shimPath()).mode & 0o111).toBe(0o111)
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(fakeBinary))
   })
 
-  it("produces a shim that routes like the rendered script", () => {
+  it.skipIf(process.platform === "win32")("produces a shim that routes like the rendered script", () => {
     ensureShim(fakeBinary)
     const env = { HOME: root, PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home }
     const out = execFileSync(shimPath(), ["open", "z"], { env, encoding: "utf8" })
@@ -247,12 +248,12 @@ describe("ensureShim", () => {
     expect(statSync(shimPath()).mtimeMs).toBe(old)
   })
 
-  it("repairs a lost execute bit without rewriting", () => {
+  it.skipIf(process.platform === "win32")("repairs a lost execute bit without rewriting", () => {
     ensureShim(fakeBinary)
     chmodSync(shimPath(), 0o644)
     const old = ageShim()
     ensureShim(fakeBinary)
-    expect(statSync(shimPath()).mode & 0o111).toBe(0o111)
+    if (process.platform !== "win32") expect(statSync(shimPath()).mode & 0o111).toBe(0o111)
     expect(statSync(shimPath()).mtimeMs).toBe(old)
   })
 
@@ -309,7 +310,7 @@ describe("findRealAgentBrowser", () => {
     expect(findRealAgentBrowser(env)).toBe(fakeBinary)
   })
 
-  it("ignores empty entries and non-executable candidates", () => {
+  it.skipIf(process.platform === "win32")("ignores empty entries and non-executable candidates", () => {
     const plainDir = join(root, "plain")
     mkdirSync(plainDir)
     writeFileSync(join(plainDir, "agent-browser"), "not runnable", { mode: 0o644 })

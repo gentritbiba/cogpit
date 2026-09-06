@@ -138,15 +138,16 @@ describe("installSkill", () => {
     delete process.env.COGPIT_SKILL_HOME
     const home = join(root, "fallback")
     mkdirSync(home)
-    const previous = process.env.HOME
-    process.env.HOME = home
+    const homeKey = process.platform === "win32" ? "USERPROFILE" : "HOME"
+    const previous = process.env[homeKey]
+    process.env[homeKey] = home
     try {
       const dir = installSkill("claude")
       expect(dir.startsWith(home)).toBe(true)
       expect(existsSync(join(dir, "SKILL.md"))).toBe(true)
     } finally {
-      if (previous === undefined) delete process.env.HOME
-      else process.env.HOME = previous
+      if (previous === undefined) delete process.env[homeKey]
+      else process.env[homeKey] = previous
     }
   })
 })

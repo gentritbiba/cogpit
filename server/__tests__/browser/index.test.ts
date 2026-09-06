@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
+
 /**
  * `failures` names the step a test wants to break; the mocks below delegate to
  * the real modules for every other step, so a tolerance test still exercises
@@ -61,6 +63,7 @@ vi.mock("../../browser/daemons", async (importOriginal) => {
 })
 
 import { initBrowserSupport } from "../../browser"
+import { renderShim } from "../../browser/shim"
 import { pluginManifestFile, pluginSkillFile, SKILL_NAME } from "../../browser/skill"
 import { profilesDir, sharedRunDir, shimPath } from "../../browser/paths"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
@@ -138,8 +141,8 @@ describe("initBrowserSupport", () => {
 
     expect(statSync(profilesDir()).isDirectory()).toBe(true)
     expect(statSync(sharedRunDir()).isDirectory()).toBe(true)
-    expect(readFileSync(shimPath(), "utf8")).toContain(`real="${realBinary}"`)
-    expect(statSync(shimPath()).mode & 0o111).not.toBe(0)
+    expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(realBinary))
+    if (process.platform !== "win32") expect(statSync(shimPath()).mode & 0o111).not.toBe(0)
     expect(JSON.parse(readFileSync(manifestFile(), "utf8")).name).toBe("cogpit")
     expect(readFileSync(pluginSkillFile(), "utf8")).toContain("name: cogpit-browser")
     expect(record.sweepersStarted).toBe(1)
