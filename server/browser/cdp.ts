@@ -1,6 +1,7 @@
 import { WebSocket } from "ws"
 import type { FrameHeader } from "../../shared/browser/frames"
 import type { BrowserClientMessage, BrowserServerMessage, BrowserTab } from "../../shared/browser/protocol"
+import { resolveNavigationUrl } from "../../shared/browser/url"
 
 type CdpParams = Record<string, unknown>
 type CdpEventHandler = (params: CdpParams, sessionId?: string) => void
@@ -252,23 +253,6 @@ function macEditingCommands(key: string, modifiers: number): string[] | undefine
   if (pressed === "z" && (modifiers & MODIFIER_SHIFT) !== 0) return ["redo"]
   const command = MAC_EDITING_COMMANDS.get(pressed)
   return command === undefined ? undefined : [command]
-}
-
-const ALLOWED_SCHEMES = new Set(["http", "https", "about"])
-/** A scheme, except that `host:port` is not one. */
-const SCHEME_RE = /^([a-z][a-z0-9+.-]*):(?!\d+(?:[/?#]|$))/i
-/** Loopback only: a bare `host:port` elsewhere is still https. */
-const LOOPBACK_RE = /^(localhost|127(\.\d+){1,3}|0\.0\.0\.0|\[::1\]|::1)(?:[:/?#]|$)/i
-
-export function resolveNavigationUrl(raw: string): string {
-  const url = raw.trim()
-  if (url === "") throw new Error("Nothing to navigate to")
-  const scheme = SCHEME_RE.exec(url)?.[1].toLowerCase()
-  if (scheme !== undefined) {
-    if (!ALLOWED_SCHEMES.has(scheme)) throw new Error(`Refusing to navigate to a ${scheme}: url`)
-    return url
-  }
-  return `${LOOPBACK_RE.test(url) ? "http" : "https"}://${url}`
 }
 
 function isPageTarget(info: TargetInfo): boolean {

@@ -317,6 +317,22 @@ drops back to `stopped` + polling, which self-heals on the next poll. The
 invalid-name close reuses `assertNamedBrowser`'s message, so a throwaway
 `tmp-*` name is refused on the socket too.
 
+Review follow-up (`fix(browser): reject non-web launch URLs and harden the
+viewer socket`): `launch` used to pass the client's string straight to the shim,
+so a socket reachable through the hub could open `file:///…` in a real Chromium
+and stream it back. `resolveNavigationUrl` moved to `shared/browser/url.ts` and
+now guards `daemons.launch` — the one door both the socket and the REST route go
+through (the route checks it too, so a bad scheme is a 400 rather than a 502).
+The socket also: rechecks authorization on the way *out* (frames and JSON), the
+way `PtySessionManager` does, so a revoked session stops receiving video at once;
+races `openViewer` against a 10 s timeout, with a per-attempt token so a viewer
+that answers late is closed rather than adopted; settles the frame promise from
+`ws.once("close")` as well as the send callback; dedupes consecutive `error`
+messages like `status`; caches the last `viewport` and replays it after a
+reattach; parses `?session=` inside the guard (a request target like `//[`
+throws); closes the client sockets in `cleanup()`; and makes `deliver`'s switch
+exhaustive so a new protocol message cannot be dropped silently.
+
 ### Task 9: Skill + plugin + agent env ✅ done
 
 **Files:**
@@ -381,6 +397,13 @@ The valid skill-install targets are derived from the descriptor table
 - Modify: `server/hub/proxy.ts` — `handleHubUpgrade` matcher `^\/hub\/([^/]+)\/(__pty|__browser)$`, pass the transport path through to `attemptUpgrade` (`devicePath = `${transport}?token=…``, keep query string from the original url — the browser upgrade carries `?session=`; merge: original `url.search` params plus token).
 - Modify: `src/lib/device.ts` — `withBase` routes `/__browser` too.
 - Tests: extend `server/__tests__/security.test.ts` (protected prefix), `server/__tests__/hub/proxy.test.ts` (browser path + session query preserved), `src/lib/__tests__/device.test.ts` if present.
+
+The `/__browser` `WebSocketServer` must terminate its clients in the server's
+cleanup path the same way `app-server.ts` already does for the PTY `wss`
+(`for (const client of wss.clients) client.terminate()` before `wss.close()`),
+and its sockets must be registered with `PtyAuthorizationController` so
+`onSessionRevoked` closes them immediately — the manager's own 5 s recheck is the
+backstop, not the primary path.
 
 Commit: `feat(browser): /__browser transport`
 

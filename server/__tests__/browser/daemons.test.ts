@@ -255,6 +255,26 @@ describe("launch", () => {
     expect(deps.spawns).toEqual([])
   })
 
+  it.each([
+    "file:///Users/x/.ssh/id_rsa",
+    "javascript:alert(1)",
+    "data:text/html,hi",
+    "chrome://settings",
+  ])("refuses to open %s", async (url) => {
+    const deps = fakeDeps()
+    await expect(launch("work", url, undefined, deps)).rejects.toThrow(/Refusing to navigate/)
+    expect(deps.spawns).toEqual([])
+  })
+
+  it.each([
+    ["example.com", "https://example.com"],
+    ["localhost:3000", "http://localhost:3000"],
+  ])("normalises %s to %s before spawning", async (url, expected) => {
+    const deps = fakeDeps()
+    await launch("work", url, undefined, deps)
+    expect(deps.spawns[0].args).toEqual(["--session", "work", "open", expected])
+  })
+
   it("propagates spawn errors", async () => {
     const deps = fakeDeps({ spawnError: new Error("ENOENT") })
     await expect(launch("work", "https://example.com", undefined, deps)).rejects.toThrow("ENOENT")

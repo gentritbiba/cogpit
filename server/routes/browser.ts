@@ -11,6 +11,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 
 import { MAX_URL_LENGTH } from "../../shared/browser/protocol"
+import { resolveNavigationUrl } from "../../shared/browser/url"
 import type { BrowserSessionInfo, BrowserStatus } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import { isRunning, launch, stop } from "../browser/daemons"
@@ -153,6 +154,14 @@ async function launchSession(
   }
   if (url.length > MAX_URL_LENGTH) {
     sendJson(res, 400, { error: `Browser url must be at most ${MAX_URL_LENGTH} characters` })
+    return
+  }
+  // The daemon rejects the scheme too; checking here is what tells a bad request
+  // (400) apart from a browser that would not start (502).
+  try {
+    resolveNavigationUrl(url)
+  } catch (error) {
+    sendJson(res, 400, { error: messageOf(error) })
     return
   }
   try {

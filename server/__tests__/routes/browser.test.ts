@@ -347,6 +347,16 @@ describe("POST /api/browser/sessions/:name/launch", () => {
     expect(deps.launch).not.toHaveBeenCalled()
   })
 
+  it.each(["file:///Users/x/.ssh/id_rsa", "javascript:alert(1)", "data:text/html,hi", "chrome://settings"])(
+    "rejects %s with 400",
+    async (url) => {
+      const call = await drive("POST", "/sessions/github/launch", { url })
+
+      expect(call.status()).toBe(400)
+      expect(deps.launch).not.toHaveBeenCalled()
+    },
+  )
+
   it("rejects an oversized url", async () => {
     const call = await drive("POST", "/sessions/github/launch", {
       url: `https://example.com/${"a".repeat(2048)}`,

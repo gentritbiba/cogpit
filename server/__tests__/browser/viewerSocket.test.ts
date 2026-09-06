@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { WebSocket } from "ws"
 import type { ViewerEvents } from "../../browser/cdp"
+import { defaultDaemonDeps, launch as launchBrowser } from "../../browser/daemons"
 import {
   BrowserViewerManager,
   type BrowserViewerLike,
@@ -29,7 +30,6 @@ const JPEG = Uint8Array.from([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])
 
 class FakeSocket extends EventEmitter {
   readyState = OPEN
-  binaryType = ""
   readonly sent: (string | Uint8Array)[] = []
   readonly closes: { code: number; reason: string }[] = []
   private readonly pending: (() => void)[] = []
@@ -44,10 +44,6 @@ class FakeSocket extends EventEmitter {
     this.closes.push({ code, reason })
     this.readyState = CLOSED
     this.emit("close")
-  }
-
-  terminate(): void {
-    this.close(1006, "terminated")
   }
 
   /** Run the send callbacks the manager is waiting on. */
@@ -152,6 +148,9 @@ function request(query = "?session=default"): IncomingMessage {
   return { url: `/__browser${query}` } as IncomingMessage
 }
 
+/** Every harness is torn down in `afterEach`, so a failing assertion cannot leak timers. */
+const managers: BrowserViewerManager[] = []
+
 function makeHarness(overrides: Partial<ViewerSocketDeps> = {}) {
   const opened: OpenedViewer[] = []
   const controls = {
@@ -188,6 +187,7 @@ function makeHarness(overrides: Partial<ViewerSocketDeps> = {}) {
     ...overrides,
   }
   const manager = new BrowserViewerManager(deps)
+  managers.push(manager)
   return {
     manager,
     controls,
@@ -227,7 +227,7 @@ describe("BrowserViewerManager", () => {
   })
 
   afterEach(() => {
-    harness.manager.cleanup()
+    for (const manager of managers.splice(0)) manager.cleanup()
     vi.useRealTimers()
   })
 
@@ -240,6 +240,16 @@ describe("BrowserViewerManager", () => {
       ["throwaway", "?session=tmp-1"],
     ])("rejects a %s session name with 1008", async (_label, query) => {
       const ws = harness.connect(query)
+      await settle()
+
+      expect(ws.errors()).toHaveLength(1)
+      expect(ws.closes).toEqual([{ code: 1008, reason: expect.any(String) }])
+      expect(harness.calls.isRunning).toBe(0)
+    })
+
+    it("rejects a request target that cannot be parsed as a url", async () => {
+      const ws = new FakeSocket()
+      harness.manager.handleConnection(ws.asWebSocket(), { url: "//[" } as IncomingMessage)
       await settle()
 
       expect(ws.errors()).toHaveLength(1)
@@ -338,6 +348,69 @@ describe("BrowserViewerManager", () => {
       expect(harness.calls.isRunning).toBe(polls)
     })
 
+    it("refuses a launch url the daemon would not open, and spawns nothing", async () => {
+      const spawned: string[][] = []
+      const guarded = makeHarness({
+        launch: (name, url) => launchBrowser(name, url, undefined, {
+          ...defaultDaemonDeps,
+          spawn: async (_command, args) => {
+            spawned.push(args)
+            return { code: 0, stderr: "" }
+          },
+        }),
+      })
+      const ws = guarded.connect()
+      await settle()
+
+      ws.receive({ type: "launch", url: "file:///Users/x/.ssh/id_rsa" })
+      await settle()
+
+      expect(ws.errors()).toEqual(["Refusing to navigate to a file: url"])
+      expect(spawned).toEqual([])
+      expect(guarded.opened).toHaveLength(0)
+      expect(ws.statuses()).toEqual(["stopped"])
+    })
+
+    it("does not re-attach when a launch arrives while the viewer is live", async () => {
+      const ws = await connectLive(harness)
+
+      ws.receive({ type: "launch", url: "https://example.com" })
+      await settle()
+
+      expect(harness.opened).toHaveLength(1)
+      expect(ws.statuses()).toEqual(["connecting", "live"])
+      expect(harness.last().viewer.closeCount).toBe(0)
+    })
+
+    it("reports an attach that keeps failing only once", async () => {
+      harness.controls.running = true
+      harness.controls.endpoint = () => null
+      const ws = harness.connect()
+      await settle()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(ws.errors()).toEqual(["default is not exposing a DevTools endpoint"])
+      expect(harness.calls.isRunning).toBeGreaterThan(3)
+    })
+
+    it("replays the last viewport once the browser comes up", async () => {
+      const ws = harness.connect()
+      await settle()
+
+      ws.receive({ type: "viewport", width: 1024, height: 768, dpr: 2 })
+      await settle()
+      expect(harness.opened).toHaveLength(0)
+
+      harness.controls.running = true
+      await vi.advanceTimersByTimeAsync(2_000)
+
+      const viewer = harness.last().viewer
+      expect(viewer.names()).toEqual(["setViewport"])
+      expect(viewer.calls[0].args).toEqual([1024, 768, 2])
+      expect(ws.statuses()).toEqual(["stopped", "connecting", "live"])
+    })
+
     it("reports a failed launch and stays stopped", async () => {
       const failing = makeHarness({
         launch: async () => {
@@ -353,7 +426,50 @@ describe("BrowserViewerManager", () => {
       expect(ws.errors()).toEqual(["no binary"])
       expect(ws.statuses()).toEqual(["stopped"])
       expect(failing.opened).toHaveLength(0)
-      failing.manager.cleanup()
+    })
+  })
+
+  describe("attach timeout", () => {
+    function wedgedHarness() {
+      let opens = 0
+      let release: ((viewer: BrowserViewerLike) => void) | undefined
+      const harness = makeHarness({
+        openViewer: () => new Promise<BrowserViewerLike>((resolve) => {
+          opens += 1
+          release ??= resolve
+        }),
+      })
+      harness.controls.running = true
+      return { harness, releaseFirst: (viewer: BrowserViewerLike) => release?.(viewer), opens: () => opens }
+    }
+
+    it("gives up on a viewer that never answers and resumes polling", async () => {
+      const wedged = wedgedHarness()
+      const ws = wedged.harness.connect()
+      await settle()
+      expect(ws.statuses()).toEqual(["connecting"])
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(ws.statuses()).toEqual(["connecting", "stopped"])
+      expect(ws.errors()).toEqual([expect.stringContaining("did not answer")])
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(wedged.opens()).toBe(2)
+    })
+
+    it("closes a viewer that answers after the timeout instead of adopting it", async () => {
+      const wedged = wedgedHarness()
+      const late = new FakeViewer()
+      const ws = wedged.harness.connect()
+      await settle()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      wedged.releaseFirst(late)
+      await settle()
+
+      expect(late.closeCount).toBe(1)
+      expect(ws.statuses()).toEqual(["connecting", "stopped"])
     })
   })
 
@@ -377,6 +493,22 @@ describe("BrowserViewerManager", () => {
 
       ws.flush()
       await settle()
+      expect(flushed).toBe(true)
+    })
+
+    it("settles the frame promise when the socket dies mid-send", async () => {
+      const ws = await connectLive(harness)
+
+      let flushed = false
+      void Promise.resolve(harness.last().events.frame(HEADER, JPEG)).then(() => {
+        flushed = true
+      })
+      await settle()
+      expect(flushed).toBe(false)
+
+      ws.close()
+      await settle()
+
       expect(flushed).toBe(true)
     })
 
@@ -438,7 +570,6 @@ describe("BrowserViewerManager", () => {
 
       expect(ws.statuses()).toEqual(["connecting", "live"])
       expect(ws.errors()).toEqual([])
-      throwing.manager.cleanup()
     })
 
     it("forwards a viewer error without tearing the connection down", async () => {
@@ -575,6 +706,29 @@ describe("BrowserViewerManager", () => {
       expect(ws.closes[0].code).toBe(1008)
     })
 
+    it("stops sending before the next recheck once the authorizer says no", async () => {
+      let allowed = true
+      harness.controls.running = true
+      const ws = new FakeSocket()
+      harness.manager.handleConnection(ws.asWebSocket(), request(), () => allowed)
+      await settle()
+      const { events } = harness.last()
+      const sentWhileLive = ws.sent.length
+
+      allowed = false
+      let flushed = false
+      void Promise.resolve(events.frame(HEADER, JPEG)).then(() => {
+        flushed = true
+      })
+      events.tabs([{ targetId: "t1", url: "https://a.test/", title: "A" }], "t1")
+      await settle()
+
+      expect(ws.frames()).toHaveLength(0)
+      expect(ws.sent).toHaveLength(sentWhileLive)
+      expect(flushed).toBe(true)
+      expect(ws.closes).toEqual([{ code: 1008, reason: expect.any(String) }])
+    })
+
     it("fails closed when the authorizer throws", async () => {
       harness.controls.running = true
       const ws = new FakeSocket()
@@ -633,7 +787,29 @@ describe("BrowserViewerManager", () => {
 
       expect(slow.closeCount).toBe(1)
       expect(ws.statuses()).toEqual(["connecting"])
-      racing.manager.cleanup()
+    })
+
+    it("keeps two connections on one session independent", async () => {
+      const first = await connectLive(harness)
+      const second = harness.connect()
+      await settle()
+      const [one, two] = harness.opened
+      expect(harness.opened).toHaveLength(2)
+
+      one.events.error("only the first")
+      void one.events.frame(HEADER, JPEG)
+      await settle()
+      expect(second.errors()).toEqual([])
+      expect(second.frames()).toHaveLength(0)
+
+      first.close()
+      await settle()
+      expect(one.viewer.closeCount).toBe(1)
+      expect(two.viewer.closeCount).toBe(0)
+
+      second.receive({ type: "reload" })
+      await settle()
+      expect(two.viewer.names()).toEqual(["reload"])
     })
 
     it("cleanup closes every live connection and is idempotent", async () => {
@@ -647,10 +823,10 @@ describe("BrowserViewerManager", () => {
       harness.manager.cleanup()
 
       expect(viewers.map((viewer) => viewer.closeCount)).toEqual([1, 1])
+      expect(first.closes).toEqual([{ code: 1001, reason: expect.any(String) }])
+      expect(second.closes).toEqual([{ code: 1001, reason: expect.any(String) }])
       expect(vi.getTimerCount()).toBe(0)
 
-      first.close()
-      second.close()
       await vi.advanceTimersByTimeAsync(10_000)
       expect(harness.calls.isRunning).toBe(2)
     })

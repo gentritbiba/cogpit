@@ -1,8 +1,8 @@
 /**
  * The `/__browser` transport: one CDP viewer per socket client. Shaped like
  * `PtySessionManager` — same authorizer contract, same 5 s recheck, same 1008
- * close — so the two long-lived transports behave alike under a revoked
- * session.
+ * close, and the same outbound recheck so a revoked session stops receiving
+ * video immediately rather than at the next tick.
  *
  * Each connection is a small state machine. `not-installed` is terminal; the
  * rest cycle `stopped` ⇄ `connecting` → `live`, with a 2 s poll while stopped
@@ -43,9 +43,11 @@ export type ViewerConnectionAuthorizer = (touch: boolean) => boolean
 
 type StatusState = Extract<BrowserServerMessage, { type: "status" }>["state"]
 type InputMessage = Exclude<BrowserClientMessage, { type: "launch" }>
+type ViewportMessage = Extract<BrowserClientMessage, { type: "viewport" }>
 
 const POLL_INTERVAL_MS = 2_000
 const AUTHORIZATION_RECHECK_MS = 5_000
+const ATTACH_TIMEOUT_MS = 10_000
 
 export const defaultViewerSocketDeps: ViewerSocketDeps = {
   installed: () => findRealAgentBrowser() !== null,
@@ -61,6 +63,8 @@ interface ViewerConnection {
   readonly session: string
   readonly authorize?: ViewerConnectionAuthorizer
   status: StatusState | null
+  lastError: string | null
+  viewport: ViewportMessage | null
   viewer: BrowserViewerLike | null
   attaching: boolean
   terminal: boolean
@@ -87,8 +91,10 @@ export class BrowserViewerManager {
   constructor(private readonly deps: ViewerSocketDeps = defaultViewerSocketDeps) {}
 
   handleConnection(ws: WebSocket, req: IncomingMessage, authorize?: ViewerConnectionAuthorizer): void {
-    const session = sessionName(req)
+    let session: string
     try {
+      // Inside the guard: an upgrade target like `//[` is a TypeError, not a name.
+      session = sessionName(req)
       assertNamedBrowser(session)
     } catch (error) {
       this.sendTo(ws, { type: "error", message: messageOf(error) })
@@ -96,12 +102,13 @@ export class BrowserViewerManager {
       return
     }
 
-    ws.binaryType = "nodebuffer"
     const connection: ViewerConnection = {
       ws,
       session,
       authorize,
       status: null,
+      lastError: null,
+      viewport: null,
       viewer: null,
       attaching: false,
       terminal: false,
@@ -130,7 +137,11 @@ export class BrowserViewerManager {
   }
 
   cleanup(): void {
-    for (const connection of [...this.connections]) this.teardown(connection)
+    for (const connection of [...this.connections]) {
+      const { ws } = connection
+      this.teardown(connection)
+      if (ws.readyState === WebSocket.OPEN) ws.close(1001, "Browser transport shutting down")
+    }
   }
 
   private interval(run: () => void, ms: number): ReturnType<typeof setInterval> {
@@ -195,19 +206,50 @@ export class BrowserViewerManager {
     try {
       const endpoint = this.deps.endpoint(connection.session)
       if (endpoint === null) throw new Error(`${connection.session} is not exposing a DevTools endpoint`)
-      const viewer = await this.deps.openViewer(endpoint.browserWsUrl, this.viewerEvents(connection))
+      const viewer = await this.openViewer(connection, endpoint.browserWsUrl)
       if (connection.torn) {
         closeQuietly(viewer)
         return
       }
       connection.viewer = viewer
+      connection.lastError = null
       this.setStatus(connection, "live")
+      const { viewport } = connection
+      if (viewport) await this.deliver(connection, viewer, viewport)
     } catch (error) {
-      this.send(connection, { type: "error", message: messageOf(error) })
+      this.sendError(connection, messageOf(error))
       this.setStopped(connection)
     } finally {
       connection.attaching = false
     }
+  }
+
+  /**
+   * A Chromium that completes the WebSocket handshake and then never answers
+   * would otherwise leave the connection in `connecting` with the poll stopped
+   * and no way back. The attempt that timed out disowns its viewer, so one that
+   * arrives afterwards is closed instead of adopted.
+   */
+  private openViewer(connection: ViewerConnection, wsUrl: string): Promise<BrowserViewerLike> {
+    return new Promise((resolve, reject) => {
+      let expired = false
+      const timer = setTimeout(() => {
+        expired = true
+        reject(new Error(`${connection.session} did not answer in ${ATTACH_TIMEOUT_MS / 1_000}s`))
+      }, ATTACH_TIMEOUT_MS)
+      timer.unref?.()
+      this.deps.openViewer(wsUrl, this.viewerEvents(connection)).then(
+        (viewer) => {
+          clearTimeout(timer)
+          if (expired) closeQuietly(viewer)
+          else resolve(viewer)
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
+          reject(error instanceof Error ? error : new Error(messageOf(error)))
+        },
+      )
+    })
   }
 
   private viewerEvents(connection: ViewerConnection): ViewerEvents {
@@ -222,7 +264,7 @@ export class BrowserViewerManager {
           // Remembering the last url is best effort; a viewer must not die with the registry.
         }
       },
-      error: (message) => this.send(connection, { type: "error", message }),
+      error: (message) => this.sendError(connection, message),
       closed: (reason) => {
         if (connection.torn) return
         connection.viewer = null
@@ -239,6 +281,9 @@ export class BrowserViewerManager {
       void this.handleLaunch(connection, message.url)
       return
     }
+    // Remembered even with no viewer: an attach replays it, so a reattach does
+    // not depend on the client noticing and sending its size again.
+    if (message.type === "viewport") connection.viewport = message
     const { viewer } = connection
     if (viewer) void this.deliver(connection, viewer, message)
   }
@@ -247,7 +292,7 @@ export class BrowserViewerManager {
     try {
       await this.deps.launch(connection.session, url)
     } catch (error) {
-      this.send(connection, { type: "error", message: messageOf(error) })
+      this.sendError(connection, messageOf(error))
       return
     }
     await this.attach(connection)
@@ -287,9 +332,15 @@ export class BrowserViewerManager {
         case "follow":
           await viewer.follow(message.targetId)
           break
+        default: {
+          // Exhaustiveness guard: a new client message must fail typecheck here
+          // rather than being silently dropped by the transport.
+          const exhaustive: never = message
+          return exhaustive
+        }
       }
     } catch (error) {
-      this.send(connection, { type: "error", message: messageOf(error) })
+      this.sendError(connection, messageOf(error))
     }
   }
 
@@ -315,20 +366,35 @@ export class BrowserViewerManager {
     this.send(connection, { type: "status", state, session: connection.session, ...(message ? { message } : {}) })
   }
 
+  /** Deduped like `status`: an attach that keeps failing every 2 s reports once. */
+  private sendError(connection: ViewerConnection, message: string): void {
+    if (connection.lastError === message) return
+    connection.lastError = message
+    this.send(connection, { type: "error", message })
+  }
+
   /**
    * Resolves in the send callback, never on entry: the viewer awaits this
    * before acking Chromium, so a slow client throttles the browser instead of
-   * growing an unbounded send buffer.
+   * growing an unbounded send buffer. A client that stops reading without
+   * closing still settles it, on `close`.
    */
   private sendFrame(connection: ViewerConnection, header: FrameHeader, jpeg: Uint8Array): Promise<void> {
+    if (!this.ensureAuthorized(connection, false)) return Promise.resolve()
     const { ws } = connection
     if (ws.readyState !== WebSocket.OPEN) return Promise.resolve()
     return new Promise((resolve) => {
-      ws.send(encodeFrame(header, jpeg), () => resolve())
+      const settle = (): void => {
+        ws.off("close", settle)
+        resolve()
+      }
+      ws.once("close", settle)
+      ws.send(encodeFrame(header, jpeg), settle)
     })
   }
 
   private send(connection: ViewerConnection, message: BrowserServerMessage): void {
+    if (!this.ensureAuthorized(connection, false)) return
     this.sendTo(connection.ws, message)
   }
 

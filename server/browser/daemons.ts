@@ -8,6 +8,8 @@ import { execFileSync, spawn as spawnProcess } from "node:child_process"
 import { readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { request } from "node:http"
 import { basename, join } from "node:path"
+
+import { resolveNavigationUrl } from "../../shared/browser/url"
 import {
   assertBrowserName,
   assertNamedBrowser,
@@ -207,10 +209,16 @@ export async function isRunning(name: string, deps = defaultDaemonDeps): Promise
   return endpoint !== null && deps.probe(endpoint.port)
 }
 
+/**
+ * The one door to a real Chromium: the viewer socket and the REST route both
+ * land here, so the scheme allow-list lives here rather than at each of them —
+ * a `file:` or `chrome:` url must never reach the shim.
+ */
 export async function launch(name: string, url: string, cogpitSessionId?: string, deps = defaultDaemonDeps): Promise<void> {
   assertNamedBrowser(name)
   if (url.startsWith("-")) throw new Error(`Browser url ${JSON.stringify(url)} must not start with "-"`)
-  const { code, stderr } = await runShim(["--session", name, "open", url], shimEnv(cogpitSessionId), deps)
+  const target = resolveNavigationUrl(url)
+  const { code, stderr } = await runShim(["--session", name, "open", target], shimEnv(cogpitSessionId), deps)
   if (code !== 0) throw new Error(`agent-browser failed (${code}): ${stderr.trim()}`)
 }
 
