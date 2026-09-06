@@ -46,7 +46,7 @@ Subagents must use `--session tmp-<short-id>` and close when done. In sessions C
 
 ### When a throwaway is reaped
 
-Only a spawn that owns exactly one Cogpit session passes a real `COGPIT_SESSION_ID`, and only those throwaways land in `run/<session-id>`, which the sweeper reaps within 60 seconds of the session ending. The rest — a shared app-server or headless CLI serving every session at once, which has no single session to name — pass a deliberately invalid id, so their throwaways land in `run/shared` and are reaped when Cogpit exits instead.
+A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Codex threads resumed from disk also receive their id through thread configuration. Their throwaways land in `run/<session-id>`, which the sweeper reaps within 60 seconds of the session ending. Shared processes without a per-thread override use an invalid id; their throwaways land in `run/shared` and are reaped when Cogpit exits instead.
 
 ### One Cogpit reaps, the rest do not
 
@@ -88,7 +88,7 @@ Only a spawn that owns exactly one Cogpit session passes a real `COGPIT_SESSION_
 
 ## How the Panel Attaches
 
-1. Cogpit launches the agent with `COGPIT_SESSION_ID` set. The shim prepends `~/.cogpit/bin` to PATH.
+1. Cogpit prepends `~/.cogpit/bin` to the agent's PATH. Per-session processes also receive `COGPIT_SESSION_ID`. A shared process starts without a session owner. For Codex, thread configuration explicitly reapplies the managed PATH after shell snapshots, which can otherwise move the ordinary browser binary ahead of the shim. Threads resumed from disk also receive their session id through this configuration.
 
 2. When the agent calls `agent-browser`, the shim routes it into the tree above. The first call spawns a Node daemon on a Unix socket plus one Chromium. Chromium writes its debugging endpoint (`ws://127.0.0.1:<port>/devtools/browser/<id>`) to `<profile>/DevToolsActivePort`.
 
@@ -141,7 +141,11 @@ Hooks were chosen over `canUseTool` because the CLI skips `canUseTool` entirely 
 
 Both are registered only when `agent-browser` is installed — the gate is the shim's presence, the same signal `browserAgentEnv` uses — so a machine without it pays nothing.
 
-**This covers the sessions Cogpit starts through the SDK, and nothing else.** An agent run outside Cogpit, or a CLI Cogpit drives some other way, gets neither the appended context nor the hook; for those, the skill install below is the only channel, and the `tmp-` rule is back to being advice.
+Codex app-server sessions receive the same browser guide through `developer_instructions`, on new threads and threads resumed from disk. Cogpit reads the effective project configuration first, appends the guide to existing developer instructions, and preserves configured tool paths after prepending the shim. These overrides are set only when the shim exists. This does not install the SDK's subagent hook in Codex: its `tmp-` rule remains an instruction, not an enforced redirect. New threads served by a shared process have no browser driver identity until resumed from disk, because their id is not known at launch.
+
+An already-loaded Codex thread retains its original configuration when rejoined. Restart Cogpit after upgrading to apply the browser configuration to existing threads; a follow-up message alone does not retrofit a loaded thread.
+
+Agents launched outside Cogpit, legacy `exec` fallbacks, and other non-SDK integrations still need the installed skill for guidance. The SDK hook applies only to SDK sessions.
 
 ## Agent Skill
 

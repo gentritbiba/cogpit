@@ -1,7 +1,14 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { join, resolve } from "node:path"
 import { CodexAppServerError, type CodexThread } from "../../agents/codexAppServer"
+import { codexBrowserConfig } from "../../agents/codexBrowser"
+
+vi.mock("../../agents/codexBrowser", () => ({ codexBrowserConfig: vi.fn(async () => ({})) }))
+
+beforeEach(() => {
+  vi.mocked(codexBrowserConfig).mockReset().mockResolvedValue({})
+})
 import {
   buildCodexAccessSettings,
   buildCodexUserInput,
@@ -132,6 +139,24 @@ describe("Codex execution mappings", () => {
       "turn-active",
     )
     expect(result.action).toBe("steered")
+  })
+
+  it("configures browser routing and instructions before the first turn in full access mode", async () => {
+    const config = { "shell_environment_policy.set.PATH": "/managed/bin:/usr/bin", developer_instructions: "Browser panel guidance" }
+    vi.mocked(codexBrowserConfig).mockResolvedValue(config)
+    const runtime = client()
+    await startCodexExecution(runtime, { cwd: "/work", message: "Open site", permissions: { mode: "bypassPermissions" } })
+    expect(runtime.startThread).toHaveBeenCalledWith(expect.objectContaining({ config, approvalPolicy: "never", sandbox: "danger-full-access" }))
+    expect(vi.mocked(runtime.startThread).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(runtime.startTurn).mock.invocationCallOrder[0])
+  })
+
+  it("supplies browser configuration and the session id for disk resume", async () => {
+    const config = { "shell_environment_policy.set.COGPIT_SESSION_ID": "thread-1" }
+    vi.mocked(codexBrowserConfig).mockResolvedValue(config)
+    const runtime = client()
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Continue" })
+    expect(codexBrowserConfig).toHaveBeenCalledWith(runtime, "/work", "thread-1")
+    expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", expect.objectContaining({ config }))
   })
 
   it("steers an active turn discovered while resuming", async () => {

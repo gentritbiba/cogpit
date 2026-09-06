@@ -1,15 +1,4 @@
-/**
- * What every agent Cogpit starts is told about the Browser panel, and where a
- * subagent's browser calls actually land.
- *
- * The `cogpit-browser` skill says all of this, but a skill only reaches the
- * model if the model chooses to read it, and an agent that already knows
- * `agent-browser` never does. So the two facts that cannot be optional travel
- * outside the skill: the panel exists — appended to the system prompt, so it is
- * always in context — and a subagent browses in a throwaway, enforced by a
- * PreToolUse hook. The hook, not `canUseTool`, because the CLI skips
- * `canUseTool` entirely under bypassPermissions, which is Cogpit's common mode.
- */
+/** Shared Browser-panel guidance and the SDK-only subagent redirection hook. */
 import { scanBrowserInvocations } from "../../shared/browser/invocation"
 import {
   isThrowawayName,
@@ -27,7 +16,7 @@ export const BROWSER_CONTEXT_APPEND = [
   "No `--session` means the shared `default` browser; its logins persist across sessions. Named browsers keep separate persistent profiles. Say which browser you are using and invite the user to open the Browser panel when starting browser work.",
   "For login, 2FA, or a step the user wants to do themselves, name the browser and tab, pause browser actions, and ask them to do it in the panel. Wait for their confirmation, select the handoff tab, take a fresh snapshot, then continue. Do not overwrite their interaction or ask them to paste credentials into chat.",
   "Leave the `default` browser running unless asked to close it; the user may still be using it. You cannot tell whether the panel is open or see Cogpit's layout from website snapshots.",
-  "Subagents must use private `--session tmp-<id>` browsers, invisible to the user, and close them when done. Never use the user's default or named browsers from a subagent; Cogpit redirects recognized subagent browser calls.",
+  "Subagents must use private `--session tmp-<id>` browsers, invisible to the user, and close them when done. Never use the user's default or named browsers from a subagent.",
   "The `cogpit-browser` skill has the full manual, including named-browser management and flags Cogpit owns.",
 ].join("\n")
 

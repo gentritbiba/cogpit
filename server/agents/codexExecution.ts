@@ -11,6 +11,7 @@ import {
 } from "./codexAppServer"
 import { descriptorFor, type PermissionsConfig } from "../../shared/session/agent-descriptors"
 import { storeFor } from "."
+import { codexBrowserConfig } from "./codexBrowser"
 
 export interface CodexExecutionClient {
   start(): Promise<unknown>
@@ -131,7 +132,7 @@ export function buildCodexUserInput(
   return input
 }
 
-function threadSettings(options: CodexExecutionOptions): JsonObject {
+async function threadSettings(client: CodexExecutionClient, options: CodexExecutionOptions, sessionId?: string): Promise<JsonObject> {
   const access = buildCodexAccessSettings(options.permissions)
   const settings: JsonObject = {
     cwd: options.cwd,
@@ -142,6 +143,8 @@ function threadSettings(options: CodexExecutionOptions): JsonObject {
   if (model) settings.model = model
   const tier = serviceTier(options.fastMode)
   if (tier !== undefined) settings.serviceTier = tier
+  const browserConfig = await codexBrowserConfig(client, options.cwd, sessionId)
+  if (Object.keys(browserConfig).length > 0) settings.config = browserConfig
   return settings
 }
 
@@ -204,7 +207,7 @@ export async function startCodexExecution(
 ): Promise<{ thread: CodexThread; turnId: string }> {
   await ensureCodexAppServer(client)
   const input = buildCodexUserInput(options.message, options.images)
-  const response = await client.startThread(threadSettings(options))
+  const response = await client.startThread(await threadSettings(client, options))
   const turn = await client.startTurn({
     threadId: response.thread.id,
     input,
@@ -228,7 +231,7 @@ export async function continueCodexExecution(
   }
 
   const resumed = await client.resumeThread(threadId, {
-    ...threadSettings(options),
+    ...await threadSettings(client, options, threadId),
   })
   const resumedThreadId = resumed.thread.id || threadId
   const activeTurnId = client.getActiveTurnId(resumedThreadId)

@@ -18,6 +18,11 @@ import { join } from "node:path"
 import { writeFile, unlink, access } from "node:fs/promises"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 
+vi.mock("../../browser/agentEnv", async (importOriginal) => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  browserShimInstalled: () => false,
+}))
+
 // ---------------------------------------------------------------------------
 // Hoisted mutable Maps and spy fns so vi.mock factory can reference them
 // ---------------------------------------------------------------------------
