@@ -37,6 +37,7 @@ const openServers = new Set<Server>()
 let fixtureRoot: string
 let staticDir: string
 let userDataDir: string
+let previousBrowserHome: string | undefined
 
 async function listen(server: Server): Promise<string> {
   openServers.add(server)
@@ -75,10 +76,15 @@ beforeEach(async () => {
   ])
   await writeFile(join(staticDir, "index.html"), "<main>composition-fixture</main>")
   delete process.env.ELECTRON_RENDERER_URL
+  // Composition installs the browser shim and plugin; keep that inside the fixture.
+  previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  process.env.COGPIT_BROWSER_HOME = join(fixtureRoot, "browser")
 })
 
 afterEach(async () => {
   delete process.env.ELECTRON_RENDERER_URL
+  if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+  else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
   await Promise.all([...openServers].map(close))
   await rm(fixtureRoot, { recursive: true, force: true })
 })

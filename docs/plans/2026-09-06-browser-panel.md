@@ -418,7 +418,7 @@ existing `stripHubToken` helper the HTTP path already uses (original
 percent-encoding preserved, the hub's own `token` dropped before the device lease
 is appended) rather than re-encoding through `URLSearchParams`.
 
-### Task 12: Startup, shutdown, and env injection
+### Task 12: Startup, shutdown, and env injection ✅ done
 
 **Files:**
 - Create: `server/browser/index.ts` — `initBrowserSupport(isCogpitSessionLive): { shutdown(): Promise<void> }`: ensure dirs, `ensureShim(findRealAgentBrowser())`, `ensurePlugin()`, `startSweeper`. `isCogpitSessionLive = (id) => allRuntimes().some((r) => r.activity(id).live || r.activity(id).running)`.
@@ -431,6 +431,26 @@ is appended) rather than re-encoding through `URLSearchParams`.
 Run `bun run check:agents`; the new files must not appear in the vocabulary file. Run the full `bun run test`.
 
 Commit: `feat(browser): wire startup, shutdown and agent environment`
+
+Note: the liveness predicate is passed in, so `server/browser/` still has no
+edge into `server/agents/`. The `"shared"` session id is spelled
+`SHARED_RUN_NAME` at the three spawn sites that have no session in scope
+(`startLegacy`, the app-server client, the Copilot transport) — each is one
+process serving many sessions, so the shim files their throwaways under
+`run/shared`. `sendLegacy` has the real id and uses it.
+
+Deviation: the dev shell needed the same wiring. `server/pty-plugin.ts` mounts
+`/__browser` but never ran an init, so `bun run dev` would stream a panel with
+no shim behind it. It now calls `initBrowserSupport` and shuts it down on close
+like `app-server.ts`, and the shared predicate moved to
+`runtimes.isSessionActive(sessionId)` rather than being spelled twice.
+
+`sdk-session` merges `plugins` rather than assigning, so a future caller-set
+value survives. Four suites now pin `COGPIT_BROWSER_HOME` to a temp dir
+(`sdk-session`, `copilotTransport`, `app-server`, `share/registry-init`) because
+the composition and the spawn env would otherwise read the developer's real
+tree; `copilotTransport`'s exact-env assertion was extended to the prepended
+`PATH` and `COGPIT_SESSION_ID`, not relaxed.
 
 ## Phase 2 — Client
 

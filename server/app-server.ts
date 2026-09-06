@@ -31,7 +31,8 @@ import { initializeBootstrapToken } from "./team/bootstrapToken"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { handleHubUpgrade } from "./hub/proxy"
-import { allRuntimes } from "./agents/runtimes"
+import { allRuntimes, isSessionActive } from "./agents/runtimes"
+import { initBrowserSupport } from "./browser"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
@@ -143,6 +144,7 @@ export async function createServerComposition(
   const ptyManager = new PtySessionManager(wss)
   const browserWss = new WebSocketServer({ noServer: true })
   const browserManager = new BrowserViewerManager()
+  const browserSupport = initBrowserSupport(isSessionActive)
   const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()
 
@@ -222,6 +224,7 @@ export async function createServerComposition(
         new Promise<void>((resolve) => wss.close(() => resolve())),
         new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),
+        browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
         flushSessionPersistence(),
       ])

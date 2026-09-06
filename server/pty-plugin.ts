@@ -7,6 +7,8 @@ import { handleHubUpgrade } from "./hub/proxy"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
+import { initBrowserSupport } from "./browser"
+import { isSessionActive } from "./agents/runtimes"
 
 export function ptyPlugin(): Plugin {
   return {
@@ -16,6 +18,7 @@ export function ptyPlugin(): Plugin {
       const manager = new PtySessionManager(wss)
       const browserWss = new WebSocketServer({ noServer: true })
       const browserManager = new BrowserViewerManager()
+      const browserSupport = initBrowserSupport(isSessionActive)
       const authorization = new PtyAuthorizationController()
 
       server.httpServer!.on(
@@ -51,6 +54,7 @@ export function ptyPlugin(): Plugin {
         browserManager.cleanup()
         for (const client of browserWss.clients) client.terminate()
         browserWss.close()
+        void browserSupport.shutdown()
       })
     },
   }

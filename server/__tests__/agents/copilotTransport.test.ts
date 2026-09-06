@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { delimiter, join } from "node:path"
 import { PassThrough } from "node:stream"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createMessageConnection,
   StreamMessageReader,
@@ -16,6 +19,7 @@ import {
   type CopilotRuntimeSpawn,
   type CopilotUserInputAnswer,
 } from "../../agents/copilotTransport"
+import { binDir, shimPath } from "../../browser/paths"
 
 class FakeCopilotProcess extends EventEmitter implements CopilotRuntimeProcess {
   readonly stdin = new PassThrough()
@@ -116,7 +120,24 @@ function createHarness(
   return harness
 }
 
+// The CLI is spawned with the managed browser shim first on PATH, so the tree
+// it reads has to be this test's, never the developer's.
+let browserRoot = ""
+let previousBrowserHome: string | undefined
+
+beforeEach(() => {
+  previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  browserRoot = mkdtempSync(join(tmpdir(), "cogpit-copilot-browser-"))
+  process.env.COGPIT_BROWSER_HOME = join(browserRoot, "browser")
+  mkdirSync(binDir(), { recursive: true })
+  writeFileSync(shimPath(), "#!/usr/bin/env bash\n", { mode: 0o755 })
+})
+
 afterEach(async () => {
+  if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+  else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
+  rmSync(browserRoot, { recursive: true, force: true })
+
   const current = harnesses.splice(0)
   await Promise.all(current.map(({ runtime }) => runtime.shutdown()))
   for (const { server, process } of current) {
@@ -157,7 +178,7 @@ describe("CopilotRuntime", () => {
       ["--headless", "--no-auto-update", "--stdio"],
       {
         cwd: "/workspace",
-        env: { PATH: "/bin" },
+        env: { PATH: `${binDir()}${delimiter}/bin`, COGPIT_SESSION_ID: "shared" },
         stdio: ["pipe", "pipe", "pipe"],
       },
     )

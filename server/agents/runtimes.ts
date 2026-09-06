@@ -101,6 +101,14 @@ export function allRuntimes(): readonly AgentRuntime[] {
   return registry.allRuntimes()
 }
 
+/** Whether any runtime still holds this session, open or mid-turn. */
+export function isSessionActive(sessionId: string): boolean {
+  return allRuntimes().some((runtime) => {
+    const activity = runtime.activity(sessionId)
+    return activity.live || activity.running
+  })
+}
+
 /**
  * The agents that keep a connection per session, so membership is a complete
  * answer. Claude is absent on purpose: its resume path needs the transcript

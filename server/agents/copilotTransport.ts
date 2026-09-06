@@ -10,6 +10,8 @@ import {
   type MessageConnection,
 } from "vscode-jsonrpc/node.js"
 import { findExecutableOnPath, resolveAgentCommand } from "../lib/binaryResolver"
+import { browserAgentEnv } from "../browser/agentEnv"
+import { SHARED_RUN_NAME } from "../browser/paths"
 
 export type CopilotJsonObject = Record<string, unknown>
 
@@ -878,7 +880,8 @@ export class CopilotRuntime {
     try {
       child = this.spawn(resolved.command, resolved.args, {
         cwd: this.cwd,
-        env: this.env,
+        // One headless CLI serves every session, so no single session owns it.
+        env: browserAgentEnv(this.env, SHARED_RUN_NAME),
         stdio: ["pipe", "pipe", "pipe"],
         ...resolved.spawnOptions,
       })

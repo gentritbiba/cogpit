@@ -9,6 +9,7 @@ import {
   stat,
   unlink,
 } from "../helpers"
+import { browserAgentEnv } from "../browser/agentEnv"
 import { claudeCliPath } from "./claudeExecutable"
 import { fetchClaudeModels } from "./claudeModels"
 import { friendlySpawnError } from "./spawnError"
@@ -145,7 +146,7 @@ function startOneShot(req: StartSessionRequest): Promise<StartedSession> {
 
   // The CLI refuses to nest inside itself, and Cogpit is usually started from
   // a Claude session, so its marker has to go.
-  const cleanEnv = { ...process.env }
+  const cleanEnv = browserAgentEnv({ ...process.env }, sessionId)
   delete cleanEnv.CLAUDECODE
 
   const child = spawn(cli.command, cli.args, {

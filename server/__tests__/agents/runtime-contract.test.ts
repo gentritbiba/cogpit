@@ -40,8 +40,8 @@ const { sdk, codex, copilot, registry } = vi.hoisted(() => ({
     call: vi.fn(async () => ({})),
   },
   copilot: {
-    isSessionActive: vi.fn(() => false),
-    isTurnActive: vi.fn(() => false),
+    isSessionActive: vi.fn((_sessionId: string) => false),
+    isTurnActive: vi.fn((_sessionId: string) => false),
     getActiveSessionIds: vi.fn(() => [] as string[]),
     getPendingPermissions: vi.fn(() => [] as unknown[]),
     getPendingUserInputs: vi.fn(() => [] as unknown[]),
@@ -108,7 +108,7 @@ vi.mock("../../agents/index", () => ({
 }))
 
 import { unlink } from "../../helpers"
-import { allRuntimes, runtimeFor, runtimeForDirName } from "../../agents/runtimes"
+import { allRuntimes, isSessionActive, runtimeFor, runtimeForDirName } from "../../agents/runtimes"
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -139,6 +139,18 @@ describe("runtime registry", () => {
     }
     expect(runtimeForDirName("-tmp-project").kind).toBe("claude")
     expect(runtimeForDirName(null).kind).toBe("claude")
+  })
+
+  it("reports a session active when any one runtime holds it, open or mid-turn", () => {
+    expect(isSessionActive("sess-1")).toBe(false)
+
+    copilot.isSessionActive.mockImplementation((id: string) => id === "sess-1")
+    expect(isSessionActive("sess-1")).toBe(true)
+    expect(isSessionActive("sess-2")).toBe(false)
+
+    copilot.isSessionActive.mockReturnValue(false)
+    copilot.isTurnActive.mockImplementation((id: string) => id === "sess-2")
+    expect(isSessionActive("sess-2")).toBe(true)
   })
 })
 

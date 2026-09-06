@@ -38,6 +38,8 @@ import {
   wireApprovalDecision,
 } from "./codexApprovalCodec"
 import { resolveAgentCommand } from "../lib/binaryResolver"
+import { browserAgentEnv } from "../browser/agentEnv"
+import { SHARED_RUN_NAME } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
 import {
   parseUserAgentVersion,
@@ -246,7 +248,8 @@ export class CodexAppServer {
       const cli = resolveAgentCommand(this.command, ["app-server", "--stdio"])
       child = this.spawn(cli.command, cli.args, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: process.env,
+        // One process serves every thread, so no single session owns it.
+        env: browserAgentEnv(process.env, SHARED_RUN_NAME),
         ...cli.spawnOptions,
       })
     } catch (error) {

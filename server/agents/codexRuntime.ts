@@ -19,6 +19,8 @@ import { fetchCodexModels } from "./codexModels"
 import { friendlySpawnError } from "./spawnError"
 import { cleanupTempFiles, writeTempImageFiles } from "./tempImages"
 import { resolveAgentCommand } from "../lib/binaryResolver"
+import { browserAgentEnv } from "../browser/agentEnv"
+import { SHARED_RUN_NAME } from "../browser/paths"
 import {
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
@@ -237,7 +239,7 @@ async function startLegacy(
   ])
   const child = spawn(cli.command, cli.args, {
     cwd: req.cwd,
-    env: process.env,
+    env: browserAgentEnv(process.env, SHARED_RUN_NAME),
     stdio: ["ignore", "pipe", "pipe"],
     ...cli.spawnOptions,
   })
@@ -346,7 +348,7 @@ async function sendLegacy(
   ])
   const child = spawn(cli.command, cli.args, {
     cwd: req.cwd,
-    env: process.env,
+    env: browserAgentEnv(process.env, sessionId),
     stdio: ["ignore", "pipe", "pipe"],
     ...cli.spawnOptions,
   })

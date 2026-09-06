@@ -19,6 +19,7 @@ import type {
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { claudeCliPath } from "./agents/claudeExecutable"
+import { browserAgentEnv, browserPluginPaths } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
 import type {
   MissionControlQuestion,
@@ -493,8 +494,15 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     }
   }
 
-  queryOpts.env = { ...process.env }
+  queryOpts.env = browserAgentEnv({ ...process.env }, state.sessionId)
   delete queryOpts.env.CLAUDECODE
+
+  // The browser skill reaches the CLI as a local plugin, so an agent knows the
+  // Browser panel exists without the user installing anything.
+  const browserPlugins = browserPluginPaths().map((path) => ({ type: "local" as const, path }))
+  if (browserPlugins.length > 0) {
+    queryOpts.plugins = [...(queryOpts.plugins ?? []), ...browserPlugins]
+  }
 
   // Capture the CLI subprocess's stderr so a spawn/exit failure carries its
   // real cause into the error result. Capped to avoid unbounded growth.

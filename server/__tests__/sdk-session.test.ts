@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { delimiter, join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 /**
@@ -38,6 +41,8 @@ interface CapturedCall {
       options: { signal: AbortSignal; requestId: string },
     ) => Promise<unknown>
     supportedDialogKinds?: string[]
+    env?: NodeJS.ProcessEnv
+    plugins?: { type: string; path: string }[]
   }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
@@ -162,7 +167,15 @@ async function waitUntil(cond: () => boolean, maxTicks = 50) {
   throw new Error("waitUntil timed out")
 }
 
+// The query env is built from the managed browser tree, so every test in this
+// file reads a temp one rather than the developer's.
+let browserRoot = ""
+let previousBrowserHome: string | undefined
+
 beforeEach(() => {
+  previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  browserRoot = mkdtempSync(join(tmpdir(), "cogpit-sdk-browser-"))
+  process.env.COGPIT_BROWSER_HOME = join(browserRoot, "browser")
   captured.length = 0
   applyFlagSettingsSpy = null
   setModelSpy = null
@@ -182,6 +195,39 @@ beforeEach(() => {
 afterEach(async () => {
   const { cleanupAllSDKSessions } = await loadModule()
   cleanupAllSDKSessions()
+  if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+  else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
+  rmSync(browserRoot, { recursive: true, force: true })
+})
+
+describe("sdk-session browser support", () => {
+  it("puts the shim first on PATH and loads the browser plugin", async () => {
+    const { binDir, pluginDir } = await import("../browser/paths")
+    const { ensureShim } = await import("../browser/shim")
+    const { ensurePlugin } = await import("../browser/skill")
+    ensureShim("/usr/local/bin/agent-browser")
+    ensurePlugin()
+
+    const { createSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "browser-env", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    const { env, plugins } = captured[0].options
+    expect(env!.PATH!.split(delimiter)[0]).toBe(binDir())
+    expect(env!.COGPIT_SESSION_ID).toBe("browser-env")
+    expect(plugins).toEqual([{ type: "local", path: pluginDir() }])
+  })
+
+  it("leaves PATH and plugins alone when the browser tree is not installed", async () => {
+    const { createSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "browser-absent", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    const { env, plugins } = captured[0].options
+    expect(env!.PATH).toBe(process.env.PATH)
+    expect(env!.COGPIT_SESSION_ID).toBe("browser-absent")
+    expect(plugins).toBeUndefined()
+  })
 })
 
 describe("sdk-session error reporting", () => {

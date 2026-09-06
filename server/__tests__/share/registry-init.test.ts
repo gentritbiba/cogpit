@@ -47,6 +47,7 @@ import { codexAppServer } from "../../agents/codexAppServer"
 let fixtureRoot: string
 let staticDir: string
 let userDataDir: string
+let previousBrowserHome: string | undefined
 
 beforeEach(async () => {
   deviceRegistryDirs.length = 0
@@ -59,10 +60,15 @@ beforeEach(async () => {
     mkdir(userDataDir, { recursive: true }),
   ])
   setConfigPath(join(userDataDir, "config.local.json"))
+  // Composition installs the browser shim and plugin; keep that inside the fixture.
+  previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  process.env.COGPIT_BROWSER_HOME = join(fixtureRoot, "browser")
 })
 
 afterEach(async () => {
   __resetEditionForTest()
+  if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+  else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
   await rm(fixtureRoot, { recursive: true, force: true })
 })
 

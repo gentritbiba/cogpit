@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { existsSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -9,6 +10,7 @@ import { WebSocket } from "ws"
 import type { ViteDevServer } from "vite"
 
 import { ptyPlugin } from "../pty-plugin"
+import { profilesDir, sharedRunDir } from "../browser/paths"
 import { hashPassword, createSessionToken, revokeSessionToken, __resetSessionsForTest } from "../security"
 import { loadConfig, setConfigPath } from "../config"
 import { initEdition, __resetEditionForTest } from "../team/edition"
@@ -66,6 +68,13 @@ async function mountPlugin(): Promise<number> {
 }
 
 describe("Vite PTY plugin authorization lifecycle", () => {
+  it("installs browser support, so the dev shell matches the packaged one", async () => {
+    await mountPlugin()
+
+    expect(existsSync(profilesDir())).toBe(true)
+    expect(existsSync(sharedRunDir())).toBe(true)
+  })
+
   it("closes an established remote PTY when its session is revoked", async () => {
     const port = await mountPlugin()
 
