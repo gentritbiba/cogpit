@@ -12,9 +12,14 @@ import { delimiter } from "node:path"
 import { binDir, pluginDir, shimPath } from "./paths"
 import { pluginManifestFile } from "./skill"
 
+/** True once agent-browser is installed: the shim is written only then. */
+export function browserShimInstalled(): boolean {
+  return existsSync(shimPath())
+}
+
 export function browserAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, COGPIT_SESSION_ID: cogpitSessionId }
-  if (!existsSync(shimPath())) return env
+  if (!browserShimInstalled()) return env
   const dir = binDir()
   const path = base.PATH ?? ""
   if (path.split(delimiter)[0] === dir) return env

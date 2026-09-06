@@ -1,0 +1,162 @@
+/**
+ * What every agent Cogpit starts is told about the Browser panel, and where a
+ * subagent's browser calls actually land.
+ *
+ * The `cogpit-browser` skill says all of this, but a skill only reaches the
+ * model if the model chooses to read it, and an agent that already knows
+ * `agent-browser` never does. So the two facts that cannot be optional travel
+ * outside the skill: the panel exists — appended to the system prompt, so it is
+ * always in context — and a subagent browses in a throwaway, enforced by a
+ * PreToolUse hook. The hook, not `canUseTool`, because the CLI skips
+ * `canUseTool` entirely under bypassPermissions, which is Cogpit's common mode.
+ */
+import { BROWSER_BINARY, findBrowserInvocations } from "../../shared/browser/invocation"
+import {
+  isThrowawayName,
+  isValidBrowserName,
+  MAX_BROWSER_NAME_LENGTH,
+  THROWAWAY_PREFIX,
+} from "../../shared/browser/names"
+import { getCommandText } from "../../shared/session/toolSummary"
+import type { HookCallback } from "../agents/sdk"
+
+/** Paid for on every request, so: only what an agent cannot work without. */
+export const BROWSER_CONTEXT_APPEND = [
+  "Browser: `agent-browser` drives a real browser the user can watch, and click in, live in Cogpit's Browser panel.",
+  "No `--session` means the shared `default` browser, whose logins persist. Say which browser you are using when you start browser work.",
+  "Subagents must pass `--session tmp-<id>`; Cogpit redirects a subagent's call to a throwaway browser when it does not.",
+  "The `cogpit-browser` skill has the rest: named browsers, the flags Cogpit owns, and how to hand a login to the user.",
+].join("\n")
+
+/** The only tool carrying a shell command in the sessions this hook runs in. */
+export const BROWSER_HOOK_TOOL = "Bash"
+
+const DENIAL = "Cogpit could not rewrite this command onto a throwaway browser safely, so it did not run. "
+  + "A subagent must never drive the `default` browser or a named one — those are the user's, visible in the "
+  + "Browser panel, and a second agent on the same page destroys the first agent's work. Re-issue the command "
+  + "with an explicit `--session tmp-<id>`, written literally: not inside a quoted string, and not from a variable."
+
+/** `--session` as a whole flag, so `--session-name` is not one of these. */
+const SESSION_WORD = /--session(?![\w-])/g
+
+/**
+ * Which characters of `command` sit inside a quoted string, or null when the
+ * quoting does not close — in which case this is not a command we can edit.
+ */
+function quotedIndices(command: string): boolean[] | null {
+  const quoted = new Array<boolean>(command.length).fill(false)
+  let open: string | null = null
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index]
+    if (open === null) {
+      if (char === "\\") index++
+      else if (char === "'" || char === '"') open = char
+      continue
+    }
+    quoted[index] = true
+    if (char === "\\" && open === '"') {
+      if (index + 1 < command.length) quoted[index + 1] = true
+      index++
+    } else if (char === open) {
+      open = null
+    }
+  }
+  return open === null ? quoted : null
+}
+
+/** The browser a subagent gets: its own id, made into a `tmp-` name. */
+export function throwawayBrowserName(agentId: string): string {
+  const suffix = agentId.toLowerCase().replace(/[^a-z0-9_-]/g, "-")
+  return THROWAWAY_PREFIX + suffix.slice(0, MAX_BROWSER_NAME_LENGTH - THROWAWAY_PREFIX.length)
+}
+
+function splice(command: string, start: number, end: number, text: string): string {
+  return command.slice(0, start) + text + command.slice(end)
+}
+
+/**
+ * `command` with every `agent-browser` call in it pointed at `agentId`'s own
+ * throwaway browser. `changed: false` when they all already were, and null when
+ * the command cannot be rewritten with confidence — a half-rewritten command is
+ * worse than a refused one, so the caller denies instead.
+ */
+export function redirectToThrowaway(
+  command: string,
+  agentId: string,
+): { command: string; changed: boolean } | null {
+  const invocations = findBrowserInvocations(command)
+  if (invocations.every((invocation) => isThrowawayName(invocation.browser))) {
+    return { command, changed: false }
+  }
+
+  const quoted = quotedIndices(command)
+  const throwaway = throwawayBrowserName(agentId)
+  // An illegal name would fall straight through the shim into an unmanaged
+  // browser, which is the one outcome worse than refusing the command.
+  if (quoted === null || !isValidBrowserName(throwaway)) return null
+
+  // Everything is checked before anything is edited, so no partial rewrite can
+  // escape: the binary must be a real command rather than text inside quotes,
+  // and each invocation must carry exactly one `--session` we can read.
+  for (const invocation of invocations) {
+    if (quoted[invocation.binaryEnd - 1]) return null
+    // A separator inside quotes ends nothing, so the invocation runs past where
+    // the scan cut it and the flags we can see are not all of them.
+    if (invocation.end < command.length && quoted[invocation.end]) return null
+    const flags = invocation.text.match(SESSION_WORD)?.length ?? 0
+    if (flags !== (invocation.sessionFlag === null ? 0 : 1)) return null
+    if (invocation.sessionFlag !== null
+      && (quoted[invocation.sessionFlag.start] || /[$`]/.test(invocation.browser))) return null
+  }
+
+  let rewritten = command
+  for (let index = invocations.length - 1; index >= 0; index--) {
+    const { binaryEnd, browser, sessionFlag } = invocations[index]
+    if (isThrowawayName(browser)) continue
+    rewritten = sessionFlag === null
+      ? splice(rewritten, binaryEnd, binaryEnd, ` --session ${throwaway}`)
+      : splice(rewritten, sessionFlag.start, sessionFlag.end, `--session ${throwaway}`)
+  }
+  return { command: rewritten, changed: true }
+}
+
+/**
+ * Moves a subagent's browser calls onto its own throwaway browser. The main
+ * thread is left alone: it has no `agent_id`, and its browser is the one the
+ * user is watching.
+ */
+export const browserPreToolUseHook: HookCallback = async (input) => {
+  try {
+    if (input.hook_event_name !== "PreToolUse") return {}
+    if (input.tool_name !== BROWSER_HOOK_TOOL || input.agent_id === undefined) return {}
+    if (typeof input.tool_input !== "object" || input.tool_input === null) return {}
+
+    const toolInput = input.tool_input as Record<string, unknown>
+    const command = getCommandText(toolInput)
+    if (!command.includes(BROWSER_BINARY)) return {}
+
+    const redirect = redirectToThrowaway(command, input.agent_id)
+    if (redirect === null) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: DENIAL,
+        },
+      }
+    }
+    if (!redirect.changed) return {}
+
+    const browser = throwawayBrowserName(input.agent_id)
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: { ...toolInput, command: redirect.command },
+        additionalContext: `Cogpit redirected this command to the private throwaway browser \`${browser}\`, `
+          + "because a subagent must not share the browsers the user can see; report that browser, not `default`.",
+      },
+    }
+  } catch {
+    return {}
+  }
+}

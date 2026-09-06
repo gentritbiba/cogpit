@@ -8,7 +8,8 @@
  * are invisible by design, so `subAgentActivity` is never scanned and a
  * `tmp-*` browser never surfaces.
  */
-import { DEFAULT_BROWSER, isThrowawayName } from "../browser/names"
+import { findBrowserInvocations } from "../browser/invocation"
+import { isThrowawayName } from "../browser/names"
 import { getCommandText } from "./toolSummary"
 import type { ParsedSession, ToolCall } from "./types"
 
@@ -23,47 +24,22 @@ export interface BrowserAgentActivity {
   done: boolean
 }
 
-const BINARY = "agent-browser"
 const MAX_COMMAND_LENGTH = 120
 
 const SHELL_TOOL = /(?:^|[._])exec_command$/
-/**
- * The binary as a word, optionally reached through a path, so
- * `/usr/local/bin/agent-browser open x` counts while `cat agent-browser-plan.md`
- * does not.
- */
-const INVOCATION = /(?:^|[\s;&|(`"'])(?:[^\s;&|`"']*\/)?agent-browser(?![\w.-])/
-const SEPARATOR = /&&|;|\n/
-const BROWSER_FLAG = /--session(?:=|\s+)(['"]?)([^\s'"]+)\1/
 
 function isShellCall(call: ToolCall): boolean {
   return call.name === "Bash" || SHELL_TOOL.test(call.name)
 }
 
-/** The invocation text starting at the binary, cut at the next command. */
-function invocationIn(command: string): string | null {
-  const match = INVOCATION.exec(command)
-  if (!match) return null
-  const rest = command.slice(match.index + match[0].length - BINARY.length)
-  const separator = SEPARATOR.exec(rest)
-  return (separator ? rest.slice(0, separator.index) : rest).trim()
-}
-
-function browserOf(invocation: string): string {
-  return BROWSER_FLAG.exec(invocation)?.[2] ?? DEFAULT_BROWSER
-}
-
 function activityOf(call: ToolCall): BrowserAgentActivity | null {
   if (!isShellCall(call)) return null
-  const invocation = invocationIn(getCommandText(call.input))
-  if (invocation === null) return null
-  const browser = browserOf(invocation)
-  if (isThrowawayName(browser)) return null
+  const [invocation] = findBrowserInvocations(getCommandText(call.input))
+  if (invocation === undefined || isThrowawayName(invocation.browser)) return null
+  const { text } = invocation
   return {
-    session: browser,
-    command: invocation.length > MAX_COMMAND_LENGTH
-      ? `${invocation.slice(0, MAX_COMMAND_LENGTH - 1)}…`
-      : invocation,
+    session: invocation.browser,
+    command: text.length > MAX_COMMAND_LENGTH ? `${text.slice(0, MAX_COMMAND_LENGTH - 1)}…` : text,
     timestamp: call.timestamp,
     toolCallId: call.id,
     done: call.result !== null,

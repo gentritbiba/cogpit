@@ -62,6 +62,11 @@ describe("COGPIT_BROWSER_SKILL", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("close")
   })
 
+  it("says Cogpit enforces the throwaway rule rather than trusting it", () => {
+    expect(COGPIT_BROWSER_SKILL).toMatch(/enforced, not trusted/)
+    expect(COGPIT_BROWSER_SKILL).toMatch(/rewritten onto a `tmp-` browser before/)
+  })
+
   it("lists the flags Cogpit owns", () => {
     for (const flag of ["--profile", "--state", "--session-name", "--args", "--headed", "--cdp"]) {
       expect(COGPIT_BROWSER_SKILL).toContain(flag)

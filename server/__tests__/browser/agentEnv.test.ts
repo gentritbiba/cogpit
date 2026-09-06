@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { browserAgentEnv, browserPluginPaths } from "../../browser/agentEnv"
+import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
 import { binDir, NO_COGPIT_SESSION, pluginDir, shimPath } from "../../browser/paths"
 import { ensurePlugin } from "../../browser/skill"
 
@@ -70,6 +70,14 @@ describe("browserAgentEnv", () => {
     const base = { PATH: "/usr/bin" }
     browserAgentEnv(base, "session-1")
     expect(base).toEqual({ PATH: "/usr/bin" })
+  })
+})
+
+describe("browserShimInstalled", () => {
+  it("is false until the shim is written and true afterwards", () => {
+    expect(browserShimInstalled()).toBe(false)
+    writeShim()
+    expect(browserShimInstalled()).toBe(true)
   })
 })
 

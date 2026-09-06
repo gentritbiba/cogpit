@@ -19,7 +19,9 @@ import type {
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { claudeCliPath } from "./agents/claudeExecutable"
-import { browserAgentEnv, browserPluginPaths } from "./browser/agentEnv"
+import { appendToSystemPrompt } from "./agents/sdk"
+import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
+import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
 import type {
   MissionControlQuestion,
@@ -502,6 +504,21 @@ function buildQueryOptions(state: SDKSessionState, opts: {
   const browserPlugins = browserPluginPaths().map((path) => ({ type: "local" as const, path }))
   if (browserPlugins.length > 0) {
     queryOpts.plugins = [...(queryOpts.plugins ?? []), ...browserPlugins]
+  }
+
+  // A skill is only read if the agent decides to read it, so the panel and the
+  // subagent throwaway rule also arrive as context it cannot skip and a hook it
+  // cannot ignore. Both cost nothing to a machine without agent-browser, so
+  // neither is registered there.
+  if (browserShimInstalled()) {
+    queryOpts.systemPrompt = appendToSystemPrompt(queryOpts.systemPrompt, BROWSER_CONTEXT_APPEND)
+    queryOpts.hooks = {
+      ...queryOpts.hooks,
+      PreToolUse: [
+        ...(queryOpts.hooks?.PreToolUse ?? []),
+        { matcher: BROWSER_HOOK_TOOL, hooks: [browserPreToolUseHook] },
+      ],
+    }
   }
 
   // Capture the CLI subprocess's stderr so a spawn/exit failure carries its

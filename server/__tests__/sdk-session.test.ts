@@ -43,6 +43,8 @@ interface CapturedCall {
     supportedDialogKinds?: string[]
     env?: NodeJS.ProcessEnv
     plugins?: { type: string; path: string }[]
+    systemPrompt?: { type: string; preset: string; append?: string }
+    hooks?: { PreToolUse?: { matcher?: string; hooks: unknown[] }[] }
   }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
@@ -218,15 +220,32 @@ describe("sdk-session browser support", () => {
     expect(plugins).toEqual([{ type: "local", path: pluginDir() }])
   })
 
+  it("tells every agent about the panel and hooks a subagent's browser calls", async () => {
+    const { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } =
+      await import("../browser/agentContext")
+    const { ensureShim } = await import("../browser/shim")
+    ensureShim("/usr/local/bin/agent-browser")
+
+    const { createSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "browser-context", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    const { systemPrompt, hooks } = captured[0].options
+    expect(systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: BROWSER_CONTEXT_APPEND })
+    expect(hooks!.PreToolUse).toEqual([{ matcher: BROWSER_HOOK_TOOL, hooks: [browserPreToolUseHook] }])
+  })
+
   it("leaves PATH and plugins alone when the browser tree is not installed", async () => {
     const { createSDKSession } = await loadModule()
     createSDKSession({ sessionId: "browser-absent", cwd: "/tmp", message: "hi" })
     await waitUntil(() => captured.length === 1)
 
-    const { env, plugins } = captured[0].options
+    const { env, plugins, systemPrompt, hooks } = captured[0].options
     expect(env!.PATH).toBe(process.env.PATH)
     expect(env!.COGPIT_SESSION_ID).toBe("browser-absent")
     expect(plugins).toBeUndefined()
+    expect(systemPrompt).toBeUndefined()
+    expect(hooks).toBeUndefined()
   })
 })
 

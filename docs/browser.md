@@ -42,7 +42,7 @@ The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that rout
 | Named (e.g., `github`) | Panel | Persistent | `run/shared` | `profiles/github` | Isolated accounts, long-lived work |
 | Throwaway (e.g., `tmp-s1`) | Hidden | None | `run/<session-id>` or `run/shared` | None | Subagent scratch work, auto-cleanup |
 
-The agent skill teaches subagents to use `--session tmp-<short-id>` and close when done. A subagent that uses a named browser becomes visible in the panel but does not break anything — it just shares that browser with the main session.
+Subagents must use `--session tmp-<short-id>` and close when done. In sessions Cogpit starts through the SDK that is enforced, not merely documented: a subagent command aimed at `default` or a named browser is rewritten onto a `tmp-` browser before it runs (see "What every agent is told" below).
 
 ### When a throwaway is reaped
 
@@ -123,6 +123,19 @@ While the panel is open, the page viewport size is driven by the panel's own siz
 **When you close the panel:** The CDP client reads the page's original layout metrics (`Page.getLayoutMetrics`) and `window.devicePixelRatio` lazily — on the tab it is about to override, immediately before the first override lands on it, not for every tab at attach — then hands those values back when it un-follows or closes. So the agent's own viewport settings survive a panel open-and-close. A tab the panel never followed is never measured and never touched.
 
 The minimum panel width is 1024 pixels (keeps pages on their desktop breakpoints even in a narrow sidebar). Height is adjusted to match the panel's aspect ratio. Neither dimension can exceed 4096.
+
+## What Every Agent Is Told
+
+The skill below is the full manual, but a skill is lazy: only its `description` reaches the model, and the body loads only if the model chooses to read it. An agent that already knows `agent-browser` never does — so it never learns that the user can watch, and a subagent never learns the `tmp-` rule. The two facts that cannot be optional therefore travel outside the skill, through the SDK, in `server/browser/agentContext.ts`:
+
+- **`BROWSER_CONTEXT_APPEND`** — four lines appended to the system prompt (`systemPrompt: { type: "preset", …, append }`), so they are in context on every request with no model discretion: the panel exists and the user can click in it, no `--session` means the shared `default` browser, say which browser you are using, subagents use `--session tmp-<id>`, and the skill has the rest.
+- **`browserPreToolUseHook`** — a `PreToolUse` hook on the shell tool. When the call comes from a subagent (`agent_id` present; the main thread has none) and names `agent-browser`, `redirectToThrowaway` rewrites every invocation onto `tmp-<agent-id>` and returns the new command as `updatedInput`, plus an `additionalContext` line telling the subagent which browser it actually got — without that it may report working in `default` when it did not. A command it cannot rewrite with confidence (the binary inside a quoted string, a `--session` read from a variable, quoting that does not close, two `--session` flags) is denied with a reason instead of half-rewritten.
+
+Hooks were chosen over `canUseTool` because the CLI skips `canUseTool` entirely under `bypassPermissions`, which is Cogpit's common mode; hooks fire in every permission mode.
+
+Both are registered only when `agent-browser` is installed — the gate is the shim's presence, the same signal `browserAgentEnv` uses — so a machine without it pays nothing.
+
+**This covers the sessions Cogpit starts through the SDK, and nothing else.** An agent run outside Cogpit, or a CLI Cogpit drives some other way, gets neither the appended context nor the hook; for those, the skill install below is the only channel, and the `tmp-` rule is back to being advice.
 
 ## Agent Skill
 
