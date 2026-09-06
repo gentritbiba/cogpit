@@ -179,7 +179,7 @@ Note: `DaemonDeps` has no `now` field (nothing in this task or later ones reads 
 
 Commit: `feat(browser): daemon lifecycle`
 
-### Task 5: Frame codec (shared)
+### Task 5: Frame codec (shared) ✅ done
 
 **Files:**
 - Create: `shared/browser/frames.ts`
@@ -193,9 +193,11 @@ export function decodeFrame(buffer: Uint8Array): { header: FrameHeader; jpeg: Ui
 
 Tests: round trip; header length boundary; truncated buffer throws.
 
-Commit: `feat(browser): frame codec`
+Note: test lives at `src/lib/__tests__/browserFrames.test.ts` (vitest does not include `shared/**`; other shared modules are tested from `src/lib/__tests__/` the same way). Codec uses only `TextEncoder`/`TextDecoder`/`DataView` so it runs in both the server and the viewer; `decodeFrame` honors `byteOffset` on views into a larger buffer and returns `jpeg` as a `subarray` view, not a copy.
 
-### Task 6: Protocol types (shared)
+Commit: `feat(browser): frame codec and viewer protocol` (with Task 6)
+
+### Task 6: Protocol types (shared) ✅ done
 
 **Files:**
 - Create: `shared/browser/protocol.ts`
@@ -219,7 +221,7 @@ export type BrowserServerMessage =
   | { type: "error"; message: string }
 ```
 
-No test (types only). Commit with Task 7.
+Note: also exports `parseClientMessage(raw): BrowserClientMessage | null`, the server's only validation of viewer input. Table-driven, one check per field of every variant (a field added to the union without a check fails to compile); unknown fields are dropped, `clickCount`/`modifiers` must be non-negative integers, `viewport` numbers `> 0` and `≤ 8192` (`dpr ≤ 4`), urls non-empty and `≤ 2048` chars. Tested in `src/lib/__tests__/browserFrames.test.ts`. Committed with Task 5 rather than Task 7.
 
 ### Task 7: CDP viewer
 
