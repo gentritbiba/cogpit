@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdtempSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   assertBrowserName,
@@ -19,21 +19,27 @@ import {
   registryFile,
   runRoot,
   sessionRunDir,
+  SHARED_RUN_NAME,
   sharedRunDir,
   shimPath,
   THROWAWAY_PREFIX,
 } from "../../browser/paths"
 
+let root = ""
 let home = ""
+let previousHome: string | undefined
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "cogpit-browser-"))
+  previousHome = process.env.COGPIT_BROWSER_HOME
+  root = mkdtempSync(join(tmpdir(), "cogpit-browser-"))
+  home = join(root, "browser")
   process.env.COGPIT_BROWSER_HOME = home
 })
 
 afterEach(() => {
-  delete process.env.COGPIT_BROWSER_HOME
-  rmSync(home, { recursive: true, force: true })
+  if (previousHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+  else process.env.COGPIT_BROWSER_HOME = previousHome
+  rmSync(root, { recursive: true, force: true })
 })
 
 describe("browser home", () => {
@@ -42,17 +48,22 @@ describe("browser home", () => {
     expect(browserHome()).toBe(join(homedir(), ".cogpit", "browser"))
   })
 
+  it("treats an empty COGPIT_BROWSER_HOME as unset", () => {
+    process.env.COGPIT_BROWSER_HOME = ""
+    expect(browserHome()).toBe(join(homedir(), ".cogpit", "browser"))
+  })
+
   it("honours COGPIT_BROWSER_HOME", () => {
     expect(browserHome()).toBe(home)
   })
 
-  it("lays out every path under the home", () => {
-    expect(binDir()).toBe(join(dirname(home), "bin"))
-    expect(shimPath()).toBe(join(dirname(home), "bin", "agent-browser"))
+  it("keeps bin beside the home and everything else inside it", () => {
+    expect(binDir()).toBe(join(root, "bin"))
+    expect(shimPath()).toBe(join(root, "bin", "agent-browser"))
     expect(profilesDir()).toBe(join(home, "profiles"))
     expect(profileDir("github")).toBe(join(home, "profiles", "github"))
     expect(runRoot()).toBe(join(home, "run"))
-    expect(sharedRunDir()).toBe(join(home, "run", "shared"))
+    expect(sharedRunDir()).toBe(join(home, "run", SHARED_RUN_NAME))
     expect(sessionRunDir("abc-123_X")).toBe(join(home, "run", "abc-123_X"))
     expect(registryFile()).toBe(join(home, "sessions.json"))
     expect(pluginDir()).toBe(join(home, "plugin"))
@@ -63,6 +74,7 @@ describe("constants", () => {
   it("names the default browser and the throwaway prefix", () => {
     expect(DEFAULT_BROWSER).toBe("default")
     expect(THROWAWAY_PREFIX).toBe("tmp-")
+    expect(SHARED_RUN_NAME).toBe("shared")
   })
 })
 

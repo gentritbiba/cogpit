@@ -3,6 +3,7 @@ import { dirname, join } from "node:path"
 
 export const DEFAULT_BROWSER = "default"
 export const THROWAWAY_PREFIX = "tmp-"
+export const SHARED_RUN_NAME = "shared"
 
 const BROWSER_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/
 const COGPIT_SESSION_ID = /^[A-Za-z0-9_-]{1,80}$/
@@ -46,7 +47,7 @@ function assertCogpitSessionId(id: string): void {
 }
 
 export function browserHome(): string {
-  return process.env.COGPIT_BROWSER_HOME ?? join(homedir(), ".cogpit", "browser")
+  return process.env.COGPIT_BROWSER_HOME || join(homedir(), ".cogpit", "browser")
 }
 
 export function binDir(): string {
@@ -71,7 +72,7 @@ export function runRoot(): string {
 }
 
 export function sharedRunDir(): string {
-  return join(runRoot(), "shared")
+  return join(runRoot(), SHARED_RUN_NAME)
 }
 
 export function sessionRunDir(id: string): string {

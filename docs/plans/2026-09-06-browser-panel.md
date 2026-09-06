@@ -29,7 +29,7 @@
 - Test: `server/__tests__/browser/paths.test.ts`
 
 Behaviour:
-- `browserHome()` → `process.env.COGPIT_BROWSER_HOME ?? join(homedir(), ".cogpit", "browser")`.
+- `browserHome()` → `process.env.COGPIT_BROWSER_HOME || join(homedir(), ".cogpit", "browser")` (empty counts as unset, like the shim's `${VAR:-default}`).
 - `binDir()` → `join(dirname(browserHome()), "bin")`; `shimPath()` → `join(binDir(), "agent-browser")`.
 - `profilesDir()`, `profileDir(name)`, `sharedRunDir()` (`run/shared`), `sessionRunDir(id)` (`run/<id>`), `runRoot()`, `registryFile()` (`sessions.json`), `pluginDir()` (`plugin`).
 - `DEFAULT_BROWSER = "default"`, `THROWAWAY_PREFIX = "tmp-"`.
