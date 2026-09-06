@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  acquireSweepOwnership,
   defaultDaemonDeps,
+  holdsSweepOwnership,
   isRunning,
   launch,
   readDaemonPid,
@@ -17,7 +19,25 @@ import {
   sweep,
   type DaemonDeps,
 } from "../../browser/daemons"
-import { BrowserNameError, profileDir, runRoot, sessionRunDir, sharedRunDir, shimPath } from "../../browser/paths"
+import {
+  BrowserNameError,
+  profileDir,
+  runRoot,
+  sharedRunDir,
+  shimPath,
+  sweepOwnerFile,
+} from "../../browser/paths"
+
+/** One Cogpit session's throwaway-browser directory. */
+function sessionRunDir(id: string): string {
+  return join(runRoot(), id)
+}
+
+/** Only the owner reaps named daemons, so a test about them has to claim the tree. */
+function ownTree(): void {
+  mkdirSync(join(root, "browser"), { recursive: true })
+  expect(acquireSweepOwnership(fakeDeps())).toBe(true)
+}
 
 let root = ""
 let home = ""
@@ -352,6 +372,30 @@ describe("stop", () => {
     await expect(stop("../x", deps)).rejects.toThrow(BrowserNameError)
     expect(deps.spawns).toEqual([])
   })
+
+  it("escalates to SIGKILL for a daemon that ignores SIGTERM", async () => {
+    vi.useFakeTimers()
+    try {
+      writePid(sharedRunDir(), "work", "100")
+      const deps = fakeDeps({ alive: [100] })
+      // A daemon that stays alive through every signal.
+      deps.kill = (pid, signal) => {
+        deps.kills.push({ pid, signal })
+        return true
+      }
+
+      const stopping = stop("work", deps)
+      await vi.advanceTimersByTimeAsync(5_000)
+      await stopping
+
+      expect(deps.kills).toEqual([
+        { pid: 100, signal: "SIGTERM" },
+        { pid: 100, signal: "SIGKILL" },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe("reapRunDir", () => {
@@ -439,6 +483,7 @@ describe("shutdownBrowsers", () => {
   })
 
   it("reaps every session dir and stops every named daemon", async () => {
+    ownTree()
     writePid(sessionRunDir("sess1"), "tmp-a", "10")
     writePid(sessionRunDir("sess2"), "tmp-b", "20")
     writePid(sharedRunDir(), "default", "100")
@@ -457,6 +502,7 @@ describe("shutdownBrowsers", () => {
   })
 
   it("terminates throwaways that landed in the shared dir without a close", async () => {
+    ownTree()
     writePid(sharedRunDir(), "tmp-orphan", "300")
     const deps = fakeDeps({ alive: [300] })
     await shutdownBrowsers(deps)
@@ -466,11 +512,94 @@ describe("shutdownBrowsers", () => {
   })
 
   it("still terminates every daemon when close cannot be spawned", async () => {
+    ownTree()
     writePid(sharedRunDir(), "default", "100")
     writePid(sharedRunDir(), "work", "200")
     const deps = fakeDeps({ alive: [100, 200], spawnError: new Error("ENOENT") })
     await shutdownBrowsers(deps)
     expect(killedPids(deps)).toEqual([100, 200])
+  })
+
+  it("hands ownership on, so the next Cogpit to start may sweep", async () => {
+    ownTree()
+    await shutdownBrowsers(fakeDeps())
+    expect(existsSync(sweepOwnerFile())).toBe(false)
+  })
+
+  it("leaves another Cogpit's named daemons running, but still drops its own throwaways", async () => {
+    mkdirSync(join(root, "browser"), { recursive: true })
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
+    writePid(sessionRunDir("sess1"), "tmp-a", "10")
+    writePid(sharedRunDir(), "default", "100")
+    const deps = fakeDeps({ alive: [10, 100, 4242] })
+
+    await shutdownBrowsers(deps)
+
+    expect(existsSync(sessionRunDir("sess1"))).toBe(false)
+    expect(killedPids(deps)).toEqual([10])
+    expect(deps.spawns).toEqual([])
+    expect(runFiles(sharedRunDir(), "default")).toEqual([true, true])
+    expect(existsSync(sweepOwnerFile())).toBe(true)
+  })
+
+  it("gives up on a daemon that will not stop rather than holding the app open", async () => {
+    vi.useFakeTimers()
+    try {
+      ownTree()
+      writePid(sharedRunDir(), "default", "100")
+      const deps = fakeDeps({ alive: [100] })
+      // A close that never returns is exactly the wedged daemon this bounds.
+      deps.spawn = () => new Promise(() => {})
+
+      const shutdown = shutdownBrowsers(deps)
+      const settled = expect(shutdown).rejects.toThrow(/did not stop/)
+      await vi.advanceTimersByTimeAsync(20_000)
+      await settled
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("sweep ownership", () => {
+  beforeEach(() => {
+    mkdirSync(join(root, "browser"), { recursive: true })
+  })
+
+  it("acquires an unclaimed tree and reports holding it", () => {
+    expect(holdsSweepOwnership()).toBe(false)
+    expect(acquireSweepOwnership(fakeDeps())).toBe(true)
+    expect(holdsSweepOwnership()).toBe(true)
+    expect(JSON.parse(readFileSync(sweepOwnerFile(), "utf8")).pid).toBe(process.pid)
+  })
+
+  it("is idempotent for the process that already holds it", () => {
+    acquireSweepOwnership(fakeDeps())
+    const before = readFileSync(sweepOwnerFile(), "utf8")
+    expect(acquireSweepOwnership(fakeDeps())).toBe(true)
+    expect(readFileSync(sweepOwnerFile(), "utf8")).toBe(before)
+  })
+
+  it("declines while another live Cogpit holds it", () => {
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
+    expect(acquireSweepOwnership(fakeDeps({ alive: [4242] }))).toBe(false)
+    expect(holdsSweepOwnership()).toBe(false)
+  })
+
+  it("takes over from an owner whose process is gone", () => {
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
+    expect(acquireSweepOwnership(fakeDeps())).toBe(true)
+    expect(holdsSweepOwnership()).toBe(true)
+  })
+
+  it("takes over an unreadable owner file", () => {
+    writeFileSync(sweepOwnerFile(), "not json")
+    expect(acquireSweepOwnership(fakeDeps())).toBe(true)
+  })
+
+  it("does not read a pid file naming this process as a claim by a stale twin", () => {
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: process.pid, startedAt: 1 }))
+    expect(holdsSweepOwnership()).toBe(false)
   })
 })
 
@@ -499,6 +628,35 @@ describe("startSweeper", () => {
     expect(runFiles(sharedRunDir(), "third")).toEqual([true, true])
   })
 
+  it("leaves the tree alone while another live Cogpit owns it", () => {
+    mkdirSync(join(root, "browser"), { recursive: true })
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
+    writePid(sharedRunDir(), "dead", "100")
+
+    const stopSweeper = startSweeper(() => true, 1_000, fakeDeps({ alive: [4242] }))
+
+    expect(runFiles(sharedRunDir(), "dead")).toEqual([true, true])
+    stopSweeper()
+  })
+
+  it("takes the tree over on a later tick once that Cogpit is gone", () => {
+    mkdirSync(join(root, "browser"), { recursive: true })
+    writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
+    writePid(sharedRunDir(), "dead", "100")
+    const alive = [4242]
+    const deps = fakeDeps({ alive })
+
+    const stopSweeper = startSweeper(() => true, 1_000, deps)
+    expect(runFiles(sharedRunDir(), "dead")).toEqual([true, true])
+
+    deps.isPidAlive = () => false
+    vi.advanceTimersByTime(1_000)
+
+    expect(runFiles(sharedRunDir(), "dead")).toEqual([false, false])
+    expect(holdsSweepOwnership()).toBe(true)
+    stopSweeper()
+  })
+
   it("swallows sweep errors so the timer keeps running", () => {
     writePid(sessionRunDir("sess1"), "tmp-a", "10")
     const isLive = vi.fn(() => {
@@ -510,6 +668,26 @@ describe("startSweeper", () => {
     vi.advanceTimersByTime(1_000)
     expect(isLive).toHaveBeenCalledTimes(2)
     stopSweeper()
+  })
+})
+
+describe("defaultDaemonDeps.spawn", () => {
+  it("kills a shim call that never finishes and rejects", async () => {
+    vi.useFakeTimers()
+    try {
+      const running = defaultDaemonDeps.spawn("/bin/sh", ["-c", "sleep 60"], process.env)
+      const settled = expect(running).rejects.toThrow(/did not finish in 30s/)
+      await vi.advanceTimersByTimeAsync(30_000)
+      await settled
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("resolves with the exit code and stderr of a command that does finish", async () => {
+    const result = await defaultDaemonDeps.spawn("/bin/sh", ["-c", "echo boom >&2; exit 3"], process.env)
+    expect(result.code).toBe(3)
+    expect(result.stderr.trim()).toBe("boom")
   })
 })
 

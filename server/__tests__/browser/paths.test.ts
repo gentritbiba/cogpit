@@ -13,15 +13,16 @@ import {
   isThrowawayName,
   isValidBrowserName,
   isValidCogpitSessionId,
+  NO_COGPIT_SESSION,
   pluginDir,
   profileDir,
   profilesDir,
   registryFile,
   runRoot,
-  sessionRunDir,
   SHARED_RUN_NAME,
   sharedRunDir,
   shimPath,
+  sweepOwnerFile,
   THROWAWAY_PREFIX,
 } from "../../browser/paths"
 
@@ -64,9 +65,9 @@ describe("browser home", () => {
     expect(profileDir("github")).toBe(join(home, "profiles", "github"))
     expect(runRoot()).toBe(join(home, "run"))
     expect(sharedRunDir()).toBe(join(home, "run", SHARED_RUN_NAME))
-    expect(sessionRunDir("abc-123_X")).toBe(join(home, "run", "abc-123_X"))
     expect(registryFile()).toBe(join(home, "sessions.json"))
     expect(pluginDir()).toBe(join(home, "plugin"))
+    expect(sweepOwnerFile()).toBe(join(home, "sweeper.owner"))
   })
 })
 
@@ -75,6 +76,10 @@ describe("constants", () => {
     expect(DEFAULT_BROWSER).toBe("default")
     expect(THROWAWAY_PREFIX).toBe("tmp-")
     expect(SHARED_RUN_NAME).toBe("shared")
+  })
+
+  it("uses a session-id sentinel the shim will refuse", () => {
+    expect(isValidCogpitSessionId(NO_COGPIT_SESSION)).toBe(false)
   })
 })
 
@@ -141,11 +146,6 @@ describe("path guards", () => {
   it("profileDir rejects invalid and throwaway names", () => {
     expect(() => profileDir("../x")).toThrow(BrowserNameError)
     expect(() => profileDir("tmp-1")).toThrow(BrowserNameError)
-  })
-
-  it("sessionRunDir rejects invalid session ids", () => {
-    expect(() => sessionRunDir("../x")).toThrow(BrowserNameError)
-    expect(() => sessionRunDir("")).toThrow(BrowserNameError)
   })
 })
 

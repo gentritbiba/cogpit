@@ -48,6 +48,7 @@ let fixtureRoot: string
 let staticDir: string
 let userDataDir: string
 let previousBrowserHome: string | undefined
+let previousSkillHome: string | undefined
 
 beforeEach(async () => {
   deviceRegistryDirs.length = 0
@@ -60,15 +61,20 @@ beforeEach(async () => {
     mkdir(userDataDir, { recursive: true }),
   ])
   setConfigPath(join(userDataDir, "config.local.json"))
-  // Composition installs the browser shim and plugin; keep that inside the fixture.
+  // Composition installs the browser shim, the plugin and the per-CLI skill;
+  // keep all of that inside the fixture rather than the developer's home.
   previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  previousSkillHome = process.env.COGPIT_SKILL_HOME
   process.env.COGPIT_BROWSER_HOME = join(fixtureRoot, "browser")
+  process.env.COGPIT_SKILL_HOME = join(fixtureRoot, "home")
 })
 
 afterEach(async () => {
   __resetEditionForTest()
   if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
   else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
+  if (previousSkillHome === undefined) delete process.env.COGPIT_SKILL_HOME
+  else process.env.COGPIT_SKILL_HOME = previousSkillHome
   await rm(fixtureRoot, { recursive: true, force: true })
 })
 

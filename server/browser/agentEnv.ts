@@ -1,7 +1,11 @@
 /**
  * The environment Cogpit hands an agent so its `agent-browser` calls land in the
  * managed browser tree: the shim first on PATH, and the Cogpit session id the
- * shim files throwaway browsers under.
+ * shim files throwaway browsers under and stamps on a named browser's `.driver`.
+ *
+ * A spawn that serves every session rather than one passes `NO_COGPIT_SESSION`,
+ * which the shim rejects — the alternative, a stand-in that looks like an id,
+ * makes every named browser read as driven by a session that does not exist.
  */
 import { existsSync } from "node:fs"
 import { delimiter } from "node:path"
@@ -19,5 +23,6 @@ export function browserAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string
 }
 
 export function browserPluginPaths(): string[] {
-  return existsSync(pluginManifestFile()) ? [pluginDir()] : []
+  const manifest = pluginManifestFile()
+  return manifest !== null && existsSync(manifest) ? [pluginDir()] : []
 }

@@ -8,6 +8,7 @@
  * are invisible by design, so `subAgentActivity` is never scanned and a
  * `tmp-*` browser never surfaces.
  */
+import { DEFAULT_BROWSER, isThrowawayName } from "../browser/names"
 import { getCommandText } from "./toolSummary"
 import type { ParsedSession, ToolCall } from "./types"
 
@@ -23,9 +24,6 @@ export interface BrowserAgentActivity {
 }
 
 const BINARY = "agent-browser"
-const DEFAULT_BROWSER = "default"
-/** Mirrors the shim's rule: a `tmp-*` browser belongs to a subagent. */
-const THROWAWAY_PREFIX = "tmp-"
 const MAX_COMMAND_LENGTH = 120
 
 const SHELL_TOOL = /(?:^|[._])exec_command$/
@@ -60,7 +58,7 @@ function activityOf(call: ToolCall): BrowserAgentActivity | null {
   const invocation = invocationIn(getCommandText(call.input))
   if (invocation === null) return null
   const browser = browserOf(invocation)
-  if (browser.startsWith(THROWAWAY_PREFIX)) return null
+  if (isThrowawayName(browser)) return null
   return {
     session: browser,
     command: invocation.length > MAX_COMMAND_LENGTH

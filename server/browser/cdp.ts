@@ -13,6 +13,11 @@ interface PendingCall {
 
 const CONNECTION_CLOSED = "CDP connection closed"
 const HANDSHAKE_TIMEOUT_MS = 5000
+/**
+ * A target that completed the handshake and then stopped answering would
+ * otherwise hold every caller — and the socket under them — open for good.
+ */
+const CALL_TIMEOUT_MS = 10_000
 
 /** Minimal JSON-RPC client over one CDP WebSocket. Session-scoped traffic carries a top-level `sessionId`. */
 export class CdpConnection {
@@ -46,9 +51,20 @@ export class CdpConnection {
     const message: CdpParams = { id, method, params }
     if (sessionId !== undefined) message.sessionId = sessionId
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: (result) => resolve(result as T), reject })
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error(`${method} did not answer in ${CALL_TIMEOUT_MS / 1_000}s`))
+      }, CALL_TIMEOUT_MS)
+      timer.unref?.()
+      const settle = (finish: () => void): void => {
+        clearTimeout(timer)
+        finish()
+      }
+      this.pending.set(id, {
+        resolve: (result) => settle(() => resolve(result as T)),
+        reject: (error) => settle(() => reject(error)),
+      })
       this.socket.send(JSON.stringify(message), (error) => {
-        if (error && this.pending.delete(id)) reject(error)
+        if (error && this.pending.delete(id)) settle(() => reject(error))
       })
     })
   }
@@ -423,11 +439,15 @@ export class BrowserViewer {
     if (this.closed) return
     this.closed = true
     this.buttons = 0
-    const active = this.screencast
-    if (active) await this.stopScreencast(active.sessionId)
-    const emulated = this.override
-    if (emulated) await this.restoreMetrics(emulated.sessionId)
-    this.cdp.close()
+    try {
+      const active = this.screencast
+      if (active) await this.stopScreencast(active.sessionId)
+      const emulated = this.override
+      if (emulated) await this.restoreMetrics(emulated.sessionId)
+    } finally {
+      // Tidying up is best effort; letting go of the socket is not.
+      this.cdp.close()
+    }
   }
 
   private async start(): Promise<void> {

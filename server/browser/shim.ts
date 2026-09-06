@@ -16,7 +16,15 @@ import {
   writeFileSync,
 } from "node:fs"
 import { delimiter, join, resolve } from "node:path"
-import { binDir, shimPath } from "./paths"
+import {
+  BROWSER_NAME_RE,
+  COGPIT_SESSION_ID_RE,
+  DEFAULT_BROWSER,
+  SHARED_RUN_NAME,
+  THROWAWAY_PREFIX,
+  binDir,
+  shimPath,
+} from "./paths"
 
 export const SHIM_VERSION = 2
 
@@ -37,11 +45,11 @@ if [ ! -x "$real" ] || [ "$real" -ef "$0" ]; then
   echo "cogpit-shim: $real is not usable; restart Cogpit to refresh the shim" >&2
   exit 127
 fi
-valid_name() { local LC_ALL=C; [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,39}$ ]]; }
-valid_sid()  { local LC_ALL=C; [[ "$1" =~ ^[A-Za-z0-9_-]{1,80}$ ]]; }
+valid_name() { local LC_ALL=C; [[ "$1" =~ ${BROWSER_NAME_RE.source} ]]; }
+valid_sid()  { local LC_ALL=C; [[ "$1" =~ ${COGPIT_SESSION_ID_RE.source} ]]; }
 [ -n "\${COGPIT_BROWSER_HOME:-}" ] || [ -n "\${HOME:-}" ] || exec "$real" "$@"
 home="\${COGPIT_BROWSER_HOME:-$HOME/.cogpit/browser}"
-name="\${AGENT_BROWSER_SESSION:-default}"
+name="\${AGENT_BROWSER_SESSION:-${DEFAULT_BROWSER}}"
 prev=""
 for arg in "$@"; do
   if [ "$prev" = "--session" ]; then name="$arg"; break; fi
@@ -49,17 +57,17 @@ for arg in "$@"; do
   prev="$arg"
 done
 valid_name "$name" || exec "$real" "$@"
-if [[ "$name" == tmp-* ]]; then
+if [[ "$name" == ${THROWAWAY_PREFIX}* ]]; then
   sid="\${COGPIT_SESSION_ID:-}"
-  valid_sid "$sid" || sid="shared"
+  valid_sid "$sid" || sid="${SHARED_RUN_NAME}"
   export AGENT_BROWSER_SOCKET_DIR="$home/run/$sid"
   mkdir -p "$AGENT_BROWSER_SOCKET_DIR"
   exec "$real" "$@"
 fi
 profile="$home/profiles/$name"
-mkdir -p "$profile" "$home/run/shared"
+mkdir -p "$profile" "$home/run/${SHARED_RUN_NAME}"
 printf '%s\\n' "\${COGPIT_SESSION_ID:-}" > "$profile/.driver"
-export AGENT_BROWSER_SOCKET_DIR="$home/run/shared"
+export AGENT_BROWSER_SOCKET_DIR="$home/run/${SHARED_RUN_NAME}"
 export AGENT_BROWSER_PROFILE="$profile"
 export AGENT_BROWSER_ARGS="--remote-debugging-port=0"
 exec "$real" "$@"

@@ -1,18 +1,20 @@
 // @vitest-environment node
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { pluginDir } from "../../browser/paths"
 import {
   COGPIT_BROWSER_SKILL,
   ensurePlugin,
   installSkill,
+  installSkillEverywhere,
   PLUGIN_MANIFEST,
   pluginManifestFile,
   pluginSkillFile,
   SKILL_NAME,
 } from "../../browser/skill"
+import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 
 let root = ""
 let previousHome: string | undefined
@@ -33,6 +35,13 @@ afterEach(() => {
   else process.env.COGPIT_SKILL_HOME = previousSkillHome
   rmSync(root, { recursive: true, force: true })
 })
+
+/** Non-null unless no CLI takes a plugin at all, which the descriptor table rules out. */
+function manifestFile(): string {
+  const path = pluginManifestFile()
+  if (path === null) throw new Error("No agent CLI takes a plugin")
+  return path
+}
 
 const AGE = new Date(Date.now() - 60_000)
 
@@ -78,19 +87,19 @@ describe("COGPIT_BROWSER_SKILL", () => {
 describe("ensurePlugin", () => {
   it("writes the manifest and the skill, and returns the plugin dir", () => {
     expect(ensurePlugin()).toBe(pluginDir())
-    expect(pluginManifestFile()).toBe(join(pluginDir(), ".claude-plugin", "plugin.json"))
+    expect(manifestFile()).toBe(join(pluginDir(), ".claude-plugin", "plugin.json"))
     expect(pluginSkillFile()).toBe(join(pluginDir(), "skills", SKILL_NAME, "SKILL.md"))
-    expect(JSON.parse(readFileSync(pluginManifestFile(), "utf8"))).toEqual(PLUGIN_MANIFEST)
+    expect(JSON.parse(readFileSync(manifestFile(), "utf8"))).toEqual(PLUGIN_MANIFEST)
     expect(readFileSync(pluginSkillFile(), "utf8")).toBe(COGPIT_BROWSER_SKILL)
   })
 
   it("leaves unchanged files alone on a second call", () => {
     ensurePlugin()
-    utimesSync(pluginManifestFile(), AGE, AGE)
+    utimesSync(manifestFile(), AGE, AGE)
     utimesSync(pluginSkillFile(), AGE, AGE)
-    const before = [pluginManifestFile(), pluginSkillFile()].map((path) => statSync(path).mtimeMs)
+    const before = [manifestFile(), pluginSkillFile()].map((path) => statSync(path).mtimeMs)
     ensurePlugin()
-    expect([pluginManifestFile(), pluginSkillFile()].map((path) => statSync(path).mtimeMs)).toEqual(before)
+    expect([manifestFile(), pluginSkillFile()].map((path) => statSync(path).mtimeMs)).toEqual(before)
   })
 
   it("rewrites a file whose content drifted", () => {
@@ -132,5 +141,64 @@ describe("installSkill", () => {
       if (previous === undefined) delete process.env.HOME
       else process.env.HOME = previous
     }
+  })
+})
+
+describe("installSkillEverywhere", () => {
+  interface Target {
+    /** The CLI's global config root, e.g. `<home>/.claude`. */
+    configRoot: string
+    dir: string
+    skill: string
+  }
+
+  function targets(): Target[] {
+    return AGENT_KINDS.flatMap((kind) => {
+      const { rootDirName, skillsDir } = descriptorFor(kind).config
+      if (skillsDir === null) return []
+      const configRoot = join(root, "home", rootDirName)
+      const dir = join(configRoot, skillsDir, SKILL_NAME)
+      return [{ configRoot, dir, skill: join(dir, "SKILL.md") }]
+    })
+  }
+
+  it("writes into every config root that exists", () => {
+    for (const target of targets()) mkdirSync(target.configRoot, { recursive: true })
+
+    expect(installSkillEverywhere()).toEqual(targets().map((target) => target.dir))
+    for (const target of targets()) {
+      expect(readFileSync(target.skill, "utf8")).toBe(COGPIT_BROWSER_SKILL)
+    }
+  })
+
+  it("skips a CLI whose config root the user does not have", () => {
+    const [first, ...rest] = targets()
+    mkdirSync(first.configRoot, { recursive: true })
+
+    expect(installSkillEverywhere()).toEqual([first.dir])
+    for (const target of rest) expect(existsSync(target.configRoot)).toBe(false)
+  })
+
+  it("installs the rest and reports when one CLI cannot be written", () => {
+    const [blocked, ...rest] = targets()
+    expect(rest.length).toBeGreaterThan(0)
+    for (const target of targets()) mkdirSync(target.configRoot, { recursive: true })
+    // A file where the skill directory has to go, so only this write throws.
+    mkdirSync(dirname(blocked.dir), { recursive: true })
+    writeFileSync(blocked.dir, "not a directory")
+
+    expect(() => installSkillEverywhere()).toThrow(/did not reach/)
+    for (const target of rest) expect(readFileSync(target.skill, "utf8")).toBe(COGPIT_BROWSER_SKILL)
+  })
+
+  it("leaves an unchanged file alone on a second run", () => {
+    for (const target of targets()) mkdirSync(target.configRoot, { recursive: true })
+    installSkillEverywhere()
+    for (const target of targets()) utimesSync(target.skill, AGE, AGE)
+    const before = targets().map((target) => statSync(target.skill).mtimeMs)
+
+    installSkillEverywhere()
+
+    expect(targets().map((target) => statSync(target.skill).mtimeMs)).toEqual(before)
   })
 })

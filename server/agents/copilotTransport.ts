@@ -11,7 +11,7 @@ import {
 } from "vscode-jsonrpc/node.js"
 import { findExecutableOnPath, resolveAgentCommand } from "../lib/binaryResolver"
 import { browserAgentEnv } from "../browser/agentEnv"
-import { SHARED_RUN_NAME } from "../browser/paths"
+import { NO_COGPIT_SESSION } from "../browser/paths"
 
 export type CopilotJsonObject = Record<string, unknown>
 
@@ -881,7 +881,7 @@ export class CopilotRuntime {
       child = this.spawn(resolved.command, resolved.args, {
         cwd: this.cwd,
         // One headless CLI serves every session, so no single session owns it.
-        env: browserAgentEnv(this.env, SHARED_RUN_NAME),
+        env: browserAgentEnv(this.env, NO_COGPIT_SESSION),
         stdio: ["pipe", "pipe", "pipe"],
         ...resolved.spawnOptions,
       })

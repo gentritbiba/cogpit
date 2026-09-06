@@ -6,25 +6,33 @@ A workspace panel that streams the agent's live `agent-browser` session, lets yo
 
 The Browser panel displays the agent's headless Chromium in real time over the `/__browser` WebSocket transport. You can interact directly — click, type, navigate, go back/forward. The agent and you can drive the same browser, and you'll both see the same page.
 
-Browser tabs are persistent. The shared `default` browser keeps cookies and localStorage across session restarts. You can create named browsers (`github`, `work-gmail`) for isolated, long-lived work. Subagents get private throwaway browsers (`tmp-*`) that disappear when the session ends.
+Browser tabs are persistent. The shared `default` browser keeps cookies and localStorage across session restarts. You can create named browsers (`github`, `work-gmail`) for isolated, long-lived work. Subagents get private throwaway browsers (`tmp-*`) that are reaped automatically.
 
 ## The Shim
 
 The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that routes every `agent-browser` call into Cogpit's managed tree. The first call spawns a daemon; that daemon inherits the call's environment, so the shim decides the profile, socket dir, and debugging port at spawn time.
+
+**How it picks a name:** `--session X` or `--session=X` from argv, else `$AGENT_BROWSER_SESSION`, else `default`.
 
 **How it routes:**
 - **Named browser** (`agent-browser open …` or `agent-browser --session work open …`):
   - Profile: `~/.cogpit/browser/profiles/<name>` (persistent, survives restarts)
   - Socket dir: `~/.cogpit/browser/run/shared` (shared across all sessions)
   - Sets `--remote-debugging-port=0` so Chromium writes its debugging endpoint to `<profile>/DevToolsActivePort`
-  - Records the Cogpit session id in `<profile>/.driver` (used to show "driven by another session" in the panel)
+  - Writes `$COGPIT_SESSION_ID` to `<profile>/.driver` (used to show "driven by another session" in the panel)
 
 - **Throwaway browser** (`agent-browser --session tmp-abc123 open …`):
-  - Socket dir: `~/.cogpit/browser/run/<cogpit-session-id>` (session-specific, reaped when the session ends)
+  - Socket dir: `~/.cogpit/browser/run/<cogpit-session-id>`, or `run/shared` when `$COGPIT_SESSION_ID` is not a valid id
   - No profile (no persistent data)
   - No debugging port override (invisible to the panel)
 
-The shim validates names against `^[a-z0-9][a-z0-9_-]{0,39}$` and falls through to the real binary if invalid, so a command like `agent-browser --session 'My Browser'` runs unmanaged.
+**Two fall-through paths** run the real binary unmanaged, leaving the environment alone:
+- Neither `$COGPIT_BROWSER_HOME` nor `$HOME` is set, so there is no tree to route into.
+- The name fails `^[a-z0-9][a-z0-9_-]{0,39}$` — `agent-browser --session 'My Browser'` runs unmanaged.
+
+(A third case is not a fall-through: if the real binary the shim was generated against is gone or resolves back to the shim itself, it exits 127 and asks you to restart Cogpit.)
+
+`$COGPIT_BROWSER_HOME` overrides `~/.cogpit/browser` for the whole tree, in both the shim and the server. It is what the test suite sets; there is no reason to set it by hand.
 
 ## Browser Types
 
@@ -32,9 +40,17 @@ The shim validates names against `^[a-z0-9][a-z0-9_-]{0,39}$` and falls through 
 |------|------------|-------------|-----------|---------|-----|
 | `default` | Panel | Persistent | `run/shared` | `profiles/default` | All work needing login, default choice |
 | Named (e.g., `github`) | Panel | Persistent | `run/shared` | `profiles/github` | Isolated accounts, long-lived work |
-| Throwaway (e.g., `tmp-s1`) | Hidden | None | `run/<session-id>` | None | Subagent scratch work, auto-cleanup |
+| Throwaway (e.g., `tmp-s1`) | Hidden | None | `run/<session-id>` or `run/shared` | None | Subagent scratch work, auto-cleanup |
 
 The agent skill teaches subagents to use `--session tmp-<short-id>` and close when done. A subagent that uses a named browser becomes visible in the panel but does not break anything — it just shares that browser with the main session.
+
+### When a throwaway is reaped
+
+Only a spawn that owns exactly one Cogpit session passes a real `COGPIT_SESSION_ID`, and only those throwaways land in `run/<session-id>`, which the sweeper reaps within 60 seconds of the session ending. The rest — a shared app-server or headless CLI serving every session at once, which has no single session to name — pass a deliberately invalid id, so their throwaways land in `run/shared` and are reaped when Cogpit exits instead.
+
+### One Cogpit reaps, the rest do not
+
+`run/<session-id>` names a session only the process that started it knows about, so a second Cogpit on the same tree would read every one of them as finished. Reaping is single-owner: `~/.cogpit/browser/sweeper.owner` names the holder by pid and start time, a holder whose process is gone can be taken over, and a non-owner still installs the shim and the skill but never sweeps and never stops a named daemon on the way out. The standard Electron dev flow (Vite plus the app server) runs two instances, which is exactly the case this protects.
 
 ## File Layout
 
@@ -43,7 +59,9 @@ The agent skill teaches subagents to use `--session tmp-<short-id>` and close wh
   profiles/
     default/            # Persistent Chromium profile (cookies, localStorage, etc.)
       DevToolsActivePort    # Written by Chromium; contains the CDP debugging port
-      .driver               # Cogpit session id that owns this browser (empty if stopped)
+      .driver               # Cogpit session id of the last call routed through the shim
+                            #   (empty when the caller owned no session, and after a
+                            #    stop that went through Cogpit; its mtime is lastUsedAt)
     <name>/             # One per named browser
       ...
   run/
@@ -54,7 +72,8 @@ The agent skill teaches subagents to use `--session tmp-<short-id>` and close wh
     <session-id>/       # Throwaway browsers for one Cogpit session
       tmp-abc123.pid
       ...
-  sessions.json         # Metadata: notes, created/last-used times, last URLs
+  sessions.json         # Metadata: notes, createdAt, last URLs
+  sweeper.owner         # pid + start time of the Cogpit allowed to reap this tree
   plugin/
     .claude-plugin/
       plugin.json       # Plugin manifest
@@ -64,6 +83,8 @@ The agent skill teaches subagents to use `--session tmp-<short-id>` and close wh
 
 ~/.cogpit/bin/agent-browser    # The shim (bash), regenerated on Cogpit start
 ```
+
+`lastUsedAt` in the API is the mtime of `.driver`, not a field in `sessions.json`.
 
 ## How the Panel Attaches
 
@@ -84,6 +105,10 @@ The agent skill teaches subagents to use `--session tmp-<short-id>` and close wh
 
 The connection works over the hub for remote devices; the hub route matcher is `^/hub/[^/]+/(__pty|__browser)$`.
 
+The retry loop is server-side, not in the panel: while a browser is stopped the server polls every 2 seconds and attaches as soon as it answers, so a browser the agent opens on its own appears without any user action. An attach that stalls is abandoned after 10 seconds and the poll resumes; individual CDP calls give up after 10 seconds so a wedged Chromium cannot hold a socket open.
+
+Screencast frames are capped at 1920 device pixels on each side (JPEG, quality 80), so a very large panel on a retina display streams at that ceiling rather than at its full pixel count.
+
 ## Viewport Emulation
 
 While the panel is open, the page viewport size is driven by the panel's own size, not by the agent's Chromium settings.
@@ -95,13 +120,18 @@ While the panel is open, the page viewport size is driven by the panel's own siz
 
 **What the agent sees:** When the panel is open, `window.innerWidth` and page breakpoints reflect the panel's size, not what the agent wrote to Chromium. This means responsive pages adapt to the panel.
 
-**When you close the panel:** The CDP client reads the page's original layout metrics (`Page.getLayoutMetrics`) and `window.devicePixelRatio` on first attach, then restores those values when it un-follows or closes. So the agent's own viewport settings survive a panel open-and-close.
+**When you close the panel:** The CDP client reads the page's original layout metrics (`Page.getLayoutMetrics`) and `window.devicePixelRatio` lazily — on the tab it is about to override, immediately before the first override lands on it, not for every tab at attach — then hands those values back when it un-follows or closes. So the agent's own viewport settings survive a panel open-and-close. A tab the panel never followed is never measured and never touched.
 
 The minimum panel width is 1024 pixels (keeps pages on their desktop breakpoints even in a narrow sidebar). Height is adjusted to match the panel's aspect ratio. Neither dimension can exceed 4096.
 
 ## Agent Skill
 
-Cogpit ships the `cogpit-browser` skill as a local plugin to every session, so agents learn the rules without installation. The skill covers:
+Cogpit delivers the `cogpit-browser` skill two ways, so agents learn the rules without installation:
+
+- **As a local plugin**, passed to the sessions Cogpit drives through the SDK. `~/.cogpit/browser/plugin` is written at startup in the plugin shape the descriptor declares (`.claude-plugin/plugin.json` plus `skills/`).
+- **As an installed skill**, written at startup into every agent CLI's own global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`) whose config root already exists. That is what reaches one-shot runs and the CLIs that take no plugin. It is idempotent — an unchanged file is left alone — and one CLI failing does not stop the others.
+
+The skill covers:
 - What the Browser panel is and to mention it when starting browser work
 - Default browser semantics and login persistence
 - Named browsers: `--session name`, list via `GET /api/browser`, add notes via `PATCH`
@@ -121,11 +151,15 @@ All routes require admin trust (same as PTY). Failures send JSON errors with sta
 | POST | `/api/browser/sessions` | `{name, note?}` | 201 info / 400 invalid / 409 exists | Create named browser |
 | PATCH | `/api/browser/sessions/:name` | `{note?}` | info / 404 not found | Update note |
 | DELETE | `/api/browser/sessions/:name` | — | 204 / 400 if default | Delete browser (stops it first) |
-| POST | `/api/browser/sessions/:name/launch` | `{url?: string}` | Queued | Launch or reopen browser (default `about:blank` or last URL) |
-| POST | `/api/browser/sessions/:name/stop` | — | — | Stop the daemon (profile preserved) |
+| POST | `/api/browser/sessions/:name/launch` | `{url?: string}` | 200 `{ok:true}` / 400 bad url / 502 would not start | Launch or reopen browser (default `about:blank` or last URL) |
+| POST | `/api/browser/sessions/:name/stop` | — | 200 `{ok:true}` | Stop the daemon (profile preserved) |
 | POST | `/api/browser/skill/install` | `{target: "claude"\|"codex"\|"copilot"}` | `{path}` | Copy skill to `~/.claude/skills` etc. for agents not run through Cogpit |
 
-URL length is capped at 2048 characters. Names are validated; `default` cannot be deleted. Launch URL schemes are allow-listed (`http`, `https`, `about`); loopback forms without a scheme are prefixed with `http://`.
+URL length is capped at 2048 characters. Names are validated; `default` cannot be deleted. Launch URL schemes are allow-listed (`http`, `https`, `about`); a url with no scheme gets `http://` when it is loopback (`localhost`, `127.x`, `0.0.0.0`, `::1`) and `https://` otherwise, so `example.com:8080` becomes `https://example.com:8080` while `localhost:3000` becomes `http://localhost:3000`.
+
+`launch` is not fire-and-forget: it waits for the shim, so a browser that fails to start answers 502 with the CLI's stderr. `DELETE` stops the browser before deleting its profile — that ordering lives in the route, so a live Chromium is never writing into a directory that is being removed.
+
+Startup also installs the skill into every agent CLI's global skills directory; the `skill/install` route is the manual equivalent, for a CLI you installed after Cogpit started.
 
 ## Security
 
@@ -138,18 +172,31 @@ URL length is capped at 2048 characters. Names are validated; `default` cannot b
 
 ## Troubleshooting
 
+Everything below goes through Cogpit's own stop, which is the only supported way to end a managed browser. Cogpit refuses to signal a process whose `ps` line does not contain `agent-browser`, so a stray `kill` by hand loses that guard — and the daemon is the `agent-browser` Node process recorded in `~/.cogpit/browser/run/shared/<name>.pid`, not the Chromium under it. Never `killall` a Chromium: it takes down every headless browser on the machine, including ones nothing here owns.
+
+**Stopping a browser**
+
+Use the panel's Stop button, or:
+
+```bash
+PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"
+curl -s -X POST "http://localhost:$PORT/api/browser/sessions/default/stop"
+```
+
+Stop closes the browser politely, then SIGTERMs the daemon and SIGKILLs it if it has not gone within 3 seconds. The profile — and every login in it — is untouched.
+
 **Browser shows as stopped even though the agent is using it**
 
-The panel polls every 2 seconds while stopped. If the page opens but does not appear:
-- The daemon might have crashed. Kill the process: `killall -9 chrome-headless-shell`.
-- The profile might be in use by another Chromium process (e.g., from a manual agent-browser command). Close that and try again.
+The server polls every 2 seconds while stopped, so this resolves itself unless something is actually wrong:
+- The daemon may have crashed and left its pid file behind. Stop the browser as above; the sweeper also drops dead pid files every 60 seconds.
+- The profile may be in use by a Chromium started outside Cogpit (a manual `agent-browser` run with its own `--profile`). Close that one and try again.
 
 **The panel is blank or frozen**
 
-A stale `DevToolsActivePort` file can cause attachment to fail:
-- Stop the browser via the panel UI or `POST /api/browser/sessions/default/stop`.
+A stale `DevToolsActivePort` file can make the attach fail:
+- Stop the browser (panel button or the `stop` route above).
 - Delete the stale port file: `rm ~/.cogpit/browser/profiles/default/DevToolsActivePort`.
-- Reopen the browser.
+- Reopen the browser from the panel.
 
 **"agent-browser" not installed on this machine**
 
@@ -157,14 +204,14 @@ The panel shows an install prompt and a command to run:
 ```bash
 npm i -g agent-browser && agent-browser install
 ```
-Reload Cogpit once installed. Or use the panel's "Install agent skill" button to copy the skill into `~/.claude/skills` for agents not launched through Cogpit.
+Reload Cogpit once installed — the shim is written at startup and only when the real binary is on PATH. The panel's "Install agent skill" button copies the skill into a CLI's global skills directory for agents not launched through Cogpit; startup already does this for every CLI whose config root exists.
 
 **Full reset**
 
-If a browser is in a bad state, stop it, delete its profile, and reopen:
+If a browser is in a bad state, stop it and delete its profile:
 ```bash
-# Stop via API or the panel, then:
+# Stop it first (panel button, or the stop route above), then:
 rm -rf ~/.cogpit/browser/profiles/<name>
 ```
 
-On restart, Cogpit will recreate the profile. Logins and data are lost.
+The shim recreates the profile on the next `agent-browser` call for that name — no restart needed. Logins and data are lost.

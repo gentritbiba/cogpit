@@ -214,6 +214,71 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((fake) => fake.close()))
 })
 
+/**
+ * A Chromium that completes the handshake and then goes quiet. Without a
+ * per-call timeout every caller waits for ever, so `BrowserViewer.open` never
+ * settles and the socket it is holding is never closed — while the viewer
+ * socket's 2 s poll opens another one on every attempt. The timeout below turns
+ * that into a rejected open, which "rejects a failed open" then shows closing
+ * the socket.
+ */
+describe("an unresponsive target", () => {
+  it("rejects a call it never answers", async () => {
+    const fake = await startFakeCdp()
+    fake.handlers["Custom.silent"] = () => undefined
+    const cdp = await CdpConnection.connect(fake.url)
+
+    vi.useFakeTimers()
+    try {
+      const pending = cdp.send("Custom.silent")
+      const settled = expect(pending).rejects.toThrow("Custom.silent did not answer in 10s")
+      await vi.advanceTimersByTimeAsync(10_000)
+      await settled
+    } finally {
+      vi.useRealTimers()
+    }
+    cdp.close()
+  })
+
+  it("clears the timer of a call that does answer", async () => {
+    const fake = await startFakeCdp()
+    fake.handlers["Custom.echo"] = () => ({ ok: true })
+    const cdp = await CdpConnection.connect(fake.url)
+
+    await expect(cdp.send("Custom.echo")).resolves.toEqual({ ok: true })
+
+    vi.useFakeTimers()
+    try {
+      // Nothing left pending, so advancing past the timeout rejects nothing.
+      await vi.advanceTimersByTimeAsync(30_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    cdp.close()
+  })
+
+  it("lets go of the socket even when it will not stop the screencast", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(1280, 720, 1)
+    fake.handlers["Page.stopScreencast"] = () => undefined
+    fake.handlers["Emulation.setDeviceMetricsOverride"] = () => undefined
+    fake.handlers["Emulation.clearDeviceMetricsOverride"] = () => undefined
+
+    vi.useFakeTimers()
+    try {
+      const closing = viewer.close()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await closing
+    } finally {
+      vi.useRealTimers()
+    }
+
+    await vi.waitFor(() => {
+      expect(fake.socket?.readyState).toBe(WebSocket.CLOSED)
+    })
+  })
+})
+
 describe("CdpConnection", () => {
   it("rejects connect when nothing listens", async () => {
     const fake = await startFakeCdp()

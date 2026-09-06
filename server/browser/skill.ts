@@ -1,18 +1,17 @@
 /**
- * The skill that teaches agents how Cogpit's browser tree works, plus the two
- * ways it reaches them: a local plugin every managed session loads, and an
- * explicit install for agents that run outside Cogpit.
+ * The skill that teaches agents how Cogpit's browser tree works, plus the ways
+ * it reaches them: a local plugin the CLI that reads plugins loads from disk, an
+ * install into every CLI's own skills directory at startup, and the one-shot
+ * install the panel offers for agents Cogpit does not spawn.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { AGENT_KINDS, descriptorFor } from "../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../shared/session/types"
 import { pluginDir } from "./paths"
 
 export const SKILL_NAME = "cogpit-browser"
-
-const MANIFEST_DIR = ".claude-plugin"
 
 export const PLUGIN_MANIFEST = {
   name: "cogpit",
@@ -148,8 +147,19 @@ export const COGPIT_BROWSER_SKILL = [
   "",
 ].join("\n")
 
-export function pluginManifestFile(): string {
-  return join(pluginDir(), MANIFEST_DIR, "plugin.json")
+/** The plugin Cogpit writes is shaped for whichever CLI reads plugins from a path. */
+function pluginManifestDirName(): string | null {
+  for (const kind of AGENT_KINDS) {
+    const { pluginManifestDir } = descriptorFor(kind).config
+    if (pluginManifestDir !== null) return pluginManifestDir
+  }
+  return null
+}
+
+/** Null when no CLI takes a plugin, in which case only the skill install reaches agents. */
+export function pluginManifestFile(): string | null {
+  const dir = pluginManifestDirName()
+  return dir === null ? null : join(pluginDir(), dir, "plugin.json")
 }
 
 export function pluginSkillFile(): string {
@@ -173,8 +183,10 @@ function writeIfChanged(path: string, content: string): void {
 }
 
 /** Materialises the plugin agents load from disk. Idempotent. */
-export function ensurePlugin(): string {
-  writeIfChanged(pluginManifestFile(), `${JSON.stringify(PLUGIN_MANIFEST, null, 2)}\n`)
+export function ensurePlugin(): string | null {
+  const manifest = pluginManifestFile()
+  if (manifest === null) return null
+  writeIfChanged(manifest, `${JSON.stringify(PLUGIN_MANIFEST, null, 2)}\n`)
   writeIfChanged(pluginSkillFile(), COGPIT_BROWSER_SKILL)
   return pluginDir()
 }
@@ -183,12 +195,45 @@ function skillHome(): string {
   return process.env.COGPIT_SKILL_HOME || homedir()
 }
 
+function configRoot(kind: AgentKind): string {
+  return join(skillHome(), descriptorFor(kind).config.rootDirName)
+}
+
+function skillDir(kind: AgentKind): string | null {
+  const { skillsDir } = descriptorFor(kind).config
+  return skillsDir === null ? null : join(configRoot(kind), skillsDir, SKILL_NAME)
+}
+
 /** Copies the skill into a CLI's global config, for agents Cogpit does not spawn. */
 export function installSkill(target: AgentKind): string {
-  const { rootDirName, skillsDir } = descriptorFor(target).config
-  if (!skillsDir) throw new Error(`${descriptorFor(target).displayName} has no skills directory`)
-  const dir = join(skillHome(), rootDirName, skillsDir, SKILL_NAME)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "SKILL.md"), COGPIT_BROWSER_SKILL)
+  const dir = skillDir(target)
+  if (dir === null) throw new Error(`${descriptorFor(target).displayName} has no skills directory`)
+  writeIfChanged(join(dir, "SKILL.md"), COGPIT_BROWSER_SKILL)
   return dir
+}
+
+/**
+ * Startup delivery. The plugin only reaches the one CLI that loads plugins, and
+ * only on the path that passes it, so every other agent — a one-shot run, and
+ * both of the others — would otherwise run with no subagent rule at all and put
+ * a subagent in the user's logged-in browser.
+ *
+ * Skips a CLI whose config root is absent rather than creating one the user
+ * never asked for, and one CLI failing never costs the rest theirs.
+ */
+export function installSkillEverywhere(): string[] {
+  const installed: string[] = []
+  const failures: string[] = []
+  for (const kind of AGENT_KINDS) {
+    const dir = skillDir(kind)
+    if (dir === null || !existsSync(configRoot(kind))) continue
+    try {
+      writeIfChanged(join(dir, "SKILL.md"), COGPIT_BROWSER_SKILL)
+      installed.push(dir)
+    } catch (error) {
+      failures.push(`${dir}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (failures.length > 0) throw new Error(`The browser skill did not reach ${failures.join("; ")}`)
+  return installed
 }

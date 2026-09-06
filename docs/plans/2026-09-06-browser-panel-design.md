@@ -49,8 +49,10 @@ Verified against agent-browser 0.16.3 (see the research session for probes):
                            + .driver written by the shim: "<cogpitSessionId>")
   run/shared/             sockets + pids of named-browser daemons
   run/<cogpitSessionId>/  sockets + pids of that session's throwaway browsers
+                          (a spawn with no single session files them in run/shared)
   sessions.json           { version, sessions: { [name]: { note, createdAt, lastUrl } } }
-  plugin/                 Claude plugin dir carrying the cogpit-browser skill
+  sweeper.owner           { pid, startedAt } of the Cogpit allowed to reap this tree
+  plugin/                 plugin dir carrying the cogpit-browser skill
 ~/.cogpit/bin/agent-browser   shim (bash) that routes every call into the tree above
 ```
 
@@ -60,10 +62,12 @@ drivable by the user. `default` always exists and is what `agent-browser` uses
 when no `--session` is given. Names: `^[a-z0-9][a-z0-9_-]{0,39}$`.
 
 **Throwaway browser** = any session named `tmp-*`. No profile, no CDP port,
-socket dir scoped to the Cogpit session that created it. Never listed, never
-viewable, reaped when that Cogpit session ends. This is the subagent lane. The
-skill makes it a hard rule; the structure makes a violation harmless (a subagent
-that uses a named browser only becomes visible, it cannot break anything).
+socket dir scoped to the Cogpit session that created it, or `run/shared` when
+the spawn owned no single session. Never listed, never viewable, reaped when
+that Cogpit session ends — or, for the shared case, when Cogpit exits. This is
+the subagent lane. The skill makes it a hard rule; the structure makes a
+violation harmless (a subagent that uses a named browser only becomes visible,
+it cannot break anything).
 
 Named browsers are global, like browser windows. Any Cogpit session's panel can
 show any of them; two Cogpit sessions driving the same one at once will
@@ -79,7 +83,8 @@ Logic:
 
 1. Session name = `--session X` from argv, else `$AGENT_BROWSER_SESSION`, else
    `default`.
-2. `tmp-*` → export `AGENT_BROWSER_SOCKET_DIR=run/$COGPIT_SESSION_ID`, exec.
+2. `tmp-*` → export `AGENT_BROWSER_SOCKET_DIR=run/$COGPIT_SESSION_ID`, falling
+   back to `run/shared` when that is not a valid session id, exec.
 3. Otherwise → `mkdir -p profiles/<name>`, write `.driver`, export
    `AGENT_BROWSER_SOCKET_DIR=run/shared`, `AGENT_BROWSER_PROFILE`,
    `AGENT_BROWSER_ARGS=--remote-debugging-port=0`, exec.
@@ -89,31 +94,46 @@ the panel shows install instructions instead.
 
 ### Agent environment (`server/browser/agentEnv.ts`)
 
-`browserAgentEnv(cogpitSessionId)` returns `{ PATH: "~/.cogpit/bin:" + PATH,
-COGPIT_SESSION_ID }`. Applied where Cogpit builds an agent's env (SDK sessions,
-one-shot runs, Codex, Copilot). Claude SDK sessions also receive
-`plugins: [{ type: "local", path: ~/.cogpit/browser/plugin }]` so the skill is
-present in every session without installation.
+`browserAgentEnv(base, cogpitSessionId)` returns `base` with the shim directory
+first on `PATH` and `COGPIT_SESSION_ID` set. Applied where Cogpit builds an
+agent's env (SDK sessions, one-shot runs, Codex, Copilot). A spawn that serves
+every session rather than one — a shared app-server, a headless CLI — passes
+`NO_COGPIT_SESSION`, a sentinel the shim and the registry both reject, so its
+browsers are never attributed to a session that does not own them.
+
+The SDK path additionally receives
+`plugins: [{ type: "local", path: ~/.cogpit/browser/plugin }]`. That reaches
+only the CLI that takes plugins, so startup also installs the skill into every
+CLI's own global skills directory — the plugin is an optimisation for one path,
+not the delivery mechanism.
 
 ### Registry (`server/browser/registry.ts`)
 
 Source of truth for existence is `profiles/`; `sessions.json` holds metadata.
 `list()` merges both, always includes `default`, and for each name reports:
-`running`, `driver` (Cogpit session id + age from `.driver`), `lastUrl`,
-`note`, `createdAt`. `create(name, note)`, `update(name, patch)`,
-`remove(name)` (stops first, deletes the profile).
+`running`, `driverSessionId` and `lastUsedAt` (content and mtime of `.driver`),
+`lastUrl`, `note`, `createdAt`. `create(name, note)`, `update(name, patch)`,
+`remove(name)` (deletes the profile). Stopping before removing lives in the
+route, not here, so the registry stays free of daemon lifecycle.
 
 ### Daemons (`server/browser/daemons.ts`)
 
 - `isRunning(name)`: pid file alive **and** `GET /json/version` on the
   DevToolsActivePort port answers within 500 ms.
 - `launch(name, url)`: spawn the shim with `agent-browser --session name open url`.
-- `stop(name)`: `agent-browser --session name close`, then SIGTERM the daemon.
-- `reapSession(cogpitSessionId)`: SIGTERM every pid in `run/<id>/`, remove dir.
+- `stop(name)`: `agent-browser --session name close`, then SIGTERM the daemon and
+  SIGKILL it if it has not gone within 3 s.
+- `reapRunDir(dir)`: SIGTERM every pid in that run directory, remove it.
 - `sweep()`: on start and every 60 s — drop dead pid files, reap `run/<id>/`
-  whose Cogpit session is no longer live.
-- `shutdown()`: reap all throwaway dirs and stop named daemons (profiles keep
-  logins). Wired into `app-server.ts` cleanup.
+  whose Cogpit session is no longer live. Only the process holding
+  `sweeper.owner` sweeps: `run/<id>` names a session one process knows about, so
+  a second Cogpit on the same tree would reap live browsers.
+- `shutdownBrowsers()`: reap all throwaway dirs and, if this process is the
+  owner, stop the named daemons (profiles keep logins). Bounded overall, so a
+  wedged daemon cannot hold app quit open. Wired into `app-server.ts` cleanup.
+
+Every spawn of the shim is bounded too, and every CDP call has its own timeout,
+so nothing here can wait on a browser for ever.
 
 ### CDP client (`server/browser/cdp.ts`)
 
@@ -147,14 +167,20 @@ carrying `deviceWidth`, `deviceHeight`, `targetId`.
 - `DELETE /api/browser/sessions/:name`
 - `POST /api/browser/sessions/:name/launch` `{ url? }`
 - `POST /api/browser/sessions/:name/stop`
-- `POST /api/browser/skill/install` `{ target: "claude" | "codex" }` — copies
-  the skill into `~/.claude/skills` / `~/.codex/skills` for people whose agents
-  do not run through Cogpit's SDK path.
+- `POST /api/browser/skill/install` `{ target }` — one of the three CLIs; copies
+  the skill into that CLI's global skills directory. Startup already does this
+  for every CLI whose config root exists, so this is the manual path for one
+  installed afterwards.
+
+`DELETE` stops the browser before removing its profile.
 
 ### Panel (`src/components/BrowserPanel/`, id `cogpit.browser`)
 
-Registered in `builtInWorkspacePlugin.tsx`, desktop only, `when: can("terminal")`
-(same trust as the terminal: both are remote control of the host).
+Registered in `builtInWorkspacePlugin.tsx`, desktop only,
+`when: (context) => context.canAccessHostFiles` — the same gate the other
+host-backed panels use. The panel reaches the user's own logged-in browser
+profiles on this machine, which is host access, and the REST routes behind it
+are policy `admin` (the terminal's own trust level) regardless.
 
 Layout, top to bottom:
 
@@ -185,7 +211,10 @@ the last 10 s.
 
 ### Skill (`server/browser/skill.ts`, name `cogpit-browser`)
 
-Shipped as a Claude plugin at `~/.cogpit/browser/plugin`. Teaches:
+Materialised at startup as a local plugin at `~/.cogpit/browser/plugin`, in the
+plugin shape the descriptor declares, and installed into every agent CLI's own
+global skills directory that already exists. Both are idempotent and neither can
+block startup. Teaches:
 
 - `agent-browser` works as documented; the user can watch and interact in
   Cogpit's Browser panel. Say so when starting browser work.
@@ -202,6 +231,8 @@ Shipped as a Claude plugin at `~/.cogpit/browser/plugin`. Teaches:
 ## Security
 
 - `/__browser` inherits the PTY trust gate; team policy `admin` for `/api/browser`.
+  The panel itself is gated on host-file access, so the transport and the routes
+  stay the authoritative boundary rather than the rail icon.
 - CDP listens on 127.0.0.1 without auth. That is the same local-user boundary
   agent-browser's own stream server has, and equivalent to the existing PTY.
 - Names are validated before touching the file system; `default` cannot be

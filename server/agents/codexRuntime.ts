@@ -20,7 +20,7 @@ import { friendlySpawnError } from "./spawnError"
 import { cleanupTempFiles, writeTempImageFiles } from "./tempImages"
 import { resolveAgentCommand } from "../lib/binaryResolver"
 import { browserAgentEnv } from "../browser/agentEnv"
-import { SHARED_RUN_NAME } from "../browser/paths"
+import { NO_COGPIT_SESSION } from "../browser/paths"
 import {
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
@@ -239,7 +239,9 @@ async function startLegacy(
   ])
   const child = spawn(cli.command, cli.args, {
     cwd: req.cwd,
-    env: browserAgentEnv(process.env, SHARED_RUN_NAME),
+    // The session id only arrives once the CLI reports it, which is after the
+    // env is fixed; the resume path below spawns with the real one.
+    env: browserAgentEnv(process.env, NO_COGPIT_SESSION),
     stdio: ["ignore", "pipe", "pipe"],
     ...cli.spawnOptions,
   })

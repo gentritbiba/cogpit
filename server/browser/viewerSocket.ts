@@ -39,9 +39,6 @@ export interface ViewerSocketDeps {
   recordUrl: (name: string, url: string) => void
 }
 
-/** `touch=true` only for client activity; the periodic recheck must not keep a session alive. */
-export type ViewerConnectionAuthorizer = SocketAuthorizer
-
 type StatusState = Extract<BrowserServerMessage, { type: "status" }>["state"]
 type InputMessage = Exclude<BrowserClientMessage, { type: "launch" }>
 type ViewportMessage = Extract<BrowserClientMessage, { type: "viewport" }>
@@ -62,7 +59,8 @@ export const defaultViewerSocketDeps: ViewerSocketDeps = {
 interface ViewerConnection {
   readonly ws: WebSocket
   readonly session: string
-  readonly authorize?: ViewerConnectionAuthorizer
+  /** `touch=true` only for client activity; the periodic recheck must not keep a session alive. */
+  readonly authorize?: SocketAuthorizer
   status: StatusState | null
   lastError: string | null
   viewport: ViewportMessage | null
@@ -91,7 +89,7 @@ export class BrowserViewerManager {
 
   constructor(private readonly deps: ViewerSocketDeps = defaultViewerSocketDeps) {}
 
-  handleConnection(ws: WebSocket, req: IncomingMessage, authorize?: ViewerConnectionAuthorizer): void {
+  handleConnection(ws: WebSocket, req: IncomingMessage, authorize?: SocketAuthorizer): void {
     let session: string
     try {
       // Inside the guard: an upgrade target like `//[` is a TypeError, not a name.

@@ -18,14 +18,19 @@ import { initEdition, __resetEditionForTest } from "../team/edition"
 let root: string
 let server: Server | null
 let previousBrowserHome: string | undefined
+let previousSkillHome: string | undefined
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "cogpit-pty-plugin-"))
   server = createServer()
-  // The browser transport reads its state from this root; keep the suite off the
-  // developer's real ~/.cogpit/browser.
+  // The browser transport reads its state from this root, and startup installs
+  // the browser skill into every agent CLI's config root under the skill home.
+  // Both are pinned inside the fixture to keep the suite off the developer's
+  // real ~/.cogpit/browser and ~/.claude.
   previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+  previousSkillHome = process.env.COGPIT_SKILL_HOME
   process.env.COGPIT_BROWSER_HOME = join(root, "browser")
+  process.env.COGPIT_SKILL_HOME = join(root, "home")
   const configPath = join(root, "config.local.json")
   await mkdir(root, { recursive: true })
   await writeFile(configPath, JSON.stringify({
@@ -47,6 +52,8 @@ afterEach(async () => {
   server = null
   if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
   else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
+  if (previousSkillHome === undefined) delete process.env.COGPIT_SKILL_HOME
+  else process.env.COGPIT_SKILL_HOME = previousSkillHome
   __resetSessionsForTest()
   __resetEditionForTest()
   await rm(root, { recursive: true, force: true })

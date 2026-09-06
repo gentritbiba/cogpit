@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { BrowserNameError, profileDir, profilesDir, registryFile } from "../../browser/paths"
+import { BrowserNameError, NO_COGPIT_SESSION, profileDir, profilesDir, registryFile } from "../../browser/paths"
 import {
   BrowserExistsError,
   BrowserNotFoundError,
@@ -200,6 +200,15 @@ describe("listBrowsers", () => {
     expect(session.driverSessionId).toBe("sess-123")
     expect(session.lastUsedAt).toBe(statSync(path).mtime.toISOString())
     expect(session.lastUsedAt).toBe(when.toISOString())
+  })
+
+  it("attributes nothing to a spawn that owns no session", async () => {
+    // What the shim writes when Cogpit passed NO_COGPIT_SESSION: a browser a
+    // shared app-server touched must not read as driven by a real session.
+    writeDriver("default", `${NO_COGPIT_SESSION}\n`)
+    const [session] = await listBrowsers(neverRunning)
+    expect(session.driverSessionId).toBeNull()
+    expect(session.lastUsedAt).not.toBeNull()
   })
 
   it.each(["\n", "../x\n", "not a session id\n", `${"x".repeat(81)}\n`])(

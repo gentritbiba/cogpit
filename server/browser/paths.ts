@@ -1,12 +1,28 @@
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import {
+  BROWSER_NAME_RE,
+  DEFAULT_BROWSER,
+  isThrowawayName,
+  isValidBrowserName,
+  THROWAWAY_PREFIX,
+} from "../../shared/browser/names"
 
-export const DEFAULT_BROWSER = "default"
-export const THROWAWAY_PREFIX = "tmp-"
+export { BROWSER_NAME_RE, DEFAULT_BROWSER, isThrowawayName, isValidBrowserName, THROWAWAY_PREFIX }
+
 export const SHARED_RUN_NAME = "shared"
 
-const BROWSER_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/
-const COGPIT_SESSION_ID = /^[A-Za-z0-9_-]{1,80}$/
+/**
+ * What Cogpit passes for `COGPIT_SESSION_ID` when the process it is spawning
+ * serves every session rather than one — a shared app-server, a headless CLI.
+ * Deliberately not a valid id: the shim then files throwaways under
+ * `run/shared` and stamps an empty `.driver`, so no browser is attributed to a
+ * session that does not own it.
+ */
+export const NO_COGPIT_SESSION = ""
+
+/** Also rendered into the shim, which reads `COGPIT_SESSION_ID` before using it. */
+export const COGPIT_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/
 
 export class BrowserNameError extends Error {
   constructor(message: string) {
@@ -15,21 +31,13 @@ export class BrowserNameError extends Error {
   }
 }
 
-export function isValidBrowserName(name: string): boolean {
-  return BROWSER_NAME.test(name)
-}
-
-export function isThrowawayName(name: string): boolean {
-  return name.startsWith(THROWAWAY_PREFIX)
-}
-
 export function isValidCogpitSessionId(id: string): boolean {
-  return COGPIT_SESSION_ID.test(id)
+  return COGPIT_SESSION_ID_RE.test(id)
 }
 
 export function assertBrowserName(name: string): void {
   if (!isValidBrowserName(name)) {
-    throw new BrowserNameError(`Browser name ${JSON.stringify(name)} must match ${BROWSER_NAME.source}`)
+    throw new BrowserNameError(`Browser name ${JSON.stringify(name)} must match ${BROWSER_NAME_RE.source}`)
   }
 }
 
@@ -37,12 +45,6 @@ export function assertNamedBrowser(name: string): void {
   assertBrowserName(name)
   if (isThrowawayName(name)) {
     throw new BrowserNameError(`Browser name ${JSON.stringify(name)} is a throwaway (${THROWAWAY_PREFIX}*), not a named browser`)
-  }
-}
-
-function assertCogpitSessionId(id: string): void {
-  if (!isValidCogpitSessionId(id)) {
-    throw new BrowserNameError(`Cogpit session id ${JSON.stringify(id)} must match ${COGPIT_SESSION_ID.source}`)
   }
 }
 
@@ -75,15 +77,15 @@ export function sharedRunDir(): string {
   return join(runRoot(), SHARED_RUN_NAME)
 }
 
-export function sessionRunDir(id: string): string {
-  assertCogpitSessionId(id)
-  return join(runRoot(), id)
-}
-
 export function registryFile(): string {
   return join(browserHome(), "sessions.json")
 }
 
 export function pluginDir(): string {
   return join(browserHome(), "plugin")
+}
+
+/** Names the one Cogpit allowed to reap this tree; see `acquireSweepOwnership`. */
+export function sweepOwnerFile(): string {
+  return join(browserHome(), "sweeper.owner")
 }

@@ -19,7 +19,7 @@ import {
   type CopilotRuntimeSpawn,
   type CopilotUserInputAnswer,
 } from "../../agents/copilotTransport"
-import { binDir, shimPath } from "../../browser/paths"
+import { binDir, NO_COGPIT_SESSION, shimPath } from "../../browser/paths"
 
 class FakeCopilotProcess extends EventEmitter implements CopilotRuntimeProcess {
   readonly stdin = new PassThrough()
@@ -178,7 +178,9 @@ describe("CopilotRuntime", () => {
       ["--headless", "--no-auto-update", "--stdio"],
       {
         cwd: "/workspace",
-        env: { PATH: `${binDir()}${delimiter}/bin`, COGPIT_SESSION_ID: "shared" },
+        // One CLI serves every session, so the sentinel goes in rather than an
+        // id: the shim must not stamp a browser as driven by a real session.
+        env: { PATH: `${binDir()}${delimiter}/bin`, COGPIT_SESSION_ID: NO_COGPIT_SESSION },
         stdio: ["pipe", "pipe", "pipe"],
       },
     )
