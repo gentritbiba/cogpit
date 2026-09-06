@@ -35,6 +35,16 @@ describe("fitRect", () => {
       .toEqual({ x: 200, y: 0, width: 400, height: 300, scale: 0.5 })
   })
 
+  it("leaves no bands when the page is emulated at the panel's aspect ratio", () => {
+    // The server emulates a 715x907 panel at 1024x1299, so this is a pure downscale.
+    const fit = fitRect({ width: 715, height: 907 }, { width: 1024, height: 1299 })
+    expect(fit.scale).toBeCloseTo(0.698, 3)
+    expect(fit.width).toBeCloseTo(715, 1)
+    expect(fit.height).toBeCloseTo(907, 6)
+    expect(fit.x).toBe(0)
+    expect(fit.y).toBe(0)
+  })
+
   it("never upscales past 1x, it centres instead", () => {
     expect(fitRect({ width: 1600, height: 1200 }, { width: 800, height: 600 }))
       .toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 })
@@ -84,6 +94,14 @@ describe("toDevicePoint", () => {
     expect(toDevicePoint(150, 10, bar, pillarboxed)).toEqual({ x: 50, y: 10 })
     expect(toDevicePoint(50, 10, bar, pillarboxed)).toBeNull()
     expect(toDevicePoint(50, 10, bar, pillarboxed, { clamp: true })).toEqual({ x: 0, y: 10 })
+  })
+
+  it("maps the centre of a full-bleed panel to the centre of the page", () => {
+    const fit = fitRect({ width: 715, height: 907 }, { width: 1024, height: 1299 })
+    const panel = { left: 0, top: 0, width: 715, height: 907 }
+    const centre = toDevicePoint(357.5, 453.5, panel, fit)
+    expect(centre?.x).toBeCloseTo(512, 1)
+    expect(centre?.y).toBeCloseTo(649.5, 6)
   })
 
   it("has no point to map when nothing is drawn", () => {

@@ -92,6 +92,8 @@ async function startFakeCdp(targets: TargetInfo[] = [page("t1"), page("t2")]): P
         return {}
       },
       "Page.stopScreencast": () => ({}),
+      "Emulation.setDeviceMetricsOverride": () => ({}),
+      "Emulation.clearDeviceMetricsOverride": () => ({}),
       "Page.getNavigationHistory": (_message, self) => self.history,
       "Page.navigate": () => ({ frameId: "main", loaderId: "loader" }),
       "Page.navigateToHistoryEntry": () => ({}),
@@ -386,8 +388,8 @@ describe("BrowserViewer", () => {
   it("scales the screencast by dpr, caps it, and only restarts on change", async () => {
     const { fake, viewer } = await openViewer()
 
-    await viewer.setViewport(1000, 700, 2)
-    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1920, maxHeight: 1200 })
+    await viewer.setViewport(1000, 1000, 2)
+    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1920, maxHeight: 1920 })
 
     await viewer.setViewport(500.4, 300.2, 3)
     expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1001, maxHeight: 600 })
@@ -396,6 +398,7 @@ describe("BrowserViewer", () => {
     await viewer.setViewport(500.4, 300.2, 3)
     expect(fake.sent("Page.startScreencast")).toHaveLength(2)
     expect(fake.sent("Page.stopScreencast")).toHaveLength(1)
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(2)
 
     await Promise.all([viewer.setViewport(640, 480, 1), viewer.setViewport(320, 240, 1)])
     const screencastCalls = fake.messages
@@ -407,6 +410,72 @@ describe("BrowserViewer", () => {
       "Page.stopScreencast", "Page.startScreencast",
     ])
     expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 320, maxHeight: 240 })
+  })
+
+  it("emulates the panel's aspect ratio, widening a narrow panel to the floor", async () => {
+    const { fake, viewer } = await openViewer()
+
+    await viewer.setViewport(715, 907, 2)
+    const override = last(fake.sent("Emulation.setDeviceMetricsOverride"))
+    expect(override.sessionId).toBe(sessionFor("t2"))
+    expect(override.params).toEqual({
+      width: 1024,
+      height: 1299,
+      deviceScaleFactor: 2,
+      mobile: false,
+      screenWidth: 1024,
+      screenHeight: 1299,
+    })
+    // The screencast has to read the page's new box, so the override goes first.
+    const methods = fake.messages.map((message) => message.method)
+    expect(methods.indexOf("Emulation.setDeviceMetricsOverride"))
+      .toBeLessThan(methods.indexOf("Page.startScreencast"))
+    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1430, maxHeight: 1814 })
+  })
+
+  it("emulates a panel wider than the floor at its own size", async () => {
+    const { fake, viewer } = await openViewer()
+
+    await viewer.setViewport(1600, 900, 1)
+    expect(last(fake.sent("Emulation.setDeviceMetricsOverride")).params).toMatchObject({
+      width: 1600, height: 900, deviceScaleFactor: 1,
+    })
+    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1600, maxHeight: 900 })
+  })
+
+  it("moves the override to the newly followed tab and clears the old one", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(715, 907, 2)
+
+    await viewer.follow("t1")
+    expect(last(fake.sent("Emulation.clearDeviceMetricsOverride")).sessionId).toBe(sessionFor("t2"))
+    const reapplied = last(fake.sent("Emulation.setDeviceMetricsOverride"))
+    expect(reapplied.sessionId).toBe(sessionFor("t1"))
+    expect(reapplied.params).toMatchObject({ width: 1024, height: 1299 })
+  })
+
+  it("leaves the page its own size again when the viewer closes", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(715, 907, 2)
+
+    await viewer.close()
+    expect(last(fake.sent("Emulation.clearDeviceMetricsOverride")).sessionId).toBe(sessionFor("t2"))
+  })
+
+  it("still streams, letterboxed, when the page refuses the override", async () => {
+    const { fake, events, viewer } = await openViewer()
+    fake.handlers["Emulation.setDeviceMetricsOverride"] = () => new CdpError("Emulation unavailable")
+
+    await viewer.setViewport(715, 907, 2)
+    expect(events.errors).toEqual(["Emulation unavailable"])
+    expect(last(fake.sent("Page.startScreencast")).sessionId).toBe(sessionFor("t2"))
+  })
+
+  it("has no aspect ratio to emulate for a panel with no width", async () => {
+    const { fake, viewer } = await openViewer()
+
+    await viewer.setViewport(0, 907, 2)
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(0)
   })
 
   it("follow moves the screencast and input to the chosen tab", async () => {

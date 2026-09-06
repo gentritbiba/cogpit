@@ -153,6 +153,24 @@ interface ScreencastSize {
   maxHeight: number
 }
 
+/** The panel's own box, in CSS pixels, as the viewer last measured it. */
+interface PanelSize {
+  width: number
+  height: number
+  dpr: number
+}
+
+/** `Emulation.setDeviceMetricsOverride`'s size for the followed page. */
+interface PageMetrics {
+  width: number
+  height: number
+  deviceScaleFactor: number
+}
+
+interface ActiveOverride extends PageMetrics {
+  sessionId: string
+}
+
 /** Chromium always sends the sizes; the scroll/scale fields are optional in older builds. */
 interface ScreencastMetadata {
   deviceWidth: number
@@ -186,9 +204,12 @@ export interface ViewerEvents {
 }
 
 const EMPTY_PAGE: PageInfo = { targetId: "", url: "", title: "", canGoBack: false, canGoForward: false }
-const MAX_SCREENCAST_WIDTH = 1920
-const MAX_SCREENCAST_HEIGHT = 1200
-const MAX_SCREENCAST_DPR = 2
+const MAX_SCREENCAST_SIZE = 1920
+const MIN_DPR = 1
+const MAX_DPR = 2
+/** Below this the page lays itself out for a phone, which is not what a narrow panel wants. */
+const MIN_PAGE_WIDTH = 1024
+const MAX_PAGE_SIZE = 4096
 const SCREENCAST_QUALITY = 80
 const HIDDEN_URL_PREFIXES = ["devtools://", "chrome-extension://"]
 
@@ -259,19 +280,40 @@ function isPageTarget(info: TargetInfo): boolean {
   return info.type === "page" && !HIDDEN_URL_PREFIXES.some((prefix) => info.url.startsWith(prefix))
 }
 
-function screencastSize(width: number, height: number, dpr: number): ScreencastSize {
-  const scale = Math.min(dpr, MAX_SCREENCAST_DPR)
+function clampDpr(dpr: number): number {
+  return Math.min(MAX_DPR, Math.max(MIN_DPR, dpr))
+}
+
+/** The panel's device pixels, capped so a huge pane cannot ask for a huge stream. */
+function screencastSize({ width, height, dpr }: PanelSize): ScreencastSize {
+  const scale = clampDpr(dpr)
   return {
-    maxWidth: Math.min(MAX_SCREENCAST_WIDTH, Math.round(width * scale)),
-    maxHeight: Math.min(MAX_SCREENCAST_HEIGHT, Math.round(height * scale)),
+    maxWidth: Math.min(MAX_SCREENCAST_SIZE, Math.round(width * scale)),
+    maxHeight: Math.min(MAX_SCREENCAST_SIZE, Math.round(height * scale)),
+  }
+}
+
+/**
+ * The page renders at the panel's aspect ratio, so the viewer's `fitRect` fills
+ * the pane instead of letterboxing it. A panel narrower than `MIN_PAGE_WIDTH`
+ * scales up to that floor, keeping the ratio, so the page stays a desktop page.
+ */
+function pageMetrics({ width, height, dpr }: PanelSize): PageMetrics | null {
+  if (width <= 0 || height <= 0) return null
+  const emulatedWidth = Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_WIDTH, Math.round(width)))
+  return {
+    width: emulatedWidth,
+    height: Math.min(MAX_PAGE_SIZE, Math.round(height * emulatedWidth / width)),
+    deviceScaleFactor: clampDpr(dpr),
   }
 }
 
 /**
  * One viewer per socket client. Follows the most recently created page target
  * until `follow()` pins one; a pinned tab stays followed until it is destroyed,
- * after which the newest remaining tab takes over. Target bookkeeping and
- * screencast start/stop run on one serial queue so they never interleave.
+ * after which the newest remaining tab takes over. Target bookkeeping, the
+ * followed page's emulated size and screencast start/stop run on one serial
+ * queue, so none of them can land on a session that has already detached.
  */
 export class BrowserViewer {
   private readonly targets = new Map<string, PageTarget>()
@@ -279,8 +321,9 @@ export class BrowserViewer {
   private pinned = false
   private ready = false
   private closed = false
-  private viewport: ScreencastSize | null = null
+  private panel: PanelSize | null = null
   private screencast: ActiveScreencast | null = null
+  private override: ActiveOverride | null = null
   private buttons = 0
   private queue: Promise<unknown> = Promise.resolve()
 
@@ -302,8 +345,8 @@ export class BrowserViewer {
   }
 
   setViewport(width: number, height: number, dpr: number): Promise<void> {
-    this.viewport = screencastSize(width, height, dpr)
-    return this.enqueue(() => this.syncScreencast())
+    this.panel = { width, height, dpr }
+    return this.enqueue(() => this.syncFollowed())
   }
 
   follow(targetId: string): Promise<void> {
@@ -375,6 +418,8 @@ export class BrowserViewer {
     this.buttons = 0
     const active = this.screencast
     if (active) await this.stopScreencast(active.sessionId)
+    const emulated = this.override
+    if (emulated) await this.clearMetrics(emulated.sessionId)
     this.cdp.close()
   }
 
@@ -475,6 +520,7 @@ export class BrowserViewer {
     }
     if (!isPageTarget(info)) {
       await this.stopScreencast(target.sessionId)
+      await this.clearMetrics(target.sessionId)
       await this.dropTarget(info.targetId)
       return
     }
@@ -496,6 +542,7 @@ export class BrowserViewer {
     if (!target) return
     this.targets.delete(targetId)
     if (this.screencast?.sessionId === target.sessionId) this.screencast = null
+    if (this.override?.sessionId === target.sessionId) this.override = null
     if (targetId !== this.followed) {
       this.emitTabs()
       return
@@ -544,15 +591,66 @@ export class BrowserViewer {
   private async setFollowed(targetId: string | null, force = false): Promise<void> {
     if (!force && this.followed === targetId) return
     this.followed = targetId
-    await this.syncScreencast()
+    await this.syncFollowed()
     this.emitTabs()
     await this.emitPage()
+  }
+
+  /** The emulated size has to land before the screencast reads the page's box. */
+  private async syncFollowed(): Promise<void> {
+    try {
+      await this.syncMetrics()
+    } catch (error) {
+      // A page that refuses the override still streams, letterboxed: report and go on.
+      this.reportError(error)
+    }
+    await this.syncScreencast()
+  }
+
+  private async syncMetrics(): Promise<void> {
+    if (this.closed) return
+    const target = this.followed === null ? undefined : this.targets.get(this.followed)
+    const metrics = this.panel === null ? null : pageMetrics(this.panel)
+    const wanted: ActiveOverride | null = target && metrics ? { sessionId: target.sessionId, ...metrics } : null
+    const active = this.override
+    if (
+      active && wanted && active.sessionId === wanted.sessionId
+      && active.width === wanted.width && active.height === wanted.height
+      && active.deviceScaleFactor === wanted.deviceScaleFactor
+    ) {
+      return
+    }
+    // A target we stop following goes back to its own size; one we keep just gets the new box.
+    if (active && active.sessionId !== wanted?.sessionId) await this.clearMetrics(active.sessionId)
+    if (!wanted) return
+    await this.cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      {
+        width: wanted.width,
+        height: wanted.height,
+        deviceScaleFactor: wanted.deviceScaleFactor,
+        mobile: false,
+        screenWidth: wanted.width,
+        screenHeight: wanted.height,
+      },
+      wanted.sessionId,
+    )
+    this.override = wanted
+  }
+
+  /** No-op unless `sessionId` owns the override. A tab that already went away cannot answer. */
+  private async clearMetrics(sessionId: string): Promise<void> {
+    if (this.override?.sessionId !== sessionId) return
+    this.override = null
+    await this.cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId).catch(() => {})
   }
 
   private async syncScreencast(): Promise<void> {
     if (this.closed) return
     const target = this.followed === null ? undefined : this.targets.get(this.followed)
-    const wanted: ActiveScreencast | null = target && this.viewport ? { sessionId: target.sessionId, ...this.viewport } : null
+    const wanted: ActiveScreencast | null = target && this.panel
+      ? { sessionId: target.sessionId, ...screencastSize(this.panel) }
+      : null
     const active = this.screencast
     if (
       active && wanted && active.sessionId === wanted.sessionId

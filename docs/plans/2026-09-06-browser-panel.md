@@ -568,6 +568,27 @@ non-passive listener (React attaches `wheel` passively at the root) and converts
 line/page delta modes to pixels. `src/__tests__/setup.ts` gained a stateful
 pointer-capture shim, which jsdom lacks.
 
+Note (live QA follow-up): the panel is tall and narrow (measured 715×907) while
+the page rendered at agent-browser's 1280×720, so `fitRect` letterboxed it into
+~44% of the pane. `setViewport` now emulates the page at the panel's own aspect
+ratio before starting the screencast: `Emulation.setDeviceMetricsOverride` with
+`width = clamp(round(panelWidth), 1024, 4096)` and
+`height = round(panelHeight * width / panelWidth)`, `mobile: false`, `dpr`
+clamped to `[1, 2]`, and `screenWidth`/`screenHeight` matching. The 1024 floor
+keeps a narrow panel on a site's desktop breakpoints — the panel then sees the
+whole page scaled down rather than a phone layout. Both dimensions cap at 4096;
+the screencast's own cap is now `1920×1920` (was `1920×1200`, which forced bands
+back on a tall pane). Since the ratios match, `fitRect` fills the panel and the
+scale is a pure downscale, which its no-upscale rule allows. The override is
+re-applied whenever the followed target changes (a freshly attached target has
+none) and cleared with `Emulation.clearDeviceMetricsOverride` for a target we
+stop following and on `close()`, so the agent's own automation is not left
+inside the panel's box; all of it runs on the same serial queue as `follow` and
+the screencast. Caveat: a device-metrics override is per target, not per CDP
+client, so Playwright's own `viewport: {1280, 720}` and ours are the same slot —
+whoever writes last wins, and clearing on close drops Playwright's too until it
+sets a viewport again.
+
 ### Task 17: Session bar and nav bar ✅ done
 
 **Files:**
