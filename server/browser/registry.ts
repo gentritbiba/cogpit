@@ -8,6 +8,7 @@ import {
   DEFAULT_BROWSER,
   isThrowawayName,
   isValidBrowserName,
+  isValidCogpitSessionId,
   profileDir,
   profilesDir,
   registryFile,
@@ -38,6 +39,13 @@ export class BrowserExistsError extends Error {
   }
 }
 
+export class BrowserNotFoundError extends Error {
+  constructor(name: string) {
+    super(`Browser ${JSON.stringify(name)} does not exist`)
+    this.name = "BrowserNotFoundError"
+  }
+}
+
 const DRIVER_FILE = ".driver"
 
 function isNamedBrowser(name: string): boolean {
@@ -63,7 +71,7 @@ function parseEntry(value: unknown): RegistryEntry | null {
 function parseRegistry(raw: string): BrowserRegistry {
   const registry = emptyRegistry()
   const parsed: unknown = JSON.parse(raw)
-  if (!isRecord(parsed) || !isRecord(parsed.sessions)) return registry
+  if (!isRecord(parsed) || parsed.version !== REGISTRY_VERSION || !isRecord(parsed.sessions)) return registry
   for (const [name, value] of Object.entries(parsed.sessions)) {
     const entry = parseEntry(value)
     if (entry && isNamedBrowser(name)) registry.sessions[name] = entry
@@ -82,13 +90,17 @@ export function readRegistry(): BrowserRegistry {
 export function writeRegistry(registry: BrowserRegistry): void {
   mkdirSync(browserHome(), { recursive: true })
   const path = registryFile()
-  const tmp = `${path}.tmp`
+  const tmp = `${path}.${process.pid}.tmp`
   writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`)
   renameSync(tmp, path)
 }
 
 function entryOf(registry: BrowserRegistry, name: string): RegistryEntry | undefined {
   return Object.hasOwn(registry.sessions, name) ? registry.sessions[name] : undefined
+}
+
+function browserExists(registry: BrowserRegistry, name: string): boolean {
+  return name === DEFAULT_BROWSER || entryOf(registry, name) !== undefined || existsSync(profileDir(name))
 }
 
 function applyPatch(registry: BrowserRegistry, name: string, patch: BrowserPatch): RegistryEntry {
@@ -114,7 +126,8 @@ function readDriver(name: string): Pick<BrowserSessionInfo, "lastUsedAt" | "driv
   const path = join(profileDir(name), DRIVER_FILE)
   try {
     const lastUsedAt = statSync(path).mtime.toISOString()
-    return { lastUsedAt, driverSessionId: readFileSync(path, "utf8").trim() || null }
+    const content = readFileSync(path, "utf8").trim()
+    return { lastUsedAt, driverSessionId: isValidCogpitSessionId(content) ? content : null }
   } catch {
     return { lastUsedAt: null, driverSessionId: null }
   }
@@ -146,7 +159,10 @@ export async function listBrowsers(isRunning: (name: string) => Promise<boolean>
   const registry = readRegistry()
   const names = new Set([DEFAULT_BROWSER, ...profileNames(), ...Object.keys(registry.sessions)])
   const sessions = await Promise.all(
-    [...names].map(async (name) => describeBrowser(name, entryOf(registry, name), await isRunning(name))),
+    [...names].map(async (name) => {
+      const running = await isRunning(name).catch(() => false)
+      return describeBrowser(name, entryOf(registry, name), running)
+    }),
   )
   return sessions.sort(compareSessions)
 }
@@ -154,9 +170,7 @@ export async function listBrowsers(isRunning: (name: string) => Promise<boolean>
 export function createBrowser(name: string, note?: string): BrowserSessionInfo {
   assertNamedBrowser(name)
   const registry = readRegistry()
-  if (name === DEFAULT_BROWSER || entryOf(registry, name) || existsSync(profileDir(name))) {
-    throw new BrowserExistsError(name)
-  }
+  if (browserExists(registry, name)) throw new BrowserExistsError(name)
   mkdirSync(profileDir(name), { recursive: true })
   const entry = applyPatch(registry, name, { note })
   writeRegistry(registry)
@@ -166,6 +180,7 @@ export function createBrowser(name: string, note?: string): BrowserSessionInfo {
 export function updateBrowser(name: string, patch: BrowserPatch): RegistryEntry {
   assertNamedBrowser(name)
   const registry = readRegistry()
+  if (!browserExists(registry, name)) throw new BrowserNotFoundError(name)
   const entry = applyPatch(registry, name, patch)
   writeRegistry(registry)
   return entry
@@ -185,7 +200,7 @@ export function removeBrowser(name: string): void {
 export function touchLastUrl(name: string, url: string): void {
   if (!isNamedBrowser(name)) return
   const registry = readRegistry()
-  if (entryOf(registry, name)?.lastUrl === url) return
+  if (!browserExists(registry, name) || entryOf(registry, name)?.lastUrl === url) return
   applyPatch(registry, name, { lastUrl: url })
   writeRegistry(registry)
 }

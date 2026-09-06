@@ -1,11 +1,22 @@
 // @vitest-environment node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BrowserNameError, profileDir, profilesDir, registryFile } from "../../browser/paths"
 import {
   BrowserExistsError,
+  BrowserNotFoundError,
   createBrowser,
   listBrowsers,
   readRegistry,
@@ -71,6 +82,14 @@ describe("readRegistry", () => {
     expect(readRegistry()).toEqual({ version: 1, sessions: {} })
   })
 
+  it("returns the empty shape for an unknown version", () => {
+    mkdirSync(home, { recursive: true })
+    writeFileSync(registryFile(), JSON.stringify({ version: 2, sessions: { github: { createdAt: "2026-09-06T10:00:00.000Z" } } }))
+    expect(readRegistry()).toEqual({ version: 1, sessions: {} })
+    writeFileSync(registryFile(), JSON.stringify({ sessions: { github: { createdAt: "2026-09-06T10:00:00.000Z" } } }))
+    expect(readRegistry()).toEqual({ version: 1, sessions: {} })
+  })
+
   it("drops entries whose names are not named browsers", () => {
     mkdirSync(home, { recursive: true })
     writeFileSync(
@@ -107,7 +126,7 @@ describe("writeRegistry", () => {
   it("pretty-prints and leaves no temp file behind", () => {
     writeRegistry({ version: 1, sessions: {} })
     expect(readFileSync(registryFile(), "utf8")).toBe('{\n  "version": 1,\n  "sessions": {}\n}\n')
-    expect(existsSync(`${registryFile()}.tmp`)).toBe(false)
+    expect(readdirSync(home)).toEqual(["sessions.json"])
   })
 })
 
@@ -158,6 +177,21 @@ describe("listBrowsers", () => {
     expect(sessions.find((session) => session.name === "default")?.running).toBe(false)
   })
 
+  it("treats a rejecting isRunning as not running without sinking the list", async () => {
+    mkdirSync(profileDir("github"), { recursive: true })
+    mkdirSync(profileDir("docs"), { recursive: true })
+    const isRunning = async (name: string) => {
+      if (name === "github") throw new Error("daemon probe failed")
+      return name === "docs"
+    }
+    const sessions = await listBrowsers(isRunning)
+    expect(sessions.map((session) => [session.name, session.running])).toEqual([
+      ["default", false],
+      ["docs", true],
+      ["github", false],
+    ])
+  })
+
   it("parses .driver into lastUsedAt and driverSessionId", async () => {
     const when = new Date("2026-09-06T12:34:56.000Z")
     const path = writeDriver("default", "sess-123\n", when)
@@ -167,12 +201,15 @@ describe("listBrowsers", () => {
     expect(session.lastUsedAt).toBe(when.toISOString())
   })
 
-  it("reports a whitespace-only .driver as no driver but still used", async () => {
-    writeDriver("default", "\n")
-    const [session] = await listBrowsers(neverRunning)
-    expect(session.driverSessionId).toBeNull()
-    expect(session.lastUsedAt).not.toBeNull()
-  })
+  it.each(["\n", "../x\n", "not a session id\n", `${"x".repeat(81)}\n`])(
+    "reports .driver content %j as no driver but still used",
+    async (content) => {
+      writeDriver("default", content)
+      const [session] = await listBrowsers(neverRunning)
+      expect(session.driverSessionId).toBeNull()
+      expect(session.lastUsedAt).not.toBeNull()
+    },
+  )
 
   it("orders default first, then lastUsedAt descending with nulls last, then name", async () => {
     writeDriver("older", "a", new Date("2026-09-01T00:00:00.000Z"))
@@ -213,6 +250,16 @@ describe("createBrowser", () => {
     expect(readRegistry().sessions.github).not.toHaveProperty("note")
   })
 
+  it("round-trips a browser named constructor", async () => {
+    expect(createBrowser("constructor").name).toBe("constructor")
+    expect(() => createBrowser("constructor")).toThrow(BrowserExistsError)
+    touchLastUrl("constructor", "https://example.com")
+    const sessions = await listBrowsers(neverRunning)
+    expect(sessions.map((session) => session.name)).toEqual(["default", "constructor"])
+    expect(sessions[1].lastUrl).toBe("https://example.com")
+    expect(Object.keys(readRegistry().sessions)).toEqual(["constructor"])
+  })
+
   it("throws BrowserExistsError when the profile dir exists", () => {
     mkdirSync(profileDir("github"), { recursive: true })
     expect(() => createBrowser("github")).toThrow(BrowserExistsError)
@@ -245,12 +292,23 @@ describe("updateBrowser", () => {
     expect(readRegistry().sessions.github).toMatchObject({ note: "Work GitHub", lastUrl: "https://github.com" })
   })
 
-  it("creates the entry when absent", () => {
+  it("creates the entry for default, which always exists", () => {
     const before = Date.now()
     updateBrowser("default", { note: "Shared" })
     const entry = readRegistry().sessions.default
     expect(entry.note).toBe("Shared")
     expect(Date.parse(entry.createdAt)).toBeGreaterThanOrEqual(before)
+  })
+
+  it("creates the entry for a browser that only has a profile dir", () => {
+    mkdirSync(profileDir("github"), { recursive: true })
+    updateBrowser("github", { note: "GitHub" })
+    expect(readRegistry().sessions.github.note).toBe("GitHub")
+  })
+
+  it("throws BrowserNotFoundError when neither entry nor profile dir exists", () => {
+    expect(() => updateBrowser("github", { note: "GitHub" })).toThrow(BrowserNotFoundError)
+    expect(existsSync(registryFile())).toBe(false)
   })
 
   it("clears the note with null", () => {
@@ -293,15 +351,25 @@ describe("removeBrowser", () => {
 })
 
 describe("touchLastUrl", () => {
-  it("records the url, creating the entry when absent", () => {
+  it("records the url for default, creating the entry when absent", () => {
     touchLastUrl("default", "https://example.com")
     expect(readRegistry().sessions.default.lastUrl).toBe("https://example.com")
+  })
+
+  it("records the url for a browser that only has a profile dir", () => {
+    mkdirSync(profileDir("github"), { recursive: true })
+    touchLastUrl("github", "https://github.com")
+    expect(readRegistry().sessions.github.lastUrl).toBe("https://github.com")
+  })
+
+  it("does not create an entry for a browser with neither entry nor profile dir", () => {
+    touchLastUrl("github", "https://github.com")
+    expect(existsSync(registryFile())).toBe(false)
   })
 
   it("skips the write when the url is unchanged", () => {
     touchLastUrl("default", "https://example.com")
     const before = statSync(registryFile())
-    writeFileSync(registryFile(), readFileSync(registryFile()))
     utimesSync(registryFile(), new Date(0), new Date(0))
     touchLastUrl("default", "https://example.com")
     expect(statSync(registryFile()).mtimeMs).toBe(0)

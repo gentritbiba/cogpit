@@ -143,7 +143,7 @@ Tests: empty home lists only default (not running); profile dir without registry
 
 Commit: `feat(browser): named browser registry`
 
-Note: registry keys are sanitized on read (invalid or throwaway names and malformed entries are dropped), so a hand-edited `sessions.json` cannot make `profileDir()` throw. `touchLastUrl` shares the patch helper with `updateBrowser` rather than calling it, so the hot path reads the file once.
+Note: registry keys are sanitized on read (invalid or throwaway names, malformed entries, and any `version` other than 1 are dropped), so a hand-edited `sessions.json` cannot make `profileDir()` throw. `updateBrowser` throws `BrowserNotFoundError` unless the browser is `default`, has a registry entry, or has a profile dir; `touchLastUrl` applies the same existence rule silently (a profile dir alone counts, since the shim creates dirs before Cogpit knows about them) and shares the patch helper rather than calling `updateBrowser`, so the hot path reads the file once. `driverSessionId` is null unless `.driver` holds a valid Cogpit session id. `listBrowsers` treats a rejecting `isRunning` as not running.
 
 ### Task 4: Daemons
 
@@ -319,8 +319,8 @@ Commit: `feat(browser): agent skill, plugin and environment`
 Routes (all JSON, method-guarded, `sendJson`):
 - `GET /api/browser` → `BrowserStatus`
 - `POST /api/browser/sessions` `{name, note?}` → 201 info / 400 on invalid or throwaway / 409 exists
-- `PATCH /api/browser/sessions/:name` `{note?}`
-- `DELETE /api/browser/sessions/:name` → 204 / 400 for default
+- `PATCH /api/browser/sessions/:name` `{note?}` → info / 400 on invalid or throwaway / 404 when `registry.updateBrowser` throws `BrowserNotFoundError`
+- `DELETE /api/browser/sessions/:name` → 204 / 400 for default. Must call `daemons.stop(name)` before `registry.removeBrowser(name)` so the profile is never deleted under a live Chromium; the route test asserts that call order.
 - `POST /api/browser/sessions/:name/launch` `{url?}` (default `about:blank`; also allow `lastUrl` when body omits url and registry has one)
 - `POST /api/browser/sessions/:name/stop`
 - `POST /api/browser/skill/install` `{target}` → `{ path }`
