@@ -81,6 +81,16 @@ describe("CommandPalette", () => {
     expect(props.onToggleProjectFiles).toHaveBeenCalledOnce()
   })
 
+  it("toggles the browser panel where the host can reach one", async () => {
+    const user = userEvent.setup()
+    const props = { ...createProps(), onToggleBrowser: vi.fn(), showBrowser: false }
+    render(<CommandPalette {...props} />)
+
+    await user.click(screen.getByText("Show browser"))
+
+    expect(props.onToggleBrowser).toHaveBeenCalledOnce()
+  })
+
   it("hides actions that are invalid without an active project or session", () => {
     const props = createProps()
     render(

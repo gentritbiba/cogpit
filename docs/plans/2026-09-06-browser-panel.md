@@ -627,7 +627,7 @@ does not blow away a working view. The pill reads `IDLE` for "no frame in the
 last 3 s", including before the first one — a still page is normal, so it says
 so plainly rather than warning.
 
-### Task 19: Register the panel
+### Task 19: Register the panel ✅ done
 
 **Files:**
 - Modify: `src/plugins/builtInPanelIds.ts` (add `browser`), `src/components/workspace-panels/builtInWorkspacePlugin.tsx` (lazy `BrowserPanel`, icon `Globe`, `order: 15`, `defaultSize: "46%"`, `minSize: "360px"`, `maxSize: "75%"`, `keepAlive: true`, `when: (ctx) => ctx.canAccessHostFiles`), an `indicator` component rendering a pulsing green dot while `latestBrowserActivity(context.session)` is within 10 s (`useState` + interval).
@@ -635,6 +635,14 @@ so plainly rather than warning.
 - Test: `src/components/workspace-panels/__tests__/builtInWorkspacePlugin.test.tsx` — extend to assert the browser panel is present and gated.
 
 Commit: `feat(browser): register the Browser workspace panel`
+
+Note: the indicator arms a single timeout for the moment the last call goes
+stale instead of polling on an interval — a new call re-arms it, and a session
+that never browses schedules nothing. The palette command fit the existing
+pattern (`onToggleBrowser` / `showBrowser` alongside `onToggleProjectFiles`),
+so it is wired; it reads "Show browser" / "Hide browser" to match the
+neighbouring commands rather than "Toggle Browser panel", and is offered only
+where the host can reach its own files, like the panel itself.
 
 ## Phase 3 — Verification
 

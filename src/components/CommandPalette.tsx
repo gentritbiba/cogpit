@@ -11,6 +11,7 @@ import {
   FolderSearch,
   FolderTree,
   GitBranch,
+  Globe,
   Globe2,
   Home,
   Keyboard,
@@ -93,6 +94,7 @@ export interface CommandPaletteProps {
   onOpenKeyboardShortcuts?: () => void
   onTogglePreview?: () => void
   onToggleProjectFiles?: () => void
+  onToggleBrowser?: () => void
   onOpenTheme: () => void
   onOpenTerminal: () => void
   onOpenIntegratedTerminal?: () => void
@@ -117,6 +119,7 @@ export interface CommandPaletteProps {
   showConfig: boolean
   showMission: boolean
   showProjectFiles?: boolean
+  showBrowser?: boolean
   projects?: CommandPaletteProject[]
   recentSessions?: CommandPaletteSession[]
   devices?: CommandPaletteDevice[]
@@ -282,6 +285,13 @@ export function CommandPalette(props: CommandPaletteProps) {
       FolderTree,
       props.onToggleProjectFiles,
       shortcutLabel("projectFiles"),
+    ),
+    props.onToggleBrowser && action(
+      "toggle-browser",
+      props.showBrowser ? "Hide browser" : "Show browser",
+      "web page live view browse panel",
+      Globe,
+      props.onToggleBrowser,
     ),
     props.hasFileChanges && action(
       "toggle-file-changes",

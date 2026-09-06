@@ -1,17 +1,28 @@
-import { lazy, Suspense } from "react"
-import { FileCode2, FolderTree, GitBranch, PanelRight } from "lucide-react"
+import { lazy, Suspense, useEffect, useState } from "react"
+import { FileCode2, FolderTree, GitBranch, Globe, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { Spinner } from "@/components/ui/Spinner"
-import { definePlugin, type WorkspacePanelProps } from "@/plugin-api"
+import {
+  definePlugin,
+  type WorkspacePanelIndicatorProps,
+  type WorkspacePanelProps,
+} from "@/plugin-api"
 import { BUILT_IN_PLUGIN_ID } from "@/plugins/builtInPanelIds"
+import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { useBuiltInPanelServices } from "./BuiltInPanelServices"
+
+/** How long the rail keeps marking the icon after the agent's last browser call. */
+const BROWSING_MS = 10_000
 
 const ProjectFilesPanel = lazy(() =>
   import("@/components/ProjectFilesPanel").then((module) => ({ default: module.ProjectFilesPanel })),
 )
 const WorktreePanel = lazy(() =>
   import("@/components/WorktreePanel").then((module) => ({ default: module.WorktreePanel })),
+)
+const BrowserPanel = lazy(() =>
+  import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
 )
 
 function PanelFallback() {
@@ -66,6 +77,40 @@ function SessionInfoWorkspacePanel() {
   )
 }
 
+function BrowserWorkspacePanel(props: WorkspacePanelProps) {
+  return (
+    <Suspense fallback={<PanelFallback />}>
+      <BrowserPanel {...props} />
+    </Suspense>
+  )
+}
+
+/**
+ * A dot on the rail while the agent is driving a browser, so the panel is
+ * worth opening. One timeout, armed for the moment the last call goes stale —
+ * a new call re-arms it, and a session that never browses schedules nothing.
+ */
+function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
+  const [, expire] = useState(0)
+  const at = Date.parse(latestBrowserActivity(context.session)?.timestamp ?? "")
+
+  useEffect(() => {
+    const remaining = at + BROWSING_MS - Date.now()
+    if (Number.isNaN(remaining) || remaining <= 0) return
+    const timer = setTimeout(() => expire((tick) => tick + 1), remaining)
+    return () => clearTimeout(timer)
+  }, [at])
+
+  if (Number.isNaN(at) || Date.now() - at >= BROWSING_MS) return null
+  return (
+    <span
+      role="status"
+      aria-label="The agent is using the browser"
+      className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+    />
+  )
+}
+
 function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
   const services = useBuiltInPanelServices()
   return (
@@ -106,6 +151,19 @@ export const builtInWorkspacePlugin = definePlugin({
       maxSize: "75%",
       keepAlive: true,
       when: (context) => context.canAccessHostFiles && context.projectPath !== null,
+    },
+    {
+      id: "browser",
+      title: "Browser",
+      icon: Globe,
+      component: BrowserWorkspacePanel,
+      indicator: BrowserActivityIndicator,
+      order: 15,
+      defaultSize: "46%",
+      minSize: "360px",
+      maxSize: "75%",
+      keepAlive: true,
+      when: (context) => context.canAccessHostFiles,
     },
     {
       id: "file-changes",

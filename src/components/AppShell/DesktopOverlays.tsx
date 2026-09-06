@@ -151,6 +151,9 @@ export function DesktopOverlays({
           onOpenKeyboardShortcuts={() => onKeyboardShortcutsOpenChange(true)}
           onTogglePreview={project.currentCwd ? project.onTogglePreview : undefined}
           onToggleProjectFiles={can("hostFiles") && project.currentCwd ? project.onToggleProjectFiles : undefined}
+          onToggleBrowser={can("hostFiles")
+            ? () => navigation.panels.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.browser)
+            : undefined}
           onOpenTheme={navigation.panels.handleToggleThemeSelector}
           onOpenTerminal={project.onOpenTerminal}
           onOpenDevices={canManageDevices ? setDevicesDialogMode : undefined}
@@ -174,6 +177,7 @@ export function DesktopOverlays({
           showSidebar={navigation.panels.showSidebar}
           showStats={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo}
           showProjectFiles={project.showProjectFiles}
+          showBrowser={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.browser}
           showFileChanges={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges}
           showWorktrees={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.worktrees}
           showConfig={state.mainView === "config"}
