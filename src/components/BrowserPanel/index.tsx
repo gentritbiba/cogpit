@@ -5,7 +5,6 @@ import { Spinner } from "@/components/ui/Spinner"
 import { useBrowserSessions, type BrowserActionResult } from "@/hooks/useBrowserSessions"
 import { useBrowserSocket } from "@/hooks/useBrowserSocket"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
-import { DEFAULT_AGENT_KIND } from "@/lib/agents"
 import { deviceScopedKey } from "@/lib/device"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
@@ -14,6 +13,7 @@ import { AgentCaption } from "./AgentCaption"
 import { BrowserEmptyState } from "./BrowserEmptyState"
 import { BrowserNavBar } from "./BrowserNavBar"
 import { BrowserSessionBar, DEFAULT_BROWSER } from "./BrowserSessionBar"
+import { BrowserSkillDialog } from "./BrowserSkillDialog"
 import { BrowserViewport } from "./BrowserViewport"
 
 /**
@@ -40,9 +40,18 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  const [skillOpen, setSkillOpen] = useState(false)
   const pickedAt = useRef(0)
 
-  const { status, error: listError, create, remove, stop, installSkill } = useBrowserSessions(active)
+  const {
+    status,
+    error: listError,
+    create,
+    remove,
+    stop,
+    readSkillTargets,
+    installSkill,
+  } = useBrowserSessions(active)
   const socket = useBrowserSocket(active ? selected : null)
 
   const sessions = status?.sessions ?? NO_SESSIONS
@@ -81,6 +90,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   }, [setFollowAgent])
 
   const showDefault = useCallback(() => select(DEFAULT_BROWSER), [select])
+  const openSkill = useCallback(() => setSkillOpen(true), [])
   const handleRemove = useCallback((name: string) => {
     select(DEFAULT_BROWSER)
     void run(() => remove(name))
@@ -116,6 +126,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
         busy={busy}
         onSelect={select}
         onToggleFollow={toggleFollow}
+        onOpenSkill={openSkill}
         onCreate={create}
         onRemove={handleRemove}
         onStop={handleStop}
@@ -149,10 +160,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {notInstalled && (
-          <BrowserEmptyState
-            kind="not-installed"
-            onInstallSkill={() => installSkill(context.session?.agentKind ?? DEFAULT_AGENT_KIND)}
-          />
+          <BrowserEmptyState kind="not-installed" onOpenSkill={openSkill} />
         )}
         {stopped && (
           <BrowserEmptyState
@@ -184,6 +192,13 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           </div>
         )}
       </div>
+
+      <BrowserSkillDialog
+        open={skillOpen}
+        onOpenChange={setSkillOpen}
+        readTargets={readSkillTargets}
+        install={installSkill}
+      />
     </div>
   )
 }

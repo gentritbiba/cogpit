@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
@@ -36,10 +36,6 @@ vi.mock("../../browser/skill", async (importOriginal) => {
     ensurePlugin: () => {
       if (failures.has("plugin")) throw new Error("plugin write failed")
       return actual.ensurePlugin()
-    },
-    installSkillEverywhere: () => {
-      if (failures.has("skill")) throw new Error("skill install failed")
-      return actual.installSkillEverywhere()
     },
   }
 })
@@ -84,7 +80,7 @@ function manifestFile(): string {
   return path
 }
 
-/** Where the startup installer would put the skill, one entry per CLI that reads skills. */
+/** Where an install would put the skill, one entry per CLI that reads skills. */
 function skillTargets(): { configRoot: string; dir: string; skill: string }[] {
   return AGENT_KINDS.flatMap((kind) => {
     const { rootDirName, skillsDir } = descriptorFor(kind).config
@@ -176,46 +172,23 @@ describe("initBrowserSupport", () => {
     await support.shutdown()
   })
 
-  it("installs the skill into every CLI the user has, not just the one that takes the plugin", async () => {
+  it("leaves every agent CLI's global config untouched", async () => {
     giveTheUserEveryCli()
 
     const support = initBrowserSupport(alwaysDead)
 
     expect(skillTargets().length).toBeGreaterThan(1)
-    for (const { skill } of skillTargets()) {
-      expect(readFileSync(skill, "utf8")).toContain("name: cogpit-browser")
-    }
+    // The user keeps these directories; starting Cogpit must not add a file to one.
+    for (const { configRoot } of skillTargets()) expect(readdirSync(configRoot)).toEqual([])
     expect(errors).toEqual([])
 
     await support.shutdown()
   })
 
-  it("keeps installing for the other CLIs when one of them cannot be written", async () => {
-    giveTheUserEveryCli()
-    const [blocked, ...rest] = skillTargets()
-    expect(rest.length).toBeGreaterThan(0)
-    // A file where the skill directory has to go: this write throws, the rest do not.
-    mkdirSync(dirname(blocked.dir), { recursive: true })
-    writeFileSync(blocked.dir, "not a directory")
-
+  it("does not create a config root the user does not have", async () => {
     const support = initBrowserSupport(alwaysDead)
 
-    expect(errors).toHaveLength(1)
-    for (const { skill } of rest) expect(readFileSync(skill, "utf8")).toContain("name: cogpit-browser")
-
-    await support.shutdown()
-  })
-
-  it("leaves an unchanged skill file alone on a second start", async () => {
-    giveTheUserEveryCli()
-    await initBrowserSupport(alwaysDead).shutdown()
-    const written = new Date(Date.now() - 60_000)
-    for (const { skill } of skillTargets()) utimesSync(skill, written, written)
-    const before = skillTargets().map(({ skill }) => statSync(skill).mtimeMs)
-
-    const support = initBrowserSupport(alwaysDead)
-
-    expect(skillTargets().map(({ skill }) => statSync(skill).mtimeMs)).toEqual(before)
+    expect(existsSync(skillHome)).toBe(false)
 
     await support.shutdown()
   })
@@ -224,7 +197,6 @@ describe("initBrowserSupport", () => {
     ["find", "PATH scan failed"],
     ["shim", "shim write failed"],
     ["plugin", "plugin write failed"],
-    ["skill", "skill install failed"],
     ["sweeper", "sweeper failed"],
   ])("logs and continues when the %s step throws", async (step, message) => {
     failures.add(step)

@@ -1,8 +1,13 @@
 /**
  * Turning the managed browser tree on and off: the directories it lives in, the
- * shim that goes first on every agent's PATH, the two ways the skill reaches an
- * agent — a local plugin and an install per CLI — and the sweeper that reaps
- * daemons a finished session left behind.
+ * shim that goes first on every agent's PATH, the plugin that carries the skill
+ * to the sessions Cogpit starts, and the sweeper that reaps daemons a finished
+ * session left behind.
+ *
+ * Every path here stays inside Cogpit's own tree. Copying the skill into an
+ * agent CLI's global config is the user's call, made through the panel or
+ * `POST /api/browser/skill/install` — starting the server never edits a
+ * directory the user owns.
  *
  * Each step stands alone. A read-only home, or a machine without agent-browser,
  * costs the Browser panel and nothing else — the server still starts.
@@ -11,7 +16,7 @@ import { mkdirSync } from "node:fs"
 import { shutdownBrowsers, startSweeper } from "./daemons"
 import { profilesDir, sharedRunDir } from "./paths"
 import { ensureShim, findRealAgentBrowser } from "./shim"
-import { ensurePlugin, installSkillEverywhere } from "./skill"
+import { ensurePlugin } from "./skill"
 
 export interface BrowserSupport {
   shutdown(): Promise<void>
@@ -37,9 +42,6 @@ export function initBrowserSupport(isCogpitSessionLive: (id: string) => boolean)
   })
   attempt("writing the browser skill plugin", () => {
     ensurePlugin()
-  })
-  attempt("installing the browser skill for the agent CLIs", () => {
-    installSkillEverywhere()
   })
   attempt("starting the daemon sweeper", () => {
     stopSweeper = startSweeper(isCogpitSessionLive)

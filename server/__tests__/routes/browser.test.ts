@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { BrowserSessionInfo } from "../../../shared/browser/types"
+import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 import { BrowserNameError, DEFAULT_BROWSER } from "../../browser/paths"
 import { BrowserExistsError, BrowserNotFoundError, type BrowserPatch } from "../../browser/registry"
@@ -10,7 +10,19 @@ import { registerBrowserRoutes, type BrowserRouteDeps } from "../../routes/brows
 
 const BINARY = "/opt/homebrew/bin/agent-browser"
 /** Derived, not spelled: the route offers whichever CLIs the descriptor table gives a skills dir. */
-const SUPPORTED_TARGET = AGENT_KINDS.filter((kind) => descriptorFor(kind).config.skillsDir !== null)[0]
+const SKILL_KINDS = AGENT_KINDS.filter((kind) => descriptorFor(kind).config.skillsDir !== null)
+const SUPPORTED_TARGET = SKILL_KINDS[0]
+
+function skillTarget(kind: (typeof SKILL_KINDS)[number]): BrowserSkillTarget {
+  const { config, displayName } = descriptorFor(kind)
+  return {
+    kind,
+    label: displayName,
+    configRoot: `/tmp/home/${config.rootDirName}`,
+    installed: false,
+    automatic: config.pluginManifestDir !== null,
+  }
+}
 
 function info(name: string, overrides: Partial<BrowserSessionInfo> = {}): BrowserSessionInfo {
   return {
@@ -38,6 +50,8 @@ function createDeps() {
     launch: vi.fn(async (_name: string, _url: string) => undefined),
     stop: vi.fn(async (_name: string) => undefined),
     installSkill: vi.fn((target: string) => `/tmp/home/.${target}/skills/cogpit-browser`),
+    installSkillEverywhere: vi.fn(() => SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit-browser`)),
+    skillTargets: vi.fn(() => SKILL_KINDS.map(skillTarget)),
   } satisfies BrowserRouteDeps
 }
 
@@ -405,6 +419,22 @@ describe("POST /api/browser/sessions/:name/stop", () => {
   })
 })
 
+// ── GET /api/browser/skill ──────────────────────────────────────────────────
+
+describe("GET /api/browser/skill", () => {
+  it("reports every target and whether the skill is installed there", async () => {
+    const call = await drive("GET", "/skill")
+
+    expect(call.status()).toBe(200)
+    expect(call.body()).toEqual({ targets: SKILL_KINDS.map(skillTarget) })
+  })
+
+  it("falls through for a non-GET method", async () => {
+    const call = await drive("POST", "/skill", {})
+    expect(call.next).toHaveBeenCalled()
+  })
+})
+
 // ── POST /api/browser/skill/install ─────────────────────────────────────────
 
 describe("POST /api/browser/skill/install", () => {
@@ -412,8 +442,20 @@ describe("POST /api/browser/skill/install", () => {
     const call = await drive("POST", "/skill/install", { target: SUPPORTED_TARGET })
 
     expect(call.status()).toBe(200)
-    expect(call.body()).toEqual({ path: `/tmp/home/.${SUPPORTED_TARGET}/skills/cogpit-browser` })
+    expect(call.body()).toEqual({ paths: [`/tmp/home/.${SUPPORTED_TARGET}/skills/cogpit-browser`] })
     expect(deps.installSkill).toHaveBeenCalledWith(SUPPORTED_TARGET)
+    expect(deps.installSkillEverywhere).not.toHaveBeenCalled()
+  })
+
+  it("installs for every CLI the user has when the target is all", async () => {
+    const call = await drive("POST", "/skill/install", { target: "all" })
+
+    expect(call.status()).toBe(200)
+    expect(call.body()).toEqual({
+      paths: SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit-browser`),
+    })
+    expect(deps.installSkillEverywhere).toHaveBeenCalledOnce()
+    expect(deps.installSkill).not.toHaveBeenCalled()
   })
 
   it("rejects an unknown target", async () => {
@@ -421,6 +463,7 @@ describe("POST /api/browser/skill/install", () => {
 
     expect(call.status()).toBe(400)
     expect(deps.installSkill).not.toHaveBeenCalled()
+    expect(deps.installSkillEverywhere).not.toHaveBeenCalled()
   })
 
   it("rejects a missing target", async () => {
@@ -428,6 +471,7 @@ describe("POST /api/browser/skill/install", () => {
 
     expect(call.status()).toBe(400)
     expect(deps.installSkill).not.toHaveBeenCalled()
+    expect(deps.installSkillEverywhere).not.toHaveBeenCalled()
   })
 
   it("falls through for a non-POST method", async () => {

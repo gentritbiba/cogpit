@@ -7,12 +7,20 @@ vi.mock("@/lib/auth", () => ({
 
 import { authFetch } from "@/lib/auth"
 import { useBrowserSessions, type UseBrowserSessions } from "../useBrowserSessions"
-import type { BrowserStatus } from "../../../shared/browser/types"
+import type { BrowserSkillTarget, BrowserStatus } from "../../../shared/browser/types"
 import { AGENT_KINDS } from "../../../shared/session/agent-descriptors"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 /** Any CLI the skill can be installed into; the hook only forwards the kind. */
 const SKILL_TARGET = AGENT_KINDS[0]
+
+const SKILL_TARGETS: BrowserSkillTarget[] = AGENT_KINDS.map((kind) => ({
+  kind,
+  label: kind,
+  configRoot: `/home/me/${kind}`,
+  installed: false,
+  automatic: false,
+}))
 
 const STATUS: BrowserStatus = {
   installed: true,
@@ -171,17 +179,49 @@ describe("useBrowserSessions", () => {
     expect(init.body).toBe(body)
   })
 
-  it("returns the installed skill path", async () => {
+  it("returns the paths the install wrote", async () => {
     const { result } = renderHook(() => useBrowserSessions(true))
     await settle()
-    mockedAuthFetch.mockResolvedValueOnce(response({ path: "/home/me/skills/cogpit-browser/SKILL.md" }))
+    mockedAuthFetch.mockResolvedValueOnce(response({ paths: ["/home/me/skills/cogpit-browser"] }))
 
     let outcome: unknown
     await act(async () => {
-      outcome = await result.current.installSkill(SKILL_TARGET)
+      outcome = await result.current.installSkill("all")
     })
 
-    expect(outcome).toEqual({ ok: true, path: "/home/me/skills/cogpit-browser/SKILL.md" })
+    expect(outcome).toEqual({ ok: true, paths: ["/home/me/skills/cogpit-browser"] })
+    const [url, init] = mockedAuthFetch.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe("/api/browser/skill/install")
+    expect(init.body).toBe(JSON.stringify({ target: "all" }))
+  })
+
+  it("reads where the skill can be installed without disturbing the status poll", async () => {
+    const { result } = renderHook(() => useBrowserSessions(true))
+    await settle()
+    mockedAuthFetch.mockResolvedValueOnce(response({ targets: SKILL_TARGETS }))
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.readSkillTargets()
+    })
+
+    expect(outcome).toEqual({ ok: true, targets: SKILL_TARGETS })
+    // A read is not a mutation: it must not trigger the refresh a mutation does.
+    expect(lastCall()[0]).toBe("/api/browser/skill")
+  })
+
+  it("reports a failed skill read as a result", async () => {
+    const { result } = renderHook(() => useBrowserSessions(true))
+    await settle()
+    mockedAuthFetch.mockResolvedValueOnce(response({ error: "no" }, { ok: false, status: 500 }))
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.readSkillTargets()
+    })
+
+    expect(outcome).toEqual({ ok: false, error: "no" })
+    expect(result.current.error).toBeNull()
   })
 
   it("refreshes after a mutation succeeds", async () => {

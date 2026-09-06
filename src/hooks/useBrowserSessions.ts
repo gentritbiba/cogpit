@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { withBase } from "@/lib/device"
-import type { BrowserStatus } from "../../shared/browser/types"
+import type { BrowserSkillStatus, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 
 /**
@@ -18,7 +18,14 @@ const BROWSER_API = "/api/browser"
 const POLL_INTERVAL = 5_000
 
 export type BrowserActionResult = { ok: true } | { ok: false; error: string }
-export type SkillInstallResult = { ok: true; path: string } | { ok: false; error: string }
+export type SkillInstallResult = { ok: true; paths: string[] } | { ok: false; error: string }
+export type SkillTargetsResult =
+  | { ok: true; targets: BrowserSkillTarget[] }
+  | { ok: false; error: string }
+
+/** Install for every CLI the user has, rather than naming one. */
+export const ALL_SKILL_TARGETS = "all"
+export type SkillTarget = AgentKind | typeof ALL_SKILL_TARGETS
 
 export interface UseBrowserSessions {
   status: BrowserStatus | null
@@ -31,7 +38,9 @@ export interface UseBrowserSessions {
   launch: (name: string, url?: string) => Promise<BrowserActionResult>
   stop: (name: string) => Promise<BrowserActionResult>
   setNote: (name: string, note: string) => Promise<BrowserActionResult>
-  installSkill: (target: AgentKind) => Promise<SkillInstallResult>
+  /** Where the browser skill can be installed, and where it already is. */
+  readSkillTargets: () => Promise<SkillTargetsResult>
+  installSkill: (target: SkillTarget) => Promise<SkillInstallResult>
 }
 
 function sessionPath(name: string, suffix = ""): string {
@@ -173,7 +182,22 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
     `Could not save the note for ${name}`,
   ), [perform])
 
-  const installSkill = useCallback(async (target: AgentKind): Promise<SkillInstallResult> => {
+  const readSkillTargets = useCallback(async (): Promise<SkillTargetsResult> => {
+    const fallback = "Could not read where the browser skill is installed"
+    let res: Response
+    try {
+      res = await authFetch(withBase(`${BROWSER_API}/skill`))
+    } catch (cause) {
+      return { ok: false, error: messageOf(cause, fallback) }
+    }
+    if (!res.ok) return { ok: false, error: await readError(res, fallback) }
+    const data = (await readJson(res)) as BrowserSkillStatus | null
+    return Array.isArray(data?.targets)
+      ? { ok: true, targets: data.targets }
+      : { ok: false, error: fallback }
+  }, [])
+
+  const installSkill = useCallback(async (target: SkillTarget): Promise<SkillInstallResult> => {
     const fallback = "Could not install the browser skill"
     const result = await mutate(
       `${BROWSER_API}/skill/install`,
@@ -181,10 +205,23 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
       fallback,
     )
     if (!result.ok) return result
-    return typeof result.data?.path === "string"
-      ? { ok: true, path: result.data.path }
+    const { paths } = result.data ?? {}
+    return Array.isArray(paths) && paths.every((path) => typeof path === "string")
+      ? { ok: true, paths }
       : { ok: false, error: fallback }
   }, [mutate])
 
-  return { status, loading, error, refresh, create, remove, launch, stop, setNote, installSkill }
+  return {
+    status,
+    loading,
+    error,
+    refresh,
+    create,
+    remove,
+    launch,
+    stop,
+    setNote,
+    readSkillTargets,
+    installSkill,
+  }
 }

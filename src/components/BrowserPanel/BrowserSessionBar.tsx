@@ -1,5 +1,5 @@
 import { memo, useId, useState } from "react"
-import { ChevronDown, CircleStop, Crosshair, Plus, Trash2, TriangleAlert, X } from "lucide-react"
+import { ChevronDown, CircleStop, Crosshair, Plus, Sparkles, Trash2, TriangleAlert, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -62,6 +62,8 @@ interface BrowserSessionBarProps {
   busy?: boolean
   onSelect: (name: string) => void
   onToggleFollow: (next: boolean) => void
+  /** Opens the panel's skill dialog; installing is never implicit. */
+  onOpenSkill: () => void
   onCreate: (name: string, note: string) => Promise<BrowserActionResult>
   onRemove: (name: string) => void
   onStop: (name: string) => void
@@ -100,6 +102,7 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
   busy = false,
   onSelect,
   onToggleFollow,
+  onOpenSkill,
   onCreate,
   onRemove,
   onStop,
@@ -198,6 +201,11 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
           <DropdownMenuItem disabled={busy} onClick={openCreate}>
             <Plus />
             New browser…
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={onOpenSkill}>
+            <Sparkles />
+            Agent skill…
           </DropdownMenuItem>
 
           {!isDefault && (

@@ -354,6 +354,15 @@ Tests: env prepends only when shim exists; no duplicate prepend; plugin written 
 
 Commit: `feat(browser): agent skill, plugin and environment`
 
+Follow-up (opt-in install): copying the skill into a CLI's global config is now
+a request, never a side effect. `skill.ts` keeps `installSkill(kind)` and
+`installSkillEverywhere()` but nothing calls them at startup, and it gained
+`skillTargets(): BrowserSkillTarget[]` — one row per CLI that reads skills, with
+its `configRoot`, whether the current skill is already there, and `automatic`
+for the CLI the local plugin reaches on its own. Cogpit does not write into the
+user's global agent configuration unless asked: those directories belong to the
+user and are often under version control.
+
 Note: `installSkill` takes an `AgentKind` and reads `descriptorFor(kind).config`
 for the config root and skills dir, rather than hardcoding `"claude" | "codex"` —
 it keeps `check:agents` at one line for this file (the `.claude-plugin` manifest
@@ -431,6 +440,14 @@ is appended) rather than re-encoding through `URLSearchParams`.
 Run `bun run check:agents`; the new files must not appear in the vocabulary file. Run the full `bun run test`.
 
 Commit: `feat(browser): wire startup, shutdown and agent environment`
+
+Follow-up (opt-in install): `initBrowserSupport` no longer calls
+`installSkillEverywhere()`. Startup creates the directories, the shim and the
+plugin — all inside `~/.cogpit` — and stops there, so booting Cogpit adds
+nothing to `~/.claude`, `~/.codex` or `~/.copilot`. The SDK plugin injection in
+`sdk-session.ts` stays automatic, because it needs no file in the user's config.
+`server/__tests__/browser/index.test.ts` pins `COGPIT_SKILL_HOME` at a temp dir
+and asserts it stays empty across a start.
 
 Note: the liveness predicate is passed in, so `server/browser/` still has no
 edge into `server/agents/`. The `"shared"` session id is spelled

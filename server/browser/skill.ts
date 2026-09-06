@@ -1,12 +1,17 @@
 /**
- * The skill that teaches agents how Cogpit's browser tree works, plus the ways
- * it reaches them: a local plugin the CLI that reads plugins loads from disk, an
- * install into every CLI's own skills directory at startup, and the one-shot
- * install the panel offers for agents Cogpit does not spawn.
+ * The skill that teaches agents how Cogpit's browser tree works, plus the two
+ * ways it reaches them.
+ *
+ * The plugin is automatic: it is written inside Cogpit's own tree and handed to
+ * the sessions Cogpit starts, so nothing outside `~/.cogpit` is touched. The
+ * install is not. It copies the skill into an agent CLI's global config, which
+ * is the user's own directory — often one they keep in version control — so it
+ * happens only when the panel or the API asks for it, never at startup.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import type { BrowserSkillTarget } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor } from "../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../shared/session/types"
 import { pluginDir } from "./paths"
@@ -213,10 +218,27 @@ export function installSkill(target: AgentKind): string {
 }
 
 /**
- * Startup delivery. The plugin only reaches the one CLI that loads plugins, and
- * only on the path that passes it, so every other agent — a one-shot run, and
- * both of the others — would otherwise run with no subagent rule at all and put
- * a subagent in the user's logged-in browser.
+ * What the panel lists: every CLI that reads skills, with the directory an
+ * install would write into and whether the skill is already there.
+ */
+export function skillTargets(): BrowserSkillTarget[] {
+  const pluginDirName = pluginManifestDirName()
+  return AGENT_KINDS.flatMap((kind) => {
+    const dir = skillDir(kind)
+    if (dir === null) return []
+    const { config, displayName } = descriptorFor(kind)
+    return [{
+      kind,
+      label: displayName,
+      configRoot: configRoot(kind),
+      installed: hasContent(join(dir, "SKILL.md"), COGPIT_BROWSER_SKILL),
+      automatic: config.pluginManifestDir !== null && config.pluginManifestDir === pluginDirName,
+    }]
+  })
+}
+
+/**
+ * Installs for every CLI at once, for the user who asks for all of them.
  *
  * Skips a CLI whose config root is absent rather than creating one the user
  * never asked for, and one CLI failing never costs the rest theirs.

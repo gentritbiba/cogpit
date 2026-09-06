@@ -7,7 +7,8 @@ import type { UseBrowserSessions } from "@/hooks/useBrowserSessions"
 import type { BrowserFrame, BrowserSocketStatus, UseBrowserSocket } from "@/hooks/useBrowserSocket"
 import type { WorkspacePanelContext } from "@/plugin-api"
 import type { BrowserClientMessage } from "../../../../shared/browser/protocol"
-import type { BrowserSessionInfo } from "../../../../shared/browser/types"
+import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../../shared/browser/types"
+import { AGENT_KINDS } from "../../../../shared/session/agent-descriptors"
 import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
 
 vi.mock("@/hooks/useBrowserSessions", () => ({
@@ -35,7 +36,13 @@ vi.mock("@/components/BrowserPanel/BrowserSessionBar", async (importOriginal) =>
 // ── Hook doubles ─────────────────────────────────────────────────────────
 
 const send = vi.fn<(message: BrowserClientMessage) => void>()
-const installSkill = vi.fn(async () => ({ ok: true as const, path: "/home/me/skills/cogpit-browser" }))
+/** Labels come from the server, so the panel never spells a CLI itself. */
+const SKILL_TARGETS: BrowserSkillTarget[] = [
+  { kind: AGENT_KINDS[0], label: "First CLI", configRoot: "/home/me/.first", installed: true, automatic: true },
+  { kind: AGENT_KINDS[1], label: "Second CLI", configRoot: "/home/me/.second", installed: false, automatic: false },
+]
+const installSkill = vi.fn(async () => ({ ok: true as const, paths: ["/home/me/.second/skills/cogpit-browser"] }))
+const readSkillTargets = vi.fn(async () => ({ ok: true as const, targets: SKILL_TARGETS }))
 const remove = vi.fn(async () => ({ ok: true as const }))
 const stop = vi.fn(async () => ({ ok: true as const }))
 const noop = vi.fn(async () => ({ ok: true as const }))
@@ -67,6 +74,7 @@ function sessionsDouble(enabled: boolean): UseBrowserSessions {
     launch: noop,
     stop,
     setNote: noop,
+    readSkillTargets,
     installSkill,
   }
 }
@@ -221,7 +229,27 @@ describe("BrowserPanel", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: /install the agent skill/i }))
-    expect(installSkill).toHaveBeenCalledOnce()
+    expect(await screen.findByRole("heading", { name: "Agent skill" })).toBeInTheDocument()
+    // Opening the dialog is not installing: nothing is written until a row is clicked.
+    expect(installSkill).not.toHaveBeenCalled()
+  })
+
+  it("opens the agent skill dialog from the session bar and installs one CLI", async () => {
+    const { user } = setup()
+
+    await user.click(screen.getByRole("button", { name: "Switch browser" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Agent skill…" }))
+
+    expect(await screen.findByRole("heading", { name: "Agent skill" })).toBeInTheDocument()
+    for (const target of SKILL_TARGETS) {
+      expect(screen.getByText(target.label)).toBeInTheDocument()
+      expect(screen.getByText(target.configRoot)).toBeInTheDocument()
+    }
+    // The one already installed offers nothing to click; the other does.
+    expect(screen.queryByRole("button", { name: "Install for First CLI" })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Install for Second CLI" }))
+    expect(installSkill).toHaveBeenCalledWith(AGENT_KINDS[1])
   })
 
   it("opens a page from the stopped state, prefilled with the last one", async () => {

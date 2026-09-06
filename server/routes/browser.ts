@@ -1,7 +1,7 @@
 /**
  * The managed browsers as REST: status for the panel, the named-browser CRUD
- * behind its session bar, launch/stop, and the one-shot skill install for
- * agents Cogpit does not spawn. The `/__browser` socket owns the live page;
+ * behind its session bar, launch/stop, and the skill install the panel offers
+ * for agents Cogpit does not spawn. The `/__browser` socket owns the live page;
  * this owns the list.
  *
  * Every name arrives as a URL segment, so it is decoded once here and then
@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 
 import { MAX_URL_LENGTH } from "../../shared/browser/protocol"
 import { resolveNavigationUrl } from "../../shared/browser/url"
-import type { BrowserSessionInfo, BrowserStatus } from "../../shared/browser/types"
+import type { BrowserSessionInfo, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import { isRunning, launch, stop } from "../browser/daemons"
 import { assertNamedBrowser, BrowserNameError, DEFAULT_BROWSER } from "../browser/paths"
@@ -27,7 +27,7 @@ import {
   type BrowserPatch,
 } from "../browser/registry"
 import { findRealAgentBrowser } from "../browser/shim"
-import { installSkill } from "../browser/skill"
+import { installSkill, installSkillEverywhere, skillTargets } from "../browser/skill"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn, type NextFn } from "../http"
 
 type RunningProbe = (name: string) => Promise<boolean>
@@ -43,6 +43,8 @@ export interface BrowserRouteDeps {
   launch: (name: string, url: string) => Promise<void>
   stop: (name: string) => Promise<void>
   installSkill: (target: AgentKind) => string
+  installSkillEverywhere: () => string[]
+  skillTargets: () => BrowserSkillTarget[]
 }
 
 export const defaultBrowserRouteDeps: BrowserRouteDeps = {
@@ -58,6 +60,8 @@ export const defaultBrowserRouteDeps: BrowserRouteDeps = {
   launch: (name, url) => launch(name, url),
   stop: (name) => stop(name),
   installSkill: (target) => installSkill(target),
+  installSkillEverywhere: () => installSkillEverywhere(),
+  skillTargets: () => skillTargets(),
 }
 
 const BLANK_URL = "about:blank"
@@ -66,6 +70,9 @@ const BLANK_URL = "about:blank"
 const SKILL_TARGETS: readonly AgentKind[] = AGENT_KINDS.filter(
   (kind) => descriptorFor(kind).config.skillsDir !== null,
 )
+
+/** Asks for every CLI at once instead of naming one. */
+const ALL_TARGETS = "all"
 
 function subPath(rawUrl: string): string {
   const path = rawUrl.split("?")[0] || "/"
@@ -178,17 +185,25 @@ async function stopSession(name: string, res: ServerResponse, deps: BrowserRoute
   sendJson(res, 200, { ok: true })
 }
 
+/**
+ * The only writes Cogpit makes inside the user's own config, so they happen
+ * here and nowhere else — nothing installs the skill on its own.
+ */
 function installBrowserSkill(
   body: Record<string, unknown>,
   res: ServerResponse,
   deps: BrowserRouteDeps,
 ): void {
   const { target } = body
-  if (typeof target !== "string" || !(SKILL_TARGETS as readonly string[]).includes(target)) {
-    sendJson(res, 400, { error: `target must be one of: ${SKILL_TARGETS.join(", ")}` })
+  if (target === ALL_TARGETS) {
+    sendJson(res, 200, { paths: deps.installSkillEverywhere() })
     return
   }
-  sendJson(res, 200, { path: deps.installSkill(target as AgentKind) })
+  if (typeof target !== "string" || !(SKILL_TARGETS as readonly string[]).includes(target)) {
+    sendJson(res, 400, { error: `target must be ${ALL_TARGETS} or one of: ${SKILL_TARGETS.join(", ")}` })
+    return
+  }
+  sendJson(res, 200, { paths: [deps.installSkill(target as AgentKind)] })
 }
 
 async function dispatch(
@@ -207,6 +222,10 @@ async function dispatch(
   if (path === "/sessions") {
     if (method !== "POST") return next()
     return createSession(await readBody(req), res, deps)
+  }
+  if (path === "/skill") {
+    if (method !== "GET") return next()
+    return sendJson(res, 200, { targets: deps.skillTargets() })
   }
   if (path === "/skill/install") {
     if (method !== "POST") return next()

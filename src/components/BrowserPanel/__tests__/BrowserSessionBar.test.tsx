@@ -34,6 +34,7 @@ function setup(props: Partial<Props> = {}) {
   const handlers = {
     onSelect: vi.fn(),
     onToggleFollow: vi.fn(),
+    onOpenSkill: vi.fn(),
     onCreate: vi.fn<(name: string, note: string) => Promise<BrowserActionResult>>(
       async () => ({ ok: true }),
     ),
@@ -158,6 +159,14 @@ describe("BrowserSessionBar", () => {
     await user.click(screen.getByRole("button", { name: "Create browser" }))
 
     expect(onSelect).toHaveBeenCalledWith("shop")
+  })
+
+  it("offers the agent skill from any browser, next to creating one", async () => {
+    const { user, onOpenSkill } = setup()
+    await openMenu(user)
+
+    await user.click(screen.getByRole("menuitem", { name: "Agent skill…" }))
+    expect(onOpenSkill).toHaveBeenCalledTimes(1)
   })
 
   it("never offers to delete the default browser", async () => {

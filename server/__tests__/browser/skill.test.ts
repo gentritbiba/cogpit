@@ -13,6 +13,7 @@ import {
   pluginManifestFile,
   pluginSkillFile,
   SKILL_NAME,
+  skillTargets,
 } from "../../browser/skill"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 
@@ -141,6 +142,45 @@ describe("installSkill", () => {
       if (previous === undefined) delete process.env.HOME
       else process.env.HOME = previous
     }
+  })
+})
+
+describe("skillTargets", () => {
+  const kindsWithSkills = AGENT_KINDS.filter((kind) => descriptorFor(kind).config.skillsDir !== null)
+
+  it("lists every CLI that reads skills, with the config root an install writes into", () => {
+    const targets = skillTargets()
+
+    expect(targets.map((target) => target.kind)).toEqual(kindsWithSkills)
+    expect(targets.length).toBeGreaterThan(1)
+    for (const target of targets) {
+      const descriptor = descriptorFor(target.kind)
+      expect(target.label).toBe(descriptor.displayName)
+      expect(target.configRoot).toBe(join(root, "home", descriptor.config.rootDirName))
+      expect(target.installed).toBe(false)
+    }
+  })
+
+  it("calls a target installed only while its file matches the current skill", () => {
+    const [first] = skillTargets()
+    const dir = installSkill(first.kind)
+
+    expect(skillTargets()[0].installed).toBe(true)
+
+    writeFileSync(join(dir, "SKILL.md"), "an older skill")
+    expect(skillTargets()[0].installed).toBe(false)
+  })
+
+  it("marks the CLIs the plugin Cogpit writes already reaches", () => {
+    const manifest = manifestFile()
+
+    for (const target of skillTargets()) {
+      const { pluginManifestDir } = descriptorFor(target.kind).config
+      expect(target.automatic).toBe(
+        pluginManifestDir !== null && manifest.startsWith(join(pluginDir(), pluginManifestDir)),
+      )
+    }
+    expect(skillTargets().some((target) => target.automatic)).toBe(true)
   })
 })
 

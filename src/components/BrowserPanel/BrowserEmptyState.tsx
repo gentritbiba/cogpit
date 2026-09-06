@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { copyToClipboard } from "@/lib/utils"
-import type { SkillInstallResult } from "@/hooks/useBrowserSessions"
 
 /**
  * The two states with nothing to render: no CLI on the machine, and a browser
@@ -23,19 +22,17 @@ const INSTALL_COMMAND = "npm i -g agent-browser && agent-browser install"
 const COPIED_MS = 1_500
 
 type BrowserEmptyStateProps =
-  | { kind: "not-installed"; onInstallSkill: () => Promise<SkillInstallResult> }
+  | { kind: "not-installed"; onOpenSkill: () => void }
   | { kind: "stopped"; name: string; lastUrl: string | null; onOpen: (url: string) => void }
 
 export function BrowserEmptyState(props: BrowserEmptyStateProps) {
   return props.kind === "not-installed"
-    ? <NotInstalled onInstallSkill={props.onInstallSkill} />
+    ? <NotInstalled onOpenSkill={props.onOpenSkill} />
     : <Stopped name={props.name} lastUrl={props.lastUrl} onOpen={props.onOpen} />
 }
 
-function NotInstalled({ onInstallSkill }: { onInstallSkill: () => Promise<SkillInstallResult> }) {
+function NotInstalled({ onOpenSkill }: { onOpenSkill: () => void }) {
   const [copied, setCopied] = useState(false)
-  const [installing, setInstalling] = useState(false)
-  const [skill, setSkill] = useState<SkillInstallResult | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => {
@@ -47,12 +44,6 @@ function NotInstalled({ onInstallSkill }: { onInstallSkill: () => Promise<SkillI
     setCopied(true)
     if (copyTimer.current) clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(false), COPIED_MS)
-  }
-
-  async function install(): Promise<void> {
-    setInstalling(true)
-    setSkill(await onInstallSkill())
-    setInstalling(false)
   }
 
   return (
@@ -80,14 +71,13 @@ function NotInstalled({ onInstallSkill }: { onInstallSkill: () => Promise<SkillI
               : <Copy data-icon="inline-start" />}
           </Button>
         </div>
-        <Button variant="outline" size="sm" disabled={installing} onClick={() => void install()}>
+        <Button variant="outline" size="sm" onClick={onOpenSkill}>
           <Sparkles data-icon="inline-start" />
-          Install the agent skill
+          Install the agent skill…
         </Button>
         <EmptyDescription className="text-xs">
-          {skill === null && "The skill teaches the agent when to use a named browser and how this panel follows along."}
-          {skill?.ok === true && `Installed to ${skill.path}`}
-          {skill?.ok === false && skill.error}
+          The skill teaches the agent when to use a named browser and how this panel follows
+          along. Installing writes it into your home directory, so it is never done for you.
         </EmptyDescription>
       </EmptyContent>
     </Empty>
