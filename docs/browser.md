@@ -111,18 +111,24 @@ Screencast frames are capped at 1920 device pixels on each side (JPEG, quality 8
 
 ## Viewport Emulation
 
-While the panel is open, the page viewport size is driven by the panel's own size, not by the agent's Chromium settings.
+Opening or resizing the panel applies its aspect ratio to the page viewport.
 
 **What changes:**
 - The panel sends `viewport` messages whenever it resizes or you drag its splitter.
 - The CDP client runs `Emulation.setDeviceMetricsOverride` with the panel's dimensions (clamped to 1024–4096 width, scaled to panel aspect ratio, dpr clamped to 1–2).
 - The page re-renders at the new size.
 
-**What the agent sees:** When the panel is open, `window.innerWidth` and page breakpoints reflect the panel's size, not what the agent wrote to Chromium. This means responsive pages adapt to the panel.
+Screenshots and explicit agent viewport changes can resize the page independently.
+Cogpit coalesces those resize events, reads the current page dimensions and scale,
+and synchronizes its streaming client's emulation state. The panel then fits the
+whole page, letterboxing when its aspect ratio differs, instead of cropping it
+using stale dimensions. Resizing the panel applies the panel's aspect ratio again.
 
-**When you close the panel:** The CDP client reads the page's original layout metrics (`Page.getLayoutMetrics`) and `window.devicePixelRatio` lazily — on the tab it is about to override, immediately before the first override lands on it, not for every tab at attach — then hands those values back when it un-follows or closes. So the agent's own viewport settings survive a panel open-and-close. A tab the panel never followed is never measured and never touched.
+**What the agent sees:** After opening or resizing the panel, `window.innerWidth` and page breakpoints reflect the panel's emulated size. Later screenshot or agent viewport changes are preserved until the next panel resize.
 
-The minimum panel width is 1024 pixels (keeps pages on their desktop breakpoints even in a narrow sidebar). Height is adjusted to match the panel's aspect ratio. Neither dimension can exceed 4096.
+**When you close the panel:** The CDP client reads the page's original layout metrics (`Page.getLayoutMetrics`) and `window.devicePixelRatio` lazily, immediately before its first override. It restores those values when it un-follows or closes, unless it has observed a later external resize, in which case it preserves that newer size. The agent's own viewport settings survive a panel open-and-close. A tab the panel never followed is never measured and never touched.
+
+Panel-driven emulation has a minimum width of 1024 pixels to keep desktop breakpoints in narrow sidebars. Height follows the panel's aspect ratio, and both dimensions are capped at 4096. Later agent viewport changes retain their own dimensions.
 
 ## What Every Agent Is Told
 

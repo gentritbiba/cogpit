@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { build } from "esbuild"
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8"))
 assert.equal(manifest.name, "cogpit")
@@ -15,10 +16,19 @@ assert.ok(manifest.dependencies["node-pty"])
 // esbuild leaves every package external, so each one the bundle imports has
 // to be declared here — on a machine with nothing else installed, `npx cogpit`
 // resolves them from this manifest alone.
-const bundle = readFileSync("dist/cli.js", "utf8")
-const externalSpecifier = /(?:from\s*|import\s*\(?\s*|require\(\s*)"((?:@[^/"]+\/)?[^./"][^/"]*)/g
+const { metafile } = await build({
+  entryPoints: ["dist/cli.js"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  packages: "external",
+  write: false,
+  metafile: true,
+})
 const externals = new Set(
-  [...bundle.matchAll(externalSpecifier)].map((match) => match[1]).filter((name) => !name.startsWith("node:")),
+  Object.values(metafile.outputs).flatMap((output) => output.imports)
+    .filter((entry) => entry.external && !entry.path.startsWith("node:"))
+    .map((entry) => entry.path.split("/").slice(0, entry.path.startsWith("@") ? 2 : 1).join("/")),
 )
 for (const name of externals) {
   assert.ok(manifest.dependencies[name], `dist/cli.js imports ${name} but package.json does not declare it`)

@@ -4,6 +4,12 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260906T204734Z-PENDING - Browser screenshot recovery and 2.6.0
+- File: `audit-history/audit-20260906T204734Z-PENDING.md`
+- Status: PASS after viewport documentation and package-contract corrections.
+- Scope: Screenshot resize recovery, browser guidance, package validation and version 2.6.0.
+- Validation: 396 files / 6,199 tests; coverage and quality gates; Electron build; 9 launcher tests and package contract; live screenshot and pointer probes.
+
 ### 20260906T203201Z-0faf8a8 - Browser routing through shell snapshots
 - File: `audit-history/audit-20260906T203201Z-0faf8a8.md`
 - Status: PASS after configuration-preservation and scope corrections.

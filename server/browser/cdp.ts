@@ -233,6 +233,7 @@ const MAX_DPR = 2
 const MIN_PAGE_WIDTH = 1024
 const MAX_PAGE_SIZE = 4096
 const SCREENCAST_QUALITY = 80
+const RESIZE_SETTLE_MS = 150
 const HIDDEN_URL_PREFIXES = ["devtools://", "chrome-extension://"]
 
 const MOUSE_EVENT_TYPES: Record<ClientMessage<"mouse">["event"], string> = {
@@ -330,6 +331,10 @@ function pageMetrics({ width, height, dpr }: PanelSize): PageMetrics | null {
   }
 }
 
+function sameMetrics(a: PageMetrics, b: PageMetrics): boolean {
+  return a.width === b.width && a.height === b.height && a.deviceScaleFactor === b.deviceScaleFactor
+}
+
 /**
  * One viewer per socket client. Follows the most recently created page target
  * until `follow()` pins one; a pinned tab stays followed until it is destroyed,
@@ -346,6 +351,7 @@ export class BrowserViewer {
   private panel: PanelSize | null = null
   private screencast: ActiveScreencast | null = null
   private override: ActiveOverride | null = null
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null
   private readonly captured = new Map<string, PageMetrics>()
   private buttons = 0
   private queue: Promise<unknown> = Promise.resolve()
@@ -438,6 +444,8 @@ export class BrowserViewer {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    if (this.resizeTimer) clearTimeout(this.resizeTimer)
+    this.resizeTimer = null
     this.buttons = 0
     try {
       const active = this.screencast
@@ -472,6 +480,9 @@ export class BrowserViewer {
     })
     this.cdp.on("Page.screencastFrame", (params, sessionId) => {
       this.report(this.onScreencastFrame(params, sessionId))
+    })
+    this.cdp.on("Page.frameResized", (_params, sessionId) => {
+      this.scheduleMetricsSync(sessionId)
     })
     this.cdp.on("Page.frameNavigated", (params, sessionId) => {
       const { frame } = params as { frame: { parentId?: string; url: string } }
@@ -643,8 +654,7 @@ export class BrowserViewer {
     const active = this.override
     if (
       active && wanted && active.sessionId === wanted.sessionId
-      && active.width === wanted.width && active.height === wanted.height
-      && active.deviceScaleFactor === wanted.deviceScaleFactor
+      && sameMetrics(active, wanted)
     ) {
       return
     }
@@ -652,6 +662,10 @@ export class BrowserViewer {
     if (active && active.sessionId !== wanted?.sessionId) await this.restoreMetrics(active.sessionId)
     if (!wanted) return
     await this.captureMetrics(wanted.sessionId)
+    await this.applyMetrics(wanted)
+  }
+
+  private async applyMetrics(wanted: ActiveOverride): Promise<void> {
     await this.cdp.send(
       "Emulation.setDeviceMetricsOverride",
       {
@@ -667,19 +681,44 @@ export class BrowserViewer {
     this.override = wanted
   }
 
-  /**
-   * Reads what a target renders at before our first override lands on it. The
-   * emulation slot is per target, not per CDP client, so this is the automation's
-   * own viewport and we have to hand it back rather than clear the slot.
-   */
+  private scheduleMetricsSync(sessionId: string | undefined): void {
+    if (this.closed || sessionId === undefined || this.override?.sessionId !== sessionId) return
+    if (this.targetForSession(sessionId) !== this.followed) return
+    if (this.resizeTimer) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null
+      this.report(this.enqueue(() => this.syncExternalMetrics(sessionId)))
+    }, RESIZE_SETTLE_MS)
+    this.resizeTimer.unref?.()
+  }
+
+  /** Screenshots can leave the page size different from this CDP client's emulation state. */
+  private async syncExternalMetrics(sessionId: string): Promise<void> {
+    const active = this.override
+    if (this.closed || active?.sessionId !== sessionId || this.targetForSession(sessionId) !== this.followed) return
+    const actual = await this.readMetrics(sessionId)
+    if (this.closed || !actual || sameMetrics(active, actual)) return
+    await this.applyMetrics({ sessionId, ...actual })
+    this.captured.set(sessionId, actual)
+  }
+
+  private async readMetrics(sessionId: string): Promise<PageMetrics | null> {
+    const metrics = await this.cdp.send<LayoutMetrics>("Page.getLayoutMetrics", {}, sessionId)
+    const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport
+    if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return null
+    return {
+      width: viewport.clientWidth,
+      height: viewport.clientHeight,
+      deviceScaleFactor: await this.devicePixelRatio(sessionId),
+    }
+  }
+
+  /** Saves the page's rendered size before our first override, for restoration on close. */
   private async captureMetrics(sessionId: string): Promise<void> {
     if (this.captured.has(sessionId)) return
     try {
-      const metrics = await this.cdp.send<LayoutMetrics>("Page.getLayoutMetrics", {}, sessionId)
-      const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport
-      if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return
-      const deviceScaleFactor = await this.devicePixelRatio(sessionId)
-      this.captured.set(sessionId, { width: viewport.clientWidth, height: viewport.clientHeight, deviceScaleFactor })
+      const metrics = await this.readMetrics(sessionId)
+      if (metrics) this.captured.set(sessionId, metrics)
     } catch {
       // Nothing read means nothing to restore, and the stop path clears instead.
     }
@@ -700,7 +739,7 @@ export class BrowserViewer {
   }
 
   /**
-   * Hands the target back what `captureMetrics` read, and only clears the slot
+   * Hands the target back its saved external size, and only clears the slot
    * when nothing was read. No-op unless `sessionId` owns the override: a tab that
    * already went away cannot answer either way.
    */

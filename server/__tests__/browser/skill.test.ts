@@ -81,7 +81,7 @@ describe("COGPIT_BROWSER_SKILL", () => {
   })
 
   it("warns that the panel drives the page viewport", () => {
-    expect(COGPIT_BROWSER_SKILL).toMatch(/the page's viewport follows the\n.*panel/)
+    expect(COGPIT_BROWSER_SKILL).toContain("Opening or resizing the Browser panel sets the page's viewport")
     expect(COGPIT_BROWSER_SKILL).toContain("agent-browser set viewport <w> <h>")
   })
 

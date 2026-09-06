@@ -521,6 +521,94 @@ describe("BrowserViewer", () => {
     expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1600, maxHeight: 900 })
   })
 
+  it("resynchronizes the stream after a screenshot changes the page viewport", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    fake.handlers["Runtime.evaluate"] = () => ({ result: { value: 1 } })
+    fake.handlers["Emulation.setDeviceMetricsOverride"] = (message, self) => {
+      self.frameMetadata = { deviceWidth: message.params.width, deviceHeight: message.params.height }
+      self.pushFrame(30, message.sessionId)
+      return {}
+    }
+
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(last(events.frames).header).toMatchObject({ deviceWidth: 1280, deviceHeight: 720 }))
+    expect(last(fake.sent("Emulation.setDeviceMetricsOverride")).params).toEqual({
+      width: 1280, height: 720, screenWidth: 1280, screenHeight: 720, deviceScaleFactor: 1, mobile: false,
+    })
+    expect(fake.sent("Page.startScreencast")).toHaveLength(1)
+
+    await viewer.close()
+    expect(last(fake.sent("Emulation.setDeviceMetricsOverride")).params).toEqual({
+      width: 1280, height: 720, deviceScaleFactor: 1, mobile: false,
+    })
+  })
+
+  it("coalesces resize bursts and preserves an agent's new viewport when closing", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    fake.handlers["Page.getLayoutMetrics"] = () => ({ cssLayoutViewport: { clientWidth: 1440, clientHeight: 900 } })
+    for (let index = 0; index < 5; index++) fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(2))
+    expect(fake.sent("Page.getLayoutMetrics")).toHaveLength(2)
+    await viewer.close()
+    expect(last(fake.sent("Emulation.setDeviceMetricsOverride")).params).toMatchObject({ width: 1440, height: 900 })
+  })
+
+  it("does not rewrite metrics when our own resize notification matches", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(1280, 720, 2)
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(fake.sent("Runtime.evaluate")).toHaveLength(2))
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(1)
+  })
+
+  it("ignores resizes of other tabs and cancels pending work on close", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    fake.push("Page.frameResized", {}, sessionFor("t1"))
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await viewer.close()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(fake.sent("Page.getLayoutMetrics")).toHaveLength(1)
+  })
+
+  it("ignores a pending resize after following a different tab", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await viewer.follow("t1")
+    const count = fake.sent("Emulation.setDeviceMetricsOverride").length
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(count)
+    expect(last(fake.sent("Emulation.setDeviceMetricsOverride")).sessionId).toBe(sessionFor("t1"))
+  })
+
+  it("ignores empty layout metrics during a resize", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    fake.handlers["Page.getLayoutMetrics"] = () => ({ cssLayoutViewport: { clientWidth: 0, clientHeight: 0 } })
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(fake.sent("Page.getLayoutMetrics")).toHaveLength(2))
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(1)
+    expect(events.errors).toEqual([])
+  })
+
+  it("keeps streaming when a resize check fails and retries on the next resize", async () => {
+    const { fake, viewer, events } = await openViewer()
+    await viewer.setViewport(600, 900, 2)
+    const metrics = fake.handlers["Page.getLayoutMetrics"]
+    fake.handlers["Page.getLayoutMetrics"] = () => new CdpError("Layout unavailable")
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(events.errors).toEqual(["Layout unavailable"]))
+    expect(fake.sent("Page.stopScreencast")).toHaveLength(0)
+    fake.handlers["Page.getLayoutMetrics"] = metrics
+    fake.push("Page.frameResized", {}, sessionFor("t2"))
+    await vi.waitFor(() => expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(2))
+  })
+
   it("reads the page's own metrics once, before the first override", async () => {
     const { fake, viewer } = await openViewer()
 
