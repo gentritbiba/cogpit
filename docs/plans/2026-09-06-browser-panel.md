@@ -595,7 +595,7 @@ live url back. It also opens the current url in the real browser. Labels that
 crowd a narrow panel ("Not the default browser", "Follow") hide below the bar's
 own container-query breakpoints rather than the viewport's.
 
-### Task 18: Panel composition
+### Task 18: Panel composition ✅ done
 
 **Files:**
 - Create: `src/components/BrowserPanel/index.tsx`, `src/components/BrowserPanel/BrowserEmptyState.tsx`, `src/components/BrowserPanel/AgentCaption.tsx`
@@ -615,6 +615,17 @@ own container-query breakpoints rather than the viewport's.
 Tests: renders not-installed state; stopped state shows Launch and sends `launch`; follow-agent switches selection when activity references another existing session; non-default indicator visible.
 
 Commit: `feat(browser): browser panel`
+
+Note: the separate "Reopen last page" button is gone — the URL field is
+prefilled with `lastUrl`, so Open already reopens it, and a second control for
+the same action reads as a different one. Follow does not fight the user: a
+browser picked by hand in the last 10 s outranks the transcript, and turning
+Follow back on clears that hold, since that is itself a request to go where the
+agent is. A socket `error` (and a failed Stop/Delete) shows as a dismissible
+strip above the body rather than replacing it, so a transient attach failure
+does not blow away a working view. The pill reads `IDLE` for "no frame in the
+last 3 s", including before the first one — a still page is normal, so it says
+so plainly rather than warning.
 
 ### Task 19: Register the panel
 
