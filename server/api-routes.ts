@@ -3,6 +3,7 @@ import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
 import { registerAgentPromptRoutes } from "./routes/agent-prompts"
 import { registerAskUserRoutes } from "./routes/ask-user"
+import { registerBrowserRoutes } from "./routes/browser"
 import { registerAgentRuntimeRoutes } from "./routes/agent-runtime"
 import { registerCopilotHistoryRoutes } from "./routes/copilot-history"
 import { registerSessionManageRoutes } from "./routes/session-manage"
@@ -144,6 +145,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("provider-updates", registerProviderUpdateRoutes),
   apiRoute("agent-executable", registerAgentExecutableRoutes),
   apiRoute("agent-accounts", registerAgentAccountRoutes),
+  apiRoute("browser", registerBrowserRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 
 export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {

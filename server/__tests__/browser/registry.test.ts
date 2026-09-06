@@ -19,6 +19,7 @@ import {
   BrowserNotFoundError,
   createBrowser,
   listBrowsers,
+  readBrowser,
   readRegistry,
   removeBrowser,
   touchLastUrl,
@@ -220,6 +221,38 @@ describe("listBrowsers", () => {
     mkdirSync(profileDir("alpha"), { recursive: true })
     const names = (await listBrowsers(neverRunning)).map((session) => session.name)
     expect(names).toEqual(["default", "newest", "middle", "older", "alpha", "zed"])
+  })
+})
+
+describe("readBrowser", () => {
+  it("describes one browser the way listBrowsers does", async () => {
+    createBrowser("github", "GitHub")
+    writeDriver("github", "sess-123\n")
+    const [listed] = (await listBrowsers(neverRunning)).filter((session) => session.name === "github")
+    expect(await readBrowser("github", neverRunning)).toEqual(listed)
+  })
+
+  it("reports a browser that has neither entry nor profile", async () => {
+    expect(await readBrowser("ghost", neverRunning)).toMatchObject({
+      name: "ghost",
+      running: false,
+      note: null,
+      createdAt: null,
+      lastUsedAt: null,
+    })
+  })
+
+  it("asks isRunning for the name and tolerates a rejection", async () => {
+    const isRunning = vi.fn(async (name: string) => name === "github")
+    expect(await readBrowser("github", isRunning)).toMatchObject({ running: true })
+    expect(isRunning).toHaveBeenCalledWith("github")
+    expect(await readBrowser("github", async () => { throw new Error("probe failed") }))
+      .toMatchObject({ running: false })
+  })
+
+  it("throws BrowserNameError for invalid and throwaway names", async () => {
+    await expect(readBrowser("../x", neverRunning)).rejects.toBeInstanceOf(BrowserNameError)
+    await expect(readBrowser("tmp-1", neverRunning)).rejects.toBeInstanceOf(BrowserNameError)
   })
 })
 

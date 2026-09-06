@@ -21,7 +21,8 @@ export type BrowserServerMessage =
 
 const MAX_VIEWPORT_PX = 8192
 const MAX_DPR = 4
-const MAX_URL_LENGTH = 2048
+/** Cap on any url the server is asked to open, from the socket or the REST route. */
+export const MAX_URL_LENGTH = 2048
 
 type FieldCheck = (value: unknown) => boolean
 

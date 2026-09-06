@@ -346,7 +346,7 @@ the third CLI work for free. `browserAgentEnv` sets `PATH` to `binDir()` alone
 when the base has none, instead of leaving a trailing delimiter (an empty PATH
 entry means "current directory").
 
-### Task 10: REST routes
+### Task 10: REST routes ✅ done
 
 **Files:**
 - Create: `server/routes/browser.ts`
@@ -365,6 +365,12 @@ Routes (all JSON, method-guarded, `sendJson`):
 Dependencies injected with defaults (`registry`, `daemons`, `skill`). Existing `api-routes.test.ts` will fail until the policy entry exists — run it.
 
 Commit: `feat(browser): REST routes`
+
+Note: two supporting exports rather than one new file — `registry.readBrowser(name, isRunning)`
+(so PATCH and the launch fallback describe one browser without listing and probing
+them all) and `protocol.MAX_URL_LENGTH` (one url cap for the socket and the route).
+The valid skill-install targets are derived from the descriptor table
+(`config.skillsDir !== null`), which is every CLI, not the two the plan named.
 
 ### Task 11: Transport wiring
 

@@ -167,6 +167,16 @@ export async function listBrowsers(isRunning: (name: string) => Promise<boolean>
   return sessions.sort(compareSessions)
 }
 
+/** One browser's info, for a caller that already knows which name it wants. */
+export async function readBrowser(
+  name: string,
+  isRunning: (name: string) => Promise<boolean>,
+): Promise<BrowserSessionInfo> {
+  assertNamedBrowser(name)
+  const running = await isRunning(name).catch(() => false)
+  return describeBrowser(name, entryOf(readRegistry(), name), running)
+}
+
 export function createBrowser(name: string, note?: string): BrowserSessionInfo {
   assertNamedBrowser(name)
   const registry = readRegistry()

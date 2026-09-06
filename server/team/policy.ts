@@ -195,6 +195,10 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/agent-accounts", methods: ["GET"], requires: "authed" },
     { prefix: "/api/agent-accounts", requires: "admin" },
   ],
+  // Remote control of a browser that holds the user's own logins, on the host
+  // machine — at least as sensitive as the terminal, and read access already
+  // reveals which sites those browsers sit on.
+  browser: admin("/api/browser"),
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()
