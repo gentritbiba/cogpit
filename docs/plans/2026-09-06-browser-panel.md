@@ -477,7 +477,7 @@ binary, so `npx agent-browser open x` captions as `agent-browser open x`. The
 scan skips a `tmp-*` call and keeps going rather than returning null, so a
 subagent's throwaway browser cannot hide the one the main agent is driving.
 
-### Task 14: Socket hook
+### Task 14: Socket hook ✅ done
 
 **Files:**
 - Create: `src/hooks/useBrowserSocket.ts`
@@ -499,6 +499,17 @@ export function useBrowserSocket(session: string | null): {
 URL: `${ws(s)}://${host}${devicePrefix()}/__browser?session=${name}`; `binaryType = "arraybuffer"`; binary → `decodeFrame` → `createImageBitmap(new Blob([jpeg]))` when available else blob URL (revoke the previous); reconnect with the same backoff constants as `usePtySocket`; tear down on session change/unmount. Tests: connects with the right URL, decodes a frame into state, forwards `send`, reconnects after close, cleans up on unmount.
 
 Commit: `feat(browser): viewer socket hook`
+
+Note: `BrowserFrame` is `{ bitmap, blobUrl: string | null, header: FrameHeader }` —
+the header already carries `deviceWidth`/`deviceHeight`/`targetId` plus the scale
+and scroll offsets Task 12 added, so duplicating three of its fields would have
+left two sources for the same numbers. The return also gained `error: string | null`
+(the transport's `error` message, cleared by the next `status`), otherwise a failed
+attach was invisible to the panel. Each effect run owns a `{ alive, issued, applied }`
+record: a decode that resolves after teardown, or after a newer frame already
+painted, closes its own bitmap instead of reaching state. `state`/`page`/`tabs`
+keep their identity when a repeated message is field-identical, so the server's
+2 s poll does not re-render the panel.
 
 ### Task 15: Sessions hook ✅ done
 
