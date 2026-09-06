@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -8,6 +8,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { WebSocket } from "ws"
 import type { ViteDevServer } from "vite"
+
+vi.mock("../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 
 import { ptyPlugin } from "../pty-plugin"
 import { profilesDir, sharedRunDir } from "../browser/paths"

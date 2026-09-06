@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { PassThrough } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 import {
   createMessageConnection,
   StreamMessageReader,
