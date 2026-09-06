@@ -107,3 +107,7 @@ See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for 
 ## Nested iOS Repository
 
 The `ios/` directory is a separate, private Git repository that is intentionally ignored by this parent repository. When changing anything under `ios/`, run Git commands from `ios/` and commit and push those changes to the child repository. Never stage iOS files in the parent repository, and always report the status of both repositories when a task touches both.
+
+## Browser Panel
+
+Live agent-browser streaming inside the workspace (see `docs/browser.md`). The bash shim at `~/.cogpit/bin/agent-browser` owns `--profile`, `--args`, and socket directories — never set them elsewhere or in `server/browser/daemons.ts`. Shared types live in `shared/browser/types.ts`; keep the client and server in sync there only. Agents spawn with `COGPIT_SESSION_ID` and `PATH` prepended; the shim routes to persistent profiles (`default`, named) or throwaway session-scoped trees (`tmp-*`). The panel attaches via CDP over a second WebSocket and supports remote devices through the hub.
