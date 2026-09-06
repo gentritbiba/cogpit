@@ -1,9 +1,17 @@
 // Browser-safe: runs in the server and the viewer. No Buffer, no node imports.
 
-/** Sent ahead of every JPEG so the viewer can map pointer input back to page pixels. */
+/**
+ * Sent ahead of every JPEG so the viewer can map pointer input back to page
+ * pixels. Every field is required: the encoder fills the ones Chromium omits
+ * with `pageScaleFactor: 1` and zero offsets, so the viewer never guesses.
+ */
 export interface FrameHeader {
   deviceWidth: number
   deviceHeight: number
+  pageScaleFactor: number
+  offsetTop: number
+  scrollOffsetX: number
+  scrollOffsetY: number
   targetId: string
   ts: number
 }
@@ -45,12 +53,16 @@ function parseHeader(json: string): FrameHeader {
     throw new Error("Frame header is not valid JSON")
   }
   if (typeof parsed !== "object" || parsed === null) throw new Error("Frame header is not an object")
-  const { deviceWidth, deviceHeight, targetId, ts } = parsed as Partial<FrameHeader>
+  const {
+    deviceWidth, deviceHeight, pageScaleFactor, offsetTop, scrollOffsetX, scrollOffsetY, targetId, ts,
+  } = parsed as Partial<FrameHeader>
   if (
     typeof deviceWidth !== "number" || typeof deviceHeight !== "number"
+    || typeof pageScaleFactor !== "number" || typeof offsetTop !== "number"
+    || typeof scrollOffsetX !== "number" || typeof scrollOffsetY !== "number"
     || typeof targetId !== "string" || typeof ts !== "number"
   ) {
     throw new Error("Frame header is missing fields")
   }
-  return { deviceWidth, deviceHeight, targetId, ts }
+  return { deviceWidth, deviceHeight, pageScaleFactor, offsetTop, scrollOffsetX, scrollOffsetY, targetId, ts }
 }

@@ -11,6 +11,7 @@ interface PendingCall {
 }
 
 const CONNECTION_CLOSED = "CDP connection closed"
+const HANDSHAKE_TIMEOUT_MS = 5000
 
 /** Minimal JSON-RPC client over one CDP WebSocket. Session-scoped traffic carries a top-level `sessionId`. */
 export class CdpConnection {
@@ -27,7 +28,7 @@ export class CdpConnection {
 
   static connect(wsUrl: string): Promise<CdpConnection> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(wsUrl)
+      const socket = new WebSocket(wsUrl, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS })
       socket.once("error", reject)
       socket.once("open", () => {
         socket.off("error", reject)
@@ -124,6 +125,10 @@ function describeError(error: unknown): string {
   return "CDP error"
 }
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 interface TargetInfo {
   targetId: string
   type: string
@@ -147,6 +152,16 @@ interface ScreencastSize {
   maxHeight: number
 }
 
+/** Chromium always sends the sizes; the scroll/scale fields are optional in older builds. */
+interface ScreencastMetadata {
+  deviceWidth: number
+  deviceHeight: number
+  pageScaleFactor?: number
+  offsetTop?: number
+  scrollOffsetX?: number
+  scrollOffsetY?: number
+}
+
 interface ActiveScreencast extends ScreencastSize {
   sessionId: string
 }
@@ -155,9 +170,17 @@ type ClientMessage<T extends BrowserClientMessage["type"]> = Extract<BrowserClie
 export type PageInfo = Omit<Extract<BrowserServerMessage, { type: "page" }>, "type">
 
 export interface ViewerEvents {
-  frame(header: FrameHeader, jpeg: Uint8Array): void
+  /**
+   * Resolve once the frame is flushed to the viewer. Chromium caps the frames
+   * it keeps in flight and waits for the ack, so a promise that settles late is
+   * the only backpressure there is: a slow viewer throttles the browser instead
+   * of growing an unbounded send buffer.
+   */
+  frame(header: FrameHeader, jpeg: Uint8Array): void | Promise<void>
   tabs(tabs: BrowserTab[], followed: string | null): void
   page(info: PageInfo): void
+  /** Something failed off the request path — a target event, a screencast start, a frame flush. */
+  error(message: string): void
   closed(reason: string): void
 }
 
@@ -174,33 +197,78 @@ const MOUSE_EVENT_TYPES: Record<ClientMessage<"mouse">["event"], string> = {
   up: "mouseReleased",
 }
 
-/** Keys whose page-side effect (submit, delete, caret moves) needs the virtual key code, not just `key`. */
-const VIRTUAL_KEY_CODES: Record<string, number> = {
-  Backspace: 8,
-  Tab: 9,
-  Enter: 13,
-  Escape: 27,
-  ArrowLeft: 37,
-  ArrowUp: 38,
-  ArrowRight: 39,
-  ArrowDown: 40,
-  Delete: 46,
+/** `Input.dispatchMouseEvent.buttons` bits. Without them Blink reads a drag as a hover. */
+const MOUSE_BUTTON_MASKS: Record<ClientMessage<"mouse">["button"], number> = {
+  left: 1,
+  right: 2,
+  middle: 4,
+  none: 0,
 }
 
-const BLOCKED_SCHEMES = new Set(["javascript", "data"])
+const MODIFIER_META = 4
+const MODIFIER_SHIFT = 8
+
+/** Keys whose page-side effect (submit, delete, caret moves) needs the virtual key code, not just `key`. */
+const NAMED_KEY_CODES = new Map<string, number>([
+  ["Backspace", 8],
+  ["Tab", 9],
+  ["Enter", 13],
+  ["Escape", 27],
+  ["Space", 32],
+  ["PageUp", 33],
+  ["PageDown", 34],
+  ["End", 35],
+  ["Home", 36],
+  ["ArrowLeft", 37],
+  ["ArrowUp", 38],
+  ["ArrowRight", 39],
+  ["ArrowDown", 40],
+  ["Delete", 46],
+])
+const LETTER_CODE_RE = /^Key([A-Z])$/
+const DIGIT_CODE_RE = /^Digit([0-9])$/
+
+/** Blink runs macOS editor shortcuts from `commands`, not from the Meta-modified key event. */
+const MAC_EDITING_COMMANDS = new Map<string, string>([
+  ["a", "selectAll"],
+  ["c", "copy"],
+  ["v", "paste"],
+  ["x", "cut"],
+  ["z", "undo"],
+  ["y", "redo"],
+])
+
+function virtualKeyCode(code: string): number | undefined {
+  const letter = LETTER_CODE_RE.exec(code)
+  if (letter) return letter[1].charCodeAt(0)
+  const digit = DIGIT_CODE_RE.exec(code)
+  if (digit) return 48 + Number(digit[1])
+  return NAMED_KEY_CODES.get(code)
+}
+
+function macEditingCommands(key: string, modifiers: number): string[] | undefined {
+  if (process.platform !== "darwin" || (modifiers & MODIFIER_META) === 0) return undefined
+  const pressed = key.toLowerCase()
+  if (pressed === "z" && (modifiers & MODIFIER_SHIFT) !== 0) return ["redo"]
+  const command = MAC_EDITING_COMMANDS.get(pressed)
+  return command === undefined ? undefined : [command]
+}
+
+const ALLOWED_SCHEMES = new Set(["http", "https", "about"])
 /** A scheme, except that `host:port` is not one. */
 const SCHEME_RE = /^([a-z][a-z0-9+.-]*):(?!\d+(?:[/?#]|$))/i
-const LOCAL_ADDRESS_RE = /^(localhost|127\.|0\.0\.0\.0|\[::1\])|^[^/]+:\d+/i
+/** Loopback only: a bare `host:port` elsewhere is still https. */
+const LOOPBACK_RE = /^(localhost|127(\.\d+){1,3}|0\.0\.0\.0|\[::1\]|::1)(?:[:/?#]|$)/i
 
 export function resolveNavigationUrl(raw: string): string {
   const url = raw.trim()
   if (url === "") throw new Error("Nothing to navigate to")
   const scheme = SCHEME_RE.exec(url)?.[1].toLowerCase()
   if (scheme !== undefined) {
-    if (BLOCKED_SCHEMES.has(scheme)) throw new Error(`Refusing to navigate to a ${scheme}: url`)
+    if (!ALLOWED_SCHEMES.has(scheme)) throw new Error(`Refusing to navigate to a ${scheme}: url`)
     return url
   }
-  return `${LOCAL_ADDRESS_RE.test(url) ? "http" : "https"}://${url}`
+  return `${LOOPBACK_RE.test(url) ? "http" : "https"}://${url}`
 }
 
 function isPageTarget(info: TargetInfo): boolean {
@@ -229,6 +297,7 @@ export class BrowserViewer {
   private closed = false
   private viewport: ScreencastSize | null = null
   private screencast: ActiveScreencast | null = null
+  private buttons = 0
   private queue: Promise<unknown> = Promise.resolve()
 
   private constructor(private readonly cdp: CdpConnection, private readonly events: ViewerEvents) {}
@@ -242,7 +311,9 @@ export class BrowserViewer {
       cdp.close()
       throw error
     }
-    cdp.onClose((reason) => events.closed(reason))
+    cdp.onClose((reason) => {
+      if (!viewer.closed) events.closed(reason)
+    })
     return viewer
   }
 
@@ -254,23 +325,30 @@ export class BrowserViewer {
   follow(targetId: string): Promise<void> {
     return this.enqueue(async () => {
       if (!this.targets.has(targetId)) throw new Error(`Unknown tab ${targetId}`)
-      this.pinned = true
       await this.setFollowed(targetId)
+      this.pinned = true
     })
   }
 
   async mouse(msg: ClientMessage<"mouse">): Promise<void> {
     const { event, x, y, button, clickCount, modifiers } = msg
+    const mask = MOUSE_BUTTON_MASKS[button]
+    if (event === "down") this.buttons |= mask
+    else if (event === "up") this.buttons &= ~mask
     await this.cdp.send(
       "Input.dispatchMouseEvent",
-      { type: MOUSE_EVENT_TYPES[event], x, y, button, clickCount, modifiers },
+      { type: MOUSE_EVENT_TYPES[event], x, y, button, clickCount, modifiers, buttons: this.buttons },
       this.followedSession(),
     )
   }
 
   async wheel(msg: ClientMessage<"wheel">): Promise<void> {
     const { x, y, deltaX, deltaY, modifiers } = msg
-    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX, deltaY, modifiers }, this.followedSession())
+    await this.cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: "mouseWheel", x, y, deltaX, deltaY, modifiers, buttons: this.buttons },
+      this.followedSession(),
+    )
   }
 
   async key(msg: ClientMessage<"key">): Promise<void> {
@@ -278,10 +356,14 @@ export class BrowserViewer {
     const type = event === "up" ? "keyUp" : text ? "keyDown" : "rawKeyDown"
     const params: CdpParams = { type, key, code, modifiers }
     if (type === "keyDown") params.text = text
-    const virtualKeyCode = VIRTUAL_KEY_CODES[key]
-    if (virtualKeyCode !== undefined) {
-      params.windowsVirtualKeyCode = virtualKeyCode
-      params.nativeVirtualKeyCode = virtualKeyCode
+    const keyCode = virtualKeyCode(code)
+    if (keyCode !== undefined) {
+      params.windowsVirtualKeyCode = keyCode
+      params.nativeVirtualKeyCode = keyCode
+    }
+    if (event === "down") {
+      const commands = macEditingCommands(key, modifiers)
+      if (commands !== undefined) params.commands = commands
     }
     await this.cdp.send("Input.dispatchKeyEvent", params, this.followedSession())
   }
@@ -306,36 +388,45 @@ export class BrowserViewer {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.buttons = 0
     const active = this.screencast
-    this.screencast = null
-    if (active) await this.cdp.send("Page.stopScreencast", {}, active.sessionId).catch(() => {})
+    if (active) await this.stopScreencast(active.sessionId)
     this.cdp.close()
   }
 
   private async start(): Promise<void> {
     this.cdp.on("Target.targetCreated", (params) => {
       const { targetInfo } = params as { targetInfo: TargetInfo }
-      this.enqueue(() => this.onTargetCreated(targetInfo)).catch(() => {})
+      this.report(this.enqueue(() => this.onTargetCreated(targetInfo)))
     })
     this.cdp.on("Target.targetInfoChanged", (params) => {
       const { targetInfo } = params as { targetInfo: TargetInfo }
-      this.enqueue(() => this.onTargetInfoChanged(targetInfo)).catch(() => {})
+      this.report(this.enqueue(() => this.onTargetInfoChanged(targetInfo)))
     })
     this.cdp.on("Target.targetDestroyed", (params) => {
       const { targetId } = params as { targetId: string }
-      this.enqueue(() => this.onTargetDestroyed(targetId)).catch(() => {})
+      this.report(this.enqueue(() => this.dropTarget(targetId)))
     })
-    this.cdp.on("Page.screencastFrame", (params, sessionId) => this.onScreencastFrame(params, sessionId))
+    this.cdp.on("Target.detachedFromTarget", (params) => {
+      const { targetId, sessionId } = params as { targetId?: string; sessionId?: string }
+      this.report(this.enqueue(() => this.onDetached(targetId, sessionId)))
+    })
+    this.cdp.on("Inspector.targetCrashed", (_params, sessionId) => {
+      this.report(this.enqueue(() => this.onDetached(undefined, sessionId)))
+    })
+    this.cdp.on("Page.screencastFrame", (params, sessionId) => {
+      this.report(this.onScreencastFrame(params, sessionId))
+    })
     this.cdp.on("Page.frameNavigated", (params, sessionId) => {
       const { frame } = params as { frame: { parentId?: string; url: string } }
       if (frame.parentId !== undefined) return
-      this.enqueue(() => this.onMainFrameNavigated(frame.url, sessionId)).catch(() => {})
+      this.report(this.enqueue(() => this.onMainFrameNavigated(frame.url, sessionId)))
     })
 
     await this.cdp.send("Target.setDiscoverTargets", { discover: true })
     const { targetInfos } = await this.cdp.send<{ targetInfos: TargetInfo[] }>("Target.getTargets")
     await this.enqueue(async () => {
-      for (const info of targetInfos) await this.attach(info).catch(() => {})
+      for (const info of targetInfos) await this.attach(info).catch((error: unknown) => this.reportError(error))
       this.ready = true
       await this.setFollowed(this.newestTarget(), true)
     })
@@ -345,6 +436,15 @@ export class BrowserViewer {
     const run = this.queue.then(work)
     this.queue = run.catch(() => {})
     return run
+  }
+
+  /** Work that no caller is awaiting still has to reach the viewer when it fails. */
+  private report(work: Promise<unknown>): void {
+    work.catch((error: unknown) => this.reportError(error))
+  }
+
+  private reportError(error: unknown): void {
+    if (!this.closed) this.events.error(messageOf(error))
   }
 
   private followedSession(): string {
@@ -383,14 +483,31 @@ export class BrowserViewer {
 
   private async onTargetInfoChanged(info: TargetInfo): Promise<void> {
     const target = this.targets.get(info.targetId)
-    if (!target || (target.url === info.url && target.title === info.title)) return
+    // A tab that navigates into devtools:// stops being ours to show; one that
+    // navigates back out of an extension page is ours again.
+    if (!target) {
+      await this.onTargetCreated(info)
+      return
+    }
+    if (!isPageTarget(info)) {
+      await this.stopScreencast(target.sessionId)
+      await this.dropTarget(info.targetId)
+      return
+    }
+    if (target.url === info.url && target.title === info.title) return
     target.url = info.url
     target.title = info.title
     this.emitTabs()
     if (info.targetId === this.followed) await this.emitPage()
   }
 
-  private async onTargetDestroyed(targetId: string): Promise<void> {
+  private async onDetached(targetId: string | undefined, sessionId: string | undefined): Promise<void> {
+    const detached = targetId ?? this.targetForSession(sessionId)
+    if (detached) await this.dropTarget(detached)
+  }
+
+  /** Forgets a target without talking to it: its session is already unusable. */
+  private async dropTarget(targetId: string): Promise<void> {
     const target = this.targets.get(targetId)
     if (!target) return
     this.targets.delete(targetId)
@@ -411,19 +528,32 @@ export class BrowserViewer {
     if (targetId === this.followed) await this.emitPage()
   }
 
-  private onScreencastFrame(params: CdpParams, sessionId: string | undefined): void {
+  private async onScreencastFrame(params: CdpParams, sessionId: string | undefined): Promise<void> {
     const { data, metadata, sessionId: screencastSessionId } = params as {
       data: string
-      metadata: { deviceWidth: number; deviceHeight: number }
+      metadata: ScreencastMetadata
       sessionId: number
     }
-    this.cdp.send("Page.screencastFrameAck", { sessionId: screencastSessionId }, sessionId).catch(() => {})
     const targetId = this.targetForSession(sessionId)
-    if (targetId === null || targetId !== this.followed) return
-    this.events.frame(
-      { deviceWidth: metadata.deviceWidth, deviceHeight: metadata.deviceHeight, targetId, ts: Date.now() },
-      Buffer.from(data, "base64"),
-    )
+    if (targetId !== null && targetId === this.followed) {
+      const header: FrameHeader = {
+        deviceWidth: metadata.deviceWidth,
+        deviceHeight: metadata.deviceHeight,
+        pageScaleFactor: metadata.pageScaleFactor ?? 1,
+        offsetTop: metadata.offsetTop ?? 0,
+        scrollOffsetX: metadata.scrollOffsetX ?? 0,
+        scrollOffsetY: metadata.scrollOffsetY ?? 0,
+        targetId,
+        ts: Date.now(),
+      }
+      try {
+        await this.events.frame(header, Buffer.from(data, "base64"))
+      } catch (error) {
+        // A viewer that cannot take this frame must not wedge the stream: ack anyway.
+        this.reportError(error)
+      }
+    }
+    await this.cdp.send("Page.screencastFrameAck", { sessionId: screencastSessionId }, sessionId)
   }
 
   /** `force` emits even when the followed id is unchanged, for the initial state and after a destroy. */
@@ -446,17 +576,28 @@ export class BrowserViewer {
     ) {
       return
     }
-    if (active) {
-      this.screencast = null
-      await this.cdp.send("Page.stopScreencast", {}, active.sessionId).catch(() => {})
-    }
+    if (active) await this.stopScreencast(active.sessionId)
     if (!wanted) return
-    await this.cdp.send(
-      "Page.startScreencast",
-      { format: "jpeg", quality: SCREENCAST_QUALITY, maxWidth: wanted.maxWidth, maxHeight: wanted.maxHeight, everyNthFrame: 1 },
-      wanted.sessionId,
-    )
     this.screencast = wanted
+    try {
+      await this.cdp.send(
+        "Page.startScreencast",
+        { format: "jpeg", quality: SCREENCAST_QUALITY, maxWidth: wanted.maxWidth, maxHeight: wanted.maxHeight, everyNthFrame: 1 },
+        wanted.sessionId,
+      )
+    } catch (error) {
+      // Nothing is streaming, so leave nothing pinned: the next sync retries
+      // instead of freezing the viewer on the last frame.
+      this.screencast = null
+      throw error
+    }
+  }
+
+  /** No-op unless `sessionId` owns the active screencast. A tab that already went away cannot answer. */
+  private async stopScreencast(sessionId: string): Promise<void> {
+    if (this.screencast?.sessionId !== sessionId) return
+    this.screencast = null
+    await this.cdp.send("Page.stopScreencast", {}, sessionId).catch(() => {})
   }
 
   private async stepHistory(delta: number): Promise<void> {
@@ -488,7 +629,6 @@ export class BrowserViewer {
     } catch {
       // a tab that is already gone reports no history; targetDestroyed follows
     }
-    if (this.followed !== targetId) return
     this.events.page({ targetId, url: target.url, title: target.title, canGoBack, canGoForward })
   }
 }

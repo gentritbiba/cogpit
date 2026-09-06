@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest"
 import { decodeFrame, encodeFrame, type FrameHeader } from "../../../shared/browser/frames"
 import { parseClientMessage, type BrowserClientMessage } from "../../../shared/browser/protocol"
 
-const header: FrameHeader = { deviceWidth: 1280, deviceHeight: 720, targetId: "tab-1", ts: 1_700_000_000_000 }
+const header: FrameHeader = {
+  deviceWidth: 1280,
+  deviceHeight: 720,
+  pageScaleFactor: 2,
+  offsetTop: 48,
+  scrollOffsetX: 0,
+  scrollOffsetY: 320,
+  targetId: "tab-1",
+  ts: 1_700_000_000_000,
+}
 
 function headerLengthOf(frame: Uint8Array): number {
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(0)
@@ -45,8 +54,8 @@ describe("frame codec", () => {
     expect(() => decodeFrame(new Uint8Array([0, 0])).header).toThrow(Error)
   })
 
-  it("rejects a JSON header that is missing a field", () => {
-    const { deviceWidth: _omitted, ...partial } = header
+  it.each(Object.keys(header))("rejects a JSON header missing %s — no field has a decoder default", (omitted) => {
+    const partial = { ...header, [omitted]: undefined }
     const frame = frameWithHeaderBytes(new TextEncoder().encode(JSON.stringify(partial)))
     expect(() => decodeFrame(frame)).toThrow(Error)
   })

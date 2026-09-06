@@ -195,6 +195,8 @@ Tests: round trip; header length boundary; truncated buffer throws.
 
 Note: test lives at `src/lib/__tests__/browserFrames.test.ts` (vitest does not include `shared/**`; other shared modules are tested from `src/lib/__tests__/` the same way). Codec uses only `TextEncoder`/`TextDecoder`/`DataView` so it runs in both the server and the viewer; `decodeFrame` honors `byteOffset` on views into a larger buffer and returns `jpeg` as a `subarray` view, not a copy.
 
+Note (review follow-up): `FrameHeader` also carries `pageScaleFactor`, `offsetTop`, `scrollOffsetX` and `scrollOffsetY` from `Page.screencastFrame`'s metadata, which Task 16 needs to map pointer coordinates on a zoomed or scrolled page. All four are **required** in the header — the encoder fills what Chromium omits with `1`/`0`/`0`/`0`, so `decodeFrame` has no defaults and rejects a header missing any field (one test case per field).
+
 Commit: `feat(browser): frame codec and viewer protocol` (with Task 6)
 
 ### Task 6: Protocol types (shared) ✅ done
@@ -259,9 +261,18 @@ export class BrowserViewer {
 
 Internals: on open → `Target.setDiscoverTargets {discover:true}`, list page targets (`type === "page"`, url not `devtools://`), attach to each with `Target.attachToTarget {targetId, flatten:true}` → sessionId; `Page.enable` on each; follow the newest (`Target.targetCreated` ordering, last wins); `Target.targetInfoChanged` updates url/title and emits `page` for the followed one; `Target.targetDestroyed` detaches and re-follows newest; screencast frames: `Page.screencastFrame` → ack → emit `frame` with `{deviceWidth: metadata.deviceWidth, deviceHeight: metadata.deviceHeight, targetId, ts}`; `Page.frameNavigated` (main frame) → emit `page` with history state. Screencast starts on first `setViewport` and moves with `follow`.
 
-Tests: a fake CDP server built on `ws` (`new WebSocketServer({port:0})`) that answers `Target.getTargets`, `attachToTarget`, `Page.startScreencast` (then pushes two `Page.screencastFrame` events, asserting the ack arrives), `Input.*` (recording params), `Page.navigate`, `getNavigationHistory`. Assertions: attach happens, frames emitted with decoded header, `follow` switches the sessionId used for input, `navigate("example.com")` sends `https://example.com`, `targetDestroyed` re-follows, `close` stops screencast and closes the socket.
+Tests: a fake CDP server built on `ws` (`new WebSocketServer({port:0})`) that answers `Target.getTargets`, `attachToTarget`, `Page.startScreencast` (pushes one `Page.screencastFrame`, and the second only once its ack arrives, with distinct per-frame ids), `Input.*` (recording params), `Page.navigate`, `getNavigationHistory`. Assertions: attach happens, frames emitted with decoded header, `follow` switches the sessionId used for input, `navigate("example.com")` sends `https://example.com`, `targetDestroyed` re-follows, `close` stops screencast and closes the socket.
 
-Note: also exports `resolveNavigationUrl` (pure, table-tested) and `PageInfo` (derived from the protocol's `page` message). Every target/screencast mutation runs on one serial promise queue, so `follow`, `setViewport` and target events never interleave; concurrent `setViewport` calls coalesce to the last size. `follow()` pins a tab: new tabs then update `tabs` only, until the pinned tab is destroyed. `targetInfoChanged` emits `tabs` whenever url/title change (not only `page` for the followed tab) so the tab strip stays current. `closed` is only wired after `open()` succeeds, so a failed open rejects without also emitting `closed`. Editing keys carry `windowsVirtualKeyCode`/`nativeVirtualKeyCode` (Enter, Backspace, Tab, Escape, arrows, Delete), which Chromium needs for form submit and caret movement.
+Note: also exports `resolveNavigationUrl` (pure, table-tested) and `PageInfo` (derived from the protocol's `page` message). Every target/screencast mutation runs on one serial promise queue, so `follow`, `setViewport` and target events never interleave; concurrent `setViewport` calls coalesce to the last size. `follow()` pins a tab: new tabs then update `tabs` only, until the pinned tab is destroyed. `targetInfoChanged` emits `tabs` whenever url/title change (not only `page` for the followed tab) so the tab strip stays current. `closed` is only wired after `open()` succeeds, so a failed open rejects without also emitting `closed`.
+
+Note (review follow-up, commit `fix(browser): CDP viewer review follow-ups`):
+
+- **Backpressure.** `ViewerEvents.frame` returns `void | Promise<void>` and the viewer awaits it before `Page.screencastFrameAck`, wrapped in try/catch so a throwing consumer still acks. Chromium caps frames in flight and gates on the ack, so a slow viewer now throttles the browser (see Task 8).
+- **Error channel.** `ViewerEvents.error(message)` replaces the swallowed failures: queued target work, the per-target attach in `start()`, a rejected `Page.startScreencast` and a frame the viewer could not take all reach it. A failed `startScreencast` clears the pinned screencast so the next sync retries instead of freezing on the last frame.
+- **Input fidelity.** Mouse events carry a `buttons` mask (left 1, right 2, middle 4) tracked across `down`/`up` and sent on `mouseMoved`/`mouseWheel` too, without which Blink reads a drag as a hover (no text selection, no sliders). Virtual key codes are derived: `KeyA`–`KeyZ` → 65+, `Digit0`–`Digit9` → 48+, plus a table (Backspace, Tab, Enter, Escape, Space, PageUp/Down, End, Home, arrows, Delete). On macOS a Meta-modified key down also sends CDP's `commands` (`selectAll`/`copy`/`paste`/`cut`/`undo`/`redo`), which is the only way Blink's editor runs those shortcuts — copy/paste in the login flow depends on it. Note CDP's modifier bits are Alt 1, Ctrl 2, **Meta 4**, Shift 8.
+- **Navigation.** Scheme allow-list (`http`, `https`, `about`); everything else throws. Only real loopback forms (`localhost`, `127.x`, `0.0.0.0`, `[::1]`) get `http://`, so `example.com:8443` resolves to https.
+- **Target hygiene.** `targetInfoChanged` re-runs the page-target test: a tab that navigates into `devtools://` or `chrome-extension://` is dropped (and its screencast stopped), and one that navigates back out is re-attached. `Target.detachedFromTarget` and `Inspector.targetCrashed` drop the target and re-follow, so a stale `sessionId` can no longer make every input fail invisibly.
+- **Smaller.** `closed` fires only when the viewer did not close itself; `follow()` pins after `setFollowed` resolves; the `ws` connect uses `handshakeTimeout: 5000`.
 
 Commit: `feat(browser): CDP viewer`
 
@@ -286,6 +297,8 @@ export class BrowserViewerManager {
   cleanup(): void
 }
 ```
+
+The `frame` handler this manager passes to `openViewer` returns a promise that settles when the frame is flushed — resolve it from the `ws.send` callback, not on entry. The viewer awaits it before acking, so a slow viewer throttles Chromium instead of growing an unbounded send buffer. `error(message)` forwards as an `{type:"error"}` message.
 
 Flow: parse `?session=`; invalid name → send `error` + close 1008. Send `status not-installed` when `!installed()`. Else if not running → `status stopped` and wait; a `launch` message calls `deps.launch` then retries attach. When running → `status connecting`, `openViewer(endpoint.browserWsUrl, …)`, then `status live`; forward viewer events as JSON/binary; forward client messages to viewer methods; `page` events also `recordUrl`. Poll `isRunning` every 2 s while `stopped` so a browser the agent opens appears without user action. On viewer `closed` → `status stopped`, back to polling. Authorization: mirror `PtySessionManager` — call `authorize(true)` on each inbound message and `authorize(false)` on a 5 s interval; close 1008 when false. `cleanup()` closes everything.
 
@@ -425,6 +438,8 @@ export function cdpButton(button: number): "left" | "middle" | "right"
 ```
 
 `BrowserViewport` props: `frame`, `live: boolean`, `send`, `onSizeChange(width, height, dpr)` (ResizeObserver, debounced 150 ms). Draws the bitmap onto a `<canvas>` sized to the container (device-pixel aware), letterboxed via `fitRect`. Pointer: `pointermove` (throttled to one per animation frame) → `mouse move`; `pointerdown` → focus + `mouse down`; `pointerup` → `mouse up`; `wheel` (preventDefault) → `wheel`; `contextmenu` preventDefault. Keyboard while focused: `keydown`/`keyup` → `key` with `text` for single printable chars (respecting `e.key.length === 1`), preventDefault except for Escape (blur) and browser-reserved combos with Meta. `tabIndex=0`, `aria-label="Browser viewport"`. Shows a focus ring and a small "Keyboard captured · Esc to release" hint while focused.
+
+`fitRect`/`toDevicePoint` work in the frame's device pixels, which is what `Input.dispatchMouseEvent` wants; the header's `pageScaleFactor`, `offsetTop`, `scrollOffsetX` and `scrollOffsetY` (added in Task 5) are there for anything that has to map back to page coordinates — an overlay, a scroll indicator — and for a page the user has pinch-zoomed.
 
 Tests: pointer math table; component sends a `mouse down` with scaled coordinates given a mocked `getBoundingClientRect`; Escape blurs; keydown of "a" sends `{type:"key", event:"down", key:"a", text:"a"}`.
 
