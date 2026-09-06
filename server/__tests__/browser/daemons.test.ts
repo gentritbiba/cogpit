@@ -1,9 +1,11 @@
 // @vitest-environment node
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  defaultDaemonDeps,
   isRunning,
   launch,
   readDaemonPid,
@@ -127,6 +129,15 @@ describe("readDevToolsEndpoint", () => {
     expect(readDevToolsEndpoint("work")).toBeNull()
   })
 
+  it("returns null for a port outside the TCP range", () => {
+    writeEndpoint("work", "65536\n/devtools/browser/x\n")
+    expect(readDevToolsEndpoint("work")).toBeNull()
+    writeEndpoint("work", "0\n/devtools/browser/x\n")
+    expect(readDevToolsEndpoint("work")).toBeNull()
+    writeEndpoint("work", "65535\n/devtools/browser/x\n")
+    expect(readDevToolsEndpoint("work")?.port).toBe(65535)
+  })
+
   it("rejects throwaway and malformed names before touching the disk", () => {
     expect(() => readDevToolsEndpoint("tmp-x")).toThrow(BrowserNameError)
     expect(() => readDevToolsEndpoint("../x")).toThrow(BrowserNameError)
@@ -238,6 +249,12 @@ describe("launch", () => {
     await expect(launch("work", "https://example.com", undefined, deps)).rejects.toThrow("agent-browser failed (3): boom")
   })
 
+  it("rejects a url that could be parsed as a flag before spawning", async () => {
+    const deps = fakeDeps()
+    await expect(launch("work", "--headed", undefined, deps)).rejects.toThrow('must not start with "-"')
+    expect(deps.spawns).toEqual([])
+  })
+
   it("propagates spawn errors", async () => {
     const deps = fakeDeps({ spawnError: new Error("ENOENT") })
     await expect(launch("work", "https://example.com", undefined, deps)).rejects.toThrow("ENOENT")
@@ -252,6 +269,17 @@ describe("launch", () => {
 })
 
 describe("stop", () => {
+  let previousSessionId: string | undefined
+
+  beforeEach(() => {
+    previousSessionId = process.env.COGPIT_SESSION_ID
+  })
+
+  afterEach(() => {
+    if (previousSessionId === undefined) delete process.env.COGPIT_SESSION_ID
+    else process.env.COGPIT_SESSION_ID = previousSessionId
+  })
+
   it("closes politely, then terminates the daemon and removes its files", async () => {
     writePid(sharedRunDir(), "work", "100")
     const deps = fakeDeps({ alive: [100] })
@@ -259,6 +287,14 @@ describe("stop", () => {
     expect(deps.calls).toEqual(["spawn --session work close", "kill 100 SIGTERM"])
     expect(deps.spawns[0].command).toBe(shimPath())
     expect(runFiles(sharedRunDir(), "work")).toEqual([false, false])
+  })
+
+  it("never lets the close inherit the server's own COGPIT_SESSION_ID", async () => {
+    process.env.COGPIT_SESSION_ID = "inherited"
+    writePid(sharedRunDir(), "work", "100")
+    const deps = fakeDeps({ alive: [100] })
+    await stop("work", deps)
+    expect("COGPIT_SESSION_ID" in deps.spawns[0].env).toBe(false)
   })
 
   it("still terminates when the close command fails", async () => {
@@ -276,10 +312,18 @@ describe("stop", () => {
     expect(deps.kills).toEqual([{ pid: 100, signal: "SIGTERM" }])
   })
 
-  it("tolerates a missing pid file", async () => {
+  it("does nothing when there is no pid file, so the shim never spawns a fresh daemon", async () => {
     const deps = fakeDeps()
     await stop("work", deps)
-    expect(deps.calls).toEqual(["spawn --session work close"])
+    expect(deps.calls).toEqual([])
+  })
+
+  it("only removes the files when the pid is dead", async () => {
+    writePid(sharedRunDir(), "work", "100")
+    const deps = fakeDeps()
+    await stop("work", deps)
+    expect(deps.calls).toEqual([])
+    expect(runFiles(sharedRunDir(), "work")).toEqual([false, false])
   })
 
   it("rejects throwaway and malformed names before spawning", async () => {
@@ -318,13 +362,25 @@ describe("sweep", () => {
   it("drops dead shared pid files and keeps live ones", () => {
     writePid(sharedRunDir(), "dead", "100")
     writePid(sharedRunDir(), "live", "200")
-    writePid(sharedRunDir(), "junk", "???")
     const deps = fakeDeps({ alive: [200] })
     sweep(() => true, deps)
     expect(runFiles(sharedRunDir(), "dead")).toEqual([false, false])
-    expect(runFiles(sharedRunDir(), "junk")).toEqual([false, false])
     expect(runFiles(sharedRunDir(), "live")).toEqual([true, true])
     expect(deps.kills).toEqual([])
+  })
+
+  it("keeps a fresh unparsable pid file, since a starting daemon may still be writing it", () => {
+    writePid(sharedRunDir(), "junk", "???")
+    sweep(() => true, fakeDeps())
+    expect(runFiles(sharedRunDir(), "junk")).toEqual([true, true])
+  })
+
+  it("drops an unparsable pid file once it is older than a minute", () => {
+    writePid(sharedRunDir(), "junk", "???")
+    const twoMinutesAgo = new Date(Date.now() - 120_000)
+    utimesSync(join(sharedRunDir(), "junk.pid"), twoMinutesAgo, twoMinutesAgo)
+    sweep(() => true, fakeDeps())
+    expect(runFiles(sharedRunDir(), "junk")).toEqual([false, false])
   })
 
   it("reaps session dirs whose session is gone and keeps live ones", () => {
@@ -389,7 +445,7 @@ describe("shutdownBrowsers", () => {
     expect(runFiles(sharedRunDir(), "tmp-orphan")).toEqual([false, false])
   })
 
-  it("keeps going when one stop fails", async () => {
+  it("still terminates every daemon when close cannot be spawned", async () => {
     writePid(sharedRunDir(), "default", "100")
     writePid(sharedRunDir(), "work", "200")
     const deps = fakeDeps({ alive: [100, 200], spawnError: new Error("ENOENT") })
@@ -434,5 +490,17 @@ describe("startSweeper", () => {
     vi.advanceTimersByTime(1_000)
     expect(isLive).toHaveBeenCalledTimes(2)
     stopSweeper()
+  })
+})
+
+describe("defaultDaemonDeps.kill", () => {
+  it("refuses to signal a process that is not an agent-browser daemon", () => {
+    expect(defaultDaemonDeps.kill(process.pid, "SIGTERM")).toBe(false)
+  })
+
+  it("returns false for a pid that has already exited", () => {
+    const exited = spawnSync("true").pid
+    expect(exited).toBeGreaterThan(0)
+    expect(defaultDaemonDeps.kill(exited, "SIGTERM")).toBe(false)
   })
 })

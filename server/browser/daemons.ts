@@ -4,8 +4,8 @@
  * writes `<profile>/DevToolsActivePort`, which goes stale after `close`, so a
  * browser only counts as running when the pid is alive *and* CDP answers.
  */
-import { spawn as spawnProcess } from "node:child_process"
-import { readdirSync, readFileSync, rmSync } from "node:fs"
+import { execFileSync, spawn as spawnProcess } from "node:child_process"
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { request } from "node:http"
 import { basename, join } from "node:path"
 import {
@@ -36,6 +36,10 @@ export interface DevToolsEndpoint {
 const PROBE_TIMEOUT_MS = 500
 const DEVTOOLS_PORT_FILE = "DevToolsActivePort"
 const PID_SUFFIX = ".pid"
+const MAX_PORT = 65535
+/** An unparsable pid file younger than this may still be mid-write by a starting daemon. */
+const STALE_PID_FILE_MS = 60_000
+const DAEMON_COMMAND_MARKER = "agent-browser"
 
 function spawnCollectingStderr(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -64,7 +68,20 @@ function probeDevTools(port: number): Promise<boolean> {
   })
 }
 
+/** Guards against a recycled pid: only ever signal a process that is an agent-browser daemon. */
+function isDaemonProcess(pid: number): boolean {
+  try {
+    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).includes(DAEMON_COMMAND_MARKER)
+  } catch {
+    return false
+  }
+}
+
 function killPid(pid: number, signal: NodeJS.Signals): boolean {
+  if (!isDaemonProcess(pid)) return false
   try {
     process.kill(pid, signal)
     return true
@@ -89,20 +106,39 @@ export const defaultDaemonDeps: DaemonDeps = {
   isPidAlive,
 }
 
-function parsePid(raw: string): number | null {
+function parsePositiveInt(raw: string): number | null {
   const text = raw.trim()
   return /^\d+$/.test(text) && Number(text) > 0 ? Number(text) : null
 }
 
+function parsePort(raw: string): number | null {
+  const port = parsePositiveInt(raw)
+  return port !== null && port <= MAX_PORT ? port : null
+}
+
 function readPidFile(path: string): number | null {
   try {
-    return parsePid(readFileSync(path, "utf8"))
+    return parsePositiveInt(readFileSync(path, "utf8"))
   } catch {
     return null
   }
 }
 
-function listPidFiles(dir: string): { name: string; pid: number | null }[] {
+function isStaleFile(path: string): boolean {
+  try {
+    return Date.now() - statSync(path).mtimeMs > STALE_PID_FILE_MS
+  } catch {
+    return false
+  }
+}
+
+interface PidFile {
+  name: string
+  path: string
+  pid: number | null
+}
+
+function listPidFiles(dir: string): PidFile[] {
   let entries: string[]
   try {
     entries = readdirSync(dir)
@@ -111,7 +147,10 @@ function listPidFiles(dir: string): { name: string; pid: number | null }[] {
   }
   return entries
     .filter((entry) => entry.endsWith(PID_SUFFIX))
-    .map((entry) => ({ name: basename(entry, PID_SUFFIX), pid: readPidFile(join(dir, entry)) }))
+    .map((entry) => {
+      const path = join(dir, entry)
+      return { name: basename(entry, PID_SUFFIX), path, pid: readPidFile(path) }
+    })
 }
 
 function listRunSubdirs(): string[] {
@@ -129,6 +168,14 @@ function removeRunFiles(dir: string, name: string): void {
   rmSync(join(dir, `${name}.sock`), { force: true })
 }
 
+/** The shim stamps `.driver` from COGPIT_SESSION_ID, so the server's own value must never leak through. */
+function shimEnv(cogpitSessionId?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  delete env.COGPIT_SESSION_ID
+  if (cogpitSessionId !== undefined) env.COGPIT_SESSION_ID = cogpitSessionId
+  return env
+}
+
 function runShim(args: string[], env: NodeJS.ProcessEnv, deps: DaemonDeps): Promise<{ code: number; stderr: string }> {
   return deps.spawn(shimPath(), args, env)
 }
@@ -142,7 +189,7 @@ export function readDevToolsEndpoint(name: string): DevToolsEndpoint | null {
     return null
   }
   const [portLine = "", path = ""] = raw.split(/\r?\n/)
-  const port = parsePid(portLine)
+  const port = parsePort(portLine)
   if (port === null || !path.startsWith("/")) return null
   return { port, browserWsUrl: `ws://127.0.0.1:${port}${path}` }
 }
@@ -162,18 +209,19 @@ export async function isRunning(name: string, deps = defaultDaemonDeps): Promise
 
 export async function launch(name: string, url: string, cogpitSessionId?: string, deps = defaultDaemonDeps): Promise<void> {
   assertNamedBrowser(name)
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  delete env.COGPIT_SESSION_ID
-  if (cogpitSessionId !== undefined) env.COGPIT_SESSION_ID = cogpitSessionId
-  const { code, stderr } = await runShim(["--session", name, "open", url], env, deps)
+  if (url.startsWith("-")) throw new Error(`Browser url ${JSON.stringify(url)} must not start with "-"`)
+  const { code, stderr } = await runShim(["--session", name, "open", url], shimEnv(cogpitSessionId), deps)
   if (code !== 0) throw new Error(`agent-browser failed (${code}): ${stderr.trim()}`)
 }
 
+/** `close` goes through the shim, which would spawn a fresh daemon if none is alive, so it only runs against a live pid. */
 export async function stop(name: string, deps = defaultDaemonDeps): Promise<void> {
   assertNamedBrowser(name)
-  await runShim(["--session", name, "close"], process.env, deps).catch(() => undefined)
   const pid = readDaemonPid(name)
-  if (pid !== null) deps.kill(pid, "SIGTERM")
+  if (pid !== null && deps.isPidAlive(pid)) {
+    await runShim(["--session", name, "close"], shimEnv(), deps).catch(() => undefined)
+    deps.kill(pid, "SIGTERM")
+  }
   removeRunFiles(sharedRunDir(), name)
 }
 
@@ -185,8 +233,9 @@ export function reapRunDir(dir: string, deps = defaultDaemonDeps): void {
 }
 
 export function sweep(isCogpitSessionLive: (id: string) => boolean, deps = defaultDaemonDeps): void {
-  for (const { name, pid } of listPidFiles(sharedRunDir())) {
-    if (pid === null || !deps.isPidAlive(pid)) removeRunFiles(sharedRunDir(), name)
+  for (const { name, path, pid } of listPidFiles(sharedRunDir())) {
+    const dead = pid === null ? isStaleFile(path) : !deps.isPidAlive(pid)
+    if (dead) removeRunFiles(sharedRunDir(), name)
   }
   for (const dir of listRunSubdirs()) {
     if (!isValidCogpitSessionId(dir) || !isCogpitSessionLive(dir)) reapRunDir(join(runRoot(), dir), deps)
