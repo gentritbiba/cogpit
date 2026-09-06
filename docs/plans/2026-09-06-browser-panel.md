@@ -44,7 +44,7 @@ Commit: `feat(browser): path layout and name rules`
 
 Note: `profileDir()` guards with `assertNamedBrowser` (throwaways have no profile per the design); `sessionRunDir()` guards with a private session-id assert that also throws `BrowserNameError`.
 
-### Task 2: Shim script
+### Task 2: Shim script ✅ done
 
 **Files:**
 - Create: `server/browser/shim.ts`
@@ -100,6 +100,8 @@ Tests run the rendered shim with `bash` against a fake binary (a temp script tha
 8. `findRealAgentBrowser` skips `binDir()` and finds the fake binary on a synthetic PATH.
 
 Commit: `feat(browser): agent-browser shim`
+
+Note: `renderShim` backslash-escapes `\ " $ \`` in the real path before interpolating it into `real="…"`, since the path is user-controlled; the script is otherwise verbatim. Extra tests beyond the eight: tmp-* with a missing/invalid `COGPIT_SESSION_ID` falls back to `run/shared`, `--session` beats `AGENT_BROWSER_SESSION`, and `findRealAgentBrowser` skips `binDir()` spelled with a trailing slash or `..`.
 
 ### Task 3: Registry
 
