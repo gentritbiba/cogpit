@@ -500,7 +500,7 @@ URL: `${ws(s)}://${host}${devicePrefix()}/__browser?session=${name}`; `binaryTyp
 
 Commit: `feat(browser): viewer socket hook`
 
-### Task 15: Sessions hook
+### Task 15: Sessions hook ✅ done
 
 **Files:**
 - Create: `src/hooks/useBrowserSessions.ts`
@@ -509,6 +509,17 @@ Commit: `feat(browser): viewer socket hook`
 `useBrowserSessions(enabled: boolean)` → `{ status: BrowserStatus | null, loading, error, refresh, create(name, note), remove(name), launch(name, url?), stop(name), setNote(name, note), installSkill(target) }` using `authFetch` + `withBase`; polls every 5 s while `enabled`.
 
 Commit: `feat(browser): sessions hook`
+
+Note: the hook also exposes typed results — `BrowserActionResult` and
+`SkillInstallResult` — so the session bar can render a 409 next to the name
+field. A mutation reports its failure only through that result; `error` is
+reserved for a status refresh nobody asked for, so a poll failure and an inline
+conflict never fight over the same banner. The poll skips its turn while a
+status request is out, but a mutation's own refresh always runs (last write
+wins via a request sequence), otherwise a newly created browser stayed
+invisible until the next 5 s tick. Repeat polls that bring back an identical
+list keep the previous `status` object, so the panel does not re-render on a
+heartbeat.
 
 ### Task 16: Viewport component
 
