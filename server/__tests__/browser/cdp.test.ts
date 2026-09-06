@@ -59,6 +59,15 @@ function sessionFor(targetId: string): string {
   return `session-${targetId}`
 }
 
+/** What agent-browser's own `set viewport` left on each target, which the panel has to hand back. */
+const AGENT_VIEWPORTS: Record<string, { clientWidth: number; clientHeight: number }> = {
+  [sessionFor("t1")]: { clientWidth: 1440, clientHeight: 810 },
+  [sessionFor("t2")]: { clientWidth: 1280, clientHeight: 720 },
+}
+const AGENT_VIEWPORT_FALLBACK = { clientWidth: 800, clientHeight: 600 }
+/** Retina, so a restore that fell back to a scale of 1 is visibly wrong. */
+const AGENT_DPR = 2
+
 const servers: FakeCdp[] = []
 const viewers: BrowserViewer[] = []
 
@@ -94,6 +103,10 @@ async function startFakeCdp(targets: TargetInfo[] = [page("t1"), page("t2")]): P
       "Page.stopScreencast": () => ({}),
       "Emulation.setDeviceMetricsOverride": () => ({}),
       "Emulation.clearDeviceMetricsOverride": () => ({}),
+      "Page.getLayoutMetrics": (message) => ({
+        cssLayoutViewport: AGENT_VIEWPORTS[message.sessionId ?? ""] ?? AGENT_VIEWPORT_FALLBACK,
+      }),
+      "Runtime.evaluate": () => ({ result: { type: "number", value: AGENT_DPR } }),
       "Page.getNavigationHistory": (_message, self) => self.history,
       "Page.navigate": () => ({ frameId: "main", loaderId: "loader" }),
       "Page.navigateToHistoryEntry": () => ({}),
@@ -443,23 +456,57 @@ describe("BrowserViewer", () => {
     expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 1600, maxHeight: 900 })
   })
 
-  it("moves the override to the newly followed tab and clears the old one", async () => {
+  it("reads the page's own metrics once, before the first override", async () => {
     const { fake, viewer } = await openViewer()
-    await viewer.setViewport(715, 907, 2)
 
-    await viewer.follow("t1")
-    expect(last(fake.sent("Emulation.clearDeviceMetricsOverride")).sessionId).toBe(sessionFor("t2"))
-    const reapplied = last(fake.sent("Emulation.setDeviceMetricsOverride"))
-    expect(reapplied.sessionId).toBe(sessionFor("t1"))
-    expect(reapplied.params).toMatchObject({ width: 1024, height: 1299 })
+    await viewer.setViewport(715, 907, 2)
+    const methods = fake.messages.map((message) => message.method)
+    expect(methods.indexOf("Page.getLayoutMetrics"))
+      .toBeLessThan(methods.indexOf("Emulation.setDeviceMetricsOverride"))
+    expect(fake.sent("Page.getLayoutMetrics").map((message) => message.sessionId)).toEqual([sessionFor("t2")])
+    expect(last(fake.sent("Runtime.evaluate")).params).toMatchObject({ expression: "window.devicePixelRatio" })
+
+    await viewer.setViewport(800, 1000, 2)
+    expect(fake.sent("Page.getLayoutMetrics")).toHaveLength(1)
   })
 
-  it("leaves the page its own size again when the viewer closes", async () => {
+  it("moves the override to the newly followed tab and gives the old one its viewport back", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(1600, 900, 1)
+
+    await viewer.follow("t1")
+    const overrides = fake.sent("Emulation.setDeviceMetricsOverride")
+    const restored = overrides[overrides.length - 2]
+    expect(restored.sessionId).toBe(sessionFor("t2"))
+    expect(restored.params).toEqual({ width: 1280, height: 720, deviceScaleFactor: AGENT_DPR, mobile: false })
+    const reapplied = last(overrides)
+    expect(reapplied.sessionId).toBe(sessionFor("t1"))
+    expect(reapplied.params).toMatchObject({ width: 1600, height: 900 })
+    expect(fake.sent("Emulation.clearDeviceMetricsOverride")).toHaveLength(0)
+    expect(fake.sent("Page.getLayoutMetrics").map((message) => message.sessionId))
+      .toEqual([sessionFor("t2"), sessionFor("t1")])
+  })
+
+  it("gives the page its own viewport back when the viewer closes", async () => {
     const { fake, viewer } = await openViewer()
     await viewer.setViewport(715, 907, 2)
 
     await viewer.close()
+    const restored = last(fake.sent("Emulation.setDeviceMetricsOverride"))
+    expect(restored.sessionId).toBe(sessionFor("t2"))
+    expect(restored.params).toEqual({ width: 1280, height: 720, deviceScaleFactor: AGENT_DPR, mobile: false })
+    expect(fake.sent("Emulation.clearDeviceMetricsOverride")).toHaveLength(0)
+  })
+
+  it("clears the override when the page never reported a size to restore", async () => {
+    const { fake, events, viewer } = await openViewer()
+    fake.handlers["Page.getLayoutMetrics"] = () => new CdpError("Page not laid out")
+    await viewer.setViewport(715, 907, 2)
+
+    await viewer.close()
     expect(last(fake.sent("Emulation.clearDeviceMetricsOverride")).sessionId).toBe(sessionFor("t2"))
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toHaveLength(1)
+    expect(events.errors).toEqual([])
   })
 
   it("still streams, letterboxed, when the page refuses the override", async () => {

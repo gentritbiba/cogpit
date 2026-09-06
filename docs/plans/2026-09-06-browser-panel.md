@@ -584,10 +584,24 @@ re-applied whenever the followed target changes (a freshly attached target has
 none) and cleared with `Emulation.clearDeviceMetricsOverride` for a target we
 stop following and on `close()`, so the agent's own automation is not left
 inside the panel's box; all of it runs on the same serial queue as `follow` and
-the screencast. Caveat: a device-metrics override is per target, not per CDP
-client, so Playwright's own `viewport: {1280, 720}` and ours are the same slot —
-whoever writes last wins, and clearing on close drops Playwright's too until it
-sets a viewport again.
+the screencast.
+
+Note (viewport-restore follow-up): a device-metrics override is per target, not
+per CDP client, so Playwright's own `viewport: {1280, 720}` and ours are the same
+slot — whoever writes last wins, and clearing it dropped Playwright's too, leaving
+the agent at the raw window size it never asked for. The viewer now reads
+`Page.getLayoutMetrics` (`cssLayoutViewport`, falling back to `layoutViewport`)
+plus `Runtime.evaluate` of `window.devicePixelRatio` once per target, before its
+first override lands there, and every stop path — un-following, `close()`, a tab
+that navigates into a hidden scheme — re-applies that size with
+`Emulation.setDeviceMetricsOverride { width, height, deviceScaleFactor, mobile: false }`
+instead of clearing. `Emulation.clearDeviceMetricsOverride` is now only the
+fallback for a target whose metrics we never managed to read (the read is
+swallowed, as is the restore: the tab may be gone). Both calls sit on the same
+serial queue as the rest, and a dropped target forgets its capture. Still not
+restorable: `screenWidth`/`screenHeight` and `mobile`/device emulation are not
+readable, so a target that was emulating a phone comes back as a desktop page at
+its old size.
 
 ### Task 17: Session bar and nav bar ✅ done
 

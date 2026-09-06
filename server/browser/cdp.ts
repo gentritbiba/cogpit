@@ -171,6 +171,12 @@ interface ActiveOverride extends PageMetrics {
   sessionId: string
 }
 
+/** `Page.getLayoutMetrics`. `cssLayoutViewport` is the CSS-pixel one; older builds only send `layoutViewport`. */
+interface LayoutMetrics {
+  cssLayoutViewport?: { clientWidth: number; clientHeight: number }
+  layoutViewport?: { clientWidth: number; clientHeight: number }
+}
+
 /** Chromium always sends the sizes; the scroll/scale fields are optional in older builds. */
 interface ScreencastMetadata {
   deviceWidth: number
@@ -324,6 +330,7 @@ export class BrowserViewer {
   private panel: PanelSize | null = null
   private screencast: ActiveScreencast | null = null
   private override: ActiveOverride | null = null
+  private readonly captured = new Map<string, PageMetrics>()
   private buttons = 0
   private queue: Promise<unknown> = Promise.resolve()
 
@@ -419,7 +426,7 @@ export class BrowserViewer {
     const active = this.screencast
     if (active) await this.stopScreencast(active.sessionId)
     const emulated = this.override
-    if (emulated) await this.clearMetrics(emulated.sessionId)
+    if (emulated) await this.restoreMetrics(emulated.sessionId)
     this.cdp.close()
   }
 
@@ -520,7 +527,7 @@ export class BrowserViewer {
     }
     if (!isPageTarget(info)) {
       await this.stopScreencast(target.sessionId)
-      await this.clearMetrics(target.sessionId)
+      await this.restoreMetrics(target.sessionId)
       await this.dropTarget(info.targetId)
       return
     }
@@ -543,6 +550,7 @@ export class BrowserViewer {
     this.targets.delete(targetId)
     if (this.screencast?.sessionId === target.sessionId) this.screencast = null
     if (this.override?.sessionId === target.sessionId) this.override = null
+    this.captured.delete(target.sessionId)
     if (targetId !== this.followed) {
       this.emitTabs()
       return
@@ -621,8 +629,9 @@ export class BrowserViewer {
       return
     }
     // A target we stop following goes back to its own size; one we keep just gets the new box.
-    if (active && active.sessionId !== wanted?.sessionId) await this.clearMetrics(active.sessionId)
+    if (active && active.sessionId !== wanted?.sessionId) await this.restoreMetrics(active.sessionId)
     if (!wanted) return
+    await this.captureMetrics(wanted.sessionId)
     await this.cdp.send(
       "Emulation.setDeviceMetricsOverride",
       {
@@ -638,11 +647,56 @@ export class BrowserViewer {
     this.override = wanted
   }
 
-  /** No-op unless `sessionId` owns the override. A tab that already went away cannot answer. */
-  private async clearMetrics(sessionId: string): Promise<void> {
+  /**
+   * Reads what a target renders at before our first override lands on it. The
+   * emulation slot is per target, not per CDP client, so this is the automation's
+   * own viewport and we have to hand it back rather than clear the slot.
+   */
+  private async captureMetrics(sessionId: string): Promise<void> {
+    if (this.captured.has(sessionId)) return
+    try {
+      const metrics = await this.cdp.send<LayoutMetrics>("Page.getLayoutMetrics", {}, sessionId)
+      const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport
+      if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return
+      const deviceScaleFactor = await this.devicePixelRatio(sessionId)
+      this.captured.set(sessionId, { width: viewport.clientWidth, height: viewport.clientHeight, deviceScaleFactor })
+    } catch {
+      // Nothing read means nothing to restore, and the stop path clears instead.
+    }
+  }
+
+  private async devicePixelRatio(sessionId: string): Promise<number> {
+    try {
+      const { result } = await this.cdp.send<{ result?: { value?: unknown } }>(
+        "Runtime.evaluate",
+        { expression: "window.devicePixelRatio", returnByValue: true },
+        sessionId,
+      )
+      const value = result?.value
+      return typeof value === "number" && value > 0 ? value : 1
+    } catch {
+      return 1
+    }
+  }
+
+  /**
+   * Hands the target back what `captureMetrics` read, and only clears the slot
+   * when nothing was read. No-op unless `sessionId` owns the override: a tab that
+   * already went away cannot answer either way.
+   */
+  private async restoreMetrics(sessionId: string): Promise<void> {
     if (this.override?.sessionId !== sessionId) return
     this.override = null
-    await this.cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId).catch(() => {})
+    const previous = this.captured.get(sessionId)
+    this.captured.delete(sessionId)
+    const request = previous
+      ? this.cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: previous.width, height: previous.height, deviceScaleFactor: previous.deviceScaleFactor, mobile: false },
+        sessionId,
+      )
+      : this.cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId)
+    await request.catch(() => {})
   }
 
   private async syncScreencast(): Promise<void> {

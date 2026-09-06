@@ -64,6 +64,11 @@ describe("COGPIT_BROWSER_SKILL", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("PATCH")
   })
 
+  it("warns that the panel drives the page viewport", () => {
+    expect(COGPIT_BROWSER_SKILL).toMatch(/the page's viewport follows the\n.*panel/)
+    expect(COGPIT_BROWSER_SKILL).toContain("agent-browser set viewport <w> <h>")
+  })
+
   it("tells the agent to name the browser and to hand logins to the user", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("open the Browser panel to watch")
     expect(COGPIT_BROWSER_SKILL).toMatch(/log in inside the Browser panel/)
