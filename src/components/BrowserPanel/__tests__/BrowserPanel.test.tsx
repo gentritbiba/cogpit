@@ -205,12 +205,14 @@ describe("BrowserPanel", () => {
     expect(screen.queryByRole("application", { name: "Browser viewport" })).not.toBeInTheDocument()
   })
 
-  it("shows the live page with a LIVE pill, and IDLE once frames stop", () => {
+  it("reports the stream in the nav bar, not over the page", () => {
     const { rerender } = setup()
 
-    expect(screen.getByRole("application", { name: "Browser viewport" })).toBeInTheDocument()
+    const viewport = screen.getByRole("application", { name: "Browser viewport" })
     expect(screen.getByLabelText("Page URL")).toBeInTheDocument()
     expect(screen.getByText("LIVE")).toBeInTheDocument()
+    // Nothing the panel draws sits on top of the page.
+    expect(viewport.parentElement?.textContent).not.toContain("LIVE")
 
     lastFrameAt = Date.now() - 10_000
     rerender(panel())

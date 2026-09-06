@@ -8,6 +8,10 @@ import type { BrowserAgentActivity } from "../../../shared/session/browserActivi
  * sits over the page rather than beside it, so it costs no width, and fades
  * out once the agent stops — the transcript keeps the call forever, and a
  * caption that never left would read as if the agent were still working.
+ *
+ * A scrim that fades out at both ends keeps it legible over a light page
+ * without drawing a seam, and it stops short of the bottom edge, which is
+ * where a site puts its own footer or cookie bar.
  */
 
 /** How long a command stays on screen after the agent stops changing it. */
@@ -29,7 +33,8 @@ export function AgentCaption({ activity }: { activity: BrowserAgentActivity | nu
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2",
+        "pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-2 pb-6 pt-8",
+        "bg-gradient-to-t from-transparent via-background/70 to-transparent",
         "transition-opacity duration-700 motion-reduce:transition-none",
         visible ? "opacity-100" : "opacity-0",
       )}

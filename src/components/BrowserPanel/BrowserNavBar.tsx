@@ -7,13 +7,16 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { BrowserServerMessage, BrowserTab } from "../../../shared/browser/protocol"
 
 /**
- * History, address and tabs for the followed page. The address field shows the
- * live url until the user starts editing; from the first keystroke to Enter,
- * Escape or blur, what they typed is the only thing that can be in there.
+ * History, address, stream status and tabs for the followed page. The address
+ * field shows the live url until the user starts editing; from the first
+ * keystroke to Enter, Escape or blur, what they typed is the only thing that
+ * can be in there. The panel's own chrome lives here rather than over the page,
+ * where it would sit on top of whatever the site draws in that corner.
  */
 
 export type BrowserPage = Extract<BrowserServerMessage, { type: "page" }>
@@ -22,6 +25,8 @@ interface BrowserNavBarProps {
   page: BrowserPage | null
   tabs: BrowserTab[]
   followed: string | null
+  /** Whether frames are still arriving. Left off when there is no stream to report on. */
+  status?: "live" | "idle"
   /** No page to drive — the whole bar is inert rather than lying about what it can do. */
   disabled?: boolean
   onNavigate: (url: string) => void
@@ -40,10 +45,44 @@ function tabLabel(tab: BrowserTab): string {
   }
 }
 
+/** Whether frames are still arriving. A still page is normal, so it says so plainly. */
+function FrameStatus({ status }: { status: "live" | "idle" }) {
+  const live = status === "live"
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn(
+              "ml-1 flex shrink-0 cursor-default items-center gap-1 text-[10px] font-medium tracking-wide",
+              live ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+            )}
+          />
+        }
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "size-1.5 rounded-full",
+            live ? "bg-emerald-500" : "ring-1 ring-muted-foreground/50 ring-inset",
+          )}
+        />
+        {live ? "LIVE" : "IDLE"}
+      </TooltipTrigger>
+      <TooltipContent>
+        {live
+          ? "Streaming the page as it changes"
+          : "The page has not changed for a few seconds"}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function BrowserNavBar({
   page,
   tabs,
   followed,
+  status,
   disabled = false,
   onNavigate,
   onBack,
@@ -127,6 +166,8 @@ export function BrowserNavBar({
             </InputGroupAddon>
           </InputGroup>
         </form>
+
+        {status && <FrameStatus status={status} />}
       </div>
 
       {tabs.length > 1 && (

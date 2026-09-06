@@ -7,7 +7,6 @@ import { useBrowserSocket } from "@/hooks/useBrowserSocket"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { DEFAULT_AGENT_KIND } from "@/lib/agents"
 import { deviceScopedKey } from "@/lib/device"
-import { cn } from "@/lib/utils"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { AgentCaption } from "./AgentCaption"
@@ -75,6 +74,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     setFollowAgent(next)
   }
 
+  const frameStatus = useFrameStatus(socket.lastFrameAt)
   const state = socket.state?.state ?? null
   const notInstalled = status?.installed === false || state === "not-installed"
   const live = !notInstalled && state === "live"
@@ -109,6 +109,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           page={socket.page}
           tabs={socket.tabs}
           followed={socket.followed}
+          status={frameStatus}
           onNavigate={(url) => send({ type: "navigate", url })}
           onBack={() => send({ type: "back" })}
           onForward={() => send({ type: "forward" })}
@@ -151,7 +152,6 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
               send={send}
               onSizeChange={handleResize}
             />
-            <FramePill lastFrameAt={socket.lastFrameAt} />
             <AgentCaption activity={activity && activity.session === selected ? activity : null} />
           </>
         )}
@@ -169,29 +169,23 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   )
 }
 
-/** Whether frames are still arriving. A still page is normal, so it says so plainly. */
-function FramePill({ lastFrameAt }: { lastFrameAt: number | null }) {
-  const [now, setNow] = useState(() => Date.now())
+/**
+ * Whether frames are still arriving. One timeout, armed for the moment the last
+ * frame goes stale, rather than a ticker that re-renders the panel every second.
+ */
+function useFrameStatus(lastFrameAt: number | null): "live" | "idle" {
+  const [, expire] = useState(0)
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1_000)
-    return () => clearInterval(timer)
-  }, [])
+    if (lastFrameAt === null) return
+    const remaining = lastFrameAt + STILL_AFTER_MS - Date.now()
+    if (remaining <= 0) return
+    const timer = setTimeout(() => expire((tick) => tick + 1), remaining)
+    return () => clearTimeout(timer)
+  }, [lastFrameAt])
 
-  const streaming = lastFrameAt !== null && now - lastFrameAt < STILL_AFTER_MS
-  return (
-    <span
-      title={streaming ? "Streaming the page as it changes" : "The page has not changed for a few seconds"}
-      className={cn(
-        "pointer-events-none absolute left-2 top-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium tracking-wide backdrop-blur-sm",
-        streaming
-          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-          : "bg-background/80 text-muted-foreground",
-      )}
-    >
-      {streaming ? "LIVE" : "IDLE"}
-    </span>
-  )
+  if (lastFrameAt === null) return "idle"
+  return Date.now() - lastFrameAt < STILL_AFTER_MS ? "live" : "idle"
 }
 
 function ProblemStrip({ message, onDismiss }: { message: string; onDismiss: () => void }) {

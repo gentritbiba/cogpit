@@ -135,6 +135,31 @@ describe("BrowserNavBar", () => {
     expect(onFollow).toHaveBeenCalledWith("tab-2")
   })
 
+  it("marks the stream live or still at the trailing end of the bar", () => {
+    const { rerender } = setup({ status: "live" })
+
+    expect(screen.getByText("LIVE")).toBeInTheDocument()
+
+    rerender({ status: "idle" })
+    expect(screen.getByText("IDLE")).toBeInTheDocument()
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument()
+  })
+
+  it("says nothing about the stream when there is none to report", () => {
+    setup()
+
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument()
+    expect(screen.queryByText("IDLE")).not.toBeInTheDocument()
+  })
+
+  it("keeps the stream status out of the tab strip", () => {
+    setup({ status: "live", tabs: TABS })
+
+    const tabStrip = screen.getByRole("button", { name: "One" }).parentElement
+    expect(tabStrip?.textContent).not.toContain("LIVE")
+    expect(screen.getByText("LIVE")).toBeInTheDocument()
+  })
+
   it("opens the live url in the real browser", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null)
     const { user } = setup()

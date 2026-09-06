@@ -662,6 +662,16 @@ does not blow away a working view. The pill reads `IDLE` for "no frame in the
 last 3 s", including before the first one — a still page is normal, so it says
 so plainly rather than warning.
 
+Note (QA follow-up): the pill is gone. Once the page filled the pane edge to
+edge it sat on top of the site's own header, so live/idle moved into the nav
+bar as an optional `status` prop — a dot plus `LIVE`/`IDLE` at the trailing end
+of the address row, kept out of the tab strip so it does not shift when a
+second tab appears. The panel derives the status and arms one timeout for the
+moment the stream goes stale instead of ticking every second. `AgentCaption`
+still sits over the page, since it is `pointer-events-none` and transient, but
+it gained a scrim that fades out at both ends and now stops short of the bottom
+edge, where a site puts its own footer or cookie bar.
+
 ### Task 19: Register the panel ✅ done
 
 **Files:**
