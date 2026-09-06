@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { FileCode2, FolderTree, GitBranch, Globe, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
@@ -92,7 +92,11 @@ function BrowserWorkspacePanel(props: WorkspacePanelProps) {
  */
 function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
   const [, expire] = useState(0)
-  const at = Date.parse(latestBrowserActivity(context.session)?.timestamp ?? "")
+  // The rail re-renders on anything; the transcript is only walked when it moves.
+  const at = useMemo(
+    () => Date.parse(latestBrowserActivity(context.session)?.timestamp ?? ""),
+    [context.session],
+  )
 
   useEffect(() => {
     const remaining = at + BROWSING_MS - Date.now()

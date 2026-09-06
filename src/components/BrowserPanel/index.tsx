@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
@@ -8,6 +8,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { DEFAULT_AGENT_KIND } from "@/lib/agents"
 import { deviceScopedKey } from "@/lib/device"
 import type { WorkspacePanelProps } from "@/plugin-api"
+import type { BrowserSessionInfo } from "../../../shared/browser/types"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { AgentCaption } from "./AgentCaption"
 import { BrowserEmptyState } from "./BrowserEmptyState"
@@ -20,6 +21,9 @@ import { BrowserViewport } from "./BrowserViewport"
  * `/__browser` socket and driveable by hand. The list of browsers comes from
  * the REST hook, the page itself from the socket, and which browser to show
  * from the user — or, while Follow agent is on, from the transcript.
+ *
+ * A frame re-renders this component thirty times a second, so everything it
+ * hands the bars keeps its identity between frames and the bars are memoised.
  */
 
 const SESSION_KEY = "browser-panel-session"
@@ -28,6 +32,7 @@ const FOLLOW_KEY = "browser-panel-follow"
 const MANUAL_HOLD_MS = 10_000
 /** No frame for this long means the page is standing still, not that it broke. */
 const STILL_AFTER_MS = 3_000
+const NO_SESSIONS: BrowserSessionInfo[] = []
 
 export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProps) {
   const [selected, setSelected] = useLocalStorage(deviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
@@ -37,11 +42,12 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const [dismissed, setDismissed] = useState<string | null>(null)
   const pickedAt = useRef(0)
 
-  const { status, create, remove, stop, installSkill } = useBrowserSessions(active)
+  const { status, error: listError, create, remove, stop, installSkill } = useBrowserSessions(active)
   const socket = useBrowserSocket(active ? selected : null)
 
-  const sessions = status?.sessions ?? []
-  const activity = latestBrowserActivity(context.session)
+  const sessions = status?.sessions ?? NO_SESSIONS
+  // Walking the transcript per frame would cost more than painting one.
+  const activity = useMemo(() => latestBrowserActivity(context.session), [context.session])
   const driven = activity?.session ?? null
   const drivenExists = sessions.some((session) => session.name === driven)
 
@@ -68,11 +74,24 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     send({ type: "viewport", width, height, dpr })
   }, [send])
 
-  function toggleFollow(next: boolean): void {
+  const toggleFollow = useCallback((next: boolean) => {
     // Turning it back on is itself a request to go wherever the agent is.
     if (next) pickedAt.current = 0
     setFollowAgent(next)
-  }
+  }, [setFollowAgent])
+
+  const showDefault = useCallback(() => select(DEFAULT_BROWSER), [select])
+  const handleRemove = useCallback((name: string) => {
+    select(DEFAULT_BROWSER)
+    void run(() => remove(name))
+  }, [select, run, remove])
+  const handleStop = useCallback((name: string) => void run(() => stop(name)), [run, stop])
+
+  const navigate = useCallback((url: string) => send({ type: "navigate", url }), [send])
+  const goBack = useCallback(() => send({ type: "back" }), [send])
+  const goForward = useCallback(() => send({ type: "forward" }), [send])
+  const reload = useCallback(() => send({ type: "reload" }), [send])
+  const follow = useCallback((targetId: string) => send({ type: "follow", targetId }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
   const state = socket.state?.state ?? null
@@ -80,8 +99,11 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const live = !notInstalled && state === "live"
   const stopped = !notInstalled && state === "stopped"
   const selectedInfo = sessions.find((session) => session.name === selected) ?? null
+  // The transport dropped under a page that was live: the last frame is still
+  // worth looking at, as long as the panel stops calling it the live one.
+  const reconnecting = live && (socket.status === "disconnected" || socket.status === "connecting")
 
-  const failure = socket.error ?? actionError
+  const failure = socket.error ?? actionError ?? listError
   const problem = failure !== null && failure !== dismissed ? failure : null
 
   return (
@@ -95,12 +117,9 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
         onSelect={select}
         onToggleFollow={toggleFollow}
         onCreate={create}
-        onRemove={(name) => {
-          select(DEFAULT_BROWSER)
-          void run(() => remove(name))
-        }}
-        onStop={(name) => void run(() => stop(name))}
-        onShowDefault={() => select(DEFAULT_BROWSER)}
+        onRemove={handleRemove}
+        onStop={handleStop}
+        onShowDefault={showDefault}
         onClose={closePanel}
       />
 
@@ -109,12 +128,12 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           page={socket.page}
           tabs={socket.tabs}
           followed={socket.followed}
-          status={frameStatus}
-          onNavigate={(url) => send({ type: "navigate", url })}
-          onBack={() => send({ type: "back" })}
-          onForward={() => send({ type: "forward" })}
-          onReload={() => send({ type: "reload" })}
-          onFollow={(targetId) => send({ type: "follow", targetId })}
+          status={reconnecting ? "offline" : frameStatus}
+          onNavigate={navigate}
+          onBack={goBack}
+          onForward={goForward}
+          onReload={reload}
+          onFollow={follow}
         />
       )}
 
@@ -148,10 +167,10 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
             <BrowserViewport
               className="flex-1"
               frame={socket.frame}
-              live
               send={send}
               onSizeChange={handleResize}
             />
+            {reconnecting && <ReconnectingBanner />}
             <AgentCaption activity={activity && activity.session === selected ? activity : null} />
           </>
         )}
@@ -186,6 +205,20 @@ function useFrameStatus(lastFrameAt: number | null): "live" | "idle" {
 
   if (lastFrameAt === null) return "idle"
   return Date.now() - lastFrameAt < STILL_AFTER_MS ? "live" : "idle"
+}
+
+/** Said over the last frame, so a frozen page never passes for a live one. */
+function ReconnectingBanner() {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-2">
+      <span
+        role="status"
+        className="rounded-full bg-background/85 px-2.5 py-0.5 text-[11px] text-muted-foreground shadow-xs backdrop-blur-sm"
+      >
+        Reconnecting…
+      </span>
+    </div>
+  )
 }
 
 function ProblemStrip({ message, onDismiss }: { message: string; onDismiss: () => void }) {

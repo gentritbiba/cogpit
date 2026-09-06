@@ -73,10 +73,21 @@ describe("BrowserSessionBar", () => {
     const { bar, user, onShowDefault } = setup({ selected: "work" })
 
     expect(bar).toHaveClass("bg-amber-500/10", "border-amber-500/40")
-    expect(screen.getByText("Not the default browser")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Not the default browser")
 
     await user.click(screen.getByRole("button", { name: "Show default" }))
     expect(onShowDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the warning readable at the panel's own minimum width", () => {
+    setup({ selected: "work" })
+    const label = screen.getByText("Not the default browser")
+
+    // The bar is narrower than @sm at the panel's 360px minimum, where the
+    // label collapses to the icon beside it — but never out of the a11y tree.
+    expect(label).toHaveClass("sr-only", "@sm/browser-bar:not-sr-only")
+    expect(label).not.toHaveClass("hidden")
+    expect(screen.getByRole("status").querySelector("svg")).toBeInTheDocument()
   })
 
   it("lists every browser and selects the one that is picked", async () => {

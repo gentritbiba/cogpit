@@ -1,9 +1,10 @@
+import type { ComponentProps } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { BrowserPanel } from "@/components/BrowserPanel"
 import type { UseBrowserSessions } from "@/hooks/useBrowserSessions"
-import type { UseBrowserSocket } from "@/hooks/useBrowserSocket"
+import type { BrowserFrame, BrowserSocketStatus, UseBrowserSocket } from "@/hooks/useBrowserSocket"
 import type { WorkspacePanelContext } from "@/plugin-api"
 import type { BrowserClientMessage } from "../../../../shared/browser/protocol"
 import type { BrowserSessionInfo } from "../../../../shared/browser/types"
@@ -12,9 +13,24 @@ import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/t
 vi.mock("@/hooks/useBrowserSessions", () => ({
   useBrowserSessions: (enabled: boolean) => sessionsDouble(enabled),
 }))
-vi.mock("@/hooks/useBrowserSocket", () => ({
+vi.mock("@/hooks/useBrowserSocket", async (importOriginal) => ({
+  // `releaseFrame` stays real: the viewport frees the frames it is handed.
+  ...(await importOriginal<typeof import("@/hooks/useBrowserSocket")>()),
   useBrowserSocket: (session: string | null) => socketDouble(session),
 }))
+// Wrapped in the same memo the panel relies on, so a re-render here means the
+// panel handed the bar something new — the frame path must not do that.
+vi.mock("@/components/BrowserPanel/BrowserSessionBar", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/BrowserPanel/BrowserSessionBar")>()
+  const { createElement, memo } = await import("react")
+  return {
+    ...actual,
+    BrowserSessionBar: memo((props: ComponentProps<typeof actual.BrowserSessionBar>) => {
+      sessionBarRenders += 1
+      return createElement(actual.BrowserSessionBar, props)
+    }),
+  }
+})
 
 // ── Hook doubles ─────────────────────────────────────────────────────────
 
@@ -24,13 +40,19 @@ const remove = vi.fn(async () => ({ ok: true as const }))
 const stop = vi.fn(async () => ({ ok: true as const }))
 const noop = vi.fn(async () => ({ ok: true as const }))
 const refresh = vi.fn(async () => {})
+const closePanel = vi.fn()
+const openPanel = vi.fn()
 const socketSessions: (string | null)[] = []
 
 let installed = true
 let browsers: BrowserSessionInfo[] = []
 let socketState: "not-installed" | "stopped" | "connecting" | "live" = "live"
+let socketStatus: BrowserSocketStatus = "connected"
 let socketError: string | null = null
+let listError: string | null = null
 let lastFrameAt: number | null = null
+let frame: BrowserFrame | null = null
+let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
   return {
@@ -38,7 +60,7 @@ function sessionsDouble(enabled: boolean): UseBrowserSessions {
       ? { installed, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
       : null,
     loading: false,
-    error: null,
+    error: listError,
     refresh,
     create: noop,
     remove,
@@ -52,15 +74,32 @@ function sessionsDouble(enabled: boolean): UseBrowserSessions {
 function socketDouble(session: string | null): UseBrowserSocket {
   socketSessions.push(session)
   return {
-    status: session === null ? "idle" : "connected",
+    status: session === null ? "idle" : socketStatus,
     state: session === null ? null : { type: "status", state: socketState, session },
     page: null,
     tabs: [],
     followed: null,
-    frame: null,
+    frame,
     lastFrameAt,
     error: socketError,
     send,
+  }
+}
+
+function frameOf(ts: number): BrowserFrame {
+  return {
+    bitmap: null,
+    blobUrl: null,
+    header: {
+      deviceWidth: 1280,
+      deviceHeight: 720,
+      pageScaleFactor: 1,
+      offsetTop: 0,
+      scrollOffsetX: 0,
+      scrollOffsetY: 0,
+      targetId: "target-1",
+      ts,
+    },
   }
 }
 
@@ -139,7 +178,7 @@ function contextOf(session: ParsedSession | null = null): WorkspacePanelContext 
 }
 
 function panel(context = contextOf()) {
-  return <BrowserPanel context={context} active closePanel={vi.fn()} openPanel={vi.fn()} />
+  return <BrowserPanel context={context} active closePanel={closePanel} openPanel={openPanel} />
 }
 
 function setup(context = contextOf()) {
@@ -158,8 +197,12 @@ beforeEach(() => {
   installed = true
   browsers = [browserOf()]
   socketState = "live"
+  socketStatus = "connected"
   socketError = null
+  listError = null
   lastFrameAt = Date.now()
+  frame = null
+  sessionBarRenders = 0
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: vi.fn(async () => {}) },
@@ -263,6 +306,47 @@ describe("BrowserPanel", () => {
 
     expect(selectedName()).toContain("default")
     expect(screen.queryByText("agent-browser --session work snapshot")).not.toBeInTheDocument()
+  })
+
+  it("says the connection dropped rather than passing a frozen page off as live", () => {
+    socketStatus = "disconnected"
+    frame = frameOf(1)
+    setup()
+
+    expect(screen.getByText("Reconnecting…")).toBeInTheDocument()
+    expect(screen.getByText("OFFLINE")).toBeInTheDocument()
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument()
+    // The last frame is worth more than a black pane while the socket retries.
+    expect(screen.getByRole("application", { name: "Browser viewport" })).toBeInTheDocument()
+  })
+
+  it("stays quiet about the socket before the first page arrives", () => {
+    socketState = "connecting"
+    socketStatus = "connecting"
+    setup()
+
+    expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to default")
+  })
+
+  it("reports a browser list it could not read", () => {
+    listError = "Could not read the browser list (500)"
+    setup()
+
+    expect(screen.getByText("Could not read the browser list (500)")).toBeInTheDocument()
+  })
+
+  it("keeps the session bar out of the frame path", () => {
+    const { rerender } = setup()
+    const before = sessionBarRenders
+    expect(before).toBeGreaterThan(0)
+
+    frame = frameOf(2)
+    rerender(panel())
+    frame = frameOf(3)
+    rerender(panel())
+
+    expect(sessionBarRenders).toBe(before)
   })
 
   it("reports a socket failure beside the page instead of replacing it", async () => {

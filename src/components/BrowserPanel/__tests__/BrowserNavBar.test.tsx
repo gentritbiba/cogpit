@@ -69,14 +69,6 @@ describe("BrowserNavBar", () => {
     expect(onBack).toHaveBeenCalledTimes(1)
   })
 
-  it("stands down entirely while the page is not live", () => {
-    setup({ disabled: true })
-
-    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Reload" })).toBeDisabled()
-    expect(screen.getByRole("textbox", { name: "Page URL" })).toBeDisabled()
-  })
-
   it("navigates to what was typed on Enter", async () => {
     const { user, url, onNavigate } = setup()
 
@@ -135,7 +127,7 @@ describe("BrowserNavBar", () => {
     expect(onFollow).toHaveBeenCalledWith("tab-2")
   })
 
-  it("marks the stream live or still at the trailing end of the bar", () => {
+  it("marks the stream live, still or cut off at the trailing end of the bar", () => {
     const { rerender } = setup({ status: "live" })
 
     expect(screen.getByText("LIVE")).toBeInTheDocument()
@@ -143,6 +135,10 @@ describe("BrowserNavBar", () => {
     rerender({ status: "idle" })
     expect(screen.getByText("IDLE")).toBeInTheDocument()
     expect(screen.queryByText("LIVE")).not.toBeInTheDocument()
+
+    rerender({ status: "offline" })
+    expect(screen.getByText("OFFLINE")).toBeInTheDocument()
+    expect(screen.queryByText("IDLE")).not.toBeInTheDocument()
   })
 
   it("says nothing about the stream when there is none to report", () => {

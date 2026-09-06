@@ -213,7 +213,7 @@ describe("useBrowserSocket", () => {
       expect(result.current.lastFrameAt).toBeGreaterThan(0)
     })
 
-    it("closes the previous bitmap when a new frame arrives", async () => {
+    it("leaves a shown frame to the viewer rather than closing it under a pending paint", async () => {
       const bitmaps = stubBitmaps()
       const { result } = renderHook(() => useBrowserSocket("default"))
       act(() => latest().open())
@@ -221,7 +221,7 @@ describe("useBrowserSocket", () => {
       await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 1 }))))
       await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 2 }))))
 
-      expect(bitmaps[0].close).toHaveBeenCalledTimes(1)
+      expect(bitmaps[0].close).not.toHaveBeenCalled()
       expect(bitmaps[1].close).not.toHaveBeenCalled()
       expect(result.current.frame?.header.ts).toBe(2)
     })
@@ -264,9 +264,9 @@ describe("useBrowserSocket", () => {
       expect(bitmap.close).toHaveBeenCalledTimes(1)
     })
 
-    it("falls back to an object url and revokes the one it replaces", async () => {
+    it("falls back to an object url where the decoder is missing", async () => {
       vi.stubGlobal("createImageBitmap", undefined)
-      const { result } = renderHook(() => useBrowserSocket("default"))
+      const { result, unmount } = renderHook(() => useBrowserSocket("default"))
       act(() => latest().open())
 
       await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 1 }))))
@@ -275,8 +275,10 @@ describe("useBrowserSocket", () => {
 
       await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 2 }))))
       expect(result.current.frame?.blobUrl).toBe("blob:frame-2")
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:frame-1")
-      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+      unmount()
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:frame-2")
     })
 
     it("ignores a malformed frame", async () => {

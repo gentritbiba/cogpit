@@ -1,5 +1,5 @@
-import { useId, useState } from "react"
-import { ChevronDown, CircleStop, Crosshair, Plus, Trash2, X } from "lucide-react"
+import { memo, useId, useState } from "react"
+import { ChevronDown, CircleStop, Crosshair, Plus, Trash2, TriangleAlert, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -92,7 +92,7 @@ function StatusDot({ running, className }: { running: boolean; className?: strin
   )
 }
 
-export function BrowserSessionBar({
+export const BrowserSessionBar = memo(function BrowserSessionBar({
   sessions,
   selected,
   currentSessionId,
@@ -226,8 +226,15 @@ export function BrowserSessionBar({
 
       {!isDefault && (
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="hidden truncate text-xs font-medium text-amber-700 @sm/browser-bar:inline dark:text-amber-300">
-            Not the default browser
+          <span
+            role="status"
+            className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+          >
+            <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+            {/* Too narrow and only the icon is left, but the words stay in the a11y tree. */}
+            <span className="sr-only @sm/browser-bar:not-sr-only @sm/browser-bar:whitespace-nowrap">
+              Not the default browser
+            </span>
           </span>
           <Button variant="outline" size="xs" onClick={onShowDefault}>
             Show default
@@ -349,4 +356,4 @@ export function BrowserSessionBar({
       )}
     </div>
   )
-}
+})

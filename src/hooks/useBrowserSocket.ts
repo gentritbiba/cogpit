@@ -18,7 +18,10 @@ type PageMessage = Extract<BrowserServerMessage, { type: "page" }>
 
 export type BrowserSocketStatus = "idle" | "connecting" | "connected" | "disconnected"
 
-/** A decoded frame, owning either a bitmap or an object url — never both, never neither. */
+/**
+ * A decoded frame, holding either a bitmap or an object url — never both,
+ * never neither. Whoever paints it releases it; see `releaseFrame`.
+ */
 export interface BrowserFrame {
   bitmap: ImageBitmap | null
   blobUrl: string | null
@@ -73,8 +76,12 @@ function sameTabs(a: BrowserTab[], b: BrowserTab[]): boolean {
   ))
 }
 
-/** A frame holds a decoder resource, so every frame the hook stops showing gets freed here. */
-function releaseFrame(frame: BrowserFrame | null): void {
+/**
+ * A frame holds a decoder resource. The hook frees the frames it never shows;
+ * a frame it hands out belongs to whoever paints it, which frees it once it is
+ * off screen — a bitmap closed while a paint is still pending throws.
+ */
+export function releaseFrame(frame: BrowserFrame | null): void {
   if (!frame) return
   frame.bitmap?.close()
   if (frame.blobUrl) URL.revokeObjectURL(frame.blobUrl)
@@ -114,13 +121,14 @@ export function useBrowserSocket(session: string | null): UseBrowserSocket {
     const run = { alive: true, issued: 0, applied: 0 }
     let delay = INITIAL_RECONNECT_DELAY
 
+    // Showing a frame hands its bitmap to the viewer; only a frame nobody ever
+    // saw is freed here, plus whatever is still out when the session ends.
     function show(next: BrowserFrame, sequence: number): void {
       if (!run.alive || sequence <= run.applied) {
         releaseFrame(next)
         return
       }
       run.applied = sequence
-      releaseFrame(frameRef.current)
       frameRef.current = next
       setFrame(next)
       setLastFrameAt(Date.now())

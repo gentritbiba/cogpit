@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react"
+import { memo, useState, type FormEvent, type KeyboardEvent } from "react"
 import { ArrowLeft, ArrowRight, ExternalLink, RotateCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,14 +21,15 @@ import type { BrowserServerMessage, BrowserTab } from "../../../shared/browser/p
 
 export type BrowserPage = Extract<BrowserServerMessage, { type: "page" }>
 
+/** What the stream is doing: arriving, standing still, or cut off mid-session. */
+export type BrowserStreamStatus = "live" | "idle" | "offline"
+
 interface BrowserNavBarProps {
   page: BrowserPage | null
   tabs: BrowserTab[]
   followed: string | null
-  /** Whether frames are still arriving. Left off when there is no stream to report on. */
-  status?: "live" | "idle"
-  /** No page to drive — the whole bar is inert rather than lying about what it can do. */
-  disabled?: boolean
+  /** Left off when there is no stream to report on. */
+  status?: BrowserStreamStatus
   onNavigate: (url: string) => void
   onBack: () => void
   onForward: () => void
@@ -45,9 +46,35 @@ function tabLabel(tab: BrowserTab): string {
   }
 }
 
-/** Whether frames are still arriving. A still page is normal, so it says so plainly. */
-function FrameStatus({ status }: { status: "live" | "idle" }) {
-  const live = status === "live"
+/** A still page is normal and a dropped socket is not, so each says so plainly. */
+const STREAM_REPORT: Record<BrowserStreamStatus, {
+  label: string
+  hint: string
+  tone: string
+  dot: string
+}> = {
+  live: {
+    label: "LIVE",
+    hint: "Streaming the page as it changes",
+    tone: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+  },
+  idle: {
+    label: "IDLE",
+    hint: "The page has not changed for a few seconds",
+    tone: "text-muted-foreground",
+    dot: "ring-1 ring-muted-foreground/50 ring-inset",
+  },
+  offline: {
+    label: "OFFLINE",
+    hint: "The connection dropped — this is the last frame that arrived",
+    tone: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+}
+
+function FrameStatus({ status }: { status: BrowserStreamStatus }) {
+  const report = STREAM_REPORT[status]
   return (
     <Tooltip>
       <TooltipTrigger
@@ -55,35 +82,24 @@ function FrameStatus({ status }: { status: "live" | "idle" }) {
           <span
             className={cn(
               "ml-1 flex shrink-0 cursor-default items-center gap-1 text-[10px] font-medium tracking-wide",
-              live ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+              report.tone,
             )}
           />
         }
       >
-        <span
-          aria-hidden="true"
-          className={cn(
-            "size-1.5 rounded-full",
-            live ? "bg-emerald-500" : "ring-1 ring-muted-foreground/50 ring-inset",
-          )}
-        />
-        {live ? "LIVE" : "IDLE"}
+        <span aria-hidden="true" className={cn("size-1.5 rounded-full", report.dot)} />
+        {report.label}
       </TooltipTrigger>
-      <TooltipContent>
-        {live
-          ? "Streaming the page as it changes"
-          : "The page has not changed for a few seconds"}
-      </TooltipContent>
+      <TooltipContent>{report.hint}</TooltipContent>
     </Tooltip>
   )
 }
 
-export function BrowserNavBar({
+export const BrowserNavBar = memo(function BrowserNavBar({
   page,
   tabs,
   followed,
   status,
-  disabled = false,
   onNavigate,
   onBack,
   onForward,
@@ -115,7 +131,7 @@ export function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Back"
-          disabled={disabled || !page?.canGoBack}
+          disabled={!page?.canGoBack}
           onClick={onBack}
         >
           <ArrowLeft data-icon="inline-start" />
@@ -124,7 +140,7 @@ export function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Forward"
-          disabled={disabled || !page?.canGoForward}
+          disabled={!page?.canGoForward}
           onClick={onForward}
         >
           <ArrowRight data-icon="inline-start" />
@@ -133,7 +149,7 @@ export function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Reload"
-          disabled={disabled || !page}
+          disabled={!page}
           onClick={onReload}
         >
           <RotateCw data-icon="inline-start" />
@@ -144,7 +160,6 @@ export function BrowserNavBar({
             <InputGroupInput
               aria-label="Page URL"
               className="text-xs"
-              disabled={disabled}
               placeholder="Enter a URL"
               spellCheck={false}
               autoComplete="off"
@@ -182,7 +197,6 @@ export function BrowserNavBar({
                 tab.targetId === followed && "text-foreground",
               )}
               aria-current={tab.targetId === followed ? "page" : undefined}
-              disabled={disabled}
               onClick={() => onFollow(tab.targetId)}
             >
               <span className="truncate">{tabLabel(tab)}</span>
@@ -192,4 +206,4 @@ export function BrowserNavBar({
       )}
     </div>
   )
-}
+})
