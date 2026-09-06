@@ -276,7 +276,7 @@ Note (review follow-up, commit `fix(browser): CDP viewer review follow-ups`):
 
 Commit: `feat(browser): CDP viewer`
 
-### Task 8: Viewer socket manager
+### Task 8: Viewer socket manager ✅ done
 
 **Files:**
 - Create: `server/browser/viewerSocket.ts`
@@ -305,6 +305,17 @@ Flow: parse `?session=`; invalid name → send `error` + close 1008. Send `statu
 Tests: fake `ws` objects (EventEmitter with `send`/`close`/`readyState`), fake deps; assert status sequence, launch path, frame forwarding (binary), input forwarding, authorization close.
 
 Commit: `feat(browser): viewer socket manager`
+
+Note: `BrowserViewerLike` is a `Pick` of `BrowserViewer`, so a fake viewer is
+checked against the real signatures. The manager also exports
+`defaultViewerSocketDeps` (shim/daemons/registry) as its constructor default, so
+Task 11 only mounts it. Status messages are deduplicated — the 2 s poll re-runs
+`isRunning` but only sends `status` when the state actually changes — so a
+stopped browser does not spam the client. A failed attach (no DevTools endpoint,
+or `openViewer` rejecting on a stale `DevToolsActivePort`) sends `error` and
+drops back to `stopped` + polling, which self-heals on the next poll. The
+invalid-name close reuses `assertNamedBrowser`'s message, so a throwaway
+`tmp-*` name is refused on the socket too.
 
 ### Task 9: Skill + plugin + agent env
 
