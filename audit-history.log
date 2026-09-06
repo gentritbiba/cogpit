@@ -4,6 +4,12 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260906T194344Z-e47e69b - Browser subagent hook
+- File: `audit-history/audit-20260906T194344Z-e47e69b.md`
+- Status: PASS after documentation corrections.
+- Scope: Shell-aware subagent browser redirection, inert mentions, and bounded isolation coverage.
+- Validation: 395 files / 6,183 tests; lint, typecheck, vocabulary, architecture, duplicates; direct hook and Bash execution probes.
+
 ### 2026-09-04 22:47 UTC - Tool rendering and iOS parity (32de20d)
 - **File:** `audit-history/audit-20260904T224712Z-32de20d.md`
 - **Status:** PASS AFTER UPDATES
