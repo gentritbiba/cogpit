@@ -108,7 +108,7 @@ Commit: `feat(browser): agent-browser shim`
 
 Note: `renderShim` backslash-escapes `\ " $ \`` in the real path before interpolating it into `real="…"`, since the path is user-controlled; the script is otherwise verbatim. Extra tests beyond the eight: tmp-* with a missing/invalid `COGPIT_SESSION_ID` falls back to `run/shared`, `--session` beats `AGENT_BROWSER_SESSION`, and `findRealAgentBrowser` skips `binDir()` spelled with a trailing slash, `..` or a symlink. Review follow-ups (v2): `LC_ALL=C` regex validation (the glob accepted `Foo` on macOS bash 3.2 under `en_US.UTF-8`), the not-executable / self-referencing guard, the missing-`HOME` passthrough, atomic write, and the chmod repair.
 
-### Task 3: Registry
+### Task 3: Registry ✅ done
 
 **Files:**
 - Create: `server/browser/registry.ts`
@@ -142,6 +142,8 @@ API: `readRegistry()`, `writeRegistry()`, `listBrowsers(isRunning: (name) => Pro
 Tests: empty home lists only default (not running); profile dir without registry entry appears; registry entry without profile dir appears; `.driver` parsed; ordering; create/update/remove; remove default throws; invalid names throw.
 
 Commit: `feat(browser): named browser registry`
+
+Note: registry keys are sanitized on read (invalid or throwaway names and malformed entries are dropped), so a hand-edited `sessions.json` cannot make `profileDir()` throw. `touchLastUrl` shares the patch helper with `updateBrowser` rather than calling it, so the hot path reads the file once.
 
 ### Task 4: Daemons
 
