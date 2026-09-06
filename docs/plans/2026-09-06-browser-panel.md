@@ -145,7 +145,7 @@ Commit: `feat(browser): named browser registry`
 
 Note: registry keys are sanitized on read (invalid or throwaway names, malformed entries, and any `version` other than 1 are dropped), so a hand-edited `sessions.json` cannot make `profileDir()` throw. `updateBrowser` throws `BrowserNotFoundError` unless the browser is `default`, has a registry entry, or has a profile dir; `touchLastUrl` applies the same existence rule silently (a profile dir alone counts, since the shim creates dirs before Cogpit knows about them) and shares the patch helper rather than calling `updateBrowser`, so the hot path reads the file once. `driverSessionId` is null unless `.driver` holds a valid Cogpit session id. `listBrowsers` treats a rejecting `isRunning` as not running.
 
-### Task 4: Daemons
+### Task 4: Daemons ✅ done
 
 **Files:**
 - Create: `server/browser/daemons.ts`
@@ -159,7 +159,6 @@ export interface DaemonDeps {
   probe: (port: number) => Promise<boolean>          // GET http://127.0.0.1:port/json/version within 500 ms
   kill: (pid: number, signal: NodeJS.Signals) => boolean
   isPidAlive: (pid: number) => boolean
-  now: () => number
 }
 ```
 
@@ -175,6 +174,8 @@ Functions (all take `deps` last, defaulting to real implementations):
 - `startSweeper(isLive, intervalMs = 60_000)`: returns `stop()`; runs `sweep` immediately and on an unref'd interval.
 
 Tests use a temp home, fake pid files, and fake deps; assert kill calls, file removal, launch argv/env, `isRunning` truth table.
+
+Note: `DaemonDeps` has no `now` field (nothing in this task or later ones reads it). `launch` strips an inherited `COGPIT_SESSION_ID` from the env before setting the given one, so a panel launch never inherits a driver tag from the server's own environment. `shutdownBrowsers` also SIGTERMs throwaway pids that landed in `run/shared/` (the shim parks `tmp-*` there when no valid session id is set) without a `close`, since `stop()` only accepts named browsers. Default `spawn` resolves on `close`, which is safe: the daemon does not inherit the CLI's stderr pipe (verified against 0.16.3).
 
 Commit: `feat(browser): daemon lifecycle`
 
