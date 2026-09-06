@@ -4,6 +4,11 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260906T210840Z-42e6ed7 - Browser release correction
+- File: `audit-history/audit-20260906T210840Z-42e6ed7.md`
+- Status: PASS after native Windows support disclosure and cross-viewer tab-close recovery.
+- Validation: 397 files / 6,230 tests, coverage and quality gates; Electron build; package contract; live screenshot, pointer and two-viewer close/reload probes.
+
 ### 20260906T204734Z-693a485 - Browser screenshot recovery and 2.6.0
 - File: `audit-history/audit-20260906T204734Z-693a485.md`
 - Status: PASS after viewport documentation and package-contract corrections.
