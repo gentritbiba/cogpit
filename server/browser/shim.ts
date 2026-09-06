@@ -50,13 +50,9 @@ exec "$real" "$@"
 `
 }
 
-function header(script: string): string {
-  return script.split("\n", 2).join("\n")
-}
-
-function hasCurrentHeader(path: string, script: string): boolean {
+function hasContent(path: string, script: string): boolean {
   try {
-    return header(readFileSync(path, "utf8")) === header(script)
+    return readFileSync(path, "utf8") === script
   } catch {
     return false
   }
@@ -69,7 +65,7 @@ export function ensureShim(realBinary: string | null): { path: string | null } {
     return { path: null }
   }
   const script = renderShim(realBinary)
-  if (!hasCurrentHeader(path, script)) {
+  if (!hasContent(path, script)) {
     mkdirSync(binDir(), { recursive: true })
     writeFileSync(path, script, { mode: 0o755 })
     chmodSync(path, 0o755)

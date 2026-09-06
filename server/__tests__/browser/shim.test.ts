@@ -191,6 +191,12 @@ describe("ensureShim", () => {
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(fakeBinary))
   })
 
+  it("rewrites a shim that points at a different real binary", () => {
+    ensureShim("/old/agent-browser")
+    ensureShim("/new/agent-browser")
+    expect(readFileSync(shimPath(), "utf8")).toBe(renderShim("/new/agent-browser"))
+  })
+
   it("removes an existing shim when the real binary disappears", () => {
     ensureShim(fakeBinary)
     expect(ensureShim(null)).toEqual({ path: null })

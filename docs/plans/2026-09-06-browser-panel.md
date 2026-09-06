@@ -85,7 +85,7 @@ export AGENT_BROWSER_ARGS="--remote-debugging-port=0"
 exec "$real" "$@"
 ```
 
-`ensureShim(realBinary: string | null): { path: string | null }`: when `realBinary` is null, remove an existing shim and return `{ path: null }`; else write the script (mode `0o755`) when missing or its first two lines differ, return `{ path }`.
+`ensureShim(realBinary: string | null): { path: string | null }`: when `realBinary` is null, remove an existing shim and return `{ path: null }`; else write the script (mode `0o755`) when missing or its content differs from the rendered script, return `{ path }`.
 
 `findRealAgentBrowser(env = process.env): string | null`: walk `PATH`, skip entries equal to `binDir()`, return the first executable `agent-browser`.
 
