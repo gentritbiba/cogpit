@@ -1,0 +1,494 @@
+import { WebSocket } from "ws"
+import type { FrameHeader } from "../../shared/browser/frames"
+import type { BrowserClientMessage, BrowserServerMessage, BrowserTab } from "../../shared/browser/protocol"
+
+type CdpParams = Record<string, unknown>
+type CdpEventHandler = (params: CdpParams, sessionId?: string) => void
+
+interface PendingCall {
+  resolve: (result: CdpParams) => void
+  reject: (error: Error) => void
+}
+
+const CONNECTION_CLOSED = "CDP connection closed"
+
+/** Minimal JSON-RPC client over one CDP WebSocket. Session-scoped traffic carries a top-level `sessionId`. */
+export class CdpConnection {
+  private nextId = 1
+  private readonly pending = new Map<number, PendingCall>()
+  private readonly handlers = new Map<string, Set<CdpEventHandler>>()
+  private readonly closeHandlers = new Set<(reason: string) => void>()
+  private closeReason: string | null = null
+
+  private constructor(private readonly socket: WebSocket) {
+    socket.on("message", (data) => this.receive(data.toString()))
+    socket.on("close", (code, reason) => this.handleClose(reason.toString() || `socket closed (${code})`))
+  }
+
+  static connect(wsUrl: string): Promise<CdpConnection> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(wsUrl)
+      socket.once("error", reject)
+      socket.once("open", () => {
+        socket.off("error", reject)
+        // "close" follows every error; nothing to do here beyond keeping the emitter from throwing.
+        socket.on("error", () => {})
+        resolve(new CdpConnection(socket))
+      })
+    })
+  }
+
+  send<T = CdpParams>(method: string, params: CdpParams = {}, sessionId?: string): Promise<T> {
+    if (this.socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error(CONNECTION_CLOSED))
+    const id = this.nextId++
+    const message: CdpParams = { id, method, params }
+    if (sessionId !== undefined) message.sessionId = sessionId
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve: (result) => resolve(result as T), reject })
+      this.socket.send(JSON.stringify(message), (error) => {
+        if (error && this.pending.delete(id)) reject(error)
+      })
+    })
+  }
+
+  on(method: string, handler: CdpEventHandler): void {
+    let set = this.handlers.get(method)
+    if (!set) {
+      set = new Set()
+      this.handlers.set(method, set)
+    }
+    set.add(handler)
+  }
+
+  off(method: string, handler: CdpEventHandler): void {
+    this.handlers.get(method)?.delete(handler)
+  }
+
+  /** Fires once, immediately if the connection is already gone. */
+  onClose(handler: (reason: string) => void): void {
+    if (this.closeReason !== null) handler(this.closeReason)
+    else this.closeHandlers.add(handler)
+  }
+
+  close(): void {
+    this.socket.close()
+  }
+
+  private receive(text: string): void {
+    let message: unknown
+    try {
+      message = JSON.parse(text)
+    } catch {
+      return
+    }
+    if (typeof message !== "object" || message === null || Array.isArray(message)) return
+    const { id, method, params, result, error, sessionId } = message as CdpParams
+
+    if (typeof id === "number") {
+      const call = this.pending.get(id)
+      if (!call) return
+      this.pending.delete(id)
+      if (error) call.reject(new Error(describeError(error)))
+      else call.resolve(isParams(result) ? result : {})
+      return
+    }
+
+    if (typeof method !== "string") return
+    for (const handler of this.handlers.get(method) ?? []) {
+      try {
+        handler(isParams(params) ? params : {}, typeof sessionId === "string" ? sessionId : undefined)
+      } catch {
+        // one handler failing must not stop dispatch or take the socket down
+      }
+    }
+  }
+
+  private handleClose(reason: string): void {
+    this.closeReason = reason
+    const error = new Error(CONNECTION_CLOSED)
+    for (const call of this.pending.values()) call.reject(error)
+    this.pending.clear()
+    for (const handler of this.closeHandlers) handler(reason)
+    this.closeHandlers.clear()
+  }
+}
+
+function isParams(value: unknown): value is CdpParams {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function describeError(error: unknown): string {
+  if (isParams(error) && typeof error.message === "string") {
+    return typeof error.data === "string" ? `${error.message}: ${error.data}` : error.message
+  }
+  return "CDP error"
+}
+
+interface TargetInfo {
+  targetId: string
+  type: string
+  url: string
+  title: string
+}
+
+interface NavigationHistory {
+  currentIndex: number
+  entries: { id: number }[]
+}
+
+interface PageTarget {
+  sessionId: string
+  url: string
+  title: string
+}
+
+interface ScreencastSize {
+  maxWidth: number
+  maxHeight: number
+}
+
+interface ActiveScreencast extends ScreencastSize {
+  sessionId: string
+}
+
+type ClientMessage<T extends BrowserClientMessage["type"]> = Extract<BrowserClientMessage, { type: T }>
+export type PageInfo = Omit<Extract<BrowserServerMessage, { type: "page" }>, "type">
+
+export interface ViewerEvents {
+  frame(header: FrameHeader, jpeg: Uint8Array): void
+  tabs(tabs: BrowserTab[], followed: string | null): void
+  page(info: PageInfo): void
+  closed(reason: string): void
+}
+
+const EMPTY_PAGE: PageInfo = { targetId: "", url: "", title: "", canGoBack: false, canGoForward: false }
+const MAX_SCREENCAST_WIDTH = 1920
+const MAX_SCREENCAST_HEIGHT = 1200
+const MAX_SCREENCAST_DPR = 2
+const SCREENCAST_QUALITY = 80
+const HIDDEN_URL_PREFIXES = ["devtools://", "chrome-extension://"]
+
+const MOUSE_EVENT_TYPES: Record<ClientMessage<"mouse">["event"], string> = {
+  move: "mouseMoved",
+  down: "mousePressed",
+  up: "mouseReleased",
+}
+
+/** Keys whose page-side effect (submit, delete, caret moves) needs the virtual key code, not just `key`. */
+const VIRTUAL_KEY_CODES: Record<string, number> = {
+  Backspace: 8,
+  Tab: 9,
+  Enter: 13,
+  Escape: 27,
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+  Delete: 46,
+}
+
+const BLOCKED_SCHEMES = new Set(["javascript", "data"])
+/** A scheme, except that `host:port` is not one. */
+const SCHEME_RE = /^([a-z][a-z0-9+.-]*):(?!\d+(?:[/?#]|$))/i
+const LOCAL_ADDRESS_RE = /^(localhost|127\.|0\.0\.0\.0|\[::1\])|^[^/]+:\d+/i
+
+export function resolveNavigationUrl(raw: string): string {
+  const url = raw.trim()
+  if (url === "") throw new Error("Nothing to navigate to")
+  const scheme = SCHEME_RE.exec(url)?.[1].toLowerCase()
+  if (scheme !== undefined) {
+    if (BLOCKED_SCHEMES.has(scheme)) throw new Error(`Refusing to navigate to a ${scheme}: url`)
+    return url
+  }
+  return `${LOCAL_ADDRESS_RE.test(url) ? "http" : "https"}://${url}`
+}
+
+function isPageTarget(info: TargetInfo): boolean {
+  return info.type === "page" && !HIDDEN_URL_PREFIXES.some((prefix) => info.url.startsWith(prefix))
+}
+
+function screencastSize(width: number, height: number, dpr: number): ScreencastSize {
+  const scale = Math.min(dpr, MAX_SCREENCAST_DPR)
+  return {
+    maxWidth: Math.min(MAX_SCREENCAST_WIDTH, Math.round(width * scale)),
+    maxHeight: Math.min(MAX_SCREENCAST_HEIGHT, Math.round(height * scale)),
+  }
+}
+
+/**
+ * One viewer per socket client. Follows the most recently created page target
+ * until `follow()` pins one; a pinned tab stays followed until it is destroyed,
+ * after which the newest remaining tab takes over. Target bookkeeping and
+ * screencast start/stop run on one serial queue so they never interleave.
+ */
+export class BrowserViewer {
+  private readonly targets = new Map<string, PageTarget>()
+  private followed: string | null = null
+  private pinned = false
+  private ready = false
+  private closed = false
+  private viewport: ScreencastSize | null = null
+  private screencast: ActiveScreencast | null = null
+  private queue: Promise<unknown> = Promise.resolve()
+
+  private constructor(private readonly cdp: CdpConnection, private readonly events: ViewerEvents) {}
+
+  static async open(browserWsUrl: string, events: ViewerEvents): Promise<BrowserViewer> {
+    const cdp = await CdpConnection.connect(browserWsUrl)
+    const viewer = new BrowserViewer(cdp, events)
+    try {
+      await viewer.start()
+    } catch (error) {
+      cdp.close()
+      throw error
+    }
+    cdp.onClose((reason) => events.closed(reason))
+    return viewer
+  }
+
+  setViewport(width: number, height: number, dpr: number): Promise<void> {
+    this.viewport = screencastSize(width, height, dpr)
+    return this.enqueue(() => this.syncScreencast())
+  }
+
+  follow(targetId: string): Promise<void> {
+    return this.enqueue(async () => {
+      if (!this.targets.has(targetId)) throw new Error(`Unknown tab ${targetId}`)
+      this.pinned = true
+      await this.setFollowed(targetId)
+    })
+  }
+
+  async mouse(msg: ClientMessage<"mouse">): Promise<void> {
+    const { event, x, y, button, clickCount, modifiers } = msg
+    await this.cdp.send(
+      "Input.dispatchMouseEvent",
+      { type: MOUSE_EVENT_TYPES[event], x, y, button, clickCount, modifiers },
+      this.followedSession(),
+    )
+  }
+
+  async wheel(msg: ClientMessage<"wheel">): Promise<void> {
+    const { x, y, deltaX, deltaY, modifiers } = msg
+    await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX, deltaY, modifiers }, this.followedSession())
+  }
+
+  async key(msg: ClientMessage<"key">): Promise<void> {
+    const { event, key, code, text, modifiers } = msg
+    const type = event === "up" ? "keyUp" : text ? "keyDown" : "rawKeyDown"
+    const params: CdpParams = { type, key, code, modifiers }
+    if (type === "keyDown") params.text = text
+    const virtualKeyCode = VIRTUAL_KEY_CODES[key]
+    if (virtualKeyCode !== undefined) {
+      params.windowsVirtualKeyCode = virtualKeyCode
+      params.nativeVirtualKeyCode = virtualKeyCode
+    }
+    await this.cdp.send("Input.dispatchKeyEvent", params, this.followedSession())
+  }
+
+  async navigate(url: string): Promise<void> {
+    const resolved = resolveNavigationUrl(url)
+    await this.cdp.send("Page.navigate", { url: resolved }, this.followedSession())
+  }
+
+  back(): Promise<void> {
+    return this.stepHistory(-1)
+  }
+
+  forward(): Promise<void> {
+    return this.stepHistory(1)
+  }
+
+  async reload(): Promise<void> {
+    await this.cdp.send("Page.reload", {}, this.followedSession())
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    const active = this.screencast
+    this.screencast = null
+    if (active) await this.cdp.send("Page.stopScreencast", {}, active.sessionId).catch(() => {})
+    this.cdp.close()
+  }
+
+  private async start(): Promise<void> {
+    this.cdp.on("Target.targetCreated", (params) => {
+      const { targetInfo } = params as { targetInfo: TargetInfo }
+      this.enqueue(() => this.onTargetCreated(targetInfo)).catch(() => {})
+    })
+    this.cdp.on("Target.targetInfoChanged", (params) => {
+      const { targetInfo } = params as { targetInfo: TargetInfo }
+      this.enqueue(() => this.onTargetInfoChanged(targetInfo)).catch(() => {})
+    })
+    this.cdp.on("Target.targetDestroyed", (params) => {
+      const { targetId } = params as { targetId: string }
+      this.enqueue(() => this.onTargetDestroyed(targetId)).catch(() => {})
+    })
+    this.cdp.on("Page.screencastFrame", (params, sessionId) => this.onScreencastFrame(params, sessionId))
+    this.cdp.on("Page.frameNavigated", (params, sessionId) => {
+      const { frame } = params as { frame: { parentId?: string; url: string } }
+      if (frame.parentId !== undefined) return
+      this.enqueue(() => this.onMainFrameNavigated(frame.url, sessionId)).catch(() => {})
+    })
+
+    await this.cdp.send("Target.setDiscoverTargets", { discover: true })
+    const { targetInfos } = await this.cdp.send<{ targetInfos: TargetInfo[] }>("Target.getTargets")
+    await this.enqueue(async () => {
+      for (const info of targetInfos) await this.attach(info).catch(() => {})
+      this.ready = true
+      await this.setFollowed(this.newestTarget(), true)
+    })
+  }
+
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(work)
+    this.queue = run.catch(() => {})
+    return run
+  }
+
+  private followedSession(): string {
+    const target = this.followed === null ? undefined : this.targets.get(this.followed)
+    if (!target) throw new Error("No open tab")
+    return target.sessionId
+  }
+
+  private newestTarget(): string | null {
+    let newest: string | null = null
+    for (const targetId of this.targets.keys()) newest = targetId
+    return newest
+  }
+
+  private targetForSession(sessionId: string | undefined): string | null {
+    for (const [targetId, target] of this.targets) {
+      if (target.sessionId === sessionId) return targetId
+    }
+    return null
+  }
+
+  /** Resolves false for non-page targets and ones already attached. */
+  private async attach(info: TargetInfo): Promise<boolean> {
+    if (!isPageTarget(info) || this.targets.has(info.targetId)) return false
+    const { sessionId } = await this.cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId: info.targetId, flatten: true })
+    await this.cdp.send("Page.enable", {}, sessionId)
+    this.targets.set(info.targetId, { sessionId, url: info.url, title: info.title })
+    return true
+  }
+
+  private async onTargetCreated(info: TargetInfo): Promise<void> {
+    if (!(await this.attach(info)) || !this.ready) return
+    if (this.pinned) this.emitTabs()
+    else await this.setFollowed(info.targetId)
+  }
+
+  private async onTargetInfoChanged(info: TargetInfo): Promise<void> {
+    const target = this.targets.get(info.targetId)
+    if (!target || (target.url === info.url && target.title === info.title)) return
+    target.url = info.url
+    target.title = info.title
+    this.emitTabs()
+    if (info.targetId === this.followed) await this.emitPage()
+  }
+
+  private async onTargetDestroyed(targetId: string): Promise<void> {
+    const target = this.targets.get(targetId)
+    if (!target) return
+    this.targets.delete(targetId)
+    if (this.screencast?.sessionId === target.sessionId) this.screencast = null
+    if (targetId !== this.followed) {
+      this.emitTabs()
+      return
+    }
+    this.pinned = false
+    this.followed = null
+    await this.setFollowed(this.newestTarget(), true)
+  }
+
+  private async onMainFrameNavigated(url: string, sessionId: string | undefined): Promise<void> {
+    const targetId = this.targetForSession(sessionId)
+    if (targetId === null) return
+    this.targets.get(targetId)!.url = url
+    if (targetId === this.followed) await this.emitPage()
+  }
+
+  private onScreencastFrame(params: CdpParams, sessionId: string | undefined): void {
+    const { data, metadata, sessionId: screencastSessionId } = params as {
+      data: string
+      metadata: { deviceWidth: number; deviceHeight: number }
+      sessionId: number
+    }
+    this.cdp.send("Page.screencastFrameAck", { sessionId: screencastSessionId }, sessionId).catch(() => {})
+    const targetId = this.targetForSession(sessionId)
+    if (targetId === null || targetId !== this.followed) return
+    this.events.frame(
+      { deviceWidth: metadata.deviceWidth, deviceHeight: metadata.deviceHeight, targetId, ts: Date.now() },
+      Buffer.from(data, "base64"),
+    )
+  }
+
+  /** `force` emits even when the followed id is unchanged, for the initial state and after a destroy. */
+  private async setFollowed(targetId: string | null, force = false): Promise<void> {
+    if (!force && this.followed === targetId) return
+    this.followed = targetId
+    await this.syncScreencast()
+    this.emitTabs()
+    await this.emitPage()
+  }
+
+  private async syncScreencast(): Promise<void> {
+    if (this.closed) return
+    const target = this.followed === null ? undefined : this.targets.get(this.followed)
+    const wanted: ActiveScreencast | null = target && this.viewport ? { sessionId: target.sessionId, ...this.viewport } : null
+    const active = this.screencast
+    if (
+      active && wanted && active.sessionId === wanted.sessionId
+      && active.maxWidth === wanted.maxWidth && active.maxHeight === wanted.maxHeight
+    ) {
+      return
+    }
+    if (active) {
+      this.screencast = null
+      await this.cdp.send("Page.stopScreencast", {}, active.sessionId).catch(() => {})
+    }
+    if (!wanted) return
+    await this.cdp.send(
+      "Page.startScreencast",
+      { format: "jpeg", quality: SCREENCAST_QUALITY, maxWidth: wanted.maxWidth, maxHeight: wanted.maxHeight, everyNthFrame: 1 },
+      wanted.sessionId,
+    )
+    this.screencast = wanted
+  }
+
+  private async stepHistory(delta: number): Promise<void> {
+    const sessionId = this.followedSession()
+    const { currentIndex, entries } = await this.cdp.send<NavigationHistory>("Page.getNavigationHistory", {}, sessionId)
+    const entry = entries[currentIndex + delta]
+    if (!entry) return
+    await this.cdp.send("Page.navigateToHistoryEntry", { entryId: entry.id }, sessionId)
+  }
+
+  private emitTabs(): void {
+    const tabs = Array.from(this.targets, ([targetId, { url, title }]) => ({ targetId, url, title }))
+    this.events.tabs(tabs, this.followed)
+  }
+
+  private async emitPage(): Promise<void> {
+    const targetId = this.followed
+    const target = targetId === null ? undefined : this.targets.get(targetId)
+    if (targetId === null || !target) {
+      this.events.page(EMPTY_PAGE)
+      return
+    }
+    let canGoBack = false
+    let canGoForward = false
+    try {
+      const { currentIndex, entries } = await this.cdp.send<NavigationHistory>("Page.getNavigationHistory", {}, target.sessionId)
+      canGoBack = currentIndex > 0
+      canGoForward = currentIndex < entries.length - 1
+    } catch {
+      // a tab that is already gone reports no history; targetDestroyed follows
+    }
+    if (this.followed !== targetId) return
+    this.events.page({ targetId, url: target.url, title: target.title, canGoBack, canGoForward })
+  }
+}

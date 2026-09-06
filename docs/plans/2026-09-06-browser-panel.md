@@ -223,7 +223,7 @@ export type BrowserServerMessage =
 
 Note: also exports `parseClientMessage(raw): BrowserClientMessage | null`, the server's only validation of viewer input. Table-driven, one check per field of every variant (a field added to the union without a check fails to compile); unknown fields are dropped, `clickCount`/`modifiers` must be non-negative integers, `viewport` numbers `> 0` and `≤ 8192` (`dpr ≤ 4`), urls non-empty and `≤ 2048` chars. Tested in `src/lib/__tests__/browserFrames.test.ts`. Committed with Task 5 rather than Task 7.
 
-### Task 7: CDP viewer
+### Task 7: CDP viewer ✅ done
 
 **Files:**
 - Create: `server/browser/cdp.ts`
@@ -260,6 +260,8 @@ export class BrowserViewer {
 Internals: on open → `Target.setDiscoverTargets {discover:true}`, list page targets (`type === "page"`, url not `devtools://`), attach to each with `Target.attachToTarget {targetId, flatten:true}` → sessionId; `Page.enable` on each; follow the newest (`Target.targetCreated` ordering, last wins); `Target.targetInfoChanged` updates url/title and emits `page` for the followed one; `Target.targetDestroyed` detaches and re-follows newest; screencast frames: `Page.screencastFrame` → ack → emit `frame` with `{deviceWidth: metadata.deviceWidth, deviceHeight: metadata.deviceHeight, targetId, ts}`; `Page.frameNavigated` (main frame) → emit `page` with history state. Screencast starts on first `setViewport` and moves with `follow`.
 
 Tests: a fake CDP server built on `ws` (`new WebSocketServer({port:0})`) that answers `Target.getTargets`, `attachToTarget`, `Page.startScreencast` (then pushes two `Page.screencastFrame` events, asserting the ack arrives), `Input.*` (recording params), `Page.navigate`, `getNavigationHistory`. Assertions: attach happens, frames emitted with decoded header, `follow` switches the sessionId used for input, `navigate("example.com")` sends `https://example.com`, `targetDestroyed` re-follows, `close` stops screencast and closes the socket.
+
+Note: also exports `resolveNavigationUrl` (pure, table-tested) and `PageInfo` (derived from the protocol's `page` message). Every target/screencast mutation runs on one serial promise queue, so `follow`, `setViewport` and target events never interleave; concurrent `setViewport` calls coalesce to the last size. `follow()` pins a tab: new tabs then update `tabs` only, until the pinned tab is destroyed. `targetInfoChanged` emits `tabs` whenever url/title change (not only `page` for the followed tab) so the tab strip stays current. `closed` is only wired after `open()` succeeds, so a failed open rejects without also emitting `closed`. Editing keys carry `windowsVirtualKeyCode`/`nativeVirtualKeyCode` (Enter, Backspace, Tab, Escape, arrows, Delete), which Chromium needs for form submit and caret movement.
 
 Commit: `feat(browser): CDP viewer`
 
