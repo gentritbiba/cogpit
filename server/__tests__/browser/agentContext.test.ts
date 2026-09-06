@@ -16,7 +16,7 @@ const AGENT = "sub1"
 const TMP = "tmp-sub1"
 
 describe("BROWSER_CONTEXT_APPEND", () => {
-  it("says the four things a skill would otherwise have to be read for", () => {
+  it("provides browser ownership rules without requiring a skill read", () => {
     expect(BROWSER_CONTEXT_APPEND).toContain("Browser panel")
     expect(BROWSER_CONTEXT_APPEND).toContain("`default`")
     expect(BROWSER_CONTEXT_APPEND).toContain("--session tmp-")
@@ -24,7 +24,23 @@ describe("BROWSER_CONTEXT_APPEND", () => {
   })
 
   it("stays short enough to send on every request", () => {
-    expect(BROWSER_CONTEXT_APPEND.split("\n")).toHaveLength(4)
+    expect(BROWSER_CONTEXT_APPEND.length).toBeLessThan(1800)
+  })
+
+  it("explains shared interaction and when to use it", () => {
+    expect(BROWSER_CONTEXT_APPEND).toContain("same tabs and page state")
+    expect(BROWSER_CONTEXT_APPEND).toContain("click, type, and navigate")
+    expect(BROWSER_CONTEXT_APPEND).toContain("live demos, testing and fixing websites")
+    expect(BROWSER_CONTEXT_APPEND).toContain("signed-in accounts")
+  })
+
+  it("teaches a manual handoff and the limits of panel awareness", () => {
+    expect(BROWSER_CONTEXT_APPEND).toContain("login, 2FA")
+    expect(BROWSER_CONTEXT_APPEND).toContain("pause browser actions")
+    expect(BROWSER_CONTEXT_APPEND).toContain("Wait for their confirmation, select the handoff tab, take a fresh snapshot")
+    expect(BROWSER_CONTEXT_APPEND).toContain("panel and your tool can select different tabs")
+    expect(BROWSER_CONTEXT_APPEND).toContain("Leave the `default` browser running unless asked")
+    expect(BROWSER_CONTEXT_APPEND).toContain("cannot tell whether the panel is open")
   })
 })
 

@@ -20,12 +20,15 @@ import {
 import { getCommandText } from "../../shared/session/toolSummary"
 import type { HookCallback } from "../agents/sdk"
 
-/** Paid for on every request, so: only what an agent cannot work without. */
+/** Always in context: capabilities, collaboration, and browser ownership. */
 export const BROWSER_CONTEXT_APPEND = [
-  "Browser: `agent-browser` drives a real browser the user can watch, and click in, live in Cogpit's Browser panel.",
-  "No `--session` means the shared `default` browser, whose logins persist. Say which browser you are using when you start browser work.",
-  "Subagents must pass `--session tmp-<id>`; Cogpit redirects a subagent's call to a throwaway browser when it does not.",
-  "The `cogpit-browser` skill has the rest: named browsers, the flags Cogpit owns, and how to hand a login to the user.",
+  "Browser: With default or named `agent-browser` browsers, you and the user share the same tabs and page state. Cogpit's Browser panel streams a selected tab live and lets the user click, type, and navigate.",
+  "Use this for live demos, testing and fixing websites, research, and authorized workflows in signed-in accounts. The user can take over a step, then you can continue. The panel and your tool can select different tabs; snapshots show what they see only when you select the same browser and tab.",
+  "No `--session` means the shared `default` browser; its logins persist across sessions. Named browsers keep separate persistent profiles. Say which browser you are using and invite the user to open the Browser panel when starting browser work.",
+  "For login, 2FA, or a step the user wants to do themselves, name the browser and tab, pause browser actions, and ask them to do it in the panel. Wait for their confirmation, select the handoff tab, take a fresh snapshot, then continue. Do not overwrite their interaction or ask them to paste credentials into chat.",
+  "Leave the `default` browser running unless asked to close it; the user may still be using it. You cannot tell whether the panel is open or see Cogpit's layout from website snapshots.",
+  "Subagents must use private `--session tmp-<id>` browsers, invisible to the user, and close them when done. Never use the user's default or named browsers from a subagent; Cogpit redirects recognized subagent browser calls.",
+  "The `cogpit-browser` skill has the full manual, including named-browser management and flags Cogpit owns.",
 ].join("\n")
 
 /** The only tool carrying a shell command in the sessions this hook runs in. */
