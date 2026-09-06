@@ -317,7 +317,7 @@ drops back to `stopped` + polling, which self-heals on the next poll. The
 invalid-name close reuses `assertNamedBrowser`'s message, so a throwaway
 `tmp-*` name is refused on the socket too.
 
-### Task 9: Skill + plugin + agent env
+### Task 9: Skill + plugin + agent env ✅ done
 
 **Files:**
 - Create: `server/browser/skill.ts`, `server/browser/agentEnv.ts`
@@ -337,6 +337,14 @@ export function browserPluginPaths(): string[]   // [pluginDir()] when the plugi
 Tests: env prepends only when shim exists; no duplicate prepend; plugin written idempotently; install targets.
 
 Commit: `feat(browser): agent skill, plugin and environment`
+
+Note: `installSkill` takes an `AgentKind` and reads `descriptorFor(kind).config`
+for the config root and skills dir, rather than hardcoding `"claude" | "codex"` —
+it keeps `check:agents` at one line for this file (the `.claude-plugin` manifest
+dir, which is a plugin-format constant and now carries a budget of 1) and makes
+the third CLI work for free. `browserAgentEnv` sets `PATH` to `binDir()` alone
+when the base has none, instead of leaving a trailing delimiter (an empty PATH
+entry means "current directory").
 
 ### Task 10: REST routes
 
