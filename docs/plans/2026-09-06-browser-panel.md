@@ -568,7 +568,7 @@ non-passive listener (React attaches `wheel` passively at the root) and converts
 line/page delta modes to pixels. `src/__tests__/setup.ts` gained a stateful
 pointer-capture shim, which jsdom lacks.
 
-### Task 17: Session bar and nav bar
+### Task 17: Session bar and nav bar ✅ done
 
 **Files:**
 - Create: `src/components/BrowserPanel/BrowserSessionBar.tsx`, `src/components/BrowserPanel/BrowserNavBar.tsx`
@@ -584,6 +584,16 @@ pointer-capture shim, which jsdom lacks.
 Tests: non-default styling + "Show default" appears; picker lists sessions and calls `onSelect`; nav bar disables back when `canGoBack` false; Enter calls `onNavigate`.
 
 Commit: `feat(browser): session bar and nav bar`
+
+Note: the bar exports `DEFAULT_BROWSER` and takes `busy` (a mutation is in
+flight, so New/Stop/Delete stand down) and `onShowDefault`; a successful create
+selects the new browser, since that is why you made it. The nav bar exports its
+`BrowserPage` type and takes `disabled` for the non-live states. Its address
+field holds a `draft` that is `null` until the first keystroke, so an incoming
+`page` can never overwrite what the user is typing, and Escape or blur puts the
+live url back. It also opens the current url in the real browser. Labels that
+crowd a narrow panel ("Not the default browser", "Follow") hide below the bar's
+own container-query breakpoints rather than the viewport's.
 
 ### Task 18: Panel composition
 
