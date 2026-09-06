@@ -218,6 +218,62 @@ describe("app-server upgrade lifecycle", () => {
     openServers.delete(httpServer)
   })
 
+  it("disposes accepted browser viewer clients before awaiting HTTP shutdown", async () => {
+    const previousBrowserHome = process.env.COGPIT_BROWSER_HOME
+    process.env.COGPIT_BROWSER_HOME = join(fixtureRoot, "browser-home")
+    try {
+      const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
+      const baseUrl = await listen(httpServer)
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/__browser?session=qa-fixture`)
+
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", resolve)
+        ws.once("error", reject)
+      })
+      const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()))
+
+      await dispose()
+      await closed
+      expect(httpServer.listening).toBe(false)
+      openServers.delete(httpServer)
+    } finally {
+      if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
+      else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
+    }
+  })
+
+  it("rejects a forwarded browser upgrade without a session token", async () => {
+    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
+    const baseUrl = new URL(await listen(httpServer))
+
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connect(Number(baseUrl.port), baseUrl.hostname)
+      let received = ""
+      const timeout = setTimeout(() => {
+        socket.destroy()
+        reject(new Error("Rejected browser upgrade socket remained open"))
+      }, 1_000)
+      socket.setEncoding("utf8")
+      socket.on("connect", () => socket.write(
+        "GET /__browser?session=qa-fixture HTTP/1.1\r\n"
+        + `Host: localhost:${baseUrl.port}\r\n`
+        + "X-Forwarded-For: 203.0.113.8\r\n"
+        + "Connection: Upgrade\r\n"
+        + "Upgrade: websocket\r\n\r\n",
+      ))
+      socket.on("data", (chunk) => { received += chunk })
+      socket.on("error", reject)
+      socket.on("close", () => {
+        clearTimeout(timeout)
+        resolve(received)
+      })
+    })
+
+    expect(response).toContain("401 Unauthorized")
+    await dispose()
+    openServers.delete(httpServer)
+  })
+
   it("rejects a forwarded PTY upgrade without a session token", async () => {
     const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
     const baseUrl = new URL(await listen(httpServer))
@@ -561,6 +617,71 @@ describe("app-server team edition composition", () => {
       tunnel.once("open", resolve)
       tunnel.once("error", reject)
     })
+    const echo = new Promise<string>((resolve) => tunnel.once("message", (data) => resolve(data.toString())))
+    tunnel.send("ping")
+    await expect(echo).resolves.toBe("ping")
+
+    const tunnelClosed = new Promise<void>((resolve) => tunnel.once("close", () => resolve()))
+    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(logout.status).toBe(200)
+    await tunnelClosed
+
+    await dispose()
+    openServers.delete(httpServer)
+    targetWss.close()
+    await close(targetServer)
+  })
+
+  it("closes an established hub browser tunnel when its outer session is revoked", async () => {
+    process.env.COGPIT_EDITION = "team"
+    process.env.COGPIT_BOOTSTRAP_TOKEN = "hub-browser-bootstrap-token-at-least-32-chars"
+
+    const targetWss = new WebSocketServer({ noServer: true })
+    targetWss.on("connection", (ws) => ws.on("message", (data) => ws.send(data)))
+    const targetServer = createServer()
+    let deviceUrl: string | null = null
+    targetServer.on("upgrade", (req, socket, head) => {
+      deviceUrl = req.url || ""
+      if (new URL(req.url || "/", "http://localhost").pathname !== "/__browser") {
+        socket.destroy()
+        return
+      }
+      targetWss.handleUpgrade(req, socket, head, (ws) => targetWss.emit("connection", ws, req))
+    })
+    const targetUrl = new URL(await listen(targetServer))
+    await writeFile(join(userDataDir, "devices.local.json"), JSON.stringify([{
+      id: "dev_view",
+      name: "Viewer",
+      host: targetUrl.hostname,
+      port: Number(targetUrl.port),
+      auth: "none",
+      addedAt: Date.now(),
+    }]))
+
+    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
+      },
+      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
+    })
+    const { token } = await bootstrap.json() as { token: string }
+
+    const tunnel = new WebSocket(
+      `${baseUrl.replace(/^http/, "ws")}/hub/dev_view/__browser?session=work&token=${token}`,
+    )
+    await new Promise<void>((resolve, reject) => {
+      tunnel.once("open", resolve)
+      tunnel.once("error", reject)
+    })
+    // The device sees the browser it was asked for, never the hub's own token.
+    expect(deviceUrl).toBe("/__browser?session=work")
     const echo = new Promise<string>((resolve) => tunnel.once("message", (data) => resolve(data.toString())))
     tunnel.send("ping")
     await expect(echo).resolves.toBe("ping")

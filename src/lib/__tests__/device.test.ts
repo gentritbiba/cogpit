@@ -100,6 +100,7 @@ describe("device", () => {
       setPath("/")
       expect(withBase("/api/foo")).toBe("/api/foo")
       expect(withBase("/__pty")).toBe("/__pty")
+      expect(withBase("/__browser?session=work")).toBe("/__browser?session=work")
       expect(withBase("/api/hub/devices")).toBe("/api/hub/devices")
     })
 
@@ -114,6 +115,10 @@ describe("device", () => {
         expect(withBase("/__pty")).toBe("/hub/dev_x/__pty")
       })
 
+      it("prefixes /__browser URLs, query string included", () => {
+        expect(withBase("/__browser?session=work")).toBe("/hub/dev_x/__browser?session=work")
+      })
+
       it("never prefixes /api/hub/* (hub-scoped)", () => {
         expect(withBase("/api/hub/devices")).toBe("/api/hub/devices")
       })
@@ -122,7 +127,7 @@ describe("device", () => {
         expect(withBase("/api/auth/verify")).toBe("/api/auth/verify")
       })
 
-      it("leaves non-api, non-pty strings untouched", () => {
+      it("leaves non-api, non-transport strings untouched", () => {
         expect(withBase("/something")).toBe("/something")
         expect(withBase("relative/path")).toBe("relative/path")
         expect(withBase("https://example.com/api/x")).toBe("https://example.com/api/x")

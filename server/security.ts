@@ -857,7 +857,7 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
 const PUBLIC_PATHS = new Set(["/api/auth/verify", "/api/hello", "/api/share/verify"])
 
 // /hub/* is the multi-device reverse proxy — protected exactly like /api/*.
-const PROTECTED_TRANSPORT_PREFIXES = ["/api/", "/__pty", "/hub/"] as const
+const PROTECTED_TRANSPORT_PREFIXES = ["/api/", "/__pty", "/__browser", "/hub/"] as const
 
 function startsWithProtectedPrefix(path: string): boolean {
   // Express routes case-insensitively, so a case-variant prefix (/HUB, /API,
@@ -869,8 +869,9 @@ function startsWithProtectedPrefix(path: string): boolean {
 }
 
 /**
- * True when `path` names the API, the hub proxy, or the PTY — the transports
- * that require authentication and must never be cached.
+ * True when `path` names the API, the hub proxy, or a socket transport (PTY,
+ * browser viewer) — the transports that require authentication and must never
+ * be cached.
  *
  * Both the path as sent and its single percent-decode are tested, and either
  * hit protects the request. Decoding here can only ever widen what is

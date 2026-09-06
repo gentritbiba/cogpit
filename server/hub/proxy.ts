@@ -471,21 +471,26 @@ function dispatch(
 // ── WebSocket upgrade proxy ──────────────────────────────────────────
 
 /**
- * Proxy a `/hub/:deviceId/__pty` WebSocket upgrade to the target device.
+ * Proxy a `/hub/:deviceId/__pty` or `/hub/:deviceId/__browser` WebSocket upgrade
+ * to the same transport on the target device.
  *
- * Returns `false` immediately when the path is not a hub PTY upgrade (the caller
- * falls through to its other upgrade branches). Returns `true` the moment this
- * function owns the socket — including every error path — so the caller must not
- * touch the socket afterwards.
+ * Returns `false` immediately when the path is not a hub transport upgrade (the
+ * caller falls through to its other upgrade branches). Returns `true` the moment
+ * this function owns the socket — including every error path — so the caller must
+ * not touch the socket afterwards.
  */
 export function handleHubUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
   const url = new URL(req.url || "/", "http://localhost")
-  const match = /^\/hub\/([^/]+)\/__pty$/.exec(url.pathname)
+  const match = /^\/hub\/([^/]+)\/(__pty|__browser)$/.exec(url.pathname)
   if (!match) return false
 
   const deviceId = match[1]
+  const transport = `/${match[2]}`
+  const target = req.url || ""
+  const qIndex = target.indexOf("?")
+  const rawQuery = qIndex === -1 ? "" : target.slice(qIndex + 1)
 
-  // Hub-side trust check FIRST — identical semantics to the local /__pty branch.
+  // Hub-side trust check FIRST — identical semantics to the local transport branch.
   if (rejectWebsocketUpgrade(req, url, socket)) return true
 
   if (!getDevice(deviceId)) {
@@ -495,7 +500,7 @@ export function handleHubUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
   }
 
   // Mint asynchronously; we already own the socket, so return true now.
-  void openDeviceUpgrade(req, socket, head, deviceId)
+  void openDeviceUpgrade(req, socket, head, deviceId, transport, rawQuery)
   return true
 }
 
@@ -506,7 +511,14 @@ function writeSocketError(socket: Duplex, line: string): void {
   }
 }
 
-async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deviceId: string): Promise<void> {
+async function openDeviceUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  deviceId: string,
+  transport: string,
+  rawQuery: string,
+): Promise<void> {
   let invalidated = false
   let currentProxyReq: ClientRequest | null = null
   let currentProxySocket: Duplex | null = null
@@ -555,8 +567,14 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
 
   const attemptUpgrade = (device: HubDevice, lease: DeviceTokenLease, allowRetry: boolean): void => {
     if (invalidated || socket.destroyed) return
-    // auth:"none" devices read no token; password devices carry it in the query.
-    const devicePath = lease.token ? `/__pty?token=${encodeURIComponent(lease.token)}` : "/__pty"
+    // The client's query travels on — the browser transport names its session
+    // there. Its `token` is the hub's own credential and never reaches a device;
+    // auth:"none" devices read no token, password devices get the minted lease.
+    const clientQuery = stripHubToken(rawQuery)
+    const deviceQuery = [clientQuery, lease.token ? `token=${encodeURIComponent(lease.token)}` : ""]
+      .filter((part) => part !== "")
+      .join("&")
+    const devicePath = deviceQuery ? `${transport}?${deviceQuery}` : transport
     const requestFn = device.tls ? httpsRequest : httpRequest
     const proxyReq = requestFn({
       hostname: device.host,

@@ -2,7 +2,6 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 import { WebSocket } from "ws"
 
-import type { PtySessionManager } from "./pty-server"
 import {
   getRequestSessionToken,
   getSessionPrincipal,
@@ -15,7 +14,19 @@ import { isTeamEdition } from "./team/edition"
 
 const AUTHORIZATION_RECHECK_MS = 5_000
 
-function createPtyAuthorizer(token: string, userAgent?: string): (touch: boolean) => boolean {
+/** `touch=true` only for client activity; a periodic recheck must not keep a session alive. */
+export type SocketAuthorizer = (touch: boolean) => boolean
+
+/**
+ * A socket manager this controller can hand an authorized connection to:
+ * `PtySessionManager`, and `BrowserViewerManager` with its upgrade request
+ * already bound.
+ */
+export interface AuthorizableSocketManager {
+  handleConnection(ws: WebSocket, authorize?: SocketAuthorizer): void
+}
+
+function createPtyAuthorizer(token: string, userAgent?: string): SocketAuthorizer {
   return (touch) => {
     try {
       if (touch && !validateSessionToken(token, userAgent)) return false
@@ -37,12 +48,13 @@ function requestRequiresSession(req: IncomingMessage): boolean {
 }
 
 /**
- * Tracks the authorization attached to long-lived PTY transports.
+ * Tracks the authorization attached to long-lived socket transports (the PTY
+ * and the browser viewer).
  *
  * Upgrade validation proves only that a session was valid at handshake time.
  * This controller also closes established local WebSockets and raw hub tunnels
  * when the session is revoked, disabled/demoted, or expires. Trusted direct
- * local PTYs in personal edition intentionally retain their passwordless
+ * local transports in personal edition intentionally retain their passwordless
  * desktop/dev behavior.
  */
 export class PtyAuthorizationController {
@@ -66,7 +78,7 @@ export class PtyAuthorizationController {
     })
   }
 
-  handleConnection(ws: WebSocket, req: IncomingMessage, manager: PtySessionManager): void {
+  handleConnection(ws: WebSocket, req: IncomingMessage, manager: AuthorizableSocketManager): void {
     if (!requestRequiresSession(req)) {
       manager.handleConnection(ws)
       return

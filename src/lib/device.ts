@@ -38,15 +38,17 @@ export function devicePrefix(): string {
 
 /**
  * Prefix a same-origin URL with the active device's proxy prefix. Only "/api/*"
- * and "/__pty" URLs are routed to a remote device. Hub-scoped URLs
- * ("/api/hub/*" device management, "/api/auth/*" hub authentication) are never
- * prefixed — they always target the hub itself.
+ * and the socket transports ("/__pty", "/__browser") are routed to a remote
+ * device. Hub-scoped URLs ("/api/hub/*" device management, "/api/auth/*" hub
+ * authentication) are never prefixed — they always target the hub itself.
  */
 export function withBase(url: string): string {
   const prefix = devicePrefix()
   if (!prefix) return url
   if (url.startsWith("/api/hub/") || url.startsWith("/api/auth/")) return url
-  if (url.startsWith("/api") || url.startsWith("/__pty")) return `${prefix}${url}`
+  if (url.startsWith("/api") || url.startsWith("/__pty") || url.startsWith("/__browser")) {
+    return `${prefix}${url}`
+  }
   return url
 }
 

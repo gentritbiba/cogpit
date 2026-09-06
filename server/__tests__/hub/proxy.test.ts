@@ -597,8 +597,18 @@ describe("createHubProxyHandler — streaming", () => {
 })
 
 describe("handleHubUpgrade", () => {
-  it("returns false for a non-hub-pty upgrade path", () => {
+  it("returns false for a non-hub-transport upgrade path", () => {
     const req = { url: "/__pty", headers: {}, socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage
+    const fakeSocket = { write: () => {}, destroy: () => {}, destroyed: false } as never
+    expect(handleHubUpgrade(req, fakeSocket, Buffer.alloc(0))).toBe(false)
+  })
+
+  it("returns false for a hub path that is neither transport", () => {
+    const req = {
+      url: "/hub/dev_x/__debug",
+      headers: {},
+      socket: { remoteAddress: "127.0.0.1" },
+    } as unknown as IncomingMessage
     const fakeSocket = { write: () => {}, destroy: () => {}, destroyed: false } as never
     expect(handleHubUpgrade(req, fakeSocket, Buffer.alloc(0))).toBe(false)
   })
@@ -642,6 +652,96 @@ describe("handleHubUpgrade", () => {
       const forwardedHeaders = deviceUpgradeHeaders as unknown as http.IncomingHttpHeaders
       expect(forwardedHeaders.cookie).toBeUndefined()
       expect(forwardedHeaders.origin).toBeUndefined()
+    } finally {
+      ws.close()
+      wss.close()
+    }
+  })
+
+  it("proxies a /__browser upgrade to the device, keeping the session query (password device)", async () => {
+    // The browser transport carries `?session=<name>`; the device token must be
+    // merged into those params, never replace them.
+    const wss = new WebSocketServer({ noServer: true })
+    wss.on("connection", (ws) => {
+      ws.on("message", (m) => ws.send(`echo:${m}`))
+    })
+    let deviceUrl: string | null = null
+    const targetServer = http.createServer((req, res) => {
+      if (req.url === "/api/auth/verify" && req.method === "POST") {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ valid: true, token: "device-token-1" }))
+        return
+      }
+      res.end()
+    })
+    targetServer.on("upgrade", (req, socket, head) => {
+      deviceUrl = req.url || ""
+      const u = new URL(req.url || "/", "http://localhost")
+      if (u.pathname === "/__browser") wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+      else socket.destroy()
+    })
+    openServers.push(targetServer)
+    const targetPort = await listen(targetServer)
+
+    const device = await addDevice({
+      name: "Studio", host: "127.0.0.1", port: targetPort, auth: "password", password: "hunter2secret1",
+    })
+    const hub = track(await makeHub())
+
+    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__browser?session=work`)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve())
+        ws.once("error", reject)
+      })
+      const reply = await new Promise<string>((resolve) => {
+        ws.once("message", (d) => resolve(d.toString()))
+        ws.send("ping")
+      })
+      expect(reply).toBe("echo:ping")
+
+      const forwarded = new URL(deviceUrl as unknown as string, "http://localhost")
+      expect(forwarded.pathname).toBe("/__browser")
+      expect(forwarded.searchParams.get("session")).toBe("work")
+      expect(forwarded.searchParams.get("token")).toBe("device-token-1")
+    } finally {
+      ws.close()
+      wss.close()
+    }
+  })
+
+  it("forwards the hub client token as the device token on a /__pty upgrade", async () => {
+    const wss = new WebSocketServer({ noServer: true })
+    wss.on("connection", (ws) => ws.on("message", (m) => ws.send(`echo:${m}`)))
+    let deviceUrl: string | null = null
+    const targetServer = http.createServer((req, res) => {
+      if (req.url === "/api/auth/verify" && req.method === "POST") {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ valid: true, token: "device-token-1" }))
+        return
+      }
+      res.end()
+    })
+    targetServer.on("upgrade", (req, socket, head) => {
+      deviceUrl = req.url || ""
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+    })
+    openServers.push(targetServer)
+    const targetPort = await listen(targetServer)
+
+    const device = await addDevice({
+      name: "Studio", host: "127.0.0.1", port: targetPort, auth: "password", password: "hunter2secret1",
+    })
+    const hub = track(await makeHub())
+    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__pty?token=hub-client-token`)
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve())
+        ws.once("error", reject)
+      })
+      // The hub's own client token never travels onward; only the device lease does.
+      expect(deviceUrl).toBe("/__pty?token=device-token-1")
     } finally {
       ws.close()
       wss.close()

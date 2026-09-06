@@ -34,6 +34,7 @@ import { handleHubUpgrade } from "./hub/proxy"
 import { allRuntimes } from "./agents/runtimes"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
+import { BrowserViewerManager } from "./browser/viewerSocket"
 import type { HubMode } from "./routes/hello"
 
 export interface AppServerEnvironment {
@@ -140,6 +141,8 @@ export async function createServerComposition(
 
   const wss = new WebSocketServer({ noServer: true })
   const ptyManager = new PtySessionManager(wss)
+  const browserWss = new WebSocketServer({ noServer: true })
+  const browserManager = new BrowserViewerManager()
   const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()
 
@@ -149,16 +152,17 @@ export async function createServerComposition(
 
     const url = new URL(req.url || "/", "http://localhost")
     if (handleHubUpgrade(req, socket, head)) {
-      // Hub PTY upgrades bypass the local WebSocketServer and splice raw
+      // Hub transport upgrades bypass the local WebSocketServers and splice raw
       // sockets, so track the caller's outer team session here as well.
-      if (!socket.destroyed && /^\/hub\/[^/]+\/__pty$/.test(url.pathname)) {
+      if (!socket.destroyed && /^\/hub\/[^/]+\/(__pty|__browser)$/.test(url.pathname)) {
         ptyAuthorization.trackHubUpgrade(req, url, socket)
       }
       return
     }
-    if (url.pathname === "/__pty") {
+    if (url.pathname === "/__pty" || url.pathname === "/__browser") {
       if (rejectWebsocketUpgrade(req, url, socket)) return
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+      const transport = url.pathname === "/__pty" ? wss : browserWss
+      transport.handleUpgrade(req, socket, head, (ws) => transport.emit("connection", ws, req))
       return
     }
     // Dev mode: forward Vite's HMR WebSocket.
@@ -198,19 +202,25 @@ export async function createServerComposition(
   })
 
   wss.on("connection", (ws, req) => ptyAuthorization.handleConnection(ws, req, ptyManager))
+  browserWss.on("connection", (ws, req) => {
+    ptyAuthorization.handleConnection(ws, req, browserManager.socketFor(req))
+  })
 
   let cleanupPromise: Promise<void> | null = null
   const cleanupRuntime = (): Promise<void> => {
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
       ptyManager.cleanup()
+      browserManager.cleanup()
       ptyAuthorization.cleanup()
       for (const client of wss.clients) client.terminate()
+      for (const client of browserWss.clients) client.terminate()
       for (const socket of upgradedSockets) socket.destroy()
       upgradedSockets.clear()
 
       await Promise.all([
         new Promise<void>((resolve) => wss.close(() => resolve())),
+        new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
         flushSessionPersistence(),

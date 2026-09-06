@@ -17,6 +17,7 @@ import {
   type BrowserClientMessage,
   type BrowserServerMessage,
 } from "../../shared/browser/protocol"
+import type { AuthorizableSocketManager, SocketAuthorizer } from "../pty-authorization"
 import { BrowserViewer, type ViewerEvents } from "./cdp"
 import { isRunning, launch, readDevToolsEndpoint } from "./daemons"
 import { assertNamedBrowser } from "./paths"
@@ -39,7 +40,7 @@ export interface ViewerSocketDeps {
 }
 
 /** `touch=true` only for client activity; the periodic recheck must not keep a session alive. */
-export type ViewerConnectionAuthorizer = (touch: boolean) => boolean
+export type ViewerConnectionAuthorizer = SocketAuthorizer
 
 type StatusState = Extract<BrowserServerMessage, { type: "status" }>["state"]
 type InputMessage = Exclude<BrowserClientMessage, { type: "launch" }>
@@ -134,6 +135,15 @@ export class BrowserViewerManager {
       return
     }
     void this.sync(connection)
+  }
+
+  /**
+   * The shape `PtyAuthorizationController` hands connections to. The upgrade
+   * request names the browser through `?session=`, so it is bound here and only
+   * the authorizer flows back in.
+   */
+  socketFor(req: IncomingMessage): AuthorizableSocketManager {
+    return { handleConnection: (ws, authorize) => this.handleConnection(ws, req, authorize) }
   }
 
   cleanup(): void {

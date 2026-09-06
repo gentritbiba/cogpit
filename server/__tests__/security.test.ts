@@ -284,6 +284,12 @@ describe("authMiddleware path protection", () => {
     expect(r.statusCode).toBe(401)
   })
 
+  it("rejects a remote /__BROWSER request with no token (case-variant bypass)", () => {
+    const r = run("/__BROWSER")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
   it("allows a remote /hub/* request carrying a valid token", () => {
     const token = createSessionToken(REMOTE_IP)
     const r = run("/hub/dev_abc123/api/projects", { authHeader: `Bearer ${token}` })
@@ -396,6 +402,12 @@ describe("authMiddleware path protection", () => {
     expect(r.statusCode).toBe(401)
   })
 
+  it("rejects a remote /__browser request with no token", () => {
+    const r = run("/__browser?session=work")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
   it("allows a remote /api/* request carrying a valid token", () => {
     const token = createSessionToken(REMOTE_IP)
     const r = run("/api/projects", { authHeader: `Bearer ${token}` })
@@ -480,10 +492,11 @@ describe("authMiddleware path protection", () => {
     expect(r.statusCode).toBe(401)
   })
 
-  it("rejects absolute-form targets for /hub/* and /__pty", () => {
+  it("rejects absolute-form targets for /hub/*, /__pty and /__browser", () => {
     expect(run("http://cogpit.local:19384/hub/dev_abc123/api/projects").statusCode).toBe(401)
     expect(run("http://cogpit.local:19384/hub/dev_abc123/__pty").statusCode).toBe(401)
     expect(run("http://cogpit.local:19384/__pty").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/__browser?session=work").statusCode).toBe(401)
   })
 
   it("rejects an absolute-form target whose path is a case variant", () => {

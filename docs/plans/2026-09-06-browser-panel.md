@@ -388,7 +388,7 @@ them all) and `protocol.MAX_URL_LENGTH` (one url cap for the socket and the rout
 The valid skill-install targets are derived from the descriptor table
 (`config.skillsDir !== null`), which is every CLI, not the two the plan named.
 
-### Task 11: Transport wiring
+### Task 11: Transport wiring ✅ done
 
 **Files:**
 - Modify: `server/pty-authorization.ts` — widen `handleConnection(ws, req, manager)` to accept `{ handleConnection(ws, authorize?) }`; rename nothing else.
@@ -406,6 +406,17 @@ and its sockets must be registered with `PtyAuthorizationController` so
 backstop, not the primary path.
 
 Commit: `feat(browser): /__browser transport`
+
+Note: the controller's manager interface is exactly as planned
+(`AuthorizableSocketManager = { handleConnection(ws, authorize?) }`), but Task 8
+shipped `BrowserViewerManager.handleConnection(ws, req, authorize?)` — the
+upgrade request names the browser through `?session=`. The manager therefore
+adapts through `socketFor(req)`, which binds the request, so the mount sites read
+`authorization.handleConnection(ws, req, browserManager.socketFor(req))` and
+`PtySessionManager` is untouched. The hub upgrade merges the query with the
+existing `stripHubToken` helper the HTTP path already uses (original
+percent-encoding preserved, the hub's own `token` dropped before the device lease
+is appended) rather than re-encoding through `URLSearchParams`.
 
 ### Task 12: Startup, shutdown, and env injection
 
