@@ -1,14 +1,18 @@
 // @vitest-environment node
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import {
   accessSync,
+  chmodSync,
   constants as fsConstants,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -59,10 +63,15 @@ interface ShimRun {
   argv: string
 }
 
-function runShim(args: string[], extraEnv: Record<string, string> = {}): ShimRun {
+function spawnShim(file: string, args: string[], extraEnv: Record<string, string> = {}) {
   const env = { HOME: root, PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home, ...extraEnv }
-  const out = execFileSync("bash", [shimFile, ...args], { env, encoding: "utf8" })
-  const [sessionDir, profile, argLine, argv = ""] = out.split("\n")
+  return spawnSync("bash", [file, ...args], { env, encoding: "utf8", timeout: 5_000 })
+}
+
+function runShim(args: string[], extraEnv: Record<string, string> = {}): ShimRun {
+  const result = spawnShim(shimFile, args, extraEnv)
+  if (result.status !== 0) throw new Error(`shim exited ${result.status}: ${result.stderr}`)
+  const [sessionDir, profile, argLine, argv = ""] = result.stdout.split("\n")
   return {
     sessionDir: sessionDir.replace(/^SESSION_DIR=/, ""),
     profile: profile.replace(/^PROFILE=/, ""),
@@ -146,6 +155,56 @@ describe("shim routing", () => {
     expect(existsSync(home)).toBe(false)
   })
 
+  it.each([
+    ["upper case", "Foo"],
+    ["leading dash", "-foo"],
+    ["41 characters", "a".repeat(41)],
+  ])("passes a name with %s through under a UTF-8 locale", (_label, name) => {
+    const run = runShim(["--session", name], { LC_ALL: "en_US.UTF-8" })
+    expect(run.profile).toBe("")
+    expect(run.sessionDir).toBe("")
+    expect(run.argv).toBe(`[--session][${name}]`)
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it("keeps the default name when --session is the last argument", () => {
+    const run = runShim(["--session"])
+    expect(run.profile).toBe(join(home, "profiles", "default"))
+    expect(run.argv).toBe("[--session]")
+  })
+
+  it("refuses to run when the real binary is missing", () => {
+    const missing = join(root, "missing", "agent-browser")
+    const brokenShim = join(root, "broken.sh")
+    writeFileSync(brokenShim, renderShim(missing), { mode: 0o755 })
+    const result = spawnShim(brokenShim, ["open", "x"], { COGPIT_SESSION_ID: "s1" })
+    expect(result.status).toBe(127)
+    expect(result.stderr).toContain("restart Cogpit")
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it("refuses to run when the real binary is the shim itself", () => {
+    const selfShim = join(root, "self.sh")
+    writeFileSync(selfShim, renderShim(selfShim), { mode: 0o755 })
+    const result = spawnShim(selfShim, ["open", "x"])
+    expect(result.status).toBe(127)
+    expect(result.stderr).toContain("restart Cogpit")
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it("passes through when neither COGPIT_BROWSER_HOME nor HOME is set", () => {
+    const env = { PATH: process.env.PATH ?? "" }
+    const out = execFileSync("bash", [shimFile, "open", "x"], { env, encoding: "utf8" })
+    expect(out).toContain("PROFILE=\n")
+    expect(out.endsWith("[open][x]")).toBe(true)
+  })
+
+  it("uses an explicit COGPIT_BROWSER_HOME even without HOME", () => {
+    const env = { PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home }
+    const out = execFileSync("bash", [shimFile], { env, encoding: "utf8" })
+    expect(out).toContain(`PROFILE=${join(home, "profiles", "default")}\n`)
+  })
+
   it("preserves arguments with spaces and quotes", () => {
     const run = runShim(["fill", "@e1", "hello world", 'say "hi"', "it's"])
     expect(run.argv).toBe('[fill][@e1][hello world][say "hi"][it\'s]')
@@ -153,7 +212,12 @@ describe("shim routing", () => {
 })
 
 describe("ensureShim", () => {
-  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  /** Backdates the shim's mtime by a minute and returns the stored value. */
+  function ageShim(): number {
+    const old = new Date(Date.now() - 60_000)
+    utimesSync(shimPath(), old, old)
+    return statSync(shimPath()).mtimeMs
+  }
 
   it("returns null and leaves nothing behind when there is no real binary", () => {
     expect(ensureShim(null)).toEqual({ path: null })
@@ -176,12 +240,25 @@ describe("ensureShim", () => {
     expect(out.endsWith("[open][z]")).toBe(true)
   })
 
-  it("leaves a current shim untouched on repeated calls", async () => {
+  it("leaves a current shim untouched on repeated calls", () => {
     ensureShim(fakeBinary)
-    const before = statSync(shimPath()).mtimeMs
-    await wait(20)
+    const old = ageShim()
     ensureShim(fakeBinary)
-    expect(statSync(shimPath()).mtimeMs).toBe(before)
+    expect(statSync(shimPath()).mtimeMs).toBe(old)
+  })
+
+  it("repairs a lost execute bit without rewriting", () => {
+    ensureShim(fakeBinary)
+    chmodSync(shimPath(), 0o644)
+    const old = ageShim()
+    ensureShim(fakeBinary)
+    expect(statSync(shimPath()).mode & 0o111).toBe(0o111)
+    expect(statSync(shimPath()).mtimeMs).toBe(old)
+  })
+
+  it("leaves no temp file behind", () => {
+    ensureShim(fakeBinary)
+    expect(readdirSync(binDir())).toEqual(["agent-browser"])
   })
 
   it("rewrites a shim whose version line differs", () => {
@@ -213,7 +290,22 @@ describe("findRealAgentBrowser", () => {
 
   it("treats binDir() spelled differently as the same directory", () => {
     ensureShim(fakeBinary)
-    const env = { PATH: [`${binDir()}/`, join(home, "..", "bin"), fakeBinDir].join(delimiter) }
+    const env = { PATH: [`${binDir()}/`, `${home}/../bin`, fakeBinDir].join(delimiter) }
+    expect(findRealAgentBrowser(env)).toBe(fakeBinary)
+  })
+
+  it("treats a symlink to binDir() as the same directory", () => {
+    ensureShim(fakeBinary)
+    const link = join(root, "link-bin")
+    symlinkSync(binDir(), link)
+    const env = { PATH: [link, fakeBinDir].join(delimiter) }
+    expect(findRealAgentBrowser(env)).toBe(fakeBinary)
+  })
+
+  it("skips a directory named agent-browser", () => {
+    const dirBin = join(root, "dir-bin")
+    mkdirSync(join(dirBin, "agent-browser"), { recursive: true })
+    const env = { PATH: [dirBin, fakeBinDir].join(delimiter) }
     expect(findRealAgentBrowser(env)).toBe(fakeBinary)
   })
 
