@@ -4,6 +4,12 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260906T203201Z-0faf8a8 - Browser routing through shell snapshots
+- File: `audit-history/audit-20260906T203201Z-0faf8a8.md`
+- Status: PASS after configuration-preservation and scope corrections.
+- Scope: App-server browser routing and automatic guidance on new threads and disk resume.
+- Validation: 396 files / 6,192 tests; all quality gates; Electron build; actual runtime browser, streaming, and resume probes.
+
 ### 20260906T195006Z-a0757f2 - Browser capability guidance
 - File: `audit-history/audit-20260906T195006Z-a0757f2.md`
 - Status: PASS after tab-selection clarification.
