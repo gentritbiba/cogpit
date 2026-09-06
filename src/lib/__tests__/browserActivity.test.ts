@@ -119,6 +119,32 @@ describe("latestBrowserActivity", () => {
     expect(activityFor("cat agent-browser.md")).toBeNull()
   })
 
+  it.each([
+    'git commit -m "fix agent-browser"',
+    'rg "agent-browser; agent-browser" server',
+    "cat /tmp/agent-browser",
+    "echo ok # agent-browser open x",
+    "command -v agent-browser",
+    `sh -c 'agent-browser open x'`,
+  ])("does not show browser activity for %s", (command) => {
+    expect(activityFor(command)).toBeNull()
+  })
+
+  it("keeps separators inside arguments and reads the later session flag", () => {
+    const command = 'agent-browser fill @e1 "a; b && c" --session work'
+    expect(activityFor(command)).toMatchObject({ session: "work", command })
+  })
+
+  it("finds a real invocation after an inert mention", () => {
+    expect(activityFor('echo "agent-browser" && agent-browser --session work open x'))
+      .toMatchObject({ session: "work", command: "agent-browser --session work open x" })
+  })
+
+  it("ends the caption at a pipe without reading the next command's flags", () => {
+    expect(activityFor('agent-browser snapshot | rg --session work'))
+      .toMatchObject({ session: "default", command: "agent-browser snapshot" })
+  })
+
   it("ignores non-browser and non-shell calls", () => {
     expect(activityFor("bun run test")).toBeNull()
     expect(activityFor("agent-browser open x", { name: "Read" })).toBeNull()

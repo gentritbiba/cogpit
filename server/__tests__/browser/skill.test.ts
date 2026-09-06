@@ -62,8 +62,9 @@ describe("COGPIT_BROWSER_SKILL", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("close")
   })
 
-  it("says Cogpit enforces the throwaway rule rather than trusting it", () => {
-    expect(COGPIT_BROWSER_SKILL).toMatch(/enforced, not trusted/)
+  it("explains redirection and the limits of hook coverage", () => {
+    expect(COGPIT_BROWSER_SKILL).toContain("In SDK sessions Cogpit redirects recognized subagent browser calls")
+    expect(COGPIT_BROWSER_SKILL).toContain("outside this hook's coverage")
     expect(COGPIT_BROWSER_SKILL).toMatch(/rewritten onto a `tmp-` browser before/)
   })
 

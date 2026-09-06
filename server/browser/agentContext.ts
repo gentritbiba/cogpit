@@ -10,7 +10,7 @@
  * PreToolUse hook. The hook, not `canUseTool`, because the CLI skips
  * `canUseTool` entirely under bypassPermissions, which is Cogpit's common mode.
  */
-import { BROWSER_BINARY, findBrowserInvocations } from "../../shared/browser/invocation"
+import { scanBrowserInvocations } from "../../shared/browser/invocation"
 import {
   isThrowawayName,
   isValidBrowserName,
@@ -34,35 +34,7 @@ export const BROWSER_HOOK_TOOL = "Bash"
 const DENIAL = "Cogpit could not rewrite this command onto a throwaway browser safely, so it did not run. "
   + "A subagent must never drive the `default` browser or a named one — those are the user's, visible in the "
   + "Browser panel, and a second agent on the same page destroys the first agent's work. Re-issue the command "
-  + "with an explicit `--session tmp-<id>`, written literally: not inside a quoted string, and not from a variable."
-
-/** `--session` as a whole flag, so `--session-name` is not one of these. */
-const SESSION_WORD = /--session(?![\w-])/g
-
-/**
- * Which characters of `command` sit inside a quoted string, or null when the
- * quoting does not close — in which case this is not a command we can edit.
- */
-function quotedIndices(command: string): boolean[] | null {
-  const quoted = new Array<boolean>(command.length).fill(false)
-  let open: string | null = null
-  for (let index = 0; index < command.length; index++) {
-    const char = command[index]
-    if (open === null) {
-      if (char === "\\") index++
-      else if (char === "'" || char === '"') open = char
-      continue
-    }
-    quoted[index] = true
-    if (char === "\\" && open === '"') {
-      if (index + 1 < command.length) quoted[index + 1] = true
-      index++
-    } else if (char === open) {
-      open = null
-    }
-  }
-  return open === null ? quoted : null
-}
+  + "as a direct `agent-browser --session tmp-<id>` call with literal arguments. Split browser work out of shell strings, expansions, or complex shell syntax."
 
 /** The browser a subagent gets: its own id, made into a `tmp-` name. */
 export function throwawayBrowserName(agentId: string): string {
@@ -84,30 +56,10 @@ export function redirectToThrowaway(
   command: string,
   agentId: string,
 ): { command: string; changed: boolean } | null {
-  const invocations = findBrowserInvocations(command)
-  if (invocations.every((invocation) => isThrowawayName(invocation.browser))) {
-    return { command, changed: false }
-  }
-
-  const quoted = quotedIndices(command)
+  const { invocations, ambiguous } = scanBrowserInvocations(command)
+  if (ambiguous) return null
   const throwaway = throwawayBrowserName(agentId)
-  // An illegal name would fall straight through the shim into an unmanaged
-  // browser, which is the one outcome worse than refusing the command.
-  if (quoted === null || !isValidBrowserName(throwaway)) return null
-
-  // Everything is checked before anything is edited, so no partial rewrite can
-  // escape: the binary must be a real command rather than text inside quotes,
-  // and each invocation must carry exactly one `--session` we can read.
-  for (const invocation of invocations) {
-    if (quoted[invocation.binaryEnd - 1]) return null
-    // A separator inside quotes ends nothing, so the invocation runs past where
-    // the scan cut it and the flags we can see are not all of them.
-    if (invocation.end < command.length && quoted[invocation.end]) return null
-    const flags = invocation.text.match(SESSION_WORD)?.length ?? 0
-    if (flags !== (invocation.sessionFlag === null ? 0 : 1)) return null
-    if (invocation.sessionFlag !== null
-      && (quoted[invocation.sessionFlag.start] || /[$`]/.test(invocation.browser))) return null
-  }
+  if (!isValidBrowserName(throwaway)) return null
 
   let rewritten = command
   for (let index = invocations.length - 1; index >= 0; index--) {
@@ -117,7 +69,7 @@ export function redirectToThrowaway(
       ? splice(rewritten, binaryEnd, binaryEnd, ` --session ${throwaway}`)
       : splice(rewritten, sessionFlag.start, sessionFlag.end, `--session ${throwaway}`)
   }
-  return { command: rewritten, changed: true }
+  return { command: rewritten, changed: rewritten !== command }
 }
 
 /**
@@ -133,7 +85,6 @@ export const browserPreToolUseHook: HookCallback = async (input) => {
 
     const toolInput = input.tool_input as Record<string, unknown>
     const command = getCommandText(toolInput)
-    if (!command.includes(BROWSER_BINARY)) return {}
 
     const redirect = redirectToThrowaway(command, input.agent_id)
     if (redirect === null) {
