@@ -454,7 +454,7 @@ tree; `copilotTransport`'s exact-env assertion was extended to the prepended
 
 ## Phase 2 — Client
 
-### Task 13: Agent activity helper (shared)
+### Task 13: Agent activity helper (shared) ✅ done
 
 **Files:**
 - Create: `shared/session/browserActivity.ts`
@@ -468,6 +468,14 @@ export function latestBrowserActivity(session: ParsedSession | null): BrowserAge
 Scan turns from the end, `turn.toolCalls` only (main lane), `name === "Bash"` (or exec variants used by `BashCommandCard`: reuse `getCommandText`), command contains `agent-browser`. Parse `--session X` / `--session=X` (default `default`); ignore `tmp-*` (throwaway is invisible). `command` = the text after `agent-browser` up to the first `&&`/newline, trimmed to 120 chars. `done = result !== null`.
 
 Commit: `feat(browser): derive agent browser activity from the transcript`
+
+Note: the test lives at `src/lib/__tests__/browserActivity.test.ts` (vitest does
+not include `shared/**`). A call matches when the shell command names the binary
+as a word, optionally through a path — `/usr/local/bin/agent-browser open x`
+counts, `cat notes/agent-browser-plan.md` does not — and `command` starts at the
+binary, so `npx agent-browser open x` captions as `agent-browser open x`. The
+scan skips a `tmp-*` call and keeps going rather than returning null, so a
+subagent's throwaway browser cannot hide the one the main agent is driving.
 
 ### Task 14: Socket hook
 
