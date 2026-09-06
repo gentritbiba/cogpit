@@ -532,7 +532,7 @@ invisible until the next 5 s tick. Repeat polls that bring back an identical
 list keep the previous `status` object, so the panel does not re-render on a
 heartbeat.
 
-### Task 16: Viewport component
+### Task 16: Viewport component ✅ done
 
 **Files:**
 - Create: `src/components/BrowserPanel/BrowserViewport.tsx`, `src/components/BrowserPanel/pointerMath.ts`
@@ -553,6 +553,20 @@ export function cdpButton(button: number): "left" | "middle" | "right"
 Tests: pointer math table; component sends a `mouse down` with scaled coordinates given a mocked `getBoundingClientRect`; Escape blurs; keydown of "a" sends `{type:"key", event:"down", key:"a", text:"a"}`.
 
 Commit: `feat(browser): viewport canvas with input mapping`
+
+Note: `toDevicePoint` takes a `{ clamp }` option — a hover outside the image
+returns null, a drag clamps to the edge so the gesture still lands. `fitRect`
+rounds the offsets (a 1:1 page stays crisp) and reports `scale: 0` when there is
+nothing to draw. Pointer events report `detail: 0` in Chromium, verified in a
+real browser, so the component counts clicks itself (500 ms / 5 px) — without it
+double- and triple-click selection in the page never works. The right button is
+handled only by `contextmenu`, so the page gets one down/up pair rather than
+two, and a drag's `move` carries `button: "none"` because `cdp.ts` tracks the
+button mask server-side. `Enter` sends `text: "\r"`, which is what Blink submits
+a form on; every other non-printable key still sends no text. Wheel is a native
+non-passive listener (React attaches `wheel` passively at the root) and converts
+line/page delta modes to pixels. `src/__tests__/setup.ts` gained a stateful
+pointer-capture shim, which jsdom lacks.
 
 ### Task 17: Session bar and nav bar
 

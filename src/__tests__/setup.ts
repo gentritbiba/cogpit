@@ -23,6 +23,22 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   }
 }
 
+// jsdom lacks pointer capture (used by drag handling on the browser viewport canvas)
+if (typeof Element !== "undefined" && typeof Element.prototype.setPointerCapture === "undefined") {
+  const captured = new WeakMap<Element, Set<number>>()
+  Element.prototype.setPointerCapture = function setPointerCapture(pointerId: number) {
+    const ids = captured.get(this) ?? new Set<number>()
+    ids.add(pointerId)
+    captured.set(this, ids)
+  }
+  Element.prototype.releasePointerCapture = function releasePointerCapture(pointerId: number) {
+    captured.get(this)?.delete(pointerId)
+  }
+  Element.prototype.hasPointerCapture = function hasPointerCapture(pointerId: number) {
+    return captured.get(this)?.has(pointerId) ?? false
+  }
+}
+
 // jsdom lacks Element.getAnimations (reached by @base-ui ScrollArea once ResizeObserver exists)
 if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations === "undefined") {
   Element.prototype.getAnimations = () => []
