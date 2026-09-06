@@ -22,7 +22,7 @@
 
 ## Phase 1 — Server foundation
 
-### Task 1: Paths and names
+### Task 1: Paths and names ✅ done
 
 **Files:**
 - Create: `server/browser/paths.ts`
@@ -41,6 +41,8 @@ Behaviour:
 Tests: each predicate with valid/invalid samples (`default`, `github`, `tmp-1`, `../x`, `Foo`, 41 chars, empty); `profileDir("../x")` throws; env override changes `browserHome()`.
 
 Commit: `feat(browser): path layout and name rules`
+
+Note: `profileDir()` guards with `assertNamedBrowser` (throwaways have no profile per the design); `sessionRunDir()` guards with a private session-id assert that also throws `BrowserNameError`.
 
 ### Task 2: Shim script
 
