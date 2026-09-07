@@ -1068,6 +1068,7 @@ export default function App() {
       mcpServers={supportsMcp && configAdminEnabled ? mcpData.servers : undefined}
       selectedMcpServers={supportsMcp && configAdminEnabled ? mcpData.selectedServers : undefined}
       onToggleMcpServer={supportsMcp && configAdminEnabled ? mcpData.toggleServer : undefined}
+      onSetMcpServers={supportsMcp && configAdminEnabled ? mcpData.setSelection : undefined}
       onRefreshMcpServers={supportsMcp && configAdminEnabled ? mcpData.refresh : undefined}
       mcpLoading={supportsMcp && configAdminEnabled ? mcpData.loading : undefined}
       onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}

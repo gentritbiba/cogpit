@@ -32,6 +32,8 @@ export interface ChatInputSettingsProps {
   selectedMcpServers?: string[]
   /** Toggle an MCP server on/off */
   onToggleMcpServer?: (name: string) => void
+  /** Replace the whole MCP selection, for the picker's All/None actions */
+  onSetMcpServers?: (names: string[]) => void
   /** Refresh MCP server status */
   onRefreshMcpServers?: () => void
   /** Loading MCP status */
@@ -69,6 +71,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   mcpServers,
   selectedMcpServers,
   onToggleMcpServer,
+  onSetMcpServers,
   onRefreshMcpServers,
   mcpLoading,
   onMcpAuth,
@@ -150,6 +153,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     mcpServers,
     selectedMcpServers,
     onToggleMcpServer,
+    onSetMcpServers,
     onRefreshMcpServers,
     mcpLoading,
     onMcpAuth,

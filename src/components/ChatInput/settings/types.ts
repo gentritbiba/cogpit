@@ -40,6 +40,7 @@ export interface CommonSettingsControlProps {
   mcpServers?: McpServer[]
   selectedMcpServers?: string[]
   onToggleMcpServer?: (name: string) => void
+  onSetMcpServers?: (names: string[]) => void
   onRefreshMcpServers?: () => void
   mcpLoading?: boolean
   onMcpAuth?: (serverName: string) => void

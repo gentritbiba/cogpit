@@ -491,4 +491,42 @@ describe("ChatInputSettings", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /^github/ }))
     expect(onMcpAuth).toHaveBeenCalledWith("github")
   })
+
+  it("turns every MCP server on or off at once and filters long lists", () => {
+    const onSetMcpServers = vi.fn()
+    const servers = Array.from({ length: 9 }, (_, index) => ({
+      name: `server-${index}`,
+      status: "connected" as const,
+    }))
+
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+        mcpServers={servers}
+        selectedMcpServers={["server-1"]}
+        onToggleMcpServer={vi.fn()}
+        onSetMcpServers={onSetMcpServers}
+        onRefreshMcpServers={vi.fn()}
+        onMcpAuth={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "MCPs 1/9" }))
+    const panel = screen.getByRole("dialog", { name: "MCP servers" })
+    expect(within(panel).getByText("1 on")).toBeInTheDocument()
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Turn every server on" }))
+    expect(onSetMcpServers).toHaveBeenCalledWith(servers.map((server) => server.name))
+    fireEvent.click(within(panel).getByRole("button", { name: "Turn every server off" }))
+    expect(onSetMcpServers).toHaveBeenCalledWith([])
+
+    fireEvent.change(within(panel).getByRole("searchbox", { name: "Filter servers" }), { target: { value: "server-8" } })
+    expect(within(panel).getAllByRole("checkbox")).toHaveLength(1)
+    expect(within(panel).getByRole("checkbox", { name: "server-8" })).toBeInTheDocument()
+  })
 })

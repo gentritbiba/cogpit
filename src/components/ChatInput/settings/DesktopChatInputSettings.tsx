@@ -37,6 +37,7 @@ export function DesktopChatInputSettings({
   mcpServers,
   selectedMcpServers,
   onToggleMcpServer,
+  onSetMcpServers,
   onRefreshMcpServers,
   mcpLoading,
   onMcpAuth,
@@ -77,6 +78,9 @@ export function DesktopChatInputSettings({
             servers={mcpServers ?? []}
             selected={selectedMcpServers ?? []}
             onToggle={(name) => changeAndApply(() => onToggleMcpServer(name))}
+            onSetSelection={onSetMcpServers
+              ? (names) => changeAndApply(() => onSetMcpServers(names))
+              : undefined}
             onRefresh={onRefreshMcpServers}
             loading={mcpLoading ?? false}
             onAuth={onMcpAuth}

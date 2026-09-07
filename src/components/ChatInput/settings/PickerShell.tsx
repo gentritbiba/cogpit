@@ -122,31 +122,3 @@ export function PickerOption({ value, title, description, icon: Icon, disabled }
     </Radio.Root>
   )
 }
-
-interface PickerCheckRowProps {
-  /** Leading glyph; the caller styles it, since "on" means different things per row. */
-  icon: ReactNode
-  title: string
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
-}
-
-/** A multi-choice row: the whole row toggles, and a check mark shows the state. */
-export function PickerCheckRow({ icon, title, checked, onCheckedChange }: PickerCheckRowProps) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      onClick={() => onCheckedChange(!checked)}
-      className={cn(pickerRowClass, "group/check")}
-    >
-      <span className="flex size-4 shrink-0 items-center justify-center [&>svg]:size-4" aria-hidden>{icon}</span>
-      <span className="min-w-0 flex-1 truncate leading-5">{title}</span>
-      <Check
-        className={cn("size-4 shrink-0 transition-opacity duration-100", checked ? "opacity-100" : "opacity-0 group-hover/check:opacity-30")}
-        aria-hidden
-      />
-    </button>
-  )
-}
