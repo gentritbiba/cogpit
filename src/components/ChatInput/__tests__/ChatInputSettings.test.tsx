@@ -259,12 +259,13 @@ describe("ChatInputSettings", () => {
 
     const panel = openModelPicker(/Ultracode on/)
     expect(within(panel).getByRole("button", { name: "Ultracode" })).toHaveAttribute("aria-pressed", "true")
-    expect(within(panel).getByRole("button", { name: "Extra High" })).toBeDisabled()
-    expect(within(panel).getByRole("button", { name: "Light" })).toBeDisabled()
+    const slider = within(panel).getByRole("slider", { name: /Reasoning/ })
+    expect(slider).toBeDisabled()
+    expect(slider).toHaveAttribute("aria-valuetext", "Extra High")
     expect(within(panel).getByText("Pinned by Ultracode")).toBeInTheDocument()
   })
 
-  it("changes effort from the segmented control and keeps the picker open", () => {
+  it("changes effort from the slider and keeps the picker open", () => {
     const onEffortChange = vi.fn()
     render(
       <ChatInputSettings
@@ -278,8 +279,10 @@ describe("ChatInputSettings", () => {
     )
 
     const panel = openModelPicker(/Default/)
-    expect(within(panel).getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(within(panel).getByRole("button", { name: "Max" }))
+    const slider = within(panel).getByRole("slider", { name: /Reasoning/ })
+    expect(slider).toHaveAttribute("aria-valuetext", "High")
+    expect(slider).toHaveAttribute("max", "4")
+    fireEvent.change(slider, { target: { value: "4" } })
     expect(onEffortChange).toHaveBeenCalledWith("max")
     expect(screen.getByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
   })
@@ -376,9 +379,9 @@ describe("ChatInputSettings", () => {
     const panel = openModelPicker(/^Claude · Opus · Light$/)
     fireEvent.click(within(panel).getByRole("button", { name: "Fast mode" }))
     expect(onFastModeEnabledChange).toHaveBeenCalledWith(true)
-    expect(within(panel).getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true")
-    expect(within(panel).getByRole("button", { name: "Max" })).toBeInTheDocument()
-    expect(within(panel).queryByRole("button", { name: "High" })).not.toBeInTheDocument()
+    const slider = within(panel).getByRole("slider", { name: /Reasoning/ })
+    expect(slider).toHaveAttribute("aria-valuetext", "Light")
+    expect(slider).toHaveAttribute("max", "1")
 
     fireEvent.click(screen.getByRole("button", { name: "Permissions: Ask" }))
     fireEvent.click(screen.getByRole("radio", { name: /^Auto/ }))

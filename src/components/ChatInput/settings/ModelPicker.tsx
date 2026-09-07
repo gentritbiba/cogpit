@@ -2,10 +2,10 @@ import { useId, type ReactNode } from "react"
 import { Sparkles, Zap } from "lucide-react"
 import { Popover, PopoverTrigger } from "@/components/ui/popover"
 import { Toggle } from "@/components/ui/toggle"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { capabilitiesFor, type AgentKind } from "@/lib/agents"
 import { loadModelCatalog } from "@/hooks/useModelOptions"
 import { cn, type ServiceTierOption } from "@/lib/utils"
+import { EffortSlider } from "./EffortSlider"
 import { AGENT_OPTIONS } from "./modelOptions"
 import {
   PickerChip,
@@ -136,7 +136,7 @@ export function ModelPicker({
                 />
               ))}
             </PickerList>
-            {providerLocked && (
+            {providerLocked && !isNewSession && (
               <p className="mt-auto px-2 pb-1 pt-3 text-[11px] leading-4 text-muted-foreground">
                 Fixed for this session. Start a new one to switch.
               </p>
@@ -197,42 +197,35 @@ export function ModelPicker({
         </div>
 
         {showEffort && (
-          <div className="shrink-0 border-t p-3 pt-2">
-            <div className="mb-1.5 flex items-baseline justify-between gap-3">
-              <PickerSectionLabel id={effortLabelId} className="p-0">Reasoning effort</PickerSectionLabel>
+          <div className="shrink-0 border-t px-2 pb-1.5 pt-2">
+            <div className="flex items-baseline justify-between gap-3 px-1.5">
+              <PickerSectionLabel id={effortLabelId} className="flex items-baseline gap-1.5 p-0">
+                Reasoning
+                {selectedEffortOption && (
+                  <span
+                    key={selectedEffortOption.value}
+                    className="text-xs font-medium normal-case tracking-normal text-foreground motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+                  >
+                    {selectedEffortOption.label}
+                  </span>
+                )}
+              </PickerSectionLabel>
               {effortCaption && (
                 <span className="truncate text-[11px] leading-4 text-muted-foreground">{effortCaption}</span>
               )}
             </div>
             {effortOptions.length > 0
               ? (
-                <ToggleGroup
-                  value={[selectedEffort]}
-                  onValueChange={([next]) => { if (next) onEffortChange(next) }}
+                <EffortSlider
+                  options={effortOptions}
+                  value={selectedEffort}
+                  onChange={onEffortChange}
                   disabled={ultracodeOn}
-                  variant="outline"
-                  size="sm"
-                  spacing={0}
-                  aria-labelledby={effortLabelId}
-                  className="w-full"
-                >
-                  {effortOptions.map((option) => (
-                    <ToggleGroupItem
-                      key={option.value}
-                      value={option.value}
-                      title={option.description}
-                      className={cn(
-                        "min-w-0 flex-1 px-1 text-xs",
-                        "data-pressed:bg-primary data-pressed:text-primary-foreground data-pressed:hover:bg-primary/90",
-                      )}
-                    >
-                      <span className="truncate">{option.label}</span>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
+                  labelId={effortLabelId}
+                />
               )
               : (
-                <p className="text-xs leading-5 text-muted-foreground">
+                <p className="px-1.5 pb-1 text-xs leading-5 text-muted-foreground">
                   Not adjustable for {modelLabel}.
                 </p>
               )}

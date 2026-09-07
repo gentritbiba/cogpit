@@ -5,13 +5,19 @@
  * fourth agent is a type error rather than a silently missing row. That is the
  * bug that let Copilot fall out of the config badge map.
  */
-import { Bot, Code2, Github, type LucideIcon } from "lucide-react"
+import { Github } from "lucide-react"
+import type { ForwardRefExoticComponent, RefAttributes, SVGProps } from "react"
 import type { PermissionMode } from "../permissions"
 import { AGENT_KINDS, descriptorForDirName, type AgentKind } from "."
+import { AnthropicIcon, OpenAIIcon } from "./brandIcons"
 
-const ICONS: Record<AgentKind, LucideIcon> = {
-  claude: Bot,
-  codex: Code2,
+/** Any SVG component that takes the same props as a lucide icon. */
+export type AgentIcon = ForwardRefExoticComponent<SVGProps<SVGSVGElement> & RefAttributes<SVGSVGElement>>
+
+/** Each agent's vendor mark, since the product names alone don't say who runs the model. */
+const ICONS: Record<AgentKind, AgentIcon> = {
+  claude: AnthropicIcon,
+  codex: OpenAIIcon,
   copilot: Github,
 }
 
@@ -96,7 +102,7 @@ export function agentPermissionModes(kind: AgentKind): readonly PermissionModeOp
   return PERMISSION_MODES[kind]
 }
 
-export function agentIcon(kind: AgentKind): LucideIcon {
+export function agentIcon(kind: AgentKind): AgentIcon {
   return ICONS[kind]
 }
 
@@ -148,7 +154,7 @@ export function readOnlySessionNotice(kind: AgentKind): string {
 export const AGENT_OPTIONS: ReadonlyArray<{
   value: AgentKind
   label: string
-  Icon: LucideIcon
+  Icon: AgentIcon
 }> = AGENT_DISPLAY_ORDER.map((kind) => ({
   value: kind,
   label: SHORT_NAMES[kind],

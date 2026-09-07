@@ -132,6 +132,31 @@ describe("useProjectSessionLaunch", () => {
     expect(result.current.pendingAgentKindChange).toBeUndefined()
   })
 
+  it("looks the project path up when a sidebar entry only knows the dirName", async () => {
+    mockAuthFetch.mockResolvedValue(new Response(JSON.stringify([
+      { dirName: "-repo", path: "/repo" },
+    ]), { status: 200 }))
+    const { result } = renderHook(() => useProjectSessionLaunch(baseOptions))
+
+    await act(async () => result.current.handleStartNewSession("-repo"))
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "INIT_PENDING_SESSION",
+      dirName: "-repo",
+      cwd: "/repo",
+      isMobile: false,
+    })
+    expect(result.current.pendingAgentKindChange).toEqual(expect.any(Function))
+
+    act(() => result.current.pendingAgentKindChange?.("codex"))
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "INIT_PENDING_SESSION",
+      dirName: encodeCodexDirName("/repo"),
+      cwd: "/repo",
+      isMobile: false,
+    })
+  })
+
   it("uses the configured provider for a newly selected folder", async () => {
     mockAuthFetch.mockResolvedValue(new Response(JSON.stringify([
       { dirName: "-new-repo", path: "/new/repo" },

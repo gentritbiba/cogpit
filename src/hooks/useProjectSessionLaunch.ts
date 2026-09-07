@@ -80,31 +80,34 @@ export function useProjectSessionLaunch({
   } | null>(null)
   const discoveredDirNameCacheRef = useRef(new Map<string, string | null>())
 
+  const fetchProjects = useCallback(async (): Promise<Array<{ dirName: string; path: string }>> => {
+    try {
+      const response = await authFetch("/api/projects")
+      if (!response.ok) return []
+      return await response.json() as Array<{ dirName: string; path: string }>
+    } catch {
+      return []
+    }
+  }, [])
+
   const resolveDiscoveredDirName = useCallback(async (cwd: string): Promise<string | null> => {
     if (DISCOVERED_DIRNAME_KIND === null) return null
     const cache = discoveredDirNameCacheRef.current
     if (cache.has(cwd)) {
       return cache.get(cwd) ?? null
     }
-
-    try {
-      const response = await authFetch("/api/projects")
-      if (!response.ok) {
-        cache.set(cwd, null)
-        return null
-      }
-      const projects = await response.json() as Array<{ dirName: string; path: string }>
-      const match = findProjectDirNameForCwd(projects, cwd, DISCOVERED_DIRNAME_KIND)
-      cache.set(cwd, match)
-      return match
-    } catch {
-      cache.set(cwd, null)
-      return null
-    }
-  }, [])
+    const match = findProjectDirNameForCwd(await fetchProjects(), cwd, DISCOVERED_DIRNAME_KIND)
+    cache.set(cwd, match)
+    return match
+  }, [fetchProjects])
 
   const handleStartNewSession = useCallback(async (dirName: string, cwd?: string) => {
-    const normalizedCwd = cwd ?? null
+    // A sidebar entry may only know the project's dirName. The project list
+    // knows the real path, and without it there is no cwd to re-encode for
+    // another agent, so the provider picker would be stuck on this one.
+    const normalizedCwd = cwd
+      ?? (await fetchProjects()).find((project) => project.dirName === dirName)?.path
+      ?? null
     if (!normalizedCwd) {
       setPendingAgentSource(null)
       beginNewSession(dirName)
@@ -126,7 +129,7 @@ export function useProjectSessionLaunch({
       startsInLossyKind && discoveredDirName ? discoveredDirName : dirName,
       normalizedCwd,
     )
-  }, [beginNewSession, resolveDiscoveredDirName])
+  }, [beginNewSession, fetchProjects, resolveDiscoveredDirName])
 
   const handleStartNewFolder = useCallback((cwd: string) => {
     const dirName = projectDirNameFor(defaultAgentKind, cwd)

@@ -1,7 +1,7 @@
-import type { ComponentProps, ReactNode } from "react"
+import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { Radio } from "@base-ui/react/radio"
 import { RadioGroup } from "@base-ui/react/radio-group"
-import { Check, ChevronDown, type LucideIcon } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { PopoverContent } from "@/components/ui/popover"
@@ -92,7 +92,7 @@ interface PickerOptionProps {
   value: string
   title: string
   description?: string
-  icon?: LucideIcon
+  icon?: ComponentType<{ className?: string }>
   disabled?: boolean
 }
 
