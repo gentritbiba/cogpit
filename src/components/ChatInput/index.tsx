@@ -36,6 +36,11 @@ interface ChatInputProps {
   projectCwd?: string | null
   /** Mobile-only control placed at the leading edge of the composer. */
   leadingAccessory?: ReactNode
+  /**
+   * Desktop-only session controls rendered along the bottom edge of the card,
+   * between the message and the send button. Stacks the composer into two rows.
+   */
+  footer?: ReactNode
   /** Enables the compact mobile composer treatment. */
   compact?: boolean
 }
@@ -97,7 +102,19 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-input focus-within:border-ring focus-within:ring-ring/20"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, compact = false }, ref) {
+function getTextareaLayoutClass(stacked: boolean, isMultiline: boolean, compact: boolean): string {
+  if (stacked) return "px-4 pb-1.5 pt-3.5"
+  if (isMultiline) return cn("col-span-2 row-start-1", compact ? "py-2.5 pr-3 pl-2" : "py-3 pr-4 pl-4")
+  return cn("col-start-2 row-start-1", compact ? "py-2 pr-1 pl-2" : "py-2.5 pr-2 pl-4")
+}
+
+function getActionRowClass(stacked: boolean, isMultiline: boolean): string {
+  if (stacked) return "gap-1 px-2 pb-2 pt-0.5"
+  if (isMultiline) return "col-start-2 row-start-2 px-1.5 pb-1.5"
+  return "col-start-3 row-start-1 pr-1.5 pb-1.5"
+}
+
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false }, ref) {
   const canAccessHostFiles = useCapability("hostFiles")
   const {
     session,
@@ -331,6 +348,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const isPlanApproval = pendingInteraction?.type === "plan"
   const isUserQuestion = pendingInteraction?.type === "question"
   const hasPermissions = permissionRequests.length > 0
+  // With session controls inside the card the message always gets its own
+  // row, so the inline single-line grid only applies to the mobile composer.
+  const stacked = Boolean(footer)
   const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
   const isSteering = capabilitiesFor(agentKind ?? DEFAULT_AGENT_KIND).midTurnSteering && canInterrupt
   const suggestionListId = showFiles ? "file-suggestions" : showSlash ? "slash-suggestions" : undefined
@@ -343,7 +363,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   return (
     <div
       className={cn(
-        "relative bg-background pb-0",
+        "relative pb-0",
         compact ? "px-2 pt-2" : "px-3 pt-2",
         isDragOver && "ring-2 ring-info/40 ring-inset",
       )}
@@ -416,7 +436,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}
 
         <div className={cn(
-          "relative overflow-hidden rounded-xl border bg-prompt-surface shadow-xs",
+          "relative overflow-hidden border bg-composer-surface/85 shadow-lg shadow-black/5 backdrop-blur-xl transition-[border-color,box-shadow] duration-150",
+          stacked ? "rounded-3xl" : "rounded-xl",
           getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
           "focus-within:ring-3",
         )}>
@@ -430,8 +451,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             />
           )}
           <div className={cn(
-            "grid min-w-0 items-end",
-            isMultiline ? "grid-cols-[1fr_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
+            "min-w-0",
+            stacked ? "flex flex-col" : "grid items-end",
+            !stacked && (isMultiline ? "grid-cols-[1fr_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]"),
           )}>
             {leadingAccessory && (
               <div className={cn(
@@ -460,17 +482,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               aria-activedescendant={activeSuggestionId}
               rows={1}
               className={cn(
-                "min-h-0 w-full resize-none rounded-none border-0 bg-transparent text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent",
-                isMultiline
-                  ? cn("col-span-2 row-start-1", compact ? "py-2.5 pr-3" : "py-3 pr-4")
-                  : cn("col-start-2 row-start-1", compact ? "py-2 pr-1" : "py-2.5 pr-2"),
-                compact ? "pl-2 text-sm" : "pl-4 text-sm",
+                "min-h-0 w-full resize-none rounded-none border-0 bg-transparent text-sm text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent",
+                getTextareaLayoutClass(stacked, isMultiline, compact),
               )}
             />
             <div className={cn(
               "flex shrink-0 items-center justify-end",
-              isMultiline ? "col-start-2 row-start-2 px-1.5 pb-1.5" : "col-start-3 row-start-1 pr-1.5 pb-1.5",
+              getActionRowClass(stacked, isMultiline),
             )}>
+              {footer}
               <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
               <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
             </div>

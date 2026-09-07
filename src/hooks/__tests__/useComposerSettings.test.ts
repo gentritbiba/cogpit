@@ -13,7 +13,12 @@ const modelOptions: Record<AgentKind, ModelOption[]> = {
   ],
   codex: [
     { value: "", label: "Default" },
-    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    {
+      value: "gpt-5.6-sol",
+      label: "GPT-5.6 Sol",
+      defaultReasoningEffort: "medium",
+      serviceTiers: [{ value: "priority", label: "Fast" }],
+    },
   ],
   copilot: [
     { value: "", label: "Default" },

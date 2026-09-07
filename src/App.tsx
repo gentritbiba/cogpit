@@ -14,6 +14,7 @@ import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { GoalControlsBlock, GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
+import { cn } from "@/lib/utils"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
@@ -1081,7 +1082,7 @@ export default function App() {
   const previewChatInputSettingsNode = buildChatInputSettings(false)
 
   const composer = (
-    <div className="shrink-0 bg-background">
+    <div className={cn("shrink-0", isMobile && "bg-background")}>
       {!isMobile && <GoalSection />}
       <ChatInput
         ref={chatInputRef}
@@ -1090,8 +1091,8 @@ export default function App() {
         projectCwd={currentCwd}
         compact={isMobile}
         leadingAccessory={isMobile ? chatInputSettingsNode : undefined}
+        footer={isMobile ? undefined : chatInputSettingsNode}
       />
-      {!isMobile && chatInputSettingsNode}
     </div>
   )
 
@@ -1106,7 +1107,7 @@ export default function App() {
   ) : composer
 
   const previewChatInputNode = (
-    <div className="shrink-0 bg-background">
+    <div className={cn("shrink-0", isMobile && "bg-background")}>
       <ChatInput
         ref={chatInputRef}
         allowImages={imageInputAvailable}
@@ -1114,8 +1115,8 @@ export default function App() {
         projectCwd={currentCwd}
         compact={isMobile}
         leadingAccessory={isMobile ? previewChatInputSettingsNode : undefined}
+        footer={isMobile ? undefined : previewChatInputSettingsNode}
       />
-      {!isMobile && previewChatInputSettingsNode}
     </div>
   )
 

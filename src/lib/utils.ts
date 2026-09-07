@@ -58,16 +58,27 @@ export function getModelOptions(agentKind: AgentKind): readonly ModelOption[] {
   return dynamicModelOptions.get(agentKind) ?? fallbackModelsFor(agentKind)
 }
 
-export function getSelectedModelOption(agentKind: AgentKind, model?: string | null): ModelOption | undefined {
-  const options = getModelOptions(agentKind)
+// ── Catalog-derived facts ────────────────────────────────────────────────────
+// Every helper below takes the catalog it reads as an argument instead of
+// reaching into the store above. Components are compiled with the React
+// Compiler, which memoises a call on its arguments alone; a helper that read
+// the store behind the compiler's back would keep returning the static
+// fallback after the live catalog arrived. Use `useModelCapabilities` from a
+// component.
+
+export function selectModelOption(options: readonly ModelOption[], model?: string | null): ModelOption | undefined {
   if (model) return options.find((option) => option.value === model)
   return options.find((option) => option.value !== "" && option.isDefault)
     ?? options.find((option) => option.value === "")
     ?? options.find((option) => option.value !== "")
 }
 
-export function getEffortOptions(agentKind: AgentKind, model?: string | null): readonly EffortOption[] {
-  const selected = getSelectedModelOption(agentKind, model)
+export function getEffortOptions(
+  agentKind: AgentKind,
+  options: readonly ModelOption[],
+  model?: string | null,
+): readonly EffortOption[] {
+  const selected = selectModelOption(options, model)
   const supported = selected?.supportedReasoningEfforts
   if (supported && supported.length > 0) return supported
   // Agents without a default effort ladder only offer what their catalog
@@ -76,29 +87,36 @@ export function getEffortOptions(agentKind: AgentKind, model?: string | null): r
   return EFFORT_OPTIONS
 }
 
-export function getServiceTierOptions(agentKind: AgentKind, model?: string | null): readonly ServiceTierOption[] {
-  return getSelectedModelOption(agentKind, model)?.serviceTiers ?? []
-}
-
-export function getFastServiceTierOption(agentKind: AgentKind, model?: string | null): ServiceTierOption | undefined {
-  return getServiceTierOptions(agentKind, model).find(
+export function getFastServiceTierOption(
+  options: readonly ModelOption[],
+  model?: string | null,
+): ServiceTierOption | undefined {
+  return selectModelOption(options, model)?.serviceTiers?.find(
     (tier) => tier.value === "fast" || tier.value === "priority" || tier.label.toLowerCase() === "fast",
   )
 }
 
-export function supportsImageInput(agentKind: AgentKind, model?: string | null): boolean {
-  const modalities = getSelectedModelOption(agentKind, model)?.inputModalities
+export function supportsImageInput(
+  agentKind: AgentKind,
+  options: readonly ModelOption[],
+  model?: string | null,
+): boolean {
+  const modalities = selectModelOption(options, model)?.inputModalities
   // A catalog that lists modalities is authoritative either way; the capability
   // only decides what an unannotated model means.
   if (modalities) return modalities.includes("image")
   return capabilitiesFor(agentKind).imageInput
 }
 
-export function supportsAutoPermissionMode(agentKind: AgentKind, model?: string | null): boolean {
+export function supportsAutoPermissionMode(
+  agentKind: AgentKind,
+  options: readonly ModelOption[],
+  model?: string | null,
+): boolean {
   const mode = capabilitiesFor(agentKind).autoPermissionMode
   if (mode === "always") return true
   if (mode === "never") return false
-  return getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
+  return selectModelOption(options, model)?.supportsAutoMode === true
 }
 
 /**
@@ -111,17 +129,22 @@ export function isUltracodeCapableModel(agentKind: AgentKind, model?: string | n
   return !(model ?? "").toLowerCase().startsWith("haiku")
 }
 
-export function normalizeEffortForAgent(agentKind: AgentKind, effort?: string | null, model?: string | null): string {
-  const options = getEffortOptions(agentKind, model)
-  if (options.length === 0) return ""
-  const modelDefault = getSelectedModelOption(agentKind, model)?.defaultReasoningEffort
-  const fallback = modelDefault && options.some((option) => option.value === modelDefault)
-    ? modelDefault
-    : options.some((option) => option.value === DEFAULT_EFFORT)
-      ? DEFAULT_EFFORT
-      : options[0]?.value ?? DEFAULT_EFFORT
-  const normalized = effort || fallback
-  return options.some((option) => option.value === normalized) ? normalized : fallback
+export function normalizeEffortForAgent(
+  agentKind: AgentKind,
+  options: readonly ModelOption[],
+  effort?: string | null,
+  model?: string | null,
+): string {
+  const effortOptions = getEffortOptions(agentKind, options, model)
+  if (effortOptions.length === 0) return ""
+  const offers = (value?: string | null): value is string =>
+    !!value && effortOptions.some((option) => option.value === value)
+
+  if (offers(effort)) return effort
+  const modelDefault = selectModelOption(options, model)?.defaultReasoningEffort
+  if (offers(modelDefault)) return modelDefault
+  if (offers(DEFAULT_EFFORT)) return DEFAULT_EFFORT
+  return effortOptions[0].value
 }
 
 /** Convert a user message into a valid worktree/branch name. */

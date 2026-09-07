@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useModelOptions } from "@/hooks/useModelOptions"
+import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { ParsedSession } from "../../shared/session/types"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind, descriptorFor } from "@/lib/agents"
-import {
-  getFastServiceTierOption,
-  isUltracodeCapableModel,
-  normalizeEffortForAgent,
-  supportsImageInput,
-} from "@/lib/utils"
+import { isUltracodeCapableModel } from "@/lib/utils"
 
 interface UseComposerSettingsOptions {
   agentKind: AgentKind | undefined
@@ -30,7 +25,6 @@ export function useComposerSettings({
   isLive,
 }: UseComposerSettingsOptions) {
   const effectiveAgentKind = agentKind ?? DEFAULT_AGENT_KIND
-  const availableModelOptions = useModelOptions(effectiveAgentKind)
 
   // An empty model or effort delegates to the provider's recommended default.
   const [selectedModel, setSelectedModel] = useState("")
@@ -38,17 +32,20 @@ export function useComposerSettings({
   const [fastModeEnabled, setFastModeEnabled] = useState(false)
   const [ultracodeEnabled, setUltracodeEnabled] = useState(false)
 
+  const {
+    options: availableModelOptions,
+    fastTier,
+    imageInput: imageInputAvailable,
+    normalizeEffort,
+  } = useModelCapabilities(effectiveAgentKind, selectedModel)
   const ultracodeAvailable = isUltracodeCapableModel(
     effectiveAgentKind,
     selectedModel || session?.model,
   )
   const ultracodeActive = ultracodeEnabled && ultracodeAvailable
-  const effectiveEffort = ultracodeActive
-    ? "xhigh"
-    : normalizeEffortForAgent(effectiveAgentKind, selectedEffort, selectedModel)
-  const fastModeAvailable = !!getFastServiceTierOption(effectiveAgentKind, selectedModel)
+  const effectiveEffort = ultracodeActive ? "xhigh" : normalizeEffort(selectedEffort)
+  const fastModeAvailable = !!fastTier
   const fastModeActive = fastModeAvailable && fastModeEnabled
-  const imageInputAvailable = supportsImageInput(effectiveAgentKind, selectedModel)
 
   const [modelFallbackNotice, setModelFallbackNotice] = useState<string | null>(null)
   const lastFallbackRef = useRef<string | null>(null)

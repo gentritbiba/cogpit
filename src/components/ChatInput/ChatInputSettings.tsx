@@ -1,16 +1,11 @@
 import { memo, useCallback, useState, type ReactNode } from "react"
-import {
-  getEffortOptions,
-  getFastServiceTierOption,
-  supportsAutoPermissionMode,
-} from "@/lib/utils"
-import { useModelOptions } from "@/hooks/useModelOptions"
+import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import type { PermissionMode } from "@/lib/permissions"
 import { DesktopChatInputSettings } from "./settings/DesktopChatInputSettings"
 import { MobileChatInputSettings } from "./settings/MobileChatInputSettings"
 import { friendlyModelName, resolveDefaultModelName } from "./settings/modelOptions"
-import type { CommonSettingsControlProps, DropdownOption } from "./settings/types"
+import type { CommonSettingsControlProps, SettingOption } from "./settings/types"
 
 export interface ChatInputSettingsProps {
   agentKind?: AgentKind
@@ -103,9 +98,16 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     [onEffortChange, changeAndApply],
   )
 
+  const {
+    options: catalogOptions,
+    effortOptions,
+    fastTier,
+    autoPermissionMode: autoModeAvailable,
+    normalizeEffort,
+  } = useModelCapabilities(agentKind, selectedModel)
+
   // Claude and Codex model families are distinguishable by id. Copilot offers
   // models from several families, so its active model always belongs here.
-  const catalogOptions = useModelOptions(agentKind)
   const activeModelIsCodex = activeModelId?.toLowerCase().startsWith("gpt-") ?? false
   const activeModelMatchesProvider = agentKind === "copilot"
     || activeModelIsCodex === (agentKind === "codex")
@@ -118,15 +120,12 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   const resolvedDefaultName = sessionModelId
     ? friendlyModelName(sessionModelId, catalogOptions)
     : resolveDefaultModelName(catalogOptions)
-  const modelOptions: readonly DropdownOption[] = catalogOptions.map((option) => {
+  const modelOptions: readonly SettingOption[] = catalogOptions.map((option) => {
     const description = [option.description, option.availabilityMessage].filter(Boolean).join(" · ") || undefined
     return option.value === ""
       ? { ...option, description, label: resolvedDefaultName, menuLabel: option.label }
       : { ...option, description }
   })
-  const effortOptions = getEffortOptions(agentKind, selectedModel)
-  const fastTier = getFastServiceTierOption(agentKind, selectedModel)
-  const autoModeAvailable = supportsAutoPermissionMode(agentKind, selectedModel)
   const commonSettingsProps: CommonSettingsControlProps = {
     agentKind,
     onAgentKindChange,
@@ -134,7 +133,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     resolvedDefaultName,
     modelOptions,
     onModelChange: handleModelChange,
-    selectedEffort,
+    selectedEffort: normalizeEffort(selectedEffort),
     effortOptions,
     onEffortChange: handleEffortChange,
     fastTier,

@@ -1,10 +1,6 @@
 import type { ReactNode } from "react"
 import { GitBranch, RefreshCw, Settings2, X, Zap } from "lucide-react"
-import {
-  cn,
-  normalizeEffortForAgent,
-  type ModelOption,
-} from "@/lib/utils"
+import { cn, type ModelOption } from "@/lib/utils"
 import type { PermissionMode } from "@/lib/permissions"
 import type { AgentKind } from "@/lib/agents"
 import { Button } from "@/components/ui/button"
@@ -29,7 +25,7 @@ import {
 } from "@/components/ui/sheet"
 import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
-import type { CommonSettingsControlProps, DropdownOption, McpServer } from "./types"
+import type { CommonSettingsControlProps, SettingOption, McpServer } from "./types"
 import { capabilitiesFor } from "@/lib/agents"
 
 interface MobileControlProps {
@@ -110,10 +106,10 @@ interface MobileModelControlsProps {
   onAgentKindChange?: (agentKind: AgentKind) => void
   selectedModel: string
   onModelChange: (model: string) => void
-  modelOptions: readonly DropdownOption[]
+  modelOptions: readonly SettingOption[]
   selectedEffort: string
   onEffortChange: (effort: string) => void
-  effortOptions: readonly DropdownOption[]
+  effortOptions: readonly SettingOption[]
   ultracodeEnabled?: boolean
   fastTier?: CommonSettingsControlProps["fastTier"]
   fastModeEnabled?: boolean
@@ -142,8 +138,6 @@ function MobileModelControls({
   onPermissionModeChange,
   changeAndApply,
 }: MobileModelControlsProps) {
-  const normalizedEffort = normalizeEffortForAgent(agentKind, selectedEffort, selectedModel)
-
   return (
     <section aria-labelledby="mobile-model-controls" className="flex flex-col gap-2">
       <h3 id="mobile-model-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -172,7 +166,7 @@ function MobileModelControls({
           <MobileSelectControl
             label="Reasoning"
             ariaLabel="Reasoning effort"
-            value={normalizedEffort}
+            value={selectedEffort}
             options={effortOptions}
             onChange={onEffortChange}
             disabled={ultracodeEnabled}
@@ -380,12 +374,11 @@ export function MobileChatInputSettings({
   mobileExtra,
   changeAndApply,
 }: MobileChatInputSettingsProps) {
-  const normalizedEffort = normalizeEffortForAgent(agentKind, selectedEffort, selectedModel)
   const permissionOptions = getPermissionModeOptions(agentKind, autoModeAvailable)
   const permissionLabel = permissionOptions.find((option) => option.value === permissionMode)?.label
   const summary = [
     selectedModel ? friendlyModelName(selectedModel, catalogOptions) : resolvedDefaultName,
-    effortOptions.find((option) => option.value === normalizedEffort)?.label,
+    effortOptions.find((option) => option.value === selectedEffort)?.label,
     permissionLabel,
   ].filter(Boolean).join(" · ")
 

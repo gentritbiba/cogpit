@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ChatInputSettings } from "../ChatInputSettings"
 import { resetDynamicModelOptions, setDynamicModelOptions } from "@/lib/utils"
@@ -10,8 +10,13 @@ afterEach(() => {
   resetDynamicModelOptions()
 })
 
+function openModelPicker(name: RegExp | string) {
+  fireEvent.click(screen.getByRole("button", { name }))
+  return screen.getByRole("dialog", { name: "Model settings" })
+}
+
 describe("ChatInputSettings", () => {
-  it("lets new sessions switch agents from the model dropdown", () => {
+  it("lets new sessions switch provider inside the picker without closing it", () => {
     const onAgentKindChange = vi.fn()
 
     render(
@@ -26,11 +31,40 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Claude \/ Default/i }))
-    expect(screen.getByRole("menuitemradio", { name: /^Copilot$/ })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Codex$/ }))
+    const panel = openModelPicker(/^Claude · Default · High$/)
+    expect(within(panel).getByRole("radio", { name: "Claude" })).toBeChecked()
+    expect(within(panel).getByRole("radio", { name: "Copilot" })).toBeEnabled()
+    fireEvent.click(within(panel).getByRole("radio", { name: "Codex" }))
 
     expect(onAgentKindChange).toHaveBeenCalledWith("codex")
+    expect(screen.getByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
+  })
+
+  it("opens downward for new sessions and upward for live ones", async () => {
+    const { unmount } = render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+      />
+    )
+    await waitFor(() => expect(openModelPicker(/Default/)).toHaveAttribute("data-side", "bottom"))
+    unmount()
+
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession={false}
+      />
+    )
+    await waitFor(() => expect(openModelPicker(/Default/)).toHaveAttribute("data-side", "top"))
   })
 
   it("shows Copilot models from its live catalog", () => {
@@ -54,12 +88,16 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Copilot \/ GPT-5\.4/i }))
-    expect(screen.getByRole("menuitemradio", { name: /^Claude Sonnet 4\.6/ })).toBeInTheDocument()
-    expect(screen.getByRole("menuitemradio", { name: /^Gemini 3\.1 Pro Preview/ })).toBeInTheDocument()
+    const panel = openModelPicker(/^Copilot · GPT-5\.4$/)
+    expect(within(panel).getByRole("radio", { name: /^Claude Sonnet 4\.6/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("radio", { name: /^Gemini 3\.1 Pro Preview/ })).toBeInTheDocument()
+    // Copilot has no effort ladder and no modes, so neither section renders.
+    expect(within(panel).queryByText("Reasoning effort")).not.toBeInTheDocument()
+    expect(within(panel).queryByRole("button", { name: "Fast mode" })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole("button", { name: "Ultracode" })).not.toBeInTheDocument()
   })
 
-  it("offers only Ask, Plan, and Full access for Copilot", () => {
+  it("offers only Ask, Plan, Autopilot and Full access for Copilot and closes on choice", async () => {
     const onPermissionModeChange = vi.fn()
     render(
       <ChatInputSettings
@@ -74,17 +112,22 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Ask" }))
-    expect(screen.getByRole("menuitemradio", { name: /^Ask/ })).toBeInTheDocument()
-    expect(screen.getByRole("menuitemradio", { name: /^Plan/ })).toBeInTheDocument()
-    expect(screen.getByRole("menuitemradio", { name: /^Full access/ })).toBeInTheDocument()
-    expect(screen.queryByRole("menuitemradio", { name: /^Accept Edits/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Permissions: Ask" }))
+    const panel = screen.getByRole("dialog", { name: "Permissions" })
+    expect(within(panel).getByRole("radio", { name: /^Ask/ })).toBeChecked()
+    expect(within(panel).getByRole("radio", { name: /^Plan/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("radio", { name: /^Autopilot/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("radio", { name: /^Full access/ })).toBeInTheDocument()
+    expect(within(panel).queryByRole("radio", { name: /^Accept Edits/ })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }))
+    fireEvent.click(within(panel).getByRole("radio", { name: /^Plan/ }))
     expect(onPermissionModeChange).toHaveBeenCalledWith("plan")
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Permissions" })).not.toBeInTheDocument()
+    })
   })
 
-  it("shows codex defaults, selects a model, and closes the dropdown", async () => {
+  it("selects a codex model and keeps the picker open", () => {
     const onModelChange = vi.fn()
 
     render(
@@ -99,16 +142,14 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Codex \/ GPT-5\.6 Sol/i }))
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-5\.6 Terra/i }))
+    const panel = openModelPicker(/^Codex · GPT-5\.6 Sol · High$/)
+    fireEvent.click(within(panel).getByRole("radio", { name: /GPT-5\.6 Terra/i }))
 
     expect(onModelChange).toHaveBeenCalledWith("gpt-5.6-terra")
-    await waitFor(() => {
-      expect(screen.queryByRole("menu", { name: "Agent and model" })).not.toBeInTheDocument()
-    })
+    expect(screen.getByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
   })
 
-  it("labels Default from the catalog's resolvedModel, never a hardcoded name", async () => {
+  it("labels Default from the catalog's resolvedModel, never a hardcoded name", () => {
     // Regression: an org default of Sonnet used to render as "Opus (default)".
     setDynamicModelOptions("claude", [
       {
@@ -134,15 +175,15 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    // The trigger shows what Default actually resolves to (the Sonnet row's label)
-    fireEvent.click(screen.getByRole("button", { name: /Claude \/ Sonnet/ }))
-    // The menu shows the CLI's own default row verbatim
-    const defaultRow = await screen.findByRole("menuitemradio", { name: /Default \(recommended\)/ })
+    // The chip shows what Default actually resolves to (the Sonnet row's label)
+    const panel = openModelPicker(/^Claude · Sonnet · High$/)
+    // The list shows the CLI's own default row verbatim
+    const defaultRow = within(panel).getByRole("radio", { name: /Default \(recommended\)/ })
     expect(defaultRow).toHaveTextContent("Sonnet 5 · Org default")
-    expect(screen.queryByRole("menuitemradio", { name: /Opus \(default\)/ })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole("radio", { name: /Opus \(default\)/ })).not.toBeInTheDocument()
   })
 
-  it("keeps the model-only dropdown for active sessions", () => {
+  it("locks the provider column for active sessions", () => {
     render(
       <ChatInputSettings
         agentKind="claude"
@@ -154,9 +195,11 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: /^Default$/ })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^Claude$/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^Codex$/ })).not.toBeInTheDocument()
+    const panel = openModelPicker(/^Claude · Default · High$/)
+    expect(within(panel).getByRole("radio", { name: "Claude" })).toBeChecked()
+    expect(within(panel).getByRole("radio", { name: "Codex" })).toHaveAttribute("aria-disabled", "true")
+    expect(within(panel).getByRole("radio", { name: "Copilot" })).toHaveAttribute("aria-disabled", "true")
+    expect(within(panel).getByText(/Fixed for this session/)).toBeInTheDocument()
   })
 
   it("offers Ultracode for capable active Claude sessions and applies the toggle", async () => {
@@ -177,10 +220,27 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Ultracode" }))
+    const panel = openModelPicker(/^Claude · Fable · High$/)
+    fireEvent.click(within(panel).getByRole("button", { name: "Ultracode" }))
 
     expect(onUltracodeEnabledChange).toHaveBeenCalledWith(true)
     await vi.waitFor(() => expect(onApplySettings).toHaveBeenCalled())
+  })
+
+  it("greys Ultracode out when the selected model cannot run it", () => {
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel="haiku"
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+      />,
+    )
+
+    const panel = openModelPicker(/^Claude · Haiku · High$/)
+    expect(within(panel).getByRole("button", { name: "Ultracode" })).toBeDisabled()
   })
 
   it("pins the effort selector while Ultracode is enabled", () => {
@@ -197,10 +257,34 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    expect(screen.getByRole("button", { name: "Extra High" })).toBeDisabled()
+    const panel = openModelPicker(/Ultracode on/)
+    expect(within(panel).getByRole("button", { name: "Ultracode" })).toHaveAttribute("aria-pressed", "true")
+    expect(within(panel).getByRole("button", { name: "Extra High" })).toBeDisabled()
+    expect(within(panel).getByRole("button", { name: "Light" })).toBeDisabled()
+    expect(within(panel).getByText("Pinned by Ultracode")).toBeInTheDocument()
   })
 
-  it("offers Fast only for models that advertise the tier", () => {
+  it("changes effort from the segmented control and keeps the picker open", () => {
+    const onEffortChange = vi.fn()
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={onEffortChange}
+        isNewSession
+      />,
+    )
+
+    const panel = openModelPicker(/Default/)
+    expect(within(panel).getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(within(panel).getByRole("button", { name: "Max" }))
+    expect(onEffortChange).toHaveBeenCalledWith("max")
+    expect(screen.getByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
+  })
+
+  it("enables Fast only for models that advertise the tier", () => {
     const onFastModeEnabledChange = vi.fn()
     const { rerender } = render(
       <ChatInputSettings
@@ -215,7 +299,8 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Standard" }))
+    let panel = openModelPicker(/GPT-5\.6 Sol/)
+    fireEvent.click(within(panel).getByRole("button", { name: "Fast mode" }))
     expect(onFastModeEnabledChange).toHaveBeenCalledWith(true)
 
     rerender(
@@ -230,7 +315,33 @@ describe("ChatInputSettings", () => {
         isNewSession
       />
     )
-    expect(screen.queryByRole("button", { name: "Standard" })).not.toBeInTheDocument()
+    panel = screen.getByRole("dialog", { name: "Model settings" })
+    expect(within(panel).getByRole("button", { name: "Fast mode" })).toBeDisabled()
+  })
+
+  it("shows Fast and Ultracode on the chip once they are on", () => {
+    setDynamicModelOptions("claude", [
+      { value: "", label: "Default" },
+      { value: "opus", label: "Opus", serviceTiers: [{ value: "fast", label: "Fast" }] },
+    ])
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel="opus"
+        onModelChange={vi.fn()}
+        selectedEffort="xhigh"
+        onEffortChange={vi.fn()}
+        fastModeEnabled
+        onFastModeEnabledChange={vi.fn()}
+        ultracodeEnabled
+        onUltracodeEnabledChange={vi.fn()}
+        isNewSession
+      />
+    )
+
+    expect(screen.getByRole("button", {
+      name: "Claude · Opus · Extra High (Fast mode on, Ultracode on)",
+    })).toBeInTheDocument()
   })
 
   it("uses Claude's live Fast, effort, and Auto capabilities", () => {
@@ -262,12 +373,15 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Standard" }))
+    const panel = openModelPicker(/^Claude · Opus · Light$/)
+    fireEvent.click(within(panel).getByRole("button", { name: "Fast mode" }))
     expect(onFastModeEnabledChange).toHaveBeenCalledWith(true)
-    expect(screen.getByRole("button", { name: "Light" })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true")
+    expect(within(panel).getByRole("button", { name: "Max" })).toBeInTheDocument()
+    expect(within(panel).queryByRole("button", { name: "High" })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Ask" }))
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Auto/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Permissions: Ask" }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Auto/ }))
     expect(onPermissionModeChange).toHaveBeenCalledWith("auto")
   })
 
@@ -286,14 +400,14 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Full access/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Permissions: Workspace" }))
+    fireEvent.click(screen.getByRole("radio", { name: /Full access/ }))
 
     expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
   })
 
-  it("supports keyboard navigation and restores focus when a dropdown closes", async () => {
+  it("closes on Escape and restores focus to the chip", async () => {
     const user = userEvent.setup()
     render(
       <ChatInputSettings
@@ -306,23 +420,18 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    const trigger = screen.getByRole("button", { name: "Default" })
+    const trigger = screen.getByRole("button", { name: /^Claude · Default · High$/ })
     fireEvent.click(trigger)
-
-    const selected = await screen.findByRole("menuitemradio", { name: /^Default$/i })
-    await vi.waitFor(() => expect(selected).toHaveFocus())
-
-    await user.keyboard("{ArrowDown}")
-    expect(screen.getByRole("menuitemradio", { name: /^Fable$/i })).toHaveFocus()
+    expect(await screen.findByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
 
     await user.keyboard("{Escape}")
     await waitFor(() => {
-      expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("dialog", { name: "Model settings" })).not.toBeInTheDocument()
       expect(trigger).toHaveFocus()
     })
   })
 
-  it("closes a portaled dropdown when clicking outside it", async () => {
+  it("closes a portaled picker when clicking outside it", async () => {
     render(
       <ChatInputSettings
         agentKind="claude"
@@ -334,17 +443,18 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Default" }))
-    expect(await screen.findByRole("menu", { name: "Model" })).toBeInTheDocument()
+    openModelPicker(/Default/)
+    expect(await screen.findByRole("dialog", { name: "Model settings" })).toBeInTheDocument()
 
     fireEvent.pointerDown(document.body)
+    fireEvent.mouseDown(document.body)
     fireEvent.click(document.body)
     await waitFor(() => {
-      expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("dialog", { name: "Model settings" })).not.toBeInTheDocument()
     })
   })
 
-  it("preserves MCP toggle, refresh, and authentication interactions", async () => {
+  it("preserves MCP toggle, refresh, and authentication interactions", () => {
     const onToggleMcpServer = vi.fn()
     const onRefreshMcpServers = vi.fn()
     const onMcpAuth = vi.fn()
@@ -368,19 +478,17 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    const trigger = screen.getByRole("button", { name: "MCPs 0/1" })
-    fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh status" }))
+    fireEvent.click(screen.getByRole("button", { name: "MCPs 0/1" }))
+    const panel = screen.getByRole("dialog", { name: "MCP servers" })
+    fireEvent.click(within(panel).getByRole("button", { name: "Refresh status" }))
     expect(onRefreshMcpServers).toHaveBeenCalledOnce()
-    expect(screen.getByRole("menu", { name: "MCP servers" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "filesystem" }))
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "filesystem" }))
     expect(onToggleMcpServer).toHaveBeenCalledWith("filesystem")
+    // Multi-select: the panel stays open between toggles.
+    expect(screen.getByRole("dialog", { name: "MCP servers" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /^githubNeeds auth$/i }))
+    fireEvent.click(within(panel).getByRole("button", { name: /^github/ }))
     expect(onMcpAuth).toHaveBeenCalledWith("github")
-    await waitFor(() => {
-      expect(screen.queryByRole("menu", { name: "MCP servers" })).not.toBeInTheDocument()
-    })
   })
 })

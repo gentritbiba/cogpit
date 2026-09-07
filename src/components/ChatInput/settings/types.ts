@@ -2,10 +2,10 @@ import type { PermissionMode } from "@/lib/permissions"
 import type { AgentKind } from "@/lib/agents"
 import type { ServiceTierOption } from "@/lib/utils"
 
-export interface DropdownOption {
+export interface SettingOption {
   value: string
   label: string
-  /** Shown in the dropdown menu only (e.g. "Default (recommended)"). */
+  /** Shown in the picker list only (e.g. "Default (recommended)"). */
   menuLabel?: string
   description?: string
 }
@@ -20,10 +20,11 @@ export interface CommonSettingsControlProps {
   onAgentKindChange?: (agentKind: AgentKind) => void
   selectedModel: string
   resolvedDefaultName: string
-  modelOptions: readonly DropdownOption[]
+  modelOptions: readonly SettingOption[]
   onModelChange: (model: string) => void
+  /** Already clamped to one of `effortOptions`, or "" when the model offers none. */
   selectedEffort: string
-  effortOptions: readonly DropdownOption[]
+  effortOptions: readonly SettingOption[]
   onEffortChange: (effort: string) => void
   fastTier?: ServiceTierOption
   fastModeEnabled?: boolean

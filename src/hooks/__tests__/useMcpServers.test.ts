@@ -95,6 +95,27 @@ describe("useMcpServers", () => {
     expect(getSavedSelection("test-dir")).toEqual(["clickup"])
   })
 
+  it("replaces the whole selection at once and persists it", async () => {
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
+
+    const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+    await waitFor(() => {
+      expect(result.current.servers.length).toBe(2)
+    })
+
+    act(() => result.current.setSelection([]))
+    expect(result.current.selectedServers).toEqual([])
+    expect(getSavedSelection("test-dir")).toEqual([])
+
+    act(() => result.current.setSelection(["clickup", "figma"]))
+    expect(result.current.selectedServers).toEqual(["clickup", "figma"])
+    expect(getSavedSelection("test-dir")).toEqual(["clickup", "figma"])
+  })
+
   it("loads saved selection from the session config store", async () => {
     setSavedSelection("test-dir", ["figma"])
 

@@ -185,6 +185,14 @@ export function useMcpServers(
     })
   }, [])
 
+  /** Replace the whole selection at once, e.g. turning every server on or off. */
+  const setSelection = useCallback((names: string[]) => {
+    setSelectedServers(() => {
+      if (storageKeyRef.current) saveSelection(storageKeyRef.current, names)
+      return names
+    })
+  }, [])
+
   const refresh = useCallback(() => {
     if (!enabled || !cwd) return
     refreshRequestRef.current?.abort()
@@ -244,6 +252,7 @@ export function useMcpServers(
     loading,
     loaded,
     toggleServer,
+    setSelection,
     refresh,
   }
 }

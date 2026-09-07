@@ -29,13 +29,14 @@ describe("model options store", () => {
   })
 
   it("keeps Copilot fallbacks minimal and conservative until the live catalog loads", () => {
+    const copilot = getModelOptions("copilot")
     expect(fallbackModelsFor("copilot").map((option) => option.value)).toEqual(["", "auto"])
-    expect(getEffortOptions("copilot", "")).toEqual([])
-    expect(getEffortOptions("copilot", "auto")).toEqual([])
-    expect(getEffortOptions("copilot", "stale-model")).toEqual([])
-    expect(supportsImageInput("copilot", "")).toBe(false)
-    expect(supportsImageInput("copilot", "auto")).toBe(false)
-    expect(supportsImageInput("copilot", "stale-model")).toBe(false)
+    expect(getEffortOptions("copilot", copilot, "")).toEqual([])
+    expect(getEffortOptions("copilot", copilot, "auto")).toEqual([])
+    expect(getEffortOptions("copilot", copilot, "stale-model")).toEqual([])
+    expect(supportsImageInput("copilot", copilot, "")).toBe(false)
+    expect(supportsImageInput("copilot", copilot, "auto")).toBe(false)
+    expect(supportsImageInput("copilot", copilot, "stale-model")).toBe(false)
   })
 
   it("enables Copilot capabilities only when the live catalog advertises them", () => {
@@ -47,10 +48,11 @@ describe("model options store", () => {
       inputModalities: ["text", "image"],
     }])
 
-    expect(getEffortOptions("copilot", "vision-reasoning-model")).toEqual([
+    const copilot = getModelOptions("copilot")
+    expect(getEffortOptions("copilot", copilot, "vision-reasoning-model")).toEqual([
       { value: "low", label: "Light" },
     ])
-    expect(supportsImageInput("copilot", "vision-reasoning-model")).toBe(true)
+    expect(supportsImageInput("copilot", copilot, "vision-reasoning-model")).toBe(true)
   })
 
   it("swaps in a dynamic catalog per provider and notifies subscribers", () => {
