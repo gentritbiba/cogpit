@@ -4,6 +4,11 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260907T151900Z-8f4f7b6 - Composer model picker and card
+- File: `audit-history/audit-20260907T151900Z-8f4f7b6.md`
+- Status: PASS. README composer line already updated in the change; no other production doc drift.
+- Validation: 397 files / 6,260 tests earlier in the session and 59 files / 784 affected tests after the final fixes; lint, prod and test typechecks, vocabulary, architecture and duplicate ratchets; browser QA on a standalone build for new and live sessions, provider switching, Fast/Ultracode, dismissal, MCP and the card blur.
+
 ### 20260906T210840Z-42e6ed7 - Browser release correction
 - File: `audit-history/audit-20260906T210840Z-42e6ed7.md`
 - Status: PASS after native Windows support disclosure and cross-viewer tab-close recovery.
