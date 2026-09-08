@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { parseCustomToolOutput as facadeParseCustomToolOutput } from "../../../shared/session/codex"
 import {
-  inferToolError,
+  hasFailedExit,
+  isCodexQuestionTool,
   normalizeFunctionName,
   normalizePlanToTodos,
+  normalizeQuestions,
   parseCustomToolOutput,
 } from "../../../shared/session/codex-tool-normalization"
 
@@ -33,20 +35,17 @@ describe("normalizeFunctionName", () => {
   })
 })
 
-describe("inferToolError", () => {
+describe("hasFailedExit", () => {
   it("honors explicit process exit codes", () => {
-    expect(inferToolError("Process exited with code 0\nerror appears in a successful log")).toBe(false)
-    expect(inferToolError("Process exited with code 17")).toBe(true)
+    expect(hasFailedExit("Process exited with code 0\nerror appears in a successful log")).toBe(false)
+    expect(hasFailedExit("Process exited with code 17")).toBe(true)
   })
 
-  it("ignores explicit zero-error summaries", () => {
-    expect(inferToolError("0 failed, 0 errors, no failures and no errors")).toBe(false)
-  })
-
-  it("detects error terms and treats empty output as successful", () => {
-    expect(inferToolError("Unhandled exception while applying change")).toBe(true)
-    expect(inferToolError(null)).toBe(false)
-    expect(inferToolError("")).toBe(false)
+  it("ignores error words in whatever the command printed", () => {
+    expect(hasFailedExit("throw new Error('Invalid tenant slug')")).toBe(false)
+    expect(hasFailedExit("Unhandled exception while applying change")).toBe(false)
+    expect(hasFailedExit(null)).toBe(false)
+    expect(hasFailedExit("")).toBe(false)
   })
 })
 
@@ -97,7 +96,7 @@ describe("parseCustomToolOutput boundaries", () => {
   it("falls back safely for malformed JSON and unsupported values", () => {
     expect(parseCustomToolOutput("{ malformed error")).toEqual({
       text: "{ malformed error",
-      isError: true,
+      isError: false,
     })
     expect(parseCustomToolOutput({ output: "structured output" })).toEqual({
       text: "structured output",
@@ -143,8 +142,109 @@ describe("parseCustomToolOutput boundaries", () => {
     expect(parseCustomToolOutput({ output: "Stopped", exit_code: 2 })).toEqual({ text: "Stopped", isError: true })
   })
 
+  it("reads exit codes out of chunked exec results", () => {
+    const status = (text: string) => ({ type: "input_text", text })
+    const chunk = (exit: number, output: string) =>
+      status(JSON.stringify({ chunk_id: "4b6add", exit_code: exit, output }))
+
+    expect(parseCustomToolOutput([
+      status("Script completed\nWall time 0.1 seconds\nOutput:\n"),
+      chunk(0, "throw new Error('Invalid tenant slug for preview URL')"),
+    ]).isError).toBe(false)
+    expect(parseCustomToolOutput([
+      status("Script completed\nWall time 0.1 seconds\nOutput:\n"),
+      chunk(0, "first chunk"),
+      chunk(1, "zsh: no matches found: src/env*"),
+    ]).isError).toBe(true)
+    expect(parseCustomToolOutput([
+      status("Script completed\nWall time 1.6 seconds\nOutput:\n"),
+      status(JSON.stringify({ status: "fulfilled", value: { exit_code: 0, output: "ok" } })),
+      status(JSON.stringify({ status: "rejected", reason: "boom" })),
+    ]).isError).toBe(true)
+  })
+
+  it("fails a script that threw and passes one that returned plain data", () => {
+    const result = (...texts: string[]) => texts.map((text) => ({ type: "input_text", text }))
+    expect(parseCustomToolOutput(result(
+      "Script failed\nWall time 0.0 seconds\nOutput:\n",
+      "Script error:\nSyntaxError: Unexpected string",
+    )).isError).toBe(true)
+    expect(parseCustomToolOutput(result(
+      "Script completed\nWall time 0.4 seconds\nOutput:\n",
+      "<div class=\"error\">Cached page copy</div>",
+    )).isError).toBe(false)
+    expect(parseCustomToolOutput(result("Script completed\nWall time 0.0 seconds\nOutput:\n")).isError).toBe(false)
+  })
+
+  it("keeps a domain status field from posing as a settled chunk", () => {
+    expect(parseCustomToolOutput([
+      { type: "input_text", text: "Script completed\nWall time 0.2 seconds\nOutput:\n" },
+      { type: "input_text", text: JSON.stringify({ status: "ambiguous", message: "Found 2 symbols" }) },
+    ]).isError).toBe(false)
+  })
+
   it("keeps ordinary JSON results intact", () => {
     const output = JSON.stringify({ agent_id: "agent-1", nickname: "reviewer" })
     expect(parseCustomToolOutput(output)).toEqual({ text: output, isError: false })
+  })
+})
+
+describe("normalizeQuestions", () => {
+  it("renames Codex's title to the question field the card renders", () => {
+    expect(normalizeQuestions({
+      questions: [{ title: "What is your budget?", options: null }],
+    })).toEqual({
+      questions: [{ question: "What is your budget?", options: [] }],
+    })
+  })
+
+  it("promotes bare option labels to labelled options", () => {
+    expect(normalizeQuestions({
+      questions: [{ title: "Include it?", options: ["Ship it", "Wait"] }],
+    })).toEqual({
+      questions: [{
+        question: "Include it?",
+        options: [{ label: "Ship it" }, { label: "Wait" }],
+      }],
+    })
+  })
+
+  it("keeps already-normalized questions, headers and descriptions", () => {
+    expect(normalizeQuestions({
+      questions: [{
+        question: "Which theme?",
+        header: "Theme",
+        options: [{ label: "Dark", description: "Low light" }],
+      }],
+    })).toEqual({
+      questions: [{
+        question: "Which theme?",
+        header: "Theme",
+        options: [{ label: "Dark", description: "Low light" }],
+      }],
+    })
+  })
+
+  it("reads a lone question given without the questions wrapper", () => {
+    expect(normalizeQuestions({ title: "Ready?" })).toEqual({
+      title: "Ready?",
+      questions: [{ question: "Ready?", options: [] }],
+    })
+  })
+
+  it("leaves input untouched when nothing carries question text", () => {
+    expect(normalizeQuestions({ questions: [{ options: ["A"] }] }))
+      .toEqual({ questions: [{ options: ["A"] }] })
+  })
+})
+
+describe("isCodexQuestionTool", () => {
+  it.each([
+    ["request_user_input", true],
+    ["request_user_input_async", true],
+    ["exec_command", false],
+    ["AskUserQuestion", false],
+  ])("reports %s as %s", (name, expected) => {
+    expect(isCodexQuestionTool(name)).toBe(expected)
   })
 })

@@ -20,6 +20,7 @@
  * has declined. No format needs to know its siblings exist.
  */
 import { descriptorFor } from "./agent-descriptors"
+import { getCodexExecCalls, isCodexExecCall, type CodexExecCall } from "./codex-exec"
 import {
   appendClaudeSession,
   brandClaudeBranch,
@@ -317,4 +318,14 @@ export function cutLineAfterUuid(
   }
   if (targetLine < 0) return null
   return turnBoundaryLines(format, lines).find((line) => line > targetLine) ?? "keep-all"
+}
+
+/**
+ * The tool calls a recorded call actually ran. Every format records one call
+ * per tool use except Codex code mode, which persists a whole script of them as
+ * a single `exec` call, so readers that care about what ran — rather than how
+ * it is presented — expand a call here instead of learning that grammar.
+ */
+export function expandToolScript<T extends CodexExecCall>(call: T): CodexExecCall[] {
+  return isCodexExecCall(call) ? getCodexExecCalls(call.input) : [call]
 }

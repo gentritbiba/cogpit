@@ -57,7 +57,7 @@ function holdsUnansweredPrompt(block: TurnContentBlock): boolean {
 }
 
 /**
- * Index of the block holding a prompt the turn is still blocked on, or -1.
+ * Index of the block holding a prompt the reader still owes an answer to, or -1.
  *
  * A blocked session writes nothing further to its JSONL, so the stream goes
  * quiet and the turn reads as settled roughly half a minute later. Folding then
@@ -69,13 +69,23 @@ function holdsUnansweredPrompt(block: TurnContentBlock): boolean {
  * Assistant content after the prompt means the agent gave up on it, the same
  * test `detectPendingInteraction` applies, so only a turn that ENDS on an open
  * prompt is pinned.
+ *
+ * An async question is the exception the blocks cannot settle alone: the agent
+ * carries on working after asking, so its position says nothing about whether
+ * it was answered, and the answer lands in a later turn this one cannot see.
+ * Its id comes from the caller, which knows what the session is waiting on.
  */
-function findBlockingPromptIndex(blocks: TurnContentBlock[]): number {
+function findOpenPromptIndex(blocks: TurnContentBlock[], openQuestionId?: string): number {
   for (let i = blocks.length - 1; i >= 0; i--) {
     if (holdsUnansweredPrompt(blocks[i])) return i
-    if (CONTINUATION_KINDS.has(blocks[i].kind)) return -1
+    if (CONTINUATION_KINDS.has(blocks[i].kind)) break
   }
-  return -1
+  if (!openQuestionId) return -1
+  return blocks.findIndex((block) => (
+    block.kind === "tool_calls" && block.toolCalls.some(
+      (toolCall) => toolCall.id === openQuestionId && toolCall.asyncQuestion,
+    )
+  ))
 }
 
 const EMPTY_PLAN: FoldPlan = {
@@ -88,6 +98,8 @@ const EMPTY_PLAN: FoldPlan = {
 export function planTurnFold(
   blocks: TurnContentBlock[],
   phase: "working" | "settled" = "settled",
+  /** Tool call id of an async question the session is still waiting on. */
+  openQuestionId?: string,
 ): FoldPlan {
   if (blocks.length === 0) return EMPTY_PLAN
 
@@ -107,12 +119,12 @@ export function planTurnFold(
     if (terminalTextIndex === -1) return EMPTY_PLAN
   }
 
-  const blockingPromptIndex = findBlockingPromptIndex(blocks)
+  const openPromptIndex = findOpenPromptIndex(blocks, openQuestionId)
   const foldedIndices: number[] = []
   let hiddenToolCalls = 0
 
   for (let i = 0; i < blocks.length; i++) {
-    if (i === terminalTextIndex || i === blockingPromptIndex) continue
+    if (i === terminalTextIndex || i === openPromptIndex) continue
     const block = blocks[i]
     if (PINNED_KINDS.has(block.kind)) continue
 

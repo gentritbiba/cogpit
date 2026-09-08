@@ -87,7 +87,14 @@ export function releaseFrame(frame: BrowserFrame | null): void {
   if (frame.blobUrl) URL.revokeObjectURL(frame.blobUrl)
 }
 
-export function useBrowserSocket(session: string | null): UseBrowserSocket {
+/**
+ * `onClipboard` carries text the page copied. It is held in a ref, so a caller
+ * that re-creates it never reconnects the socket.
+ */
+export function useBrowserSocket(
+  session: string | null,
+  onClipboard?: (text: string) => void,
+): UseBrowserSocket {
   const [status, setStatus] = useState<BrowserSocketStatus>("idle")
   const [state, setState] = useState<StatusMessage | null>(null)
   const [page, setPage] = useState<PageMessage | null>(null)
@@ -100,6 +107,10 @@ export function useBrowserSocket(session: string | null): UseBrowserSocket {
   const wsRef = useRef<WebSocket | null>(null)
   const frameRef = useRef<BrowserFrame | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onClipboardRef = useRef(onClipboard)
+  useEffect(() => {
+    onClipboardRef.current = onClipboard
+  }, [onClipboard])
 
   useEffect(() => {
     setState(null)
@@ -172,6 +183,9 @@ export function useBrowserSocket(session: string | null): UseBrowserSocket {
           break
         case "error":
           setError(message.message)
+          break
+        case "clipboard":
+          onClipboardRef.current?.(message.text)
           break
       }
     }

@@ -4,12 +4,14 @@
  * The Browser panel follows whichever managed browser the agent last drove and
  * captions the page with the command that drove it. Nothing writes those facts
  * back — the shim only routes the call — so both are derived here from the
- * shell tool calls of the main lane. Subagents run in throwaway browsers that
- * are invisible by design, so `subAgentActivity` is never scanned and a
+ * shell tool calls of the main lane, whether the agent recorded one per call or
+ * wrapped a whole script of them in one. Subagents run in throwaway browsers
+ * that are invisible by design, so `subAgentActivity` is never scanned and a
  * `tmp-*` browser never surfaces.
  */
 import { findBrowserInvocations } from "../browser/invocation"
 import { isThrowawayName } from "../browser/names"
+import { expandToolScript } from "./agents"
 import { getCommandText } from "./toolSummary"
 import type { ParsedSession, ToolCall } from "./types"
 
@@ -28,22 +30,31 @@ const MAX_COMMAND_LENGTH = 120
 
 const SHELL_TOOL = /(?:^|[._])exec_command$/
 
-function isShellCall(call: ToolCall): boolean {
-  return call.name === "Bash" || SHELL_TOOL.test(call.name)
+function isShellName(name: string): boolean {
+  return name === "Bash" || SHELL_TOOL.test(name)
+}
+
+/** The shell commands a call ran, in the order it ran them. */
+function shellCommands(call: ToolCall): string[] {
+  return expandToolScript(call)
+    .filter((inner) => isShellName(inner.name))
+    .map((inner) => getCommandText(inner.input))
 }
 
 function activityOf(call: ToolCall): BrowserAgentActivity | null {
-  if (!isShellCall(call)) return null
-  const [invocation] = findBrowserInvocations(getCommandText(call.input))
-  if (invocation === undefined || isThrowawayName(invocation.browser)) return null
-  const { text } = invocation
-  return {
-    session: invocation.browser,
-    command: text.length > MAX_COMMAND_LENGTH ? `${text.slice(0, MAX_COMMAND_LENGTH - 1)}…` : text,
-    timestamp: call.timestamp,
-    toolCallId: call.id,
-    done: call.result !== null,
+  for (const command of shellCommands(call)) {
+    const [invocation] = findBrowserInvocations(command)
+    if (invocation === undefined || isThrowawayName(invocation.browser)) continue
+    const { text } = invocation
+    return {
+      session: invocation.browser,
+      command: text.length > MAX_COMMAND_LENGTH ? `${text.slice(0, MAX_COMMAND_LENGTH - 1)}…` : text,
+      timestamp: call.timestamp,
+      toolCallId: call.id,
+      done: call.result !== null,
+    }
   }
+  return null
 }
 
 /**

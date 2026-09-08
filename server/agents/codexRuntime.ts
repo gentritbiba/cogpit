@@ -16,6 +16,7 @@ import {
   unlink,
 } from "../helpers"
 import { fetchCodexModels } from "./codexModels"
+import { codexQuestions, type CodexAsyncQuestion } from "./codexQuestions"
 import { friendlySpawnError } from "./spawnError"
 import { cleanupTempFiles, writeTempImageFiles } from "./tempImages"
 import { resolveAgentCommand } from "../lib/binaryResolver"
@@ -45,6 +46,7 @@ import {
   type PendingApproval,
   type SendOutcome,
   type SendRequest,
+  type UserQuestionAnswers,
   type StartSessionRequest,
   type StartedSession,
   type TurnResult,
@@ -504,6 +506,31 @@ function approvalFailure(error: unknown): AgentRuntimeError {
   )
 }
 
+/**
+ * Render answers as the message that carries them back to the thread.
+ *
+ * The question text is repeated only for a multi-question answer: alone it is
+ * the message directly above, and quoting it back reads as an echo.
+ */
+function formatQuestionAnswer(
+  pending: CodexAsyncQuestion,
+  answers: UserQuestionAnswers,
+): string {
+  if (typeof answers === "string") return answers.trim()
+  if (Array.isArray(answers)) return answers.join(", ").trim()
+
+  const answered = pending.questions
+    .map((question) => ({ question: question.question, answer: answers[question.question]?.trim() }))
+    .filter((entry): entry is { question: string; answer: string } => Boolean(entry.answer))
+
+  if (answered.length === 0) {
+    return Object.values(answers).map((answer) => answer.trim()).filter(Boolean).join("\n\n")
+  }
+  return answered.length === 1
+    ? answered[0].answer
+    : answered.map(({ question, answer }) => `${question}\n${answer}`).join("\n\n")
+}
+
 // ── Runtime snapshot ────────────────────────────────────────────────────────
 
 type RuntimeSection =
@@ -657,6 +684,9 @@ export const codexRuntime: AgentRuntime = {
     }
 
     const cwd = await resolveSessionCwd(req.cwd, req.filePath)
+    // Any message the thread receives is the answer to whatever it last asked,
+    // whether it was typed into the question card or straight into the composer.
+    codexQuestions.clear(sessionId)
     try {
       const result = await continueCodexExecution(codexAppServer, sessionId, {
         ...executionOptions({ ...req, cwd }),
@@ -787,14 +817,38 @@ export const codexRuntime: AgentRuntime = {
     }
   },
 
-  listPendingQuestions() {
-    // The app-server rejects any method outside its approval pair, so there is
-    // no question channel to read.
-    return []
+  listPendingQuestions(sessionId) {
+    return codexQuestions.list(sessionId).map((question) => ({
+      sessionId: question.threadId,
+      toolUseId: question.itemId,
+      askedAt: question.askedAt,
+      questions: question.questions,
+    }))
   },
 
-  async answerQuestion() {
-    return false
+  /**
+   * Answering is sending a message: Codex's async questions carry no reply
+   * channel of their own, and the thread reads the next message as the answer.
+   * `send` steers a turn that is still running and starts one otherwise, which
+   * is exactly the two cases a question can be answered in.
+   */
+  async answerQuestion(sessionId, questionId, answers) {
+    const pending = codexQuestions
+      .list(sessionId)
+      .find((question) => question.itemId === questionId)
+    if (!pending) return false
+
+    const message = formatQuestionAnswer(pending, answers)
+    if (!message) {
+      throw new AgentRuntimeError(
+        400,
+        "INVALID_REQUEST",
+        "answers must contain an answer to the pending question",
+      )
+    }
+
+    await codexRuntime.send(sessionId, { message })
+    return true
   },
 
   listModels: fetchCodexModels,

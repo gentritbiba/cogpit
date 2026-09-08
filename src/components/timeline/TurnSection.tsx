@@ -59,7 +59,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
     state: { activeTurnIndex, activeToolCallId, expandAll, expandToolPayloads },
     isMobile,
   } = useAppContext()
-  const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
+  const { session, isLive, isSubAgentView, undoRedo, actions, pendingInteraction } = useSessionContext()
 
   const isSessionLive = isLive && session !== null
   // Narrower than `isSessionLive`: only the last turn can still be worked on, so
@@ -80,9 +80,16 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
   const cwd = session?.cwd ?? ""
   const skillMetadata = useSkillMetadata(cwd)
 
+  // An async question sits mid-turn with work after it, so only the session's
+  // pending interaction can say whether it is still waiting on an answer.
+  const openQuestionId = pendingInteraction?.type === "question"
+    ? pendingInteraction.toolUseId
+    : undefined
+
   return (
     <TurnSectionInner
       turn={turn}
+      openQuestionId={openQuestionId}
       index={index}
       branchCount={branchCount}
       isActive={activeTurnIndex === index}
@@ -160,6 +167,8 @@ interface TurnSectionInnerProps {
   onOpenBranches?: (turnIndex: number) => void
   onEditCommand?: (commandName: string) => void
   onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+  /** Tool call id of an async question the session is still waiting on. */
+  openQuestionId?: string
 }
 
 function TurnWorkLabel({
@@ -203,6 +212,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   onOpenBranches,
   onEditCommand,
   onExpandCommand,
+  openQuestionId,
 }: TurnSectionInnerProps) {
   const { ref, isNear } = useNearViewport()
 
@@ -223,8 +233,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
 
   const foldPhase = isTurnDone ? "settled" : "working"
   const foldPlan = useMemo(
-    () => planTurnFold(turn.contentBlocks, foldPhase),
-    [foldPhase, turn.contentBlocks],
+    () => planTurnFold(turn.contentBlocks, foldPhase, openQuestionId),
+    [foldPhase, openQuestionId, turn.contentBlocks],
   )
   // Undefined follows the global setting. A click becomes a local override,
   // so the disclosure never ignores the user while "expand all" is active.

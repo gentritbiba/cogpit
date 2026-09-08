@@ -1,16 +1,10 @@
 # Browser Panel
 
-Managed browsers are supported on macOS and Linux. Native Windows support is not
-available yet: the routing shim and daemon lifecycle require POSIX facilities.
-On a Windows host, Cogpit shows this limitation instead of offering installation,
-and does not install the shim, inject browser guidance, or start browser daemons.
-A Windows client can still view a browser hosted by a supported remote device.
-
 A workspace panel that streams the agent's live `agent-browser` session, lets you click and type in it, and manages persistent named browsers with automatic login persistence across restarts.
 
 ## What It Does
 
-The Browser panel displays the agent's headless Chromium in real time over the `/__browser` WebSocket transport. You can interact directly — click, type, navigate, go back/forward. The agent and you can drive the same browser. Select the same browser and tab to watch and interact with the page the agent is using.
+The Browser panel displays the agent's Chromium in real time over the `/__browser` WebSocket transport. You can interact directly — click, type, navigate, go back/forward. The agent and you can drive the same browser. Select the same browser and tab to watch and interact with the page the agent is using.
 
 Browser tabs are persistent. The shared `default` browser keeps cookies and localStorage across session restarts. You can create named browsers (`github`, `work-gmail`) for isolated, long-lived work. Subagents get private throwaway browsers (`tmp-*`) that are reaped automatically.
 
@@ -25,6 +19,7 @@ The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that rout
   - Profile: `~/.cogpit/browser/profiles/<name>` (persistent, survives restarts)
   - Socket dir: `~/.cogpit/browser/run/shared` (shared across all sessions)
   - Sets `--remote-debugging-port=0` so Chromium writes its debugging endpoint to `<profile>/DevToolsActivePort`
+  - Opens a real browser window when one can be shown (see "Window or headless" below)
   - Writes `$COGPIT_SESSION_ID` to `<profile>/.driver` (used to show "driven by another session" in the panel)
 
 - **Throwaway browser** (`agent-browser --session tmp-abc123 open …`):
@@ -39,6 +34,25 @@ The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that rout
 (A third case is not a fall-through: if the real binary the shim was generated against is gone or resolves back to the shim itself, it exits 127 and asks you to restart Cogpit.)
 
 `$COGPIT_BROWSER_HOME` overrides `~/.cogpit/browser` for the whole tree, in both the shim and the server. It is what the test suite sets; there is no reason to set it by hand.
+
+### Windows
+
+The same routing ships as a Node script, `~/.cogpit/bin/agent-browser-shim.mjs`, with two launchers beside it: `agent-browser.cmd` for cmd.exe, PowerShell and Cogpit's own launch and stop calls, and a bash delegate under the bare name for Git Bash, which some agent shell tools use there. Both call `node`, which agent-browser itself needs on PATH to start its daemon. The tree defaults to `%USERPROFILE%\.cogpit\browser`.
+
+Cogpit resolves the real binary to something CreateProcess can launch: an `agent-browser.exe` on PATH, or the native binary npm vendors under `node_modules\agent-browser\bin` next to its `.cmd` shim. A `.cmd` with nothing beside it is run through cmd.exe with every argument quoted.
+
+agent-browser's daemon listens on a loopback TCP port there rather than a unix socket, and writes `<name>.port` next to `<name>.pid`. The port is a hash of the browser name alone, so two Cogpit trees on one machine using the same name would collide. Windows has no process groups, so a daemon is stopped with `taskkill /t`, which takes its Chromium with it; the `ps` guard against recycled pids becomes a `Get-CimInstance Win32_Process` lookup.
+
+### Window or headless
+
+agent-browser's own download is Chromium's headless shell. Its user agent says `HeadlessChrome`, and bot checks such as Cloudflare's challenge page refuse it outright, so a human clicking "Verify you are human" in the panel loops forever. Named browsers therefore open in a real window whenever Cogpit finds a full browser at startup: `Google Chrome.app` or `Chromium.app` in `/Applications` or `~/Applications` on macOS, `google-chrome`, `google-chrome-stable`, `chromium` or `chromium-browser` on PATH on Linux. The shim then sets, for named browsers only:
+
+- `AGENT_BROWSER_HEADED=1` and `AGENT_BROWSER_EXECUTABLE_PATH=<that browser>`
+- `--disable-blink-features=AutomationControlled` alongside the debugging port. Chromium reports `navigator.webdriver = true` whenever a debugging port is open, even in a normal window, and Cloudflare's Turnstile fails on that flag alone (error `600010`, "There was a problem with verification"). The person driving the panel is not automation, so the flag is off.
+
+The window opens behind Cogpit without taking focus; the panel streams it the same way it streams a headless page, and you can use the window directly too. On Linux the shim only opens a window when `$DISPLAY` or `$WAYLAND_DISPLAY` is set in the agent's environment; a box with no display, or a machine with no full browser, stays headless. Throwaway `tmp-*` browsers are always headless, and so is Windows for now: the Node shim does not look for a browser.
+
+The visible browser is resolved once, when the shim is written at startup. Install Chrome and restart Cogpit to pick it up. To keep named browsers headless on a machine that has Chrome, set `COGPIT_BROWSER_HEADLESS=1` in the environment Cogpit starts agents with; a Mac driven remotely over a tunnel is the usual reason.
 
 ## Browser Types
 
@@ -108,6 +122,8 @@ A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Code
 4. Frames travel to the panel as binary on the `/__browser` WebSocket: a 4-byte header length + JSON header (device size, target id, scale/scroll) + JPEG bytes.
 
 5. The panel maps your pointer clicks and keystrokes back to device coordinates using the frame header's scale and scroll offsets.
+
+6. Clipboard crosses by hand, because the page's own clipboard belongs to a headless Chromium and holds nothing the user ever copied. A paste over the viewport is claimed from the `paste` event, sent as text, and inserted with `Input.insertText`. A copy or cut goes the other way: the server reads the page's selection and hands it back for the viewer to put on its own clipboard. That is also what makes the panel work from a remote device, where the two clipboards are on different machines.
 
 The connection works over the hub for remote devices; the hub route matcher is `^/hub/[^/]+/(__pty|__browser)$`.
 
@@ -237,6 +253,10 @@ A stale `DevToolsActivePort` file can make the attach fail:
 - Stop the browser (panel button or the `stop` route above).
 - Delete the stale port file: `rm ~/.cogpit/browser/profiles/default/DevToolsActivePort`.
 - Reopen the browser from the panel.
+
+**A site's human-verification loops or says "There was a problem with verification"**
+
+The browser is running headless. Check `~/.cogpit/bin/agent-browser` for an `AGENT_BROWSER_HEADED=1` line: if it is missing, Cogpit found no full Chrome or Chromium at startup (see "Window or headless"). On Linux, also make sure the agent's environment has a display.
 
 **"agent-browser" not installed on this machine**
 

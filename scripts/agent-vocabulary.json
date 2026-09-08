@@ -81,7 +81,7 @@
     "shared/session/prLinks.ts": 4,
     "shared/session/sessionStatus.ts": 1,
     "shared/session/token-costs.ts": 1,
-    "shared/session/toolSummary.ts": 10,
+    "shared/session/toolSummary.ts": 9,
     "shared/session/turnBuilder.ts": 13,
     "shared/usageCost/pricing.ts": 1,
     "shared/versions.ts": 2,

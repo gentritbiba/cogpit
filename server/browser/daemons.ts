@@ -1,8 +1,9 @@
 /**
  * Lifecycle of the agent-browser daemons behind Cogpit's named and throwaway
- * browsers. Each daemon writes `<runDir>/<name>.pid` and `.sock`; Chromium
- * writes `<profile>/DevToolsActivePort`, which goes stale after `close`, so a
- * browser only counts as running when the pid is alive *and* CDP answers.
+ * browsers. Each daemon writes `<runDir>/<name>.pid` and `.sock` (`.port` on
+ * Windows, where it listens on loopback TCP); Chromium writes
+ * `<profile>/DevToolsActivePort`, which goes stale after `close`, so a browser
+ * only counts as running when the pid is alive *and* CDP answers.
  */
 import { execFileSync, spawn as spawnProcess } from "node:child_process"
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -10,6 +11,7 @@ import { request } from "node:http"
 import { basename, join } from "node:path"
 
 import { resolveNavigationUrl } from "../../shared/browser/url"
+import { resolveAgentCommand } from "../lib/binaryResolver"
 import {
   assertBrowserName,
   assertNamedBrowser,
@@ -24,6 +26,7 @@ import {
   shimPath,
   sweepOwnerFile,
 } from "./paths"
+import { processCommandLine, terminateProcess } from "./processControl"
 
 export interface DaemonDeps {
   spawn: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<{ code: number; stderr: string }>
@@ -76,9 +79,11 @@ function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<
   })
 }
 
+/** The shim is a batch file on Windows, which only cmd.exe can run. */
 function spawnCollectingStderr(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; stderr: string }> {
+  const cli = resolveAgentCommand(command, args, { env })
   return new Promise((resolve, reject) => {
-    const child = spawnProcess(command, args, { env, stdio: ["ignore", "ignore", "pipe"] })
+    const child = spawnProcess(cli.command, cli.args, { env, stdio: ["ignore", "ignore", "pipe"], ...cli.spawnOptions })
     let stderr = ""
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString()
@@ -116,22 +121,19 @@ function probeDevTools(port: number): Promise<boolean> {
   })
 }
 
+function runQuietly(file: string, args: string[]): string {
+  return execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+}
+
 /** Guards against a recycled pid: only ever signal a process that is an agent-browser daemon. */
 function isDaemonProcess(pid: number): boolean {
-  try {
-    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).includes(DAEMON_COMMAND_MARKER)
-  } catch {
-    return false
-  }
+  return processCommandLine(pid, process.platform, runQuietly).includes(DAEMON_COMMAND_MARKER)
 }
 
 function killPid(pid: number, signal: NodeJS.Signals): boolean {
   if (!isDaemonProcess(pid)) return false
   try {
-    process.kill(pid, signal)
+    terminateProcess(pid, signal, process.platform, runQuietly)
     return true
   } catch {
     return false
@@ -212,8 +214,7 @@ function listRunSubdirs(): string[] {
 }
 
 function removeRunFiles(dir: string, name: string): void {
-  rmSync(join(dir, `${name}${PID_SUFFIX}`), { force: true })
-  rmSync(join(dir, `${name}.sock`), { force: true })
+  for (const suffix of [PID_SUFFIX, ".sock", ".port"]) rmSync(join(dir, `${name}${suffix}`), { force: true })
 }
 
 /** The shim stamps `.driver` from COGPIT_SESSION_ID, so the server's own value must never leak through. */

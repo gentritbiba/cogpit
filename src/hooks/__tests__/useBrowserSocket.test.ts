@@ -332,6 +332,25 @@ describe("useBrowserSocket", () => {
       expect(result.current.tabs).toBe(first.tabs)
     })
 
+    it("hands copied text to the latest onClipboard without reconnecting", () => {
+      const first = vi.fn()
+      const second = vi.fn()
+      const { rerender } = renderHook(
+        ({ onClipboard }: { onClipboard: (text: string) => void }) => useBrowserSocket("default", onClipboard),
+        { initialProps: { onClipboard: first } },
+      )
+      act(() => latest().open())
+      const socket = latest()
+
+      act(() => emitJson(socket, { type: "clipboard", text: "selected words" }))
+      rerender({ onClipboard: second })
+      act(() => emitJson(socket, { type: "clipboard", text: "more words" }))
+
+      expect(first.mock.calls).toEqual([["selected words"]])
+      expect(second.mock.calls).toEqual([["more words"]])
+      expect(latest()).toBe(socket)
+    })
+
     it("surfaces an error and clears it on the next status", () => {
       const { result } = renderHook(() => useBrowserSocket("default"))
       act(() => latest().open())

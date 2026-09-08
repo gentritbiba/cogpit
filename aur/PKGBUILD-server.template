@@ -21,7 +21,8 @@ options=('!strip' '!debug')
 build() {
   cd cogpit
   bun install --frozen-lockfile
-  bun run build
+  # not `bun run build`: that also typechecks packages/* which this package neither installs deps for nor ships
+  bun run build:web
 }
 
 package() {
@@ -37,6 +38,7 @@ package() {
   cp -r server "${pkgdir}/opt/${pkgname}/"
   cp -r electron "${pkgdir}/opt/${pkgname}/"
   cp -r src "${pkgdir}/opt/${pkgname}/"
+  cp -r shared "${pkgdir}/opt/${pkgname}/"
 
   cp package.json "${pkgdir}/opt/${pkgname}/"
   cp tsconfig.json "${pkgdir}/opt/${pkgname}/" 2>/dev/null || true

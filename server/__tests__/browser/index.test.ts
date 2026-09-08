@@ -4,16 +4,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
-
 /**
  * `failures` names the step a test wants to break; the mocks below delegate to
  * the real modules for every other step, so a tolerance test still exercises
  * the code around the one that threw.
  */
-const { failures, record } = vi.hoisted(() => ({
+const { failures, record, found } = vi.hoisted(() => ({
   failures: new Set<string>(),
   record: { sweepersStarted: 0, sweepersStopped: 0, browserShutdowns: 0 },
+  /** A real binary to report instead of scanning PATH, for hosts the scan cannot be run on. */
+  found: { binary: null as string | null },
 }))
 
 vi.mock("../../browser/shim", async (importOriginal) => {
@@ -22,7 +22,7 @@ vi.mock("../../browser/shim", async (importOriginal) => {
     ...actual,
     findRealAgentBrowser: (env?: NodeJS.ProcessEnv) => {
       if (failures.has("find")) throw new Error("PATH scan failed")
-      return actual.findRealAgentBrowser(env)
+      return found.binary ?? actual.findRealAgentBrowser(env)
     },
     ensureShim: (realBinary: string | null) => {
       if (failures.has("shim")) throw new Error("shim write failed")
@@ -63,9 +63,9 @@ vi.mock("../../browser/daemons", async (importOriginal) => {
 })
 
 import { initBrowserSupport } from "../../browser"
-import { renderShim } from "../../browser/shim"
+import { renderCmdLauncher, renderNodeShim, renderShim } from "../../browser/shim"
 import { pluginManifestFile, pluginSkillFile, SKILL_NAME } from "../../browser/skill"
-import { profilesDir, sharedRunDir, shimPath } from "../../browser/paths"
+import { nodeShimPath, profilesDir, sharedRunDir, shimPath } from "../../browser/paths"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 
 let root = ""
@@ -102,6 +102,7 @@ const alwaysDead = () => false
 
 beforeEach(() => {
   failures.clear()
+  found.binary = null
   record.sweepersStarted = 0
   record.sweepersStopped = 0
   record.browserShutdowns = 0
@@ -149,6 +150,23 @@ describe("initBrowserSupport", () => {
     expect(errors).toEqual([])
 
     await support.shutdown()
+  })
+
+  it("installs the .cmd launcher and node shim on Windows", async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, "platform", { value: "win32" })
+    found.binary = "C:\\tools\\agent-browser.exe"
+    try {
+      const support = initBrowserSupport(alwaysDead)
+      expect(readFileSync(shimPath(), "utf8")).toBe(renderCmdLauncher())
+      expect(readFileSync(nodeShimPath(), "utf8")).toBe(renderNodeShim(found.binary))
+      expect(statSync(profilesDir()).isDirectory()).toBe(true)
+      expect(record.sweepersStarted).toBe(1)
+      expect(errors).toEqual([])
+      await support.shutdown()
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform })
+    }
   })
 
   it("removes a stale shim when no agent-browser is installed", async () => {

@@ -13,7 +13,6 @@ export interface BrowserSessionInfo {
 }
 
 export interface BrowserStatus {
-  unsupportedReason?: string
   installed: boolean
   binaryPath: string | null
   sessions: BrowserSessionInfo[]

@@ -66,18 +66,50 @@ function agentContinuedAfterToolCall(turn: Turn, toolCallId: string): boolean {
 }
 
 /**
- * Detect if the session is waiting for user interaction (plan approval or
- * AskUserQuestion). Returns the interaction state or null.
+ * Check whether the reader's own text follows the given tool call in the turn.
+ * An async question is answered by a plain message, which lands mid-turn as a
+ * queued prompt when the agent was still working.
  */
-export function detectPendingInteraction(session: ParsedSession): PendingInteraction {
-  const { turns } = session
-  if (turns.length === 0) return null
+function userRepliedAfterToolCall(turn: Turn, toolCallId: string): boolean {
+  const blocks = turn.contentBlocks
+  const blockIndex = blocks.findIndex(
+    (block) => block.kind === "tool_calls" && block.toolCalls.some((tc) => tc.id === toolCallId),
+  )
+  if (blockIndex === -1) return false
+  return blocks.slice(blockIndex + 1).some((block) => block.kind === "queued_prompt")
+}
 
-  const lastTurn = turns[turns.length - 1]
-  if (!lastTurn || lastTurn.toolCalls.length === 0) return null
+/**
+ * The turn's most recent unanswered async question.
+ *
+ * These never block, so — unlike a blocking prompt — the question is not the
+ * turn's last tool call and carries a successful result the moment it is asked.
+ * What makes it still open is that the turn holds no reply to it: answering
+ * starts the next turn, so an unanswered question stays in the last one.
+ */
+function detectAsyncQuestion(turn: Turn): UserQuestionState | null {
+  for (let index = turn.toolCalls.length - 1; index >= 0; index--) {
+    const toolCall = turn.toolCalls[index]
+    if (!toolCall.asyncQuestion || toolCall.isError) continue
+    if (userRepliedAfterToolCall(turn, toolCall.id)) return null
 
+    const questions = (toolCall.input as Record<string, unknown>).questions as
+      | UserQuestionState["questions"]
+      | undefined
+    if (questions && questions.length > 0) {
+      return { type: "question", toolUseId: toolCall.id, questions }
+    }
+  }
+  return null
+}
+
+/**
+ * A prompt that stopped the agent dead: it is the turn's last tool call and it
+ * is still waiting on its own result.
+ */
+function detectBlockingPrompt(turns: Turn[], lastTurn: Turn): PendingInteraction {
   const lastToolCall = lastTurn.toolCalls[lastTurn.toolCalls.length - 1]
-  if (!lastToolCall) return null
+  if (!lastToolCall || lastToolCall.asyncQuestion) return null
 
   const { name } = lastToolCall
   if (name !== "ExitPlanMode" && name !== "AskUserQuestion") return null
@@ -110,4 +142,21 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   }
 
   return null
+}
+
+/**
+ * Detect if the session is waiting for user interaction (plan approval or
+ * AskUserQuestion). Returns the interaction state or null.
+ *
+ * A blocking prompt wins over an async question asked earlier in the same turn:
+ * it is the one holding the agent up.
+ */
+export function detectPendingInteraction(session: ParsedSession): PendingInteraction {
+  const { turns } = session
+  if (turns.length === 0) return null
+
+  const lastTurn = turns[turns.length - 1]
+  if (!lastTurn || lastTurn.toolCalls.length === 0) return null
+
+  return detectBlockingPrompt(turns, lastTurn) ?? detectAsyncQuestion(lastTurn)
 }

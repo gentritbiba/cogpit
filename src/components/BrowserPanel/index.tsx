@@ -6,6 +6,7 @@ import { useBrowserSessions, type BrowserActionResult } from "@/hooks/useBrowser
 import { useBrowserSocket } from "@/hooks/useBrowserSocket"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { deviceScopedKey } from "@/lib/device"
+import { copyToClipboard } from "@/lib/utils"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
@@ -52,7 +53,10 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     readSkillTargets,
     installSkill,
   } = useBrowserSessions(active)
-  const socket = useBrowserSocket(active ? selected : null)
+  // What the page copies goes on the user's own clipboard; the page's belongs to
+  // a headless browser process nothing else can reach.
+  const receiveClipboard = useCallback((text: string) => void copyToClipboard(text), [])
+  const socket = useBrowserSocket(active ? selected : null, receiveClipboard)
 
   const sessions = status?.sessions ?? NO_SESSIONS
   // Walking the transcript per frame would cost more than painting one.
@@ -106,10 +110,9 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
   const state = socket.state?.state ?? null
-  const unsupported = status?.unsupportedReason ?? (state === "unsupported" ? socket.state?.message ?? "The Browser panel is unavailable on this host." : null)
-  const notInstalled = !unsupported && (status?.installed === false || state === "not-installed")
-  const live = !unsupported && !notInstalled && state === "live"
-  const stopped = !unsupported && !notInstalled && state === "stopped"
+  const notInstalled = status?.installed === false || state === "not-installed"
+  const live = !notInstalled && state === "live"
+  const stopped = !notInstalled && state === "stopped"
   const selectedInfo = sessions.find((session) => session.name === selected) ?? null
   // The transport dropped under a page that was live: the last frame is still
   // worth looking at, as long as the panel stops calling it the live one.
@@ -120,12 +123,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {unsupported && (
-        <div className="flex justify-end border-b p-1">
-          <Button variant="ghost" size="icon-xs" aria-label="Close browser panel" onClick={closePanel}><X /></Button>
-        </div>
-      )}
-      {!unsupported && <BrowserSessionBar
+      <BrowserSessionBar
         sessions={sessions}
         selected={selected}
         currentSessionId={context.session?.sessionId ?? null}
@@ -139,7 +137,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
         onStop={handleStop}
         onShowDefault={showDefault}
         onClose={closePanel}
-      />}
+      />
 
       {live && (
         <BrowserNavBar
@@ -167,7 +165,6 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        {unsupported && <BrowserEmptyState kind="unsupported" message={unsupported} />}
         {notInstalled && (
           <BrowserEmptyState kind="not-installed" onOpenSkill={openSkill} />
         )}
@@ -191,7 +188,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
             <AgentCaption activity={activity && activity.session === selected ? activity : null} />
           </>
         )}
-        {!unsupported && !notInstalled && !stopped && !live && (
+        {!notInstalled && !stopped && !live && (
           <div
             role="status"
             className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"

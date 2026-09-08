@@ -321,6 +321,22 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
     return () => canvas.removeEventListener("wheel", onWheel)
   }, [send, fit, deviceWidth, deviceHeight])
 
+  // The page cannot reach the clipboard the user copied into — its own belongs
+  // to the browser process, which is headless. So the paste is carried across as
+  // text. The event lands on the document whether or not the canvas is its
+  // target, and is only claimed while the canvas holds focus.
+  useEffect(() => {
+    if (!focused) return
+    const onPaste = (event: ClipboardEvent) => {
+      const text = event.clipboardData?.getData("text/plain")
+      if (!text) return
+      event.preventDefault()
+      send({ type: "paste", text })
+    }
+    document.addEventListener("paste", onPaste)
+    return () => document.removeEventListener("paste", onPaste)
+  }, [focused, send])
+
   useEffect(() => () => {
     if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current)
   }, [])

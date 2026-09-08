@@ -69,6 +69,9 @@ function inferOptionAnswer(question: AskUserQuestion, result: string): string | 
 }
 
 function getAnswers(toolCall: ToolCall, questions: AskUserQuestion[]): Record<string, string> {
+  // An async question's result is an acceptance receipt, never an answer.
+  if (toolCall.asyncQuestion) return {}
+
   const inputAnswers = toolCall.input.answers
   if (typeof inputAnswers === "object" && inputAnswers !== null && !Array.isArray(inputAnswers)) {
     const entries = Object.entries(inputAnswers).filter(
@@ -200,11 +203,13 @@ export function AskUserQuestionCard({
   const questions = useMemo(() => getQuestions(toolCall), [toolCall])
   const answers = useMemo(() => getAnswers(toolCall, questions), [toolCall, questions])
   const showRawDetails = expandToolPayloads || detailsOpen
-  const isAnswered = toolCall.result !== null && !toolCall.isError
+  // An async question is never answered by its own result, so it stays open
+  // until the reader replies — which the card reports through isAwaitingAnswer.
+  const isAnswered = toolCall.result !== null && !toolCall.isError && !toolCall.asyncQuestion
   // questions.length guards the form branch from rendering an empty body:
   // AskUserAnswerForm returns null when it has nothing to ask.
-  const isWaiting =
-    toolCall.result === null && isAwaitingAnswer && Boolean(sessionId) && questions.length > 0
+  const isWaiting = !isAnswered && !toolCall.isError
+    && isAwaitingAnswer && Boolean(sessionId) && questions.length > 0
   const hasStructuredAnswers = Object.keys(answers).length > 0
 
   const Status = toolCall.isError
@@ -263,7 +268,7 @@ export function AskUserQuestionCard({
               question={question}
               answer={answers[question.question]}
               index={index}
-              completed={toolCall.result !== null}
+              completed={toolCall.result !== null && !toolCall.asyncQuestion}
             />
           ))
         ) : (
@@ -272,7 +277,7 @@ export function AskUserQuestionCard({
           </p>
         )}
 
-        {toolCall.result !== null && !hasStructuredAnswers && (
+        {toolCall.result !== null && !toolCall.asyncQuestion && !hasStructuredAnswers && (
           <div className={cn(
             "border-t border-border py-3",
             toolCall.isError

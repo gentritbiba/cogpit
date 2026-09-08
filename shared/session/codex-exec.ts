@@ -428,6 +428,13 @@ function staticArgumentValue(source: string): { value: unknown } | null {
   return literal && literal.endIndex === source.length ? { value: literal.value } : null
 }
 
+/** Codex code mode wraps a whole orchestration script in one `exec` tool call. */
+export function isCodexExecCall<T extends CodexExecCall>(
+  call: T,
+): call is T & { input: { raw: string } } {
+  return typeof call.input.raw === "string" && /(?:^|__|[.:/])exec$/.test(call.name)
+}
+
 /** Decode literal call inputs for presentation; expressions remain available as source. */
 export function getCodexExecCalls(input: Record<string, unknown>): CodexExecCall[] {
   if (typeof input.raw !== "string") return []

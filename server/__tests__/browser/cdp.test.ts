@@ -178,6 +178,7 @@ interface Recorded extends ViewerEvents {
   pages: PageInfo[]
   errors: string[]
   closeReasons: string[]
+  clipboards: string[]
 }
 
 function record(): Recorded {
@@ -187,11 +188,13 @@ function record(): Recorded {
     pages: [],
     errors: [],
     closeReasons: [],
+    clipboards: [],
     frame: (header, jpeg) => {
       recorded.frames.push({ header, jpeg })
     },
     tabs: (tabs, followed) => recorded.tabLists.push({ tabs, followed }),
     page: (info) => recorded.pages.push(info),
+    clipboard: (text) => recorded.clipboards.push(text),
     error: (message) => recorded.errors.push(message),
     closed: (reason) => recorded.closeReasons.push(reason),
   }
@@ -925,7 +928,6 @@ describe("BrowserViewer", () => {
       const { fake, viewer } = await openViewer()
       await viewer.key({ type: "key", event: "down", key: "a", code: "KeyA", modifiers: META })
       await viewer.key({ type: "key", event: "up", key: "a", code: "KeyA", modifiers: META })
-      await viewer.key({ type: "key", event: "down", key: "v", code: "KeyV", modifiers: META })
       await viewer.key({ type: "key", event: "down", key: "Z", code: "KeyZ", modifiers: META | SHIFT })
       await viewer.key({ type: "key", event: "down", key: "z", code: "KeyZ", modifiers: META })
       await viewer.key({ type: "key", event: "down", key: "y", code: "KeyY", modifiers: META })
@@ -935,7 +937,6 @@ describe("BrowserViewer", () => {
       expect(fake.sent("Input.dispatchKeyEvent").map((m) => [m.params.type, m.params.windowsVirtualKeyCode, m.params.commands])).toEqual([
         ["rawKeyDown", 65, ["selectAll"]],
         ["keyUp", 65, undefined],
-        ["rawKeyDown", 86, ["paste"]],
         ["rawKeyDown", 90, ["redo"]],
         ["rawKeyDown", 90, ["undo"]],
         ["rawKeyDown", 89, ["redo"]],
@@ -943,6 +944,67 @@ describe("BrowserViewer", () => {
         ["keyDown", 65, undefined],
       ])
       expect(last(fake.sent("Input.dispatchKeyEvent")).params.text).toBe("a")
+    } finally {
+      Object.defineProperty(process, "platform", platform)
+    }
+  })
+
+  it("inserts pasted text into the followed page", async () => {
+    const { fake, viewer } = await openViewer()
+    fake.handlers["Input.insertText"] = () => ({})
+    await viewer.paste("from the user's clipboard")
+
+    expect(fake.sent("Input.insertText").map((m) => [m.params.text, m.sessionId])).toEqual([
+      ["from the user's clipboard", sessionFor("t2")],
+    ])
+  })
+
+  it("mirrors what a copy selects back to the viewer, before the key lands", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
+    try {
+      const { fake, events, viewer } = await openViewer()
+      fake.handlers["Runtime.evaluate"] = () => ({ result: { value: "selected words" } })
+      await viewer.key({ type: "key", event: "down", key: "c", code: "KeyC", modifiers: META })
+      await viewer.key({ type: "key", event: "down", key: "x", code: "KeyX", modifiers: META })
+
+      expect(events.clipboards).toEqual(["selected words", "selected words"])
+      expect(fake.sent("Runtime.evaluate").map((m) => m.sessionId)).toEqual([sessionFor("t2"), sessionFor("t2")])
+      expect(fake.messages.map((m) => m.method).filter((method) => method.startsWith("Runtime.") || method.startsWith("Input."))).toEqual([
+        "Runtime.evaluate", "Input.dispatchKeyEvent", "Runtime.evaluate", "Input.dispatchKeyEvent",
+      ])
+    } finally {
+      Object.defineProperty(process, "platform", platform)
+    }
+  })
+
+  it("keeps the keystroke when the page has nothing to copy", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
+    try {
+      const { fake, events, viewer } = await openViewer()
+      fake.handlers["Runtime.evaluate"] = () => ({ result: { value: "" } })
+      await viewer.key({ type: "key", event: "down", key: "c", code: "KeyC", modifiers: META })
+      fake.handlers["Runtime.evaluate"] = () => new CdpError("Target closed")
+      await viewer.key({ type: "key", event: "down", key: "c", code: "KeyC", modifiers: META })
+
+      expect(events.clipboards).toEqual([])
+      expect(fake.sent("Input.dispatchKeyEvent")).toHaveLength(2)
+    } finally {
+      Object.defineProperty(process, "platform", platform)
+    }
+  })
+
+  it("reads no selection for a key that is not the host's copy shortcut", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+    try {
+      const { fake, viewer } = await openViewer()
+      fake.handlers["Runtime.evaluate"] = () => ({ result: { value: "selected words" } })
+      await viewer.key({ type: "key", event: "down", key: "c", code: "KeyC", modifiers: META })
+      await viewer.key({ type: "key", event: "down", key: "c", code: "KeyC", text: "c", modifiers: 0 })
+
+      expect(fake.sent("Runtime.evaluate")).toHaveLength(0)
     } finally {
       Object.defineProperty(process, "platform", platform)
     }

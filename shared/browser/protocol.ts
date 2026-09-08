@@ -6,6 +6,7 @@ export type BrowserClientMessage =
   | { type: "mouse"; event: "move" | "down" | "up"; x: number; y: number; button: "left" | "middle" | "right" | "none"; clickCount: number; modifiers: number }
   | { type: "wheel"; x: number; y: number; deltaX: number; deltaY: number; modifiers: number }
   | { type: "key"; event: "down" | "up"; key: string; code: string; text?: string; modifiers: number }
+  | { type: "paste"; text: string }
   | { type: "navigate"; url: string }
   | { type: "back" } | { type: "forward" } | { type: "reload" }
   | { type: "follow"; targetId: string }
@@ -15,15 +16,18 @@ export type BrowserClientMessage =
 export interface BrowserTab { targetId: string; url: string; title: string }
 
 export type BrowserServerMessage =
-  | { type: "status"; state: "unsupported" | "not-installed" | "stopped" | "connecting" | "live"; session: string; message?: string }
+  | { type: "status"; state: "not-installed" | "stopped" | "connecting" | "live"; session: string; message?: string }
   | { type: "tabs"; tabs: BrowserTab[]; followed: string | null }
   | { type: "page"; targetId: string; url: string; title: string; canGoBack: boolean; canGoForward: boolean }
   | { type: "error"; message: string }
+  | { type: "clipboard"; text: string }
 
 const MAX_VIEWPORT_PX = 8192
 const MAX_DPR = 4
 /** Cap on any url the server is asked to open, from the socket or the REST route. */
 export const MAX_URL_LENGTH = 2048
+/** Cap on a single paste, well past anything a form takes and short of a memory hazard. */
+export const MAX_PASTE_LENGTH = 1_000_000
 
 type FieldCheck = (value: unknown) => boolean
 
@@ -34,6 +38,7 @@ const optional = (check: FieldCheck): FieldCheck => (value) => value === undefin
 const oneOf = (allowed: readonly string[]): FieldCheck => (value) => string(value) && allowed.includes(value as string)
 const within = (max: number): FieldCheck => (value) => finite(value) && (value as number) > 0 && (value as number) <= max
 const url: FieldCheck = (value) => string(value) && (value as string).length > 0 && (value as string).length <= MAX_URL_LENGTH
+const pasteText: FieldCheck = (value) => string(value) && (value as string).length > 0 && (value as string).length <= MAX_PASTE_LENGTH
 
 type ClientMessageType = BrowserClientMessage["type"]
 type ClientMessageOf<T extends ClientMessageType> = Extract<BrowserClientMessage, { type: T }>
@@ -45,6 +50,7 @@ const CLIENT_MESSAGE_FIELDS: { [T in ClientMessageType]: FieldChecks<ClientMessa
   mouse: { event: oneOf(["move", "down", "up"]), x: finite, y: finite, button: oneOf(["left", "middle", "right", "none"]), clickCount: count, modifiers: count },
   wheel: { x: finite, y: finite, deltaX: finite, deltaY: finite, modifiers: count },
   key: { event: oneOf(["down", "up"]), key: string, code: string, text: optional(string), modifiers: count },
+  paste: { text: pasteText },
   navigate: { url },
   back: {},
   forward: {},

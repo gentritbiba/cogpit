@@ -239,3 +239,59 @@ describe("planTurnFold — unanswered prompts", () => {
     expect(plan.foldable).toBe(false)
   })
 })
+
+// ── Async questions ──────────────────────────────────────────────────────────
+//
+// These do not block: the agent asks, gets an acceptance receipt and carries on
+// working in the same turn. So neither the question's position nor its result
+// says whether it was answered — that is the caller's to know, and the reason
+// the open question's id is passed in.
+
+describe("planTurnFold — async questions", () => {
+  const asyncQuestion = (): TurnContentBlock => ({
+    kind: "tool_calls",
+    toolCalls: [{
+      id: "async-1",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Budget?", options: [] }] },
+      result: '{"accepted":true}',
+      isError: false,
+      asyncQuestion: true,
+      timestamp: "",
+    }],
+  })
+
+  it("pins an open async question the agent already worked past", () => {
+    const blocks = [asyncQuestion(), tools("Read"), text("Here is a first pass")]
+
+    const plan = planTurnFold(blocks, "settled", "async-1")
+
+    expect(plan.foldedIndices).toEqual([1])
+    expect(plan.hiddenToolCalls).toBe(1)
+  })
+
+  it("folds an async question once the session is no longer waiting on it", () => {
+    const blocks = [asyncQuestion(), tools("Read"), text("Here is a first pass")]
+
+    const plan = planTurnFold(blocks, "settled")
+
+    expect(plan.foldedIndices).toEqual([0, 1])
+  })
+
+  it("folds an async question from a turn other than the open one", () => {
+    const blocks = [asyncQuestion(), tools("Read"), text("Here is a first pass")]
+
+    const plan = planTurnFold(blocks, "settled", "a-later-question")
+
+    expect(plan.foldedIndices).toEqual([0, 1])
+  })
+
+  it("prefers a blocking prompt at the end of the turn over an async question", () => {
+    const blocks = [asyncQuestion(), tools("Read"), text("Before I go on:"), askUserQuestion(null)]
+
+    const plan = planTurnFold(blocks, "settled", "async-1")
+
+    expect(plan.foldedIndices).toContain(0)
+    expect(plan.foldedIndices).not.toContain(3)
+  })
+})

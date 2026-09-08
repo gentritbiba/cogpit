@@ -52,7 +52,6 @@ const openPanel = vi.fn()
 const socketSessions: (string | null)[] = []
 
 let installed = true
-let unsupportedReason: string | undefined
 let browsers: BrowserSessionInfo[] = []
 let socketState: "not-installed" | "stopped" | "connecting" | "live" = "live"
 let socketStatus: BrowserSocketStatus = "connected"
@@ -66,7 +65,7 @@ let sessionBarRenders = 0
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
   return {
     status: enabled
-      ? { installed, unsupportedReason, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
+      ? { installed, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
       : null,
     loading: false,
     error: listError,
@@ -205,7 +204,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   socketSessions.length = 0
   installed = true
-  unsupportedReason = undefined
   browsers = [browserOf()]
   socketState = "live"
   socketStatus = "connected"
@@ -222,16 +220,6 @@ beforeEach(() => {
 })
 
 describe("BrowserPanel", () => {
-  it("explains an unsupported host without offering installation or browser actions", async () => {
-    installed = false
-    unsupportedReason = "The Browser panel is not supported on native Windows yet."
-    const { user } = setup()
-    expect(screen.getByText(unsupportedReason)).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Copy install command" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("application", { name: "Browser viewport" })).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Close browser panel" }))
-    expect(closePanel).toHaveBeenCalledOnce()
-  })
   it("sends the chosen tab id when closing a tab", async () => {
     tabs = [{ targetId: "t2", url: "https://example.test", title: "Example" }]
     const { user } = setup()

@@ -19,13 +19,15 @@ import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { binDir, shimPath } from "../../browser/paths"
-import { ensureShim, findRealAgentBrowser, renderShim, SHIM_VERSION } from "../../browser/shim"
+import { ensureShim, findRealAgentBrowser, findVisibleBrowser, renderShim, SHIM_VERSION } from "../../browser/shim"
 
 const FAKE_BINARY = [
   "#!/usr/bin/env bash",
   'echo "SESSION_DIR=$AGENT_BROWSER_SOCKET_DIR"',
   'echo "PROFILE=${AGENT_BROWSER_PROFILE:-}"',
   'echo "ARGS=${AGENT_BROWSER_ARGS:-}"',
+  'echo "HEADED=${AGENT_BROWSER_HEADED:-}"',
+  'echo "EXECUTABLE=${AGENT_BROWSER_EXECUTABLE_PATH:-}"',
   "printf '[%s]' \"$@\"",
   "",
 ].join("\n")
@@ -60,6 +62,8 @@ interface ShimRun {
   sessionDir: string
   profile: string
   args: string
+  headed: string
+  executable: string
   argv: string
 }
 
@@ -68,14 +72,16 @@ function spawnShim(file: string, args: string[], extraEnv: Record<string, string
   return spawnSync("bash", [file, ...args], { env, encoding: "utf8", timeout: 5_000 })
 }
 
-function runShim(args: string[], extraEnv: Record<string, string> = {}): ShimRun {
-  const result = spawnShim(shimFile, args, extraEnv)
+function runShim(args: string[], extraEnv: Record<string, string> = {}, file = shimFile): ShimRun {
+  const result = spawnShim(file, args, extraEnv)
   if (result.status !== 0) throw new Error(`shim exited ${result.status}: ${result.stderr}`)
-  const [sessionDir, profile, argLine, argv = ""] = result.stdout.split("\n")
+  const [sessionDir, profile, argLine, headed, executable, argv = ""] = result.stdout.split("\n")
   return {
     sessionDir: sessionDir.replace(/^SESSION_DIR=/, ""),
     profile: profile.replace(/^PROFILE=/, ""),
     args: argLine.replace(/^ARGS=/, ""),
+    headed: headed.replace(/^HEADED=/, ""),
+    executable: executable.replace(/^EXECUTABLE=/, ""),
     argv,
   }
 }
@@ -212,6 +218,92 @@ describe.skipIf(process.platform === "win32")("shim routing", () => {
   })
 })
 
+// Native Windows does not execute the POSIX browser shim or implement its mode bits.
+describe.skipIf(process.platform === "win32")("shim routing with a visible browser", () => {
+  const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  const HEADED_ARGS = "--remote-debugging-port=0,--disable-blink-features=AutomationControlled"
+
+  function shimFor(platform: NodeJS.Platform): string {
+    const file = join(root, `visible-${platform}.sh`)
+    writeFileSync(file, renderShim(fakeBinary, { visibleBrowser: chrome, platform }), { mode: 0o755 })
+    return file
+  }
+
+  it("opens named browsers in a window on macOS with automation signalling off", () => {
+    const run = runShim(["--session", "github", "open", "x"], {}, shimFor("darwin"))
+    expect(run.headed).toBe("1")
+    expect(run.executable).toBe(chrome)
+    expect(run.args).toBe(HEADED_ARGS)
+    expect(run.profile).toBe(join(home, "profiles", "github"))
+  })
+
+  it("keeps tmp-* browsers headless and unmanaged", () => {
+    const run = runShim(["--session", "tmp-1", "open", "x"], {}, shimFor("darwin"))
+    expect(run.headed).toBe("")
+    expect(run.executable).toBe("")
+    expect(run.args).toBe("")
+  })
+
+  it("stays headless on Linux without a display", () => {
+    const run = runShim(["open", "x"], {}, shimFor("linux"))
+    expect(run.headed).toBe("")
+    expect(run.executable).toBe("")
+    expect(run.args).toBe("--remote-debugging-port=0")
+  })
+
+  it.each([
+    ["DISPLAY", { DISPLAY: ":0" }],
+    ["WAYLAND_DISPLAY", { WAYLAND_DISPLAY: "wayland-0" }],
+  ])("opens a window on Linux when %s is set", (_label, env) => {
+    const run = runShim(["open", "x"], env, shimFor("linux"))
+    expect(run.headed).toBe("1")
+    expect(run.executable).toBe(chrome)
+    expect(run.args).toBe(HEADED_ARGS)
+  })
+
+  it("stays headless when COGPIT_BROWSER_HEADLESS is set", () => {
+    const run = runShim(["open", "x"], { COGPIT_BROWSER_HEADLESS: "1" }, shimFor("darwin"))
+    expect(run.headed).toBe("")
+    expect(run.executable).toBe("")
+    expect(run.args).toBe("--remote-debugging-port=0")
+  })
+
+  it("stays headless when no visible browser was found", () => {
+    const run = runShim(["open", "x"])
+    expect(run.headed).toBe("")
+    expect(run.args).toBe("--remote-debugging-port=0")
+  })
+
+  it("escapes the browser path like the real binary", () => {
+    const script = renderShim(fakeBinary, { visibleBrowser: '/x/y "z" $HOME', platform: "darwin" })
+    expect(script).toContain('export AGENT_BROWSER_EXECUTABLE_PATH="/x/y \\"z\\" \\$HOME"')
+  })
+})
+
+describe("findVisibleBrowser", () => {
+  it("finds Google Chrome in an Applications folder on macOS", () => {
+    // /Applications comes first and may hold a real Chrome on the machine running this.
+    const chrome = join(root, "Applications", "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
+    mkdirSync(join(chrome, ".."), { recursive: true })
+    writeFileSync(chrome, "#!/bin/sh\n", { mode: 0o755 })
+    const found = findVisibleBrowser({ HOME: root, PATH: "" }, "darwin")
+    expect([chrome, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]).toContain(found)
+  })
+
+  it("finds a Chrome or Chromium on PATH on Linux", () => {
+    const dir = join(root, "linux-bin")
+    mkdirSync(dir)
+    const chromium = join(dir, "chromium")
+    writeFileSync(chromium, "#!/bin/sh\n", { mode: 0o755 })
+    expect(findVisibleBrowser({ HOME: root, PATH: dir }, "linux")).toBe(chromium)
+  })
+
+  it("returns null when nothing is installed", () => {
+    expect(findVisibleBrowser({ HOME: root, PATH: join(root, "nowhere") }, "linux")).toBeNull()
+    expect(findVisibleBrowser({ HOME: root, PATH: "" }, "win32")).toBeNull()
+  })
+})
+
 describe("ensureShim", () => {
   /** Backdates the shim's mtime by a minute and returns the stored value. */
   function ageShim(): number {
@@ -273,6 +365,13 @@ describe("ensureShim", () => {
     ensureShim("/old/agent-browser")
     ensureShim("/new/agent-browser")
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim("/new/agent-browser"))
+  })
+
+  it("rewrites a shim when the visible browser changes", () => {
+    ensureShim(fakeBinary)
+    const options = { visibleBrowser: "/opt/chrome", platform: "linux" as const }
+    ensureShim(fakeBinary, options)
+    expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(fakeBinary, options))
   })
 
   it("removes an existing shim when the real binary disappears", () => {

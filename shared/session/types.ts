@@ -440,6 +440,14 @@ export interface ToolCall {
   resultImages?: ImageBlock[]
   isError: boolean
   timestamp: string
+  /**
+   * A question whose tool result is only an acceptance receipt. Codex's
+   * `request_user_input_async` returns `{"accepted":true}` at once and the
+   * agent keeps working, so the answer arrives later as an ordinary message
+   * rather than as this call's result — `result !== null` does not mean
+   * answered here.
+   */
+  asyncQuestion?: boolean
   /** Set by parser when a PostToolUse hook replaced this tool's output */
   outputReplacedByHook?: boolean
   /** Total duration of PostToolUse hooks attached to this call, summed in ms */

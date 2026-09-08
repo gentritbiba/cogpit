@@ -225,6 +225,47 @@ const BRANCHED_SESSION = [
   assistantMessage("Branched response"),
 ].join("\n")
 
+describe("Codex request_user_input", () => {
+  const QUESTION = "What month or approximate dates do you have in mind?"
+
+  function questionSession(toolName: string): string {
+    return [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Find me a place to stay"),
+      functionCall("call-q", toolName, JSON.stringify({
+        questions: [{ title: QUESTION, options: ["June", "July"] }],
+      })),
+      functionCallOutput("call-q", JSON.stringify({ accepted: true })),
+    ].join("\n")
+  }
+
+  it.each(["request_user_input", "request_user_input_async"])(
+    "renders %s as an AskUserQuestion the question card can read",
+    (toolName) => {
+      const [toolCall] = parseCodexSession(questionSession(toolName)).turns[0].toolCalls
+
+      expect(toolCall.name).toBe("AskUserQuestion")
+      expect(toolCall.input.questions).toEqual([
+        { question: QUESTION, options: [{ label: "June" }, { label: "July" }] },
+      ])
+    },
+  )
+
+  it("marks the async variant so its receipt is not read as an answer", () => {
+    const [toolCall] = parseCodexSession(questionSession("request_user_input_async")).turns[0].toolCalls
+
+    expect(toolCall.asyncQuestion).toBe(true)
+    expect(toolCall.result).toBe('{"accepted":true}')
+  })
+
+  it("leaves the blocking variant unmarked — its result really is the answer", () => {
+    const [toolCall] = parseCodexSession(questionSession("request_user_input")).turns[0].toolCalls
+
+    expect(toolCall.asyncQuestion).toBeUndefined()
+  })
+})
+
 // ── isCodexSessionText ─────────────────────────────────────────────────────
 
 describe("structured Codex tool results", () => {
@@ -826,7 +867,10 @@ describe("parseCodexSession", () => {
         payload: {
           type: "custom_tool_call_output",
           call_id: "call-patch-test",
-          output: [{ type: "input_text", text: "Script completed\nOutput:\nTests failed" }],
+          output: [
+            { type: "input_text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+            { type: "input_text", text: JSON.stringify({ chunk_id: "aa11bb", exit_code: 1, output: "Tests failed" }) },
+          ],
         },
       }),
     ].join("\n")

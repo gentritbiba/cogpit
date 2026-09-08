@@ -111,6 +111,10 @@ class FakeViewer implements BrowserViewerLike {
     return this.record("key", message)
   }
 
+  paste(text: string): Promise<void> {
+    return this.record("paste", text)
+  }
+
   navigate(url: string): Promise<void> {
     return this.record("navigate", url)
   }
@@ -559,6 +563,15 @@ describe("BrowserViewerManager", () => {
       expect(harness.calls.recorded).toEqual([["default", "https://a.test/"]])
     })
 
+    it("forwards copied text to the viewer's own clipboard", async () => {
+      const ws = await connectLive(harness)
+
+      harness.last().events.clipboard("selected words")
+      await settle()
+
+      expect(ws.messages()).toContainEqual({ type: "clipboard", text: "selected words" })
+    })
+
     it("survives a throwing recordUrl", async () => {
       const throwing = makeHarness({
         recordUrl: () => {
@@ -604,6 +617,7 @@ describe("BrowserViewerManager", () => {
       ws.receive(mouse)
       ws.receive(wheel)
       ws.receive(key)
+      ws.receive({ type: "paste", text: "clipboard text" })
       ws.receive({ type: "navigate", url: "example.com" })
       ws.receive({ type: "back" })
       ws.receive({ type: "forward" })
@@ -613,15 +627,16 @@ describe("BrowserViewerManager", () => {
       await settle()
 
       expect(viewer.names()).toEqual([
-        "setViewport", "mouse", "wheel", "key", "navigate", "back", "forward", "reload", "follow", "closeTab",
+        "setViewport", "mouse", "wheel", "key", "paste", "navigate", "back", "forward", "reload", "follow", "closeTab",
       ])
       expect(viewer.calls[0].args).toEqual([900, 600, 2])
       expect(viewer.calls[1].args).toEqual([mouse])
       expect(viewer.calls[2].args).toEqual([wheel])
       expect(viewer.calls[3].args).toEqual([key])
-      expect(viewer.calls[4].args).toEqual(["example.com"])
-      expect(viewer.calls[8].args).toEqual(["t2"])
-      expect(viewer.calls[9].args).toEqual(["t1"])
+      expect(viewer.calls[4].args).toEqual(["clipboard text"])
+      expect(viewer.calls[5].args).toEqual(["example.com"])
+      expect(viewer.calls[9].args).toEqual(["t2"])
+      expect(viewer.calls[10].args).toEqual(["t1"])
       expect(ws.errors()).toEqual([])
     })
 
@@ -636,6 +651,7 @@ describe("BrowserViewerManager", () => {
       ws.receive({ type: "viewport", width: 0, height: 600, dpr: 1 })
       ws.receive({ type: "mouse", event: "down", x: 1, y: 2, button: "left", clickCount: -1, modifiers: 0 })
       ws.receive({ type: "navigate", url: "" })
+      ws.receive({ type: "paste", text: "" })
       await settle()
 
       expect(viewer.calls).toEqual([])

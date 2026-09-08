@@ -23,16 +23,14 @@ import { isRunning, launch, readDevToolsEndpoint } from "./daemons"
 import { assertNamedBrowser } from "./paths"
 import { touchLastUrl } from "./registry"
 import { findRealAgentBrowser } from "./shim"
-import { browserUnsupportedReason } from "./platform"
 
 /** The slice of `BrowserViewer` a connection drives, so tests can stand in for it. */
 export type BrowserViewerLike = Pick<
   BrowserViewer,
-  "setViewport" | "follow" | "closeTab" | "mouse" | "wheel" | "key" | "navigate" | "back" | "forward" | "reload" | "close"
+  "setViewport" | "follow" | "closeTab" | "mouse" | "wheel" | "key" | "paste" | "navigate" | "back" | "forward" | "reload" | "close"
 >
 
 export interface ViewerSocketDeps {
-  unsupportedReason?: () => string | null
   installed: () => boolean
   isRunning: (name: string) => Promise<boolean>
   endpoint: (name: string) => { browserWsUrl: string } | null
@@ -50,7 +48,6 @@ const AUTHORIZATION_RECHECK_MS = 5_000
 const ATTACH_TIMEOUT_MS = 10_000
 
 export const defaultViewerSocketDeps: ViewerSocketDeps = {
-  unsupportedReason: browserUnsupportedReason,
   installed: () => findRealAgentBrowser() !== null,
   isRunning: (name) => isRunning(name),
   endpoint: (name) => readDevToolsEndpoint(name),
@@ -130,12 +127,6 @@ export class BrowserViewerManager {
     ws.on("close", () => this.teardown(connection))
     ws.on("error", () => this.teardown(connection))
 
-    const unsupportedReason = this.deps.unsupportedReason?.()
-    if (unsupportedReason) {
-      connection.terminal = true
-      this.setStatus(connection, "unsupported", unsupportedReason)
-      return
-    }
     if (!this.deps.installed()) {
       connection.terminal = true
       this.setStatus(connection, "not-installed")
@@ -273,6 +264,7 @@ export class BrowserViewerManager {
     return {
       frame: (header, jpeg) => this.sendFrame(connection, header, jpeg),
       tabs: (tabs, followed) => this.send(connection, { type: "tabs", tabs, followed }),
+      clipboard: (text) => this.send(connection, { type: "clipboard", text }),
       page: (info) => {
         this.send(connection, { type: "page", ...info })
         try {
@@ -333,6 +325,9 @@ export class BrowserViewerManager {
           break
         case "key":
           await viewer.key(message)
+          break
+        case "paste":
+          await viewer.paste(message.text)
           break
         case "navigate":
           await viewer.navigate(message.url)

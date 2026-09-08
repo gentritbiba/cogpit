@@ -13,6 +13,7 @@ import {
   extractJsNumberPropertyValues,
   extractJsPropertySource,
   extractJsStringPropertyValues,
+  isCodexExecCall,
   readJsStringLiteral,
   type CodexExecInvocation,
 } from "./codex-exec"
@@ -435,13 +436,6 @@ function presentExecInvocation(invocation: CodexExecInvocation): ToolPresentatio
           }
     }
   }
-}
-
-/** Codex code mode wraps a whole orchestration script in one `exec` tool call. */
-export function isCodexExecCall(
-  tc: SummarizableToolCall,
-): tc is SummarizableToolCall & { input: { raw: string } } {
-  return typeof tc.input.raw === "string" && /(?:^|__|[.:/])exec$/.test(tc.name)
 }
 
 function presentExecScript(script: string): ToolPresentation {

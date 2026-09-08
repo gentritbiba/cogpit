@@ -41,6 +41,7 @@ import { resolveAgentCommand } from "../lib/binaryResolver"
 import { browserAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
+import { codexQuestions } from "./codexQuestions"
 import {
   parseUserAgentVersion,
   readInstalledCodexVersion,
@@ -1093,3 +1094,4 @@ export class CodexAppServer {
 /** Shared process-backed client used by the HTTP runtime and approval routes. */
 export const codexAppServer = new CodexAppServer()
 codexAppServer.subscribe(forwardCodexStreamNotification)
+codexAppServer.subscribe((notification) => codexQuestions.observe(notification))

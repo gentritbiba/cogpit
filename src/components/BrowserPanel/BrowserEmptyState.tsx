@@ -22,22 +22,10 @@ const INSTALL_COMMAND = "npm i -g agent-browser && agent-browser install"
 const COPIED_MS = 1_500
 
 type BrowserEmptyStateProps =
-  | { kind: "unsupported"; message: string }
   | { kind: "not-installed"; onOpenSkill: () => void }
   | { kind: "stopped"; name: string; lastUrl: string | null; onOpen: (url: string) => void }
 
 export function BrowserEmptyState(props: BrowserEmptyStateProps) {
-  if (props.kind === "unsupported") {
-    return (
-      <Empty className="size-full">
-        <EmptyHeader>
-          <EmptyMedia variant="icon"><Globe /></EmptyMedia>
-          <EmptyTitle>Browser panel unavailable</EmptyTitle>
-          <EmptyDescription>{props.message}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
   return props.kind === "not-installed"
     ? <NotInstalled onOpenSkill={props.onOpenSkill} />
     : <Stopped name={props.name} lastUrl={props.lastUrl} onOpen={props.onOpen} />

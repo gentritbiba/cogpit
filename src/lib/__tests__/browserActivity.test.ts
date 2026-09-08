@@ -176,6 +176,47 @@ describe("latestBrowserActivity", () => {
     expect(activity).toMatchObject({ toolCallId: "named", session: "github" })
   })
 
+  describe("Codex code mode", () => {
+    function execCall(script: string, overrides: Partial<ToolCall> = {}) {
+      return latestBrowserActivity(session([
+        turn([toolCall({ name: "exec", input: { raw: script }, ...overrides })]),
+      ]))
+    }
+
+    it("reads the command out of an exec script", () => {
+      expect(execCall('text(await tools.exec_command({cmd:"agent-browser --session shop open x"}))'))
+        .toMatchObject({ session: "shop", command: "agent-browser --session shop open x" })
+    })
+
+    it("ignores the script's non-shell calls", () => {
+      expect(execCall('await tools.apply_patch({input:"agent-browser open x"})')).toBeNull()
+    })
+
+    it("keeps reading the script past a call that never touches the browser", () => {
+      const script = [
+        'await tools.exec_command({cmd:"bun run test"});',
+        'await tools.exec_command({cmd:"agent-browser --session shop open x"})',
+      ].join("\n")
+      expect(execCall(script)).toMatchObject({ session: "shop" })
+    })
+
+    it("keeps reading the script past a throwaway browser", () => {
+      const script = [
+        'await tools.exec_command({cmd:"agent-browser --session tmp-a open y"});',
+        'await tools.exec_command({cmd:"agent-browser --session shop open x"})',
+      ].join("\n")
+      expect(execCall(script)).toMatchObject({ session: "shop" })
+    })
+
+    it("marks a script that has not returned as still running", () => {
+      const activity = execCall(
+        'await tools.exec_command({cmd:"agent-browser open x"})',
+        { result: null },
+      )
+      expect(activity?.done).toBe(false)
+    })
+  })
+
   it("never reads a subagent's browser calls", () => {
     const withSubAgent = turn([], {
       subAgentActivity: [{

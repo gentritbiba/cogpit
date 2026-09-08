@@ -56,8 +56,18 @@ export function binDir(): string {
   return join(dirname(browserHome()), "bin")
 }
 
-export function shimPath(): string {
-  return join(binDir(), "agent-browser")
+/**
+ * What Cogpit spawns and what goes first on an agent's PATH. On Windows that is
+ * a `.cmd` launcher: CreateProcess and cmd.exe cannot run the bash shim, and
+ * Git Bash finds the bash delegate written beside it under the bare name.
+ */
+export function shimPath(platform: NodeJS.Platform = process.platform): string {
+  return join(binDir(), platform === "win32" ? "agent-browser.cmd" : "agent-browser")
+}
+
+/** The routing script both Windows launchers hand their arguments to. */
+export function nodeShimPath(): string {
+  return join(binDir(), "agent-browser-shim.mjs")
 }
 
 export function profilesDir(): string {

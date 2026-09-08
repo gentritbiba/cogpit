@@ -2,9 +2,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
-vi.mock("../../browser/platform", () => ({ browserUnsupportedReason: () => null }))
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
 import { binDir, NO_COGPIT_SESSION, pluginDir, shimPath } from "../../browser/paths"
 import { ensurePlugin } from "../../browser/skill"
@@ -65,6 +63,20 @@ describe("browserAgentEnv", () => {
     writeShim()
     const env = browserAgentEnv({ PATH: "/usr/bin", COGPIT_SESSION_ID: "inherited" }, NO_COGPIT_SESSION)
     expect(env.COGPIT_SESSION_ID).toBe(NO_COGPIT_SESSION)
+  })
+
+  it("prepends under the spelling the base uses, as Windows spells it Path", () => {
+    writeShim()
+    const env = browserAgentEnv({ Path: "C:\\Windows" }, "session-1")
+    expect(env.Path).toBe(`${binDir()}${delimiter}C:\\Windows`)
+    expect("PATH" in env).toBe(false)
+  })
+
+  it("prefers an explicit PATH over a copied Path, which spawn would drop", () => {
+    writeShim()
+    const env = browserAgentEnv({ Path: "C:\\Windows", PATH: "C:\\codex" }, "session-1")
+    expect(env.PATH).toBe(`${binDir()}${delimiter}C:\\codex`)
+    expect(env.Path).toBe("C:\\Windows")
   })
 
   it("does not mutate the base environment", () => {

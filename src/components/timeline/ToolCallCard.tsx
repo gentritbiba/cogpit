@@ -26,7 +26,8 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
-import { getCommandText, getToolPresentation, getToolSummary, getToolTier, isCodexExecCall } from "../../../shared/session/toolSummary"
+import { isCodexExecCall } from "../../../shared/session/codex-exec"
+import { getCommandText, getToolPresentation, getToolSummary, getToolTier } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 

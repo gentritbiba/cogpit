@@ -4,8 +4,6 @@ import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
-vi.mock("../browser/platform", () => ({ browserUnsupportedReason: () => null }))
-
 /**
  * Tests for the Claude Agent SDK session lifecycle, with a focus on
  * confirming that when the user changes `effort` / `model` / `mcpConfig`

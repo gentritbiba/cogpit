@@ -8,7 +8,7 @@ import {
   detectPendingInteraction,
 } from "../../../shared/session/parser"
 import { buildTurns, findTurnStartIndices } from "../../../shared/session/turnBuilder"
-import type { ParsedSession, RawMessage, SubAgentMessage, TokenUsage } from "../../../shared/session/types"
+import type { ParsedSession, RawMessage, SubAgentMessage, TokenUsage, ToolCall } from "../../../shared/session/types"
 import {
   resetFixtureCounter,
   userMsg,
@@ -1662,6 +1662,92 @@ describe("detectPendingInteraction", () => {
       { kind: "tool_calls", toolCalls: turn.toolCalls },
     ]
     expect(detectPendingInteraction(session)).not.toBeNull()
+  })
+
+  // ── async questions ────────────────────────────────────────────────────
+  //
+  // These never block: the tool returns an acceptance receipt at once and the
+  // agent keeps working, so the question is neither the turn's last tool call
+  // nor waiting on its own result. Answering starts the next turn, which is
+  // what makes "still in the last turn" mean "still unanswered".
+
+  function withAsyncQuestion(
+    session: ParsedSession,
+    trailing: ToolCall[] = [],
+  ): ParsedSession {
+    const asked: ToolCall = {
+      id: "async1",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "What is your budget?", options: [] }] },
+      result: '{"accepted":true}',
+      isError: false,
+      asyncQuestion: true,
+      timestamp: "",
+    }
+    const turn = {
+      ...session.turns[0],
+      toolCalls: [asked, ...trailing],
+      contentBlocks: [
+        { kind: "tool_calls" as const, toolCalls: [asked] },
+        ...trailing.map((call) => ({ kind: "tool_calls" as const, toolCalls: [call] })),
+      ],
+    }
+    return { ...session, turns: [turn] }
+  }
+
+  const readCall: ToolCall = {
+    id: "read1", name: "Read", input: { file_path: "a.ts" },
+    result: "ok", isError: false, timestamp: "",
+  }
+
+  it("detects an async question the agent already worked past", () => {
+    const session = withAsyncQuestion(makeSessionWithLastToolCall("Read", {}), [readCall])
+
+    const result = detectPendingInteraction(session)
+
+    expect(result?.type).toBe("question")
+    expect(result?.type === "question" && result.toolUseId).toBe("async1")
+  })
+
+  it("does not treat an async question's acceptance receipt as an answer", () => {
+    const session = withAsyncQuestion(makeSessionWithLastToolCall("Read", {}))
+
+    expect(detectPendingInteraction(session)?.type).toBe("question")
+  })
+
+  it("clears an async question once the reader replies in the same turn", () => {
+    const session = withAsyncQuestion(makeSessionWithLastToolCall("Read", {}), [readCall])
+    session.turns[0].contentBlocks = [
+      { kind: "tool_calls", toolCalls: [session.turns[0].toolCalls[0]] },
+      { kind: "queued_prompt", content: "About 900 a month" },
+      { kind: "tool_calls", toolCalls: [readCall] },
+    ]
+
+    expect(detectPendingInteraction(session)).toBeNull()
+  })
+
+  it("prefers a blocking prompt over an async question asked earlier", () => {
+    const blocking: ToolCall = {
+      id: "blocking1",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Ship it?", options: [{ label: "Yes" }] }] },
+      result: null,
+      isError: false,
+      timestamp: "",
+    }
+    const session = withAsyncQuestion(makeSessionWithLastToolCall("Read", {}), [blocking])
+
+    const result = detectPendingInteraction(session)
+
+    expect(result?.type === "question" && result.toolUseId).toBe("blocking1")
+  })
+
+  it("ignores an async question from an earlier turn", () => {
+    const asked = withAsyncQuestion(makeSessionWithLastToolCall("Read", {})).turns[0]
+    const later = { ...asked, id: "t2", toolCalls: [readCall], contentBlocks: [] }
+    const session = makeSessionWithLastToolCall("Read", {})
+
+    expect(detectPendingInteraction({ ...session, turns: [asked, later] })).toBeNull()
   })
 
   it("returns null for AskUserQuestion with empty questions array", () => {

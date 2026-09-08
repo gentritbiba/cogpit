@@ -164,7 +164,10 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     await navigator.clipboard.writeText(text)
     return true
   } catch {
-    // Fallback: execCommand('copy') via a temporary textarea
+    // Fallback: execCommand('copy') via a temporary textarea. It has to take
+    // focus to be copied from, and whatever had it — the browser viewport, say
+    // — needs it back, or the copy costs the user their keyboard.
+    const focused = document.activeElement
     const textarea = document.createElement("textarea")
     textarea.value = text
     textarea.style.position = "fixed"
@@ -173,6 +176,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     textarea.select()
     const ok = document.execCommand("copy")
     document.body.removeChild(textarea)
+    if (focused instanceof HTMLElement) focused.focus()
     return ok
   }
 }

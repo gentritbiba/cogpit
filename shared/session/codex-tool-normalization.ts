@@ -47,14 +47,62 @@ export function normalizeFunctionName(rawName: string): string {
   return COLLABORATION_TOOL_NAMES.get(leaf) ?? (NATIVE_TOOL_NAMES.has(leaf) ? leaf : rawName)
 }
 
-export function inferToolError(output: string | null): boolean {
-  if (!output) return false
-  const exitMatch = output.match(/Process exited with code (\d+)/)
-  if (exitMatch) return exitMatch[1] !== "0"
-  const withoutSuccessSummaries = output
-    .replace(/\b0\s+(?:fail(?:ed|ures?)?|errors?)\b/gi, "")
-    .replace(/\bno\s+(?:failures?|errors?)\b/gi, "")
-  return /\b(error|failed|exception)\b/i.test(withoutSuccessSummaries)
+/**
+ * Read the exit code Codex's shell wrapper prints into its own output. Nothing
+ * else in the text decides failure: a command that prints source files, HTML or
+ * logs carries words like "error" that say nothing about how it ended.
+ */
+export function hasFailedExit(output: string | null): boolean {
+  const exitMatch = output?.match(/Process exited with code (\d+)/)
+  return exitMatch ? exitMatch[1] !== "0" : false
+}
+
+/**
+ * Names Codex gives the tool that asks the user a question, both the blocking
+ * form and the `_async` one that returns a receipt and keeps working.
+ */
+export function isCodexQuestionTool(name: string): boolean {
+  return name === "request_user_input" || name === "request_user_input_async"
+}
+
+/**
+ * Normalize Codex request_user_input input to AskUserQuestion format.
+ *
+ * Codex writes a question as `{ title, options: string[] | null }`, where the
+ * options are bare labels rather than the `{ label, description }` objects the
+ * question card renders.
+ */
+export function normalizeQuestions(input: Record<string, unknown>): Record<string, unknown> {
+  const source = Array.isArray(input.questions) ? input.questions : [input]
+  const questions = source
+    .filter((question): question is Record<string, unknown> => isObject(question))
+    .map((question) => {
+      const text = typeof question.question === "string"
+        ? question.question
+        : typeof question.title === "string" ? question.title : ""
+      const options = Array.isArray(question.options) ? question.options : []
+      return {
+        question: text,
+        ...(typeof question.header === "string" && question.header
+          ? { header: question.header }
+          : {}),
+        options: options
+          .map((option) => {
+            if (typeof option === "string") return { label: option }
+            if (!isObject(option) || typeof option.label !== "string") return null
+            return {
+              label: option.label,
+              ...(typeof option.description === "string" && option.description
+                ? { description: option.description }
+                : {}),
+            }
+          })
+          .filter((option): option is { label: string; description?: string } => option !== null),
+      }
+    })
+    .filter((question) => question.question)
+
+  return questions.length > 0 ? { ...input, questions } : input
 }
 
 /** Normalize Codex update_plan input to TodoWrite format. */
@@ -90,20 +138,49 @@ function outputImage(block: Record<string, unknown>): ImageBlock | null {
     : null
 }
 
-function outputContent(output: unknown): { text: string; images: ImageBlock[] } {
-  if (typeof output === "string") return { text: output, images: [] }
+function outputContent(output: unknown): { parts: string[]; text: string; images: ImageBlock[] } {
+  if (typeof output === "string") return { parts: [output], text: output, images: [] }
   if (!Array.isArray(output)) {
-    return { text: output == null ? "" : JSON.stringify(output), images: [] }
+    const text = output == null ? "" : JSON.stringify(output)
+    return { parts: [text], text, images: [] }
   }
-  const text: string[] = []
+  const parts: string[] = []
   const images: ImageBlock[] = []
   for (const block of output) {
     if (!isObject(block)) continue
-    if (typeof block.text === "string") text.push(block.text)
+    if (typeof block.text === "string") parts.push(block.text)
     const image = outputImage(block)
     if (image) images.push(image)
   }
-  return { text: text.join(""), images }
+  return { parts, text: parts.join(""), images }
+}
+
+/** Codex opens every exec result with a status line, then one block per chunk. */
+const SCRIPT_STATUS = /^Script (?:completed|failed|running)\b/
+
+function collectExitCodes(chunk: unknown, codes: number[]): void {
+  if (!isObject(chunk)) return
+  if (chunk.status === "rejected") codes.push(1)
+  else if (chunk.status === "fulfilled") collectExitCodes(chunk.value, codes)
+  else if (typeof chunk.exit_code === "number") codes.push(chunk.exit_code)
+}
+
+/**
+ * Read how an exec script ended. Codex runs each shell command as its own chunk
+ * and serializes one envelope per chunk after the status line, so the result
+ * never parses as a whole and its exit codes stay invisible to the caller.
+ */
+function scriptFailed(parts: readonly string[]): boolean | undefined {
+  const status = parts[0] ?? ""
+  if (!SCRIPT_STATUS.test(status)) return undefined
+  if (status.startsWith("Script failed")) return true
+  const codes: number[] = []
+  for (const part of parts.slice(1)) {
+    let chunk: unknown
+    try { chunk = JSON.parse(part) } catch { continue }
+    for (const entry of Array.isArray(chunk) ? chunk : [chunk]) collectExitCodes(entry, codes)
+  }
+  return codes.length > 0 ? codes.some((code) => code !== 0) : undefined
 }
 
 /** Read function, custom-tool, and MCP output without losing structured images. */
@@ -125,7 +202,9 @@ export function parseCustomToolOutput(output: unknown): CodexToolOutput {
     ? envelope.isError
     : typeof envelope?.is_error === "boolean" ? envelope.is_error : undefined
   const isError = explicitError === true
-    || (typeof exitCode === "number" ? exitCode !== 0 : explicitError ?? inferToolError(content.text))
+    || (typeof exitCode === "number"
+      ? exitCode !== 0
+      : explicitError ?? scriptFailed(original.parts) ?? hasFailedExit(content.text))
   return {
     text: content.text,
     isError,

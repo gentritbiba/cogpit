@@ -1,6 +1,6 @@
 import { WebSocket } from "ws"
 import type { FrameHeader } from "../../shared/browser/frames"
-import type { BrowserClientMessage, BrowserServerMessage, BrowserTab } from "../../shared/browser/protocol"
+import { MAX_PASTE_LENGTH, type BrowserClientMessage, type BrowserServerMessage, type BrowserTab } from "../../shared/browser/protocol"
 import { resolveNavigationUrl } from "../../shared/browser/url"
 
 type CdpParams = Record<string, unknown>
@@ -221,6 +221,8 @@ export interface ViewerEvents {
   frame(header: FrameHeader, jpeg: Uint8Array): void | Promise<void>
   tabs(tabs: BrowserTab[], followed: string | null): void
   page(info: PageInfo): void
+  /** Text the page just copied, for the viewer to put on the clipboard it actually has. */
+  clipboard(text: string): void
   /** Something failed off the request path — a target event, a screencast start, a frame flush. */
   error(message: string): void
   closed(reason: string): void
@@ -251,6 +253,7 @@ const MOUSE_BUTTON_MASKS: Record<ClientMessage<"mouse">["button"], number> = {
   none: 0,
 }
 
+const MODIFIER_CTRL = 2
 const MODIFIER_META = 4
 const MODIFIER_SHIFT = 8
 
@@ -278,11 +281,21 @@ const DIGIT_CODE_RE = /^Digit([0-9])$/
 const MAC_EDITING_COMMANDS = new Map<string, string>([
   ["a", "selectAll"],
   ["c", "copy"],
-  ["v", "paste"],
   ["x", "cut"],
   ["z", "undo"],
   ["y", "redo"],
 ])
+
+/** Copy and cut, whose text the viewer mirrors; paste arrives as its own message. */
+const CLIPBOARD_OUT_KEYS = new Set(["c", "x"])
+/** What the page would put on the clipboard: a field's selection, else the document's. */
+const SELECTION_EXPRESSION = `(() => {
+  const el = document.activeElement
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el.selectionStart !== null) {
+    return el.value.slice(el.selectionStart, el.selectionEnd)
+  }
+  return String(document.getSelection() ?? "")
+})()`
 
 function virtualKeyCode(code: string): number | undefined {
   const letter = LETTER_CODE_RE.exec(code)
@@ -290,6 +303,12 @@ function virtualKeyCode(code: string): number | undefined {
   const digit = DIGIT_CODE_RE.exec(code)
   if (digit) return 48 + Number(digit[1])
   return NAMED_KEY_CODES.get(code)
+}
+
+/** The clipboard modifier of the host running the page, which is the one Blink acts on. */
+function isClipboardOut(key: string, modifiers: number): boolean {
+  const accelerator = process.platform === "darwin" ? MODIFIER_META : MODIFIER_CTRL
+  return (modifiers & accelerator) !== 0 && CLIPBOARD_OUT_KEYS.has(key.toLowerCase())
 }
 
 function macEditingCommands(key: string, modifiers: number): string[] | undefined {
@@ -483,8 +502,36 @@ export class BrowserViewer {
     if (event === "down") {
       const commands = macEditingCommands(key, modifiers)
       if (commands !== undefined) params.commands = commands
+      // A cut takes the selection with it, so the mirror reads it while it is there.
+      if (isClipboardOut(key, modifiers)) await this.mirrorSelection()
     }
     await this.cdp.send("Input.dispatchKeyEvent", params, this.followedSession())
+  }
+
+  /**
+   * The page's clipboard belongs to the browser process, which for a headless
+   * Chromium is an in-memory one the user cannot reach. Paste arrives as text
+   * the viewer read from its own clipboard, and goes in as an insertion — which
+   * replaces the selection and raises `input`, the way a real paste does.
+   */
+  async paste(text: string): Promise<void> {
+    await this.cdp.send("Input.insertText", { text }, this.followedSession())
+  }
+
+  /** The other half: what the page copies is handed back for the viewer to keep, capped like a paste. */
+  private async mirrorSelection(): Promise<void> {
+    try {
+      const { result } = await this.cdp.send<{ result: { value?: unknown } }>(
+        "Runtime.evaluate",
+        { expression: SELECTION_EXPRESSION, returnByValue: true },
+        this.followedSession(),
+      )
+      if (typeof result.value === "string" && result.value.length > 0) {
+        this.events.clipboard(result.value.slice(0, MAX_PASTE_LENGTH))
+      }
+    } catch {
+      // A selection the page would not give up costs the copy, not the keystroke.
+    }
   }
 
   async navigate(url: string): Promise<void> {

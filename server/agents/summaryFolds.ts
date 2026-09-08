@@ -2,7 +2,7 @@ import type { EditOp } from "../../shared/diff-utils"
 import { formatForRecords } from "../../shared/session/agents"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import {
-  inferToolError,
+  hasFailedExit,
   normalizeFunctionName,
   parseCustomToolOutput,
 } from "../../shared/session/codex-tool-normalization"
@@ -466,7 +466,7 @@ function foldCodexResponseItem(acc: SessionAccumulator, payload: Record<string, 
 
   if (type === "function_call_output") {
     acc.pendingToolUses.delete(str(payload.call_id))
-    acc.lastToolErrored = inferToolError(str(payload.output))
+    acc.lastToolErrored = hasFailedExit(str(payload.output))
     return
   }
 

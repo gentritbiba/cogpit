@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { cn, getEffortOptions, getModelOptions, normalizeEffortForAgent, supportsImageInput } from "../utils"
+import { describe, it, expect, vi } from "vitest"
+import { cn, copyToClipboard, getEffortOptions, getModelOptions, normalizeEffortForAgent, supportsImageInput } from "../utils"
 
 const claude = getModelOptions("claude")
 const codex = getModelOptions("codex")
@@ -80,5 +80,27 @@ describe("normalizeEffortForAgent", () => {
     ])
     expect(normalizeEffortForAgent("codex", codex, "", "gpt-5.3-codex-spark")).toBe("high")
     expect(supportsImageInput("codex", codex, "gpt-5.3-codex-spark")).toBe(false)
+  })
+})
+
+describe("copyToClipboard", () => {
+  it("gives focus back after falling back to execCommand", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => Promise.reject(new Error("denied")) } })
+    document.execCommand = vi.fn(() => true)
+    // jsdom's `select` is inert; a real one takes focus, which is the whole point.
+    vi.spyOn(HTMLTextAreaElement.prototype, "select").mockImplementation(function (this: HTMLTextAreaElement) {
+      this.focus()
+    })
+    const canvas = document.createElement("canvas")
+    canvas.tabIndex = 0
+    document.body.appendChild(canvas)
+    canvas.focus()
+
+    await expect(copyToClipboard("selected words")).resolves.toBe(true)
+
+    expect(document.activeElement).toBe(canvas)
+    canvas.remove()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 })

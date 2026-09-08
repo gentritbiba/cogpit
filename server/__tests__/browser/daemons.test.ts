@@ -329,6 +329,13 @@ describe("stop", () => {
     expect(runFiles(sharedRunDir(), "work")).toEqual([false, false])
   })
 
+  it("removes the .port file a Windows daemon leaves beside its pid", async () => {
+    writePid(sharedRunDir(), "work", "100")
+    writeFileSync(join(sharedRunDir(), "work.port"), "51234")
+    await stop("work", fakeDeps({ alive: [100] }))
+    expect(existsSync(join(sharedRunDir(), "work.port"))).toBe(false)
+  })
+
   it("never lets the close inherit the server's own COGPIT_SESSION_ID", async () => {
     process.env.COGPIT_SESSION_ID = "inherited"
     writePid(sharedRunDir(), "work", "100")
@@ -688,6 +695,24 @@ describe("defaultDaemonDeps.spawn", () => {
     const result = await defaultDaemonDeps.spawn(process.execPath, ["-e", "console.error('boom'); process.exit(3)"], process.env)
     expect(result.code).toBe(3)
     expect(result.stderr.trim()).toBe("boom")
+  })
+
+  it.skipIf(process.platform === "win32")("runs a .cmd shim through the command interpreter on Windows", async () => {
+    // COMSPEC stands in for cmd.exe: it echoes the line it was handed.
+    const comspec = join(root, "comspec.sh")
+    writeFileSync(comspec, "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >&2\n", { mode: 0o755 })
+    const originalPlatform = process.platform
+    Object.defineProperty(process, "platform", { value: "win32" })
+    try {
+      const result = await defaultDaemonDeps.spawn("C:\\bin\\agent-browser.cmd", ["--session", "work", "open", "https://x/?a=1&b=2"], { ...process.env, COMSPEC: comspec })
+      expect(result.code).toBe(0)
+      expect(result.stderr.split("\n").slice(0, 3)).toEqual(["/d", "/s", "/c"])
+      expect(result.stderr).toContain("C:\\bin\\agent-browser.cmd")
+      expect(result.stderr).toContain('^"work^"')
+      expect(result.stderr).toContain("a=1^&b=2")
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform })
+    }
   })
 })
 

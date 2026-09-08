@@ -6,8 +6,10 @@ import {
   parseCodexToolPatches,
 } from "./codex-patches"
 import {
+  isCodexQuestionTool,
   normalizeFunctionName,
   normalizePlanToTodos,
+  normalizeQuestions,
   parseCustomToolOutput,
   type CodexToolOutput,
 } from "./codex-tool-normalization"
@@ -1019,6 +1021,9 @@ function walkCodexRecords(
       } else if (functionName === "update_plan") {
         name = "TodoWrite"
         input = normalizePlanToTodos(parsedInput)
+      } else if (isCodexQuestionTool(functionName)) {
+        name = "AskUserQuestion"
+        input = normalizeQuestions(parsedInput)
       }
 
       // Detect spawn_agent → synthesize sub-agent activity
@@ -1040,6 +1045,7 @@ function walkCodexRecords(
         result: null,
         isError: false,
         timestamp,
+        ...(functionName === "request_user_input_async" ? { asyncQuestion: true } : {}),
       }
       pendingToolCalls.set(toolCall.id, toolCall)
       appendToolCall(current, toolCall, timestamp)

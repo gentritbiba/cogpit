@@ -1081,6 +1081,53 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
   })
 })
 
+describe("ToolCallCard async questions", () => {
+  const questions = [{ question: "What is your budget?", options: [] }]
+
+  /**
+   * An async question's result is an acceptance receipt, not an answer: the
+   * agent keeps working and the reply arrives as a later message. Reading
+   * `result !== null` as "answered" marked every one of these as settled and
+   * hid the only affordance for answering it.
+   */
+  function makeAsyncQuestionCall(): ToolCall {
+    return {
+      id: "tool-use-id-123",
+      name: "AskUserQuestion",
+      input: { questions },
+      result: '{"accepted":true}',
+      isError: false,
+      asyncQuestion: true,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  beforeEach(() => {
+    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+    mockPendingInteraction = { type: "question", toolUseId: "tool-use-id-123", questions }
+  })
+
+  afterEach(() => {
+    mockPendingInteraction = null
+  })
+
+  it("offers the answer form even though the call already has a result", () => {
+    render(<ToolCallCard toolCall={makeAsyncQuestionCall()} isAgentActive={false} />)
+
+    expect(screen.getByText("Send answer")).toBeTruthy()
+    expect(screen.queryByText("Answered")).toBeNull()
+  })
+
+  it("does not present the acceptance receipt as a recorded response", () => {
+    mockPendingInteraction = null
+    render(<ToolCallCard toolCall={makeAsyncQuestionCall()} isAgentActive={false} />)
+
+    expect(screen.queryByText("Recorded response")).toBeNull()
+    expect(screen.getByText("What is your budget?")).toBeTruthy()
+    expect(screen.getByText("No answer recorded")).toBeTruthy()
+  })
+})
+
 describe("ToolCallCard AskUserQuestion history", () => {
   it("opens raw question details only at the payload expansion level", () => {
     const toolCall: ToolCall = {

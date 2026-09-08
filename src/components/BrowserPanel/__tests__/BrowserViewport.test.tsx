@@ -96,6 +96,13 @@ function SwapDuringCommit({ frames, next }: { frames: BrowserFrame[]; next: bool
   )
 }
 
+/** jsdom builds no clipboard data of its own, so the paste carries its own. */
+function pasteEvent(text: string): Event {
+  const event = new Event("paste", { bubbles: true, cancelable: true })
+  Object.defineProperty(event, "clipboardData", { value: { getData: () => text } })
+  return event
+}
+
 function settle(ms = 200): void {
   act(() => {
     vi.advanceTimersByTime(ms)
@@ -311,6 +318,30 @@ describe("BrowserViewport", () => {
       code: "KeyA",
       modifiers: 2,
     })
+  })
+
+  it("carries a paste across as text while the canvas has focus", () => {
+    const { canvas, send } = setup()
+    act(() => canvas.focus())
+    const paste = pasteEvent("from the clipboard")
+    act(() => { document.dispatchEvent(paste) })
+
+    expect(paste.defaultPrevented).toBe(true)
+    expect(send).toHaveBeenCalledWith({ type: "paste", text: "from the clipboard" })
+  })
+
+  it("leaves a paste alone once the canvas is blurred, or when it carries no text", () => {
+    const { canvas, send } = setup()
+    act(() => canvas.focus())
+    const empty = pasteEvent("")
+    act(() => { document.dispatchEvent(empty) })
+    act(() => canvas.blur())
+    const blurred = pasteEvent("for something else")
+    act(() => { document.dispatchEvent(blurred) })
+
+    expect(empty.defaultPrevented).toBe(false)
+    expect(blurred.defaultPrevented).toBe(false)
+    expect(send.mock.calls.filter(([message]) => message.type === "paste")).toEqual([])
   })
 
   it("keeps Tab inside the page", () => {
