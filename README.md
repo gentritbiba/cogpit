@@ -1,218 +1,152 @@
-<p align="center">
-  <img width="2098" height="1289" alt="Screenshot 2026-03-11 at 4 31 18 AM" src="https://github.com/user-attachments/assets/22f4858d-2b17-4f1b-8cd7-f5d07dacd620" />
-</p>
-
 <h1 align="center">Cogpit</h1>
 
+<p align="center"><strong>Your coding agents, in one workspace.</strong></p>
+
 <p align="center">
-  <em>A real-time control center for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://github.com/openai/codex">Codex</a>, and <a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli">GitHub Copilot CLI</a> sessions.</em>
+  An open-source GUI for Claude Code, OpenAI Codex, and GitHub Copilot CLI.<br />
+  Run sessions, review code changes, and use the browser alongside your agents.
 </p>
 
 <p align="center">
-  <a href="https://cogpit.dev">Website</a> · <a href="https://github.com/gentritbiba/cogpit/releases">Download</a>
+  <a href="https://github.com/gentritbiba/cogpit/releases/latest">Download Cogpit</a> ·
+  <a href="#get-started">Get started</a> ·
+  <a href="docs/usage.md">Documentation</a> ·
+  <a href="https://cogpit.dev">Website</a>
 </p>
 
----
+![Cogpit showing an agent session beside a live checkout preview in the shared Browser panel](docs/images/cogpit-shared-browser.png)
 
-Cogpit brings Claude Code, Codex, and GitHub Copilot CLI into one live, interactive control center. It uses provider-native control APIs for active work and the CLIs' on-disk history for restoration, so you can watch, steer, approve, and debug agents without leaving your workflow.
+<p align="center"><sub>The current Cogpit interface, captured at 3600 × 2240. All screenshots use demo sessions and sample project data.</sub></p>
 
-Available as a **desktop app** (macOS, Linux, Windows) or a **browser-based** dev server.
+Cogpit gives your AI coding agents a shared workspace on macOS, Windows, and Linux. Start a session with your preferred CLI, follow its work, and keep the conversation beside the files it changes. Switch between projects without losing the thread.
 
-## Download
+It runs on your machine and uses your existing CLI logins. Cogpit is free, MIT-licensed, and available as a desktop app or a local web app.
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `Cogpit-x.x.x-arm64.dmg` |
-| macOS (Intel) | `Cogpit-x.x.x.dmg` |
-| Linux (AppImage) | `Cogpit-x.x.x.AppImage` |
-| Linux (Arch) | `Cogpit-x.x.x.pacman` |
-| Windows (x64) | `Cogpit-x.x.x-setup.exe` |
+## Keep the work in view
 
-> **Windows is newly supported and not yet widely tested.** The installer is
-> unsigned, so SmartScreen shows an "unknown publisher" prompt — choose
-> **More info → Run anyway**. Please file an issue if you hit a problem.
+- Follow live conversations, tool calls, and recorded subagent activity. Expand a command to see its output or an edit to see its diff.
+- Resume existing Claude Code, Codex, and Copilot CLI sessions. Find them by project, prompt, branch, or pull request. A live session list shows what is running and what needs your attention.
+- Review every file an agent touched. Open files in the built-in editor, inspect changes by turn, or compare the session's combined diff.
+- Open the Browser panel to watch and interact with the browser your agent is using. Take over a login or check a page together, then let the agent continue. The shared default browser and named browser sessions keep their logins between runs.
+- Keep terminals, project scripts, and GitHub pull requests beside the chat. GitHub, ClickUp, and Vercel panels bring their status into the workspace.
+- Inspect token usage and available account limits. See published-price cost estimates when the provider exposes enough data.
+- Revisit an earlier turn and try another approach. Branching, rewind, and file restoration follow each CLI's supported controls.
+- Connect another machine or open Cogpit from your phone. Answer an agent without sitting at the computer running it.
 
-> **Prerequisite:** Install at least one supported CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses your existing CLI login — no separate API key is needed.
+## Get started
 
-## Why Cogpit
+Install and sign in to at least one supported CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [OpenAI Codex](https://github.com/openai/codex), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses that CLI's authentication and access to models.
 
-Claude Code, Codex, and Copilot CLI are powerful, but the terminal gives you a narrow view. Cogpit gives you the full picture:
+### Download the desktop app
 
-- **See everything at once** — live sessions, token costs, file changes, and agent activity in one screen
-- **Talk to your agents** — send messages, approve plans, answer questions, interrupt turns, and branch where the provider supports it
-- **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring where available
-- **Debug faster** — compact tool-call summaries, expandable thinking blocks, line-by-line edit diffs, and complete session history
-- **Follow multi-agent work** — inspect recorded subagent activity from providers that expose it
-- **Undo supported sessions** — rewind to an earlier turn with branching and file operation reversal
-- **Share a Claude Code session** — hand one live session to someone over a passphrase-protected link, without giving them the rest of the machine
+Get the installer from the [latest release](https://github.com/gentritbiba/cogpit/releases/latest).
 
-## Features
+| Platform | Download |
+| --- | --- |
+| macOS, Apple Silicon | `Cogpit-<version>-arm64.dmg` |
+| macOS, Intel | `Cogpit-<version>.dmg` |
+| Windows, x64 | `Cogpit-<version>-setup.exe` |
+| Linux | `.AppImage` or `.pacman` |
 
-### Multi-Provider Support
-Start sessions with Claude Code, Codex, or GitHub Copilot CLI from the same interface. Model settings come from the installed CLIs, and provider-specific controls appear only when the selected CLI supports them. Claude and Codex catalogs include descriptions, recommended reasoning levels, image support, personality support, and speed tiers when advertised. If a Codex model is unavailable, Cogpit visibly reports the fallback and retries with the provider default.
+The Windows installer is unsigned and Windows support has had less testing. SmartScreen may show an unknown-publisher prompt. Use **More info → Run anyway** to open the installer.
 
-Copilot support covers existing-session discovery and new, resumed, and branched chats. It supports model and reasoning-effort selection, image input, Ask/Plan/Autopilot/Full access modes, approvals, questions, interruption, and deletion. Timelines include nested subagent activity, file changes, pull request links, and recorded usage and cost data. Copilot's native rewind can restore conversation and file changes, but the runtime has no redo. Cogpit does not share Copilot sessions or expose Copilot goals, workflows, or MCP editing; its `.copilot/` instructions, settings and skills are browsable in the configuration editor. Discovery reads Copilot CLI events from `~/.copilot/session-state`. VS Code Copilot Chat data, including `~/Desktop/chatSessions`, is not imported.
+### Run in your browser
 
-### Live Session Monitoring
-Stream active sessions via SSE. Watch Claude, Codex, or Copilot think, call tools, and edit files in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
-
-Search the desktop sidebar or a project's Sessions page for the work behind a pull request. Enter `#157`, `honest-cms #157`, or paste a GitHub pull request URL. Cogpit searches sessions that created or worked on that pull request and labels the exact match.
-
-The desktop sidebar and mobile Sessions tab use the same searchable live-and-recent session list, including status and attention cues.
-
-Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.
-
-### Interactive Chat
-Send or steer messages with a model and effort override, toggle Fast where supported, and choose Full access (default), Workspace, or more restrictive modes. The model chip beside Send opens one panel with the provider, its models, the reasoning-effort ladder and the Fast and Ultracode modes; it stays open while you adjust and closes on a click outside. On capable Claude models, Ultracode can be enabled for new or active sessions to pin XHigh effort and standing multi-agent orchestration; it is off until you click it and never carries over into another session. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
-
-### Long-Running Goals
-Create persistent goals above the composer and monitor status, tokens, elapsed time, and provider-native evaluator feedback. Codex goals can optionally use token budgets and explicit pause/resume controls; Claude goals follow Claude Code's native goal lifecycle.
-
-### Conversation Timeline
-Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, compact tool rows, LCS-based edit diffs, and compaction markers. Mutating calls use normal text, read-only calls stay muted, and red is reserved for failures. Virtualized for smooth scrolling across long sessions.
-
-Adjacent Bash calls share one command card. Single commands and labeled command batches use the same compact layout, with output and failures kept on the command that produced them.
-
-Agent work stays open while a turn is live. Completed turns with a final answer fold that work behind a duration row, and each turn's file summary is a separate collapsed disclosure.
-
-### Sub-Agent Viewer
-When Claude Code, Codex, or Copilot CLI spawns subagents, Cogpit correlates the activity into one record per agent. The session Stats panel shows each agent's status, task summary, duration, and tool count when available. The parent timeline keeps the work in context, and recorded agent threads remain inspectable.
-
-### Token Analytics & Cost Tracking
-Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits where available. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
-
-### Power & Activity Monitor
-Open the header monitor to inspect Cogpit's CPU, memory, event-loop, file/stream, and API activity. The desktop app also breaks usage down by Electron process, and the monitor polls only while it is open.
-
-### Process Leak Monitor
-Automatically detect and clean up leaked agent processes: orphaned Claude sessions, hot headless browsers, and abandoned scripts that drain battery or hog CPU. The header indicator shows active leaks with severity (CPU%, age); one-click cleanup kills only suspected leaks. Two-sweep confirmation prevents accidental kills of transient processes. Notifications announce automatic cleanup.
-
-### Notifications
-Get told when an agent finishes a turn or needs an answer — on the desktop, and on your phone when you have walked away.
-
-Desktop notifications are presented by Cogpit itself, so they carry the app icon, bounce the dock, and open the session when clicked. They are suppressed only when the window is focused *and* already showing that session. The headless `cogpit-server` has no Electron main process, so it falls back to `osascript` on macOS and has no desktop channel elsewhere — there, push is the only channel.
-
-Phone push goes out via [ntfy](https://ntfy.sh) only when nobody is at the desktop: no window, screen locked or suspended, or 120 s without keyboard/mouse input anywhere on the machine (system idle, not window focus). Configure it in `~/.cogpit/push.json` — create it `chmod 600`, since the topic is a bearer secret and anyone who knows it can read every notification:
-
-```json
-{ "topic": "your-private-topic", "publicUrl": "https://cogpit.example.com" }
-```
-
-| Key | Env override | Default | Purpose |
-|-----|--------------|---------|---------|
-| `topic` | `COGPIT_NTFY_TOPIC` | — | ntfy topic; `[-_A-Za-z0-9]`, ≤64 chars. Push is off until set. |
-| `ntfyUrl` | `COGPIT_NTFY_URL` | `https://ntfy.sh` | Base URL of the ntfy server (self-hosted works). |
-| `token` | `COGPIT_NTFY_TOKEN` | — | Sent as `Authorization: Bearer` for protected topics. |
-| `publicUrl` | `COGPIT_PUBLIC_URL` | — | Reachable Cogpit base URL. Without it, pushes carry no click target rather than a dead `127.0.0.1` link. |
-
-Env overrides let a headless box be configured entirely through systemd. Edits take effect without a restart.
-
-Notifications are raised by Cogpit itself — no agent hooks required. A server-side session activity monitor sweeps recently modified Claude Code, Codex, and Copilot transcripts, including sessions started in a terminal, and notifies when a turn completes or starts waiting for permission. Every raised notification lands in a persisted inbox (`~/.cogpit/notifications.json`, bell icon in the header, `GET /api/notifications`), where clicking an entry deep-links to its session.
-
-### Branching and History Controls
-Create branches from earlier turns. Claude Code and Codex sessions use Cogpit's undo/redo graph and file-operation reversal. Copilot uses its native fork and rewind APIs, with optional file restoration, but does not provide redo.
-
-### File Changes
-Track all modifications across a session. Net-diff view (aggregated) or per-edit view (chronological). Sub-agent attribution. Open files in your editor or view git diffs directly.
-
-### Worktree Management
-Open Worktrees from the desktop right activity rail to list active git worktrees with dirty/clean status, commits-ahead count, and linked sessions. Create PRs directly. Bulk cleanup of stale worktrees.
-
-### Permissions & MCP Server Selector
-Use provider-specific access profiles and tool-level policies. Full access is the default; select a more restrictive mode to enforce approval workflows or limit operations. Native Codex command, file, and network approval requests—including requests raised by nested subagents—appear in the composer, expose only decisions allowed by the runtime, and resume directly when answered. Choose which MCP servers to enable per session from a searchable selector.
-
-### Agent Configuration Editor
-Browse and edit each installed CLI's own configuration from the dashboard — `.claude/`, `.codex/` and `.copilot/`, at global and project scope. Instruction files, settings and skills for all three, plus slash commands, agents, themes and MCP server configs for the CLIs that have them. Changes are written to disk immediately, no terminal needed.
-
-### Command Palette & Keyboard Shortcuts
-Press `Cmd+K` to open the command palette: navigate projects, sessions, toggle panels, access settings, and more. Customize keyboard shortcuts globally with conflict detection and preset categories (General, View, Tools).
-
-### Compile-time UI Plugins
-Source builds can add isolated UI plugins to the right workspace rail. Panels can react to the current project or session, expose live indicators, and preserve their state while another panel is active. Cogpit includes GitHub, ClickUp and Vercel Deployments plugins. The GitHub plugin shows Actions (workflow runs, jobs, and steps), Pull Requests (with checks, reviews, conflicts, and comments; linked to Cogpit sessions that worked on them), and Issues (filtered by assignee, author, or label; droppable into the composer) through the authenticated `gh` CLI. Vercel Deployments uses Vercel CLI 50.5.1 or newer to list deployments and fetch build output for the project linked at the exact active-session root. ClickUp shows the tasks assigned to you across your workspace plus one list linked per project, with due-date, priority, status and text filters, using a personal API token you paste once. All three integrations are read-only. If a CLI or token is unavailable or needs setup, only that panel shows guidance and the rest of Cogpit remains usable. See the [plugin guide](docs/plugins.md) for setup details, the typed API, and the registration flow. Runtime plugin installation is not supported yet.
-
-### Integrated Terminals & Project Scripts
-On desktop, open terminals and discovered project scripts from one bottom process panel. Runs share the same tabs and output area. Select terminal output and add it to the chat composer with one action.
-
-### Project File Editor & Previews
-Edit project files securely: read and write to any file in your project with optimistic concurrency control (mtime-based conflict detection prevents lost writes). Preview viewport with zoom controls for rendered content. File suggestions with `@-mention` autocomplete in the chat input.
-
-Enable **Configuration → Open files in Cogpit** to route every "open in editor" action — file-change cards, git diff buttons, file links in agent output, project context menus — into this panel instead of launching an external editor. It works over the network too, so files on a remote device open in place rather than copying a path to the clipboard.
-
-### Network Access
-Access Cogpit from your phone or tablet on the same LAN. Password-protected with rate-limited auth and full feature parity with the local client.
-
-Remote **browser** access requires HTTPS, and a non-loopback bind requires a network password of at least 16 characters. See [Self-hosting](docs/self-hosting.md) for the TLS proxy configs, the forwarding-header requirement, password policy and session expiry.
-
-### Multi-Device Hub
-Register other machines and control them from one Cogpit window. A device switcher in the header (and at the top of the mobile UI) lets you jump between "This machine" and any registered remote — with `⌘⇧1–9` / `Ctrl+Shift+1–9` to jump and `⌘⇧0` to cycle. You always see one machine at a time; switching restores exactly where you left off on that device. Your browser never leaves the hub, which reverse-proxies traffic to each device so there's nothing to configure per-origin.
-
-A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` (or `https://host:port` for TLS-terminating proxies) and credentials: a network password for personal edition, or a username and password for team edition. A live probe reports reachability, required authentication, incomplete team bootstrap, disabled network access, and version skew. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active — except open-in-editor when **Open files in Cogpit** is enabled, which reads the remote device's files through the hub proxy.
-
-Headless boxes become addable with one command:
-```bash
-COGPIT_HOST=0.0.0.0 COGPIT_NETWORK_PASSWORD='your-long-passphrase' bun server/standalone.ts
-```
-
-### Theming
-Dark, Deep OLED, and Light themes use bundled Geist fonts, neutral shadcn tokens, compact radii, and semantic color for status, warnings, and diffs.
-
-## Getting Started
-
-### Without installing
-
-Run the full local web app directly from npm:
+With Node.js 20.11 or newer:
 
 ```bash
 npx cogpit@latest
 ```
 
-Or open one existing Claude Code, Codex, or Copilot session in a focused chat-only view:
+This starts a local server on an available loopback port and opens Cogpit in your browser. Press `Ctrl+C` to stop it. To open a single existing session:
 
 ```bash
 npx cogpit@latest preview <session-id>
 ```
 
-Both commands start a loopback-only Cogpit server on an available port, open
-your browser, and read session history from the provider directories already
-on your machine. Nothing is uploaded. Press `Ctrl+C` to stop the server.
+See [launcher options](packages/cogpit-cli/README.md) or the [self-hosting guide](docs/self-hosting.md) for a headless server and remote access.
 
-### From Releases (recommended)
+## Claude Code, Codex, and Copilot support
 
-Download from the [Releases page](https://github.com/gentritbiba/cogpit/releases) and open.
+Cogpit connects to the installed agent CLIs. The controls in a session reflect what that CLI supports.
 
-### From Source
+| Agent | What you can do in Cogpit |
+| --- | --- |
+| Claude Code | Start and resume chats, choose models, answer approvals, inspect subagents, set goals, undo and redo edits, and share a live session with a guest. |
+| OpenAI Codex | Start and resume threads, choose models and reasoning effort, steer active turns, answer native approvals, inspect subagents, and track goals with optional token budgets. |
+| GitHub Copilot CLI | Discover existing sessions, start and resume chats, choose models, answer approvals, and use native fork and rewind, including optional file restoration. |
+
+[Read the agent-specific details](docs/usage.md#agent-support) for limits on sharing, history controls, and configuration.
+
+## From task to pull request to preview
+
+### GitHub pull requests and Actions
+
+Check pull request status, reviews, changed files, and Actions runs beside the conversation. Jump back to the session linked to a pull request.
+
+![Cogpit GitHub panel with an expanded pull request, changed files, review status, and a linked agent session](docs/images/cogpit-github-pull-requests.png)
+
+### ClickUp task context
+
+Browse your tasks, filter by status or due date, and add a task to the agent's prompt without retyping its requirements.
+
+![Cogpit ClickUp panel showing task priorities, due dates, and an expanded checkout task with Add to prompt](docs/images/cogpit-clickup-tasks.png)
+
+### Vercel deployments
+
+See production and preview deployments, inspect build logs, and open the preview you need to check. Use the Browser panel above to inspect the page with your agent.
+
+![Cogpit Vercel panel showing production status, preview deployments, and expanded build logs](docs/images/cogpit-vercel-deployments.png)
+
+These panels use the services you connect in Cogpit. See [integration setup](docs/plugins.md) and [Browser panel setup](docs/browser.md), including persistent sessions and platform support.
+
+## Common questions
+
+### Can I use Cogpit as a Claude Code GUI or Codex GUI?
+
+Yes. Cogpit is a desktop and browser interface for Claude Code and OpenAI Codex. It reads their local session history and connects to their runtimes so you can continue conversations, respond to approval requests, and review code changes in the same window.
+
+### Does Cogpit work with GitHub Copilot?
+
+Cogpit supports GitHub Copilot CLI sessions. It does not import VS Code Copilot Chat history. Install and authenticate Copilot CLI before starting a Copilot session in Cogpit.
+
+### Can I run multiple AI coding agents in one app?
+
+Yes. Keep sessions from Claude Code, Codex, and Copilot CLI in the same Cogpit workspace, grouped by project. Each session uses its selected CLI. Cogpit also displays recorded subagent work when the provider exposes it.
+
+### Do I need a separate API key or subscription?
+
+Cogpit does not require a Cogpit account, API key, or paid subscription. It uses your existing agent CLI login. The agent provider's own subscription, API charges, and usage limits still apply.
+
+### Where does my session data go?
+
+Cogpit reads session history from the CLI directories on your machine. It does not upload that history to a Cogpit cloud service. Your agent CLI still sends requests to its model provider. Optional remote access, session sharing, and integrations communicate with the services you configure.
+
+### Can I use Cogpit from my phone or self-host it?
+
+Yes. Run the desktop app with Network Access enabled or run a headless Cogpit server, then connect through your phone's browser. Remote browser access requires HTTPS and authentication. The multi-device hub lets you switch between registered machines. See [self-hosting and remote access](docs/self-hosting.md).
+
+## Build from source
 
 ```bash
 git clone https://github.com/gentritbiba/cogpit.git
 cd cogpit
 bun install
-
-# Browser
 bun run dev
-
-# Electron
-bun run electron:dev
 ```
 
-### Build
+Use `bun run electron:dev` for the desktop app, `bun run build:web` for the web build, or `bun run electron:package` for a local desktop package. See the [development guide](docs/development.md) for checks and packaging details.
 
-```bash
-# Web
-bun run serve
+React, TypeScript, Vite, Electron, Tailwind CSS, and Express. [Architecture](ARCHITECTURE.md) explains how Cogpit connects to each agent.
 
-# Desktop — arm64 macOS DMG, unsigned. ~1 min, for local iteration.
-# Release artifacts for every platform are built by .github/workflows/release.yml
-bun run electron:package
+## Documentation
 
-# Same, but signs with a local Developer ID and builds every host target.
-# Only useful with a paid Apple Developer account.
-bun run electron:package:signed
-```
-
-## Tech Stack
-
-React 19 · TypeScript · Vite 6 · Electron 41 · Tailwind CSS 4 · shadcn/ui · Base UI · Express 5 · SSE + WebSocket · Shiki · Vitest
+- [Using Cogpit](docs/usage.md): session controls, history, file changes, goals, and notifications.
+- [Browser panel](docs/browser.md): shared browsing, persistent logins, and setup.
+- [Self-hosting](docs/self-hosting.md): headless servers, HTTPS, and authentication.
+- [Integrations and plugins](docs/plugins.md): GitHub, ClickUp, Vercel, and custom panels.
+- [cogpit-memory](packages/cogpit-memory/README.md): search and inspect agent sessions from the command line.
 
 ## License
 
-MIT
+[MIT](LICENSE)
