@@ -100,6 +100,17 @@ function executionOptions(
   }
 }
 
+type ThreadSettings = Omit<CodexExecutionOptions, "message" | "images">
+
+// Question answers omit session settings. Preserve them so replies keep the
+// thread's access mode, working directory, and model options.
+const rememberedSettings = new Map<string, ThreadSettings>()
+
+function rememberThreadSettings(sessionId: string, options: CodexExecutionOptions): void {
+  const { message: _message, images: _images, ...settings } = options
+  rememberedSettings.set(sessionId, settings)
+}
+
 /**
  * Watch the sessions tree for the rollout this spawn just created.
  *
@@ -619,13 +630,15 @@ export const codexRuntime: AgentRuntime = {
     )
     const startedAt = Date.now()
     try {
-      const started = await startCodexExecution(codexAppServer, executionOptions(req))
+      const options = executionOptions(req)
+      const started = await startCodexExecution(codexAppServer, options)
       const identity = await resolveStartedIdentity(
         started.thread,
         req.cwd,
         knownPaths,
         startedAt,
       )
+      rememberThreadSettings(identity.sessionId, options)
       let initialContent: string | undefined
       try {
         initialContent = await readFile(identity.filePath, "utf-8")
@@ -664,9 +677,9 @@ export const codexRuntime: AgentRuntime = {
     // whether it was typed into the question card or straight into the composer.
     codexQuestions.clear(sessionId)
     try {
-      const result = await continueCodexExecution(codexAppServer, sessionId, {
-        ...executionOptions({ ...req, cwd }),
-      })
+      const options = executionOptions({ ...req, cwd })
+      const result = await continueCodexExecution(codexAppServer, sessionId, options)
+      rememberThreadSettings(sessionId, options)
       return { delivery: result.action, turnId: result.turnId }
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {
@@ -716,6 +729,7 @@ export const codexRuntime: AgentRuntime = {
   async deleteSession(sessionId, filePath) {
     terminateTrackedSession(sessionId)
     await unlink(filePath)
+    rememberedSettings.delete(sessionId)
   },
 
   activity(sessionId) {
@@ -823,7 +837,7 @@ export const codexRuntime: AgentRuntime = {
       )
     }
 
-    await codexRuntime.send(sessionId, { message })
+    await codexRuntime.send(sessionId, { ...rememberedSettings.get(sessionId), message })
     return true
   },
 
@@ -844,6 +858,7 @@ export const codexRuntime: AgentRuntime = {
   },
 
   shutdown() {
+    rememberedSettings.clear()
     return codexAppServer.shutdown()
   },
 }

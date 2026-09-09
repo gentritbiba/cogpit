@@ -47,6 +47,7 @@ const {
     getActiveTurnId: vi.fn(),
     listApprovalThreadIds: vi.fn(() => []),
     call: vi.fn(),
+    shutdown: vi.fn(async () => {}),
   },
   mockCopilotRuntime: {
     isSessionActive: vi.fn(),
@@ -134,6 +135,7 @@ vi.mock("../../agents/copilotTransport", () => ({ copilotRuntime: mockCopilotRun
 
 import type { UseFn, Middleware } from "../../helpers"
 import { registerSessionSendRoutes } from "../../routes/session-send"
+import { codexRuntime } from "../../agents/codexRuntime"
 
 function createMockReqRes(method: string, body?: string) {
   const dataHandlers: ((chunk: Buffer) => void)[] = []
@@ -219,7 +221,8 @@ async function postCodexMessage(body: Record<string, unknown>) {
   return { res }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await codexRuntime.shutdown()
   vi.clearAllMocks()
   mockActiveProcesses.clear()
   mockPersistentSessions.clear()

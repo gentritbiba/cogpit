@@ -79,7 +79,9 @@ vi.mock("../../agents/index", () => ({
 
 import { codexRuntime } from "../../agents/codexRuntime"
 import { codexQuestions } from "../../agents/codexQuestions"
+import { resolveSessionCwd } from "../../agents/sessionCwd"
 import { AgentRuntimeError } from "../../agents/runtimeTypes"
+import { unlink } from "../../helpers"
 
 function ask(questions: Array<{ title: string; options?: string[] }>): void {
   codexQuestions.observe({
@@ -102,14 +104,27 @@ function ask(questions: Array<{ title: string; options?: string[] }>): void {
   })
 }
 
-function sentMessage(): string | undefined {
+function sentOptions(): Record<string, unknown> | undefined {
   const call = execution.continueCodexExecution.mock.calls.at(-1) as
-    | [unknown, string, { message?: string }]
+    | [unknown, string, Record<string, unknown>]
     | undefined
-  return call?.[2].message
+  return call?.[2]
 }
 
-beforeEach(() => {
+function sentMessage(): string | undefined {
+  return sentOptions()?.message as string | undefined
+}
+
+const fullAccess = {
+  cwd: "/project",
+  permissions: { mode: "bypassPermissions" },
+  model: "gpt-5.3-codex",
+  effort: "high",
+  fastMode: true,
+}
+
+beforeEach(async () => {
+  await codexRuntime.shutdown()
   vi.clearAllMocks()
   codexQuestions.clear("thread-1")
 })
@@ -180,6 +195,16 @@ describe("codexRuntime.answerQuestion", () => {
     expect(sentMessage()).toBe("June")
   })
 
+  it("keeps the access mode, cwd and model the thread was last sent with", async () => {
+    await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
+    ask([{ title: "Which month?" }])
+
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+
+    expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
+    expect(resolveSessionCwd).toHaveBeenLastCalledWith("/project", undefined)
+  })
+
   it("refuses an unknown question rather than sending a stray message", async () => {
     ask([{ title: "Which month?" }])
 
@@ -203,5 +228,90 @@ describe("codexRuntime.send", () => {
     await codexRuntime.send("thread-1", { message: "June, and I will have a car" })
 
     expect(codexRuntime.listPendingQuestions("thread-1")).toEqual([])
+  })
+
+  it("clears omitted model options on a normal send and uses the new settings for answers", async () => {
+    await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
+
+    await codexRuntime.send("thread-1", {
+      message: "Now read-only",
+      permissions: { mode: "plan" },
+    })
+
+    expect(sentOptions()).toMatchObject({
+      cwd: "/project",
+      message: "Now read-only",
+      permissions: { mode: "plan" },
+      model: undefined,
+      effort: undefined,
+      fastMode: undefined,
+    })
+
+    ask([{ title: "Which month?" }])
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+
+    expect(sentOptions()).toMatchObject({
+      cwd: "/project",
+      message: "June",
+      permissions: { mode: "plan" },
+      model: undefined,
+      effort: undefined,
+      fastMode: undefined,
+    })
+  })
+
+  it("keeps the previous settings when a send fails", async () => {
+    await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
+    execution.continueCodexExecution.mockRejectedValueOnce(new Error("Send failed"))
+
+    await expect(codexRuntime.send("thread-1", {
+      message: "Now read-only",
+      permissions: { mode: "plan" },
+    })).rejects.toThrow("Send failed")
+
+    ask([{ title: "Which month?" }])
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+
+    expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
+  })
+})
+
+describe("remembered question settings lifecycle", () => {
+  it("clears settings when the runtime shuts down", async () => {
+    await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
+    await codexRuntime.shutdown()
+
+    ask([{ title: "Which month?" }])
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+
+    expect(sentOptions()).toMatchObject({
+      permissions: undefined,
+      model: undefined,
+      effort: undefined,
+      fastMode: undefined,
+    })
+    expect(resolveSessionCwd).toHaveBeenLastCalledWith(undefined, undefined)
+  })
+
+  it("clears settings only after the session is deleted successfully", async () => {
+    await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
+    vi.mocked(unlink).mockRejectedValueOnce(new Error("Delete failed"))
+
+    await expect(codexRuntime.deleteSession("thread-1", "/project/thread-1.jsonl"))
+      .rejects.toThrow("Delete failed")
+    ask([{ title: "Which month?" }])
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
+
+    await codexRuntime.deleteSession("thread-1", "/project/thread-1.jsonl")
+    ask([{ title: "Which month?" }])
+    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "July" })
+    expect(sentOptions()).toMatchObject({
+      permissions: undefined,
+      model: undefined,
+      effort: undefined,
+      fastMode: undefined,
+    })
+    expect(resolveSessionCwd).toHaveBeenLastCalledWith(undefined, undefined)
   })
 })
