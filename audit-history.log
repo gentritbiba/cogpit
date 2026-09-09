@@ -4,6 +4,12 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260909T164304Z-f926dfd - README and agent session support
+- File: `audit-history/audit-20260909T164304Z-f926dfd.md`
+- Status: PASS after process-cleanup clarification and Bun version guidance.
+- Scope: README, four high resolution screenshots, usage/development docs, Codex question-reply settings, and dependency patches.
+- Validation: 401 app files / 6,307 tests; 108 memory tests on Bun 1.3.14; lint, production/test typechecks, quality checks, web build, and browser review.
+
 ### 20260907T151900Z-8f4f7b6 - Composer model picker and card
 - File: `audit-history/audit-20260907T151900Z-8f4f7b6.md`
 - Status: PASS. README composer line already updated in the change; no other production doc drift.
