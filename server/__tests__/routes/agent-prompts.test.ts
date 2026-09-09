@@ -8,7 +8,10 @@ const mockGetSDKElicitations = vi.fn((..._args: unknown[]): unknown[] => [])
 const mockGetSDKUserDialogs = vi.fn((..._args: unknown[]): unknown[] => [])
 const mockListAgentPromptSessionIds = vi.fn((): string[] => [])
 
-vi.mock("../../sdk-session", () => ({
+vi.mock("../../sdk-session", async (importOriginal) => ({
+  // The route's content validator is the real one; everything the route reaches
+  // into the live session for is stubbed.
+  ...await importOriginal<typeof import("../../sdk-session")>(),
   get sdkSessions() { return mockSdkSessions },
   resolveElicitation: (...args: unknown[]) => mockResolveElicitation(...args),
   resolveUserDialog: (...args: unknown[]) => mockResolveUserDialog(...args),

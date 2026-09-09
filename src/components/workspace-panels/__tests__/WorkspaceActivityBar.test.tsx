@@ -108,7 +108,6 @@ describe("WorkspaceActivityBar", () => {
       panels,
       context,
       onClosePanel: vi.fn(),
-      onOpenPanel: vi.fn(),
     }
     const { rerender } = render(
       <WorkspacePanelHost {...props} activePanelId="test.first" />,
@@ -142,7 +141,6 @@ describe("WorkspaceActivityBar", () => {
         openWorktreeSession: vi.fn(),
       },
       onClosePanel: vi.fn(),
-      onOpenPanel: vi.fn(),
       onTogglePanel: vi.fn(),
     }
     const { rerender } = render(

@@ -1,23 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { installDirsMock, mockDirs } from "../fixtures"
 
-// Mock dirs.PROJECTS_DIR (and TEAMS_DIR / TASKS_DIR) to point at temp directories.
-// Use a mutable object so updates in beforeEach are visible through the
-// captured import reference.
 let tmpDir: string
-const mockDirs = {
-  PROJECTS_DIR: "",
-  TEAMS_DIR: "",
-  TASKS_DIR: "",
-  CODEX_SESSIONS_DIR: "",
-  COPILOT_SESSIONS_DIR: "",
-}
 
-mock.module("../../lib/dirs", () => ({
-  dirs: mockDirs,
-}))
+installDirsMock()
 
 // Import after mock setup
 import {

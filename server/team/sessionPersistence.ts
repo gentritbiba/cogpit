@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { chmod, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { replaceAll, serialQueue } from "../lib/serialQueue"
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
@@ -35,14 +36,14 @@ interface PersistedSession {
 
 let sessionsPath: string | null = null
 const sessions = new Map<string, PersistedSession>()
-let operationQueue: Promise<void> = Promise.resolve()
+const queue = serialQueue()
 let stateVersion = 0
 let persistedVersion = 0
 
 export function __resetForTest(): void {
   sessionsPath = null
   sessions.clear()
-  operationQueue = Promise.resolve()
+  queue.reset()
   stateVersion = 0
   persistedVersion = 0
 }
@@ -63,26 +64,10 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex")
 }
 
-function enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = operationQueue.then(operation)
-  // A rejected operation belongs to its caller. Keep a handled tail so later
-  // operations still run rather than inheriting the rejection.
-  operationQueue = result.then(
-    () => undefined,
-    () => undefined,
-  )
-  return result
-}
-
-function replaceSessions(next: ReadonlyMap<string, PersistedSession>): void {
-  sessions.clear()
-  for (const [tokenHash, row] of next) sessions.set(tokenHash, row)
-}
-
 // Snapshots the rows when the write actually runs, so back-to-back mutations
 // coalesce and the last write always reflects the final in-memory state.
 function schedulePersist(): Promise<void> {
-  return enqueueOperation(async () => {
+  return queue.run(async () => {
     if (!sessionsPath || persistedVersion === stateVersion) return
     const version = stateVersion
     await writeOwnerOnlyJson(sessionsPath, { sessions: [...sessions.values()] }, 0o600)
@@ -128,7 +113,7 @@ function parseLiveRow(row: unknown, now: number): PersistedSession | null {
  * session store fails toward re-login, never toward an auth bypass.
  */
 export async function initSessionPersistence(dir: string): Promise<void> {
-  await enqueueOperation(async () => {
+  await queue.run(async () => {
     await mkdir(dir, { recursive: true })
     // Windows has no POSIX modes: chmod only toggles the read-only bit there.
     if (process.platform !== "win32") {
@@ -169,7 +154,7 @@ export async function initSessionPersistence(dir: string): Promise<void> {
     }
 
     sessionsPath = nextPath
-    replaceSessions(loaded)
+    replaceAll(sessions, loaded)
     if (raw !== null && needsRewrite) {
       await writeOwnerOnlyJson(nextPath, { sessions: [...loaded.values()] }, 0o600)
     }

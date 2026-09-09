@@ -425,7 +425,7 @@ export function deriveClaudeSessionStatus(rawMessages: readonly RawRecord[]): Se
     }
 
     // Compaction markers — skip past them to find the real session state.
-    // In-progress compaction is detected live via subagent file watcher (isCompacting),
+    // In-progress compaction is announced live by the runtime (isCompacting),
     // so these finished-compaction markers should not lock the status to "compacting".
     if (msg.type === "summary") continue
     if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") continue

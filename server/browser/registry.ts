@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { BrowserSessionInfo } from "../../shared/browser/types"
+import { isRecord } from "../../shared/objects"
+import { writeIfChanged } from "./files"
 import {
   assertNamedBrowser,
   BrowserNameError,
-  browserHome,
   DEFAULT_BROWSER,
   isThrowawayName,
   isValidBrowserName,
@@ -56,10 +57,6 @@ function emptyRegistry(): BrowserRegistry {
   return { version: REGISTRY_VERSION, sessions: {} }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function parseEntry(value: unknown): RegistryEntry | null {
   if (!isRecord(value) || typeof value.createdAt !== "string") return null
   const entry: RegistryEntry = { createdAt: value.createdAt }
@@ -88,11 +85,7 @@ export function readRegistry(): BrowserRegistry {
 }
 
 export function writeRegistry(registry: BrowserRegistry): void {
-  mkdirSync(browserHome(), { recursive: true })
-  const path = registryFile()
-  const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`)
-  renameSync(tmp, path)
+  writeIfChanged(registryFile(), `${JSON.stringify(registry, null, 2)}\n`)
 }
 
 function entryOf(registry: BrowserRegistry, name: string): RegistryEntry | undefined {

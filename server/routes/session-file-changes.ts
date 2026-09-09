@@ -88,6 +88,15 @@ function normalizeCopilotFileChangeEvents(jsonlContent: string): string {
   return records.map((record) => JSON.stringify(record)).join("\n")
 }
 
+const RM_COMMAND = /^(?:rm|git\s+rm)\s/
+function collectRmPaths(cmd: string, turnIndex: number, out: Array<{ path: string; turnIndex: number; isDir: boolean }>): void {
+  if (!RM_COMMAND.test(cmd)) return
+  const isDir = /-r\b/.test(cmd)
+  const quoted = [...cmd.matchAll(/"(\/[^"]+)"/g)].map((m) => m[1])
+  const bare = cmd.replace(/^(?:rm|git\s+rm)\s+(?:-[a-z]+\s+)*/i, "").split(/\s+/).filter((t) => t.startsWith("/"))
+  for (const path of [...quoted, ...bare]) out.push({ path, turnIndex, isDir })
+}
+
 export async function parseSessionFileChanges(
   jsonlContent: string,
   includeContent: boolean,
@@ -212,18 +221,7 @@ export async function parseSessionFileChanges(
           try { args = JSON.parse(payload.input) as Record<string, unknown> } catch { /* skip */ }
         }
         const cmd = typeof args.command === "string" ? args.command : (typeof args.cmd === "string" ? args.cmd : "")
-        if (cmd && /^(?:rm|git\s+rm)\s/.test(cmd) && callId) {
-          const isDir = /-r\b/.test(cmd)
-          for (const m of cmd.matchAll(/"(\/[^"]+)"/g)) {
-            rmPaths.push({ path: m[1], turnIndex: lastHumanTurnIndex, isDir })
-          }
-          const afterFlags = cmd.replace(/^(?:rm|git\s+rm)\s+(?:-[a-z]+\s+)*/i, "")
-          for (const token of afterFlags.split(/\s+/)) {
-            if (token.startsWith("/")) {
-              rmPaths.push({ path: token, turnIndex: lastHumanTurnIndex, isDir })
-            }
-          }
-        }
+        if (cmd && callId) collectRmPaths(cmd, lastHumanTurnIndex, rmPaths)
       }
 
       continue
@@ -295,19 +293,8 @@ export async function parseSessionFileChanges(
           accum.ops.push({ oldString, newString, isWrite: !isEdit })
         }
 
-        if (b.name === "Bash") {
-          const cmd = b.input.command as string | undefined
-          if (!cmd || !/^(?:rm|git\s+rm)\s/.test(cmd)) continue
-          const isDir = /-r\b/.test(cmd)
-          for (const m of cmd.matchAll(/"(\/[^"]+)"/g)) {
-            rmPaths.push({ path: m[1], turnIndex: lastHumanTurnIndex, isDir })
-          }
-          const afterFlags = cmd.replace(/^(?:rm|git\s+rm)\s+(?:-[a-z]+\s+)*/i, "")
-          for (const token of afterFlags.split(/\s+/)) {
-            if (token.startsWith("/")) {
-              rmPaths.push({ path: token, turnIndex: lastHumanTurnIndex, isDir })
-            }
-          }
+        if (b.name === "Bash" && typeof b.input.command === "string") {
+          collectRmPaths(b.input.command, lastHumanTurnIndex, rmPaths)
         }
       }
     }

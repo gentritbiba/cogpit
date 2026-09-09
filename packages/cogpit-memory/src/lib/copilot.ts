@@ -1,6 +1,6 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 import { normalizeFunctionName } from "./codex-tool-normalization"
-import { computeStats, createEmptySessionStats } from "./sessionStats"
+import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
 import type {
   ContentBlock,
@@ -321,23 +321,6 @@ function extractToolResultImages(
       ? data.result.binaryResultsForLlm
       : []),
   ], assets)
-}
-
-function mergeTokenUsage(existing: TokenUsage | null, incoming: TokenUsage): TokenUsage {
-  if (!existing) return { ...incoming }
-  const existingThinking = existing.output_tokens_details?.thinking_tokens ?? 0
-  const incomingThinking = incoming.output_tokens_details?.thinking_tokens ?? 0
-  return {
-    input_tokens: existing.input_tokens + incoming.input_tokens,
-    output_tokens: existing.output_tokens + incoming.output_tokens,
-    cache_creation_input_tokens:
-      (existing.cache_creation_input_tokens ?? 0) + (incoming.cache_creation_input_tokens ?? 0),
-    cache_read_input_tokens:
-      (existing.cache_read_input_tokens ?? 0) + (incoming.cache_read_input_tokens ?? 0),
-    ...(existingThinking || incomingThinking
-      ? { output_tokens_details: { thinking_tokens: existingThinking + incomingThinking } }
-      : {}),
-  }
 }
 
 function parseUsage(

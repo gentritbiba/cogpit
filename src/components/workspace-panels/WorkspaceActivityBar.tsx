@@ -131,7 +131,6 @@ interface WorkspacePanelHostProps {
   context: WorkspacePanelContext
   activePanelId: string
   onClosePanel: () => void
-  onOpenPanel: (panelId: string) => void
 }
 
 export function WorkspacePanelHost({
@@ -139,7 +138,6 @@ export function WorkspacePanelHost({
   context,
   activePanelId,
   onClosePanel,
-  onOpenPanel,
 }: WorkspacePanelHostProps) {
   const [visited, setVisited] = useState(() => new Set([activePanelId]))
 
@@ -168,7 +166,6 @@ export function WorkspacePanelHost({
               context={context}
               active={active}
               closePanel={onClosePanel}
-              openPanel={onOpenPanel}
             />
           </div>
         )

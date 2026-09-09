@@ -29,10 +29,13 @@ function bitmapOf(width = 1600, height = 1200) {
 type FakeBitmap = ReturnType<typeof bitmapOf>
 
 /** Device pixels are twice the canvas, so a mapped point is never accidentally 1:1. */
-function frameOf(deviceWidth = 1600, deviceHeight = 1200, bitmap: ImageBitmap | null = null): BrowserFrame {
+function frameOf(
+  deviceWidth = 1600,
+  deviceHeight = 1200,
+  bitmap: ImageBitmap = bitmapOf() as unknown as ImageBitmap,
+): BrowserFrame {
   return {
     bitmap,
-    blobUrl: bitmap ? null : "blob:frame",
     header: {
       deviceWidth,
       deviceHeight,

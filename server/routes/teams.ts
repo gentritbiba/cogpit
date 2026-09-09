@@ -7,7 +7,7 @@ import {
   join,
   watch,
 } from "../helpers"
-import { withJsonBody, type UseFn } from "../http"
+import { sendJson, withJsonBody, type UseFn } from "../http"
 
 export function registerTeamRoutes(use: UseFn) {
   // GET /api/teams - list all teams with task progress summary
@@ -24,8 +24,7 @@ export function registerTeamRoutes(use: UseFn) {
         const entries = await readdir(dirs.TEAMS_DIR, { withFileTypes: true })
         teamDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
       } catch {
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify([]))
+        sendJson(res, 200, [])
         return
       }
 
@@ -70,11 +69,9 @@ export function registerTeamRoutes(use: UseFn) {
 
       teams.sort((a, b) => b.createdAt - a.createdAt)
 
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify(teams))
+      sendJson(res, 200, teams)
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -91,8 +88,7 @@ export function registerTeamRoutes(use: UseFn) {
     const teamDir = join(dirs.TEAMS_DIR, teamName)
 
     if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
@@ -127,11 +123,9 @@ export function registerTeamRoutes(use: UseFn) {
         }
       } catch { /* no inboxes */ }
 
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify({ config, tasks, inboxes }))
+      sendJson(res, 200, { config, tasks, inboxes })
     } catch {
-      res.statusCode = 404
-      res.end(JSON.stringify({ error: "Team not found" }))
+      sendJson(res, 404, { error: "Team not found" })
     }
   })
 
@@ -149,8 +143,7 @@ export function registerTeamRoutes(use: UseFn) {
     const taskDir = join(dirs.TASKS_DIR, teamName)
 
     if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
@@ -208,16 +201,14 @@ export function registerTeamRoutes(use: UseFn) {
     const inboxPath = join(dirs.TEAMS_DIR, teamName, "inboxes", `${memberName}.json`)
 
     if (!isWithinDir(dirs.TEAMS_DIR, inboxPath)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
     withJsonBody<{ message?: string }>(req, res, async ({ message }) => {
       try {
         if (!message || typeof message !== "string") {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "message is required" }))
+          sendJson(res, 400, { error: "message is required" })
           return
         }
 
@@ -238,11 +229,9 @@ export function registerTeamRoutes(use: UseFn) {
 
         await writeFile(inboxPath, JSON.stringify(inbox, null, 2), "utf-8")
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ success: true }))
+        sendJson(res, 200, { success: true })
       } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendJson(res, 400, { error: "Invalid JSON body" })
       }
     })
   })

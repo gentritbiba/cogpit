@@ -38,7 +38,6 @@ interface PanelState {
   showThemeSelector: boolean
 
   handleToggleSidebar: () => void
-  handleToggleWorkflows: () => void
   toggleWorkspacePanel: (panelId: string) => void
   openWorkspacePanel: (panelId: string) => void
   closeWorkspacePanel: () => void
@@ -50,7 +49,6 @@ interface PanelState {
   handleToggleThemeSelector: () => void
   handleCloseThemeSelector: () => void
 
-  setShowSidebar: React.Dispatch<React.SetStateAction<boolean>>
   setShowWorkflows: React.Dispatch<React.SetStateAction<boolean>>
 }
 
@@ -92,7 +90,6 @@ export function usePanelState(
   const handleToggleSidebar = useCallback(() => {
     startTransition(() => setShowSidebar(!showSidebar))
   }, [setShowSidebar, showSidebar])
-  const handleToggleWorkflows = useCallback(() => setShowWorkflows((p) => !p), [setShowWorkflows])
   const toggleWorkspacePanel = useCallback((panelId: string) => {
     startTransition(() => {
       const returningToSessions = state.mainView === "config" || state.mainView === "mission"
@@ -142,7 +139,6 @@ export function usePanelState(
     showProjectSwitcher,
     showThemeSelector,
     handleToggleSidebar,
-    handleToggleWorkflows,
     toggleWorkspacePanel,
     openWorkspacePanel,
     closeWorkspacePanel,
@@ -153,7 +149,6 @@ export function usePanelState(
     handleCloseProjectSwitcher,
     handleToggleThemeSelector,
     handleCloseThemeSelector,
-    setShowSidebar,
     setShowWorkflows,
   }
 }

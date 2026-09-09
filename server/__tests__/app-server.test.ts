@@ -7,8 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { createAppServer } from "../../electron/server"
-import { createStandaloneAppServer } from "../standalone-app-server"
+import { createServerComposition } from "../app-server"
 import { WebSocket, WebSocketServer } from "ws"
 import { hashPassword, __resetSessionsForTest } from "../security"
 import { __resetEditionForTest } from "../team/edition"
@@ -23,6 +22,11 @@ type AppServerFactory = (
   staticDir: string,
   userDataDir: string,
 ) => Promise<{ httpServer: Server }>
+
+const createAppServer = (staticDir: string, userDataDir: string) =>
+  createServerComposition(staticDir, userDataDir, { mode: "electron", viteDevUrl: process.env.ELECTRON_RENDERER_URL })
+const createStandaloneAppServer = (staticDir: string, userDataDir: string) =>
+  createServerComposition(staticDir, userDataDir, { mode: "standalone", viteDevUrl: process.env.ELECTRON_RENDERER_URL })
 
 const adapterCases: ReadonlyArray<readonly [
   name: string,

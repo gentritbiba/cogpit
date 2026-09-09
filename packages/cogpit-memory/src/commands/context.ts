@@ -5,7 +5,8 @@
 
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { findJsonlPath, matchSubagentToMember } from "../lib/helpers"
+import { matchSubagentToMember } from "../lib/helpers"
+import { findSessionFile } from "../lib/stores"
 import { dirs } from "../lib/dirs"
 import { parseSession } from "../lib/parser"
 import type {
@@ -339,7 +340,7 @@ function findAgentMetadata(
  * L1: Session overview with all turns summarized.
  */
 export async function getSessionOverview(sessionId: string): Promise<object> {
-  const jsonlPath = await findJsonlPath(sessionId)
+  const jsonlPath = await findSessionFile(sessionId)
   if (!jsonlPath) return { error: "Session not found" }
   const content = await readFile(jsonlPath, "utf-8")
   const session = parseSession(content)
@@ -350,7 +351,7 @@ export async function getSessionOverview(sessionId: string): Promise<object> {
  * L2: Detailed view of a single turn.
  */
 export async function getTurnDetail(sessionId: string, turnIndex: number): Promise<object> {
-  const jsonlPath = await findJsonlPath(sessionId)
+  const jsonlPath = await findSessionFile(sessionId)
   if (!jsonlPath) return { error: "Session not found" }
   const content = await readFile(jsonlPath, "utf-8")
   const session = parseSession(content)
@@ -362,7 +363,7 @@ export async function getTurnDetail(sessionId: string, turnIndex: number): Promi
  * L3: Sub-agent's session overview.
  */
 export async function getAgentOverview(sessionId: string, agentId: string): Promise<object> {
-  const jsonlPath = await findJsonlPath(sessionId)
+  const jsonlPath = await findSessionFile(sessionId)
   if (!jsonlPath) return { error: "Session not found" }
   const content = await readFile(jsonlPath, "utf-8")
   const session = parseSession(content)
@@ -396,7 +397,7 @@ export async function getAgentTurnDetail(
   agentId: string,
   turnIndex: number,
 ): Promise<object> {
-  const jsonlPath = await findJsonlPath(sessionId)
+  const jsonlPath = await findSessionFile(sessionId)
   if (!jsonlPath) return { error: "Session not found" }
 
   const subagentFile = await findSubagentFile(jsonlPath, agentId)

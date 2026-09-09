@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, type HTMLAttributes } from "react"
+import { useState, type HTMLAttributes } from "react"
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
-import { highlightCode } from "@/lib/shiki"
+import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
-import { cn, copyToClipboard } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useHighlightedTokens } from "./ToolCallResult"
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -43,37 +44,14 @@ function parseLang(className: string | undefined): string | null {
 // ── Copy button ─────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }): React.ReactElement {
-  const [copied, setCopied] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
-  const copyRequestRef = useRef(0)
-
-  useEffect(() => {
-    return () => {
-      copyRequestRef.current += 1
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
-
-  function handleCopy() {
-    const requestId = ++copyRequestRef.current
-    copyToClipboard(text).then((ok) => {
-      if (ok && requestId === copyRequestRef.current) {
-        if (timerRef.current) clearTimeout(timerRef.current)
-        setCopied(true)
-        timerRef.current = setTimeout(() => {
-          timerRef.current = null
-          setCopied(false)
-        }, 2000)
-      }
-    })
-  }
+  const [copied, copy] = useCopyWithFeedback()
 
   return (
     <Button
       type="button"
       variant="ghost"
       size="xs"
-      onClick={handleCopy}
+      onClick={() => copy(text)}
       className="text-muted-foreground"
       title="Copy code"
       aria-label={copied ? "Copied" : "Copy code"}
@@ -129,13 +107,6 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 
 // ── Highlighted code block with Shiki ───────────────────────────────────────
 
-type TokenLine = Array<{ content: string; color?: string }>
-
-interface HighlightedTokens {
-  key: string
-  lines: TokenLine[] | null
-}
-
 function HighlightedCodeBlock({
   code,
   lang,
@@ -145,24 +116,11 @@ function HighlightedCodeBlock({
   lang: string | null
 } & Omit<HTMLAttributes<HTMLElement>, "lang">): React.ReactElement {
   const isDark = useIsDarkMode()
-  const [highlighted, setHighlighted] = useState<HighlightedTokens | null>(null)
+  const tokens = useHighlightedTokens(code, lang, isDark)
   const [collapsed, setCollapsed] = useState(false)
   const lines = code.split("\n")
   const lineCount = lines.length
   const isLong = lineCount > 30
-  const highlightKey = lang ? `${lang}\u0000${isDark ? "dark" : "light"}\u0000${code}` : null
-  const tokens = highlighted?.key === highlightKey ? highlighted.lines : null
-
-  useEffect(() => {
-    if (!lang || !highlightKey) return
-    let cancelled = false
-    highlightCode(code, lang, isDark).then((result) => {
-      if (!cancelled) setHighlighted({ key: highlightKey, lines: result })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [code, lang, isDark, highlightKey])
 
   const Chevron = collapsed ? ChevronRight : ChevronDown
 

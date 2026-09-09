@@ -9,6 +9,7 @@ import {
   type UserInput,
 } from "../agents/codexAppServer"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../http"
+import { isRecord } from "../../shared/objects"
 
 /**
  * Goals and direct turn control are Codex-only capabilities with no analogue in
@@ -42,10 +43,6 @@ const GOAL_STATUSES = new Set([
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function pathParts(url: string | undefined): string[] {
@@ -88,7 +85,7 @@ async function readJsonObject(
     }
     throw error
   }
-  if (!isObject(parsed)) {
+  if (!isRecord(parsed)) {
     throw new RequestError(
       400,
       "INVALID_REQUEST",
@@ -186,7 +183,7 @@ function parseSteerInput(body: JsonObject): string | UserInput[] {
     input.length === 0 ||
     !input.every(
       (item) =>
-        isObject(item) && typeof item.type === "string" && item.type.length > 0,
+        isRecord(item) && typeof item.type === "string" && item.type.length > 0,
     )
   ) {
     throw new RequestError(

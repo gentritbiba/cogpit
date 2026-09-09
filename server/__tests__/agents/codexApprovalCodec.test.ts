@@ -55,7 +55,6 @@ describe("Codex app-server protocol facade", () => {
     expectTypeOf<Facade.PendingApprovalKind>().toEqualTypeOf<Protocol.PendingApprovalKind>()
     expectTypeOf<Facade.ApprovalDecision>().toEqualTypeOf<Protocol.ApprovalDecision>()
     expectTypeOf<Facade.PendingApproval>().toEqualTypeOf<Protocol.PendingApproval>()
-    expectTypeOf<Facade.ApprovalListener>().toEqualTypeOf<Protocol.ApprovalListener>()
     expectTypeOf<Facade.CodexThread>().toEqualTypeOf<Protocol.CodexThread>()
     expectTypeOf<Facade.CodexTurn>().toEqualTypeOf<Protocol.CodexTurn>()
     expectTypeOf<Facade.ThreadStartParams>().toEqualTypeOf<Protocol.ThreadStartParams>()

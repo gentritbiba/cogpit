@@ -73,46 +73,13 @@ const mockedSaveConfig = vi.mocked(saveConfig)
 const mockedValidateClaudeDir = vi.mocked(validateClaudeDir)
 const mockedNetworkInterfaces = vi.mocked(networkInterfaces)
 
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerConfigRoutes } from "../../routes/config"
 
-function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: Buffer) => void)[] = []
-  const endHandlers: (() => void)[] = []
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: Buffer) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
-      return req
-    }),
-    socket: {
-      remoteAddress: "192.168.1.100",
-      address: () => ({ port: 19384 }),
-    },
-    headers: {} as Record<string, string>,
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-  }
-  const next = vi.fn()
-  const sendBody = () => {
-    if (body) {
-      for (const h of dataHandlers) h(Buffer.from(body))
-    }
-    for (const h of endHandlers) h()
-  }
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
+/** Every config route here is reached from a LAN client on the default port. */
+function createLanReqRes(method: string, url: string, body?: string) {
+  return createMockReqRes(method, url, { body, remoteAddress: "192.168.1.100", socketPort: 19384 })
 }
 
 describe("config routes", () => {
@@ -123,11 +90,7 @@ describe("config routes", () => {
     mockedHasTrustedMutationSource.mockReturnValue(true)
     mockedCanIssueBrowserSession.mockReturnValue(true)
     mockedGetConfiguredEditionValue.mockReturnValue(undefined)
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerConfigRoutes(use)
+    handlers = collectRoutes(registerConfigRoutes)
   })
 
   // ── GET /api/network-info ─────────────────────────────────────────────
@@ -135,14 +98,14 @@ describe("config routes", () => {
   describe("GET /api/network-info", () => {
     it("calls next for non-GET methods", () => {
       const handler = getRouteHandler(handlers, "/api/network-info")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns enabled:false when network access is off", () => {
       const handler = getRouteHandler(handlers, "/api/network-info")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce(null)
 
       handler(req, res, next)
@@ -153,7 +116,7 @@ describe("config routes", () => {
 
     it("returns enabled:false when no password set", () => {
       const handler = getRouteHandler(handlers, "/api/network-info")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({ claudeDir: "/x", networkAccess: true })
 
       handler(req, res, next)
@@ -164,7 +127,7 @@ describe("config routes", () => {
 
     it("returns network info when enabled", () => {
       const handler = getRouteHandler(handlers, "/api/network-info")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/x", networkAccess: true, networkPassword: "hashed",
       })
@@ -187,14 +150,14 @@ describe("config routes", () => {
   describe("POST /api/auth/verify", () => {
     it("calls next for non-POST methods", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns valid:true for directly trusted local requests", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(true)
 
       await handler(req, res, next)
@@ -205,7 +168,7 @@ describe("config routes", () => {
 
     it("returns 429 when rate limited", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(true)
 
@@ -218,7 +181,7 @@ describe("config routes", () => {
 
     it("returns 403 when network access disabled", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(false)
       mockedGetConfig.mockReturnValueOnce(null)
@@ -230,7 +193,7 @@ describe("config routes", () => {
 
     it("returns 401 when no password provided", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(false)
       mockedGetConfig.mockReturnValueOnce({
@@ -245,7 +208,7 @@ describe("config routes", () => {
 
     it("returns 401 for invalid password", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers.authorization = "Bearer wrongpass"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(false)
@@ -262,7 +225,7 @@ describe("config routes", () => {
 
     it("does not mint a session for a verified legacy password below the current minimum", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers.authorization = "Bearer short-but-correct"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedGetConfig.mockReturnValueOnce({
@@ -280,7 +243,7 @@ describe("config routes", () => {
 
     it("returns session token for valid password", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers.authorization = "Bearer correctpass"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(false)
@@ -300,7 +263,7 @@ describe("config routes", () => {
 
     it("sets an HttpOnly cookie and withholds the token body for secure browsers", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers.authorization = "Bearer correctpass"
       req.headers["x-cogpit-client"] = "1"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
@@ -319,7 +282,7 @@ describe("config routes", () => {
 
     it("refuses to issue a browser session over insecure transport", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers["x-cogpit-client"] = "1"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedCanIssueBrowserSession.mockReturnValueOnce(false)
@@ -333,7 +296,7 @@ describe("config routes", () => {
 
     it("rejects a cross-origin authentication attempt before password work", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedHasTrustedMutationSource.mockReturnValueOnce(false)
 
@@ -345,7 +308,7 @@ describe("config routes", () => {
 
     it("upgrades a legacy password hash after successful authentication", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/verify")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       req.headers.authorization = "Bearer correctpass"
       mockedIsTrustedDirectLocalRequest.mockReturnValueOnce(false)
       mockedIsRateLimited.mockReturnValueOnce(false)
@@ -386,7 +349,7 @@ describe("config routes", () => {
       mockedVerifyPasswordAsync.mockReturnValue(pendingVerification)
 
       const attempts = Array.from({ length: 3 }, () => {
-        const attempt = createMockReqRes("POST", "/")
+        const attempt = createLanReqRes("POST", "/")
         attempt.req.headers.authorization = "Bearer password"
         return attempt
       })
@@ -405,7 +368,7 @@ describe("config routes", () => {
   describe("browser session routes", () => {
     it("reports an authenticated session without exposing its token", () => {
       const handler = getRouteHandler(handlers, "/api/auth/session")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       handler(req, res, next)
       expect(JSON.parse(res._getData())).toEqual({ authenticated: true })
       expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store")
@@ -413,7 +376,7 @@ describe("config routes", () => {
 
     it("revokes only the current session and expires its cookie", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/logout")
-      const { req, res, next } = createMockReqRes("POST", "/")
+      const { req, res, next } = createLanReqRes("POST", "/")
       mockedGetRequestSessionToken.mockReturnValueOnce("current-session")
 
       await handler(req, res, next)
@@ -429,7 +392,7 @@ describe("config routes", () => {
   describe("GET /api/config/validate", () => {
     it("calls next for non-GET methods", async () => {
       const handler = getRouteHandler(handlers, "/api/config/validate")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       // No path param => 400, not next
       await handler(req, res, next)
       expect(res._getStatus()).toBe(400)
@@ -437,14 +400,14 @@ describe("config routes", () => {
 
     it("returns 400 when path param missing", async () => {
       const handler = getRouteHandler(handlers, "/api/config/validate")
-      const { req, res, next } = createMockReqRes("GET", "?other=x")
+      const { req, res, next } = createLanReqRes("GET", "?other=x")
       await handler(req, res, next)
       expect(res._getStatus()).toBe(400)
     })
 
     it("returns validation result for valid path", async () => {
       const handler = getRouteHandler(handlers, "/api/config/validate")
-      const { req, res, next } = createMockReqRes("GET", "?path=/home/.claude")
+      const { req, res, next } = createLanReqRes("GET", "?path=/home/.claude")
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -458,7 +421,7 @@ describe("config routes", () => {
 
     it("returns validation error for invalid path", async () => {
       const handler = getRouteHandler(handlers, "/api/config/validate")
-      const { req, res, next } = createMockReqRes("GET", "?path=/nonexistent")
+      const { req, res, next } = createLanReqRes("GET", "?path=/nonexistent")
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: false, error: "Path does not exist",
       })
@@ -476,7 +439,7 @@ describe("config routes", () => {
   describe("GET /api/config", () => {
     it("returns null when no config", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce(null)
 
       await handler(req, res, next)
@@ -486,7 +449,7 @@ describe("config routes", () => {
 
     it("returns config with password masked as 'set'", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         networkAccess: true,
@@ -508,7 +471,7 @@ describe("config routes", () => {
 
     it("reports the built-in editor preference", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         useBuiltInEditor: true,
@@ -521,12 +484,12 @@ describe("config routes", () => {
 
     it("reports the executable choice, defaulting to auto", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const first = createMockReqRes("GET", "/")
+      const first = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({ claudeDir: "/home/.claude" })
       await handler(first.req, first.res, first.next)
       expect(JSON.parse(first.res._getData()).agentExecutable).toEqual({ source: "auto" })
 
-      const second = createMockReqRes("GET", "/")
+      const second = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         agentExecutable: { source: "custom", path: "/opt/claude" },
@@ -540,7 +503,7 @@ describe("config routes", () => {
 
     it("returns null networkPassword when not set", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         networkAccess: false,
@@ -554,7 +517,7 @@ describe("config routes", () => {
 
     it("identifies an auto-bootstrapped Codex-only configuration", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         defaultAgent: "codex",
@@ -568,7 +531,7 @@ describe("config routes", () => {
 
     it("identifies an auto-bootstrapped Copilot-only configuration", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/")
+      const { req, res, next } = createLanReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         defaultAgent: "copilot",
@@ -582,7 +545,7 @@ describe("config routes", () => {
 
     it("calls next for non-root GET paths", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("GET", "/subpath")
+      const { req, res, next } = createLanReqRes("GET", "/subpath")
 
       await handler(req, res, next)
 
@@ -596,7 +559,7 @@ describe("config routes", () => {
     it("returns 400 when claudeDir is missing", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ other: "value" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
 
       await handler(req, res, next)
       sendBody()
@@ -610,7 +573,7 @@ describe("config routes", () => {
     it("returns 400 when claudeDir validation fails", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/bad/path" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: false, error: "Not a directory",
       })
@@ -627,7 +590,7 @@ describe("config routes", () => {
     it("saves config successfully", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -653,7 +616,7 @@ describe("config routes", () => {
         terminalApp: "Ghostty",
         editorApp: "Visual Studio Code",
       })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
         defaultAgent: "copilot",
@@ -684,7 +647,7 @@ describe("config routes", () => {
     it("persists the built-in editor preference", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude", useBuiltInEditor: true })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
       mockedSaveConfig.mockResolvedValueOnce(undefined)
 
@@ -709,7 +672,7 @@ describe("config routes", () => {
         ["bundled", undefined],
       ] as const) {
         const body = JSON.stringify({ claudeDir: "/home/.claude", agentExecutable: posted })
-        const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+        const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
         mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
         mockedSaveConfig.mockResolvedValueOnce(undefined)
 
@@ -726,7 +689,7 @@ describe("config routes", () => {
     it("carries the persisted edition through an unrelated config save", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude", terminalApp: "Ghostty" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -750,7 +713,7 @@ describe("config routes", () => {
     it("preserves an edition-only team bootstrap when the first full config is saved", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedGetConfig.mockReturnValueOnce(null)
       mockedGetConfiguredEditionValue.mockReturnValueOnce("team")
       mockedValidateClaudeDir.mockResolvedValueOnce({
@@ -771,7 +734,7 @@ describe("config routes", () => {
     it("never adopts a client-supplied edition (file/env only)", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude", edition: "team" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -795,7 +758,7 @@ describe("config routes", () => {
         networkAccess: true,
         networkPassword: "short",
       })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -818,7 +781,7 @@ describe("config routes", () => {
         networkAccess: true,
         networkPassword: "validpassword123",
       })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -845,7 +808,7 @@ describe("config routes", () => {
         claudeDir: "/home/.claude",
         networkAccess: true,
       })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -866,7 +829,7 @@ describe("config routes", () => {
         claudeDir: "/home/.claude",
         networkAccess: false,
       })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: true, resolved: "/home/.claude",
       })
@@ -886,7 +849,7 @@ describe("config routes", () => {
 
     it("returns 400 for invalid JSON body", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", "not-json{")
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", "not-json{")
 
       await handler(req, res, next)
       sendBody()
@@ -898,7 +861,7 @@ describe("config routes", () => {
 
     it("calls next for non-GET/POST methods", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
-      const { req, res, next } = createMockReqRes("DELETE", "/")
+      const { req, res, next } = createLanReqRes("DELETE", "/")
 
       await handler(req, res, next)
 

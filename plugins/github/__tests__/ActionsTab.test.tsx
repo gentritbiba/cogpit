@@ -132,7 +132,6 @@ function renderPanel() {
       context={context}
       active
       closePanel={vi.fn()}
-      openPanel={vi.fn()}
     />,
   )
 }

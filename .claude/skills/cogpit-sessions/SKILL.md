@@ -75,29 +75,37 @@ while [ "$(curl -s "$BASE/api/session-status/$SESSION_ID" | jq -r .running)" = "
 done
 ```
 
-## Quick start
+## Create once, retry safely
+
+Use one `requestId` per intended new session. Save the full JSON request before sending it; all retries must reuse the same file and ID. A parse failure or timeout does not prove the agent failed to start.
 
 ```bash
-curl -s --max-time 30 -X POST "$BASE/api/create-and-send" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dirName": "-Users-gentritbiba-my-project",
-    "message": "What files are in this project?",
-    "permissions": {"mode": "bypassPermissions"}
-  }'
+# Choose a task-specific directory and retain it until the result is confirmed.
+REQUEST_DIR=$(mktemp -d)
+jq -n --arg id "$(uuidgen)" \
+  --arg dir "-Users-gentritbiba-my-project" \
+  --arg message "What files are in this project?" \
+  '{requestId:$id, dirName:$dir, message:$message, permissions:{mode:"bypassPermissions"}}' \
+  > "$REQUEST_DIR/request.json"
+
+curl -sS --max-time 30 -X POST "$BASE/api/create-and-send" \
+  -H 'Content-Type: application/json' \
+  --data-binary @"$REQUEST_DIR/request.json" \
+  -o "$REQUEST_DIR/response.json" -w '%{http_code}\n'
+jq '{success, sessionId, error}' "$REQUEST_DIR/response.json"
 ```
 
-Response:
+On timeout, invalid response JSON, or a lost connection, repeat only the `curl` and `jq` commands with the saved request. Do not generate another ID or recreate the payload. Keep stderr separate from JSON. Do not pipe `echo "$RESULT"` into a JSON parser; some shells interpret the response's backslash escapes. Use the response file, or `printf '%s\n' "$RESULT"`.
 
-```json
-{
-  "success": true,
-  "dirName": "-Users-gentritbiba-my-project",
-  "fileName": "<uuid>.jsonl",
-  "sessionId": "<uuid>",
-  "initialContent": "..."
-}
-```
+- Success echoes `requestId` in the JSON response and returns the original session for the same ID and payload, including across server restarts. Same-process concurrent retries await the same creation.
+- `409 CONFLICT` with a different-payload message means the ID was reused for different work. Restore the original payload to retrieve its result.
+- `409 CONFLICT` with a pending/unknown-outcome message means another server is creating it, or the server stopped before recording the outcome. Retry the same ID later and inspect `/api/active-sessions`; do not launch another copy blindly. Stop retrying and report uncertainty if the result cannot be determined.
+- IDs are scoped to the authenticated user, contain 8–128 letters, digits, hyphens or underscores, and have no automatic expiry. A fresh ID means an intentional new session.
+- Older servers may ignore `requestId` and will not echo it in the response. On those, inspect active sessions after a failed response before any retry. Upgrade the server to get retry protection.
+
+After confirmation, record the session ID and remove the temporary request directory. Request and response files may contain private prompt/transcript data.
+
+The shorter examples below omit request persistence for readability. Use this pattern for every actual `create-and-send` call.
 
 ## Finding the dirName
 
@@ -135,6 +143,7 @@ Body:
   "effort": "'low' | 'medium' | 'high' | 'xhigh' | 'max'",
   "fastMode": "boolean (fast/priority service tier)",
   "ultracode": "boolean (Claude ultracode; needs xhigh-capable model)",
+  "requestId": "string (reuse with the same payload for safe retries)",
   "worktreeName": "string (runs the session in a git worktree with this name)",
   "mcpConfig": "string (JSON-encoded mcpServers config, passed to the SDK)",
   "name": "string (session name)",
@@ -229,7 +238,7 @@ DIR_NAME=$(curl -s "$BASE/api/projects" | jq -r '.[0].dirName')
 RESULT=$(curl -s --max-time 30 -X POST "$BASE/api/create-and-send" \
   -H "Content-Type: application/json" \
   -d "{\"dirName\": \"$DIR_NAME\", \"message\": \"List the main source files\", \"permissions\": {\"mode\": \"bypassPermissions\"}}")
-SESSION_ID=$(echo "$RESULT" | jq -r '.sessionId')
+SESSION_ID=$(printf '%s\n' "$RESULT" | jq -r '.sessionId')
 
 # 3. Send a follow-up in the background
 curl -s --max-time 600 -X POST "$BASE/api/send-message" \
@@ -260,7 +269,7 @@ Start a task and check on it later. The server-side process persists; no connect
 RESULT=$(curl -s --max-time 30 -X POST "$BASE/api/create-and-send" \
   -H "Content-Type: application/json" \
   -d '{"dirName":"...","message":"Do the task","permissions":{"mode":"bypassPermissions"}}')
-SESSION_ID=$(echo "$RESULT" | jq -r '.sessionId')
+SESSION_ID=$(printf '%s\n' "$RESULT" | jq -r '.sessionId')
 
 # Later:
 curl -s "$BASE/api/session-status/$SESSION_ID"

@@ -11,7 +11,7 @@ import type { WorkspacePanelProps } from "@/plugin-api"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { AgentCaption } from "./AgentCaption"
-import { BrowserEmptyState } from "./BrowserEmptyState"
+import { BrowserNotInstalled, BrowserStopped } from "./BrowserEmptyState"
 import { BrowserNavBar } from "./BrowserNavBar"
 import { BrowserSessionBar, DEFAULT_BROWSER } from "./BrowserSessionBar"
 import { BrowserSkillDialog } from "./BrowserSkillDialog"
@@ -166,11 +166,10 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {notInstalled && (
-          <BrowserEmptyState kind="not-installed" onOpenSkill={openSkill} />
+          <BrowserNotInstalled onOpenSkill={openSkill} />
         )}
         {stopped && (
-          <BrowserEmptyState
-            kind="stopped"
+          <BrowserStopped
             name={selected}
             lastUrl={selectedInfo?.lastUrl ?? null}
             onOpen={(url) => send({ type: "launch", url })}

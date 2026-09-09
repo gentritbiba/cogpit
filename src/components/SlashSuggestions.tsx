@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef } from "react"
 import { Terminal, Sparkles, Loader2, Pencil } from "lucide-react"
-import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
+import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {

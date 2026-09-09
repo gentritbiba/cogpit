@@ -1,22 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { Turn } from "../../../../shared/session/types"
 import { collectSessionImageItems } from "../SessionImageGallery"
+import { emptyTurn } from "@/__tests__/fixtures"
 
-function makeTurn(id: string, content: Turn["userMessage"]): Turn {
-  return {
-    id,
-    userMessage: content,
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls: [],
-    subAgentActivity: [],
-    timestamp: "2026-07-22T00:00:00.000Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-  }
-}
+const makeTurn = (id: string, content: Turn["userMessage"]) =>
+  emptyTurn({ id, userMessage: content, timestamp: "2026-07-22T00:00:00.000Z" })
 
 describe("collectSessionImageItems", () => {
   it("collects attachments in session order with stable turn labels", () => {

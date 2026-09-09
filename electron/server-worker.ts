@@ -3,7 +3,7 @@
  * so that heavy child-process work (claude CLI, PTY sessions, search indexing)
  * never blocks the main process event loop or freezes the UI.
  */
-import { createAppServer } from "./server.ts"
+import { createServerComposition } from "../server/app-server"
 import { getConfig } from "../server/config"
 import { removePortFile, writePortFile } from "../server/lib/portFile"
 import { setDesktopAttention } from "../server/lib/desktopAttention"
@@ -21,7 +21,10 @@ let starting = false
 
 async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<void> {
   try {
-    const { httpServer } = await createAppServer(staticDir, userDataDir)
+    const { httpServer } = await createServerComposition(staticDir, userDataDir, {
+      mode: "electron",
+      viteDevUrl: process.env.ELECTRON_RENDERER_URL,
+    })
 
     const config = getConfig()
     const networkEnabled = config?.networkAccess && config?.networkPassword

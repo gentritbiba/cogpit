@@ -1,19 +1,5 @@
 import "@testing-library/jest-dom/vitest"
 
-// Mock crypto.randomUUID for deterministic tests
-let uuidCounter = 0
-
-export function resetUUIDCounter() {
-  uuidCounter = 0
-}
-
-// Provide deterministic UUIDs in tests when needed
-if (typeof globalThis.crypto === "undefined") {
-  Object.defineProperty(globalThis, "crypto", {
-    value: { randomUUID: () => `test-uuid-${++uuidCounter}` },
-  })
-}
-
 // jsdom lacks ResizeObserver (needed by react-zoom-pan-pinch)
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class ResizeObserver {
@@ -42,6 +28,24 @@ if (typeof Element !== "undefined" && typeof Element.prototype.setPointerCapture
 // jsdom lacks Element.getAnimations (reached by @base-ui ScrollArea once ResizeObserver exists)
 if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations === "undefined") {
   Element.prototype.getAnimations = () => []
+}
+
+// jsdom lacks matchMedia (reached by useIsMobile and viewTransitions)
+if (typeof window !== "undefined" && typeof window.matchMedia === "undefined") {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
 }
 
 // Mock localStorage for auth tests

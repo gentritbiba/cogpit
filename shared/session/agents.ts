@@ -195,47 +195,23 @@ const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({
 
 // ── Resolvers ───────────────────────────────────────────────────────────────
 
-export interface FormatRegistry {
-  formatFor(kind: AgentKind): AgentFormat
-  formatForText(jsonlText: string): AgentFormat
-  formatForRecords(records: readonly { type?: unknown }[]): AgentFormat
-}
-
-/**
- * Build resolvers over an arbitrary format table. The module-level singletons
- * below are this applied to the real table; tests inject a fake one.
- */
-export function createFormatRegistry(
-  formats: Readonly<Record<AgentKind, AgentFormat>>,
-): FormatRegistry {
-  function firstMatch(matches: (format: AgentFormat) => boolean): AgentFormat {
-    for (const kind of AGENT_KINDS) {
-      const format = formats[kind]
-      if (matches(format)) return format
-    }
-    // Only reachable from an injected table whose terminal format declines.
-    return formats[TERMINAL_AGENT_KIND]
+function firstMatch(matches: (format: AgentFormat) => boolean): AgentFormat {
+  for (const kind of AGENT_KINDS) {
+    if (matches(FORMATS[kind])) return FORMATS[kind]
   }
-
-  return {
-    formatFor: (kind) => formats[kind],
-    formatForText: (jsonlText) => firstMatch((format) => format.detectsText(jsonlText)),
-    formatForRecords: (records) => firstMatch((format) => format.detectsRecords(records)),
-  }
+  return FORMATS[TERMINAL_AGENT_KIND]
 }
-
-const registry = createFormatRegistry(FORMATS)
 
 export function formatFor(kind: AgentKind): AgentFormat {
-  return registry.formatFor(kind)
+  return FORMATS[kind]
 }
 
 export function formatForText(jsonlText: string): AgentFormat {
-  return registry.formatForText(jsonlText)
+  return firstMatch((format) => format.detectsText(jsonlText))
 }
 
 export function formatForRecords(records: readonly { type?: unknown }[]): AgentFormat {
-  return registry.formatForRecords(records)
+  return firstMatch((format) => format.detectsRecords(records))
 }
 
 // ── Turn-boundary cut points ────────────────────────────────────────────────

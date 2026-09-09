@@ -31,6 +31,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
+import { LineCounts } from "@/components/shared/ChangeCounts"
 import { formatRelativeTime } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
 import { useCapability } from "@/hooks/useCapability"
@@ -324,11 +325,7 @@ export function WorktreePanel({
                       <span>
                         {fileCount} file{fileCount !== 1 ? "s" : ""} changed
                       </span>
-                      <span className="ml-1">
-                        <span className="text-success">+{totalAdded}</span>
-                        {" "}
-                        <span className="text-destructive">-{totalDeleted}</span>
-                      </span>
+                      <LineCounts add={totalAdded} del={totalDeleted} className="ml-1" />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       <div className="mt-1.5 flex flex-col gap-px rounded-md bg-muted/40 p-1.5">
@@ -338,11 +335,7 @@ export function WorktreePanel({
                               {f.status}
                             </span>
                             <span className="truncate text-foreground/80">{f.path}</span>
-                            <span className="ml-auto shrink-0 text-muted-foreground">
-                              <span className="text-success">+{f.additions}</span>
-                              {" "}
-                              <span className="text-destructive">-{f.deletions}</span>
-                            </span>
+                            <LineCounts add={f.additions} del={f.deletions} className="ml-auto text-muted-foreground" />
                           </div>
                         ))}
                       </div>

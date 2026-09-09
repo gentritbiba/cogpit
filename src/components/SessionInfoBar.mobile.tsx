@@ -32,7 +32,6 @@ export interface SessionInfoBarProps {
   creatingSession: boolean
   onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
-  onOpenTerminal?: () => void
   onBackToMain?: () => void
   onShowFileChanges?: () => void
   hasFileChanges?: boolean

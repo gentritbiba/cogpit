@@ -96,7 +96,7 @@ function state(overrides: Record<string, unknown> = {}) {
 
 async function renderIssuesTab() {
   const user = userEvent.setup()
-  render(<GitHubPanel context={context} active closePanel={vi.fn()} openPanel={vi.fn()} />)
+  render(<GitHubPanel context={context} active closePanel={vi.fn()} />)
   await user.click(screen.getByRole("tab", { name: /Issues/ }))
   return user
 }

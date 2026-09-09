@@ -96,7 +96,7 @@ describe("deriveSessionStatus", () => {
       { type: "system", subtype: "turn_duration" },
       { type: "summary", summary: "compacted" },
     ]
-    // Finished-compaction markers are skipped — live compaction is detected via subagent file watcher
+    // Finished-compaction markers are skipped — live compaction is announced by the runtime
     expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 
@@ -106,7 +106,7 @@ describe("deriveSessionStatus", () => {
       { type: "system", subtype: "turn_duration" },
       { type: "system", subtype: "compact_boundary", content: "Conversation compacted", isMeta: false },
     ]
-    // Finished-compaction markers are skipped — live compaction is detected via subagent file watcher
+    // Finished-compaction markers are skipped — live compaction is announced by the runtime
     expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 

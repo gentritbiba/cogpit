@@ -4,11 +4,13 @@ import { usePermissionRequests, type PermissionRequest } from "../usePermissionR
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
+  jsonFetch: vi.fn(),
 }))
 
-import { authFetch } from "@/lib/auth"
+import { authFetch, jsonFetch } from "@/lib/auth"
 
 const mockedAuthFetch = vi.mocked(authFetch)
+const mockedJsonFetch = vi.mocked(jsonFetch)
 
 const pendingRequest: PermissionRequest = {
   requestId: "approval-1",
@@ -45,7 +47,7 @@ describe("usePermissionRequests", () => {
     rerender()
 
     expect(result.current.requests).toEqual([pendingRequest])
-    expect(mockedAuthFetch).not.toHaveBeenCalledWith(
+    expect(mockedJsonFetch).not.toHaveBeenCalledWith(
       expect.stringContaining("/respond"),
       expect.anything(),
     )

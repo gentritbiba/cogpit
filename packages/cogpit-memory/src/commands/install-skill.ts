@@ -1,26 +1,12 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
-import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
+import { join } from "node:path"
 
 function findSkillContent(): string {
-  // Try multiple resolution strategies to find SKILL.md
-
-  // 1. Relative to this source file (works in Bun source mode)
   const candidates: string[] = []
 
-  // CJS: __dirname is available
   if (typeof __dirname !== "undefined") {
     candidates.push(join(__dirname, "..", "skill", "SKILL.md"))   // from dist/
     candidates.push(join(__dirname, "..", "..", "skill", "SKILL.md")) // from src/commands/
-  }
-
-  // ESM: import.meta.url
-  try {
-    const thisDir = dirname(fileURLToPath(import.meta.url))
-    candidates.push(join(thisDir, "..", "skill", "SKILL.md"))
-    candidates.push(join(thisDir, "..", "..", "skill", "SKILL.md"))
-  } catch {
-    // import.meta.url is unavailable in some compiled CommonJS builds.
   }
 
   for (const candidate of candidates) {

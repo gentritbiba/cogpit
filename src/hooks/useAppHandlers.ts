@@ -43,11 +43,6 @@ interface AppliedSettings {
   mcpConfig: string | null
 }
 
-export function settingsApplyRequiresRestart(source: SessionSource | null): boolean {
-  void source
-  return false
-}
-
 interface AppHandlersResult {
   // Session reload
   reloadSession: () => Promise<void>

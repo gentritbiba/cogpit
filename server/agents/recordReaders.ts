@@ -1,4 +1,5 @@
 import { AGENT_KINDS, type AgentKind } from "../../shared/session/agent-descriptors"
+import { isRecord } from "../../shared/objects"
 
 /**
  * Per-agent readers for single transcript records, for the scans in
@@ -15,10 +16,6 @@ interface AgentRecordReader {
   readonly userMessageMarkers: readonly string[]
   /** Text of a prompt someone typed, or null for any other record. */
   userMessageText(record: Record<string, unknown>): string | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 function nonEmpty(value: unknown): string | null {

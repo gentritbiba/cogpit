@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises"
 import type { AgentSettingMessage, WorktreeStateMessage } from "../../shared/session/types"
+import { isRecord } from "../../shared/objects"
 import { HEAD_BYTES } from "./transcriptHead"
 import type { SessionMeta, TranscriptHead } from "./types"
 
@@ -23,10 +24,6 @@ function lastRealModel(text: string): string | null {
     if (!match[1].startsWith("<")) found = match[1]
   }
   return found
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 /** Extract meaningful user prompt text from a parsed user message object. */

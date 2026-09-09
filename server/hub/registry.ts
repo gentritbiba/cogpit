@@ -1,7 +1,7 @@
-import { readFile, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
-import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { readOwnerOnlyJsonArray, writeOwnerOnlyJson } from "../atomicJsonFile"
+import { replaceAll, serialQueue } from "../lib/serialQueue"
 
 /**
  * Multi-device hub registry.
@@ -93,7 +93,7 @@ const DEFAULT_TLS_PORT = 443
 let registryPath: string | null = null
 const devices = new Map<string, HubDevice>()
 const runtimes = new Map<string, DeviceRuntime>()
-let registryOperationQueue: Promise<void> = Promise.resolve()
+const queue = serialQueue()
 
 // ── Persistence ──────────────────────────────────────────────────────
 
@@ -120,22 +120,6 @@ function normalizeDevice(entry: unknown): HubDevice | null {
   }
 }
 
-function enqueueRegistryOperation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = registryOperationQueue.then(operation)
-  // A rejected persistence attempt belongs to its caller. Keep a handled tail
-  // so later operations still run rather than inheriting the rejection.
-  registryOperationQueue = result.then(
-    () => undefined,
-    () => undefined,
-  )
-  return result
-}
-
-function replaceDevices(nextDevices: ReadonlyMap<string, HubDevice>): void {
-  devices.clear()
-  for (const [id, device] of nextDevices) devices.set(id, device)
-}
-
 async function persist(
   filePath: string | null,
   snapshot: readonly HubDevice[],
@@ -153,7 +137,7 @@ interface DeviceMutation<T> {
 function commitDeviceMutation<T>(
   mutate: (draft: Map<string, HubDevice>) => DeviceMutation<T>,
 ): Promise<T> {
-  return enqueueRegistryOperation(async () => {
+  return queue.run(async () => {
     // Clone records as well as the map so an existing device reference cannot
     // change the candidate while its atomic write is in flight.
     const draft = new Map(
@@ -167,7 +151,7 @@ function commitDeviceMutation<T>(
     // rolls the mutation back by discarding this draft.
     const snapshot = [...draft.values()].map((device) => ({ ...device }))
     await persist(registryPath, snapshot)
-    replaceDevices(draft)
+    replaceAll(devices, draft)
     mutation.commitRuntime?.()
     return mutation.value
   })
@@ -178,37 +162,16 @@ function commitDeviceMutation<T>(
  * corrupt file yields an empty registry rather than throwing.
  */
 export async function initDeviceRegistry(dir: string): Promise<void> {
-  await enqueueRegistryOperation(async () => {
+  await queue.run(async () => {
     const nextRegistryPath = join(dir, "devices.local.json")
-    const loadedDevices = new Map<string, HubDevice>()
-
-    let raw: string | null = null
-    try {
-      const contents = await readFile(nextRegistryPath, "utf-8")
-      // Existing installations may predate owner-only creation. Refuse to load
-      // credentials unless the registry can be repaired to owner-only mode.
-      await chmod(nextRegistryPath, 0o600)
-      raw = contents
-    } catch {
-      // Missing file (first run) or unreadable → start empty.
-    }
-
-    if (raw !== null) {
-      try {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          for (const entry of parsed) {
-            const device = normalizeDevice(entry)
-            if (device) loadedDevices.set(device.id, device)
-          }
-        }
-      } catch {
-        // Corrupt JSON → start empty rather than crashing the shell.
-      }
-    }
+    const loadedDevices = await readOwnerOnlyJsonArray(
+      nextRegistryPath,
+      normalizeDevice,
+      (device) => device.id,
+    )
 
     registryPath = nextRegistryPath
-    replaceDevices(loadedDevices)
+    replaceAll(devices, loadedDevices)
     runtimes.clear()
   })
 }

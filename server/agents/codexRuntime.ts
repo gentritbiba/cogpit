@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { asRecord } from "../../shared/objects"
 import {
   CODEX_CLIENT_CAPABILITIES,
   codexAppServer,
@@ -177,27 +178,8 @@ function trackLegacySession(sessionId: string, session: PersistentSession): void
   activeProcesses.set(sessionId, session.proc)
 }
 
-function newLegacySession(
-  proc: ChildProcess,
-  cwd: string,
-  args: ReturnType<typeof legacyArgs>,
-  jsonlPath: string | null,
-): PersistentSession {
-  return {
-    agentKind: "codex",
-    proc,
-    onResult: null,
-    dead: false,
-    cwd,
-    permArgs: args.permArgs,
-    modelArgs: args.modelArgs,
-    effortArgs: args.effortArgs,
-    jsonlPath,
-    pendingTaskCalls: new Map(),
-    subagentWatcher: null,
-    worktreeName: null,
-    pendingPermissions: new Map(),
-  }
+function newLegacySession(proc: ChildProcess, jsonlPath: string | null): PersistentSession {
+  return { agentKind: "codex", proc, onResult: null, dead: false, jsonlPath }
 }
 
 /** Prefer the path the app-server reported; fall back to recognising the file. */
@@ -248,7 +230,7 @@ async function startLegacy(
     ...cli.spawnOptions,
   })
 
-  const session = newLegacySession(child, req.cwd, args, null)
+  const session = newLegacySession(child, null)
   let stderr = ""
   child.stderr?.on("data", (data: Buffer) => { stderr += data.toString() })
 
@@ -357,7 +339,7 @@ async function sendLegacy(
     ...cli.spawnOptions,
   })
 
-  const session = newLegacySession(child, req.cwd, args, req.filePath ?? null)
+  const session = newLegacySession(child, req.filePath ?? null)
   trackLegacySession(sessionId, session)
 
   child.stdout?.on("data", () => {})
@@ -410,12 +392,6 @@ async function sendLegacy(
 }
 
 // ── Approvals ───────────────────────────────────────────────────────────────
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
 
 /**
  * Present a Codex approval as a tool call.

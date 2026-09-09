@@ -6,6 +6,7 @@ import {
   recordDeviceConnectionRevision,
   switchDevice,
 } from "@/lib/device"
+import { readJson } from "@/lib/httpJson"
 import type { CogpitEdition } from "../../shared/contracts/team"
 
 // ── Types (mirror server/hub/registry.ts + server/routes/devices.ts) ─────────
@@ -152,15 +153,6 @@ function announceDevicesChanged(device: DeviceSummary): void {
 
 function devicePath(id: string, suffix = ""): string {
   return `/api/hub/devices/${encodeURIComponent(id)}${suffix}`
-}
-
-async function readJson(res: Response): Promise<Record<string, unknown> | null> {
-  try {
-    const data = (await res.json()) as unknown
-    return data && typeof data === "object" ? (data as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
 }
 
 /** Read the reported app version from a device's last hello, if any. */

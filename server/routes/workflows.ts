@@ -15,7 +15,7 @@
  * Mirrors the team-watch SSE pattern (debounced fs.watch → {type:"update"}).
  */
 import { watch, activeProcesses, persistentSessions } from "../helpers"
-import { withJsonBody, type UseFn } from "../http"
+import { sendJson, withJsonBody, type UseFn } from "../http"
 import { sdkSessions, stopSDKSession } from "../sdk-session"
 import {
   listSessionWorkflows,
@@ -25,11 +25,6 @@ import {
   workflowsDirFor,
   sessionDirFor,
 } from "../lib/workflows"
-
-function sendJson(res: { setHeader: (k: string, v: string) => void; end: (s: string) => void }, body: unknown): void {
-  res.setHeader("Content-Type", "application/json")
-  res.end(JSON.stringify(body))
-}
 
 /** Is the owning session a live, Cogpit-managed process we can stop? */
 function isControllable(sessionId: string): boolean {
@@ -84,17 +79,15 @@ export function registerWorkflowRoutes(use: UseFn) {
     const sessionId = decodeURIComponent(parts[1])
 
     if (!workflowsDirFor(dirName, sessionId)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
     try {
       const workflows = await listSessionWorkflows(dirName, sessionId)
-      sendJson(res, workflows)
+      sendJson(res, 200, workflows)
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -111,22 +104,19 @@ export function registerWorkflowRoutes(use: UseFn) {
     const runId = decodeURIComponent(parts[2])
 
     if (!workflowsDirFor(dirName, sessionId)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
     try {
       const detail = await readWorkflowDetail(dirName, sessionId, runId)
       if (!detail) {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "Workflow not found" }))
+        sendJson(res, 404, { error: "Workflow not found" })
         return
       }
-      sendJson(res, { ...detail, controllable: isControllable(sessionId) })
+      sendJson(res, 200, { ...detail, controllable: isControllable(sessionId) })
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -143,22 +133,19 @@ export function registerWorkflowRoutes(use: UseFn) {
     const runId = decodeURIComponent(parts[2])
 
     if (!workflowsDirFor(dirName, sessionId)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
     try {
       const result = await readWorkflowResult(dirName, sessionId, runId)
       if (!result) {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "Workflow result not found" }))
+        sendJson(res, 404, { error: "Workflow result not found" })
         return
       }
-      sendJson(res, result)
+      sendJson(res, 200, result)
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -176,22 +163,19 @@ export function registerWorkflowRoutes(use: UseFn) {
     const agentId = decodeURIComponent(parts[3])
 
     if (!workflowsDirFor(dirName, sessionId)) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
     try {
       const agentResult = await readWorkflowAgentResult(dirName, sessionId, runId, agentId)
       if (!agentResult) {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "Agent result not found" }))
+        sendJson(res, 404, { error: "Agent result not found" })
         return
       }
-      sendJson(res, agentResult)
+      sendJson(res, 200, agentResult)
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -210,8 +194,7 @@ export function registerWorkflowRoutes(use: UseFn) {
     const sessionDir = sessionDirFor(dirName, sessionId)
     const workflowsDir = workflowsDirFor(dirName, sessionId)
     if (!sessionDir || !workflowsDir) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
 
@@ -273,13 +256,12 @@ export function registerWorkflowRoutes(use: UseFn) {
     withJsonBody<{ sessionId?: string; runId?: string }>(req, res, (parsed) => {
       const sessionId = parsed.sessionId
       if (!sessionId || typeof sessionId !== "string") {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "sessionId is required" }))
+        sendJson(res, 400, { error: "sessionId is required" })
         return
       }
 
       if (!isControllable(sessionId)) {
-        sendJson(res, {
+        sendJson(res, 200, {
           success: false,
           controllable: false,
           error: "This workflow runs in a session Cogpit doesn't control.",
@@ -288,7 +270,7 @@ export function registerWorkflowRoutes(use: UseFn) {
       }
 
       const stopped = stopOwningSession(sessionId)
-      sendJson(res, { success: stopped, controllable: true })
+      sendJson(res, 200, { success: stopped, controllable: true })
     })
   })
 }

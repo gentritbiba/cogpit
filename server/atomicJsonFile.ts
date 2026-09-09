@@ -1,4 +1,4 @@
-import { chmod, rename, unlink, writeFile } from "node:fs/promises"
+import { chmod, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 
 /**
@@ -36,4 +36,39 @@ export async function writeOwnerOnlyJson(
   mode = 0o600,
 ): Promise<void> {
   await writeOwnerOnlyText(filePath, JSON.stringify(value, null, 2), mode)
+}
+
+/**
+ * Load a JSON array of records into a keyed map. The chmod shares the read's
+ * try block, so a file that cannot be repaired to owner-only mode yields an
+ * empty map rather than loading secrets out of a world-readable file. A missing
+ * or corrupt file yields an empty map too.
+ */
+export async function readOwnerOnlyJsonArray<T>(
+  filePath: string,
+  normalize: (entry: unknown) => T | null,
+  keyOf: (value: T) => string,
+): Promise<Map<string, T>> {
+  const loaded = new Map<string, T>()
+
+  let raw: string
+  try {
+    raw = await readFile(filePath, "utf-8")
+    await chmod(filePath, 0o600)
+  } catch {
+    return loaded
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        const value = normalize(entry)
+        if (value) loaded.set(keyOf(value), value)
+      }
+    }
+  } catch {
+    // Corrupt JSON → start empty rather than crashing the shell.
+  }
+  return loaded
 }

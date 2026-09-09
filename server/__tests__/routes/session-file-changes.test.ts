@@ -18,7 +18,8 @@ vi.mock("../../helpers", () => ({
 import { readFile, stat } from "../../helpers"
 import { findJsonlPath } from "../../sessionPaths"
 import { parseSessionFileChanges, registerSessionFileChangesRoutes } from "../../routes/session-file-changes"
-import type { UseFn, Middleware } from "../../helpers"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 
 const mockedFindJsonlPath = vi.mocked(findJsonlPath)
 const mockedReadFile = vi.mocked(readFile)
@@ -655,53 +656,26 @@ describe("parseSessionFileChanges", () => {
 
 // ── HTTP route tests ──────────────────────────────────────────────────────────
 
-function createMockReqRes(method: string, url: string) {
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  let body = ""
-
-  const req = {
-    method,
-    url,
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((k: string, v: string) => { headers[k] = v }),
-    end: vi.fn((data?: string) => { body = data || "" }),
-    _getData: () => body,
-    _getStatus: () => statusCode,
-  }
-
-  const next = vi.fn()
-  return { req, res, next }
-}
-
 describe("registerSessionFileChangesRoutes", () => {
   let handlers: Map<string, Middleware>
 
   beforeEach(() => {
     vi.clearAllMocks()
-    handlers = new Map()
-    const use: UseFn = (path, handler) => { handlers.set(path, handler) }
-    registerSessionFileChangesRoutes(use)
+    handlers = collectRoutes(registerSessionFileChangesRoutes)
   })
 
   it("calls next for non-GET methods", async () => {
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("POST", "/session-abc")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(next).toHaveBeenCalled()
   })
 
   it("returns 404 when session not found", async () => {
     mockedFindJsonlPath.mockResolvedValueOnce(null)
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/missing-session")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(res._getStatus()).toBe(404)
     expect(JSON.parse(res._getData())).toMatchObject({ error: "Session not found" })
   })
@@ -715,9 +689,9 @@ describe("registerSessionFileChangesRoutes", () => {
         userLine([toolResult("tc1")]),
       ) as never,
     )
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/session-abc")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(res._getStatus()).toBe(200)
     const data = JSON.parse(res._getData())
     expect(data.sessionId).toBe("session-abc")
@@ -736,9 +710,9 @@ describe("registerSessionFileChangesRoutes", () => {
         userLine([toolResult("tc1")]),
       ) as never,
     )
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/session-abc?content=true")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     const data = JSON.parse(res._getData())
     expect(data.changes[0].content).toEqual({ originalStr: "a", currentStr: "b" })
   })
@@ -752,9 +726,9 @@ describe("registerSessionFileChangesRoutes", () => {
         userLine([toolResult("tc1")]),
       ) as never,
     )
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/session-abc/tool/tc1")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(res._getStatus()).toBe(200)
     const data = JSON.parse(res._getData())
     expect(data.toolCallIds).toContain("tc1")
@@ -769,17 +743,17 @@ describe("registerSessionFileChangesRoutes", () => {
         assistantLine([toolUse("tc1", "Edit", { file_path: "/app.ts", old_string: "a", new_string: "b" })]),
       ) as never,
     )
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/session-abc/tool/nonexistent")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(res._getStatus()).toBe(404)
     expect(JSON.parse(res._getData())).toMatchObject({ error: "Tool call not found" })
   })
 
   it("calls next for unknown path shapes", async () => {
-    const handler = handlers.get("/api/session-file-changes/")!
+    const handler = getRouteHandler(handlers, "/api/session-file-changes/")
     const { req, res, next } = createMockReqRes("GET", "/session/extra/unknown/path")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(next).toHaveBeenCalled()
   })
 })

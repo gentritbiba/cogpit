@@ -163,20 +163,7 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
     context.clearRect(0, 0, size.width, size.height)
 
     if (!frame || fit.width <= 0 || fit.height <= 0) return
-    if (frame.bitmap) {
-      paint(context, frame.bitmap, fit)
-      return
-    }
-    if (!frame.blobUrl) return
-    let cancelled = false
-    const image = new Image()
-    image.onload = () => {
-      if (!cancelled) paint(context, image, fit)
-    }
-    image.src = frame.blobUrl
-    return () => {
-      cancelled = true
-    }
+    paint(context, frame.bitmap, fit)
   }, [frame, fit, size])
 
   // The hook stops owning a frame the moment it hands it over, so the frame on

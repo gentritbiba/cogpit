@@ -81,8 +81,9 @@ about its siblings.
 ## Registries
 
 Each concern has one registry. Each is a frozen `Record<AgentKind, T>` read
-through functions, with no service locator or DI container. Each also exposes a `createXRegistry(table)`
-factory so a test can substitute a fake instead of mocking module paths.
+through functions, with no service locator or DI container. `server/agents/index.ts`
+also exposes a `createStoreRegistry(table)` factory so a test can substitute a fake
+instead of mocking module paths.
 
 | Registry | Resolvers |
 | --- | --- |

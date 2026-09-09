@@ -18,7 +18,7 @@ import {
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { allStores } from "../../agents"
 import { runtimeFor } from "../../agents/runtimes"
-import type { NextFn } from "../../http"
+import { sendJson, type NextFn } from "../../http"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
@@ -277,8 +277,7 @@ export async function handleActiveSessions(
       results.flatMap((session) => session ? [session] : []),
     ).slice(0, totalLimit)
 
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify(activeSessions))
+    sendJson(res, 200, activeSessions)
   } catch (err) {
     sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))
   }

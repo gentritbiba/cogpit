@@ -110,10 +110,10 @@ const mockedGetSessionStatus = vi.mocked(getSessionStatus)
 const mockedReadFile = vi.mocked(readFile)
 const mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
 
-import type { UseFn, Middleware } from "../../helpers"
+import type { Middleware } from "../../helpers"
 import {
-  asIncomingMessage,
-  asServerResponse,
+  collectRoutes,
+  createMockReqRes,
   getRouteHandler,
   makeSessionMeta,
 } from "../http-fixtures"
@@ -129,29 +129,6 @@ function claudeFile(dirName: string, fileName: string, mtimeMs: number, size = 1
 
 const codexDirName = (cwd: string) => descriptorFor("codex").dirName.encode(cwd)
 const copilotDirName = (cwd: string) => descriptorFor("copilot").dirName.encode(cwd)
-
-function createMockReqRes(method: string, url: string) {
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-    _getHeaders: () => headers,
-  }
-  const next = vi.fn()
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next }
-}
 
 describe("project routes", () => {
   let handlers: Map<string, Middleware>
@@ -175,11 +152,7 @@ describe("project routes", () => {
     })
     mockedResolveSessionFilePath.mockImplementation(async (dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
     mockedFindJsonlPath.mockResolvedValue(null)
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerProjectRoutes(use)
+    handlers = collectRoutes(registerProjectRoutes)
   })
 
   // ── GET /api/projects ─────────────────────────────────────────────────
@@ -262,51 +235,6 @@ describe("project routes", () => {
       await handler(req, res, next)
 
       expect(JSON.parse(res._getData())).toEqual([])
-    })
-  })
-
-  describe("GET /api/codex-subagents", () => {
-    it("returns Codex subagents with read-only virtual paths", async () => {
-      const handler = getRouteHandler(handlers, "/api/codex-subagents")
-      const { req, res, next } = createMockReqRes("GET", "/")
-      mocks.listSessionFiles.codex.mockResolvedValueOnce([
-        {
-          fileName: "2026/07/14/rollout-sub-older.jsonl",
-          filePath: "/tmp/codex-sessions/2026/07/14/rollout-sub-older.jsonl",
-          mtimeMs: 1_000,
-          size: 200,
-        },
-        {
-          fileName: "2026/07/15/rollout-parent.jsonl",
-          filePath: "/tmp/codex-sessions/2026/07/15/rollout-parent.jsonl",
-          mtimeMs: 3_000,
-          size: 400,
-        },
-      ])
-      mockedGetSessionMeta
-        .mockResolvedValueOnce(makeSessionMeta({
-          sessionId: "sub-older", version: "", gitBranch: "main", model: "gpt-5",
-          slug: "", cwd: "/code/cogpit", firstUserMessage: "Inspect the API", lastUserMessage: "Inspect the API",
-          timestamp: "", lastTimestamp: "", turnCount: 1, lineCount: 4,
-          isSubagent: true, parentSessionId: "parent-1", agentPath: "/root/api_scout",
-        }))
-        .mockResolvedValueOnce(makeSessionMeta({
-          sessionId: "parent", version: "", gitBranch: "main", model: "gpt-5",
-          slug: "", cwd: "/code/cogpit", firstUserMessage: "Build it", lastUserMessage: "Build it",
-          timestamp: "", lastTimestamp: "", turnCount: 2, lineCount: 8,
-          isSubagent: false, parentSessionId: null, agentPath: "/root",
-        }))
-
-      await handler(req, res, next)
-
-      expect(JSON.parse(res._getData())).toEqual([
-        expect.objectContaining({
-          sessionId: "sub-older",
-          dirName: codexDirName("/code/cogpit"),
-          fileName: "parent-1/subagents/agent-sub-older.jsonl",
-          parentSessionId: "parent-1",
-        }),
-      ])
     })
   })
 

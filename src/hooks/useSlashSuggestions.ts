@@ -1,13 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { authFetch } from "@/lib/auth"
-
-export interface SlashSuggestion {
-  name: string
-  description: string
-  type: "command" | "skill"
-  source: "project" | "user" | string
-  filePath: string
-}
+import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 
 export function useSlashSuggestions(cwd: string | undefined, enabled = true) {
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])

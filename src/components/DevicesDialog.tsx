@@ -71,7 +71,6 @@ interface DevicesDialogProps {
   open: boolean
   initialMode: "add" | "manage"
   onClose: () => void
-  onCloseComplete?: () => void
 }
 
 /**
@@ -167,14 +166,13 @@ const AUTH_STATE_DOT: Record<PublicDevice["runtime"]["authState"], string> = {
 
 interface DeviceRowProps {
   device: PublicDevice
-  hubVersion: string
   onRename: (id: string, name: string) => Promise<void>
   onCredentials: (id: string, patch: UpdateDeviceInput) => Promise<MutationResult>
   onRemove: (id: string) => Promise<void>
   onTest: (id: string) => Promise<void>
 }
 
-function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTest }: DeviceRowProps) {
+function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: DeviceRowProps) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.name)
   const [editingCredentials, setEditingCredentials] = useState(false)
@@ -193,7 +191,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
   }, [device.username])
 
   const version = deviceVersion(device)
-  const skewed = version !== undefined && version !== hubVersion
+  const skewed = version !== undefined && version !== HUB_VERSION
   const teamDevice = deviceEdition(device) === "team"
 
   async function saveName() {
@@ -271,7 +269,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
               {version && (
                 <span
                   className={cn("shrink-0 font-mono text-xs", skewed ? "text-warning" : "text-muted-foreground")}
-                  title={skewed ? `Device runs v${version}; hub runs v${hubVersion}` : undefined}
+                  title={skewed ? `Device runs v${version}; hub runs v${HUB_VERSION}` : undefined}
                 >
                   v{version}
                   {skewed && " ≠ hub"}
@@ -440,7 +438,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
-export function DevicesDialog({ open, initialMode, onClose, onCloseComplete }: DevicesDialogProps) {
+export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps) {
   const { devices, refresh, probe, addDevice, updateDevice, removeDevice, testDevice } = useDevices()
 
   const [name, setName] = useState("")
@@ -569,7 +567,6 @@ export function DevicesDialog({ open, initialMode, onClose, onCloseComplete }: D
     <Dialog
       open={open}
       onOpenChange={(next) => { if (!next) onClose() }}
-      onOpenChangeComplete={(next) => { if (!next) onCloseComplete?.() }}
     >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -586,7 +583,6 @@ export function DevicesDialog({ open, initialMode, onClose, onCloseComplete }: D
               <DeviceRow
                 key={device.id}
                 device={device}
-                hubVersion={HUB_VERSION}
                 onRename={handleRename}
                 onCredentials={updateDevice}
                 onRemove={handleRemove}

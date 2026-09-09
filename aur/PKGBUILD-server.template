@@ -34,7 +34,7 @@ package() {
   # Copy built frontend
   cp -r dist "${pkgdir}/opt/${pkgname}/"
 
-  # Copy server + electron/server.ts (reused by standalone entry point)
+  # Copy server sources
   cp -r server "${pkgdir}/opt/${pkgname}/"
   cp -r electron "${pkgdir}/opt/${pkgname}/"
   cp -r src "${pkgdir}/opt/${pkgname}/"

@@ -14,7 +14,7 @@ import {
 import { storeForDirName, storeForPath } from "../../agents"
 import { runtimeForDirName } from "../../agents/runtimes"
 import { resolveSessionFilePath } from "../../sessionPaths"
-import { withJsonBody, type UseFn } from "../../http"
+import { sendJson, withJsonBody, type UseFn } from "../../http"
 
 export function registerBranchSessionRoute(use: UseFn) {
   use("/api/branch-session", (req, res, next) => {
@@ -29,8 +29,7 @@ export function registerBranchSessionRoute(use: UseFn) {
       try {
 
         if (!dirName || !fileName) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "dirName and fileName are required" }))
+          sendJson(res, 400, { error: "dirName and fileName are required" })
           return
         }
 
@@ -39,8 +38,7 @@ export function registerBranchSessionRoute(use: UseFn) {
         // The resolved path has to sit in the storage of the agent the dirName
         // claims, so one agent's dirName cannot reach another's transcript.
         if (!sourcePath || storeForPath(sourcePath)?.kind !== descriptor.kind) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
+          sendJson(res, 403, { error: "Access denied" })
           return
         }
 
@@ -48,8 +46,7 @@ export function registerBranchSessionRoute(use: UseFn) {
         let lines = content.split("\n").filter(Boolean)
 
         if (lines.length === 0) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Source session is empty" }))
+          sendJson(res, 400, { error: "Source session is empty" })
           return
         }
 
@@ -57,18 +54,16 @@ export function registerBranchSessionRoute(use: UseFn) {
           // The CLI forks its own session; the transcript is never copied.
           const originalId = descriptor.sessionFile.sessionId(fileName)
           if (!originalId) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: `Invalid ${descriptor.displayName} session path` }))
+            sendJson(res, 400, { error: `Invalid ${descriptor.displayName} session path` })
             return
           }
           const forked = await runtimeForDirName(dirName).fork(originalId, { lines, turnIndex, turnUuid })
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({
+          sendJson(res, 200, {
             dirName,
             fileName: forked.fileName,
             sessionId: forked.sessionId,
             branchedFrom: originalId,
-          }))
+          })
           return
         }
 
@@ -104,29 +99,20 @@ export function registerBranchSessionRoute(use: UseFn) {
 
         const target = storeForDirName(dirName).transcriptPath(dirName, newSessionId)
         if (!target) {
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: `${descriptor.displayName} has no session storage` }))
+          sendJson(res, 500, { error: `${descriptor.displayName} has no session storage` })
           return
         }
         await mkdir(dirname(target.filePath), { recursive: true })
         await writeFile(target.filePath, lines.join("\n") + "\n")
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(
-          JSON.stringify({
-            dirName,
-            fileName: target.fileName,
-            sessionId: newSessionId,
-            branchedFrom: originalId,
-          })
-        )
+        sendJson(res, 200, {
+          dirName,
+          fileName: target.fileName,
+          sessionId: newSessionId,
+          branchedFrom: originalId,
+        })
       } catch (err) {
-        res.statusCode = 400
-        res.end(
-          JSON.stringify({
-            error: err instanceof Error ? err.message : "Invalid request",
-          })
-        )
+        sendJson(res, 400, { error: err instanceof Error ? err.message : "Invalid request" })
       }
     })
   })

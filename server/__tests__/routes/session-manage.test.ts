@@ -98,7 +98,8 @@ import {
 } from "../../processRegistry"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { resolveSessionFilePath } from "../../sessionPaths"
-import type { UseFn, Middleware } from "../../helpers"
+import type { Middleware } from "../../helpers"
+import { collectRoutes } from "../http-fixtures"
 import { registerSessionManageRoutes } from "../../routes/session-manage"
 
 // ---------------------------------------------------------------------------
@@ -200,11 +201,7 @@ describe("session lifecycle routes", () => {
     mockSDKControls.stopSDKTask.mockResolvedValue(true)
     mockSDKControls.backgroundSDKTasks.mockResolvedValue(true)
 
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerSessionManageRoutes(use)
+    handlers = collectRoutes(registerSessionManageRoutes)
   })
 
   describe("native Claude controls", () => {

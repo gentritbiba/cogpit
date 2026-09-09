@@ -31,7 +31,6 @@ const FILES = [
   "sessionStats.ts",
   "turnContent.ts",
   "sessionStatus.ts",
-  "token-costs.ts",
   "interactiveState.ts",
 ] as const
 

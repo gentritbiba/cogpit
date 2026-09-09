@@ -1,3 +1,6 @@
+const DEVICE_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const
+type DeviceIndex = (typeof DEVICE_INDEXES)[number]
+
 export type KeybindingCommand =
   | "commandPalette"
   | "keyboardShortcuts"
@@ -26,15 +29,7 @@ export type KeybindingCommand =
   | "previewResetZoom"
   | "projectFiles"
   | "projectFileSave"
-  | "device.switch.1"
-  | "device.switch.2"
-  | "device.switch.3"
-  | "device.switch.4"
-  | "device.switch.5"
-  | "device.switch.6"
-  | "device.switch.7"
-  | "device.switch.8"
-  | "device.switch.9"
+  | `device.switch.${DeviceIndex}`
   | "device.cycle"
 
 export interface KeybindingChord {
@@ -262,69 +257,15 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
   // Multi-device switching. 1 = this machine, then remote devices in registry
   // order. mod+1..9 is browser-reserved and mod+shift+1..9 already jumps to the
   // Nth live session, so these use the platform chord (⌃⌘N / Ctrl+Alt+N).
-  {
-    command: "device.switch.1",
-    label: "Switch to device 1",
-    description: "Jump to this machine (the local device)",
-    group: "General",
-    defaultShortcut: { key: "1", platformChord: true },
-  },
-  {
-    command: "device.switch.2",
-    label: "Switch to device 2",
-    description: "Jump to the 2nd device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "2", platformChord: true },
-  },
-  {
-    command: "device.switch.3",
-    label: "Switch to device 3",
-    description: "Jump to the 3rd device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "3", platformChord: true },
-  },
-  {
-    command: "device.switch.4",
-    label: "Switch to device 4",
-    description: "Jump to the 4th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "4", platformChord: true },
-  },
-  {
-    command: "device.switch.5",
-    label: "Switch to device 5",
-    description: "Jump to the 5th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "5", platformChord: true },
-  },
-  {
-    command: "device.switch.6",
-    label: "Switch to device 6",
-    description: "Jump to the 6th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "6", platformChord: true },
-  },
-  {
-    command: "device.switch.7",
-    label: "Switch to device 7",
-    description: "Jump to the 7th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "7", platformChord: true },
-  },
-  {
-    command: "device.switch.8",
-    label: "Switch to device 8",
-    description: "Jump to the 8th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "8", platformChord: true },
-  },
-  {
-    command: "device.switch.9",
-    label: "Switch to device 9",
-    description: "Jump to the 9th device in the switcher",
-    group: "General",
-    defaultShortcut: { key: "9", platformChord: true },
-  },
+  ...DEVICE_INDEXES.map((n) => ({
+    command: `device.switch.${n}` as const,
+    label: `Switch to device ${n}`,
+    description: n === 1
+      ? "Jump to this machine (the local device)"
+      : `Jump to the ${n}${n === 2 ? "nd" : n === 3 ? "rd" : "th"} device in the switcher`,
+    group: "General" as const,
+    defaultShortcut: { key: String(n), platformChord: true },
+  })),
   {
     command: "device.cycle",
     label: "Cycle devices",
@@ -551,17 +492,7 @@ export function getDoubleTapModifierKey(command: KeybindingCommand): "Meta" | "C
 // ── Multi-device switching helpers ───────────────────────────────────────────
 
 /** The nine "switch to device N" commands, ordered 1 → 9. */
-export const DEVICE_SWITCH_COMMANDS = [
-  "device.switch.1",
-  "device.switch.2",
-  "device.switch.3",
-  "device.switch.4",
-  "device.switch.5",
-  "device.switch.6",
-  "device.switch.7",
-  "device.switch.8",
-  "device.switch.9",
-] as const satisfies readonly KeybindingCommand[]
+export const DEVICE_SWITCH_COMMANDS = DEVICE_INDEXES.map((n) => `device.switch.${n}` as const)
 
 export const DEVICE_CYCLE_COMMAND: KeybindingCommand = "device.cycle"
 

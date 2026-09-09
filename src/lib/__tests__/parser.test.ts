@@ -4,7 +4,6 @@ import {
   parseSessionAppend,
   getUserMessageText,
   getUserMessageImages,
-  getToolColor,
   detectPendingInteraction,
 } from "../../../shared/session/parser"
 import { buildTurns, findTurnStartIndices } from "../../../shared/session/turnBuilder"
@@ -1377,58 +1376,6 @@ describe("getUserMessageImages", () => {
   })
 })
 
-// ── getToolColor ────────────────────────────────────────────────────────
-
-describe("getToolColor", () => {
-  it("returns correct color for Read tool", () => {
-    expect(getToolColor("Read")).toBe("text-muted-foreground")
-  })
-
-  it("returns correct color for Write tool", () => {
-    expect(getToolColor("Write")).toBe("text-foreground")
-  })
-
-  it("returns correct color for Edit tool", () => {
-    expect(getToolColor("Edit")).toBe("text-foreground")
-  })
-
-  it("returns correct color for Bash tool", () => {
-    expect(getToolColor("Bash")).toBe("text-foreground")
-  })
-
-  it("returns correct color for Grep tool", () => {
-    expect(getToolColor("Grep")).toBe("text-muted-foreground")
-  })
-
-  it("returns correct color for Glob tool", () => {
-    expect(getToolColor("Glob")).toBe("text-muted-foreground")
-  })
-
-  it("returns correct color for Task tool", () => {
-    expect(getToolColor("Task")).toBe("text-foreground")
-  })
-
-  it("returns correct color for WebFetch tool", () => {
-    expect(getToolColor("WebFetch")).toBe("text-muted-foreground")
-  })
-
-  it("returns correct color for WebSearch tool", () => {
-    expect(getToolColor("WebSearch")).toBe("text-muted-foreground")
-  })
-
-  it("returns correct color for AskUserQuestion tool", () => {
-    expect(getToolColor("AskUserQuestion")).toBe("text-foreground")
-  })
-
-  it("returns default color for unknown tools", () => {
-    expect(getToolColor("UnknownTool")).toBe("text-muted-foreground")
-  })
-
-  it("returns default color for empty string", () => {
-    expect(getToolColor("")).toBe("text-muted-foreground")
-  })
-})
-
 // ── detectPendingInteraction ────────────────────────────────────────────
 
 describe("detectPendingInteraction", () => {
@@ -2044,11 +1991,6 @@ describe("Agent tool with toolUseResult (new format)", () => {
     const subBlocks = turn.contentBlocks.filter((b) => b.kind === "sub_agent")
     // Only one sub_agent block should exist (from the old-format progress)
     expect(subBlocks).toHaveLength(1)
-  })
-
-  it("assigns Agent tool the correct color", () => {
-    expect(getToolColor("Agent")).toBe("text-foreground")
-    expect(getToolColor("Task")).toBe("text-foreground")
   })
 })
 

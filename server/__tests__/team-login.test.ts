@@ -68,49 +68,16 @@ const mockedHashPassword = vi.mocked(hashPassword)
 const mockedGetConfig = vi.mocked(getConfig)
 const mockedFlushSessionPersistence = vi.mocked(flushSessionPersistence)
 
-import type { UseFn, Middleware } from "../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "./http-fixtures"
+import type { Middleware } from "../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "./http-fixtures"
 import { registerConfigRoutes } from "../routes/config"
 
 const STRONG_PASSWORD = "correct-horse-battery-staple"
 const originalEditionEnv = process.env.COGPIT_EDITION
 
-function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: Buffer) => void)[] = []
-  const endHandlers: (() => void)[] = []
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: Buffer) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
-      return req
-    }),
-    socket: {
-      remoteAddress: "192.168.1.100",
-      address: () => ({ port: 19384 }),
-    },
-    headers: {} as Record<string, string>,
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-  }
-  const next = vi.fn()
-  const sendBody = () => {
-    if (body) {
-      for (const h of dataHandlers) h(Buffer.from(body))
-    }
-    for (const h of endHandlers) h()
-  }
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
+/** Every login here arrives from a LAN browser on the default port. */
+function createLanReqRes(method: string, url: string, body?: string) {
+  return createMockReqRes(method, url, { body, remoteAddress: "192.168.1.100", socketPort: 19384 })
 }
 
 describe("POST /api/auth/verify (team edition)", () => {
@@ -136,11 +103,7 @@ describe("POST /api/auth/verify (team edition)", () => {
     mockedVerifyPasswordAsync.mockResolvedValue(false)
     mockedFlushSessionPersistence.mockResolvedValue(undefined)
 
-    handlers = new Map()
-    const use: UseFn = (path: string, routeHandler: Middleware) => {
-      handlers.set(path, routeHandler)
-    }
-    registerConfigRoutes(use)
+    handlers = collectRoutes(registerConfigRoutes)
     handler = getRouteHandler(handlers, "/api/auth/verify")
   })
 
@@ -155,7 +118,7 @@ describe("POST /api/auth/verify (team edition)", () => {
   it("issues a browser cookie session for a JSON username login", async () => {
     const alice = await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const body = JSON.stringify({ username: " Alice ", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
     req.headers["x-cogpit-client"] = "1"
     req.headers["user-agent"] = "Browser/1"
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
@@ -177,7 +140,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("returns the session token in the body for a Bearer user:pass machine login", async () => {
     const alice = await createUser({ username: "alice", password: STRONG_PASSWORD, role: "member" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer alice:${STRONG_PASSWORD}`
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
     mockedCreateSessionToken.mockReturnValueOnce("team-machine-session")
@@ -198,7 +161,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("does not acknowledge a team login until its session is durable", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer alice:${STRONG_PASSWORD}`
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
     mockedCreateSessionToken.mockReturnValueOnce("durable-team-session")
@@ -221,7 +184,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("splits Bearer credentials at the first colon only", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = "Bearer alice:pass:with:colons"
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
     mockedCreateSessionToken.mockReturnValueOnce("session")
@@ -236,7 +199,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("rejects a bad password with 401 Invalid credentials", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = "Bearer alice:wrong-password-guess"
     mockedVerifyPasswordAsync.mockResolvedValueOnce(false)
 
@@ -249,7 +212,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("verifies unknown users against a dummy hash so timing cannot enumerate accounts", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = "Bearer mallory:some-password-guess"
     // The dummy result must be ignored even if the scrypt comparison "passes".
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
@@ -265,7 +228,7 @@ describe("POST /api/auth/verify (team edition)", () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
     await setUserDisabled(bob.id, true)
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
     mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
 
@@ -284,7 +247,7 @@ describe("POST /api/auth/verify (team edition)", () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
     await setUserDisabled(bob.id, true)
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = "Bearer bob:wrong-password-guess"
     mockedVerifyPasswordAsync.mockResolvedValueOnce(false)
 
@@ -297,7 +260,7 @@ describe("POST /api/auth/verify (team edition)", () => {
   it("does not issue a session when the user is disabled during password verification", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
     let finishVerification!: (valid: boolean) => void
     mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
@@ -318,7 +281,7 @@ describe("POST /api/auth/verify (team edition)", () => {
   it("issues only the current role when a user is demoted during password verification", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
     let finishVerification!: (valid: boolean) => void
     mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
@@ -343,7 +306,7 @@ describe("POST /api/auth/verify (team edition)", () => {
   it("rejects old credentials when the password changes during verification", async () => {
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
     let finishVerification!: (valid: boolean) => void
     mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
@@ -362,7 +325,7 @@ describe("POST /api/auth/verify (team edition)", () => {
   })
 
   it("rejects a bare Bearer password (no colon) with 401 Username required", async () => {
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
     req.headers.authorization = "Bearer just-a-network-password"
 
     await handler(req, res, next)
@@ -374,7 +337,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("preserves the 413 status for an oversized JSON login body", async () => {
     const body = JSON.stringify({ username: "alice", password: "x".repeat(70_000) })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
 
     const pending = handler(req, res, next)
     sendBody()
@@ -389,7 +352,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("requires a password when the JSON body omits it", async () => {
     const body = JSON.stringify({ username: "alice" })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
 
     const pending = handler(req, res, next)
     sendBody()
@@ -401,7 +364,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("does not grant the trusted-local bypass in team edition", async () => {
     mockedIsTrustedDirectLocalRequest.mockReturnValue(true)
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/")
+    const { req, res, next, sendBody } = createLanReqRes("POST", "/")
 
     const pending = handler(req, res, next)
     sendBody()
@@ -413,7 +376,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("still applies the rate limit", async () => {
     mockedIsRateLimited.mockReturnValueOnce(true)
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
 
     await handler(req, res, next)
 
@@ -423,7 +386,7 @@ describe("POST /api/auth/verify (team edition)", () => {
 
   it("still rejects untrusted mutation sources", async () => {
     mockedHasTrustedMutationSource.mockReturnValueOnce(false)
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createLanReqRes("POST", "/")
 
     await handler(req, res, next)
 
@@ -440,7 +403,7 @@ describe("POST /api/auth/verify (team edition)", () => {
     mockedVerifyPasswordAsync.mockReturnValue(pendingVerification)
 
     const attempts = Array.from({ length: 3 }, () => {
-      const attempt = createMockReqRes("POST", "/")
+      const attempt = createLanReqRes("POST", "/")
       attempt.req.headers.authorization = `Bearer alice:${STRONG_PASSWORD}`
       return attempt
     })

@@ -25,7 +25,8 @@ import { readFile, readdir } from "../../helpers"
 import { findJsonlPath } from "../../sessionPaths"
 import { parseSession } from "../../../shared/session/parser"
 import { registerSessionContextRoutes } from "../../routes/session-context"
-import type { UseFn, Middleware } from "../../helpers"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import type { ParsedSession, Turn, TokenUsage } from "../../../shared/session/types"
 
 const mockedFindJsonlPath = vi.mocked(findJsonlPath)
@@ -34,32 +35,6 @@ const mockedReaddir = vi.mocked(readdir)
 const mockedParseSession = vi.mocked(parseSession)
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
-
-function createMockReqRes(method: string, url: string) {
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  let body = ""
-
-  const req = {
-    method,
-    url,
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((k: string, v: string) => { headers[k] = v }),
-    end: vi.fn((data?: string) => { body = data || "" }),
-    _getData: () => body,
-    _getStatus: () => statusCode,
-    _getHeaders: () => headers,
-  }
-
-  const next = vi.fn()
-  return { req, res, next }
-}
 
 function makeTokenUsage(input = 1000, output = 500): TokenUsage {
   return { input_tokens: input, output_tokens: output, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
@@ -114,17 +89,14 @@ describe("registerSessionContextRoutes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    const handlers = new Map<string, Middleware>()
-    const use: UseFn = (path, h) => { handlers.set(path, h) }
-    registerSessionContextRoutes(use)
-    handler = handlers.get("/api/session-context/")!
+    handler = getRouteHandler(collectRoutes(registerSessionContextRoutes), "/api/session-context/")
   })
 
   // ── Method guard ─────────────────────────────────────────────────────────
 
   it("calls next for non-GET methods", async () => {
     const { req, res, next } = createMockReqRes("POST", "/test-session")
-    await handler(req as never, res as never, next)
+    await handler(req, res, next)
     expect(next).toHaveBeenCalled()
   })
 
@@ -134,7 +106,7 @@ describe("registerSessionContextRoutes", () => {
     it("returns 404 when session not found", async () => {
       mockedFindJsonlPath.mockResolvedValueOnce(null)
       const { req, res, next } = createMockReqRes("GET", "/missing-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
       expect(res._getStatus()).toBe(404)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Session not found" })
     })
@@ -145,7 +117,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession())
 
       const { req, res, next } = createMockReqRes("GET", "/test-session-123")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
@@ -175,7 +147,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(session)
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].userMessage).toBe("First part\n[image attached]\nSecond part")
@@ -189,7 +161,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].userMessage).toBeNull()
@@ -203,7 +175,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].assistantMessage).toBeNull()
@@ -219,7 +191,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession({ turns: hugeTurns }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const raw = res._getData()
       expect(raw.length).toBeLessThanOrEqual(150_000)
@@ -240,7 +212,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].userMessage).toBe(msg)
@@ -261,7 +233,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].toolSummary).toEqual({ Read: 2, Edit: 1 })
@@ -293,7 +265,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].subAgents).toHaveLength(1)
@@ -332,7 +304,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].subAgents).toHaveLength(1)
@@ -371,7 +343,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       const agent = data.turns[0].subAgents[0]
@@ -393,7 +365,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.compacted).toBe(true)
@@ -410,7 +382,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].compactionSummary).toBe("S".repeat(400) + "... [truncated, use L2 for full text]")
@@ -433,7 +405,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.stats).toEqual({
@@ -451,7 +423,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.branchedFrom).toEqual({ sessionId: "parent-abc", turnIndex: 3 })
@@ -467,7 +439,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].hasThinking).toBe(true)
@@ -485,7 +457,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.turns[0].isError).toBe(true)
@@ -501,7 +473,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession())
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/abc")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
       expect(res._getStatus()).toBe(400)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Invalid turn index" })
     })
@@ -512,7 +484,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession())
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/99")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
       expect(res._getStatus()).toBe(404)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Turn not found" })
     })
@@ -526,7 +498,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(JSON.parse(res._getData()).compactionSummary).toBe(summary)
     })
@@ -562,7 +534,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
@@ -610,7 +582,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(JSON.parse(res._getData()).contentBlocks).toEqual([
         {
@@ -644,7 +616,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       const tc = data.contentBlocks[0].toolCalls[0]
@@ -665,7 +637,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       const tc = data.contentBlocks[0].toolCalls[0]
@@ -689,7 +661,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.contentBlocks[0].text).toBe("Real thought")
@@ -703,7 +675,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       expect(data.tokenUsage).toEqual({ input: 8000, output: 2500 })
@@ -739,7 +711,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       const data = JSON.parse(res._getData())
       const agent = data.contentBlocks[0].agents[0]
@@ -760,7 +732,7 @@ describe("registerSessionContextRoutes", () => {
       mockedReaddir.mockResolvedValueOnce([] as never)
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/agent/nonexistent")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(404)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Agent not found" })
@@ -808,7 +780,7 @@ describe("registerSessionContextRoutes", () => {
       mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/agent/abc123")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
@@ -837,7 +809,7 @@ describe("registerSessionContextRoutes", () => {
       }))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/agent/abc123/turn/0")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
@@ -854,7 +826,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession())
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/agent/abc123/turn/xyz")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(400)
     })
@@ -866,7 +838,7 @@ describe("registerSessionContextRoutes", () => {
       mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/agent/abc123")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(404)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Agent not found" })
@@ -880,7 +852,7 @@ describe("registerSessionContextRoutes", () => {
       mockedFindJsonlPath.mockRejectedValueOnce(new Error("Disk failure"))
 
       const { req, res, next } = createMockReqRes("GET", "/test-session")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(res._getStatus()).toBe(500)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Error: Disk failure" })
@@ -892,7 +864,7 @@ describe("registerSessionContextRoutes", () => {
       mockedParseSession.mockReturnValueOnce(makeSession())
 
       const { req, res, next } = createMockReqRes("GET", "/test-session/unknown/path/shape")
-      await handler(req as never, res as never, next)
+      await handler(req, res, next)
 
       expect(next).toHaveBeenCalled()
     })

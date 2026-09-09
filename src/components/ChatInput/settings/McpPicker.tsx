@@ -5,7 +5,7 @@ import { Popover, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { serverMonogram, splitServerName } from "./mcpNames"
 import { PickerChip, PickerPanel, PickerSectionLabel, pickerSideFor } from "./PickerShell"
-import type { McpServer } from "./types"
+import type { McpServer } from "../../../../shared/contracts/projectTools"
 
 /** Past this many servers a filter box is worth its row. */
 const FILTER_THRESHOLD = 8

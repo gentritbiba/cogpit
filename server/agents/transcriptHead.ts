@@ -37,17 +37,7 @@ export async function readTranscriptHead(filePath: string): Promise<TranscriptHe
     return { lines: content.split("\n").filter(Boolean), isPartialRead: false, size: fileStat.size }
   }
 
-  const fh = await open(filePath, "r")
-  try {
-    const headBuf = Buffer.alloc(HEAD_BYTES)
-    const { bytesRead } = await fh.read(headBuf, 0, HEAD_BYTES, 0)
-    const headText = headBuf.subarray(0, bytesRead).toString("utf-8")
-    const headLastNl = headText.lastIndexOf("\n")
-    const lines = (headLastNl > 0 ? headText.slice(0, headLastNl) : headText).split("\n").filter(Boolean)
-    return { lines, isPartialRead: true, size: fileStat.size }
-  } finally {
-    await fh.close()
-  }
+  return { lines: await readHeadLines(filePath, HEAD_BYTES), isPartialRead: true, size: fileStat.size }
 }
 
 /** Every line of the transcript, re-reading only when `head` stopped short. */

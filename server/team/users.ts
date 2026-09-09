@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { replaceAll, serialQueue } from "../lib/serialQueue"
 import { hashPassword, isPasswordHashed, validatePasswordStrength } from "../password-utils"
 import type { TeamRole, TeamUserPublic } from "../../shared/contracts/team"
 
@@ -42,31 +43,15 @@ const MAX_DISPLAY_NAME_LENGTH = 64
 
 let usersPath: string | null = null
 const users = new Map<string, TeamUser>()
-let usersOperationQueue: Promise<void> = Promise.resolve()
+const queue = serialQueue()
 
 export function __resetUsersForTest(): void {
   usersPath = null
   users.clear()
-  usersOperationQueue = Promise.resolve()
+  queue.reset()
 }
 
 // ── Persistence ──────────────────────────────────────────────────────
-
-function enqueueUsersOperation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = usersOperationQueue.then(operation)
-  // A rejected operation belongs to its caller. Keep a handled tail so later
-  // operations still run rather than inheriting the rejection.
-  usersOperationQueue = result.then(
-    () => undefined,
-    () => undefined,
-  )
-  return result
-}
-
-function replaceUsers(nextUsers: ReadonlyMap<string, TeamUser>): void {
-  users.clear()
-  for (const [id, user] of nextUsers) users.set(id, user)
-}
 
 async function persist(filePath: string | null, snapshot: readonly TeamUser[]): Promise<void> {
   if (!filePath) return
@@ -81,7 +66,7 @@ interface UserMutation<T> {
 function commitUserMutation<T>(
   mutate: (draft: Map<string, TeamUser>) => UserMutation<T>,
 ): Promise<T> {
-  return enqueueUsersOperation(async () => {
+  return queue.run(async () => {
     // Never mutate memory-only: without a store path the change could not
     // persist and would silently vanish on restart.
     if (!usersPath) throw new Error("Users store is not initialized")
@@ -95,7 +80,7 @@ function commitUserMutation<T>(
 
     const snapshot = [...draft.values()].map((user) => ({ ...user }))
     await persist(usersPath, snapshot)
-    replaceUsers(draft)
+    replaceAll(users, draft)
     return mutation.value
   })
 }
@@ -124,7 +109,7 @@ function isValidStoredUser(user: unknown): user is TeamUser {
  * unauthenticated first-admin bootstrap.
  */
 export async function initUsersStore(dir: string): Promise<void> {
-  await enqueueUsersOperation(async () => {
+  await queue.run(async () => {
     await mkdir(dir, { recursive: true })
     // Windows has no POSIX modes: chmod only toggles the read-only bit there.
     if (process.platform !== "win32") {
@@ -152,7 +137,7 @@ export async function initUsersStore(dir: string): Promise<void> {
     }
 
     usersPath = nextPath
-    replaceUsers(loaded)
+    replaceAll(users, loaded)
   })
 }
 
@@ -223,7 +208,7 @@ export function withVerifiedUser<T>(
   verifiedPasswordHash: string,
   operation: (user: TeamUser) => Promise<T>,
 ): Promise<VerifiedUserOperationResult<T>> {
-  return enqueueUsersOperation(async () => {
+  return queue.run(async () => {
     const current = users.get(id)
     if (!current || current.passwordHash !== verifiedPasswordHash) {
       return { status: "invalid" }

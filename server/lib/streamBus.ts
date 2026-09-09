@@ -56,6 +56,7 @@ export type StreamBusEvent =
   | { type: "turn_error"; message: string }
   | { type: "agent_progress"; toolUseId: string; summary: string }
   | { type: "prompt_suggestion"; suggestion: string }
+  | { type: "compacting"; active: boolean }
 
 /**
  * Minimal structural type for the Anthropic raw stream events we consume —
@@ -90,6 +91,8 @@ interface SessionStreamState {
   pending: StreamDelta[]
   flushTimer: ReturnType<typeof setTimeout> | null
   listeners: Set<Listener>
+  /** The runtime is summarising context; nothing streams until it finishes. */
+  compacting: boolean
 }
 
 const sessions = new Map<string, SessionStreamState>()
@@ -97,7 +100,14 @@ const sessions = new Map<string, SessionStreamState>()
 function getOrCreate(sessionId: string): SessionStreamState {
   let state = sessions.get(sessionId)
   if (!state) {
-    state = { lanes: new Map(), messages: new Map(), pending: [], flushTimer: null, listeners: new Set() }
+    state = {
+      lanes: new Map(),
+      messages: new Map(),
+      pending: [],
+      flushTimer: null,
+      listeners: new Set(),
+      compacting: false,
+    }
     sessions.set(sessionId, state)
   }
   return state
@@ -109,7 +119,8 @@ function maybeGc(sessionId: string, state: SessionStreamState): void {
     state.listeners.size === 0 &&
     state.messages.size === 0 &&
     state.lanes.size === 0 &&
-    state.pending.length === 0
+    state.pending.length === 0 &&
+    !state.compacting
   ) {
     if (state.flushTimer) clearTimeout(state.flushTimer)
     sessions.delete(sessionId)
@@ -403,8 +414,28 @@ export function clear(sessionId: string): void {
     clearTimeout(state.flushTimer)
     state.flushTimer = null
   }
+  state.compacting = false
   emit(state, { type: "stream_clear" })
   maybeGc(sessionId, state)
+}
+
+/**
+ * Mark a compaction as running or finished.
+ *
+ * Both runtimes go silent while they summarise context, so this is the only
+ * signal the watch route has to keep the session live. The flag is stored so
+ * a client that connects mid-compaction still learns about it.
+ */
+export function publishCompacting(sessionId: string, active: boolean): void {
+  const state = active ? getOrCreate(sessionId) : sessions.get(sessionId)
+  if (!state || state.compacting === active) return
+  state.compacting = active
+  emit(state, { type: "compacting", active })
+  if (!active) maybeGc(sessionId, state)
+}
+
+export function isCompacting(sessionId: string): boolean {
+  return sessions.get(sessionId)?.compacting ?? false
 }
 
 /**

@@ -1,4 +1,4 @@
-import { authFetch } from "@/lib/auth"
+import { authFetch, jsonFetch } from "@/lib/auth"
 import type { PermissionMode } from "@/lib/permissions"
 import { deviceScopedKey } from "@/lib/device"
 
@@ -59,10 +59,8 @@ export function saveSessionConfig(key: string, patch: SessionConfig): void {
     if (deviceScopedKey(key) !== pendingKey) return
     void (async () => {
       try {
-        await authFetch(`/api/session-config/${encodeURIComponent(key)}`, {
+        await jsonFetch(`/api/session-config/${encodeURIComponent(key)}`, merged, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(merged),
         })
       } catch {
         // Offline or server restart — the next change retries.

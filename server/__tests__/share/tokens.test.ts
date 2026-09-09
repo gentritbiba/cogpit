@@ -14,7 +14,6 @@ import {
   countShareGuests,
   MAX_SHARE_GUESTS_PER_SESSION,
   setShareCookie,
-  clearShareCookie,
   getRequestShareToken,
   __resetShareTokensForTest,
 } from "../../security"
@@ -236,13 +235,5 @@ describe("share tokens", () => {
     // nothing else to notice "Stop sharing" by.
     await removeShare("sess-unshared")
     expect(isShareTokenActive(token)).toBe(false)
-  })
-
-  it("clearShareCookie expires the cookie", () => {
-    const headers: string[] = []
-    const res = { setHeader: (_n: string, v: string) => headers.push(v) } as never
-    clearShareCookie(res)
-    expect(headers[0]).toContain("__Host-cogpit_share=;")
-    expect(headers[0]).toContain("Max-Age=0")
   })
 })

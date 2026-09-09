@@ -6,37 +6,11 @@ import {
 } from "../http"
 import { getConfig, getDirs } from "../config"
 import { execFile } from "node:child_process"
-import { stat, writeFile, unlink, readdir, open } from "node:fs/promises"
+import { stat, writeFile, unlink } from "node:fs/promises"
 import { platform, tmpdir } from "node:os"
 import { join, basename, dirname } from "node:path"
 import { randomBytes } from "node:crypto"
-import { descriptorForDirName } from "../../shared/session/agent-descriptors"
-
-/**
- * Read the `cwd` field from the first line of a JSONL session file.
- * Returns `null` if the file cannot be read or has no `cwd`.
- */
-async function readCwdFromJsonl(filePath: string): Promise<string | null> {
-  let fh: Awaited<ReturnType<typeof open>> | null = null
-  try {
-    fh = await open(filePath, "r")
-    const buf = Buffer.alloc(8192)
-    const { bytesRead } = await fh.read(buf, 0, 8192, 0)
-    const lines = buf.subarray(0, bytesRead).toString("utf-8").split("\n")
-    for (const line of lines) {
-      if (!line) continue
-      try {
-        const parsed = JSON.parse(line)
-        if (parsed.cwd) return parsed.cwd
-      } catch { continue }
-    }
-    return null
-  } catch {
-    return null
-  } finally {
-    await fh?.close()
-  }
-}
+import { resolveProjectCwd } from "../lib/projectCwd"
 
 /**
  * Resolve a real filesystem path from either a direct `path` or a `dirName`.
@@ -45,26 +19,12 @@ async function readCwdFromJsonl(filePath: string): Promise<string | null> {
  * Falls back to the lossy dash-to-slash conversion only as a last resort.
  */
 export async function resolveActionPath(body: { path?: string; dirName?: string }): Promise<string | null> {
-  if (body.path && typeof body.path === "string") return body.path
+  if (typeof body.path === "string" && body.path) return body.path
+  if (typeof body.dirName !== "string" || !body.dirName) return null
 
-  if (body.dirName && typeof body.dirName === "string") {
-    const config = getConfig()
-    if (!config) return null
-    const dirs = getDirs(config.claudeDir)
-    const projectDir = join(dirs.PROJECTS_DIR, body.dirName)
-    try {
-      const files = await readdir(projectDir)
-      for (const f of files) {
-        if (!f.endsWith(".jsonl")) continue
-        const cwd = await readCwdFromJsonl(join(projectDir, f))
-        if (cwd) return cwd
-      }
-    } catch { /* projectDir might not exist */ }
-    // Last resort: lossy conversion
-    return descriptorForDirName(body.dirName).dirName.decode(body.dirName)
-  }
-
-  return null
+  const config = getConfig()
+  if (!config) return null
+  return resolveProjectCwd(join(getDirs(config.claudeDir).PROJECTS_DIR, body.dirName), body.dirName)
 }
 
 /** Terminals that need --working-directory instead of a positional dir arg */

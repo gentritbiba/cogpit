@@ -211,10 +211,6 @@ const TAIL_FORMATS: Readonly<Record<AgentKind, AgentTailFormat>> = Object.freeze
   copilot: copilotTail,
 })
 
-export function tailFormatFor(kind: AgentKind): AgentTailFormat {
-  return TAIL_FORMATS[kind]
-}
-
 export interface TailMatch {
   readonly format: AgentTailFormat
   readonly verdict: TailVerdict

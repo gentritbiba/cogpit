@@ -92,7 +92,7 @@ function resource<T>(data: T | null, error: { error: string; code: string } | nu
 }
 
 function renderPanel() {
-  return render(<ClickUpPanel context={context} active closePanel={vi.fn()} openPanel={vi.fn()} />)
+  return render(<ClickUpPanel context={context} active closePanel={vi.fn()} />)
 }
 
 describe("ClickUpPanel", () => {

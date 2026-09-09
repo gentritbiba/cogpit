@@ -1,5 +1,5 @@
-import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import { claudeCliPath } from "./claudeExecutable"
+import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk"
+import { withControlQuery } from "./sdk"
 import { effortLabel, MODEL_FETCH_TIMEOUT_MS, type ModelOption } from "./modelCatalog"
 import { withTimeout } from "./timeout"
 import { shortenModel } from "../../shared/session/model-names"
@@ -81,25 +81,12 @@ function disambiguateLabels(options: ModelOption[]): void {
  * control request, then aborts it.
  */
 export async function fetchClaudeModels(): Promise<ModelOption[] | null> {
-  const abort = new AbortController()
   try {
-    const q = query({
-      // Never-yielding prompt: we only want the control channel.
-      // eslint-disable-next-line require-yield
-      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-        await new Promise(() => {})
-      })(),
-      options: {
-        abortController: abort,
-        maxTurns: 1,
-        pathToClaudeCodeExecutable: claudeCliPath(),
-      },
-    })
-    const models = await withTimeout(q.supportedModels(), MODEL_FETCH_TIMEOUT_MS, "claude supportedModels")
+    const models = await withControlQuery({ maxTurns: 1 }, (q) => (
+      withTimeout(q.supportedModels(), MODEL_FETCH_TIMEOUT_MS, "claude supportedModels")
+    ))
     return mapClaudeModels(models)
   } catch {
     return null
-  } finally {
-    abort.abort()
   }
 }

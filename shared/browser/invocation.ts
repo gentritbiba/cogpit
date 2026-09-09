@@ -7,7 +7,6 @@ export interface BrowserInvocation {
   text: string
   /** Past the entire executable word, including any closing quote. */
   binaryEnd: number
-  end: number
   browser: string
   sessionFlag: { start: number; end: number } | null
 }
@@ -79,7 +78,6 @@ function invocationOf(words: ShellWord[], end: number, source: string): BrowserI
   return {
     text: BROWSER_BINARY + source.slice(binary.end, end).trimEnd(),
     binaryEnd: binary.end,
-    end,
     browser,
     sessionFlag,
   }

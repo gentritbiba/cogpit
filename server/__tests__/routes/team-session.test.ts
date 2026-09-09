@@ -38,42 +38,16 @@ const mockedStat = vi.mocked(stat)
 
 const NO_TAGS = { teamName: null, agentName: null }
 
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asReaddirMock, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { asReaddirMock, collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerTeamSessionRoutes } from "../../routes/team-session"
-
-function createMockReqRes(method: string, url: string) {
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-  }
-  const next = vi.fn()
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next }
-}
 
 describe("team-session routes", () => {
   let handlers: Map<string, Middleware>
 
   beforeEach(() => {
     vi.resetAllMocks()
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerTeamSessionRoutes(use)
+    handlers = collectRoutes(registerTeamSessionRoutes)
   })
 
   // ── GET /api/session-team ─────────────────────────────────────────────

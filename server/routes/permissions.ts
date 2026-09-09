@@ -37,26 +37,13 @@ const DEFAULT_RUNTIMES: PermissionRuntimes = {
   runtimeForSession: defaultRuntimeForSession,
 }
 
-/**
- * Pending requests for one session.
- *
- * Legacy CLI children keep their own map and belong to no runtime — they carry
- * no dirName to infer an agent from — so they stay a last resort here.
- */
+/** Pending requests for one session. */
 export function collectPendingPermissions(
   sessionId: string,
   runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
 ): PendingApproval[] {
   const runtime = runtimes.runtimeForSession(sessionId)
-  if (runtime) return runtime.listPendingApprovals(sessionId)
-
-  const legacy = persistentSessions.get(sessionId)
-  if (!legacy) return []
-  return [...legacy.pendingPermissions.values()].map((request) => ({
-    ...request,
-    sessionId,
-    availableDecisions: ["allow", "allow_always", "deny"] as ApprovalDecision[],
-  }))
+  return runtime ? runtime.listPendingApprovals(sessionId) : []
 }
 
 /** Every session id currently holding a pending request. */
@@ -67,7 +54,6 @@ export function listPermissionSessionIds(
   for (const runtime of runtimes.allRuntimes()) {
     for (const approval of runtime.listPendingApprovals()) ids.add(approval.sessionId)
   }
-  for (const id of persistentSessions.keys()) ids.add(id)
   return [...ids]
 }
 

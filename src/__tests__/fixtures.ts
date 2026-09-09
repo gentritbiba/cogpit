@@ -488,6 +488,24 @@ export function makeTurn(overrides: Partial<Turn> = {}): Turn {
   }
 }
 
+/** A turn with every optional field empty — the shape component/lib suites assert against. */
+export function emptyTurn(overrides: Partial<Turn> = {}): Turn {
+  return {
+    id: "turn-1",
+    userMessage: null,
+    contentBlocks: [],
+    thinking: [],
+    assistantText: [],
+    toolCalls: [],
+    subAgentActivity: [],
+    timestamp: "2026-01-01T00:00:00.000Z",
+    durationMs: null,
+    tokenUsage: null,
+    model: null,
+    ...overrides,
+  }
+}
+
 export function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
     id: nextId(),

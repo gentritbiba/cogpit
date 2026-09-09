@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { getLangFromPath, highlightCode } from "@/lib/shiki"
 
-type TokenLine = Array<{ content: string; color?: string }>
+export type TokenLine = Array<{ content: string; color?: string }>
 
 export type ToolResultVariant = "boxed" | "unboxed"
 
@@ -15,7 +15,7 @@ const BOXED_CODE_BLOCK_CLASS =
 export const TOOL_RESULT_CLASS =
   "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-l border-border pl-3 font-mono text-xs leading-relaxed text-muted-foreground"
 
-function useHighlightedTokens(
+export function useHighlightedTokens(
   code: string,
   lang: string | null,
   isDark: boolean,
@@ -114,21 +114,15 @@ function parseReadResult(text: string): { lineNums: string[]; codeLines: string[
 export function ReadResultHighlighted({
   result,
   filePath,
-  expanded,
   variant = "boxed",
 }: {
   result: string
   filePath: string
-  expanded: boolean
   variant?: ToolResultVariant
 }): React.ReactElement {
   const isDark = useIsDarkMode()
   const lang = getLangFromPath(filePath)
-  const slicedResult = expanded ? result : previewToolResult(result).text
-  const { lineNums, codeLines } = useMemo(
-    () => parseReadResult(slicedResult),
-    [slicedResult],
-  )
+  const { lineNums, codeLines } = useMemo(() => parseReadResult(result), [result])
   const code = useMemo(() => codeLines.join("\n"), [codeLines])
   const tokens = useHighlightedTokens(code, lang, isDark)
 
@@ -154,12 +148,10 @@ export function tryPrettyJson(text: string): string | null {
 
 export function JsonResultHighlighted({
   result,
-  expanded,
   alreadyPretty,
   variant = "boxed",
 }: {
   result: string
-  expanded: boolean
   alreadyPretty?: boolean
   variant?: ToolResultVariant
 }): React.ReactElement {
@@ -168,9 +160,8 @@ export function JsonResultHighlighted({
     () => alreadyPretty ? result : (tryPrettyJson(result) ?? result),
     [result, alreadyPretty],
   )
-  const sliced = expanded ? pretty : previewToolResult(pretty).text
-  const lines = useMemo(() => splitLogicalLines(sliced), [sliced])
-  const tokens = useHighlightedTokens(sliced, "json", isDark)
+  const lines = useMemo(() => splitLogicalLines(pretty), [pretty])
+  const tokens = useHighlightedTokens(pretty, "json", isDark)
 
   return <HighlightedCodeBlock lines={lines} tokens={tokens} variant={variant} />
 }
@@ -227,9 +218,9 @@ export function ToolResultPanel({
         {!result.trim() ? (
           <p className="text-xs text-muted-foreground">No output</p>
         ) : filePath && !isError ? (
-          <ReadResultHighlighted result={visible} filePath={filePath} expanded variant="unboxed" />
+          <ReadResultHighlighted result={visible} filePath={filePath} variant="unboxed" />
         ) : prettyJson !== null ? (
-          <JsonResultHighlighted result={visible} expanded alreadyPretty variant="unboxed" />
+          <JsonResultHighlighted result={visible} alreadyPretty variant="unboxed" />
         ) : (
           <pre tabIndex={0} className={cn(TOOL_RESULT_CLASS, isError && "border-destructive/30 text-destructive")}>
             {visible}

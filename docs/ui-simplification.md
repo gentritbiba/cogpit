@@ -394,9 +394,10 @@ control while *adding* information.
   palette.** A fixed-position menu shows every option at once; a filtered list must be read
   every time. And `SessionContextMenu.tsx` is not just a menu — it owns two `<Dialog>`s (rename
   at `:91`, delete-confirm at `:125`) that a palette has nowhere to put.
-- **Solving anything with `HoverRevealPanel`.** A 6px trigger with a 200ms dwell trades visual
-  noise for interaction cost. Do not extend it; if it stays, widen it and never put a
-  first-class action behind it.
+- **Solving anything with a hover-reveal panel.** A 6px trigger with a 200ms dwell trades visual
+  noise for interaction cost. Cogpit had one — `HoverRevealPanel.tsx`, since deleted as dead
+  code — and it should not come back; if a panel ever needs an edge trigger again, make it wide
+  and never put a first-class action behind it.
 - **Keeping "quiet" without fixing the live signal.** `src/index.css:481-483` globally disables
   `animate-pulse`, and `LiveSessions/SessionRow.tsx:84` distinguishes "working" from "live but
   idle" *purely* by adding `animate-pulse` to the same green dot — so those two states have been
@@ -422,7 +423,6 @@ control while *adding* information.
 | The command menu *is* the product | Linear | `CommandPalette.tsx` |
 | Configurable/removable toolbar, persisted | Warp | `hooks/usePanelState.ts` |
 | Native menu bar as free discovery | macOS HIG | `electron/main.ts:189-216` |
-| Hiding frequent controls has a measured cost (guardrail) | Euro NCAP 2026 vs Tesla | `HoverRevealPanel.tsx` |
 | Solo mode — one accordion section open | Lightroom Classic | `StatsPanel.tsx` |
 | As little design as possible; negative space is active | Rams · *ma* | `ChatArea.tsx` `max-w-3xl` |
 

@@ -209,6 +209,16 @@ export function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   return requestWithAuth(input, init, true)
 }
 
+/** POST (or PUT via `init.method`) a JSON body through {@link authFetch}. */
+export function jsonFetch(input: string, body: unknown, init: RequestInit = {}): Promise<Response> {
+  return authFetch(input, {
+    method: "POST",
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
+    body: JSON.stringify(body),
+  })
+}
+
 /**
  * Like {@link authFetch} but never applies the device prefix — for hub-scoped
  * call sites (device management, hub network info) that must always target the

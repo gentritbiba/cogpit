@@ -1,13 +1,7 @@
 import { relative, sep } from "node:path"
 import { resolveGitProject, runGit } from "../lib/gitProject"
 import { sendJson, type UseFn } from "../http"
-
-export interface GitStatusFile {
-  path: string
-  originalPath?: string
-  indexStatus: string
-  workTreeStatus: string
-}
+import type { GitStatusFile } from "../../shared/contracts/projectTools"
 
 export interface ParsedGitStatus {
   branch: string | null

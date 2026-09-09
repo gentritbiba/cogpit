@@ -7,7 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { EditDiffView } from "../timeline/EditDiffView"
 import { cn } from "@/lib/utils"
 import { fileExtension } from "@/lib/fileTypeColors"
-import { ChangeBar } from "@/components/shared/ChangeCounts"
+import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
 import { openFile } from "@/lib/fileOpener"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
@@ -141,12 +141,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
               <TooltipContent>View git diff</TooltipContent>
             </Tooltip>
           </div>
-          {file.addCount > 0 && (
-            <span className="font-mono text-xs tabular-nums text-success">+{file.addCount}</span>
-          )}
-          {file.delCount > 0 && (
-            <span className="font-mono text-xs tabular-nums text-destructive">-{file.delCount}</span>
-          )}
+          <LineCounts add={file.addCount} del={file.delCount} />
           <ChangeBar add={file.addCount} del={file.delCount} />
         </div>
       </div>

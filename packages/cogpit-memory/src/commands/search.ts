@@ -14,8 +14,8 @@ import { join, basename, dirname } from "node:path"
 import { SearchIndex } from "../lib/search-index"
 import { DEFAULT_DB_PATH } from "../lib/dirs"
 import { parseMaxAge } from "../lib/response"
-import { findJsonlPath } from "../lib/helpers"
-import { listAllSessionFiles } from "../lib/stores"
+import { findSessionFile, listAllSessionFiles } from "../lib/stores"
+import { formatForText } from "../lib/agents"
 import { parseSession, getUserMessageText } from "../lib/parser"
 import type { ParsedSession } from "../lib/types"
 
@@ -23,10 +23,10 @@ import type { ParsedSession } from "../lib/types"
 
 export interface SearchOptions {
   sessionId?: string
+  excludeSessionId?: string
   maxAge?: string
   limit?: number
   caseSensitive?: boolean
-  depth?: number
 }
 
 export interface SearchHit {
@@ -65,7 +65,6 @@ export async function searchSessions(
   const limit = Math.min(Math.max(1, opts.limit ?? 20), 200)
   const caseSensitive = opts.caseSensitive ?? false
   const maxAgeMs = parseMaxAge(opts.maxAge ?? "5d")
-  const depth = Math.min(Math.max(1, opts.depth ?? 4), 4)
 
   // ── FTS5 path (auto-build if no DB, incremental update otherwise) ────────
   // When searchIndex is explicitly null, skip FTS5 (used by tests for raw-scan).
@@ -96,13 +95,14 @@ export async function searchSessions(
       const hits = index.search(query, {
         limit,
         sessionId: opts.sessionId,
+        excludeSessionId: opts.excludeSessionId,
         maxAgeMs,
         caseSensitive,
       })
 
       if (opts.sessionId && hits.length === 0) {
         if (ownedIndex) index.close()
-        return rawScanSearch(query, opts.sessionId, maxAgeMs, limit, caseSensitive, depth)
+        return rawScanSearch(query, opts.sessionId, maxAgeMs, limit, caseSensitive, opts.excludeSessionId)
       }
 
       // Group by sessionId
@@ -132,6 +132,7 @@ export async function searchSessions(
       if (hits.length >= limit) {
         const counts = index.countMatches(query, {
           sessionId: opts.sessionId,
+          excludeSessionId: opts.excludeSessionId,
           maxAgeMs,
         })
         totalHits = counts.totalHits
@@ -154,7 +155,7 @@ export async function searchSessions(
   }
 
   // ── Fallback: raw-scan (3-phase) ─────────────────────────────────────────
-  return rawScanSearch(query, opts.sessionId ?? null, maxAgeMs, limit, caseSensitive, depth)
+  return rawScanSearch(query, opts.sessionId ?? null, maxAgeMs, limit, caseSensitive, opts.excludeSessionId)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -177,31 +178,11 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
       const buf = Buffer.alloc(CWD_READ_BYTES)
       const { bytesRead } = await fh.read(buf, 0, CWD_READ_BYTES, 0)
       const head = buf.subarray(0, bytesRead).toString("utf-8")
-      const lines = head.split("\n", 10)
-      for (const line of lines) {
-        if (!line) continue
-        try {
-          const obj = JSON.parse(line)
-          if (obj.cwd) {
-            cwdCache.set(filePath, obj.cwd)
-            return obj.cwd
-          }
-          if (obj.type === "session_meta" && obj.payload?.cwd) {
-            cwdCache.set(filePath, obj.payload.cwd)
-            return obj.payload.cwd
-          }
-          if (obj.type === "turn_context" && obj.payload?.cwd) {
-            cwdCache.set(filePath, obj.payload.cwd)
-            return obj.payload.cwd
-          }
-          const copilotCwd = obj.type === "session.start" ? obj.data?.context?.cwd : undefined
-          if (copilotCwd) {
-            cwdCache.set(filePath, copilotCwd)
-            return copilotCwd
-          }
-        } catch {
-          // Ignore malformed JSONL lines and keep scanning the file header.
-        }
+      const lines = head.split("\n", 10).filter(Boolean)
+      const cwd = formatForText(lines.join("\n")).metadataFromLines(lines).cwd
+      if (cwd) {
+        cwdCache.set(filePath, cwd)
+        return cwd
       }
     } finally {
       await fh.close()
@@ -214,6 +195,8 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
 }
 
 const SNIPPET_WINDOW = 150
+/** How many levels of sub-agent transcripts a raw scan follows. */
+const MAX_SUBAGENT_DEPTH = 4
 
 /** Generate a ~150-char snippet centered on the first match. */
 function generateSnippet(text: string, matchIdx: number, queryLen: number): string {
@@ -266,11 +249,11 @@ function searchField(
 
 // ── Phase 1: File Discovery ──────────────────────────────────────────────────
 
-async function discoverSingleSession(sessionId: string): Promise<Array<{ path: string; mtimeMs: number }>> {
-  const jsonlPath = await findJsonlPath(sessionId)
+async function discoverSingleSession(sessionId: string): Promise<Array<{ path: string; mtimeMs: number; sessionId: string }>> {
+  const jsonlPath = await findSessionFile(sessionId)
   if (!jsonlPath) return []
   const s = await stat(jsonlPath)
-  return [{ path: jsonlPath, mtimeMs: s.mtimeMs }]
+  return [{ path: jsonlPath, mtimeMs: s.mtimeMs, sessionId }]
 }
 
 /**
@@ -278,10 +261,10 @@ async function discoverSingleSession(sessionId: string): Promise<Array<{ path: s
  * the raw scan cannot cover a different set of agents from the FTS index — the
  * disagreement that made Codex sessions unfindable by either path.
  */
-function discoverAllSessions(maxAgeMs: number): Array<{ path: string; mtimeMs: number }> {
+function discoverAllSessions(maxAgeMs: number): Array<{ path: string; mtimeMs: number; sessionId: string }> {
   return listAllSessionFiles(Date.now() - maxAgeMs)
     .filter((file) => !file.isSubagent)
-    .map((file) => ({ path: file.path, mtimeMs: file.mtimeMs }))
+    .map((file) => ({ path: file.path, mtimeMs: file.mtimeMs, sessionId: file.sessionId }))
 }
 
 // ── Phase 2: Raw Text Pre-Filter ─────────────────────────────────────────────
@@ -437,7 +420,7 @@ async function rawScanSearch(
   maxAgeMs: number,
   limit: number,
   caseSensitive: boolean,
-  depth: number,
+  excludeSessionId?: string,
 ): Promise<SearchResponse> {
   try {
     // Phase 1: Discover files
@@ -451,6 +434,7 @@ async function rawScanSearch(
     let sessionsSearched = 0
 
     for (const file of files) {
+      if (file.sessionId === excludeSessionId) continue
       // Early exit: skip expensive work once limit is reached
       if (returnedHits >= limit) break
 
@@ -463,7 +447,7 @@ async function rawScanSearch(
       const session = parseSession(rawContent)
 
       const sessionHits = walkSession(session, query, caseSensitive)
-      const subagentHits = await walkSubagentFiles(file.path, query, caseSensitive, 0, depth)
+      const subagentHits = await walkSubagentFiles(file.path, query, caseSensitive, 0, MAX_SUBAGENT_DEPTH)
       const allHits = [...sessionHits, ...subagentHits]
 
       if (allHits.length === 0) continue

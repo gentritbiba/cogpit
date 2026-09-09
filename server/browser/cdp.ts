@@ -2,6 +2,7 @@ import { WebSocket } from "ws"
 import type { FrameHeader } from "../../shared/browser/frames"
 import { MAX_PASTE_LENGTH, type BrowserClientMessage, type BrowserServerMessage, type BrowserTab } from "../../shared/browser/protocol"
 import { resolveNavigationUrl } from "../../shared/browser/url"
+import { isRecord } from "../../shared/objects"
 
 type CdpParams = Record<string, unknown>
 type CdpEventHandler = (params: CdpParams, sessionId?: string) => void
@@ -107,14 +108,14 @@ export class CdpConnection {
       if (!call) return
       this.pending.delete(id)
       if (error) call.reject(new Error(describeError(error)))
-      else call.resolve(isParams(result) ? result : {})
+      else call.resolve(isRecord(result) ? result : {})
       return
     }
 
     if (typeof method !== "string") return
     for (const handler of this.handlers.get(method) ?? []) {
       try {
-        handler(isParams(params) ? params : {}, typeof sessionId === "string" ? sessionId : undefined)
+        handler(isRecord(params) ? params : {}, typeof sessionId === "string" ? sessionId : undefined)
       } catch {
         // one handler failing must not stop dispatch or take the socket down
       }
@@ -131,12 +132,8 @@ export class CdpConnection {
   }
 }
 
-function isParams(value: unknown): value is CdpParams {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function describeError(error: unknown): string {
-  if (isParams(error) && typeof error.message === "string") {
+  if (isRecord(error) && typeof error.message === "string") {
     return typeof error.data === "string" ? `${error.message}: ${error.data}` : error.message
   }
   return "CDP error"

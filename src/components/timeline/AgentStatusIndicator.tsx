@@ -172,7 +172,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
   const derivedStatus = useMemo(() => {
     if (!session || sseState !== "connected") return null
 
-    // In-progress compaction detected via subagent file watcher
+    // In-progress compaction announced by the runtime over the watch stream
     if (isCompacting) return { status: "compacting" as const }
 
     return deriveSessionStatus(

@@ -1,11 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
 import { fetchSessionConfig, saveSessionConfig } from "@/lib/sessionConfig"
-
-export interface McpServer {
-  name: string
-  status: "connected" | "needs_auth" | "error"
-}
+import type { McpServer } from "../../shared/contracts/projectTools"
 
 type McpConfigs = Record<string, Record<string, unknown>>
 

@@ -126,7 +126,7 @@ function state(overrides: Record<string, unknown> = {}) {
 
 async function renderPullsTab() {
   const user = userEvent.setup()
-  render(<GitHubPanel context={context} active closePanel={vi.fn()} openPanel={vi.fn()} />)
+  render(<GitHubPanel context={context} active closePanel={vi.fn()} />)
   await user.click(screen.getByRole("tab", { name: /Pull requests/ }))
   return user
 }

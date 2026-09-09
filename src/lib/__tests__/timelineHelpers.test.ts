@@ -1,27 +1,20 @@
 import { describe, expect, it } from "vitest"
 import { matchesSearch } from "../timelineHelpers"
 import type { Turn } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
-function makeTurn(overrides: Partial<Turn> = {}): Turn {
-  return {
-    id: "turn-1",
+const makeTurn = (overrides: Partial<Turn> = {}) =>
+  emptyTurn({
     userMessage: "Initial request",
+    model: "opus",
+    timestamp: "2025-01-15T10:00:00Z",
     contentBlocks: [{
       kind: "queued_prompt",
       content: "Also verify the mobile layout",
       timestamp: "2025-01-15T10:00:01Z",
     }],
-    thinking: [],
-    assistantText: [],
-    toolCalls: [],
-    subAgentActivity: [],
-    timestamp: "2025-01-15T10:00:00Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: "opus",
     ...overrides,
-  }
-}
+  })
 
 describe("matchesSearch", () => {
   it("finds text from a prompt queued during an active turn", () => {

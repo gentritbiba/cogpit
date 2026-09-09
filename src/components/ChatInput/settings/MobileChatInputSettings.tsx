@@ -25,7 +25,8 @@ import {
 } from "@/components/ui/sheet"
 import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
-import type { CommonSettingsControlProps, SettingOption, McpServer } from "./types"
+import type { CommonSettingsControlProps, SettingOption } from "./types"
+import type { McpServer } from "../../../../shared/contracts/projectTools"
 import { capabilitiesFor } from "@/lib/agents"
 
 interface MobileControlProps {

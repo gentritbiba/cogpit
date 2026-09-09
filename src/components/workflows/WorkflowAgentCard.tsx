@@ -21,11 +21,10 @@ import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/Spinner"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { authFetch } from "@/lib/auth"
-import { formatDuration } from "@/lib/format"
+import { formatDuration, formatTokenCount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import {
   agentStateStyle,
-  formatTokens,
   isTerminalAgentState,
   type WorkflowAgent,
 } from "@/lib/workflow-types"
@@ -123,7 +122,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 {agent.model && <span>{cleanModelName(agent.model)}</span>}
                 {typeof agent.tokens === "number" && agent.tokens > 0 && (
-                  <Metric icon={Coins}>{formatTokens(agent.tokens)} tokens</Metric>
+                  <Metric icon={Coins}>{formatTokenCount(agent.tokens)} tokens</Metric>
                 )}
                 {typeof agent.toolCalls === "number" && agent.toolCalls > 0 && (
                   <Metric icon={Wrench}>{agent.toolCalls} tools</Metric>

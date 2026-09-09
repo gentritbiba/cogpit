@@ -3,6 +3,8 @@
  * records goal state in its transcript and takes a `/goal` slash command;
  * Codex exposes goals through its app-server thread API, which Cogpit proxies.
  */
+import { asRecord } from "../../../shared/objects"
+
 export type TranscriptGoalStatus = "active" | "achieved" | "failed"
 
 export interface TranscriptGoalState {
@@ -12,12 +14,6 @@ export interface TranscriptGoalState {
   iterations: number
   durationMs: number
   tokens: number
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 /**

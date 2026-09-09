@@ -29,6 +29,7 @@ import {
   type ClickUpConfig,
 } from "../lib/clickupConfig"
 import { resolveGitProject } from "../lib/gitProject"
+import { record, stringValue as text } from "./apiValues"
 
 const API_BASE = "https://api.clickup.com/api/v2"
 const REQUEST_TIMEOUT_MS = 20_000
@@ -59,16 +60,6 @@ export class ClickUpRouteError extends Error {
   ) {
     super(message)
   }
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function text(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback
 }
 
 function idText(value: unknown): string {

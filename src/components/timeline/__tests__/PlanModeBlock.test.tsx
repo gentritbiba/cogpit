@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { PlanModeBlock } from "../PlanModeBlock"
 import type { ToolCall } from "../../../../shared/session/types"
@@ -20,23 +20,6 @@ vi.mock("@/lib/shiki", () => ({
   highlightCode: vi.fn().mockResolvedValue([]),
   getLangFromPath: vi.fn().mockReturnValue(null),
 }))
-
-// Mock window.matchMedia — required by ToolCallCard → useIsMobile
-beforeAll(() => {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  })
-})
 
 function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {

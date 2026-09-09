@@ -1,5 +1,5 @@
 import type { AgentKind } from "../shared/session/agent-descriptors"
-import { allStores, storeFor, storeForDirName, storeForPath } from "./agents"
+import { allStores, storeFor, storeForDirName } from "./agents"
 import { isSinglePathSegment } from "./agents/containment"
 import { getSessionMeta } from "./sessionMetadata"
 
@@ -13,17 +13,6 @@ import { getSessionMeta } from "./sessionMetadata"
 
 export { dirs, refreshDirs } from "./dirs"
 export type { SessionFileInfo } from "./agents/types"
-
-/**
- * Which agent produced the transcript at `filePath`.
- *
- * Defaults to Claude for a null, unknown or unowned path. Several callers rely
- * on that default — a session whose file has been deleted still has to render
- * as something rather than 404.
- */
-export function getAgentKindFromSessionPath(filePath: string | null | undefined): AgentKind {
-  return storeForPath(filePath)?.kind ?? "claude"
-}
 
 /**
  * Turn an untrusted `{dirName, fileName}` pair from a URL into a safe absolute

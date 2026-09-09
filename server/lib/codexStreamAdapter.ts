@@ -25,9 +25,22 @@ export function forwardCodexStreamNotification(notification: CodexNotification):
       return
     }
 
+    case "item/started": {
+      const item = params.item
+      if (isObject(item) && item.type === "contextCompaction") {
+        streamBus.publishCompacting(threadId, true)
+      }
+      return
+    }
+
     case "item/completed": {
       const item = params.item
-      if (!isObject(item) || item.type !== "agentMessage") return
+      if (!isObject(item)) return
+      if (item.type === "contextCompaction") {
+        streamBus.publishCompacting(threadId, false)
+        return
+      }
+      if (item.type !== "agentMessage") return
       const itemId = stringField(item, "id")
       if (itemId) streamBus.completeMessage(threadId, itemId)
       return

@@ -12,7 +12,7 @@
  *   reasonably read as success and drop the user's input.
  */
 
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 import { answerShareQuestion } from "@/lib/shareApi"
 import { isSharedPath } from "@/lib/sharePath"
 
@@ -31,7 +31,16 @@ export interface AnswerResult {
 }
 
 /** Resolves rather than throwing so each caller can choose its own fallback. */
-export async function submitUserQuestionAnswers(
+export async function postAnswer(url: string, body: unknown): Promise<AnswerResult> {
+  try {
+    const res = await jsonFetch(url, body)
+    return { ok: res.ok, gone: res.status === 404 }
+  } catch {
+    return { ok: false, gone: false }
+  }
+}
+
+export function submitUserQuestionAnswers(
   sessionId: string,
   toolUseId: string,
   answers: UserQuestionAnswerMap,
@@ -43,14 +52,5 @@ export async function submitUserQuestionAnswers(
   if (isSharedPath(window.location.pathname)) {
     return answerShareQuestion(toolUseId, answers)
   }
-  try {
-    const res = await authFetch("/api/ask-user-answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, toolUseId, answers }),
-    })
-    return { ok: res.ok, gone: res.status === 404 }
-  } catch {
-    return { ok: false, gone: false }
-  }
+  return postAnswer("/api/ask-user-answer", { sessionId, toolUseId, answers })
 }

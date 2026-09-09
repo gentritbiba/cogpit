@@ -58,46 +58,14 @@ export function usePermissions() {
     setConfig((prev) => ({ ...prev, mode }))
   }, [])
 
-  const toggleAllowedTool = useCallback((tool: string) => {
-    setConfig((prev) => {
-      const has = prev.allowedTools.includes(tool)
-      return {
-        ...prev,
-        allowedTools: has
-          ? prev.allowedTools.filter((t) => t !== tool)
-          : [...prev.allowedTools, tool],
-      }
-    })
-  }, [])
-
-  const toggleDisallowedTool = useCallback((tool: string) => {
-    setConfig((prev) => {
-      const has = prev.disallowedTools.includes(tool)
-      return {
-        ...prev,
-        disallowedTools: has
-          ? prev.disallowedTools.filter((t) => t !== tool)
-          : [...prev.disallowedTools, tool],
-      }
-    })
-  }, [])
-
   const markApplied = useCallback(() => {
     setAppliedConfig(config)
   }, [config])
 
-  const resetToDefault = useCallback(() => {
-    setConfig(DEFAULT_PERMISSIONS)
-  }, [])
-
   return {
     config,
-    appliedConfig,
     hasPendingChanges,
     setMode,
-    toggleAllowedTool,
-    toggleDisallowedTool,
     markApplied,
-    resetToDefault,
   }
 }

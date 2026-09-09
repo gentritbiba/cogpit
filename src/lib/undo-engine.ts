@@ -125,22 +125,6 @@ function buildForwardOps(calls: ArchivedToolCall[], turnIndex: number): FileOper
   return ops
 }
 
-// ── Build the list of file operations for redo (forward order) ───────────
-
-export function buildRedoOperations(
-  turns: Turn[],
-  fromTurnIndex: number, // current position (inclusive, already applied)
-  toTurnIndex: number    // target position (inclusive)
-): FileOperation[] {
-  const ops: FileOperation[] = []
-  for (let i = fromTurnIndex + 1; i <= toTurnIndex; i++) {
-    const turn = turns[i]
-    if (!turn) continue
-    ops.push(...buildForwardOps(extractReversibleCalls(turn), i))
-  }
-  return ops
-}
-
 // ── Build redo operations from archived turns (branch restore) ───────────
 
 export function buildRedoFromArchived(

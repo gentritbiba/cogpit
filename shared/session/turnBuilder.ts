@@ -33,6 +33,7 @@ import {
   isAttachmentMessage,
 } from "./messageTypeGuards"
 import { parseAgentEnvelope } from "./agentEnvelope"
+import { mergeTokenUsage } from "./sessionStats"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
@@ -164,38 +165,6 @@ function mergeAttribution(
     merged = { ...merged, [key]: value }
   }
   return merged
-}
-
-// ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
-
-function mergeTokenUsage(
-  existing: TokenUsage | null,
-  incoming: TokenUsage
-): TokenUsage {
-  if (!existing) {
-    return { ...incoming }
-  }
-  // Thinking tokens are a slice of output_tokens, so they add up the same way.
-  // Dropping them here used to make a turn with several assistant records fall
-  // back to a 4-chars-per-token estimate even though every record reported the
-  // exact count.
-  const thinking =
-    (existing.output_tokens_details?.thinking_tokens ?? 0) +
-    (incoming.output_tokens_details?.thinking_tokens ?? 0)
-  return {
-    input_tokens: existing.input_tokens + incoming.input_tokens,
-    output_tokens: existing.output_tokens + incoming.output_tokens,
-    cache_creation_input_tokens:
-      (existing.cache_creation_input_tokens ?? 0) +
-      (incoming.cache_creation_input_tokens ?? 0),
-    cache_read_input_tokens:
-      (existing.cache_read_input_tokens ?? 0) +
-      (incoming.cache_read_input_tokens ?? 0),
-    speed: incoming.speed ?? existing.speed,
-    ...(existing.output_tokens_details || incoming.output_tokens_details
-      ? { output_tokens_details: { thinking_tokens: thinking } }
-      : {}),
-  }
 }
 
 // ── Compaction Summary ───────────────────────────────────────────────────────

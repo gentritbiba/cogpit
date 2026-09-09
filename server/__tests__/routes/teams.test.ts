@@ -29,58 +29,16 @@ const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedWatch = vi.mocked(watch)
 
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asReaddirMock, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { asReaddirMock, collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerTeamRoutes } from "../../routes/teams"
-
-function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: string) => void)[] = []
-  const endHandlers: (() => void)[] = []
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: string) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
-      return req
-    }),
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    write: vi.fn(),
-    writeHead: vi.fn(),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-    _getHeaders: () => headers,
-  }
-  const next = vi.fn()
-  const sendBody = () => {
-    if (body) {
-      for (const h of dataHandlers) h(body)
-    }
-    for (const h of endHandlers) h()
-  }
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
-}
 
 describe("team routes", () => {
   let handlers: Map<string, Middleware>
 
   beforeEach(() => {
     vi.resetAllMocks()
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerTeamRoutes(use)
+    handlers = collectRoutes(registerTeamRoutes)
   })
 
   // ── GET /api/teams ────────────────────────────────────────────────────
@@ -377,7 +335,7 @@ describe("team routes", () => {
     it("appends message to inbox file", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ message: "hello team" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", body)
+      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
       mockedIsWithinDir.mockReturnValueOnce(true)
 
       // Existing inbox
@@ -400,7 +358,7 @@ describe("team routes", () => {
     it("creates new inbox when file does not exist", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ message: "first message" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", body)
+      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
       mockedIsWithinDir.mockReturnValueOnce(true)
 
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
@@ -419,7 +377,7 @@ describe("team routes", () => {
     it("returns 400 when message is missing", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ notMessage: "oops" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", body)
+      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
       mockedIsWithinDir.mockReturnValueOnce(true)
 
       handler(req, res, next)
@@ -432,7 +390,7 @@ describe("team routes", () => {
 
     it("returns 400 for invalid JSON body", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
-      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", "not-json{")
+      const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body: "not-json{" })
       mockedIsWithinDir.mockReturnValueOnce(true)
 
       handler(req, res, next)

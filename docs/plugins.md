@@ -69,7 +69,6 @@ Each panel receives:
 - `context`: the current session, project path, file-change state, host-file capability, worktree availability, plus `openSession(dirName, fileName)` and `composePrompt(text)` where the host can switch sessions or has a composer
 - `active`: whether the panel is currently visible
 - `closePanel()`: close the right workspace
-- `openPanel(id)`: open another fully qualified panel ID
 
 A panel definition may also set:
 

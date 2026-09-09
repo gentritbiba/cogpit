@@ -191,7 +191,6 @@ describe.each(CASES)("$kind store", ({ kind, store, seed }) => {
     const seeded = await seed("registry")
     expect(agents.storeForPath(seeded.filePath)?.kind).toBe(kind)
     expect(agents.storeForDirName(seeded.dirName).kind).toBe(kind)
-    expect(sessionPaths.getAgentKindFromSessionPath(seeded.filePath)).toBe(kind)
   })
 })
 
@@ -200,14 +199,10 @@ describe("store registry", () => {
     expect(agents.allStores().map((store) => store.kind)).toEqual(["codex", "copilot", "claude"])
   })
 
-  it("owns no path outside every root, and still calls that Claude", () => {
+  it("owns no path outside every root", () => {
     const stray = join(fixtureRoot, "stray.jsonl")
     expect(agents.storeForPath(stray)).toBeNull()
     expect(agents.storeForPath(null)).toBeNull()
-    // Several callers depend on this default: a session whose file has gone
-    // missing still has to render as something rather than 404.
-    expect(sessionPaths.getAgentKindFromSessionPath(null)).toBe("claude")
-    expect(sessionPaths.getAgentKindFromSessionPath(stray)).toBe("claude")
   })
 
   it("can be built over an injected table", () => {

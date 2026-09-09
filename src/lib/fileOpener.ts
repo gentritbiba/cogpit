@@ -6,7 +6,7 @@
 // editor over /api/open-in-editor. Call sites state *what* to open; this module
 // owns *where* it opens.
 
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { parentDirectory, relativePathWithin } from "@/lib/paths"
@@ -122,11 +122,7 @@ function handledInternally(target: FileOpenTarget): boolean {
 
 /** Fire-and-forget host action; the host surfaces its own failures. */
 function postHostAction(endpoint: string, body: Record<string, unknown>): void {
-  authFetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).catch(() => {})
+  jsonFetch(endpoint, body).catch(() => {})
 }
 
 /** Open one file — in the built-in workspace, or the host's editor. */

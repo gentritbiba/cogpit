@@ -4,8 +4,7 @@ import { Clock, RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
 import { AgentMessageCard } from "./AgentMessageCard"
 import { AssistantText } from "./AssistantText"
-import { SubAgentPanel } from "./SubAgentPanel"
-import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
+import { AgentPanel } from "./AgentPanel"
 import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
@@ -621,7 +620,7 @@ function ContentBlocks({
     if (block.kind === "sub_agent") {
       elements.push(
         <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
-          <SubAgentPanel messages={block.messages} expandAll={expandAll} />
+          <AgentPanel messages={block.messages} expandAll={expandAll} label="Sub-agent activity" countLabel="subagents active" />
         </div>
       )
       i++
@@ -631,7 +630,7 @@ function ContentBlocks({
     if (block.kind === "background_agent") {
       elements.push(
         <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
-          <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
+          <AgentPanel messages={block.messages} expandAll={expandAll} label="Background agent activity" countLabel="agents active" />
         </div>
       )
       i++
@@ -669,7 +668,6 @@ function ContentBlocks({
         <RecapBanner
           key={keyFor(block, i)}
           content={block.content}
-          timestamp={block.timestamp}
         />
       )
       i++

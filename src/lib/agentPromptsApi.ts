@@ -7,8 +7,7 @@
  * thing that can answer them.
  */
 
-import { authFetch } from "@/lib/auth"
-import type { AnswerResult } from "@/lib/askUserApi"
+import { postAnswer, type AnswerResult } from "@/lib/askUserApi"
 import type {
   ElicitationAction,
   ElicitationContent,
@@ -21,26 +20,12 @@ export interface ElicitationAnswer {
   content?: ElicitationContent
 }
 
-/** Resolves rather than throwing so each caller can choose its own fallback. */
-async function post(url: string, body: unknown): Promise<AnswerResult> {
-  try {
-    const res = await authFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    return { ok: res.ok, gone: res.status === 404 }
-  } catch {
-    return { ok: false, gone: false }
-  }
-}
-
 export function submitElicitationAnswer(
   sessionId: string,
   requestId: string,
   answer: ElicitationAnswer,
 ): Promise<AnswerResult> {
-  return post("/api/elicitation-answer", { sessionId, requestId, ...answer })
+  return postAnswer("/api/elicitation-answer", { sessionId, requestId, ...answer })
 }
 
 /**
@@ -52,5 +37,5 @@ export function submitUserDialogChoice(
   requestId: string,
   choice: UserDialogChoice,
 ): Promise<AnswerResult> {
-  return post("/api/user-dialog-answer", { sessionId, requestId, choice })
+  return postAnswer("/api/user-dialog-answer", { sessionId, requestId, choice })
 }

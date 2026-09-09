@@ -302,7 +302,6 @@ export default function App() {
 
   // Mobile file changes bottom sheet
   const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
   // Force-show file changes panel when a file is clicked in TurnChangedFiles
   const openWorkspacePanel = panels.openWorkspacePanel
@@ -344,16 +343,6 @@ export default function App() {
     workerAppend,
     () => reconnectHandlerRef.current?.(),
     state.session,
-  )
-  const streamingContentLen = useMemo(
-    () => streamingOverlay.reduce(
-      (total, message) => total + message.blocks.reduce(
-        (messageTotal, block) => messageTotal + block.text.length,
-        0,
-      ),
-      0,
-    ),
-    [streamingOverlay],
   )
 
   // Background agents (shared between notifications + StatsPanel)
@@ -523,7 +512,7 @@ export default function App() {
     pendingMessages: agentChat.pendingMessages,
     consumePending: agentChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
-    partialContentLen: streamingContentLen,
+    partialSignal: streamingOverlay,
   })
 
   const chatScrollRef = scroll.chatScrollRef
@@ -788,8 +777,6 @@ export default function App() {
     dispatch,
     config,
     theme: themeCtx,
-    networkAuth,
-    me,
     isMobile,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
@@ -799,7 +786,7 @@ export default function App() {
     state.dashboardProject, state.pendingDirName, state.pendingCwd,
     state.currentMemberName, state.loadingMember,
     state.configFilePath, state.sessionChangeKey,
-    dispatch, config, themeCtx, networkAuth, me, isMobile,
+    dispatch, config, themeCtx, isMobile,
   ])
 
   // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
@@ -1217,8 +1204,6 @@ export default function App() {
             branchModal,
             fileChangesOpen: showMobileFileChanges,
             onFileChangesOpenChange: setShowMobileFileChanges,
-            searchOpen: mobileSearchOpen,
-            onSearchOpenChange: setMobileSearchOpen,
           }}
         />
       </StreamingOverlayProvider>

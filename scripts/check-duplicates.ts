@@ -14,8 +14,10 @@ interface DuplicateReport {
 
 // Absolute ratchets complement jscpd's percentage threshold. Growth in the
 // codebase can no longer hide newly copied blocks behind a stable percentage.
-const MAX_CLONES = 80
-const MAX_DUPLICATED_LINES = 728
+// Both numbers sit exactly at the last measured total, so they are a floor with
+// no slack: any new clone fails. Lower them again after a de-duplication pass.
+const MAX_CLONES = 63
+const MAX_DUPLICATED_LINES = 555
 
 const outputDir = await mkdtemp(join(tmpdir(), "cogpit-jscpd-"))
 try {

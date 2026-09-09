@@ -379,29 +379,6 @@ describe("ProjectFilesPanel", () => {
     expect(mocks.authFetch.mock.calls.filter((call) => String(call[0]).startsWith("/api/git-status"))).toHaveLength(2)
   })
 
-  it("persists the latest resized width when the drag ends", async () => {
-    const setPointerCapture = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
-      configurable: true,
-      value: setPointerCapture,
-    })
-    try {
-      const { container } = render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
-      await screen.findByRole("button", { name: /README\.md/ })
-      const resizeHandle = container.querySelector<HTMLElement>(".cursor-col-resize")
-      expect(resizeHandle).not.toBeNull()
-
-      fireEvent.pointerDown(resizeHandle!, { clientX: 760, pointerId: 1 })
-      fireEvent.pointerMove(resizeHandle!, { clientX: 700, pointerId: 1 })
-      expect(localStorage.getItem("cogpit-project-files-width")).toBeNull()
-
-      fireEvent.pointerUp(resizeHandle!, { pointerId: 1 })
-      expect(localStorage.getItem("cogpit-project-files-width")).toBe("820")
-    } finally {
-      Reflect.deleteProperty(HTMLElement.prototype, "setPointerCapture")
-    }
-  })
-
   it("sends selected file lines back to the composer context", async () => {
     const user = userEvent.setup()
     const onAddToPrompt = vi.fn()

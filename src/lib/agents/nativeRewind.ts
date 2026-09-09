@@ -1,4 +1,4 @@
-import { authFetch } from "../auth"
+import { jsonFetch } from "../auth"
 
 /**
  * Undo for an agent whose CLI rewinds its own history — Copilot's
@@ -19,13 +19,9 @@ export async function previewNativeRewind(
   sessionId: string,
   eventId: string,
 ): Promise<NativeRewindPreview | null> {
-  const response = await authFetch(
+  const response = await jsonFetch(
     `/api/copilot-history/${encodeURIComponent(sessionId)}/preview`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId }),
-    },
+    { eventId },
   )
   return response.ok ? await response.json() as NativeRewindPreview : null
 }
@@ -36,13 +32,9 @@ export async function applyNativeRewind(
   eventId: string,
   mode: NativeRewindMode,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const response = await authFetch(
+  const response = await jsonFetch(
     `/api/copilot-history/${encodeURIComponent(sessionId)}/rewind`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId, mode }),
-    },
+    { eventId, mode },
   )
   const result = await response.json().catch(() => null) as {
     outcome?: string

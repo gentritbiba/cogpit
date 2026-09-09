@@ -141,18 +141,7 @@ Enable **Configuration → Open files in Cogpit** to route every "open in editor
 ### Network Access
 Access Cogpit from your phone or tablet on the same LAN. Password-protected with rate-limited auth and full feature parity with the local client.
 
-Remote **browser** access requires HTTPS. Cogpit keeps browser sessions in a
-host-only, `HttpOnly`, `Secure`, `SameSite=Strict` cookie, so a plaintext LAN URL
-cannot issue a browser session. Put Caddy, nginx, or a tunnel with TLS in front
-of the loopback listener and open that HTTPS origin. A displayed `http://` LAN
-listener address remains usable for authenticated Cogpit hub/device traffic,
-but should not be opened as a remote browser login URL.
-
-Network passwords must contain at least 16 characters. New credentials use a
-versioned scrypt hash, and remote browser sessions expire after 30 minutes of
-inactivity or eight hours total. Changing the password or disabling network
-access revokes existing sessions. Credentials created by older releases that
-do not meet the current minimum must be reset from the local app.
+Remote **browser** access requires HTTPS, and a non-loopback bind requires a network password of at least 16 characters. See [Self-hosting](docs/self-hosting.md) for the TLS proxy configs, the forwarding-header requirement, password policy and session expiry.
 
 ### Multi-Device Hub
 Register other machines and control them from one Cogpit window. A device switcher in the header (and at the top of the mobile UI) lets you jump between "This machine" and any registered remote — with `⌘⇧1–9` / `Ctrl+Shift+1–9` to jump and `⌘⇧0` to cycle. You always see one machine at a time; switching restores exactly where you left off on that device. Your browser never leaves the hub, which reverse-proxies traffic to each device so there's nothing to configure per-origin.
@@ -163,14 +152,6 @@ Headless boxes become addable with one command:
 ```bash
 COGPIT_HOST=0.0.0.0 COGPIT_NETWORK_PASSWORD='your-long-passphrase' bun server/standalone.ts
 ```
-The password is read from the environment only (never written to disk); `cogpit-server` refuses to bind to a non-loopback address without one. Set `COGPIT_DEVICE_NAME` to label the device in the switcher, or pass the password via `COGPIT_NETWORK_PASSWORD_FILE` (e.g. systemd `LoadCredential`). On start it prints the exact `host:port` to enter in the hub.
-
-When a TLS reverse proxy connects to Cogpit over loopback, it must add a
-standard forwarding header (`Forwarded` or `X-Forwarded-For`; the usual Caddy
-and nginx proxy presets do this). Proxied traffic is then treated as remote and
-must use the normal network password/session token. Do not strip every
-forwarding header while also rewriting `Host` to `localhost`, because that makes
-the proxy hop indistinguishable from a direct local client.
 
 ### Theming
 Dark, Deep OLED, and Light themes use bundled Geist fonts, neutral shadcn tokens, compact radii, and semantic color for status, warnings, and diffs.
@@ -217,7 +198,7 @@ bun run electron:dev
 
 ```bash
 # Web
-bun run build && bun run preview
+bun run serve
 
 # Desktop — arm64 macOS DMG, unsigned. ~1 min, for local iteration.
 # Release artifacts for every platform are built by .github/workflows/release.yml

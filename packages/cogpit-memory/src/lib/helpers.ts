@@ -2,14 +2,6 @@ import { readdir, open } from "node:fs/promises"
 import { join } from "node:path"
 import { dirs } from "./dirs"
 
-/**
- * Absolute path of a session's transcript, whichever agent wrote it.
- *
- * The walk itself lives in `./stores`, which drives every listing path in the
- * package from the one descriptor table.
- */
-export { findSessionFile as findJsonlPath } from "./stores"
-
 // ── Subagent matching ────────────────────────────────────────────────────────
 
 export async function matchSubagentToMember(

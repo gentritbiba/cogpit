@@ -32,7 +32,6 @@ try {
     assert.equal(stats.indexedSessions, 0)
     assert.equal(stats.indexedSubagents, 0)
     assert.equal(stats.totalRows, 0)
-    assert.equal(stats.watcherRunning, false)
     assert.equal(stats.lastFullBuild, null)
     assert.equal(stats.lastUpdate, null)
   } finally {
@@ -122,6 +121,11 @@ const invalid = spawnSync(process.execPath, [cliPath, "not-a-command"], { encodi
 assert.equal(invalid.status, 1)
 assert.deepEqual(JSON.parse(invalid.stderr.trim()), { error: "Unknown command: not-a-command" })
 assert.match(invalid.stdout, /Commands:/)
+
+const missingSession = spawnSync(process.execPath, [cliPath, "context", "missing-contract-session"], { encoding: "utf8" })
+assert.equal(missingSession.status, 1)
+assert.deepEqual(JSON.parse(missingSession.stdout), { error: "Session not found" })
+assert.equal(missingSession.stderr, "")
 
 const pack = spawnSync("npm", ["pack", "--json", "--dry-run"], {
   cwd: packageRoot,

@@ -19,7 +19,6 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
   return (
     <MobileSessionInfoBar
       {...props}
-      onDuplicateSession={props.onDuplicateSession}
       session={session}
       sessionSource={sessionSource}
       isSubAgentView={subAgentInfo !== null}

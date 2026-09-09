@@ -1,15 +1,6 @@
 import { readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface ScriptEntry {
-  name: string
-  command: string
-  dir: string
-  dirLabel: string
-  isCommon: boolean
-}
+import type { ScriptEntry } from "../../../shared/contracts/projectTools"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

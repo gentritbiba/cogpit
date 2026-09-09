@@ -125,34 +125,6 @@ describe("sessionMetaCache", () => {
     expect(getCachedSessionMeta("/test/file-999.jsonl", 1000)).not.toBeNull()
   })
 
-  it("explicit invalidation removes entry", async () => {
-    const { getCachedSessionMeta, setCachedSessionMeta, invalidateSessionMeta } = await loadModule()
-    const value = makeCachedMeta()
-    setCachedSessionMeta("/test/file.jsonl", value)
-
-    invalidateSessionMeta("/test/file.jsonl")
-
-    const result = getCachedSessionMeta("/test/file.jsonl", 1000)
-    expect(result).toBeNull()
-  })
-
-  it("invalidateAll removes all entries", async () => {
-    const { getCachedSessionMeta, setCachedSessionMeta, invalidateAll } = await loadModule()
-    setCachedSessionMeta("/test/a.jsonl", makeCachedMeta({ mtimeMs: 1 }))
-    setCachedSessionMeta("/test/b.jsonl", makeCachedMeta({ mtimeMs: 2 }))
-
-    invalidateAll()
-
-    expect(getCachedSessionMeta("/test/a.jsonl", 1)).toBeNull()
-    expect(getCachedSessionMeta("/test/b.jsonl", 2)).toBeNull()
-  })
-
-  it("invalidateSessionMeta is a no-op for unknown path", async () => {
-    const { invalidateSessionMeta } = await loadModule()
-    // Should not throw
-    expect(() => invalidateSessionMeta("/nonexistent.jsonl")).not.toThrow()
-  })
-
   it("setCachedSessionMeta overwrites an existing entry", async () => {
     const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
     setCachedSessionMeta("/test/file.jsonl", makeCachedMeta({ mtimeMs: 1000 }))

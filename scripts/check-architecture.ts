@@ -1,13 +1,10 @@
-import { readFile, readdir } from "node:fs/promises"
-import { dirname, extname, join, relative, resolve, sep } from "node:path"
+import { readFile } from "node:fs/promises"
+import { dirname, extname, join, resolve } from "node:path"
 import ts from "typescript"
+import { collectSourceRoots, relativePath, root } from "./lib/sourceFiles"
 
-const root = resolve(import.meta.dir, "..")
 const sourceRoots = ["shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src"] as const
-const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"])
 const emittedExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"])
-
-const legacyCrossLayerEdges = new Set<string>()
 
 interface ImportReference {
   specifier: string
@@ -18,20 +15,6 @@ interface Edge {
   source: string
   target: string
   line: number
-}
-
-async function collectFiles(directory: string): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true })
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "dist" || entry.name === "out") return []
-      return collectFiles(path)
-    }
-    if (!sourceExtensions.has(extname(entry.name)) || entry.name.includes(".test.")) return []
-    return [path]
-  }))
-  return files.flat()
 }
 
 function extractImports(source: string, fileName: string): ImportReference[] {
@@ -68,10 +51,6 @@ function extractImports(source: string, fileName: string): ImportReference[] {
   }
   visit(sourceFile)
   return references
-}
-
-function relativePath(path: string): string {
-  return relative(root, path).split(sep).join("/")
 }
 
 function resolveLocalImport(source: string, specifier: string, files: Set<string>): string | null {
@@ -177,7 +156,7 @@ function findCycles(graph: Map<string, string[]>): string[][] {
   return cycles
 }
 
-const absoluteFiles = (await Promise.all(sourceRoots.map((path) => collectFiles(join(root, path))))).flat()
+const absoluteFiles = await collectSourceRoots(sourceRoots)
 const fileSet = new Set(absoluteFiles)
 const edges: Edge[] = []
 
@@ -190,21 +169,10 @@ for (const source of absoluteFiles) {
   }
 }
 
-const observedLegacyEdges = new Set<string>()
 const violations: string[] = []
 for (const edge of edges) {
-  if (!isForbiddenCrossLayerEdge(edge)) continue
-  const key = `${edge.source} -> ${edge.target}`
-  if (legacyCrossLayerEdges.has(key)) {
-    observedLegacyEdges.add(key)
-  } else {
+  if (isForbiddenCrossLayerEdge(edge)) {
     violations.push(`${edge.source}:${edge.line} must not import ${edge.target}`)
-  }
-}
-
-for (const edge of legacyCrossLayerEdges) {
-  if (!observedLegacyEdges.has(edge)) {
-    violations.push(`stale architecture exception (remove it): ${edge}`)
   }
 }
 
@@ -221,5 +189,4 @@ if (violations.length > 0) {
   process.exitCode = 1
 } else {
   console.log(`Architecture check passed (${absoluteFiles.length} production files, ${edges.length} local edges, no cycles).`)
-  console.log(`Legacy cross-layer debt is ratcheted at ${legacyCrossLayerEdges.size} explicit edges.`)
 }

@@ -255,7 +255,6 @@ function CommandOutput({ row, cwd }: { row: CommandRowView; cwd: string | undefi
         <ReadResultHighlighted
           result={output}
           filePath={row.analysis.readFile.path}
-          expanded
           variant="unboxed"
         />
       </div>

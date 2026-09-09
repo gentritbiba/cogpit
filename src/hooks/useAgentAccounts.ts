@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { authFetch } from "@/lib/auth"
+import { readError } from "@/lib/httpJson"
 import type { AccountSwitchResult, AgentAccountsReport } from "../../shared/contracts/agentAccounts"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 
@@ -12,16 +13,11 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-async function errorFrom(res: Response): Promise<string> {
-  const body = await res.json().catch(() => null) as { error?: unknown } | null
-  return typeof body?.error === "string" ? body.error : `Request failed (${res.status})`
-}
-
 async function fetchReport(kind: AgentKind): Promise<AgentAccountsReport> {
   try {
     const res = await authFetch(`/api/agent-accounts/${kind}`)
     if (res.status === 404) return { status: "missing" }
-    return res.ok ? await res.json() : { status: "error", error: await errorFrom(res) }
+    return res.ok ? await res.json() : { status: "error", error: await readError(res, `Request failed (${res.status})`) }
   } catch (err) {
     return { status: "error", error: messageOf(err) }
   }
@@ -57,7 +53,7 @@ export function useAgentAccounts(kind: AgentKind) {
         body: JSON.stringify({ slot }),
       })
       if (!res.ok) {
-        setOutcome({ kind: "failed", error: await errorFrom(res) })
+        setOutcome({ kind: "failed", error: await readError(res, `Request failed (${res.status})`) })
         return
       }
       setOutcome({ kind: "switched", result: await res.json() })

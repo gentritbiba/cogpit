@@ -8,7 +8,7 @@ import {
 } from "../../shared/session/codex-tool-normalization"
 import { computeContextUsage } from "../../shared/session/contextWindow"
 import {
-  asRecord,
+  asRecordOrEmpty,
   foldFileEdit,
   isFileEditTool,
   notePendingTool,
@@ -33,11 +33,11 @@ type SummaryFold = (acc: SessionAccumulator, entry: Record<string, unknown>) => 
 // ── Claude ──────────────────────────────────────────────────────────────────
 
 function foldClaudeAssistant(acc: SessionAccumulator, entry: Record<string, unknown>): void {
-  const message = asRecord(entry.message)
+  const message = asRecordOrEmpty(entry.message)
   const model = str(message.model)
   if (model) acc.model = model
 
-  const usage = asRecord(message.usage)
+  const usage = asRecordOrEmpty(message.usage)
   const input = num(usage.input_tokens)
   const output = num(usage.output_tokens)
   const cacheRead = num(usage.cache_read_input_tokens)
@@ -59,7 +59,7 @@ function foldClaudeAssistant(acc: SessionAccumulator, entry: Record<string, unkn
 
   const content = Array.isArray(message.content) ? message.content : []
   for (const raw of content) {
-    const block = asRecord(raw)
+    const block = asRecordOrEmpty(raw)
     if (block.type === "text") {
       notePreview(acc, str(block.text))
       continue
@@ -68,7 +68,7 @@ function foldClaudeAssistant(acc: SessionAccumulator, entry: Record<string, unkn
 
     const name = str(block.name)
     if (!name) continue
-    const toolInput = asRecord(block.input)
+    const toolInput = asRecordOrEmpty(block.input)
     noteToolCall(acc, name)
     notePendingTool(acc, str(block.id), name, toolInput)
     if (isFileEditTool(name)) foldFileEdit(acc, name, toolInput)
@@ -76,7 +76,7 @@ function foldClaudeAssistant(acc: SessionAccumulator, entry: Record<string, unkn
 }
 
 function foldClaudeUser(acc: SessionAccumulator, entry: Record<string, unknown>): void {
-  const content = asRecord(entry.message).content
+  const content = asRecordOrEmpty(entry.message).content
   if (typeof content === "string") {
     acc.turnCount += 1
     return
@@ -85,7 +85,7 @@ function foldClaudeUser(acc: SessionAccumulator, entry: Record<string, unknown>)
 
   let sawToolResult = false
   for (const raw of content) {
-    const block = asRecord(raw)
+    const block = asRecordOrEmpty(raw)
     if (block.type !== "tool_result") continue
     sawToolResult = true
     const id = str(block.tool_use_id)
@@ -109,7 +109,7 @@ function copilotText(value: unknown): string {
   return value
     .flatMap((part) => {
       if (typeof part === "string") return part ? [part] : []
-      const record = asRecord(part)
+      const record = asRecordOrEmpty(part)
       const text = str(record.text) || str(record.content)
       return text ? [text] : []
     })
@@ -137,7 +137,7 @@ function normalizeCopilotToolInput(
   name: string,
   value: unknown,
 ): Record<string, unknown> {
-  const input = asRecord(value)
+  const input = asRecordOrEmpty(value)
   if (name === "Edit") {
     return {
       ...input,
@@ -215,9 +215,9 @@ function replaceCopilotShutdownUsage(
 ): void {
   const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
   let found = false
-  const modelMetrics = asRecord(data.modelMetrics)
+  const modelMetrics = asRecordOrEmpty(data.modelMetrics)
   for (const value of Object.values(modelMetrics)) {
-    const usage = asRecord(asRecord(value).usage)
+    const usage = asRecordOrEmpty(asRecordOrEmpty(value).usage)
     const cacheRead = num(usage.cacheReadTokens)
     const cacheCreation = num(usage.cacheWriteTokens)
     const reportedInput = num(usage.inputTokens)
@@ -231,11 +231,11 @@ function replaceCopilotShutdownUsage(
   }
 
   if (!found) {
-    const details = asRecord(data.tokenDetails)
-    totals.input = num(asRecord(details.input).tokenCount)
-    totals.output = num(asRecord(details.output).tokenCount)
-    totals.cacheRead = num(asRecord(details.cache_read).tokenCount)
-    totals.cacheCreation = num(asRecord(details.cache_write).tokenCount)
+    const details = asRecordOrEmpty(data.tokenDetails)
+    totals.input = num(asRecordOrEmpty(details.input).tokenCount)
+    totals.output = num(asRecordOrEmpty(details.output).tokenCount)
+    totals.cacheRead = num(asRecordOrEmpty(details.cache_read).tokenCount)
+    totals.cacheCreation = num(asRecordOrEmpty(details.cache_write).tokenCount)
     found = Object.values(totals).some((value) => value > 0)
   }
 
@@ -270,7 +270,7 @@ function copilotModel(type: string, data: Record<string, unknown>): string {
 
 const foldCopilot: SummaryFold = (acc, entry) => {
   const type = str(entry.type)
-  const data = asRecord(entry.data)
+  const data = asRecordOrEmpty(entry.data)
   const nested = typeof entry.agentId === "string" && entry.agentId.length > 0
 
   if (!nested) {
@@ -287,7 +287,7 @@ const foldCopilot: SummaryFold = (acc, entry) => {
     if (!nested) notePreview(acc, copilotText(data.content))
     if (Array.isArray(data.toolRequests)) {
       for (const value of data.toolRequests) {
-        const request = asRecord(value)
+        const request = asRecordOrEmpty(value)
         foldCopilotToolUse(
           acc,
           str(request.toolCallId),
@@ -364,7 +364,7 @@ function editOpFromUnifiedDiff(unifiedDiff: string): EditOp {
 /** Fold the structured file changes a completed `apply_patch` reports. */
 function foldCodexFileChanges(acc: SessionAccumulator, changes: Record<string, unknown>): void {
   for (const [path, value] of Object.entries(changes)) {
-    const change = asRecord(value)
+    const change = asRecordOrEmpty(value)
     if (change.type === "add") {
       recordEdit(acc, path, { oldString: "", newString: str(change.content), isWrite: true })
     } else if (change.type === "update") {
@@ -391,13 +391,13 @@ function foldCodexEvent(acc: SessionAccumulator, payload: Record<string, unknown
   if (type === "token_count") {
     // total_token_usage is cumulative for the whole session, so it replaces
     // rather than adds — summing it would multiply every earlier turn back in.
-    const info = asRecord(payload.info)
-    const total = asRecord(info.total_token_usage)
+    const info = asRecordOrEmpty(payload.info)
+    const total = asRecordOrEmpty(info.total_token_usage)
     if (Object.keys(total).length > 0) acc.tokens = codexTokens(total)
 
     // The window the model is carrying is the last request's input, because
     // Codex re-sends the whole conversation on every request.
-    const last = asRecord(info.last_token_usage)
+    const last = asRecordOrEmpty(info.last_token_usage)
     const context = computeContextUsage({
       input_tokens: num(last.input_tokens) - num(last.cached_input_tokens),
       cache_read_input_tokens: num(last.cached_input_tokens),
@@ -430,16 +430,16 @@ function foldCodexEvent(acc: SessionAccumulator, payload: Record<string, unknown
   }
 
   if (type === "patch_apply_end") {
-    foldCodexFileChanges(acc, asRecord(payload.changes))
+    foldCodexFileChanges(acc, asRecordOrEmpty(payload.changes))
     return
   }
 
   if (type === "mcp_tool_call_end") {
-    const invocation = asRecord(payload.invocation)
+    const invocation = asRecordOrEmpty(payload.invocation)
     const name = `mcp__${str(invocation.server)}__${str(invocation.tool)}`
-    foldCodexToolCall(acc, str(payload.call_id), name, asRecord(invocation.arguments))
+    foldCodexToolCall(acc, str(payload.call_id), name, asRecordOrEmpty(invocation.arguments))
     acc.pendingToolUses.delete(str(payload.call_id))
-    acc.lastToolErrored = "Err" in asRecord(payload.result)
+    acc.lastToolErrored = "Err" in asRecordOrEmpty(payload.result)
   }
 }
 
@@ -449,7 +449,7 @@ function foldCodexResponseItem(acc: SessionAccumulator, payload: Record<string, 
   if (type === "function_call") {
     let input: Record<string, unknown> = {}
     try {
-      input = asRecord(JSON.parse(str(payload.arguments)))
+      input = asRecordOrEmpty(JSON.parse(str(payload.arguments)))
     } catch {
       input = { raw: str(payload.arguments) }
     }
@@ -479,7 +479,7 @@ function foldCodexResponseItem(acc: SessionAccumulator, payload: Record<string, 
   if (type === "message" && str(payload.role) === "assistant") {
     const content = Array.isArray(payload.content) ? payload.content : []
     notePreview(acc, content
-      .map((block) => str(asRecord(block).text))
+      .map((block) => str(asRecordOrEmpty(block).text))
       .filter(Boolean)
       .join("\n"))
   }
@@ -487,7 +487,7 @@ function foldCodexResponseItem(acc: SessionAccumulator, payload: Record<string, 
 
 const foldCodex: SummaryFold = (acc, entry) => {
   const type = str(entry.type)
-  const payload = asRecord(entry.payload)
+  const payload = asRecordOrEmpty(entry.payload)
 
   // Model is per turn and can change mid-session, so the newest wins.
   if (type === "turn_context") {

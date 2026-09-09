@@ -58,7 +58,12 @@ export function createAccumulator(): SessionAccumulator {
   }
 }
 
-export function asRecord(value: unknown): Record<string, unknown> {
+/**
+ * Never null, so folds can walk a chain of unknown transcript fields without
+ * guarding each hop. Deliberately not `shared/objects`'s `asRecord`, which
+ * returns null and rejects arrays.
+ */
+export function asRecordOrEmpty(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
@@ -110,7 +115,7 @@ export function foldFileEdit(acc: SessionAccumulator, name: string, input: Recor
   // old/new pair on the input itself, so treat it as a batch of one.
   const edits = Array.isArray(input.edits) ? input.edits : [input]
   for (const raw of edits) {
-    const edit = asRecord(raw)
+    const edit = asRecordOrEmpty(raw)
     recordEdit(acc, path, {
       oldString: str(edit.old_string),
       newString: str(edit.new_string),

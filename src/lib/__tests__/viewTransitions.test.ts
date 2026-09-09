@@ -134,16 +134,16 @@ describe("runViewTransition", () => {
       .mockReturnValueOnce(second.transition))
 
     runViewTransition(vi.fn(), { kind: "fade" })
-    runViewTransition(vi.fn(), { kind: "panel-right" })
+    runViewTransition(vi.fn(), { kind: "fade" })
 
     expect(first.transition.skipTransition).toHaveBeenCalledOnce()
     expect(readyCatch).toHaveBeenCalledOnce()
     expect(updateCallbackDoneCatch).toHaveBeenCalledOnce()
-    expect(document.documentElement).toHaveAttribute("data-view-transition-kind", "panel-right")
+    expect(document.documentElement).toHaveAttribute("data-view-transition-kind", "fade")
 
     first.resolveFinished()
     await first.transition.finished
-    expect(document.documentElement).toHaveAttribute("data-view-transition-kind", "panel-right")
+    expect(document.documentElement).toHaveAttribute("data-view-transition-kind", "fade")
 
     second.resolveFinished()
     await second.transition.finished
@@ -155,7 +155,7 @@ describe("runViewTransition", () => {
     const controller = createTransition()
     installStartViewTransition(() => controller.transition)
 
-    runViewTransition(vi.fn(), { kind: "panel-left" })
+    runViewTransition(vi.fn(), { kind: "fade" })
     controller.resolveFinished()
     await controller.transition.finished
 

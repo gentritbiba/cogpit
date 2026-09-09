@@ -6,6 +6,7 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 // Mock authFetch before importing useUndoRedo
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
+  jsonFetch: vi.fn(),
   isRemoteClient: vi.fn(() => false),
 }))
 
@@ -44,10 +45,11 @@ vi.mock("../../../shared/session/parser", () => ({
 }))
 
 import { useUndoRedo } from "@/hooks/useUndoRedo"
-import { authFetch } from "@/lib/auth"
+import { authFetch, jsonFetch } from "@/lib/auth"
 import { buildUndoOperations, type FileOperation } from "@/lib/undo-engine"
 
 const mockAuthFetch = vi.mocked(authFetch)
+const mockJsonFetch = vi.mocked(jsonFetch)
 const mockBuildUndo = vi.mocked(buildUndoOperations)
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -497,7 +499,7 @@ describe("useUndoRedo", () => {
           makeTurn({ id: "copilot@event-3" }),
         ],
       })
-      mockAuthFetch.mockResolvedValue(new Response(JSON.stringify({
+      mockJsonFetch.mockResolvedValue(new Response(JSON.stringify({
         available: true,
         fileCount: 1,
         files: [{ path: "src/App.tsx" }],
@@ -516,7 +518,7 @@ describe("useUndoRedo", () => {
 
     it("ignores a Copilot preview that resolves after switching sessions", async () => {
       let resolvePreview: (response: Response) => void = () => undefined
-      mockAuthFetch.mockImplementation(() => new Promise<Response>((resolve) => {
+      mockJsonFetch.mockImplementation(() => new Promise<Response>((resolve) => {
         resolvePreview = resolve
       }))
       const first = makeSession(2, {
@@ -764,8 +766,7 @@ describe("useUndoRedo", () => {
         turns: [makeTurn({ id: "event-1" }), makeTurn({ id: "event-2" })],
       })
       const onReload = vi.fn().mockResolvedValue(undefined)
-      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString()
+      mockJsonFetch.mockImplementation(async (url: string) => {
         if (url.endsWith("/preview")) {
           return new Response(JSON.stringify({
             available: true,
@@ -784,8 +785,8 @@ describe("useUndoRedo", () => {
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())
       await act(async () => result.current.confirmApply(true))
 
-      const rewindCall = mockAuthFetch.mock.calls.find(([url]) => String(url).endsWith("/rewind"))
-      expect(JSON.parse((rewindCall?.[1] as RequestInit).body as string)).toEqual({
+      const rewindCall = mockJsonFetch.mock.calls.find(([url]) => url.endsWith("/rewind"))
+      expect(rewindCall?.[1]).toEqual({
         eventId: "event-2",
         mode: "conversation-and-files",
       })

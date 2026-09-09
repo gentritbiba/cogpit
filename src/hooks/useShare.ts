@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
+import { readError } from "@/lib/httpJson"
 
 /**
  * A shared session as `GET /api/shares` reports it. `lastAccessAt` is 0 until a
@@ -43,12 +44,6 @@ async function request(url: string, init?: RequestInit): Promise<Response | null
   }
 }
 
-async function errorFrom(res: Response | null): Promise<string> {
-  const body = await res?.json().catch(() => null)
-  const message = (body as { error?: unknown } | null)?.error
-  return typeof message === "string" && message.length > 0 ? message : GENERIC_ERROR
-}
-
 /**
  * The host's view of every shared session: the share button reads its own row
  * out of it, the network settings list shows all of them. One hook rather than
@@ -86,7 +81,7 @@ export function useShares(): ShareApi {
     })
 
     if (!res?.ok) {
-      if (alive.current) setError(await errorFrom(res))
+      if (alive.current) setError(await readError(res, GENERIC_ERROR))
       return null
     }
 
@@ -114,7 +109,7 @@ export function useShares(): ShareApi {
     })
 
     if (!res?.ok) {
-      if (alive.current) setError(await errorFrom(res))
+      if (alive.current) setError(await readError(res, GENERIC_ERROR))
       return null
     }
 
@@ -135,7 +130,7 @@ export function useShares(): ShareApi {
     })
 
     if (!res?.ok) {
-      if (alive.current) setError(await errorFrom(res))
+      if (alive.current) setError(await readError(res, GENERIC_ERROR))
       return
     }
     if (alive.current) setShares((current) => current.filter((s) => s.sessionId !== sessionId))

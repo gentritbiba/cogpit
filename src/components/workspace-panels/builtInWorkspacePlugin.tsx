@@ -46,7 +46,6 @@ function ProjectFilesWorkspacePanel({ context, closePanel }: WorkspacePanelProps
         onClose={closePanel}
         onAddToPrompt={services.addProjectContext}
         openRequest={services.projectFilesRequest}
-        embedded
       />
     </Suspense>
   )
@@ -66,7 +65,6 @@ function SessionInfoWorkspacePanel() {
   const services = useBuiltInPanelServices()
   return (
     <StatsPanel
-      embedded
       onJumpToTurn={services.jumpToTurn}
       onToggleServer={services.toggleServer}
       onServersChanged={services.serversChanged}

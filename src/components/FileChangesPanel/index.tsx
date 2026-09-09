@@ -9,6 +9,7 @@ import { GroupedFileCard, type DiffMode } from "./GroupedFileCard"
 import { useFileChangesData, buildGroupedFiles, buildGroupedFilesByAgent, type AgentGroup } from "./useFileChangesData"
 import { OPEN_SUBAGENT_EVENT } from "./file-change-indicators"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
+import { LineCounts } from "@/components/shared/ChangeCounts"
 
 /** Custom event name for cross-panel file focus. */
 export const FOCUS_FILE_EVENT = "cogpit:focus-file"
@@ -32,8 +33,6 @@ const PREFS_DEFAULTS: FileChangesPrefs = {
 
 /** Scope: last turn, all turns, or a specific turn index. */
 type Scope = "last" | "all" | number
-
-export type { DiffMode } from "./GroupedFileCard"
 
 interface FileChangesPanelProps {
   session: ParsedSession
@@ -81,12 +80,7 @@ function AgentGroupSection({
           {group.files.length}
         </Badge>
         <div className="flex-1" />
-        <span className="font-mono text-xs tabular-nums text-success">
-          +{group.totalAdd}
-        </span>
-        <span className="font-mono text-xs tabular-nums text-destructive">
-          -{group.totalDel}
-        </span>
+        <LineCounts add={group.totalAdd} del={group.totalDel} />
       </div>
       {group.files.map((file) => (
         <GroupedFileCard
@@ -149,24 +143,18 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const {
     fileChanges,
     fileContents,
-    groupedByFile,
-    groupedLastTurn,
     lastTurnIndex,
     agentMap,
   } = useFileChangesData(session)
 
-  // Compute grouped files for specific turn on demand
-  const groupedForTurn = useMemo(() => {
-    if (typeof scope !== "number") return null
-    return buildGroupedFiles(fileChanges, scope, fileContents)
-  }, [fileChanges, scope, fileContents])
-
-  function getActiveGrouped(): typeof groupedByFile {
-    if (typeof scope === "number") return groupedForTurn ?? []
-    if (scope === "all") return groupedByFile
-    return groupedLastTurn
-  }
-  const activeGrouped = getActiveGrouped()
+  const activeGrouped = useMemo(
+    () => buildGroupedFiles(
+      fileChanges,
+      typeof scope === "number" ? scope : scope === "all" ? "all" : lastTurnIndex,
+      fileContents,
+    ),
+    [fileChanges, scope, lastTurnIndex, fileContents],
+  )
 
   // Agent-grouped view
   const agentGroups = useMemo<AgentGroup[]>(() => {
@@ -307,12 +295,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           {totalFileCount} file{totalFileCount !== 1 ? "s" : ""}
         </Badge>
         <div className="flex-1" />
-        <span className="font-mono text-xs tabular-nums text-success">
-          +{groupedAdd}
-        </span>
-        <span className="font-mono text-xs tabular-nums text-destructive">
-          -{groupedDel}
-        </span>
+        <LineCounts add={groupedAdd} del={groupedDel} />
 
         <Tooltip>
           <TooltipTrigger render={<Button

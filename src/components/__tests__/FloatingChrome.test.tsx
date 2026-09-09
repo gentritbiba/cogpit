@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
   dispatch: vi.fn(),
   authFetch: vi.fn(),
+  jsonFetch: vi.fn(),
   toastSuccess: vi.fn(),
   inventorySessions: [] as ActiveSessionInfo[],
 }))
@@ -47,7 +48,7 @@ vi.mock("@/hooks/useCopyWithFeedback", () => ({
   useCopyWithFeedback: () => [false, mocks.copy],
 }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
-vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, jsonFetch: mocks.jsonFetch }))
 vi.mock("@/lib/utils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/utils")>()),
   copyToClipboard: mocks.copyToClipboard,
@@ -169,6 +170,7 @@ describe("FloatingChrome", () => {
     mocks.isLive = false
     mocks.inventorySessions = []
     mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
+    mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
     window.history.replaceState({}, "", "/")
   })
 
@@ -226,10 +228,9 @@ describe("FloatingChrome", () => {
     fireEvent.contextMenu(breadcrumb)
     fireEvent.click(await screen.findByRole("menuitem", { name: "Open project in editor" }))
 
-    expect(mocks.authFetch).toHaveBeenCalledWith("/api/open-in-editor", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "/tmp/project", dirName: "-tmp-project" }),
+    expect(mocks.jsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
+      path: "/tmp/project",
+      dirName: "-tmp-project",
     })
 
     fireEvent.contextMenu(breadcrumb)

@@ -6,6 +6,7 @@ import type {
   SetStateAction,
 } from "react"
 import type { ChatInputHandle } from "@/components/ChatInput"
+import type { PendingSessionInfo } from "@/components/session-browser/types"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { usePanelState } from "@/hooks/usePanelState"
@@ -63,11 +64,7 @@ export interface DesktopNavigation {
   actions: DesktopSessionActions
   handlers: DesktopAppHandlers
   creatingSession: boolean
-  pendingSession: {
-    dirName: string
-    cwd?: string | null
-    firstMessage?: string
-  } | null
+  pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
   onStartNewFolder: (cwd: string) => void
   onSelectProject: (dirName: string | null) => void

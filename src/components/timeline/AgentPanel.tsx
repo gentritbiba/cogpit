@@ -17,8 +17,6 @@ interface AgentPanelProps {
   expandAll: boolean
   label: string
   countLabel: string
-  /** Enable lazy loading of subagent JSONL files for async_launched agents */
-  lazyLoad?: boolean
 }
 
 /**
@@ -35,7 +33,6 @@ export const AgentPanel = memo(function AgentPanel({
   expandAll,
   label,
   countLabel,
-  lazyLoad = false,
 }: AgentPanelProps): React.ReactElement | null {
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
@@ -43,7 +40,7 @@ export const AgentPanel = memo(function AgentPanel({
   const { sessionSource, actions } = useSessionContext()
   const hasSubagentTranscripts = capabilitiesForDirName(sessionSource?.dirName).subagentTranscripts
   const { enrichedMessages: displayMessages, isLoading, unavailable } =
-    useSubagentContent(messages, lazyLoad && isOpen && hasSubagentTranscripts)
+    useSubagentContent(messages, isOpen && hasSubagentTranscripts)
 
   // Parent session id used to construct sub-agent file paths. Mirrors the
   // logic in AgentsPanel (sidebar) so navigation is consistent.

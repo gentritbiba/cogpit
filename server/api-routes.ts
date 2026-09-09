@@ -64,6 +64,7 @@ interface ApiRouteDefinition {
   readonly register: (use: UseFn, context: ApiRouteContext) => void
 }
 
+/** Drops the context on purpose; api-routes.test.ts guards it. */
 function apiRoute(
   id: string,
   register: (use: UseFn) => void,
@@ -91,10 +92,7 @@ function apiRoute(
 export const API_ROUTE_REGISTRY = [
   { id: "hello", register: registerHelloRoutes },
   apiRoute("devices", registerDeviceRoutes),
-  {
-    id: "hub",
-    register: (use: UseFn) => use("/hub", createHubProxyHandler()),
-  },
+  apiRoute("hub", (use) => use("/hub", createHubProxyHandler())),
   apiRoute("performance", registerPerformanceRoutes),
   apiRoute("config", registerConfigRoutes),
   apiRoute("team-admin", registerTeamAdminRoutes),

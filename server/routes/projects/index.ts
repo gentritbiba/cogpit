@@ -1,12 +1,11 @@
-import type { UseFn } from "../../http"
+import { sendJson, type UseFn } from "../../http"
 import {
   getSessionMeta,
   getSessionStatus,
   open,
   readFile,
 } from "../../helpers"
-import { projectDirNameFor } from "../../../shared/session/agent-descriptors"
-import { allStores, storeFor, storeForDirName, storeForPath } from "../../agents"
+import { allStores, storeForDirName, storeForPath } from "../../agents"
 import { findJsonlPath, resolveSessionFilePath } from "../../sessionPaths"
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { projectLabel } from "./projectLabel"
@@ -179,34 +178,6 @@ export async function readSessionHeader(filePath: string): Promise<HeaderResult>
 }
 
 export function registerProjectRoutes(use: UseFn) {
-  // GET /api/codex-subagents - list Codex sub-agent rollouts across projects
-  use("/api/codex-subagents", async (_req, res, next) => {
-    if (_req.method !== "GET") return next()
-
-    try {
-      const subagents = []
-      for (const file of await storeFor("codex").listSessionFiles()) {
-        try {
-          const meta = await getSessionMeta(file.filePath)
-          if (!meta.isSubagent || !meta.parentSessionId || !meta.cwd) continue
-          subagents.push({
-            ...meta,
-            fileName: `${meta.parentSessionId}/subagents/agent-${meta.sessionId}.jsonl`,
-            dirName: projectDirNameFor("codex", meta.cwd),
-            size: file.size,
-            lastModified: new Date(file.mtimeMs).toISOString(),
-          })
-        } catch { /* ignore incomplete rollouts */ }
-      }
-      subagents.sort((a, b) => b.lastModified.localeCompare(a.lastModified))
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify(subagents))
-    } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
-    }
-  })
-
   // GET /api/projects - list all projects
   use("/api/projects", async (_req, res, next) => {
     if (_req.method !== "GET") return next()
@@ -226,11 +197,9 @@ export function registerProjectRoutes(use: UseFn) {
         return b.lastModified.localeCompare(a.lastModified)
       })
 
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify(projects))
+      sendJson(res, 200, projects)
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -250,8 +219,7 @@ export function registerProjectRoutes(use: UseFn) {
 
         const files = await storeForDirName(dirName).listProjectSessionFiles(dirName)
         if (!files) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
+          sendJson(res, 403, { error: "Access denied" })
           return
         }
         const fileStats = files.map((file) => ({
@@ -311,11 +279,9 @@ export function registerProjectRoutes(use: UseFn) {
           }
         }))
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ sessions, total, page, pageSize: limit }))
+        sendJson(res, 200, { sessions, total, page, pageSize: limit })
       } catch (err) {
-        res.statusCode = 500
-        res.end(JSON.stringify({ error: String(err) }))
+        sendJson(res, 500, { error: String(err) })
       }
     } else if (parts.length === 3 && parts[2] === "subagents") {
       // GET /api/sessions/{dirName}/{sessionId}/subagents — list subagent files
@@ -323,12 +289,10 @@ export function registerProjectRoutes(use: UseFn) {
       const sessionId = decodeURIComponent(parts[1])
       const listing = await storeForDirName(dirName).listSubagentFiles(dirName, sessionId)
       if (!listing) {
-        res.statusCode = 403
-        res.end(JSON.stringify({ error: "Access denied" }))
+        sendJson(res, 403, { error: "Access denied" })
         return
       }
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify(listing))
+      sendJson(res, 200, listing)
     } else if (parts.length >= 2) {
       // Serve session file content (supports nested paths like sessionId/subagents/file.jsonl)
       const dirName = decodeURIComponent(parts[0])
@@ -336,15 +300,13 @@ export function registerProjectRoutes(use: UseFn) {
       const fileName = fileParts.join("/")
 
       if (!fileName.endsWith(".jsonl")) {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Only .jsonl files" }))
+        sendJson(res, 400, { error: "Only .jsonl files" })
         return
       }
 
       const filePath = await resolveSessionFilePath(dirName, fileName)
       if (!filePath) {
-        res.statusCode = 403
-        res.end(JSON.stringify({ error: "Access denied" }))
+        sendJson(res, 403, { error: "Access denied" })
         return
       }
 
@@ -370,14 +332,13 @@ export function registerProjectRoutes(use: UseFn) {
           const trimmed = trimTailToByteBudget(tail.lines, tail.byteOffset, byteBudget, minLines)
           const hasMore = trimmed.byteOffset > header.bytesRead
 
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({
+          sendJson(res, 200, {
             headerLines: header.lines,
             tailLines: trimmed.lines,
             byteOffset: trimmed.byteOffset,
             totalSize: tail.totalSize,
             hasMore,
-          }))
+          })
         } else if (beforeParam !== null) {
           // ?before=offset&count=N — return lines before the given byte offset,
           // extending the read window until the page has enough complete lines
@@ -391,13 +352,12 @@ export function registerProjectRoutes(use: UseFn) {
             readRangeBefore(filePath, endOffset, initialWindow, minLines),
           ])
 
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({
+          sendJson(res, 200, {
             headerLines: header.lines,
             lines: range.lines,
             byteOffset: range.byteOffset,
             hasMore: range.byteOffset > header.bytesRead,
-          }))
+          })
         } else {
           // Default: return full file as text/plain (original behavior)
           const content = await readFile(filePath, "utf-8")
@@ -405,8 +365,7 @@ export function registerProjectRoutes(use: UseFn) {
           res.end(content)
         }
       } catch {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "File not found" }))
+        sendJson(res, 404, { error: "File not found" })
       }
     } else {
       next()
@@ -429,15 +388,12 @@ export function registerProjectRoutes(use: UseFn) {
       const filePath = await findJsonlPath(sessionId)
       const address = filePath ? await storeForPath(filePath)?.sessionAddress(filePath) : null
       if (address) {
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify(address))
+        sendJson(res, 200, address)
         return
       }
-      res.statusCode = 404
-      res.end(JSON.stringify({ error: "Session not found" }))
+      sendJson(res, 404, { error: "Session not found" })
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 }

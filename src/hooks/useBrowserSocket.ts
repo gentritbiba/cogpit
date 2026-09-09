@@ -18,13 +18,9 @@ type PageMessage = Extract<BrowserServerMessage, { type: "page" }>
 
 export type BrowserSocketStatus = "idle" | "connecting" | "connected" | "disconnected"
 
-/**
- * A decoded frame, holding either a bitmap or an object url — never both,
- * never neither. Whoever paints it releases it; see `releaseFrame`.
- */
+/** A decoded frame and the bitmap it paints. Whoever paints it releases it; see `releaseFrame`. */
 export interface BrowserFrame {
-  bitmap: ImageBitmap | null
-  blobUrl: string | null
+  bitmap: ImageBitmap
   header: FrameHeader
 }
 
@@ -83,8 +79,7 @@ function sameTabs(a: BrowserTab[], b: BrowserTab[]): boolean {
  */
 export function releaseFrame(frame: BrowserFrame | null): void {
   if (!frame) return
-  frame.bitmap?.close()
-  if (frame.blobUrl) URL.revokeObjectURL(frame.blobUrl)
+  frame.bitmap.close()
 }
 
 /**
@@ -156,12 +151,8 @@ export function useBrowserSocket(
         return
       }
       const sequence = ++run.issued
-      if (typeof createImageBitmap !== "function") {
-        show({ bitmap: null, blobUrl: URL.createObjectURL(blob), header }, sequence)
-        return
-      }
       void createImageBitmap(blob).then(
-        (bitmap) => show({ bitmap, blobUrl: null, header }, sequence),
+        (bitmap) => show({ bitmap, header }, sequence),
         () => undefined,
       )
     }

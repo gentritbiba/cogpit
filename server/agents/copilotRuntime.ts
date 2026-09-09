@@ -1,4 +1,5 @@
 import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { asRecord } from "../../shared/objects"
 import { formatFor, turnBoundaryLines } from "../../shared/session/agents"
 import {
   copilotRuntime as transport,
@@ -128,12 +129,6 @@ function transcriptPath(sessionId: string): { fileName: string; filePath: string
   return { fileName, filePath: join(storeFor("copilot").sessionsRoot() ?? "", fileName) }
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
 function firstString(...values: unknown[]): string {
   return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? ""
 }
@@ -158,8 +153,8 @@ function canOfferSessionApproval(kind: string, request: Record<string, unknown>)
 export function normalizeCopilotPermission(
   pending: CopilotPendingPermission,
 ): PendingApproval {
-  const request = asRecord(pending.request)
-  const rawRequest = asRecord(pending.rawRequest)
+  const request = asRecord(pending.request) ?? {}
+  const rawRequest = asRecord(pending.rawRequest) ?? {}
   const kind = typeof request.kind === "string" ? request.kind : "tool"
   const requestsSandboxBypass = request.requestSandboxBypass === true
     || rawRequest.requestSandboxBypass === true

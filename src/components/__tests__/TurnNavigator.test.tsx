@@ -1,22 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { getTurnKey } from "../stats/turnKey"
-import type { Turn } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
-function makeTurn(userMessage: string): Turn {
-  return {
-    id: "shared-live-turn-id",
-    userMessage,
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls: [],
-    subAgentActivity: [],
-    timestamp: "2026-01-01T00:00:00.000Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-  }
-}
+const makeTurn = (userMessage: string) => emptyTurn({ id: "shared-live-turn-id", userMessage })
 
 describe("TurnNavigator", () => {
   it("gives live turns unique keys even when their persisted ids collide", () => {

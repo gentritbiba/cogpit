@@ -51,6 +51,7 @@ import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import type { ProjectPromptContext } from "@/plugin-api"
 import { parseProjectFilesResponse } from "@/hooks/useProjectFileSuggestions"
+import type { GitStatusFile } from "../../shared/contracts/projectTools"
 import { diffLineCount } from "../../shared/diff-utils"
 
 interface ProjectFilesPanelProps {
@@ -59,21 +60,12 @@ interface ProjectFilesPanelProps {
   onAddToPrompt?: (context: ProjectPromptContext) => void
   /** An "open this file" instruction routed here by {@link openFile}. */
   openRequest?: BuiltInEditorRequest | null
-  /** Render inside the shared workspace panel host instead of owning its width. */
-  embedded?: boolean
 }
 
 interface ProjectFileData {
   content: string
   mtimeMs: number
   size: number
-}
-
-interface GitStatusFile {
-  path: string
-  originalPath?: string
-  indexStatus: string
-  workTreeStatus: string
 }
 
 /** HEAD-vs-working-tree contents for one file; null sides mean "absent there". */
@@ -108,10 +100,6 @@ interface OpenTarget {
 type PendingDiscard =
   | { type: "file"; target: OpenTarget }
   | { type: "close" }
-
-const MIN_WIDTH = 520
-const DEFAULT_WIDTH = 760
-const WIDTH_KEY = "cogpit-project-files-width"
 
 /** Porcelain status letters, keyed by the most significant of the two columns. */
 const GIT_STATUS_STYLES: Record<string, { label: string; className: string }> = {
@@ -154,16 +142,6 @@ function resolveMarkdownImage(src: string | undefined, cwd: string, filePath: st
   return [cwd.replace(/[\\/]+$/, ""), ...resolved].join(separator)
 }
 
-function loadWidth(): number {
-  try {
-    const stored = Number(localStorage.getItem(WIDTH_KEY))
-    if (Number.isFinite(stored) && stored >= MIN_WIDTH) return stored
-  } catch {
-    // Use the default when storage is unavailable.
-  }
-  return DEFAULT_WIDTH
-}
-
 async function responseError(response: Response, fallback: string): Promise<string> {
   try {
     const data: unknown = await response.json()
@@ -197,14 +175,10 @@ export function ProjectFilesPanel({
   onClose,
   onAddToPrompt,
   openRequest,
-  embedded = false,
 }: ProjectFilesPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const pendingFocusRef = useRef<{ text: string; line?: number } | null>(null)
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
-  const [width, setWidth] = useState(loadWidth)
-  const widthRef = useRef(width)
   const [query, setQuery] = useState("")
   const [files, setFiles] = useState<string[]>([])
   const [filesLoading, setFilesLoading] = useState(true)
@@ -560,31 +534,6 @@ export function ProjectFilesPanel({
     setSelectedExcerpt({ text, startLine, endLine })
   }, [content])
 
-  const handlePointerDown = useCallback((event: React.PointerEvent) => {
-    event.preventDefault()
-    dragRef.current = { startX: event.clientX, startWidth: width }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }, [width])
-
-  const handlePointerMove = useCallback((event: React.PointerEvent) => {
-    if (!dragRef.current) return
-    const maxWidth = Math.max(MIN_WIDTH, window.innerWidth * 0.9)
-    const next = dragRef.current.startWidth + (dragRef.current.startX - event.clientX)
-    const nextWidth = Math.min(maxWidth, Math.max(MIN_WIDTH, next))
-    widthRef.current = nextWidth
-    setWidth(nextWidth)
-  }, [])
-
-  const handlePointerUp = useCallback(() => {
-    if (!dragRef.current) return
-    dragRef.current = null
-    try {
-      localStorage.setItem(WIDTH_KEY, String(widthRef.current))
-    } catch {
-      // Ignore persistence failures.
-    }
-  }, [])
-
   const selectedName = useMemo(() => selectedPath?.split("/").at(-1) ?? null, [selectedPath])
   const selectedGitFile = selectedPath ? changedFiles.get(selectedPath) : undefined
   const selectedIsMarkdown = selectedPath !== null && isMarkdownPath(selectedPath)
@@ -629,25 +578,8 @@ export function ProjectFilesPanel({
     <aside
       ref={panelRef}
       aria-label="Project files"
-      className={cn(
-        "relative flex min-h-0 flex-col bg-background",
-        embedded
-          ? "size-full"
-          : "view-transition-right-panel panel-enter-right shrink-0 border-l",
-      )}
-      style={embedded ? undefined : { width }}
+      className="relative flex size-full min-h-0 flex-col bg-background"
     >
-      {!embedded && (
-        <div
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 w-1 cursor-col-resize hover:bg-accent"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-        />
-      )}
-
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
         <FolderTree data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">Project files</h2>

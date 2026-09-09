@@ -1,68 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { installDirsMock, mockDbPath, mockDirs, writeSession } from "../fixtures"
 
-// Mock dirs so tests use temp directories instead of real filesystem.
-// Use a mutable object so updates in beforeEach are visible through the
-// captured import reference.
 let tmpDir: string
-const mockDirs = { PROJECTS_DIR: "", TEAMS_DIR: "", TASKS_DIR: "" }
-const mockDbPath = { value: "" }
 
-mock.module("../../lib/dirs", () => ({
-  dirs: mockDirs,
-  get DEFAULT_DB_PATH() {
-    return mockDbPath.value
-  },
-}))
+installDirsMock()
 
 // Import after mock setup
 import { indexStats, indexRebuild } from "../../commands/index-cmd"
 import type { IndexStats } from "../../lib/search-index"
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Create a minimal JSONL session file with a user + assistant turn. */
-function writeSession(
-  dir: string,
-  filename: string,
-  opts: {
-    sessionId?: string
-    userMessage?: string
-    assistantMessage?: string
-  } = {},
-): string {
-  const filePath = join(dir, filename)
-  const lines = [
-    JSON.stringify({
-      type: "system",
-      sessionId: opts.sessionId ?? filename.replace(".jsonl", ""),
-      cwd: "/test/project",
-    }),
-    JSON.stringify({
-      type: "user",
-      timestamp: new Date().toISOString(),
-      message: {
-        role: "user",
-        content: opts.userMessage ?? "Hello, world",
-      },
-    }),
-    JSON.stringify({
-      type: "assistant",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: opts.assistantMessage ?? "I can help with that." }],
-        model: "claude-sonnet-4-20250514",
-        id: "msg_test",
-        stop_reason: "end_turn",
-        usage: { input_tokens: 100, output_tokens: 50 },
-      },
-    }),
-  ]
-  writeFileSync(filePath, lines.join("\n"))
-  return filePath
-}
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +22,8 @@ describe("index command", () => {
     mockDirs.PROJECTS_DIR = projectsDir
     mockDirs.TEAMS_DIR = join(mockDirs.PROJECTS_DIR, "..", "teams")
     mockDirs.TASKS_DIR = join(mockDirs.PROJECTS_DIR, "..", "tasks")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
     mockDbPath.value = join(mockDirs.PROJECTS_DIR, "..", "cogpit-memory", "search-index.db")
   })
 
@@ -112,7 +62,6 @@ describe("index command", () => {
       expect(stats).toHaveProperty("indexedSessions")
       expect(stats).toHaveProperty("indexedSubagents")
       expect(stats).toHaveProperty("totalRows")
-      expect(stats).toHaveProperty("watcherRunning")
       expect(stats).toHaveProperty("lastFullBuild")
       expect(stats).toHaveProperty("lastUpdate")
       expect(stats.dbPath).toBe(dbPath)

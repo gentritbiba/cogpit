@@ -320,12 +320,12 @@ export function storeFor(kind: AgentKind): AgentSessionStore {
   return STORES[kind]
 }
 
-/** Every store, in registry order. */
 /** The store a path under no known root is read with: the agent that owns every unprefixed project. */
 export function defaultStore(): AgentSessionStore {
   return storeFor(descriptorForDirName(null).kind)
 }
 
+/** Every store, in registry order. */
 export function allStores(): readonly AgentSessionStore[] {
   return AGENT_KINDS.map((kind) => STORES[kind])
 }
@@ -333,12 +333,6 @@ export function allStores(): readonly AgentSessionStore[] {
 /** The store whose root contains `filePath`, or null when none does. */
 export function storeForPath(filePath: string): AgentSessionStore | null {
   return allStores().find((store) => store.ownsPath(filePath)) ?? null
-}
-
-/** The store whose root is exactly `root`, for a caller that names one. */
-export function storeForRoot(root: string): AgentSessionStore | null {
-  const target = resolve(root)
-  return allStores().find((store) => resolve(store.root()) === target) ?? null
 }
 
 /**
@@ -355,7 +349,7 @@ export function listAllSessionFiles(cutoffMs: number): SessionFile[] {
  * A single, non-traversing path component. Anything carrying a separator, a
  * NUL or a `..` is refused before it can be joined onto a root.
  */
-export function isSinglePathSegment(value: string): boolean {
+function isSinglePathSegment(value: string): boolean {
   return value.length > 0
     && !value.includes("/")
     && !value.includes("\\")

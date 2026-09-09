@@ -70,16 +70,14 @@ describe("useChatScroll", () => {
     const { result } = renderHook(() => useChatScroll(defaultOpts))
     expect(result.current.chatScrollRef).toBeDefined()
     expect(result.current.scrollEndRef).toBeDefined()
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
     expect(typeof result.current.handleScroll).toBe("function")
     expect(typeof result.current.scrollToBottomInstant).toBe("function")
     expect(typeof result.current.resetTurnCount).toBe("function")
   })
 
-  it("initializes canScrollUp and canScrollDown as false", () => {
+  it("initializes canScrollDown as false", () => {
     const { result } = renderHook(() => useChatScroll(defaultOpts))
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
   })
 
@@ -117,28 +115,7 @@ describe("useChatScroll", () => {
       result.current.handleScroll()
     })
 
-    // scrollTop > 10 => canScrollUp = true
-    expect(result.current.canScrollUp).toBe(true)
     // scrollHeight(1000) - scrollTop(100) - clientHeight(400) = 500 > 10 => canScrollDown = true
-    expect(result.current.canScrollDown).toBe(true)
-  })
-
-  it("handleScroll sets canScrollUp=false when near top", () => {
-    const { result } = renderHook(() => useChatScroll(defaultOpts))
-
-    const mockEl = {
-      scrollTop: 5, // < 10
-      scrollHeight: 1000,
-      clientHeight: 400,
-    }
-    // @ts-expect-error - assigning mock to ref
-    result.current.chatScrollRef.current = mockEl
-
-    act(() => {
-      result.current.handleScroll()
-    })
-
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(true)
   })
 
@@ -157,7 +134,6 @@ describe("useChatScroll", () => {
       result.current.handleScroll()
     })
 
-    expect(result.current.canScrollUp).toBe(true)
     expect(result.current.canScrollDown).toBe(false)
   })
 
@@ -168,7 +144,6 @@ describe("useChatScroll", () => {
       result.current.handleScroll()
     })
     // No error thrown, states unchanged
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
   })
 
@@ -303,14 +278,12 @@ describe("useChatScroll", () => {
     // @ts-expect-error - assigning mock to ref
     result.current.chatScrollRef.current = mockEl
 
-    // First call sets canScrollUp=false, canScrollDown=false
+    // First call sets canScrollDown=false
     act(() => { result.current.handleScroll() })
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
 
     // Second call with same values - should not trigger extra rerenders
     act(() => { result.current.handleScroll() })
-    expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
   })
 
@@ -323,7 +296,7 @@ describe("useChatScroll", () => {
           ...defaultOpts,
           session,
           isLive: true,
-          partialContentLen: 0,
+          partialSignal: [] as unknown[],
         },
       },
     )
@@ -341,7 +314,7 @@ describe("useChatScroll", () => {
       ...defaultOpts,
       session,
       isLive: true,
-      partialContentLen: 200,
+      partialSignal: [{}],
     })
 
     expect(mockEl.scrollTop).toBe(1200)

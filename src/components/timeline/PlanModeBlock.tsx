@@ -1,11 +1,10 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { ChevronRight, ChevronDown, NotebookPen, CheckCircle, Clock, XCircle } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import type { ToolCall } from "../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { ToolCallCard } from "./ToolCallCard"
-import { markdownComponents } from "./markdown-components"
+import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -89,7 +88,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({
       <CollapsibleContent>
         <div className="px-3 pb-2">
           <div className="prose prose-sm dark:prose-invert max-w-none border-t pt-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
               {plan}
             </ReactMarkdown>
           </div>

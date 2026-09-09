@@ -60,6 +60,18 @@ describe("readJsonBody", () => {
     await expect(readJsonBody(request as never, { allowEmpty: true })).resolves.toEqual({})
   })
 
+  it("treats a literal null body as empty so callers can destructure it", async () => {
+    const request = Readable.from(["null"])
+
+    await expect(readJsonBody(request as never, { allowEmpty: true })).resolves.toEqual({})
+  })
+
+  it("passes a literal null through when empty bodies are not allowed", async () => {
+    const request = Readable.from(["null"])
+
+    await expect(readJsonBody(request as never)).resolves.toBeNull()
+  })
+
   it("rejects invalid JSON with a typed client error", async () => {
     const request = Readable.from(["not-json"])
 

@@ -21,17 +21,7 @@ import { copyToClipboard } from "@/lib/utils"
 const INSTALL_COMMAND = "npm i -g agent-browser && agent-browser install"
 const COPIED_MS = 1_500
 
-type BrowserEmptyStateProps =
-  | { kind: "not-installed"; onOpenSkill: () => void }
-  | { kind: "stopped"; name: string; lastUrl: string | null; onOpen: (url: string) => void }
-
-export function BrowserEmptyState(props: BrowserEmptyStateProps) {
-  return props.kind === "not-installed"
-    ? <NotInstalled onOpenSkill={props.onOpenSkill} />
-    : <Stopped name={props.name} lastUrl={props.lastUrl} onOpen={props.onOpen} />
-}
-
-function NotInstalled({ onOpenSkill }: { onOpenSkill: () => void }) {
+export function BrowserNotInstalled({ onOpenSkill }: { onOpenSkill: () => void }) {
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -84,7 +74,7 @@ function NotInstalled({ onOpenSkill }: { onOpenSkill: () => void }) {
   )
 }
 
-function Stopped({
+export function BrowserStopped({
   name,
   lastUrl,
   onOpen,

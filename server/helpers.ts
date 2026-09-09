@@ -16,16 +16,13 @@ import { spawn } from "node:child_process"
 import { homedir } from "node:os"
 import { randomUUID } from "node:crypto"
 
-export type { AgentKind } from "../shared/session/types"
-export type { NextFn, Middleware, UseFn } from "./http"
-export type { FileChange, WorktreeInfo } from "../shared/contracts/worktrees"
+export type { Middleware, UseFn } from "./http"
 
 export {
   activeProcesses,
   persistentSessions,
   cleanupProcesses,
 } from "./processRegistry"
-export type { PermissionRequest, PersistentSession } from "./processRegistry"
 
 export { isWithinDir } from "./pathSafety"
 
@@ -33,10 +30,7 @@ export { dirs, refreshDirs } from "./dirs"
 
 export {
   isLocalRequest,
-  isTrustedLocalHost,
-  isForwardedRequest,
   isTrustedDirectLocalRequest,
-  websocketUpgradeRejection,
   safeCompare,
   createSessionToken,
   getRequestSessionToken,
@@ -50,8 +44,6 @@ export {
   revokeSessionsForUser,
   getConnectedDevices,
   hashPassword,
-  isPasswordHashed,
-  isMalformedPasswordHash,
   needsPasswordRehash,
   verifyPassword,
   verifyPasswordAsync,
@@ -69,13 +61,11 @@ export { getSessionMeta, getSessionStatus, searchSessionMessages, readTranscript
 
 export { sendJson } from "./http"
 
-export { watchSubagents } from "./subagentWatcher"
-
 // Re-export utilities needed by route handlers that spawn processes
 export { spawn, homedir, randomUUID }
 export { createInterface } from "node:readline"
 export { readdir, readFile, stat, open } from "node:fs/promises"
 export { writeFile, mkdir, unlink, lstat } from "node:fs/promises"
-export { join, resolve, basename, dirname } from "node:path"
+export { join, resolve, dirname } from "node:path"
 export { watch } from "node:fs"
 export { createConnection } from "node:net"

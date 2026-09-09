@@ -1,10 +1,7 @@
 import { extractCodexMetadataFromLines } from "../../shared/session/codex"
+import { isRecord } from "../../shared/objects"
 import { HEAD_BYTES, readHeadLines, readWholeTranscript } from "./transcriptHead"
 import type { SessionIdentity, SessionMeta, TranscriptHead } from "./types"
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
 
 /**
  * Read only the small header needed to place a Codex rollout in the session

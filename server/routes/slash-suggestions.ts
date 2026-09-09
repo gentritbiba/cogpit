@@ -3,14 +3,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 import { homedir } from "node:os"
 import type { UseFn } from "../http"
-
-export interface SlashSuggestion {
-  name: string
-  description: string
-  type: "command" | "skill"
-  source: "project" | "user" | string // plugin name for skills
-  filePath: string
-}
+import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 
 /** Parse YAML frontmatter from a markdown file's content */
 export function parseFrontmatter(content: string): Record<string, string> {

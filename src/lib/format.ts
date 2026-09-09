@@ -2,8 +2,14 @@ import type { RawMessage, Turn } from "../../shared/session/types"
 import { computeContextUsage, type ContextUsage } from "../../shared/session/contextWindow"
 import { descriptorForDirName } from "@/lib/agents"
 
-export { formatCost } from "../../shared/session/token-costs"
 export { shortenModel } from "../../shared/session/model-names"
+
+export function formatCost(usd: number): string {
+  if (!Number.isFinite(usd)) return "—"
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  if (usd < 1) return `$${usd.toFixed(3)}`
+  return `$${usd.toFixed(2)}`
+}
 
 export function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -156,8 +162,7 @@ export function parseSubAgentPath(fileName: string): {
 
 // ── Context Window ────────────────────────────────────────────────────────
 
-export { getContextLimit, AUTO_COMPACT_BUFFER, computeContextUsage } from "../../shared/session/contextWindow"
-export type { ContextUsage } from "../../shared/session/contextWindow"
+export { getContextLimit } from "../../shared/session/contextWindow"
 
 /**
  * Get the current context usage from the last API response in the session.

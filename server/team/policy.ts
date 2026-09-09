@@ -60,14 +60,12 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   ],
   projects: authed(
     "/api/projects",
-    "/api/codex-subagents",
     "/api/sessions",
     "/api/active-sessions",
     "/api/find-session",
   ),
   "session-send": authed("/api/send-message"),
   "session-new": authed(
-    "/api/new-session",
     "/api/create-and-send",
     "/api/branch-session",
   ),

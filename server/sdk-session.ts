@@ -4,7 +4,6 @@ import type {
   SDKMessage,
   SDKUserMessage,
   CanUseTool,
-  EffortLevel,
   ElicitationRequest,
   ElicitationResult,
   OnElicitation,
@@ -19,10 +18,12 @@ import type {
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { claudeCliPath } from "./agents/claudeExecutable"
-import { appendToSystemPrompt } from "./agents/sdk"
+import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
+import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
+import { asRecord } from "../shared/objects"
 import type {
   MissionControlQuestion,
   MissionControlQuestionItem,
@@ -120,7 +121,6 @@ export interface SDKSessionState {
   pendingTaskCalls: Map<string, string>
   /** Watches sub-agent JSONL files and synthesizes progress into parent JSONL */
   subagentWatcher: SubagentWatcher | null
-  worktreeName: string | null
   permissionMode: string
   allowedTools: string[]
   disallowedTools: string[]
@@ -292,7 +292,7 @@ function projectElicitationSchema(schema: Record<string, unknown> | undefined): 
   if (schema.type !== undefined && schema.type !== "object") {
     return { unsupported: `the request ${describeSchemaType(schema.type)}` }
   }
-  const properties = asRecord(schema.properties)
+  const properties = asRecord(schema.properties) ?? {}
   const required = new Set(
     Array.isArray(schema.required)
       ? schema.required.filter((entry): entry is string => typeof entry === "string")
@@ -300,7 +300,7 @@ function projectElicitationSchema(schema: Record<string, unknown> | undefined): 
   )
   const fields: MissionControlElicitationField[] = []
   for (const [name, raw] of Object.entries(properties)) {
-    const field = projectElicitationField(name, asRecord(raw), required.has(name))
+    const field = projectElicitationField(name, asRecord(raw) ?? {}, required.has(name))
     if (typeof field === "string") return { unsupported: `"${name}" ${field}` }
     fields.push(field)
   }
@@ -315,9 +315,7 @@ function makeOnElicitation(state: SDKSessionState): OnElicitation {
     // URL mode carries a link rather than a schema; anything else is a form.
     const projection = request.mode === "url"
       ? { fields: [] as MissionControlElicitationField[] }
-      : projectElicitationSchema(
-        request.requestedSchema ? asRecord(request.requestedSchema) : undefined,
-      )
+      : projectElicitationSchema(asRecord(request.requestedSchema) ?? undefined)
 
     if ("unsupported" in projection) {
       streamBus.publishError(
@@ -369,7 +367,7 @@ function projectUserDialog(
   request: UserDialogRequest,
 ): Omit<MissionControlUserDialog, "sessionId" | "requestId" | "askedAt"> | null {
   if (request.dialogKind !== REFUSAL_FALLBACK_DIALOG) return null
-  const payload = asRecord(request.payload)
+  const payload = asRecord(request.payload) ?? {}
   const originalModel = payload.originalModel
   const fallbackModel = payload.fallbackModel
   if (typeof originalModel !== "string" || typeof fallbackModel !== "string") return null
@@ -534,7 +532,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 // ── Process SDK events ───────────────────────────────────────────────
 
 /** Human-readable text for an errored `result` message. */
-function describeErrorResult(result: Record<string, unknown>): string {
+export function describeErrorResult(result: Record<string, unknown>): string {
   if (result.result != null) return String(result.result)
   const subtype = result.subtype
   return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`
@@ -567,6 +565,13 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     if (typeof suggestion === "string" && suggestion.trim()) {
       streamBus.publishPromptSuggestion(state.sessionId, suggestion)
     }
+  }
+
+  if (msg.type === "system" && msg.subtype === "status") {
+    // The CLI reports `compacting` when it starts summarising and clears the
+    // status (with a compact_result) when it is done.
+    const status = (msg as unknown as { status?: string | null }).status
+    streamBus.publishCompacting(state.sessionId, status === "compacting")
   }
 
   if (msg.type === "system" && msg.subtype === "task_progress") {
@@ -868,7 +873,6 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     jsonlPath: null,
     pendingTaskCalls: new Map(),
     subagentWatcher: null,
-    worktreeName: opts.worktreeName || null,
     permissionMode: opts.permissionMode || "default",
     allowedTools: opts.allowedTools ? [...opts.allowedTools] : [],
     disallowedTools: opts.disallowedTools ? [...opts.disallowedTools] : [],
@@ -1097,39 +1101,13 @@ export function sendSDKMessage(
   autoResolvePendingForMode(state, changes)
 
   if (isSDKQueryLive(state)) {
-    const q = state.activeQuery
     const input = buildUserMessage(message, images)
     if (!state.messageStream.enqueue(input)) return null
     state.running = true
 
-    // Fire any setting updates as independent control requests. The SDK
-    // delivers them over its own queue; we don't await ordering guarantees
-    // here, so in practice a model/effort change may apply to the queued turn
-    // or the turn after —
-    // whichever the SDK schedules first. Either outcome is acceptable: the
-    // setting is persisted on `state` (above) so any subsequent resume also
-    // sees the new value. All updates are best-effort; we swallow failures so
-    // a single failing control request doesn't break the in-flight turn.
-    if (changes.modelChanged) {
-      q.setModel(state.model).catch(() => {})
-    }
-    if (changes.ultracodeChanged) {
-      q.applyFlagSettings({
-        ultracode: state.ultracode,
-        ...(state.ultracode ? { enableWorkflows: true } : {}),
-      }).catch(() => {})
-    }
-    if (changes.fastModeChanged) {
-      q.applyFlagSettings({ fastMode: state.fastMode ?? false }).catch(() => {})
-    }
-    if (changes.effortChanged) {
-      q.applyFlagSettings({
-        effortLevel: (changes.nextEffort || null) as EffortLevel | null,
-      }).catch(() => {})
-    }
-    if (changes.permissionModeChanged) {
-      q.setPermissionMode(state.permissionMode as PermissionMode).catch(() => {})
-    }
+    // Best-effort: the setting is already persisted on `state`, so a failed
+    // control request still applies on the next resume.
+    void pushSessionUpdates(state, changes).catch(() => {})
     return state
   }
 
@@ -1149,7 +1127,7 @@ export function resumeSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
   const previous = sdkSessions.get(opts.sessionId)
   if (previous) teardownState(previous)
 
-  const state = initSDKSessionState({ ...opts, worktreeName: undefined })
+  const state = initSDKSessionState(opts)
   if (previous) {
     for (const tool of previous.sessionAllowedTools) state.sessionAllowedTools.add(tool)
   }
@@ -1197,8 +1175,6 @@ export function resolvePermission(
 
   return { found: true, toolName: pending.toolName }
 }
-
-export type UserQuestionAnswers = Record<string, string> | string[] | string
 
 function normalizeUserQuestionAnswers(
   input: Record<string, unknown>,
@@ -1252,7 +1228,7 @@ export function resolveUserQuestion(
 // ── Resolve a parked MCP elicitation / CLI dialog ────────────────────
 
 /** ElicitResult content is flat: strings, numbers, booleans and string lists. */
-function normalizeElicitationContent(content: unknown): ElicitationContent | null {
+export function normalizeElicitationContent(content: unknown): ElicitationContent | null {
   if (content === undefined) return null
   if (typeof content !== "object" || content === null || Array.isArray(content)) return null
   const normalized: ElicitationContent = {}
@@ -1383,12 +1359,6 @@ export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
 
 // ── Get pending AskUserQuestion calls ────────────────────────────────
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
 /**
  * Project a raw AskUserQuestion input down to what a dashboard can render.
  *
@@ -1400,7 +1370,7 @@ function projectQuestions(input: Record<string, unknown>): MissionControlQuestio
   const raw = Array.isArray(input.questions) ? input.questions : []
   const items: MissionControlQuestionItem[] = []
   for (const entry of raw) {
-    const q = asRecord(entry)
+    const q = asRecord(entry) ?? {}
     const question = typeof q.question === "string" ? q.question : ""
     if (!question) continue
     const rawOptions = Array.isArray(q.options) ? q.options : []
@@ -1409,7 +1379,7 @@ function projectQuestions(input: Record<string, unknown>): MissionControlQuestio
       ...(typeof q.header === "string" && q.header ? { header: q.header } : {}),
       multiSelect: q.multiSelect === true,
       options: rawOptions.flatMap((o) => {
-        const option = asRecord(o)
+        const option = asRecord(o) ?? {}
         const label = typeof option.label === "string" ? option.label : ""
         if (!label) return []
         return [{
@@ -1514,26 +1484,10 @@ export async function rewindClaudeFiles(
   const active = sdkSessions.get(sessionId)?.activeQuery
   if (active) return active.rewindFiles(userMessageId, { dryRun })
 
-  const abort = new AbortController()
-  const control = query({
-    // eslint-disable-next-line require-yield
-    prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-      await new Promise(() => {})
-    })(),
-    options: {
-      abortController: abort,
-      cwd,
-      resume: sessionId,
-      enableFileCheckpointing: true,
-      pathToClaudeCodeExecutable: claudeCliPath(),
-    },
-  })
-  try {
-    return await control.rewindFiles(userMessageId, { dryRun })
-  } finally {
-    abort.abort()
-    control.close()
-  }
+  return withControlQuery(
+    { cwd, resume: sessionId, enableFileCheckpointing: true },
+    (q) => q.rewindFiles(userMessageId, { dryRun }),
+  )
 }
 
 export function cleanupAllSDKSessions(): number {

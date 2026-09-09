@@ -1,8 +1,7 @@
 import { useState, memo } from "react"
 import { ChevronRight, ChevronDown, Minimize2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
-import { markdownComponents } from "./markdown-components"
+import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { formatTokenCount } from "@/lib/format"
@@ -68,7 +67,7 @@ export const CompactionMarker = memo(function CompactionMarker({ summary, meta }
 
       <CollapsibleContent>
         <div className="prose prose-sm dark:prose-invert mx-8 mt-2 max-w-none rounded-md border bg-muted/30 px-3 py-2">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
             {body}
           </ReactMarkdown>
         </div>

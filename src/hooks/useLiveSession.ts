@@ -123,9 +123,8 @@ export function useLiveSession(
       if (staleTimer) clearTimeout(staleTimer)
       staleTimer = setTimeout(() => {
         setIsLive(false)
-        // The server only ever announces the START of a compaction, so a stalled
-        // stream has to clear the flag itself — otherwise an interrupted
-        // compaction pins "Compressing context…" on screen forever.
+        // A dropped stream never delivers the end of the compaction, so clear
+        // the flag here — otherwise "Compressing context…" is pinned forever.
         setIsCompacting(false)
       }, ms)
     }
@@ -275,11 +274,13 @@ export function useLiveSession(
           } else {
             resetStaleTimer()
           }
-        } else if (data.type === "compacting_in_progress") {
-          setIsLive(true)
-          setIsCompacting(true)
-          clearOverlay()
-          resetStaleTimer()
+        } else if (data.type === "compacting") {
+          if (data.active) {
+            setIsLive(true)
+            clearOverlay()
+            resetStaleTimer()
+          }
+          setIsCompacting(data.active === true)
         } else if (data.type === "subagent_activity") {
           // Background agents write only to their own transcripts, so the
           // parent stream goes quiet while they run. Keep the session live.
@@ -313,6 +314,7 @@ export function useLiveSession(
           setTurnError(typeof data.message === "string" ? data.message : "The turn failed")
         } else if (data.type === "stream_clear") {
           clearOverlay()
+          setIsCompacting(false)
         } else if (data.type === "lines" && data.lines.length > 0) {
           setIsLive(true)
           setIsCompacting(false)

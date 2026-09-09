@@ -10,8 +10,7 @@ import {
 import { Spinner } from "@/components/ui/Spinner"
 import { useUsageCost } from "@/hooks/useUsageCost"
 import { cn } from "@/lib/utils"
-import { formatCost } from "../../shared/session/token-costs"
-import { formatTokenCount } from "@/lib/format"
+import { formatCost, formatTokenCount } from "@/lib/format"
 import {
   totalUsageCostTokens,
   type UsageCostProvider,
@@ -265,7 +264,7 @@ function StatTile({ label, value }: { label: string; value: string }) {
 }
 
 function UsageCostBody({ days }: { days: number }) {
-  const { summary, loading, error, refresh } = useUsageCost(days, true)
+  const { summary, loading, error, refresh } = useUsageCost(days)
   const [metric, setMetric] = useState<Metric>("cost")
   const derived = useMemo(() => (summary ? derive(summary) : null), [summary])
 

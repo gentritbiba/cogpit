@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { asIncomingMessage, asServerResponse, collectRoutes, getRouteHandler } from "../http-fixtures"
 
 // Mock helpers module
 vi.mock("../../helpers", async () => {
@@ -123,11 +123,7 @@ describe("undo routes", () => {
     // Every fixture path lives under the Claude projects root unless a test
     // says otherwise.
     mockStoreForPath.mockReturnValue({ kind: "claude" })
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerUndoRoutes(use)
+    handlers = collectRoutes(registerUndoRoutes)
   })
 
   // ── /api/undo-state ──────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import {
   getSDKElicitations,
   getSDKUserDialogs,
   listAgentPromptSessionIds,
+  normalizeElicitationContent,
 } from "../sdk-session"
 import { sendJson, type UseFn, withJsonBody } from "../http"
 import type {
@@ -17,22 +18,6 @@ import type {
 
 const ELICITATION_ACTIONS = new Set<ElicitationAction>(["accept", "decline", "cancel"])
 const DIALOG_CHOICES = new Set<UserDialogChoice>(["retry_fallback", "edit_prompt", "cancelled"])
-
-/** Flat form values only, matching the MCP ElicitResult content schema. */
-function parseContent(value: unknown): ElicitationContent | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null
-  const content: ElicitationContent = {}
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean") {
-      content[key] = entry
-    } else if (Array.isArray(entry) && entry.every((item) => typeof item === "string")) {
-      content[key] = entry as string[]
-    } else {
-      return null
-    }
-  }
-  return content
-}
 
 export function registerAgentPromptRoutes(use: UseFn) {
   /**
@@ -89,7 +74,7 @@ export function registerAgentPromptRoutes(use: UseFn) {
 
       let parsedContent: ElicitationContent | undefined
       if (content !== undefined && content !== null) {
-        const normalized = parseContent(content)
+        const normalized = normalizeElicitationContent(content)
         if (!normalized) {
           sendJson(res, 400, {
             error: "content must be an object of strings, numbers, booleans or string arrays",

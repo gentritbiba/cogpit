@@ -312,10 +312,30 @@ describe("useLiveSession", () => {
     expect(result.current.promptSuggestion).toBeNull()
   })
 
+  it("tracks a compaction from start to finish", () => {
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "file.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "compacting", active: true })
+    })
+    expect(result.current.isCompacting).toBe(true)
+    expect(result.current.isLive).toBe(true)
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "compacting", active: false })
+    })
+    expect(result.current.isCompacting).toBe(false)
+  })
+
   it("clears the compacting flag when the stream goes stale", () => {
-    // The server announces the start of a compaction but never its end, so an
-    // interrupted or failed compaction left "Compressing context…" pinned on
-    // screen indefinitely — the status survives isLive going false.
+    // A dropped stream never delivers the end of the compaction, so the flag
+    // must not outlive isLive — otherwise "Compressing context…" stays pinned.
     vi.useFakeTimers()
     const source: SessionSource = {
       dirName: "dir",
@@ -326,7 +346,7 @@ describe("useLiveSession", () => {
     const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
-      getLastEventSource().simulateMessage({ type: "compacting_in_progress" })
+      getLastEventSource().simulateMessage({ type: "compacting", active: true })
     })
     expect(result.current.isCompacting).toBe(true)
 
@@ -1136,7 +1156,7 @@ describe("useLiveSession", () => {
       expect(result.current.streamingOverlay).toHaveLength(1)
 
       act(() => {
-        getLastEventSource().simulateMessage({ type: "compacting_in_progress" })
+        getLastEventSource().simulateMessage({ type: "compacting", active: true })
         flushRAF()
       })
       expect(result.current.streamingOverlay).toHaveLength(0)

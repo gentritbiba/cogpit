@@ -213,7 +213,7 @@ export function AgentsPanel({
 
       <div className="flex max-h-[280px] flex-col gap-1.5 overflow-y-auto pr-0.5">
         {/* Background agents (sorted by latest modified) */}
-        {sortedBgAgents.map((agent, idx) => {
+        {sortedBgAgents.map((agent) => {
           const preview = firstLine(agent.preview ?? "")
           const meta = inlineMetaMap.get(agent.agentId)
           return (
@@ -223,7 +223,6 @@ export function AgentsPanel({
               subagentType={meta?.subagentType ?? null}
               agentName={meta?.agentName ?? null}
               preview={meta?.preview || (preview !== agent.agentId ? preview : "")}
-              colorIndex={idx}
               isViewing={currentAgentId === agent.agentId}
               isBackground
               status={agent.isActive ? "running" : meta?.status === "failed" ? "failed" : "done"}
@@ -237,7 +236,7 @@ export function AgentsPanel({
         })}
 
         {/* Inline agents (sorted by latest spawned) */}
-        {sortedInlineAgents.map((agent, idx) => {
+        {sortedInlineAgents.map((agent) => {
           const canNavigate = !!onLoadSession && !!parentSessionId && !!sessionSource && !agent.agentId.startsWith("tool:")
           return (
             <AgentCard
@@ -246,7 +245,6 @@ export function AgentsPanel({
               subagentType={agent.subagentType}
               agentName={agent.agentName}
               preview={agent.preview}
-              colorIndex={sortedBgAgents.length + idx}
               isViewing={currentAgentId === agent.agentId}
               isBackground={agent.isBackground}
               status={agent.status}

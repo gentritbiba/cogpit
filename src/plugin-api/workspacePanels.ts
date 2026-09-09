@@ -28,7 +28,6 @@ export interface WorkspacePanelProps {
   context: WorkspacePanelContext
   active: boolean
   closePanel: () => void
-  openPanel: (panelId: string) => void
 }
 
 export interface WorkspacePanelIndicatorProps {

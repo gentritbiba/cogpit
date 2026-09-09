@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { AddressInfo } from "node:net"
 
-import { createStandaloneAppServer } from "./standalone-app-server"
+import { createServerComposition } from "./app-server"
 import {
   applyEnvNetworkOverrides,
   clearEnvNetworkOverrides,
@@ -43,7 +43,7 @@ export interface RunningStandaloneServer {
 }
 
 function listen(
-  server: Awaited<ReturnType<typeof createStandaloneAppServer>>["httpServer"],
+  server: Awaited<ReturnType<typeof createServerComposition>>["httpServer"],
   port: number,
   host: string,
 ): Promise<number> {
@@ -128,7 +128,10 @@ export async function startStandaloneServer({
     )
   }
 
-  const composition = await createStandaloneAppServer(staticDir, dataDir)
+  const composition = await createServerComposition(staticDir, dataDir, {
+    mode: "standalone",
+    viteDevUrl: process.env.ELECTRON_RENDERER_URL,
+  })
   let boundPort: number
   try {
     boundPort = await listen(composition.httpServer, port, host)

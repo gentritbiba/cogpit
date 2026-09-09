@@ -11,7 +11,7 @@ vi.mock("../../team/users", () => ({
 }))
 
 import { getConfig } from "../../config"
-import type { UseFn, Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerHelloRoutes, getInstanceId } from "../../routes/hello"
 import { initEdition, __resetEditionForTest } from "../../team/edition"
 import { isUsersStoreInitialized, userCount } from "../../team/users"
@@ -20,29 +20,8 @@ const mockedGetConfig = vi.mocked(getConfig)
 const mockedIsUsersStoreInitialized = vi.mocked(isUsersStoreInitialized)
 const mockedUserCount = vi.mocked(userCount)
 
-function createMockReqRes(method: string, url = "/") {
-  let statusCode = 200
-  let endData = ""
-  const headers: Record<string, string> = {}
-  const req = { method, url, headers: {} as Record<string, string> }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-    _getHeaders: () => headers,
-  }
-  const next = vi.fn()
-  return { req, res, next }
-}
-
 function register(mode: "electron" | "standalone" | "dev" = "electron") {
-  const handlers = new Map<string, Middleware>()
-  const use: UseFn = (path, handler) => { handlers.set(path, handler) }
-  registerHelloRoutes(use, { mode })
-  return handlers.get("/api/hello")!
+  return getRouteHandler(collectRoutes((use) => registerHelloRoutes(use, { mode })), "/api/hello")
 }
 
 describe("GET /api/hello", () => {
@@ -62,7 +41,7 @@ describe("GET /api/hello", () => {
   it("calls next for non-GET methods", () => {
     const handler = register()
     const { req, res, next } = createMockReqRes("POST")
-    handler(req as never, res as never, next)
+    handler(req, res, next)
     expect(next).toHaveBeenCalled()
     expect(res.end).not.toHaveBeenCalled()
   })
@@ -72,7 +51,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     const body = JSON.parse(res._getData())
     expect(body.app).toBe("cogpit")
@@ -89,7 +68,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).edition).toBe("personal")
   })
@@ -100,7 +79,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).edition).toBe("team")
   })
@@ -113,7 +92,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).needsBootstrap).toBe(true)
   })
@@ -126,7 +105,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
   })
@@ -139,7 +118,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
   })
@@ -151,7 +130,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     const body = JSON.parse(res._getData())
     expect(body.edition).toBe("personal")
@@ -163,7 +142,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     const body = JSON.parse(res._getData())
     expect(body.networkAccess).toBe(false)
@@ -177,7 +156,7 @@ describe("GET /api/hello", () => {
       claudeDir: "/x", networkAccess: true, networkPassword: "hashed",
     })
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     const body = JSON.parse(res._getData())
     expect(body.networkAccess).toBe(true)
@@ -191,7 +170,7 @@ describe("GET /api/hello", () => {
       claudeDir: "/x", networkAccess: true, networkPassword: "super-secret",
     })
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(res._getData()).not.toContain("super-secret")
   })
@@ -202,7 +181,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(JSON.parse(res._getData()).name).toBe("studio-mac")
   })
@@ -212,7 +191,7 @@ describe("GET /api/hello", () => {
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
 
-    handler(req as never, res as never, next)
+    handler(req, res, next)
 
     expect(typeof JSON.parse(res._getData()).name).toBe("string")
     expect(JSON.parse(res._getData()).name.length).toBeGreaterThan(0)

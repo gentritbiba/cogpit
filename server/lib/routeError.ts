@@ -22,8 +22,6 @@ export const ErrorCodes = {
   NOT_CONFIGURED: "NOT_CONFIGURED",
 } as const
 
-export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]
-
 /**
  * Throwable error class that carries an HTTP status + RouteErrorShape.
  */

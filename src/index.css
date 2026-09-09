@@ -379,30 +379,6 @@ html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
   animation-timing-function: var(--motion-ease-enter);
 }
 
-html[data-view-transition-kind="panel-left"]::view-transition-old(app-sidebar) {
-  animation: motion-panel-left-out var(--motion-duration-fast) var(--motion-ease-exit) both;
-}
-
-html[data-view-transition-kind="panel-left"]::view-transition-new(app-sidebar) {
-  animation: motion-panel-left-in var(--motion-duration-base) var(--motion-ease-enter) both;
-}
-
-html[data-view-transition-kind="panel-right"]::view-transition-old(app-right-panel) {
-  animation: motion-panel-right-out var(--motion-duration-fast) var(--motion-ease-exit) both;
-}
-
-html[data-view-transition-kind="panel-right"]::view-transition-new(app-right-panel) {
-  animation: motion-panel-right-in var(--motion-duration-base) var(--motion-ease-enter) both;
-}
-
-html[data-view-transition-kind="panel-bottom"]::view-transition-old(app-file-panel) {
-  animation: motion-panel-bottom-out var(--motion-duration-fast) var(--motion-ease-exit) both;
-}
-
-html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-panel) {
-  animation: motion-panel-bottom-in var(--motion-duration-base) var(--motion-ease-enter) both;
-}
-
 @keyframes motion-view-fade-out {
   to { opacity: 0; }
 }
@@ -415,24 +391,12 @@ html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-pan
   from { opacity: 0; transform: translate3d(calc(var(--motion-distance-lg) * -1), 0, 0); }
 }
 
-@keyframes motion-panel-left-out {
-  to { opacity: 0; transform: translate3d(calc(var(--motion-distance-md) * -1), 0, 0); }
-}
-
 @keyframes motion-panel-right-in {
   from { opacity: 0; transform: translate3d(var(--motion-distance-lg), 0, 0); }
 }
 
-@keyframes motion-panel-right-out {
-  to { opacity: 0; transform: translate3d(var(--motion-distance-md), 0, 0); }
-}
-
 @keyframes motion-panel-bottom-in {
   from { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0); }
-}
-
-@keyframes motion-panel-bottom-out {
-  to { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0); }
 }
 
 /* Finite, opt-in entrances. These classes do not run decorative idle loops. */
@@ -485,41 +449,10 @@ html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-pan
 
 /* Functional status motion. These replace SVG SMIL so reduced-motion rules can
    pause every loop and leave a legible static icon. */
-.status-icon-thinking-core,
-.status-icon-thinking-ring,
-.status-icon-compact-top,
-.status-icon-compact-bottom {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
 .status-icon-spin {
   transform-box: view-box;
   transform-origin: 12px 12px;
-}
-
-.status-icon-thinking-core {
-  animation: status-icon-thinking-core var(--motion-duration-indicator) ease-in-out infinite;
-}
-
-.status-icon-thinking-ring {
-  animation: status-icon-thinking-ring var(--motion-duration-indicator) var(--motion-ease-standard) infinite;
-}
-
-.status-icon-cursor {
-  animation: status-icon-cursor 1200ms ease-in-out infinite;
-}
-
-.status-icon-spin {
   animation: status-icon-spin var(--motion-duration-spinner) linear infinite;
-}
-
-.status-icon-compact-top {
-  animation: status-icon-compact-top var(--motion-duration-indicator) ease-in-out infinite;
-}
-
-.status-icon-compact-bottom {
-  animation: status-icon-compact-bottom var(--motion-duration-indicator) ease-in-out infinite;
 }
 
 .status-icon-complete {
@@ -556,33 +489,8 @@ html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-pan
   from { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0); }
 }
 
-@keyframes status-icon-thinking-core {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.92); }
-}
-
-@keyframes status-icon-thinking-ring {
-  0% { opacity: 0.75; transform: scale(0.45); }
-  75%, 100% { opacity: 0; transform: scale(1); }
-}
-
-@keyframes status-icon-cursor {
-  0%, 45%, 100% { opacity: 1; }
-  50%, 95% { opacity: 0.25; }
-}
-
 @keyframes status-icon-spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes status-icon-compact-top {
-  0%, 100% { transform: translate3d(0, -1px, 0); }
-  50% { transform: translate3d(0, 2px, 0); }
-}
-
-@keyframes status-icon-compact-bottom {
-  0%, 100% { transform: translate3d(0, 1px, 0); }
-  50% { transform: translate3d(0, -2px, 0); }
 }
 
 @keyframes status-icon-complete-draw {
@@ -613,24 +521,10 @@ html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-pan
     transform: none !important;
   }
 
-  .status-icon-thinking-core,
-  .status-icon-thinking-ring,
-  .status-icon-cursor,
   .status-icon-spin,
-  .status-icon-compact-top,
-  .status-icon-compact-bottom,
   .status-icon-complete {
     animation: none !important;
     transform: none !important;
-  }
-
-  .status-icon-thinking-core,
-  .status-icon-cursor {
-    opacity: 1;
-  }
-
-  .status-icon-thinking-ring {
-    opacity: 0.2;
   }
 
   .status-icon-complete {

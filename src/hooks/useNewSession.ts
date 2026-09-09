@@ -237,7 +237,6 @@ export function useNewSession({
   const [creatingSession, setCreatingSession] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [worktreeEnabled, setWorktreeEnabled] = useState(false)
-  const [worktreeName, setWorktreeName] = useState("")
   const abortRef = useRef<AbortController | null>(null)
   /** The dirName of the pending session (set before first message) */
   const pendingDirNameRef = useRef<string | null>(null)
@@ -296,7 +295,7 @@ export function useNewSession({
           fastMode: fastMode ? true : undefined,
           ultracode: capabilities.ultracode && ultracode ? true : undefined,
           name: capabilities.namedSessions ? (sessionName || undefined) : undefined,
-          worktreeName: capabilities.worktrees && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
+          worktreeName: capabilities.worktrees && worktreeEnabled ? slugifyWorktreeName(message) : undefined,
           mcpConfig: capabilities.mcp ? (mcpConfig || undefined) : undefined,
         }
 
@@ -349,7 +348,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
+    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])
@@ -372,10 +371,7 @@ export function useNewSession({
     handleNewSession,
     createAndSend,
     cancelCreation,
-    pendingDirNameRef,
     worktreeEnabled,
     setWorktreeEnabled,
-    worktreeName,
-    setWorktreeName,
   }
 }

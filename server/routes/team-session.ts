@@ -8,7 +8,7 @@ import {
   stat,
 } from "../helpers"
 import { matchSubagentToMember, readSessionTeamTags } from "../lib/agentTeamIdentity"
-import type { UseFn } from "../http"
+import { sendJson, type UseFn } from "../http"
 
 /** List project dir names under PROJECTS_DIR (excluding the memory dir). */
 async function listProjectDirNames(): Promise<string[]> {
@@ -133,8 +133,7 @@ export function registerTeamSessionRoutes(use: UseFn) {
     const subagentFile = url.searchParams.get("subagentFile")
 
     if (!leadSessionId) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: "leadSessionId required" }))
+      sendJson(res, 400, { error: "leadSessionId required" })
       return
     }
 
@@ -146,8 +145,7 @@ export function registerTeamSessionRoutes(use: UseFn) {
           .filter((e) => e.isDirectory())
           .map((e) => e.name)
       } catch {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "No teams directory" }))
+        sendJson(res, 404, { error: "No teams directory" })
         return
       }
 
@@ -178,12 +176,10 @@ export function registerTeamSessionRoutes(use: UseFn) {
         const dirNameHint = url.searchParams.get("dirName")
         const memberCtx = await detectTeamFromSessionFile(leadSessionId, dirNameHint)
         if (memberCtx) {
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify(memberCtx))
+          sendJson(res, 200, memberCtx)
           return
         }
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "No team found for this session" }))
+        sendJson(res, 404, { error: "No team found for this session" })
         return
       }
 
@@ -203,13 +199,9 @@ export function registerTeamSessionRoutes(use: UseFn) {
         )
       }
 
-      res.setHeader("Content-Type", "application/json")
-      res.end(
-        JSON.stringify({ teamName: matchedTeamName, config: matchedConfig, currentMemberName })
-      )
+      sendJson(res, 200, { teamName: matchedTeamName, config: matchedConfig, currentMemberName })
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 
@@ -231,8 +223,7 @@ export function registerTeamSessionRoutes(use: UseFn) {
 
       const leadSessionId = config.leadSessionId
       if (!leadSessionId) {
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "No lead session ID" }))
+        sendJson(res, 404, { error: "No lead session ID" })
         return
       }
 
@@ -249,14 +240,12 @@ export function registerTeamSessionRoutes(use: UseFn) {
             const files = await readdir(projectDir)
             const targetFile = `${leadSessionId}.jsonl`
             if (files.includes(targetFile)) {
-              res.setHeader("Content-Type", "application/json")
-              res.end(JSON.stringify({ dirName: entry.name, fileName: targetFile }))
+              sendJson(res, 200, { dirName: entry.name, fileName: targetFile })
               return
             }
           } catch { continue }
         }
-        res.statusCode = 404
-        res.end(JSON.stringify({ error: "Lead session not found" }))
+        sendJson(res, 404, { error: "Lead session not found" })
         return
       }
 
@@ -269,8 +258,7 @@ export function registerTeamSessionRoutes(use: UseFn) {
         typeof config.createdAt === "number" ? config.createdAt : 0
       )
       if (topLevel) {
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify(topLevel))
+        sendJson(res, 200, topLevel)
         return
       }
 
@@ -318,13 +306,10 @@ export function registerTeamSessionRoutes(use: UseFn) {
                 firstLine.includes(term)
               )
               if (matches) {
-                res.setHeader("Content-Type", "application/json")
-                res.end(
-                  JSON.stringify({
-                    dirName: entry.name,
-                    fileName: `${leadSessionId}/subagents/${sf}`,
-                  })
-                )
+                sendJson(res, 200, {
+                  dirName: entry.name,
+                  fileName: `${leadSessionId}/subagents/${sf}`,
+                })
                 return
               }
             } finally {
@@ -336,11 +321,9 @@ export function registerTeamSessionRoutes(use: UseFn) {
         }
       }
 
-      res.statusCode = 404
-      res.end(JSON.stringify({ error: "Member session not found" }))
+      sendJson(res, 404, { error: "Member session not found" })
     } catch (err) {
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: String(err) }))
+      sendJson(res, 500, { error: String(err) })
     }
   })
 }

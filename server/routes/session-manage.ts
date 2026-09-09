@@ -77,6 +77,15 @@ function sendCheckpointError(res: ServerResponse, error: unknown): void {
   ))
 }
 
+function sessionIdFrom(res: ServerResponse, body: unknown): string | null {
+  const id = (body as { sessionId?: unknown } | null)?.sessionId
+  if (typeof id !== "string" || !id) {
+    sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
+    return null
+  }
+  return id
+}
+
 /** Matched on the file too: a Codex rollout file name is not the session id. */
 function sharedSessionIdsFor(sessionId: string, dirName: string, fileName: string): string[] {
   return listShares()
@@ -108,17 +117,8 @@ export function registerSessionManageRoutes(use: UseFn) {
   use("/api/interrupt-session", (req, res, next) => {
     if (req.method !== "POST") return next()
     handleJsonBody<unknown>(req, res, async (body) => {
-      let sessionId: string
-      try {
-        sessionId = (body as { sessionId: string }).sessionId
-      } catch {
-        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
-        return
-      }
-      if (!sessionId) {
-        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
-        return
-      }
+      const sessionId = sessionIdFrom(res, body)
+      if (!sessionId) return
       const { kind } = await resolveSessionAgent(sessionId)
       sendJson(res, 200, { success: await runtimeFor(kind).interrupt(sessionId) })
     }, () => {
@@ -187,17 +187,8 @@ export function registerSessionManageRoutes(use: UseFn) {
     if (req.method !== "POST") return next()
 
     handleJsonBody<unknown>(req, res, async (body) => {
-      let sessionId: string
-      try {
-        sessionId = (body as { sessionId: string }).sessionId
-      } catch {
-        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
-        return
-      }
-      if (!sessionId) {
-        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
-        return
-      }
+      const sessionId = sessionIdFrom(res, body)
+      if (!sessionId) return
 
       const { kind } = await resolveSessionAgent(sessionId)
       const stopped = await runtimeFor(kind).stop(sessionId)

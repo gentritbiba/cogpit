@@ -34,10 +34,3 @@ export function resolveTurnCount(sessionId: string, serverCount?: number): numbe
   const cached = cache.get(deviceScopedKey(sessionId))
   return Math.max(cached ?? 0, serverCount ?? 0)
 }
-
-/** Turn count color stays quiet until a session becomes unusually long. */
-export function turnCountColor(count: number): string {
-  if (count <= 10) return "text-muted-foreground"
-  if (count <= 50) return "text-warning"
-  return "text-destructive"
-}

@@ -26,18 +26,4 @@ export const DEFAULT_PERMISSIONS: PermissionsConfig = {
   disallowedTools: [],
 }
 
-export const KNOWN_TOOLS = [
-  "Bash",
-  "Read",
-  "Write",
-  "Edit",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "WebSearch",
-  "NotebookEdit",
-  "Task",
-  "Agent",
-] as const
-
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"

@@ -10,16 +10,19 @@ const FEEDBACK_DURATION_MS = 1500
 export function useCopyWithFeedback(): [boolean, (text: string) => void] {
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const aliveRef = useRef(true)
 
   useEffect(() => {
+    aliveRef.current = true
     return () => {
+      aliveRef.current = false
       if (timerRef.current) clearTimeout(timerRef.current)
     }
   }, [])
 
   const copy = useCallback(async (text: string) => {
     const ok = await copyToClipboard(text)
-    if (!ok) return
+    if (!ok || !aliveRef.current) return
     setCopied(true)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setCopied(false), FEEDBACK_DURATION_MS)

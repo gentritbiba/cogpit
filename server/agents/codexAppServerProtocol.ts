@@ -72,11 +72,6 @@ export interface PendingApproval {
   params: JsonObject
 }
 
-export type ApprovalListener = (
-  threadId: string,
-  approvals: readonly PendingApproval[],
-) => void
-
 export interface CodexThread extends JsonObject {
   id: string
   parentThreadId?: string | null

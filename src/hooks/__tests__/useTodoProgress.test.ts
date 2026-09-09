@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import type { ParsedSession, Turn, ToolCall } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
 function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
   return {
@@ -15,21 +16,8 @@ function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
   }
 }
 
-function makeTurn(toolCalls: ToolCall[] = []): Turn {
-  return {
-    id: "turn-1",
-    userMessage: "test",
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls,
-    subAgentActivity: [],
-    timestamp: "",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-  }
-}
+const makeTurn = (toolCalls: ToolCall[] = []) =>
+  emptyTurn({ toolCalls, userMessage: "test", timestamp: "" })
 
 function makeSession(turns: Turn[]): ParsedSession {
   return {

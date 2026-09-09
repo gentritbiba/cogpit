@@ -147,18 +147,20 @@ export function getRequestSessionToken(req: IncomingMessage): string | null {
   return bearerToken(req) ?? cookieValue(req, BROWSER_SESSION_COOKIE)
 }
 
-export function setBrowserSessionCookie(res: ServerResponse, token: string): void {
+function writeSessionCookie(res: ServerResponse, name: string, token: string | null): void {
+  const maxAge = token === null ? 0 : Math.floor(SESSION_ABSOLUTE_TTL_MS / 1000)
   res.setHeader(
     "Set-Cookie",
-    `${BROWSER_SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(SESSION_ABSOLUTE_TTL_MS / 1000)}`,
+    `${name}=${token ?? ""}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`,
   )
 }
 
+export function setBrowserSessionCookie(res: ServerResponse, token: string): void {
+  writeSessionCookie(res, BROWSER_SESSION_COOKIE, token)
+}
+
 export function clearBrowserSessionCookie(res: ServerResponse): void {
-  res.setHeader(
-    "Set-Cookie",
-    `${BROWSER_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
-  )
+  writeSessionCookie(res, BROWSER_SESSION_COOKIE, null)
 }
 
 export function canIssueBrowserSession(req: IncomingMessage): boolean {
@@ -376,17 +378,6 @@ function trackAuthenticatedHttpStream(
   trackRevocableHttpStream(req, res, token, {
     onRevoked: onSessionRevoked,
     isActive: isSessionTokenActive,
-  })
-}
-
-function trackShareHttpStream(
-  req: IncomingMessage,
-  res: ServerResponse,
-  token: string,
-): void {
-  trackRevocableHttpStream(req, res, token, {
-    onRevoked: onShareRevoked,
-    isActive: isShareTokenActive,
   })
 }
 
@@ -731,17 +722,7 @@ export function countShareGuests(sessionId: string): number {
 }
 
 export function setShareCookie(res: ServerResponse, token: string): void {
-  res.setHeader(
-    "Set-Cookie",
-    `${SHARE_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(SESSION_ABSOLUTE_TTL_MS / 1000)}`,
-  )
-}
-
-export function clearShareCookie(res: ServerResponse): void {
-  res.setHeader(
-    "Set-Cookie",
-    `${SHARE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
-  )
+  writeSessionCookie(res, SHARE_COOKIE, token)
 }
 
 /**
@@ -964,7 +945,10 @@ function handleShareRequest(
   }
 
   touchShare(sessionId)
-  trackShareHttpStream(req, res, token)
+  trackRevocableHttpStream(req, res, token, {
+    onRevoked: onShareRevoked,
+    isActive: isShareTokenActive,
+  })
   // Team edition's authz middleware runs next and refuses every request it
   // cannot account for. A guest carries no SessionPrincipal by design, so it
   // has to arrive there labelled as a guest rather than as nothing at all.

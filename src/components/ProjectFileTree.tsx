@@ -12,12 +12,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { authFetch } from "@/lib/auth"
 import { fileTypeIcon } from "@/lib/fileTypeColors"
 import { cn } from "@/lib/utils"
-
-export interface ProjectTreeEntry {
-  /** Basename, or a `a/b/c` chain when the server collapsed single-child directories. */
-  name: string
-  type: "file" | "directory"
-}
+import type { ProjectTreeEntry } from "../../shared/contracts/projectTools"
 
 export interface FileStatusMark {
   code: string

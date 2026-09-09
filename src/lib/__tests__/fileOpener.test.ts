@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
+vi.mock("@/lib/auth", () => ({ jsonFetch: vi.fn() }))
 vi.mock("@/lib/device", () => ({ isRemoteDeviceActive: vi.fn(() => false) }))
 vi.mock("@/lib/utils", () => ({ copyToClipboard: vi.fn().mockResolvedValue(true) }))
 
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { copyToClipboard } from "@/lib/utils"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
@@ -20,12 +20,12 @@ import {
 } from "@/lib/fileOpener"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 
-const mockAuthFetch = vi.mocked(authFetch)
+const mockJsonFetch = vi.mocked(jsonFetch)
 const mockIsRemoteDeviceActive = vi.mocked(isRemoteDeviceActive)
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockAuthFetch.mockResolvedValue(new Response(null, { status: 200 }))
+  mockJsonFetch.mockResolvedValue(new Response(null, { status: 200 }))
   mockIsRemoteDeviceActive.mockReturnValue(false)
 })
 
@@ -85,9 +85,12 @@ describe("openFile", () => {
 
     openFile("/repo/src/app.ts", { line: 4, column: 2 })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/open-in-editor", expect.objectContaining({
-      body: JSON.stringify({ path: "/repo/src/app.ts", mode: "file", line: 4, column: 2 }),
-    }))
+    expect(mockJsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
+      path: "/repo/src/app.ts",
+      mode: "file",
+      line: 4,
+      column: 2,
+    })
   })
 
   it("hands the request to the built-in workspace when preferred", () => {
@@ -98,7 +101,7 @@ describe("openFile", () => {
     openFile("/repo/src/app.ts", { mode: "diff" })
 
     expect(opener).toHaveBeenCalledWith({ kind: "file", path: "/repo/src/app.ts", mode: "diff" })
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 
   it("falls back to the host editor when the workspace declines", () => {
@@ -107,7 +110,7 @@ describe("openFile", () => {
 
     openFile("/repo/src/app.ts")
 
-    expect(mockAuthFetch).toHaveBeenCalledOnce()
+    expect(mockJsonFetch).toHaveBeenCalledOnce()
   })
 
   it("copies the path instead of launching an editor on a remote device", () => {
@@ -116,7 +119,7 @@ describe("openFile", () => {
     openFile("/repo/src/app.ts")
 
     expect(copyToClipboard).toHaveBeenCalledWith("/repo/src/app.ts")
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 
   it("still uses the built-in workspace on a remote device", () => {
@@ -127,7 +130,7 @@ describe("openFile", () => {
     openFile("/repo/src/app.ts")
 
     expect(copyToClipboard).not.toHaveBeenCalled()
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 
   it("does nothing without the hostFiles capability", () => {
@@ -135,7 +138,7 @@ describe("openFile", () => {
 
     openFile("/repo/src/app.ts")
 
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 
   it("unregisters cleanly", () => {
@@ -147,7 +150,7 @@ describe("openFile", () => {
     openFile("/repo/src/app.ts")
 
     expect(opener).not.toHaveBeenCalled()
-    expect(mockAuthFetch).toHaveBeenCalledOnce()
+    expect(mockJsonFetch).toHaveBeenCalledOnce()
   })
 })
 
@@ -155,9 +158,10 @@ describe("openProject", () => {
   it("sends both path and dirName to the host", () => {
     openProject({ path: "/repo", dirName: "-repo" })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/open-in-editor", expect.objectContaining({
-      body: JSON.stringify({ path: "/repo", dirName: "-repo" }),
-    }))
+    expect(mockJsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
+      path: "/repo",
+      dirName: "-repo",
+    })
   })
 
   it("opens the built-in workspace when a host path is known", () => {
@@ -168,7 +172,7 @@ describe("openProject", () => {
     openProject({ path: "/repo", dirName: "-repo" })
 
     expect(opener).toHaveBeenCalledWith({ kind: "project", path: "/repo" })
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 
   it("falls back to the host when only a dirName is known", () => {
@@ -177,14 +181,15 @@ describe("openProject", () => {
 
     openProject({ dirName: "-repo" })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/open-in-editor", expect.objectContaining({
-      body: JSON.stringify({ dirName: "-repo" }),
-    }))
+    expect(mockJsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
+      path: undefined,
+      dirName: "-repo",
+    })
   })
 
   it("ignores an empty project reference", () => {
     openProject({ path: null, dirName: null })
-    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(mockJsonFetch).not.toHaveBeenCalled()
   })
 })
 
@@ -195,8 +200,9 @@ describe("revealInFolder", () => {
 
     revealInFolder({ path: "/repo", dirName: "-repo" })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/reveal-in-folder", expect.objectContaining({
-      body: JSON.stringify({ path: "/repo", dirName: "-repo" }),
-    }))
+    expect(mockJsonFetch).toHaveBeenCalledWith("/api/reveal-in-folder", {
+      path: "/repo",
+      dirName: "-repo",
+    })
   })
 })

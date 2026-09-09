@@ -272,11 +272,6 @@ export function DesktopWorkspace({
     navigation.panels.toggleWorkspacePanel(panelId)
   }
 
-  function openWorkspacePanel(panelId: string): void {
-    if (project.showPreview) project.onCloseRightWorkspace()
-    navigation.panels.openWorkspacePanel(panelId)
-  }
-
   function openWorktreeSession(sessionId: string): void {
     if (!worktreeDirName) return
     navigation.actions.handleDashboardSelect(worktreeDirName, `${sessionId}.jsonl`)
@@ -329,7 +324,6 @@ export function DesktopWorkspace({
           openWorktreeSession,
         }}
         onClosePanel={navigation.panels.closeWorkspacePanel}
-        onOpenPanel={openWorkspacePanel}
         onTogglePanel={toggleWorkspacePanel}
         actions={[
           {

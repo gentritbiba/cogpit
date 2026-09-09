@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react"
 import {
   AlertCircle,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -10,16 +9,9 @@ import {
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
-import { AskUserAnswerForm } from "./AskUserAnswerForm"
+import { AskUserAnswerForm, QuestionOptionBody, type AskUserQuestion } from "./AskUserAnswerForm"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-
-interface AskUserQuestion {
-  question: string
-  header?: string
-  options?: Array<{ label: string; description?: string }>
-  multiSelect?: boolean
-}
 
 function getQuestions(toolCall: ToolCall): AskUserQuestion[] {
   if (!Array.isArray(toolCall.input.questions)) return []
@@ -146,29 +138,12 @@ function QuestionHistoryItem({
                     : "text-muted-foreground",
                 )}
               >
-                <span
-                  className={cn(
-                    "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-                    question.multiSelect ? "rounded" : "rounded-full",
-                    selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/30",
-                  )}
-                  aria-hidden="true"
-                >
-                  {selected && <Check className="size-3" strokeWidth={3} data-icon="icon" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-medium">
-                    {option.label}
-                    {selected && (
-                      <Badge variant="secondary" className="ml-2">Selected</Badge>
-                    )}
-                  </span>
-                  {option.description && (
-                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                      {option.description}
-                    </span>
-                  )}
-                </span>
+                <QuestionOptionBody
+                  option={option}
+                  multiSelect={question.multiSelect}
+                  selected={selected}
+                  showSelectedBadge
+                />
               </div>
             )
           })}
@@ -260,7 +235,7 @@ export function AskUserQuestionCard({
 
       <div className="px-3">
         {isWaiting && sessionId ? (
-          <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} embedded />
+          <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} />
         ) : questions.length > 0 ? (
           questions.map((question, index) => (
             <QuestionHistoryItem

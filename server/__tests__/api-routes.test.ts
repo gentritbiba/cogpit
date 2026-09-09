@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import type { Middleware, UseFn } from "../helpers"
 
@@ -70,6 +71,36 @@ const CANONICAL_ROUTE_IDS = [
   "browser",
 ] as const
 
+/** Every `./routes/*` module api-routes.ts imports, with the names it imports. */
+const ROUTE_MODULES = [
+  ...readFileSync(new URL("../api-routes.ts", import.meta.url), "utf8").matchAll(
+    /import\s*{([^}]*)}\s*from\s*"\.\/(routes\/[a-z0-9-]+)"/g,
+  ),
+].map(([, names, specifier]) => ({
+  specifier,
+  exports: names
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0 && !name.startsWith("type ")),
+}))
+
+interface RegistrarCall {
+  registrar: string
+  args: unknown[]
+}
+
+/** Module namespace whose every export is a spy recording how it was called. */
+function spyNamespace(names: string[], calls: RegistrarCall[]) {
+  return Object.fromEntries(
+    names.map((name) => [
+      name,
+      (...args: unknown[]) => {
+        calls.push({ registrar: name, args })
+      },
+    ]),
+  )
+}
+
 function captureRegistrations(mode: HubMode): Array<{
   path: string
   handler: Middleware
@@ -86,6 +117,53 @@ describe("API route registry", () => {
 
     expect(ids).toEqual(CANONICAL_ROUTE_IDS)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it("hands every registrar `use` alone, never the shared context", async () => {
+    expect(ROUTE_MODULES.length, "route module scan found nothing").toBeGreaterThan(50)
+    const calls: RegistrarCall[] = []
+    const context = { mode: "dev" as HubMode }
+    const noopUse: UseFn = () => {}
+
+    vi.resetModules()
+    for (const { specifier, exports } of ROUTE_MODULES) {
+      vi.doMock(`../${specifier}`, () => spyNamespace(exports, calls))
+    }
+
+    try {
+      const { API_ROUTE_REGISTRY: registry } = await import("../api-routes")
+
+      for (const route of registry) {
+        calls.length = 0
+        route.register(noopUse, context)
+
+        if (route.id === "hub") {
+          expect(calls, '"hub" registers inline and calls no registrar').toHaveLength(0)
+          continue
+        }
+
+        const [call] = calls
+        expect(call, `route "${route.id}" registered nothing`).toBeDefined()
+        if (!call) continue
+
+        if (route.id === "hello") {
+          expect(call.args, `"hello" needs the platform mode`).toEqual([noopUse, context])
+          continue
+        }
+
+        expect(
+          call.args,
+          `route "${route.id}" called ${call.registrar}() with ${call.args.length} arguments instead of 1. ` +
+            "Wrap it in apiRoute() in server/api-routes.ts: registrars whose second parameter is an " +
+            "injected dependency (github, clickup, vercel-deployments, permissions, codex-threads, " +
+            "copilot-history, browser, ask-user) receive ApiRouteContext as their dependencies and " +
+            "break at request time, with types and every other test still green.",
+        ).toEqual([noopUse])
+      }
+    } finally {
+      for (const { specifier } of ROUTE_MODULES) vi.doUnmock(`../${specifier}`)
+      vi.resetModules()
+    }
   })
 
   it("registers identical middleware paths in dev, Electron, and standalone modes", () => {

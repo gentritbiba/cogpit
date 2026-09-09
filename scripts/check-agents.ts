@@ -21,12 +21,11 @@
  * Comments count too: prose naming a CLI is exactly how the knowledge leaks
  * back in.
  */
-import { readFile, readdir, writeFile } from "node:fs/promises"
-import { extname, join, relative, resolve, sep } from "node:path"
+import { readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { collectSourceRoots, relativePath, root } from "./lib/sourceFiles"
 
-const root = resolve(import.meta.dir, "..")
 const sourceRoots = ["shared", "src", "server", "electron", "packages/cogpit-memory/src"] as const
-const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"])
 const budgetFile = join(root, "scripts/agent-vocabulary.json")
 
 const AGENT_WORDS = ["claude", "codex", "copilot"] as const
@@ -73,29 +72,6 @@ function isOwned(path: string): boolean {
   return OWNED_PATTERNS.some((pattern) => pattern.test(path))
 }
 
-function relativePath(path: string): string {
-  return relative(root, path).split(sep).join("/")
-}
-
-async function collectFiles(directory: string): Promise<string[]> {
-  let entries
-  try {
-    entries = await readdir(directory, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  const files = await Promise.all(entries.map(async (entry) => {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "dist" || entry.name === "out") return []
-      return collectFiles(path)
-    }
-    if (!sourceExtensions.has(extname(entry.name)) || entry.name.includes(".test.")) return []
-    return [path]
-  }))
-  return files.flat()
-}
-
 /** Number of lines in `source` that name an agent. */
 function countAgentLines(source: string): number {
   let count = 0
@@ -106,7 +82,7 @@ function countAgentLines(source: string): number {
   return count
 }
 
-const paths = (await Promise.all(sourceRoots.map((path) => collectFiles(join(root, path))))).flat()
+const paths = await collectSourceRoots(sourceRoots)
 
 const observed = new Map<string, number>()
 for (const path of paths) {

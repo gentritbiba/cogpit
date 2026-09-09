@@ -16,7 +16,6 @@ import { useSharePermissions } from "@/hooks/useSharePermissions"
 import { useTheme } from "@/hooks/useTheme"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { setMe } from "@/lib/capabilities"
-import { isRemoteClient } from "@/lib/auth"
 import { detectPendingInteraction } from "../../shared/session/parser"
 import { loadSessionTailFresh } from "@/lib/sessionLoader"
 import { agentKindForDirName } from "@/lib/agents"
@@ -175,17 +174,6 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
       networkAccessDisabled: false,
     },
     theme,
-    networkAuth: {
-      isRemote: isRemoteClient(),
-      edition: "personal",
-      authChecked: true,
-      authenticated: true,
-      needsBootstrap: false,
-      handleAuthenticated: noop,
-      refreshServerState: () => Promise.resolve(),
-      logout: noop,
-    },
-    me: GUEST_ME,
     isMobile,
   }), [state, dispatch, theme, isMobile, info.dirName, noop])
 

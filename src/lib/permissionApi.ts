@@ -4,7 +4,7 @@
  * not need to be open.
  */
 
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 
 export type PermissionDecision = "allow" | "allow_always" | "deny"
 
@@ -14,10 +14,9 @@ export async function respondToPermission(
   requestId: string,
   behavior: PermissionDecision,
 ): Promise<boolean> {
-  const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requestId, behavior }),
+  const res = await jsonFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond`, {
+    requestId,
+    behavior,
   })
   return res.ok
 }
@@ -27,10 +26,8 @@ export async function respondToAllPermissions(
   sessionId: string,
   behavior: PermissionDecision,
 ): Promise<boolean> {
-  const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond-all`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ behavior }),
+  const res = await jsonFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond-all`, {
+    behavior,
   })
   return res.ok
 }

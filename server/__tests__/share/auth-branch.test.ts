@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from "vitest"
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
+import { createMiddlewareRes } from "../http-fixtures"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -73,20 +74,10 @@ function mockReq(url: string, opts: RequestOptions = {}): IncomingMessage {
 
 function run(url: string, opts: RequestOptions = {}) {
   const req = mockReq(url, opts)
-  let body = ""
-  let statusCode = 200
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(value: number) { statusCode = value },
-    setHeader: vi.fn(),
-    end: (data?: string) => { body = data || "" },
-    once: vi.fn(),
-    destroy: vi.fn(),
-    writableEnded: false,
-  } as unknown as ServerResponse
+  const mock = createMiddlewareRes()
   const next = vi.fn()
-  authMiddleware(req, res, next)
-  return { req, next, get statusCode() { return statusCode }, get body() { return body } }
+  authMiddleware(req, mock.res, next)
+  return { req, next, get statusCode() { return mock.statusCode }, get body() { return mock.body } }
 }
 
 /** A guest cookie for the shared session, pinned to the default UA. */

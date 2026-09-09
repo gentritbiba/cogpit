@@ -8,9 +8,10 @@
  * is the user's own directory — often one they keep in version control — so it
  * happens only when the panel or the API asks for it, never at startup.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
+import { hasContent, writeIfChanged } from "./files"
 import type { BrowserSkillTarget } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor } from "../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../shared/session/types"
@@ -184,22 +185,6 @@ export function pluginManifestFile(): string | null {
 
 export function pluginSkillFile(): string {
   return join(pluginDir(), "skills", SKILL_NAME, "SKILL.md")
-}
-
-function hasContent(path: string, content: string): boolean {
-  try {
-    return readFileSync(path, "utf8") === content
-  } catch {
-    return false
-  }
-}
-
-function writeIfChanged(path: string, content: string): void {
-  if (hasContent(path, content)) return
-  mkdirSync(dirname(path), { recursive: true })
-  const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, content)
-  renameSync(tmp, path)
 }
 
 /** Materialises the plugin agents load from disk. Idempotent. */

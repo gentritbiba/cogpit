@@ -1,4 +1,4 @@
-import { authFetch } from "@/lib/auth"
+import { jsonFetch } from "@/lib/auth"
 
 export async function submitCopilotPlanResponse(
   sessionId: string,
@@ -10,13 +10,9 @@ export async function submitCopilotPlanResponse(
   },
 ): Promise<boolean> {
   try {
-    const result = await authFetch(
+    const result = await jsonFetch(
       `/api/permissions/${encodeURIComponent(sessionId)}/plan`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, ...response }),
-      },
+      { requestId, ...response },
     )
     return result.ok
   } catch {

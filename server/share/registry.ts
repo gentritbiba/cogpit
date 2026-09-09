@@ -1,6 +1,6 @@
-import { readFile, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { readOwnerOnlyJsonArray, writeOwnerOnlyJson } from "../atomicJsonFile"
+import { replaceAll, serialQueue } from "../lib/serialQueue"
 import { hashPassword, isPasswordHashed } from "../password-utils"
 import { generatePassphrase } from "./passphrase"
 
@@ -57,7 +57,7 @@ export interface IssuedShare {
 
 let registryPath: string | null = null
 const shares = new Map<string, ShareRecord>()
-let registryOperationQueue: Promise<void> = Promise.resolve()
+const queue = serialQueue()
 
 // ── Persistence ──────────────────────────────────────────────────────
 
@@ -84,22 +84,6 @@ function normalizeShare(entry: unknown): ShareRecord | null {
   }
 }
 
-function enqueueRegistryOperation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = registryOperationQueue.then(operation)
-  // A rejected persistence attempt belongs to its caller. Keep a handled tail
-  // so later operations still run rather than inheriting the rejection.
-  registryOperationQueue = result.then(
-    () => undefined,
-    () => undefined,
-  )
-  return result
-}
-
-function replaceShares(nextShares: ReadonlyMap<string, ShareRecord>): void {
-  shares.clear()
-  for (const [sessionId, share] of nextShares) shares.set(sessionId, share)
-}
-
 async function persist(
   filePath: string | null,
   snapshot: readonly ShareRecord[],
@@ -118,7 +102,7 @@ interface ShareMutation<T> {
 function commitShareMutation<T>(
   mutate: (draft: Map<string, ShareRecord>) => ShareMutation<T>,
 ): Promise<T> {
-  return enqueueRegistryOperation(async () => {
+  return queue.run(async () => {
     const draft = new Map(shares)
     const mutation = mutate(draft)
     if (!mutation.changed) return mutation.value
@@ -129,7 +113,7 @@ function commitShareMutation<T>(
     // implicitly rolls the mutation back by discarding this draft.
     const snapshot = [...draft.values()].map((share) => ({ ...share }))
     await persist(registryPath, snapshot)
-    replaceShares(draft)
+    replaceAll(shares, draft)
     return mutation.value
   })
 }
@@ -139,37 +123,16 @@ function commitShareMutation<T>(
  * corrupt file yields an empty registry rather than throwing.
  */
 export async function initShareRegistry(dir: string): Promise<void> {
-  await enqueueRegistryOperation(async () => {
+  await queue.run(async () => {
     const nextRegistryPath = join(dir, "shares.local.json")
-    const loadedShares = new Map<string, ShareRecord>()
-
-    let raw: string | null = null
-    try {
-      const contents = await readFile(nextRegistryPath, "utf-8")
-      // Existing installations may predate owner-only creation. Refuse to load
-      // password hashes unless the registry can be repaired to owner-only mode.
-      await chmod(nextRegistryPath, 0o600)
-      raw = contents
-    } catch {
-      // Missing file (first run) or unreadable → start empty.
-    }
-
-    if (raw !== null) {
-      try {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          for (const entry of parsed) {
-            const share = normalizeShare(entry)
-            if (share) loadedShares.set(share.sessionId, share)
-          }
-        }
-      } catch {
-        // Corrupt JSON → start empty rather than crashing the shell.
-      }
-    }
+    const loadedShares = await readOwnerOnlyJsonArray(
+      nextRegistryPath,
+      normalizeShare,
+      (share) => share.sessionId,
+    )
 
     registryPath = nextRegistryPath
-    replaceShares(loadedShares)
+    replaceAll(shares, loadedShares)
   })
 }
 

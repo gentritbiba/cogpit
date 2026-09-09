@@ -26,8 +26,8 @@ vi.mock("../../sdk-session", () => ({
 
 import { isWithinDir, readdir, readFile, stat } from "../../helpers"
 import { stopSDKSession } from "../../sdk-session"
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerWorkflowRoutes } from "../../routes/workflows"
 
 const mockedIsWithinDir = vi.mocked(isWithinDir)
@@ -35,46 +35,6 @@ const mockedReaddir = vi.mocked(readdir)
 const mockedReadFile = vi.mocked(readFile)
 const mockedStat = vi.mocked(stat)
 const mockedStopSDK = vi.mocked(stopSDKSession)
-
-function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: string) => void)[] = []
-  const endHandlers: (() => void)[] = []
-  const closeHandlers: (() => void)[] = []
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: string) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
-      if (event === "close") closeHandlers.push(handler as () => void)
-      return req
-    }),
-    socket: { remoteAddress: "127.0.0.1" },
-    headers: {},
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    write: vi.fn(),
-    writeHead: vi.fn(),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-  }
-  const next = vi.fn()
-  // The route parses through withJsonBody, so its handler runs on the microtask
-  // queue rather than inside the "end" call; drain it before asserting.
-  const sendBody = async () => {
-    if (body) for (const h of dataHandlers) h(body)
-    for (const h of endHandlers) h()
-    await drainBodyParse()
-  }
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
-}
 
 const journalJson = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -110,9 +70,7 @@ describe("workflow routes", () => {
     sdkSessions.clear()
     mockedIsWithinDir.mockReturnValue(true)
     mockedStopSDK.mockReturnValue(false)
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => { handlers.set(path, handler) }
-    registerWorkflowRoutes(use)
+    handlers = collectRoutes(registerWorkflowRoutes)
   })
 
   describe("GET /api/workflows/:dirName/:sessionId", () => {
@@ -256,16 +214,18 @@ describe("workflow routes", () => {
 
   describe("POST /api/workflow-stop", () => {
     it("returns 400 when sessionId is missing", async () => {
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ runId: "wf_abc-123" }))
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", { body: JSON.stringify({ runId: "wf_abc-123" }) })
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      await sendBody()
+      sendBody()
+      await drainBodyParse()
       expect(res._getStatus()).toBe(400)
     })
 
     it("reports controllable=false for an unmanaged session", async () => {
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "ghost", runId: "wf_abc-123" }))
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", { body: JSON.stringify({ sessionId: "ghost", runId: "wf_abc-123" }) })
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      await sendBody()
+      sendBody()
+      await drainBodyParse()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(false)
       expect(data.controllable).toBe(false)
@@ -274,9 +234,10 @@ describe("workflow routes", () => {
     it("kills the owning active process and reports success", async () => {
       const kill = vi.fn()
       activeProcesses.set("sess", { kill })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "sess", runId: "wf_abc-123" }))
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", { body: JSON.stringify({ sessionId: "sess", runId: "wf_abc-123" }) })
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      await sendBody()
+      sendBody()
+      await drainBodyParse()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(true)
       expect(data.controllable).toBe(true)

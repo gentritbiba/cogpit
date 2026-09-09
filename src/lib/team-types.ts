@@ -7,11 +7,8 @@ export interface TeamMember {
   model?: string
   prompt?: string
   color?: string
-  planModeRequired?: boolean
   joinedAt: number
-  tmuxPaneId?: string
   cwd?: string
-  backendType?: string
 }
 
 export interface TeamConfig {

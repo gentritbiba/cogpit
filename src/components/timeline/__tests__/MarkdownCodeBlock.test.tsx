@@ -63,7 +63,7 @@ describe("MarkdownCodeBlock lifecycle", () => {
     expect(screen.getByText("SECOND-HIGHLIGHT")).toBeInTheDocument()
   })
 
-  it("keeps copy feedback for two seconds after the latest successful copy", async () => {
+  it("keeps copy feedback after the latest successful copy", async () => {
     vi.useFakeTimers()
     render(<MarkdownCodeBlock className="language-ts">const value = 1</MarkdownCodeBlock>)
 

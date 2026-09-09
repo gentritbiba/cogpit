@@ -8,6 +8,7 @@ import {
 } from "@/lib/timelinePaging"
 import { parseSession } from "../../../shared/session/parser"
 import {
+  emptyTurn,
   peerAttachment,
   peerEnqueueMsg,
   resetFixtureCounter,
@@ -18,22 +19,8 @@ import {
 } from "@/__tests__/fixtures"
 import type { Turn, TurnContentBlock } from "../../../shared/session/types"
 
-function makeTurn(id: string, overrides: Partial<Turn> = {}): Turn {
-  return {
-    id,
-    userMessage: `msg-${id}`,
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls: [],
-    subAgentActivity: [],
-    timestamp: "2026-07-23T10:00:00Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-    ...overrides,
-  }
-}
+const makeTurn = (id: string, overrides: Partial<Turn> = {}) =>
+  emptyTurn({ id, userMessage: `msg-${id}`, timestamp: "2026-07-23T10:00:00Z", ...overrides })
 
 describe("isNearTop", () => {
   it("is true when within the trigger distance of the top", () => {

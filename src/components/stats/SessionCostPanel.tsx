@@ -19,8 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useSessionUsageCost } from "@/hooks/useSessionUsageCost"
 import { descriptorFor } from "@/lib/agents"
 import { agentIcon } from "@/lib/agents/presentation"
-import { formatTokenCount, shortenModel } from "@/lib/format"
-import { formatCost } from "../../../shared/session/token-costs"
+import { formatCost, formatTokenCount, shortenModel } from "@/lib/format"
 import { totalUsageCostTokens } from "../../../shared/contracts/usageCost"
 import type {
   SessionUsageCostCall,

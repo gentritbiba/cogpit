@@ -149,6 +149,7 @@ vi.mock("../lib/streamBus", () => ({
   publishError: vi.fn(),
   publishAgentProgress: vi.fn(),
   publishPromptSuggestion: vi.fn(),
+  publishCompacting: vi.fn(),
   clear: vi.fn(),
   getSnapshot: vi.fn(() => null),
   subscribe: vi.fn(() => () => {}),
@@ -587,6 +588,24 @@ describe("sdk-session progress summaries and prompt suggestions", () => {
       "progress",
       "toolu_7",
       "Analyzing authentication module",
+    ])
+  })
+
+  it("relays the CLI's compaction status to the stream bus", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      { type: "system", subtype: "status", status: "compacting", uuid: "u1", session_id: "compact" },
+      { type: "system", subtype: "status", status: null, compact_result: "success", uuid: "u2", session_id: "compact" },
+      { type: "result", is_error: false },
+    ]
+
+    createSDKSession({ sessionId: "compact", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishCompacting).mock.calls.length >= 2)
+    expect(vi.mocked(streamBus.publishCompacting).mock.calls).toEqual([
+      ["compact", true],
+      ["compact", false],
     ])
   })
 

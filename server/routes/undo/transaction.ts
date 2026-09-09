@@ -1,6 +1,4 @@
-import type { UseFn } from "../../http"
-import type { IncomingMessage } from "node:http"
-import { sendJson } from "../../http"
+import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../../http"
 import { dirs, mkdir, readFile, unlink } from "../../helpers"
 import { writeOwnerOnlyJson, writeOwnerOnlyText } from "../../atomicJsonFile"
 import { rewindClaudeFiles } from "../../sdk-session"
@@ -140,38 +138,6 @@ function applySessionMutation(content: string, mutation: UndoSessionMutation): s
   return nextLines.length > 0 ? `${nextLines.join("\n")}\n` : ""
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    let body = ""
-    let bytes = 0
-    let settled = false
-    req.setEncoding("utf8")
-    req.on("data", (chunk: string) => {
-      if (settled) return
-      bytes += Buffer.byteLength(chunk)
-      if (bytes > MAX_TRANSACTION_BODY_BYTES) {
-        settled = true
-        reject(new UndoOperationError(413, "Undo transaction body is too large"))
-        req.destroy()
-        return
-      }
-      body += chunk
-    })
-    req.on("end", () => {
-      if (!settled) {
-        settled = true
-        resolve(body)
-      }
-    })
-    req.on("error", (error) => {
-      if (!settled) {
-        settled = true
-        reject(error)
-      }
-    })
-  })
-}
-
 async function executeTransaction(request: UndoTransactionRequest): Promise<number> {
   const sessionPath = await resolveUndoSessionPath(request.session.dirName, request.session.fileName)
   const statePath = resolveUndoStatePath(request.state.sessionId)
@@ -251,15 +217,18 @@ export function registerUndoTransactionRoute(use: UseFn): void {
   use("/api/undo/transaction", async (req, res, next) => {
     if (req.method !== "POST") return next()
     try {
-      const body = await readBody(req)
-      const request = parseTransaction(JSON.parse(body) as unknown)
+      let body: unknown
+      try {
+        body = await readJsonBody(req, { maxBytes: MAX_TRANSACTION_BODY_BYTES })
+      } catch (error) {
+        throw error instanceof HttpBodyError
+          ? new UndoOperationError(error.statusCode, error.message)
+          : error
+      }
+      const request = parseTransaction(body)
       const applied = await enqueueUndoMutation(() => executeTransaction(request))
       sendJson(res, 200, { success: true, applied })
     } catch (error) {
-      if (error instanceof SyntaxError) {
-        sendJson(res, 400, { error: "Invalid JSON body" })
-        return
-      }
       const status = error instanceof UndoOperationError ? error.status : 500
       sendJson(res, status, { error: error instanceof Error ? error.message : String(error) })
     }

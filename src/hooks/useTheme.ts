@@ -48,14 +48,6 @@ export const themes: ThemeDefinition[] = [
   },
 ]
 
-function getThemeClasses(id: ThemeId): string {
-  switch (id) {
-    case "dark": return "dark"
-    case "oled": return "dark theme-oled"
-    case "light": return ""
-  }
-}
-
 export function useTheme(): ThemeContext {
   const [theme, setThemeState] = useState<ThemeId>(() => {
     try {
@@ -74,7 +66,6 @@ export function useTheme(): ThemeContext {
   }, [])
 
   const activeTheme = previewId ?? theme
-  const themeClasses = getThemeClasses(activeTheme)
 
   // Sync theme classes to <html> so CSS variable selectors (.dark) work globally
   useEffect(() => {
@@ -84,5 +75,5 @@ export function useTheme(): ThemeContext {
     else if (activeTheme === "oled") cl.add("dark", "theme-oled")
   }, [activeTheme])
 
-  return { theme, activeTheme, themeClasses, setTheme, setPreview: setPreviewId }
+  return { theme, activeTheme, setTheme, setPreview: setPreviewId }
 }

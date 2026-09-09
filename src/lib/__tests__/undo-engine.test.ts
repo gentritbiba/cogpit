@@ -3,7 +3,6 @@ import {
   extractReversibleCalls,
   archiveTurn,
   buildUndoOperations,
-  buildRedoOperations,
   buildRedoFromArchived,
   createBranch,
   collectChildBranches,
@@ -353,74 +352,6 @@ describe("buildUndoOperations", () => {
     expect(ops[0]).toMatchObject({ type: "reverse-edit", filePath: "b.ts" })
     expect(ops[1]).toMatchObject({ type: "delete-write", filePath: "new.ts" })
     expect(ops[2]).toMatchObject({ type: "reverse-edit", filePath: "a.ts" })
-  })
-})
-
-// ── buildRedoOperations ───────────────────────────────────────────────────
-
-describe("buildRedoOperations", () => {
-  it("returns empty array when from equals to", () => {
-    const turns = [makeTurn(), makeTurn()]
-    expect(buildRedoOperations(turns, 1, 1)).toEqual([])
-  })
-
-  it("builds apply-edit operations for Edit calls", () => {
-    const turns = [
-      makeTurn({ toolCalls: [] }),
-      makeTurn({ toolCalls: [makeEditToolCall("a.ts", "old", "new")] }),
-    ]
-    const ops = buildRedoOperations(turns, 0, 1)
-    expect(ops).toHaveLength(1)
-    expect(ops[0]).toMatchObject({
-      type: "apply-edit",
-      filePath: "a.ts",
-      oldString: "old",
-      newString: "new",
-      turnIndex: 1,
-    })
-  })
-
-  it("builds create-write operations for Write calls", () => {
-    const turns = [
-      makeTurn({ toolCalls: [] }),
-      makeTurn({ toolCalls: [makeWriteToolCall("b.ts", "content")] }),
-    ]
-    const ops = buildRedoOperations(turns, 0, 1)
-    expect(ops).toHaveLength(1)
-    expect(ops[0]).toMatchObject({
-      type: "create-write",
-      filePath: "b.ts",
-      content: "content",
-      turnIndex: 1,
-    })
-  })
-
-  it("processes turns in forward order", () => {
-    const turns = [
-      makeTurn({ toolCalls: [] }),
-      makeTurn({ toolCalls: [makeEditToolCall("a.ts", "a1", "a2")] }),
-      makeTurn({ toolCalls: [makeEditToolCall("b.ts", "b1", "b2")] }),
-    ]
-    const ops = buildRedoOperations(turns, 0, 2)
-    expect(ops).toHaveLength(2)
-    expect(ops[0].filePath).toBe("a.ts")
-    expect(ops[1].filePath).toBe("b.ts")
-  })
-
-  it("preserves replaceAll flag", () => {
-    const turns = [
-      makeTurn({ toolCalls: [] }),
-      makeTurn({
-        toolCalls: [
-          makeToolCall({
-            name: "Edit",
-            input: { file_path: "x.ts", old_string: "a", new_string: "b", replace_all: true },
-          }),
-        ],
-      }),
-    ]
-    const ops = buildRedoOperations(turns, 0, 1)
-    expect(ops[0].replaceAll).toBe(true)
   })
 })
 

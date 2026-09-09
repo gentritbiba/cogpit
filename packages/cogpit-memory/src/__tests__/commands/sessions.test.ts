@@ -1,99 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { installDirsMock, mockDirs, writeCopilotSession, writeSession } from "../fixtures"
 
-// We need to mock dirs.PROJECTS_DIR to point at our temp directory
-// so tests don't depend on the real filesystem.
-// Use a mutable object so updates in beforeEach are visible through the
-// captured import reference.
 let tmpDir: string
-const mockDirs = {
-  PROJECTS_DIR: "",
-  TEAMS_DIR: "",
-  TASKS_DIR: "",
-  CODEX_SESSIONS_DIR: "",
-  COPILOT_SESSIONS_DIR: "",
-}
 
-mock.module("../../lib/dirs", () => ({
-  dirs: mockDirs,
-}))
+installDirsMock()
 
 // Import after mock setup
 import { listSessions, currentSession } from "../../commands/sessions"
-
-/** Helper: create a minimal JSONL session file with user + assistant turns. */
-function writeSession(
-  dir: string,
-  filename: string,
-  opts: {
-    sessionId?: string
-    cwd?: string
-    model?: string
-    userMessage?: string
-    gitBranch?: string
-  } = {},
-): string {
-  const filePath = join(dir, filename)
-  const lines = [
-    JSON.stringify({
-      type: "system",
-      sessionId: opts.sessionId ?? filename.replace(".jsonl", ""),
-      cwd: opts.cwd ?? "/test/project",
-      gitBranch: opts.gitBranch ?? "main",
-    }),
-    JSON.stringify({
-      type: "user",
-      timestamp: new Date().toISOString(),
-      message: {
-        role: "user",
-        content: opts.userMessage ?? "Hello, world",
-      },
-    }),
-    JSON.stringify({
-      type: "assistant",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "I can help with that." }],
-        model: opts.model ?? "claude-sonnet-4-20250514",
-        id: "msg_test",
-        stop_reason: "end_turn",
-        usage: { input_tokens: 100, output_tokens: 50 },
-      },
-    }),
-  ]
-  writeFileSync(filePath, lines.join("\n"))
-  return filePath
-}
-
-function writeCopilotSession(sessionId: string, cwd = "/test/project"): string {
-  const sessionDir = join(mockDirs.COPILOT_SESSIONS_DIR, sessionId)
-  mkdirSync(sessionDir, { recursive: true })
-  const timestamp = new Date().toISOString()
-  const lines = [
-    JSON.stringify({
-      type: "session.start",
-      data: {
-        sessionId,
-        copilotVersion: "1.0.4",
-        selectedModel: "gpt-5.4",
-        context: { cwd, branch: "main" },
-      },
-      timestamp,
-    }),
-    JSON.stringify({ type: "user.message", data: { content: "Help from Copilot" }, timestamp }),
-    JSON.stringify({ type: "assistant.message", data: { content: "Sure" }, timestamp }),
-    JSON.stringify({
-      type: "session.shutdown",
-      data: { shutdownType: "routine", currentModel: "gpt-5.4", modelMetrics: {} },
-      timestamp,
-    }),
-  ]
-  const filePath = join(sessionDir, "events.jsonl")
-  writeFileSync(filePath, lines.join("\n"))
-  return filePath
-}
 
 describe("sessions command", () => {
   beforeEach(() => {
@@ -237,7 +153,10 @@ describe("sessions command", () => {
 
     it("discovers and identifies Copilot sessions without a Claude history directory", async () => {
       rmSync(mockDirs.PROJECTS_DIR, { recursive: true, force: true })
-      writeCopilotSession("11111111-1111-4111-8111-111111111111", "/workspace/copilot")
+      writeCopilotSession(mockDirs.COPILOT_SESSIONS_DIR, "11111111-1111-4111-8111-111111111111", {
+        cwd: "/workspace/copilot",
+        full: true,
+      })
 
       const result = await listSessions({ maxAge: "1d" })
 
@@ -334,7 +253,10 @@ describe("sessions command", () => {
     })
 
     it("finds the current Copilot session by cwd", async () => {
-      writeCopilotSession("22222222-2222-4222-8222-222222222222", "/workspace/copilot")
+      writeCopilotSession(mockDirs.COPILOT_SESSIONS_DIR, "22222222-2222-4222-8222-222222222222", {
+        cwd: "/workspace/copilot",
+        full: true,
+      })
 
       const result = await currentSession("/workspace/copilot")
 

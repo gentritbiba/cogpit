@@ -1,77 +1,8 @@
-// ── Workflow types (wire shape mirrors server/lib/workflows.ts) ──────────────
+import type { WorkflowAgent, WorkflowAgentCounts, WorkflowDetail } from "../../shared/contracts/workflows"
 
-export interface WorkflowPhaseMeta {
-  title: string
-  detail?: string
-}
-
-export type WorkflowAgentState = "queued" | "running" | "progress" | "done" | "error" | "skipped" | string
-
-export interface WorkflowAgent {
-  type: "workflow_agent"
-  index: number
-  label: string
-  phaseIndex: number
-  phaseTitle: string
-  agentId: string
-  model?: string
-  state: WorkflowAgentState
-  startedAt?: number
-  queuedAt?: number
-  attempt?: number
-  lastToolName?: string
-  lastToolSummary?: string
-  promptPreview?: string
-  lastProgressAt?: number
-  tokens?: number
-  toolCalls?: number
-  durationMs?: number
-  resultPreview?: string
-}
-
-export interface WorkflowAgentCounts {
-  total: number
-  queued: number
-  running: number
-  done: number
-  error: number
-}
-
-export type WorkflowStatus = "running" | "completed" | "failed" | "killed" | string
-
-export interface WorkflowSummary {
-  runId: string
-  taskId?: string
-  workflowName: string
-  summary: string
-  status: WorkflowStatus
-  startTime: number
-  durationMs?: number
-  agentCount: number
-  totalTokens: number
-  totalToolCalls: number
-  phaseCount: number
-  phaseTitles: string[]
-  agentCounts: WorkflowAgentCounts
-}
-
-export interface WorkflowDetail extends WorkflowSummary {
-  defaultModel?: string
-  phases: WorkflowPhaseMeta[]
-  agents: WorkflowAgent[]
-  script?: string
-  error?: string
-  resultPreview?: string
-  /** Whether the owning session is a live Cogpit-managed process (force-stoppable). */
-  controllable?: boolean
-}
+export * from "../../shared/contracts/workflows"
 
 // ── Status / state helpers ───────────────────────────────────────────────────
-
-const TERMINAL_AGENT_STATES = new Set(["done", "error", "skipped"])
-export function isTerminalAgentState(state: string): boolean {
-  return TERMINAL_AGENT_STATES.has(state)
-}
 
 /** A workflow is still in flight when not in a terminal status. */
 export function isWorkflowActive(status: string): boolean {
@@ -155,11 +86,4 @@ export function groupAgentsByPhase(detail: WorkflowDetail): PhaseGroup[] {
 export function agentProgress(counts: WorkflowAgentCounts): number {
   if (counts.total === 0) return 0
   return (counts.done + counts.error) / counts.total
-}
-
-/** Compact token formatting: 65739 → "65.7k". */
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return `${n}`
 }

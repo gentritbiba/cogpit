@@ -281,15 +281,3 @@ export function summarizeActivity(
 
   return { clauses }
 }
-
-/** Render a summary as the CLI's plain sentence (first clause capitalized). */
-export function formatActivitySummary(summary: ActivitySummary): string {
-  return summary.clauses
-    .map((clause, i) => {
-      const text = i === 0 ? clause.text[0].toUpperCase() + clause.text.slice(1) : clause.text
-      const added = clause.added ? ` +${clause.added}` : ""
-      const removed = clause.removed ? ` -${clause.removed}` : ""
-      return `${text}${added}${removed}`
-    })
-    .join(", ")
-}

@@ -33,10 +33,5 @@ export default defineConfig({
         lines: 69.5,
       },
     },
-    // Server tests use node environment via inline config
-    environmentMatchGlobs: [
-      ["server/**/*.test.ts", "node"],
-      ["electron/**/*.test.ts", "node"],
-    ],
   },
 })

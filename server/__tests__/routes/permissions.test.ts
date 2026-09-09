@@ -185,21 +185,6 @@ describe("GET /api/permissions/:sessionId", () => {
     expect(codex.listPendingApprovals).not.toHaveBeenCalledWith("session-1")
   })
 
-  it("falls back to a legacy CLI child, which belongs to no runtime", async () => {
-    mockPersistentSessions.set("legacy", {
-      pendingPermissions: new Map([["r9", { requestId: "r9", toolName: "Write", timestamp: 1 }]]),
-    })
-
-    const { response } = await invoke(register(registryOf([fakeRuntime("claude")])), {
-      method: "GET",
-      url: "/legacy",
-    })
-
-    expect(response.json()).toMatchObject({
-      permissions: [{ requestId: "r9", toolName: "Write", sessionId: "legacy" }],
-    })
-  })
-
   it("returns the session's pending exit plan alongside its permissions", async () => {
     const plan: CopilotPendingExitPlan = {
       sessionId: "copilot-1",
@@ -393,23 +378,6 @@ describe("GET /api/permissions — cross-session listing", () => {
       "copilot-1",
       "sdk-session",
     ])
-  })
-
-  it("includes legacy CLI sessions that have pending permissions", async () => {
-    mockPersistentSessions.set("legacy", {
-      pendingPermissions: new Map([[
-        "r9",
-        { requestId: "r9", toolName: "Write", input: { file_path: "/a.ts" }, timestamp: 1 },
-      ]]),
-    })
-
-    const { response } = await invoke(register(registryOf([fakeRuntime("claude")])), {
-      method: "GET",
-      url: "",
-    })
-
-    const body = response.json() as { bySession: Record<string, unknown[]> }
-    expect(body.bySession.legacy).toHaveLength(1)
   })
 
   it("omits sessions with nothing pending", async () => {

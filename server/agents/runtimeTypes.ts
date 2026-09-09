@@ -51,12 +51,6 @@ export interface StartSessionRequest extends AgentTurnSettings {
   /** Session title, applied however the agent supports it. */
   name?: string
   worktreeName?: string
-  /**
-   * True for `/api/new-session`: run the CLI once and report the session only
-   * after that run finishes, rather than as soon as the transcript exists.
-   * Only Claude distinguishes the two; the others ignore it.
-   */
-  oneShot?: boolean
 }
 
 export interface StartedSession {

@@ -1,24 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { SearchIndex } from "../lib/search-index"
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { installDirsMock, mockDirs, writeCopilotSession } from "./fixtures"
 
-function writeCopilotSession(root: string, sessionId: string, message: string): string {
-  const sessionDir = join(root, sessionId)
-  mkdirSync(sessionDir, { recursive: true })
-  const filePath = join(sessionDir, "events.jsonl")
-  const timestamp = new Date().toISOString()
-  writeFileSync(filePath, [
-    JSON.stringify({
-      type: "session.start",
-      data: { sessionId, context: { cwd: "/test/copilot" } },
-      timestamp,
-    }),
-    JSON.stringify({ type: "user.message", data: { content: message }, timestamp }),
-  ].join("\n"))
-  return filePath
-}
+installDirsMock()
+
+import { SearchIndex } from "../lib/search-index"
 
 describe("SearchIndex", () => {
   let dbPath: string
@@ -27,10 +15,47 @@ describe("SearchIndex", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "cogpit-memory-test-"))
     dbPath = join(tmpDir, "test.db")
+    mockDirs.PROJECTS_DIR = join(tmpDir, "projects")
+    mockDirs.TEAMS_DIR = join(tmpDir, "teams")
+    mockDirs.TASKS_DIR = join(tmpDir, "tasks")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
   })
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it("removes deleted transcripts before applying the search limit", () => {
+    const index = new SearchIndex(dbPath)
+    const live = join(tmpDir, "live.jsonl")
+    const deleted = join(tmpDir, "deleted.jsonl")
+    const content = JSON.stringify({ type: "user", message: { role: "user", content: "authentication" } })
+    writeFileSync(live, content)
+    writeFileSync(deleted, content)
+    index.indexFile(live, "live")
+    index.indexFile(deleted, "deleted")
+    rmSync(deleted)
+    expect(index.search("authentication", { limit: 1 }).map((hit) => hit.sessionId)).toEqual(["live"])
+    expect(index.countMatches("authentication")).toEqual({ totalHits: 1, sessionsSearched: 1 })
+    expect(index.getStats().indexedFiles).toBe(1)
+    expect(index.pruneMissingFiles()).toBe(0)
+    writeFileSync(deleted, content)
+    index.indexFile(deleted, "deleted")
+    expect(index.search("authentication")).toHaveLength(2)
+    index.close()
+  })
+
+  it("excludes a session including its subagent rows before limiting and counting", () => {
+    const index = new SearchIndex(dbPath)
+    for (const [name, sessionId, isSubagent] of [["old", "old", false], ["current", "current", false], ["agent", "current", true]] as const) {
+      const file = join(tmpDir, `${name}.jsonl`)
+      writeFileSync(file, JSON.stringify({ type: "user", message: { role: "user", content: "authentication" } }))
+      index.indexFile(file, sessionId, undefined, { isSubagent, parentSessionId: isSubagent ? sessionId : null })
+    }
+    expect(index.search("authentication", { excludeSessionId: "current", limit: 1 }).map((hit) => hit.sessionId)).toEqual(["old"])
+    expect(index.countMatches("authentication", { excludeSessionId: "current" })).toEqual({ totalHits: 1, sessionsSearched: 1 })
+    index.close()
   })
 
   it("creates database and schema", () => {
@@ -68,7 +93,6 @@ describe("SearchIndex", () => {
     expect(stats).toHaveProperty("dbSizeBytes")
     expect(stats).toHaveProperty("indexedFiles")
     expect(stats).toHaveProperty("totalRows")
-    expect(stats).toHaveProperty("watcherRunning")
     index.close()
   })
 
@@ -79,7 +103,7 @@ describe("SearchIndex", () => {
     writeFileSync(join(projectDir, "s2.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "keyword beta" } }))
 
     const index = new SearchIndex(dbPath)
-    index.buildFull(join(tmpDir, "projects"))
+    index.buildFull()
     expect(index.getStats().indexedFiles).toBe(2)
     expect(index.search("keyword").length).toBe(2)
     index.close()
@@ -88,10 +112,12 @@ describe("SearchIndex", () => {
   it("builds a full index from the Copilot session-state directory", () => {
     const copilotDir = join(tmpDir, "copilot-sessions")
     const sessionId = "11111111-1111-4111-8111-111111111111"
-    const sessionFile = writeCopilotSession(copilotDir, sessionId, "copilot full index needle")
+    const sessionFile = writeCopilotSession(copilotDir, sessionId, {
+      userMessage: "copilot full index needle",
+    })
 
     const index = new SearchIndex(dbPath)
-    index.buildFull(join(tmpDir, "missing-projects"), copilotDir)
+    index.buildFull()
 
     expect(index.getStats().indexedFiles).toBe(1)
     expect(index.search("full index needle")).toEqual([
@@ -107,9 +133,11 @@ describe("SearchIndex", () => {
     mkdirSync(projectsDir, { recursive: true })
 
     const index = new SearchIndex(dbPath)
-    index.buildFull(projectsDir, copilotDir)
-    writeCopilotSession(copilotDir, sessionId, "copilot incremental needle")
-    index.updateRecent(projectsDir, 50, copilotDir)
+    index.buildFull()
+    writeCopilotSession(copilotDir, sessionId, {
+      userMessage: "copilot incremental needle",
+    })
+    index.updateRecent(50)
 
     expect(index.getStats().indexedFiles).toBe(1)
     expect(index.search("incremental needle")).toEqual([
@@ -125,41 +153,10 @@ describe("SearchIndex", () => {
     writeFileSync(join(projectDir, "s1.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "unique searchterm here" } }))
     writeFileSync(join(projectDir, "s2.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "another unique searchterm" } }))
 
-    index.buildFull(join(tmpDir, "projects"))
+    index.buildFull()
     const counts = index.countMatches("searchterm")
     expect(counts.totalHits).toBe(2)
     expect(counts.sessionsSearched).toBe(2)
-    index.close()
-  })
-
-  it("updateStale only re-indexes changed files", () => {
-    const index = new SearchIndex(dbPath)
-    const projectDir = join(tmpDir, "projects", "-test-proj")
-    mkdirSync(projectDir, { recursive: true })
-    writeFileSync(join(projectDir, "s1.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "original content" } }))
-
-    index.buildFull(join(tmpDir, "projects"))
-    expect(index.getStats().indexedFiles).toBe(1)
-
-    // Add a new file
-    writeFileSync(join(projectDir, "s2.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "new content" } }))
-    index.updateStale(join(tmpDir, "projects"))
-    expect(index.getStats().indexedFiles).toBe(2)
-    index.close()
-  })
-
-  it("rebuild re-indexes from stored projectsDir", () => {
-    const index = new SearchIndex(dbPath)
-    const projectDir = join(tmpDir, "projects", "-test-proj")
-    mkdirSync(projectDir, { recursive: true })
-    writeFileSync(join(projectDir, "s1.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "rebuild test" } }))
-
-    index.buildFull(join(tmpDir, "projects"))
-    expect(index.getStats().indexedFiles).toBe(1)
-
-    // rebuild should work without passing projectsDir again
-    index.rebuild()
-    expect(index.getStats().indexedFiles).toBe(1)
     index.close()
   })
 
@@ -170,7 +167,7 @@ describe("SearchIndex", () => {
     writeFileSync(join(projectDir, "sess-a.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "common keyword" } }))
     writeFileSync(join(projectDir, "sess-b.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "common keyword" } }))
 
-    index.buildFull(join(tmpDir, "projects"))
+    index.buildFull()
     const allHits = index.search("common keyword")
     expect(allHits.length).toBe(2)
 

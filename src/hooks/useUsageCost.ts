@@ -10,10 +10,9 @@ interface UsageCostState {
 
 /**
  * Raw API cost summary for the trailing `days` window, bucketed in the
- * browser's time zone. `enabled: false` defers the scan until the surface is
- * actually shown — a cold scan reads every transcript in the window.
+ * browser's time zone.
  */
-export function useUsageCost(days: number, enabled: boolean): UsageCostState & {
+export function useUsageCost(days: number): UsageCostState & {
   refresh: () => void
 } {
   const [state, setState] = useState<UsageCostState>({
@@ -24,7 +23,6 @@ export function useUsageCost(days: number, enabled: boolean): UsageCostState & {
   const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
-    if (!enabled) return
     const controller = new AbortController()
     setState((prev) => ({ ...prev, loading: true, error: null }))
 
@@ -47,7 +45,7 @@ export function useUsageCost(days: number, enabled: boolean): UsageCostState & {
       })
 
     return () => controller.abort()
-  }, [days, enabled, generation])
+  }, [days, generation])
 
   const refresh = useCallback(() => setGeneration((n) => n + 1), [])
 

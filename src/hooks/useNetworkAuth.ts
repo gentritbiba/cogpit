@@ -7,7 +7,21 @@ import {
   refreshServerHello,
   type ServerHello,
 } from "@/lib/auth"
-import type { NetworkAuth } from "@/contexts/AppContext"
+import type { CogpitEdition } from "../../shared/contracts/team"
+
+export interface NetworkAuth {
+  isRemote: boolean
+  /** Edition reported by the public handshake; null until it resolves. */
+  edition: CogpitEdition | null
+  authChecked: boolean
+  authenticated: boolean
+  /** Team server with no accounts: the gate shows the first-admin screen. */
+  needsBootstrap: boolean
+  handleAuthenticated: () => void
+  /** Re-read the public handshake after the bootstrap state changes. */
+  refreshServerState: () => Promise<void>
+  logout: () => void
+}
 
 export function useNetworkAuth(): NetworkAuth {
   const remote = isRemoteClient()

@@ -71,7 +71,8 @@ import {
   DeviceUnreachableError,
 } from "../../hub/device-client"
 import { invalidateDeviceConnections } from "../../hub/connection-invalidation"
-import type { UseFn, Middleware } from "../../helpers"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, getRouteHandler } from "../http-fixtures"
 import { registerDeviceRoutes } from "../../routes/devices"
 
 const mockedGetDevice = vi.mocked(getDevice)
@@ -166,10 +167,7 @@ function createMockReqRes(
 }
 
 function getHandler(): Middleware {
-  const handlers = new Map<string, Middleware>()
-  const use: UseFn = (path, handler) => { handlers.set(path, handler) }
-  registerDeviceRoutes(use)
-  return handlers.get("/api/hub/devices")!
+  return getRouteHandler(collectRoutes(registerDeviceRoutes), "/api/hub/devices")
 }
 
 /** Drive a body-reading handler: invoke, flush the body, await the response. */

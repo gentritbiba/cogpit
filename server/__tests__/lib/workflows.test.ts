@@ -14,7 +14,6 @@ import { isWithinDir, readdir, readFile, stat } from "../../helpers"
 import {
   summarizeJournal,
   normalizeDetail,
-  isTerminalAgentState,
   listSessionWorkflows,
   readWorkflowAgentResult,
   readWorkflowDetail,
@@ -53,17 +52,6 @@ describe("workflow normalization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockedIsWithinDir.mockReturnValue(true)
-  })
-
-  describe("isTerminalAgentState", () => {
-    it("treats done/error/skipped as terminal and others as not", () => {
-      expect(isTerminalAgentState("done")).toBe(true)
-      expect(isTerminalAgentState("error")).toBe(true)
-      expect(isTerminalAgentState("skipped")).toBe(true)
-      expect(isTerminalAgentState("running")).toBe(false)
-      expect(isTerminalAgentState("queued")).toBe(false)
-      expect(isTerminalAgentState("progress")).toBe(false)
-    })
   })
 
   describe("summarizeJournal", () => {

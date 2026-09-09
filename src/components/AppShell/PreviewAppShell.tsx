@@ -32,11 +32,11 @@ export function PreviewAppShell({
   isLoadingOlderTurns,
   onLoadMoreTurns,
 }: PreviewAppShellProps) {
-  const { theme, isMobile } = useAppContext()
+  const { isMobile } = useAppContext()
   const { session } = useSessionContext()
 
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col overflow-hidden bg-background text-foreground`}>
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {session ? (
         <main className="relative flex min-h-0 flex-1 flex-col">
           <ChatArea

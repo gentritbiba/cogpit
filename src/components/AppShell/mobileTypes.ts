@@ -1,4 +1,5 @@
 import type { MutableRefObject, ReactNode, RefObject } from "react"
+import type { PendingSessionInfo } from "@/components/session-browser/types"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useProcessPanel } from "@/hooks/useProcessPanel"
@@ -23,11 +24,7 @@ export interface MobileNavigation {
   actions: MobileSessionActions
   handlers: MobileAppHandlers
   creatingSession: boolean
-  pendingSession: {
-    dirName: string
-    cwd?: string | null
-    firstMessage?: string
-  } | null
+  pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
   onSelectProject: (dirName: string | null) => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
@@ -69,8 +66,6 @@ export interface MobileChrome {
   branchModal: ReactNode
   fileChangesOpen: boolean
   onFileChangesOpenChange: (open: boolean) => void
-  searchOpen: boolean
-  onSearchOpenChange: (open: boolean) => void
 }
 
 export interface MobileAppShellProps {

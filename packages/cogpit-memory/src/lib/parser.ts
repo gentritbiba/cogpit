@@ -61,23 +61,3 @@ export function getUserMessageImages(content: UserContent | null): ImageBlock[] 
   if (content === null || typeof content === "string") return []
   return content.filter((b): b is ImageBlock => b.type === "image")
 }
-
-// ── Tool Colors ─────────────────────────────────────────────────────────────
-
-const FOREGROUND_TOOLS = new Set([
-  "Write",
-  "Edit",
-  "Bash",
-  "Task", // @deprecated pre-v2.1.63, now "Agent"
-  "Agent",
-  "NotebookEdit",
-  "AskUserQuestion",
-  "TodoWrite",
-  "Skill",
-  "Image",
-  "exec",
-])
-
-export function getToolColor(toolName: string): string {
-  return FOREGROUND_TOOLS.has(toolName) ? "text-foreground" : "text-muted-foreground"
-}

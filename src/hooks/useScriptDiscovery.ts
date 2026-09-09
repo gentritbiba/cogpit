@@ -1,16 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
 import { useCapability } from "@/hooks/useCapability"
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface ScriptEntry {
-  name: string
-  command: string
-  dir: string
-  dirLabel: string
-  isCommon: boolean
-}
+import type { ScriptEntry } from "../../shared/contracts/projectTools"
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 

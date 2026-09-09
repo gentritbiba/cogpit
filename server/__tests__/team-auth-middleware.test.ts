@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
+import { createMiddlewareRes as mockRes } from "./http-fixtures"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -88,18 +89,6 @@ function mockReq(url: string, opts: RequestOptions = {}): IncomingMessage {
     method: opts.method ?? "GET",
     headers,
   } as unknown as IncomingMessage
-}
-
-function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
-  let body = ""
-  let statusCode = 200
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn(),
-    end: (data?: string) => { body = data || "" },
-  } as unknown as ServerResponse
-  return { res, get body() { return body }, get statusCode() { return statusCode } }
 }
 
 function run(url: string, opts: RequestOptions = {}) {

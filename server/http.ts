@@ -71,11 +71,16 @@ export function readJsonBody<T = unknown>(
         resolve({} as T)
         return
       }
+      let parsed: T
       try {
-        resolve(JSON.parse(body) as T)
+        parsed = JSON.parse(body) as T
       } catch {
         reject(new HttpBodyError("Invalid JSON body", 400))
+        return
       }
+      // A literal `null` is valid JSON but no more useful than an empty body,
+      // and allowEmpty callers destructure whatever they get back.
+      resolve(parsed === null && options.allowEmpty ? ({} as T) : parsed)
     })
     req.on("error", () => {
       rejectOnce(new HttpBodyError("Failed to read request body", 400))

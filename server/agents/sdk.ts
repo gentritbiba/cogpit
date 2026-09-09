@@ -6,10 +6,30 @@
  * that wants to add a paragraph or watch a tool call imports this instead of
  * naming the CLI itself.
  */
-import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import { query, type Options, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import { claudeCliPath } from "./claudeExecutable"
 
 /** A callback the CLI runs before or after an event, e.g. a tool call. */
 export type { HookCallback } from "@anthropic-ai/claude-agent-sdk"
+
+/** Open a query only to issue control requests, and close it afterwards. */
+export async function withControlQuery<T>(
+  options: Pick<Options, "cwd" | "resume" | "maxTurns" | "enableFileCheckpointing">,
+  use: (q: Query) => Promise<T>,
+): Promise<T> {
+  const abort = new AbortController()
+  const q = query({
+    // eslint-disable-next-line require-yield
+    prompt: (async function* (): AsyncGenerator<SDKUserMessage> { await new Promise(() => {}) })(),
+    options: { ...options, abortController: abort, pathToClaudeCodeExecutable: claudeCliPath() },
+  })
+  try {
+    return await use(q)
+  } finally {
+    abort.abort()
+    q.close()
+  }
+}
 
 /**
  * The CLI's default system prompt with `text` after it. An append already set

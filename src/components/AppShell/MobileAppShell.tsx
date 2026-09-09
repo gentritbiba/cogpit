@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react"
+import { lazy, Suspense, useMemo, useState } from "react"
 import { TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatArea } from "@/components/ChatArea"
@@ -31,8 +31,9 @@ export function MobileAppShell({
   project,
   chrome,
 }: MobileAppShellProps) {
-  const { state, theme } = useAppContext()
+  const { state } = useAppContext()
   const { session, isSubAgentView } = useSessionContext()
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const visibleTabs = useMemo(() => visibleMobileTabs({
     hasSession: Boolean(session),
@@ -42,7 +43,6 @@ export function MobileAppShell({
   )
 
   const swipeRef = useSwipeNavigation<HTMLElement>({
-    enabled: true,
     onSwipeLeft: () => {
       const nextTab = adjacentMobileTab(visibleTabs, state.mobileTab, 1)
       if (nextTab) {
@@ -60,12 +60,12 @@ export function MobileAppShell({
   })
 
   const changeTab = (tab: MobileTab): void => {
-    chrome.onSearchOpenChange(false)
+    setSearchOpen(false)
     navigation.actions.handleMobileTabChange(tab)
   }
 
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
+    <div className="flex h-dvh flex-col bg-background text-foreground">
       {chrome.backgroundServers}
       <UpdateBanner />
       <ProviderUpdateBanner />
@@ -95,13 +95,12 @@ export function MobileAppShell({
                     creatingSession={navigation.creatingSession}
                     onNewSession={navigation.onStartNewSession}
                     onDuplicateSession={navigation.handlers.handleDuplicateSession}
-                    onOpenTerminal={project.onOpenTerminal}
                     onBackToMain={isSubAgentView ? sessionView.onBackToMain : undefined}
                     onShowFileChanges={() => chrome.onFileChangesOpenChange(true)}
                     hasFileChanges={project.hasFileChanges}
                     onShowWorkflows={sessionView.onShowWorkflows}
                     workflowCount={sessionView.workflowCount}
-                    onSearch={() => chrome.onSearchOpenChange(true)}
+                    onSearch={() => setSearchOpen(true)}
                     expandAll={state.expandAll}
                     onToggleExpandAll={sessionView.onToggleExpandAll}
                   />
@@ -110,8 +109,8 @@ export function MobileAppShell({
                     hasMore={sessionView.hasMoreTurns}
                     isLoadingOlder={sessionView.isLoadingOlderTurns}
                     onLoadMore={sessionView.onLoadMoreTurns}
-                    mobileSearchOpen={chrome.searchOpen}
-                    onMobileSearchClose={() => chrome.onSearchOpenChange(false)}
+                    mobileSearchOpen={searchOpen}
+                    onMobileSearchClose={() => setSearchOpen(false)}
                   />
                 </div>
               ) : state.pendingDirName ? (

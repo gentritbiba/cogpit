@@ -3,18 +3,23 @@ import type { ServerResponse } from "node:http"
 import {
   agentKindForDirName,
   descriptorFor,
-  descriptorForDirName,
 } from "../../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import { runtimeFor } from "../../agents/runtimes"
 import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes"
-import { dirs, isWithinDir, join, open, readdir } from "../../helpers"
-import { MAX_REQUEST_BODY_BYTES, withJsonBody, type UseFn } from "../../http"
+import { dirs, isWithinDir, join } from "../../helpers"
+import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type UseFn } from "../../http"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
 import { sendAgentError } from "../agentErrors"
+import { getDataRoot } from "../../config"
+import { getRequestPrincipal } from "../../team/requestPrincipal"
+import { resolveProjectCwd } from "../../lib/projectCwd"
+import { SessionCreationRequests } from "../../lib/sessionCreationRequests"
+
+const creationRequests = new SessionCreationRequests(() => join(getDataRoot(), "session-creation-requests"))
 
 /**
- * The two session-creation routes, for every agent.
+ * The session-creation route, for every agent.
  *
  * All the per-agent work — which transport creates the session, how its
  * transcript is named and found, how a failed create is rolled back — lives
@@ -23,8 +28,9 @@ import { sendAgentError } from "../agentErrors"
  * shaping the response.
  */
 
-/** Payload shared by the two session-spawn routes. */
+/** Payload the session-spawn route accepts. */
 interface NewSessionBody {
+  requestId?: string
   dirName?: string
   cwd?: string
   message?: string
@@ -37,50 +43,6 @@ interface NewSessionBody {
   worktreeName?: string
   mcpConfig?: string | null
   name?: string
-}
-
-/**
- * Recover the project path a session should run in.
- *
- * Only an agent whose dirName is a lossy encoding of the cwd needs this: the
- * real path has to be read back out of a transcript already in the directory.
- * The others encode the path itself and decode it exactly.
- */
-export async function resolveProjectPath(
-  projectDir: string,
-  dirName: string
-): Promise<string> {
-  try {
-    const files = await readdir(projectDir)
-    for (const f of files.filter((file) => file.endsWith(".jsonl"))) {
-      try {
-        const fh = await open(join(projectDir, f), "r")
-        try {
-          const buf = Buffer.alloc(8192)
-          const { bytesRead } = await fh.read(buf, 0, 8192, 0)
-          const lines = buf.subarray(0, bytesRead).toString("utf-8").split("\n")
-          for (const line of lines) {
-            if (!line) continue
-            try {
-              const parsed = JSON.parse(line)
-              if (parsed.cwd) {
-                return parsed.cwd
-              }
-            } catch {
-              continue
-            }
-          }
-        } finally {
-          await fh.close()
-        }
-      } catch {
-        continue
-      }
-    }
-  } catch {
-    // projectDir might not exist yet
-  }
-  return descriptorForDirName(dirName).dirName.decode(dirName) ?? projectDir
 }
 
 function isUsablePath(value: unknown): value is string {
@@ -118,7 +80,7 @@ async function resolveSpawnCwd(
   if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
     return new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied")
   }
-  if (requestedCwd === undefined) return resolveProjectPath(projectDir, dirName)
+  if (requestedCwd === undefined) return await resolveProjectCwd(projectDir, dirName) ?? projectDir
   if (!isUsablePath(requestedCwd)) {
     return new RouteError(
       400,
@@ -132,17 +94,13 @@ async function resolveSpawnCwd(
   return requestedCwd
 }
 
-/**
- * Run a spawn and answer with the created session.
- *
- * `/api/new-session` and `/api/create-and-send` differ only in which fields
- * they accept and whether the first turn is awaited, so they share this tail.
- */
+/** Run a spawn and answer with the created session. */
 async function respondWithSession(
   res: ServerResponse,
   dirName: string,
   requestedCwd: string | undefined,
   request: Omit<StartSessionRequest, "dirName" | "cwd">,
+  retry?: { requestId: string; scope: string },
 ): Promise<void> {
   const kind = agentKindForDirName(dirName)
   const cwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
@@ -153,18 +111,26 @@ async function respondWithSession(
 
   const runtime = runtimeFor(kind)
   try {
-    const started = await runtime.start({ ...request, dirName, cwd })
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({
+    const startRequest = { ...request, dirName, cwd }
+    const start = () => runtime.start(startRequest)
+    const started = retry
+      ? await creationRequests.run(retry.scope, retry.requestId, startRequest, start)
+      : await start()
+    sendJson(res, 200, {
       success: true,
+      ...(retry ? { requestId: retry.requestId } : {}),
       dirName: started.dirName,
       fileName: started.fileName,
       sessionId: started.sessionId,
       ...(started.initialContent !== undefined
         ? { initialContent: started.initialContent }
         : {}),
-    }))
+    })
   } catch (error) {
+    if (error instanceof RouteError) {
+      sendError(res, error)
+      return
+    }
     sendAgentError(
       res,
       error,
@@ -173,42 +139,13 @@ async function respondWithSession(
   }
 }
 
-export function registerNewSessionRoute(use: UseFn) {
-  use("/api/new-session", (req, res, next) => {
-    if (req.method !== "POST") return next()
-
-    withJsonBody<NewSessionBody>(req, res, async (body) => {
-      const { dirName, message, permissions, model, effort, fastMode, name } = body
-      if (!dirName || !message) {
-        sendError(res, new RouteError(
-          400,
-          ErrorCodes.INVALID_REQUEST,
-          "dirName and message are required",
-        ))
-        return
-      }
-      await respondWithSession(res, dirName, undefined, {
-        message,
-        permissions,
-        model,
-        effort,
-        fastMode,
-        name,
-        // A session created here has no follow-up waiting on it, so Claude runs
-        // its CLI once and reports only once that run has produced a transcript.
-        oneShot: true,
-      })
-    })
-  })
-}
-
 export function registerCreateAndSendRoute(use: UseFn) {
   use("/api/create-and-send", (req, res, next) => {
     if (req.method !== "POST") return next()
 
     withJsonBody<NewSessionBody>(req, res, async (body) => {
       const {
-        dirName, cwd, message, images, permissions,
+        requestId, dirName, cwd, message, images, permissions,
         model, effort, fastMode, ultracode, worktreeName, mcpConfig, name,
       } = body
       if (!dirName || (!message && (!images || !images.length))) {
@@ -230,6 +167,9 @@ export function registerCreateAndSendRoute(use: UseFn) {
         worktreeName,
         mcpConfig,
         name,
+      }, requestId === undefined ? undefined : {
+        requestId,
+        scope: getRequestPrincipal(req)?.userId ?? "local",
       })
     }, { maxBytes: MAX_REQUEST_BODY_BYTES })
   })

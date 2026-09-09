@@ -12,6 +12,7 @@ import type {
 } from "../../shared/contracts/vercelDeployments"
 import { sendJson, type UseFn } from "../http"
 import { resolveAgentCommand } from "../lib/binaryResolver"
+import { clampLimit, nullableString, record, stringValue } from "./apiValues"
 
 const execFile = promisify(execFileCallback)
 const DEFAULT_DEPLOYMENT_LIMIT = 20
@@ -62,20 +63,6 @@ export class VercelDeploymentsRouteError extends Error {
   ) {
     super(message)
   }
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function stringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback
-}
-
-function nullableString(value: unknown): string | null {
-  return typeof value === "string" && value ? value : null
 }
 
 function timestamp(value: unknown): number | null {
@@ -362,11 +349,6 @@ const defaultDependencies: VercelDeploymentDependencies = {
   vercelApi: runVercelApi,
 }
 
-function boundedLimit(value: string | null, fallback: number, maximum: number): number {
-  const requested = Number(value ?? fallback)
-  return Number.isInteger(requested) ? Math.min(maximum, Math.max(1, requested)) : fallback
-}
-
 function sendRouteError(res: Parameters<typeof sendJson>[0], error: unknown): void {
   const detail = mapVercelFailure(error)
   sendJson(res, detail.status, { error: detail.message, code: detail.code })
@@ -380,7 +362,7 @@ export function registerVercelDeploymentRoutes(
     if (req.method !== "GET") return next()
     const url = new URL(req.url || "", "http://localhost")
     if (url.pathname !== "/" && url.pathname !== "") return next()
-    const limit = boundedLimit(url.searchParams.get("limit"), DEFAULT_DEPLOYMENT_LIMIT, MAX_DEPLOYMENT_LIMIT)
+    const limit = clampLimit(url.searchParams.get("limit"), DEFAULT_DEPLOYMENT_LIMIT, MAX_DEPLOYMENT_LIMIT)
 
     try {
       const project = await dependencies.resolveProject(url.searchParams.get("cwd") ?? "")
@@ -410,7 +392,7 @@ export function registerVercelDeploymentRoutes(
         code: "vercel_api_failed",
       })
     }
-    const limit = boundedLimit(url.searchParams.get("limit"), DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT)
+    const limit = clampLimit(url.searchParams.get("limit"), DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT)
 
     try {
       const project = await dependencies.resolveProject(url.searchParams.get("cwd") ?? "")

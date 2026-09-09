@@ -1,10 +1,6 @@
 import { flushSync } from "react-dom"
 
-export type ViewTransitionKind =
-  | "fade"
-  | "panel-left"
-  | "panel-right"
-  | "panel-bottom"
+export type ViewTransitionKind = "fade"
 
 export interface ViewTransitionOptions {
   kind: ViewTransitionKind

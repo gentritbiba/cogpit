@@ -1,7 +1,6 @@
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
 import type { AgentKind } from "@/lib/agents"
-import type { CogpitEdition, MeResponse } from "../../shared/contracts/team"
 
 // ── App Config ──────────────────────────────────────────────────────────────
 
@@ -26,25 +25,8 @@ export interface AppConfig {
 export interface ThemeContext {
   theme: "dark" | "oled" | "light"
   activeTheme: "dark" | "oled" | "light"
-  themeClasses: string
   setTheme: (id: "dark" | "oled" | "light") => void
   setPreview: (id: "dark" | "oled" | "light" | null) => void
-}
-
-// ── Network Auth ────────────────────────────────────────────────────────────
-
-export interface NetworkAuth {
-  isRemote: boolean
-  /** Edition reported by the public handshake; null until it resolves. */
-  edition: CogpitEdition | null
-  authChecked: boolean
-  authenticated: boolean
-  /** Team server with no accounts: the gate shows the first-admin screen. */
-  needsBootstrap: boolean
-  handleAuthenticated: () => void
-  /** Re-read the public handshake after the bootstrap state changes. */
-  refreshServerState: () => Promise<void>
-  logout: () => void
 }
 
 // ── Combined App Context ────────────────────────────────────────────────────
@@ -54,9 +36,6 @@ export interface AppContextValue {
   dispatch: Dispatch<SessionAction>
   config: AppConfig
   theme: ThemeContext
-  networkAuth: NetworkAuth
-  /** Signed-in identity + capabilities from /api/me. */
-  me: MeResponse
   isMobile: boolean
 }
 

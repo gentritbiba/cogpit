@@ -1,14 +1,12 @@
 import { memo, useState } from "react"
 import { ChevronDown, ChevronRight, History } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
-import { markdownComponents } from "./markdown-components"
+import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface Props {
   content: string
-  timestamp?: string
 }
 
 /**
@@ -34,7 +32,7 @@ export const RecapBanner = memo(function RecapBanner({ content }: Props) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="prose prose-sm dark:prose-invert max-w-none border-t px-3 pb-2 pt-2">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
             {content}
           </ReactMarkdown>
         </div>

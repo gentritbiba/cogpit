@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { sendJson, type UseFn } from "../http"
 import { rankProjectFiles } from "./project-files-ranking"
+import type { ProjectTreeEntry } from "../../shared/contracts/projectTools"
 
 const MAX_FILES = 20_000
 const CACHE_TTL_MS = 30_000
@@ -85,11 +86,6 @@ export async function listProjectFiles(
   files.sort((a, b) => a.localeCompare(b))
   fileCache.set(root, { expiresAt: Date.now() + CACHE_TTL_MS, files })
   return files
-}
-
-export interface ProjectTreeEntry {
-  name: string
-  type: "file" | "directory"
 }
 
 /**

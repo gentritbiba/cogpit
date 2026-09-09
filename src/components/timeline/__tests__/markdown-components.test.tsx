@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import ReactMarkdown from "react-markdown"
-import { authFetch, authUrl } from "@/lib/auth"
+import { authUrl, jsonFetch } from "@/lib/auth"
 import { markdownComponents, parseLocalFileHref } from "../markdown-components"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
 
 vi.mock("@/lib/auth", () => ({
-  authFetch: vi.fn().mockResolvedValue({ ok: true }),
+  jsonFetch: vi.fn().mockResolvedValue({ ok: true }),
   // Identity by default; real authUrl applies the device prefix + token.
   authUrl: vi.fn((url: string) => url),
 }))
@@ -47,15 +47,11 @@ describe("markdown file links", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Open app.ts" }))
 
-    expect(authFetch).toHaveBeenCalledWith("/api/open-in-editor", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: "/Users/me/My Project/src/app.ts",
-        mode: "file",
-        line: 42,
-        column: 7,
-      }),
+    expect(jsonFetch).toHaveBeenCalledWith("/api/open-in-editor", {
+      path: "/Users/me/My Project/src/app.ts",
+      mode: "file",
+      line: 42,
+      column: 7,
     })
   })
 
@@ -70,7 +66,7 @@ describe("markdown file links", () => {
     fireEvent.click(screen.getByRole("link", { name: "Open docs" }))
 
     expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank", "noopener,noreferrer")
-    expect(authFetch).not.toHaveBeenCalled()
+    expect(jsonFetch).not.toHaveBeenCalled()
     open.mockRestore()
   })
 
@@ -89,7 +85,7 @@ describe("markdown file links", () => {
 
     expect(screen.queryByRole("link", { name: "Open app.ts" })).not.toBeInTheDocument()
     expect(screen.getByText("Open app.ts")).toBeInTheDocument()
-    expect(authFetch).not.toHaveBeenCalled()
+    expect(jsonFetch).not.toHaveBeenCalled()
   })
 })
 

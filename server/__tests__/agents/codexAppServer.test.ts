@@ -511,8 +511,6 @@ describe("CodexAppServer approvals", () => {
   it("normalizes command and file approvals by thread", async () => {
     const harness = createHarness()
     const child = await initialize(harness)
-    const approvalChanges = vi.fn()
-    harness.server.subscribeApprovals(approvalChanges)
 
     child.send({
       method: "item/commandExecution/requestApproval",
@@ -556,10 +554,6 @@ describe("CodexAppServer approvals", () => {
         grantRoot: "/shared",
       }),
     ])
-    expect(approvalChanges).toHaveBeenLastCalledWith(
-      "thread-1",
-      expect.any(Array),
-    )
     expect(harness.server.listPendingApprovals("another-thread")).toEqual([])
   })
 
@@ -653,8 +647,6 @@ describe("CodexAppServer approvals", () => {
   it("surfaces descendant approvals under every ancestor thread", async () => {
     const harness = createHarness()
     const child = await initialize(harness)
-    const approvalChanges = vi.fn()
-    harness.server.subscribeApprovals(approvalChanges)
 
     child.send({
       method: "thread/started",
@@ -686,12 +678,6 @@ describe("CodexAppServer approvals", () => {
       }),
     ])
     expect(harness.server.listPendingApprovals("child-thread")).toHaveLength(1)
-    expect(approvalChanges).toHaveBeenCalledWith(
-      "root-thread",
-      expect.arrayContaining([
-        expect.objectContaining({ requestId: "child-approval" }),
-      ]),
-    )
 
     const approval = harness.server.listPendingApprovals("root-thread")[0]
     await harness.server.respondApproval(approval, "allow")

@@ -12,6 +12,7 @@ import {
 import { findExecutableOnPath, resolveAgentCommand } from "../lib/binaryResolver"
 import { browserAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
+import { isRecord } from "../../shared/objects"
 
 export type CopilotJsonObject = Record<string, unknown>
 
@@ -284,17 +285,13 @@ class TeardownResilientStreamMessageWriter extends StreamMessageWriter {
   }
 }
 
-function isObject(value: unknown): value is CopilotJsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function errorFrom(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value))
 }
 
 function isMethodNotFound(error: unknown): boolean {
   let current = error
-  for (let depth = 0; depth < 3 && isObject(current); depth++) {
+  for (let depth = 0; depth < 3 && isRecord(current); depth++) {
     if (current.code === -32601) return true
     current = current.cause
   }
@@ -394,15 +391,15 @@ export class CopilotRuntime {
 
   async listModels(): Promise<CopilotModel[]> {
     const response = await this.request<unknown>("models.list", {})
-    if (!isObject(response) || !Array.isArray(response.models)) {
+    if (!isRecord(response) || !Array.isArray(response.models)) {
       throw new CopilotRuntimeError("Copilot CLI models.list returned no models")
     }
-    return response.models.filter(isObject) as CopilotModel[]
+    return response.models.filter(isRecord) as CopilotModel[]
   }
 
   async getAccountQuota(): Promise<CopilotAccountQuota> {
     const response = await this.request<unknown>("account.getQuota", {})
-    if (!isObject(response) || !isObject(response.quotaSnapshots)) {
+    if (!isRecord(response) || !isRecord(response.quotaSnapshots)) {
       throw new CopilotRuntimeError(
         "Copilot CLI account.getQuota returned no quota snapshots",
       )
@@ -410,7 +407,7 @@ export class CopilotRuntime {
 
     const quotaSnapshots: Record<string, CopilotAccountQuotaSnapshot> = {}
     for (const [name, value] of Object.entries(response.quotaSnapshots)) {
-      if (!isObject(value)) continue
+      if (!isRecord(value)) continue
       const snapshot: CopilotAccountQuotaSnapshot = {}
       if (typeof value.isUnlimitedEntitlement === "boolean") {
         snapshot.isUnlimitedEntitlement = value.isUnlimitedEntitlement
@@ -446,7 +443,7 @@ export class CopilotRuntime {
   async getSessionUsage(sessionId: string): Promise<CopilotSessionUsage> {
     this.assertSessionActive(sessionId)
     const response = await this.request<unknown>("session.usage.getMetrics", { sessionId })
-    if (!isObject(response)) {
+    if (!isRecord(response)) {
       throw new CopilotRuntimeError(
         "Copilot CLI session.usage.getMetrics returned an invalid response",
       )
@@ -458,15 +455,15 @@ export class CopilotRuntime {
     if (typeof response.totalPremiumRequestCost === "number") {
       usage.totalPremiumRequestCost = response.totalPremiumRequestCost
     }
-    if (isObject(response.modelMetrics)) {
+    if (isRecord(response.modelMetrics)) {
       usage.modelMetrics = Object.fromEntries(
         Object.entries(response.modelMetrics).flatMap(([model, value]) => {
-          if (!isObject(value)) return []
+          if (!isRecord(value)) return []
           const metric: CopilotSessionModelUsage = {}
           if (typeof value.totalNanoAiu === "number") {
             metric.totalNanoAiu = value.totalNanoAiu
           }
-          if (isObject(value.usage)) {
+          if (isRecord(value.usage)) {
             const tokenUsage: CopilotSessionModelTokenUsage = {}
             for (const key of [
               "inputTokens",
@@ -522,7 +519,7 @@ export class CopilotRuntime {
       const usage = await this.request<unknown>("sessions.checkInUse", {
         sessionIds: [sessionId],
       })
-      if (!isObject(usage) || !Array.isArray(usage.inUse)) {
+      if (!isRecord(usage) || !Array.isArray(usage.inUse)) {
         throw new CopilotRuntimeError(
           "Copilot CLI sessions.checkInUse returned an invalid response",
         )
@@ -587,7 +584,7 @@ export class CopilotRuntime {
         sessionId,
         ...options,
       })
-      if (!isObject(response)) {
+      if (!isRecord(response)) {
         throw new CopilotRuntimeError("Copilot CLI session.send returned an invalid response")
       }
       return requiredString(response, "messageId", "session.send")
@@ -617,7 +614,7 @@ export class CopilotRuntime {
 
   async deleteSession(sessionId: string): Promise<CopilotDeleteSessionResult> {
     const response = await this.request<unknown>("session.delete", { sessionId })
-    if (!isObject(response) || typeof response.success !== "boolean") {
+    if (!isRecord(response) || typeof response.success !== "boolean") {
       throw new CopilotRuntimeError("Copilot CLI session.delete returned an invalid response")
     }
     const result: CopilotDeleteSessionResult = {
@@ -641,7 +638,7 @@ export class CopilotRuntime {
       sessionId,
       ...options,
     })
-    if (!isObject(response)) {
+    if (!isRecord(response)) {
       throw new CopilotRuntimeError("Copilot CLI sessions.fork returned an invalid response")
     }
     const forkedSessionId = requiredString(response, "sessionId", "sessions.fork")
@@ -661,7 +658,7 @@ export class CopilotRuntime {
       eventId,
     })
     if (
-      !isObject(response)
+      !isRecord(response)
       || typeof response.available !== "boolean"
       || typeof response.fileCount !== "number"
       || !Array.isArray(response.files)
@@ -685,7 +682,7 @@ export class CopilotRuntime {
       mode,
     })
     if (
-      !isObject(response)
+      !isRecord(response)
       || typeof response.outcome !== "string"
       || !Array.isArray(response.restoredFiles)
       || !Array.isArray(response.skippedFiles)
@@ -722,7 +719,7 @@ export class CopilotRuntime {
         source: "rpc",
       })
     }
-    if (!isObject(response) || response.success !== true) {
+    if (!isRecord(response) || response.success !== true) {
       throw new CopilotRuntimeError("Copilot CLI failed to update its permission mode")
     }
   }
@@ -738,7 +735,7 @@ export class CopilotRuntime {
       modelId,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     })
-    if (!isObject(response)) {
+    if (!isRecord(response)) {
       throw new CopilotRuntimeError("Copilot CLI session.model.switchTo returned an invalid response")
     }
     return {
@@ -756,7 +753,7 @@ export class CopilotRuntime {
       sessionId,
       reasoningEffort,
     })
-    if (!isObject(response) || typeof response.reasoningEffort !== "string") {
+    if (!isRecord(response) || typeof response.reasoningEffort !== "string") {
       throw new CopilotRuntimeError(
         "Copilot CLI session.model.setReasoningEffort returned an invalid response",
       )
@@ -774,7 +771,7 @@ export class CopilotRuntime {
     const response = await this.request<unknown>("session.permissions.pendingRequests", {
       sessionId,
     })
-    if (!isObject(response) || !Array.isArray(response.items)) {
+    if (!isRecord(response) || !Array.isArray(response.items)) {
       throw new CopilotRuntimeError(
         "Copilot CLI session.permissions.pendingRequests returned an invalid response",
       )
@@ -782,7 +779,7 @@ export class CopilotRuntime {
 
     const requests = new Map<string, CopilotPendingPermission>()
     for (const item of response.items) {
-      if (!isObject(item) || typeof item.requestId !== "string") continue
+      if (!isRecord(item) || typeof item.requestId !== "string") continue
       requests.set(item.requestId, {
         sessionId,
         requestId: item.requestId,
@@ -805,7 +802,7 @@ export class CopilotRuntime {
       "session.permissions.handlePendingPermissionRequest",
       { sessionId, requestId, result },
     )
-    if (!isObject(response) || typeof response.success !== "boolean") {
+    if (!isRecord(response) || typeof response.success !== "boolean") {
       throw new CopilotRuntimeError("Copilot CLI returned an invalid permission response")
     }
     this.removePendingPermission(sessionId, requestId)
@@ -953,11 +950,11 @@ export class CopilotRuntime {
         "connect",
       )
       if (
-        !isObject(response)
+        !isRecord(response)
         || response.ok !== true
         || response.protocolVersion !== PROTOCOL_VERSION
       ) {
-        const actual = isObject(response) ? String(response.protocolVersion) : "unknown"
+        const actual = isRecord(response) ? String(response.protocolVersion) : "unknown"
         throw new CopilotRuntimeError(
           `Unsupported Copilot CLI protocol ${actual}; expected ${PROTOCOL_VERSION}`,
         )
@@ -1073,7 +1070,7 @@ export class CopilotRuntime {
   }
 
   private parseSessionOpenResult(method: string, response: unknown): CopilotSessionOpenResult {
-    if (!isObject(response)) {
+    if (!isRecord(response)) {
       throw new CopilotRuntimeError(`Copilot CLI ${method} returned an invalid response`)
     }
     requiredString(response, "sessionId", method)
@@ -1093,7 +1090,7 @@ export class CopilotRuntime {
   }
 
   private handleSessionEvent(params: unknown): void {
-    if (!isObject(params) || typeof params.sessionId !== "string" || !isObject(params.event)) {
+    if (!isRecord(params) || typeof params.sessionId !== "string" || !isRecord(params.event)) {
       return
     }
     const event = params.event
@@ -1109,7 +1106,7 @@ export class CopilotRuntime {
 
   private handleLifecycle(params: unknown): void {
     if (
-      !isObject(params)
+      !isRecord(params)
       || typeof params.type !== "string"
       || typeof params.sessionId !== "string"
     ) {
@@ -1122,7 +1119,7 @@ export class CopilotRuntime {
 
   private updatePendingPermission(notification: CopilotSessionEventNotification): void {
     const { event, sessionId } = notification
-    if (!isObject(event.data)) return
+    if (!isRecord(event.data)) return
     const requestId = event.data.requestId
     if (typeof requestId !== "string") return
 
@@ -1153,7 +1150,7 @@ export class CopilotRuntime {
 
   private handleUserInputRequest(params: unknown): Promise<CopilotUserInputAnswer> {
     if (
-      !isObject(params)
+      !isRecord(params)
       || typeof params.sessionId !== "string"
       || typeof params.question !== "string"
     ) {
@@ -1191,7 +1188,7 @@ export class CopilotRuntime {
 
   private handleExitPlanModeRequest(params: unknown): Promise<CopilotExitPlanResponse> {
     if (
-      !isObject(params)
+      !isRecord(params)
       || typeof params.sessionId !== "string"
       || (!this.activeSessions.has(params.sessionId) && !this.openingSessions.has(params.sessionId))
     ) {
@@ -1283,7 +1280,7 @@ export class CopilotRuntime {
       event.type !== "session.resume"
       || (typeof event.agentId === "string" && event.agentId.length > 0)
       || !this.openingSessions.has(sessionId)
-      || !isObject(event.data)
+      || !isRecord(event.data)
       || event.data.alreadyInUse !== true
     ) {
       return

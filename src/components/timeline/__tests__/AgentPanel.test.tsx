@@ -51,7 +51,6 @@ function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()]) {
         expandAll
         label="Sub-agents"
         countLabel="agents"
-        lazyLoad
       />
     </SessionProvider>,
   )

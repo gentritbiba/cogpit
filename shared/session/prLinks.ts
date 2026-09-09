@@ -1,4 +1,5 @@
 import type { Turn } from "./types"
+import { isRecord } from "../objects"
 
 export interface SessionPullRequest {
   /** Canonical https link to the pull request */
@@ -51,10 +52,6 @@ const TITLE_PATTERNS = [
 const GH_PR_HINT = "gh pr "
 const URL_HINT = "/pull/"
 const PR_LINK_HINT = "pr-link"
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
 
 /**
  * Claude stores the shell command under `command`; Codex uses `cmd` or an argv
@@ -350,13 +347,6 @@ export function createPullRequestScanner(): PullRequestScanner {
       for (const line of lines) if (line) scanLine(line)
     },
   }
-}
-
-/** One-shot scan of a complete transcript. */
-export function scanPullRequests(jsonlText: string): SessionPullRequest[] {
-  const scanner = createPullRequestScanner()
-  scanner.scan(jsonlText.endsWith("\n") ? jsonlText : `${jsonlText}\n`)
-  return scanner.pullRequests
 }
 
 /**

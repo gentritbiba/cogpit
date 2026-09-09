@@ -39,11 +39,10 @@ import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/Spinner"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { authFetch } from "@/lib/auth"
-import { formatDuration } from "@/lib/format"
+import { formatDuration, formatTokenCount } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import {
   agentProgress,
-  formatTokens,
   groupAgentsByPhase,
   isWorkflowActive,
   workflowStatusStyle,
@@ -119,7 +118,7 @@ export function WorkflowDetailView({
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-5">
           <RunStat icon={Bot} value={`${detail.agentCounts.done + detail.agentCounts.error}/${detail.agentCount}`} label="Agents finished" />
           <RunStat icon={Layers} value={String(detail.phaseCount)} label="Phases" />
-          <RunStat icon={Coins} value={formatTokens(detail.totalTokens)} label="Tokens" />
+          <RunStat icon={Coins} value={formatTokenCount(detail.totalTokens)} label="Tokens" />
           <RunStat icon={Wrench} value={String(detail.totalToolCalls)} label="Tool calls" />
           <RunStat
             icon={Clock}

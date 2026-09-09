@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { createMiddlewareRes as mockRes } from "./http-fixtures"
 import { EventEmitter } from "node:events"
 
 import {
@@ -421,18 +422,6 @@ describe("bodySizeLimit", () => {
     return req as IncomingMessage
   }
 
-  function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
-    let body = ""
-    let statusCode = 200
-    const res = {
-      get statusCode() { return statusCode },
-      set statusCode(v: number) { statusCode = v },
-      setHeader: vi.fn(),
-      end: (data?: string) => { body = data || "" },
-    } as unknown as ServerResponse
-    return { res, get body() { return body }, get statusCode() { return statusCode } }
-  }
-
   it("passes through GET requests without checking body", () => {
     const req = mockReq("GET")
     const { res } = mockRes()
@@ -527,18 +516,6 @@ describe("authMiddleware", () => {
       url,
       headers: authHeader ? { authorization: authHeader } : {},
     } as unknown as IncomingMessage
-  }
-
-  function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
-    let body = ""
-    let statusCode = 200
-    const res = {
-      get statusCode() { return statusCode },
-      set statusCode(v: number) { statusCode = v },
-      setHeader: vi.fn(),
-      end: (data?: string) => { body = data || "" },
-    } as unknown as ServerResponse
-    return { res, get body() { return body }, get statusCode() { return statusCode } }
   }
 
   it("allows local requests without auth", () => {
@@ -674,12 +651,10 @@ function makeFakeProc(pid = 1234): { kill: ReturnType<typeof vi.fn>; pid: number
 
 function makeFakeSession(pid = 5678): {
   proc: { kill: ReturnType<typeof vi.fn>; pid: number }
-  subagentWatcher: { close: ReturnType<typeof vi.fn> } | null
   dead: boolean
 } {
   return {
     proc: { kill: vi.fn(), pid },
-    subagentWatcher: { close: vi.fn() },
     dead: false,
   }
 }
@@ -813,15 +788,6 @@ describe("cleanupProcesses", () => {
     )
 
     consoleSpy.mockRestore()
-  })
-
-  it("closes subagentWatcher on persistent sessions", () => {
-    const sess = makeFakeSession(900)
-    persistentSessions.set("sid-watcher", sess as never)
-
-    cleanupProcesses()
-
-    expect(sess.subagentWatcher!.close).toHaveBeenCalled()
   })
 
   it("does not throw when called with empty Maps", () => {

@@ -101,8 +101,8 @@ jobs:
 
   publish:
     needs: [quality, build]
-    # Skipped on workflow_dispatch dry-runs; update-aur* chain off publish and
-    # skip with it.
+    # Skipped on workflow_dispatch dry-runs; update-aur chains off publish and
+    # skips with it.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -216,6 +216,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cogpit
+            repo: cogpit.git
+            template: aur/PKGBUILD.template
+            needsChecksum: true
+            extraFile: ''
+          - name: cogpit-server
+            repo: cogpit-server.git
+            template: aur/PKGBUILD-server.template
+            needsChecksum: false
+            extraFile: cogpit-server.service
+
+    name: update-aur (${{ matrix.name }})
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -227,6 +243,7 @@ jobs:
         run: echo "pkgver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download .pacman from release
+        if: matrix.needsChecksum
         run: |
           gh release download "$GITHUB_REF_NAME" \
             --pattern "cogpit-*.pacman" \
@@ -235,6 +252,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute checksum
+        if: matrix.needsChecksum
         id: checksum
         run: echo "sha256=$(sha256sum cogpit-*.pacman | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
@@ -251,13 +269,17 @@ jobs:
           EOF
 
       - name: Clone AUR repo
-        run: git clone ssh://aur@aur.archlinux.org/cogpit.git aur-repo
+        run: git clone ssh://aur@aur.archlinux.org/${{ matrix.repo }} aur-repo
 
       - name: Update PKGBUILD
         run: |
           sed -e 's/%%PKGVER%%/${{ steps.version.outputs.pkgver }}/' \
               -e 's/%%SHA256%%/${{ steps.checksum.outputs.sha256 }}/' \
-              aur/PKGBUILD.template > aur-repo/PKGBUILD
+              ${{ matrix.template }} > aur-repo/PKGBUILD
+
+      - name: Copy package extras
+        if: matrix.extraFile != ''
+        run: cp "aur/${{ matrix.extraFile }}" aur-repo/
 
       - name: Generate .SRCINFO
         run: |
@@ -271,58 +293,6 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" .
           git config user.name "Gentrit Biba"
           git config user.email "gentritbiba@gmail.com"
-          git add PKGBUILD .SRCINFO
-          git commit -m "Update to ${{ steps.version.outputs.pkgver }}"
-          git push
-
-  update-aur-server:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - name: Extract version from tag
-        id: version
-        run: echo "pkgver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Setup SSH for AUR
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          cat >> ~/.ssh/config <<EOF
-          Host aur.archlinux.org
-            IdentityFile ~/.ssh/aur
-            User aur
-          EOF
-
-      - name: Clone AUR repo
-        run: git clone ssh://aur@aur.archlinux.org/cogpit-server.git aur-repo
-
-      - name: Update PKGBUILD
-        run: |
-          sed -e 's/%%PKGVER%%/${{ steps.version.outputs.pkgver }}/' \
-              aur/PKGBUILD-server.template > aur-repo/PKGBUILD
-          cp aur/cogpit-server.service aur-repo/
-
-      - name: Generate .SRCINFO
-        run: |
-          cd aur-repo
-          docker run --rm -v "$PWD:/pkg" "$ARCHLINUX_IMAGE" bash -c \
-            "pacman -Syu --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
-
-      - name: Push to AUR
-        run: |
-          cd aur-repo
-          sudo chown -R "$(id -u):$(id -g)" .
-          git config user.name "Gentrit Biba"
-          git config user.email "gentritbiba@gmail.com"
-          git add PKGBUILD .SRCINFO cogpit-server.service
+          git add PKGBUILD .SRCINFO ${{ matrix.extraFile }}
           git commit -m "Update to ${{ steps.version.outputs.pkgver }}"
           git push

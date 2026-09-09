@@ -33,8 +33,8 @@ import {
   initializeBootstrapToken,
 } from "../team/bootstrapToken"
 
-import type { UseFn, Middleware } from "../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "./http-fixtures"
+import type { Middleware } from "../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "./http-fixtures"
 import { registerTeamAdminRoutes } from "../routes/team"
 
 const STRONG_PASSWORD = "correct-horse-battery-staple"
@@ -46,40 +46,13 @@ function enterTeamEdition(): void {
   initEdition({ shell: "standalone", configEdition: "team" })
 }
 
-function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: Buffer) => void)[] = []
-  const endHandlers: (() => void)[] = []
-  let endData = ""
-  let statusCode = 200
-  const headers: Record<string, string> = {}
-  const req = {
-    method,
-    url,
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: Buffer) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
-      return req
-    }),
-    socket: { remoteAddress: "192.168.1.100" },
-    headers: { "x-cogpit-bootstrap-token": BOOTSTRAP_TOKEN } as Record<string, string>,
-  }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-    _getHeaders: () => headers,
-  }
-  const next = vi.fn()
-  const sendBody = () => {
-    if (body) {
-      for (const h of dataHandlers) h(Buffer.from(body))
-    }
-    for (const h of endHandlers) h()
-  }
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
+/** Every admin route here is reached from a LAN client holding the bootstrap token. */
+function createBootstrapReqRes(method: string, url: string, body?: string) {
+  return createMockReqRes(method, url, {
+    body,
+    remoteAddress: "192.168.1.100",
+    headers: { "x-cogpit-bootstrap-token": BOOTSTRAP_TOKEN },
+  })
 }
 
 let root: string
@@ -90,11 +63,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "cogpit-team-routes-"))
   await initUsersStore(join(root, "team"))
   initializeBootstrapToken(0, { COGPIT_BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN })
-  handlers = new Map()
-  const use: UseFn = (path: string, handler: Middleware) => {
-    handlers.set(path, handler)
-  }
-  registerTeamAdminRoutes(use)
+  handlers = collectRoutes(registerTeamAdminRoutes)
 })
 
 afterEach(async () => {
@@ -113,7 +82,7 @@ afterEach(async () => {
 describe("GET /api/me", () => {
   it("reports the personal identity with full capabilities", async () => {
     const handler = getRouteHandler(handlers, "/api/me")
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
 
     await handler(req, res, next)
 
@@ -130,7 +99,7 @@ describe("GET /api/me", () => {
     enterTeamEdition()
     const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
     const handler = getRouteHandler(handlers, "/api/me")
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
     setRequestPrincipal(req, { userId: bob.id, username: "bob", role: "member" })
 
     await handler(req, res, next)
@@ -147,7 +116,7 @@ describe("GET /api/me", () => {
     enterTeamEdition()
     const alice = await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const handler = getRouteHandler(handlers, "/api/me")
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
     setRequestPrincipal(req, { userId: alice.id, username: "alice", role: "admin" })
 
     await handler(req, res, next)
@@ -162,7 +131,7 @@ describe("GET /api/me", () => {
 
   it("calls next for non-GET methods", async () => {
     const handler = getRouteHandler(handlers, "/api/me")
-    const { req, res, next } = createMockReqRes("POST", "/")
+    const { req, res, next } = createBootstrapReqRes("POST", "/")
     await handler(req, res, next)
     expect(next).toHaveBeenCalled()
   })
@@ -178,7 +147,7 @@ describe("POST /api/team/bootstrap", () => {
   it("requires the one-time bootstrap token", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: "mallory", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
     req.headers["x-cogpit-bootstrap-token"] = "wrong-token"
 
     const pending = bootstrapHandler()(req, res, next)
@@ -193,7 +162,7 @@ describe("POST /api/team/bootstrap", () => {
   it("creates the first admin and issues a machine token", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: " Alice ", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = bootstrapHandler()(req, res, next)
     sendBody()
@@ -220,7 +189,7 @@ describe("POST /api/team/bootstrap", () => {
   it("sets the HttpOnly cookie for HTTPS-forwarded browser clients and withholds the token", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
     req.headers["x-cogpit-client"] = "1"
     req.headers["x-forwarded-proto"] = "https"
 
@@ -236,7 +205,7 @@ describe("POST /api/team/bootstrap", () => {
   it("rejects a plain-HTTP remote browser bootstrap with 426 before creating the admin", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
     req.headers["x-cogpit-client"] = "1"
     // Remote socket, no HTTPS forwarding headers: the cookie could never be
     // stored, so the admin must not be created either.
@@ -257,7 +226,7 @@ describe("POST /api/team/bootstrap", () => {
     enterTeamEdition()
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const body = JSON.stringify({ username: "mallory", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = bootstrapHandler()(req, res, next)
     sendBody()
@@ -270,8 +239,8 @@ describe("POST /api/team/bootstrap", () => {
 
   it("lets exactly one of two concurrent bootstraps create an admin", async () => {
     enterTeamEdition()
-    const a = createMockReqRes("POST", "/", JSON.stringify({ username: "alice", password: STRONG_PASSWORD }))
-    const b = createMockReqRes("POST", "/", JSON.stringify({ username: "mallory", password: STRONG_PASSWORD }))
+    const a = createBootstrapReqRes("POST", "/", JSON.stringify({ username: "alice", password: STRONG_PASSWORD }))
+    const b = createBootstrapReqRes("POST", "/", JSON.stringify({ username: "mallory", password: STRONG_PASSWORD }))
 
     const handler = bootstrapHandler()
     const pendingA = handler(a.req, a.res, a.next)
@@ -289,7 +258,7 @@ describe("POST /api/team/bootstrap", () => {
   it("maps validation failures to 400", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: "alice", password: "short" })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = bootstrapHandler()(req, res, next)
     sendBody()
@@ -302,7 +271,7 @@ describe("POST /api/team/bootstrap", () => {
 
   it("does not exist in personal edition", async () => {
     const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = bootstrapHandler()(req, res, next)
     sendBody()
@@ -313,7 +282,7 @@ describe("POST /api/team/bootstrap", () => {
   })
 
   it("calls next for non-POST methods", async () => {
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
     await bootstrapHandler()(req, res, next)
     expect(next).toHaveBeenCalled()
   })
@@ -338,7 +307,7 @@ describe("/api/team/users", () => {
   it("lists users without password hashes", async () => {
     enterTeamEdition()
     const alice = await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
 
     await usersHandler()(req, res, next)
 
@@ -357,7 +326,7 @@ describe("/api/team/users", () => {
       role: "member",
       displayName: "Bob Builder",
     })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = usersHandler()(req, res, next)
     sendBody()
@@ -377,7 +346,7 @@ describe("/api/team/users", () => {
     enterTeamEdition()
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
     const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD, role: "member" })
-    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("POST", "/", body)
 
     const pending = usersHandler()(req, res, next)
     sendBody()
@@ -395,7 +364,7 @@ describe("/api/team/users", () => {
     expect(validateSessionToken(token)).toBe(true)
 
     const body = JSON.stringify({ disabled: true })
-    const { req, res, next, sendBody } = createMockReqRes("PATCH", `/${bob.id}`, body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("PATCH", `/${bob.id}`, body)
     const pending = usersHandler()(req, res, next)
     sendBody()
     await pending
@@ -413,7 +382,7 @@ describe("/api/team/users", () => {
     const token = await createSessionFor({ id: bob.id, username: "bob", role: "member" })
 
     const body = JSON.stringify({ role: "admin" })
-    const { req, res, next, sendBody } = createMockReqRes("PATCH", `/${bob.id}`, body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("PATCH", `/${bob.id}`, body)
     const pending = usersHandler()(req, res, next)
     sendBody()
     await pending
@@ -430,7 +399,7 @@ describe("/api/team/users", () => {
     const token = await createSessionFor({ id: bob.id, username: "bob", role: "member" })
 
     const body = JSON.stringify({ password: SECOND_PASSWORD })
-    const { req, res, next, sendBody } = createMockReqRes("PATCH", `/${bob.id}`, body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("PATCH", `/${bob.id}`, body)
     const pending = usersHandler()(req, res, next)
     sendBody()
     await pending
@@ -446,7 +415,7 @@ describe("/api/team/users", () => {
     const token = await createSessionFor({ id: alice.id, username: "alice", role: "admin" })
 
     for (const patch of [{ role: "member" }, { disabled: true }]) {
-      const { req, res, next, sendBody } = createMockReqRes(
+      const { req, res, next, sendBody } = createBootstrapReqRes(
         "PATCH", `/${alice.id}`, JSON.stringify(patch),
       )
       const pending = usersHandler()(req, res, next)
@@ -462,7 +431,7 @@ describe("/api/team/users", () => {
   it("answers 404 for an unknown user id", async () => {
     enterTeamEdition()
     await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next, sendBody } = createMockReqRes(
+    const { req, res, next, sendBody } = createBootstrapReqRes(
       "PATCH", "/u_missing", JSON.stringify({ disabled: true }),
     )
 
@@ -480,7 +449,7 @@ describe("/api/team/users", () => {
     const token = await createSessionFor({ id: bob.id, username: "bob", role: "member" })
 
     const body = JSON.stringify({ role: "admin", password: "short" })
-    const { req, res, next, sendBody } = createMockReqRes("PATCH", `/${bob.id}`, body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("PATCH", `/${bob.id}`, body)
     const pending = usersHandler()(req, res, next)
     sendBody()
     await pending
@@ -513,7 +482,7 @@ describe("/api/team/users", () => {
     await initUsersStore(join(root, "team"))
 
     const body = JSON.stringify({ disabled: false, role: "member" })
-    const { req, res, next, sendBody } = createMockReqRes("PATCH", "/u_alice", body)
+    const { req, res, next, sendBody } = createBootstrapReqRes("PATCH", "/u_alice", body)
     const pending = usersHandler()(req, res, next)
     sendBody()
     await pending
@@ -533,7 +502,7 @@ describe("/api/team/users", () => {
     }))
     await initUsersStore(join(root, "team"))
 
-    const { req, res, next, sendBody } = createMockReqRes(
+    const { req, res, next, sendBody } = createBootstrapReqRes(
       "PATCH", "/u_alice", JSON.stringify({ disabled: false }),
     )
     const pending = usersHandler()(req, res, next)
@@ -547,7 +516,7 @@ describe("/api/team/users", () => {
   it("maps a weak password reset to 400", async () => {
     enterTeamEdition()
     const alice = await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
-    const { req, res, next, sendBody } = createMockReqRes(
+    const { req, res, next, sendBody } = createBootstrapReqRes(
       "PATCH", `/${alice.id}`, JSON.stringify({ password: "short" }),
     )
 
@@ -560,7 +529,7 @@ describe("/api/team/users", () => {
   })
 
   it("does not exist in personal edition", async () => {
-    const { req, res, next } = createMockReqRes("GET", "/")
+    const { req, res, next } = createBootstrapReqRes("GET", "/")
     await usersHandler()(req, res, next)
     expect(res._getStatus()).toBe(404)
   })

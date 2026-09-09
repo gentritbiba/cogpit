@@ -11,7 +11,7 @@ import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
-import type { UseFn } from "../http"
+import { sendJson, type UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
@@ -130,8 +130,7 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     const outputPath = url.searchParams.get("path")
     if (!outputPath) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: "path query param required" }))
+      sendJson(res, 400, { error: "path query param required" })
       return
     }
     const requestedOutputPath = outputPath
@@ -144,8 +143,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // flight. Do not resurrect a closed request by installing SSE resources.
     if (res.destroyed || res.writableEnded) return
     if (!resolved) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied - only task output files allowed" }))
+      sendJson(res, 403, { error: "Access denied - only task output files allowed" })
       return
     }
 
@@ -256,16 +254,14 @@ export function registerFileWatchRoutes(use: UseFn) {
     const fileName = decodeURIComponent(parts[1])
 
     if (!fileName.endsWith(".jsonl")) {
-      res.statusCode = 400
-      res.end(JSON.stringify({ error: "Only .jsonl files" }))
+      sendJson(res, 400, { error: "Only .jsonl files" })
       return
     }
 
     const filePath = await resolveSessionFilePath(dirName, fileName)
     if (res.destroyed || res.writableEnded) return
     if (!filePath || storeForPath(filePath)?.kind !== descriptorForDirName(dirName).kind) {
-      res.statusCode = 403
-      res.end(JSON.stringify({ error: "Access denied" }))
+      sendJson(res, 403, { error: "Access denied" })
       return
     }
     const sessionFilePath = filePath
@@ -379,13 +375,21 @@ export function registerFileWatchRoutes(use: UseFn) {
     const runtimeTurnActive = () =>
       !descriptor.capabilities.tokenStreaming
       && runtimeForDirName(dirName).activity(sessionId).running
+    const sendCompacting = (active: boolean) => {
+      res.write(`data: ${JSON.stringify({ type: "compacting", active })}\n\n`)
+    }
+    // A compaction is silent for up to minutes, so the heartbeat re-announces
+    // it; otherwise the client's stale timer would end the session mid-way.
     const sendHeartbeat = () => {
-      if (runtimeTurnActive()) {
+      if (streamBus.isCompacting(sessionId)) {
+        sendCompacting(true)
+      } else if (runtimeTurnActive()) {
         res.write(`data: ${JSON.stringify({ type: "runtime_activity" })}\n\n`)
       } else {
         res.write(": heartbeat\n\n")
       }
     }
+    if (streamBus.isCompacting(sessionId)) sendCompacting(true)
     const snapshot = streamBus.getSnapshot(sessionId)
     if (snapshot && snapshot.length > 0) {
       res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
@@ -464,56 +468,30 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (!closed) flushNewLines()
     }, POLL_MS)
 
-    // ── Subagent-side activity detection ──────────────────────────────
-    // Two kinds of work write only to <sessionId>/subagents/, never to the
-    // parent JSONL while they run:
-    //   • compaction (agent-acompact-*.jsonl) — until it finishes
-    //   • background agents/workflows — until their task-notification lands
-    // The client's stale timer would fire mid-work and render the session as
-    // finished, so we poll the subagents dir and send synthetic SSE events.
+    // ── Background-agent activity detection ──────────────────────────
+    // Background agents and workflows write only to <sessionId>/subagents/
+    // until their task-notification lands on the parent JSONL. The client's
+    // stale timer would fire mid-work and render the session as finished, so
+    // poll the subagents dir and send a synthetic SSE event while any agent
+    // transcript is fresh.
     const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
     const subagentsDir = sessionDir + "/subagents"
     // Re-announce periodically rather than latching a single event, so the
     // server keeps saying "still going" for as long as the work runs.
-    let compactingSentAt = 0
     let subagentActivitySentAt = 0
     const ACTIVITY_RESEND_MS = 10_000
     const SUBAGENT_STAT_CAP = 100
-    let subagentTick = 0
 
     // Only Claude writes sub-agent transcripts as sibling files to poll for.
     const subagentPoller = descriptor.kind !== "claude"
       ? null
       : setInterval(async () => {
         if (closed) return
-        recordActivity("Compaction checks")
+        recordActivity("Subagent activity checks")
         try {
           const files = await readdir(subagentsDir)
-          const compactFile = files.find(
-            (f) => f.startsWith("agent-acompact") && f.endsWith(".jsonl")
-          )
-          if (compactFile) {
-            const s = await stat(subagentsDir + "/" + compactFile)
-            const recentlyActive = Date.now() - s.mtimeMs < 30_000
-            if (recentlyActive) {
-              if (Date.now() - compactingSentAt >= ACTIVITY_RESEND_MS) {
-                compactingSentAt = Date.now()
-                res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
-              }
-            } else {
-              compactingSentAt = 0
-            }
-          } else {
-            compactingSentAt = 0
-          }
-
-          // Background-agent liveness is slower-moving than compaction; check
-          // it on every fifth tick to keep the steady-state stat load small.
-          subagentTick++
-          if (subagentTick % 5 !== 0) return
-          recordActivity("Subagent activity checks")
           const agentFiles = files
-            .filter((f) => f.startsWith("agent-") && !f.startsWith("agent-acompact") && f.endsWith(".jsonl"))
+            .filter((f) => f.startsWith("agent-") && f.endsWith(".jsonl"))
             .slice(0, SUBAGENT_STAT_CAP)
           let hasFreshAgent = false
           for (const agentFile of agentFiles) {
@@ -530,7 +508,7 @@ export function registerFileWatchRoutes(use: UseFn) {
         } catch {
           // subagents dir may not exist — that's fine
         }
-      }, 1000)
+      }, 5000)
 
     // Heartbeat to keep connection alive
     heartbeat = setInterval(() => {

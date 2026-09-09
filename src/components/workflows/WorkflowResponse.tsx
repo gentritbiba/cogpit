@@ -6,14 +6,11 @@ import {
   preprocessImagePaths,
 } from "@/components/timeline/markdown-components"
 import { cn } from "@/lib/utils"
+import { isRecord } from "../../../shared/objects"
 
 const SUMMARY_KEYS = ["headline", "oneLineSell", "verdict", "summary", "name", "lens"]
 const TITLE_KEYS = new Set(["title", "name"])
 const LEAD_KEYS = new Set(["headline", "oneLineSell", "verdict"])
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function parseJson(value: string): unknown {
   const trimmed = value.trim()

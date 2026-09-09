@@ -1,18 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { installDirsMock, mockDirs } from "../fixtures"
 
 let tmpDir: string
-const mockDirs = {
-  PROJECTS_DIR: "",
-  TEAMS_DIR: "",
-  TASKS_DIR: "",
-  CODEX_SESSIONS_DIR: "",
-  COPILOT_SESSIONS_DIR: "",
-}
 
-mock.module("../../lib/dirs", () => ({ dirs: mockDirs, DEFAULT_DB_PATH: "" }))
+installDirsMock()
 
 const { listAllSessionFiles, storeFor, storeForPath } = await import("../../lib/stores")
 

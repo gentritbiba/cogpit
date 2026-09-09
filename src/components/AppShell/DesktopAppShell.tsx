@@ -1,6 +1,5 @@
 import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
-import { useAppContext } from "@/contexts/AppContext"
 import { DesktopOverlays } from "./DesktopOverlays"
 import { DesktopWorkspace } from "./DesktopWorkspace"
 import type { DesktopAppShellProps } from "./desktopTypes"
@@ -12,10 +11,8 @@ export function DesktopAppShell({
   project,
   chrome,
 }: DesktopAppShellProps) {
-  const { theme } = useAppContext()
-
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
+    <div className="flex h-dvh flex-col bg-background text-foreground">
       {chrome.backgroundServers}
       <UpdateBanner />
       <ProviderUpdateBanner />

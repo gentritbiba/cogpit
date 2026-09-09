@@ -3,9 +3,16 @@ import {
   createPullRequestScanner,
   extractPullRequests,
   mergePullRequests,
-  scanPullRequests,
+  type SessionPullRequest,
 } from "../../../shared/session/prLinks"
-import type { ToolCall, Turn } from "../../../shared/session/types"
+import type { ToolCall } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
+
+function scanPullRequests(jsonlText: string): SessionPullRequest[] {
+  const scanner = createPullRequestScanner()
+  scanner.scan(jsonlText.endsWith("\n") ? jsonlText : `${jsonlText}\n`)
+  return scanner.pullRequests
+}
 
 function toolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -19,21 +26,7 @@ function toolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   }
 }
 
-function turn(toolCalls: ToolCall[]): Turn {
-  return {
-    id: "turn-1",
-    userMessage: null,
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls,
-    subAgentActivity: [],
-    timestamp: "2026-08-14T10:00:00.000Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-  }
-}
+const turn = (toolCalls: ToolCall[]) => emptyTurn({ toolCalls, timestamp: "2026-08-14T10:00:00.000Z" })
 
 function createCall(command: string, result: string, overrides: Partial<ToolCall> = {}): ToolCall {
   return toolCall({ input: { command }, result, ...overrides })

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   classifyShellCommand,
-  formatActivitySummary,
   isScratchpadPath,
   summarizeActivity,
 } from "../activitySummary"
@@ -20,9 +19,16 @@ function call(name: string, input: Record<string, unknown> = {}): ToolCall {
   }
 }
 
-/** Convenience: summarize then format in one step. */
+/** Convenience: summarize then render the plain sentence in one step. */
 function summarize(toolCalls: ToolCall[], thoughtForMs = 0): string {
-  return formatActivitySummary(summarizeActivity(toolCalls, { thoughtForMs }))
+  return summarizeActivity(toolCalls, { thoughtForMs }).clauses
+    .map((clause, i) => {
+      const text = i === 0 ? clause.text[0].toUpperCase() + clause.text.slice(1) : clause.text
+      const added = clause.added ? ` +${clause.added}` : ""
+      const removed = clause.removed ? ` -${clause.removed}` : ""
+      return `${text}${added}${removed}`
+    })
+    .join(", ")
 }
 
 const SCRATCHPAD =

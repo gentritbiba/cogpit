@@ -4,6 +4,7 @@ import { forwardCodexStreamNotification } from "../../lib/codexStreamAdapter"
 import {
   _resetForTests,
   getSnapshot,
+  isCompacting,
   subscribe,
   type StreamBusEvent,
 } from "../../lib/streamBus"
@@ -87,5 +88,34 @@ describe("forwardCodexStreamNotification", () => {
 
     expect(events).toContainEqual({ type: "stream_clear" })
     expect(getSnapshot(THREAD_ID)).toBeNull()
+  })
+
+  it("tracks a context compaction item from start to completion", () => {
+    const events: StreamBusEvent[] = []
+    subscribe(THREAD_ID, (event) => events.push(event))
+
+    forwardCodexStreamNotification({
+      method: "item/started",
+      params: { threadId: THREAD_ID, turnId: "turn-1", item: { type: "contextCompaction", id: "c1" } },
+    })
+    expect(isCompacting(THREAD_ID)).toBe(true)
+
+    forwardCodexStreamNotification({
+      method: "item/completed",
+      params: { threadId: THREAD_ID, turnId: "turn-1", item: { type: "contextCompaction", id: "c1" } },
+    })
+    expect(isCompacting(THREAD_ID)).toBe(false)
+    expect(events).toEqual([
+      { type: "compacting", active: true },
+      { type: "compacting", active: false },
+    ])
+  })
+
+  it("ignores non-compaction item starts", () => {
+    forwardCodexStreamNotification({
+      method: "item/started",
+      params: { threadId: THREAD_ID, turnId: "turn-1", item: { type: "agentMessage", id: "msg_1", text: "" } },
+    })
+    expect(isCompacting(THREAD_ID)).toBe(false)
   })
 })

@@ -7,14 +7,8 @@ interface UseChatScrollOpts {
   pendingMessages: string[]
   consumePending: (count?: number) => void
   sessionChangeKey: number
-  /**
-   * Summed character length across all in-flight partial assistant blocks.
-   * Used only as a reactivity signal: when partials grow (streaming tokens),
-   * the live-content auto-scroll effect re-runs so a user at the bottom
-   * stays pinned to the bottom. Users scrolled up are not hijacked — the
-   * effect still checks `chatIsAtBottomRef`.
-   */
-  partialContentLen?: number
+  /** Changes identity whenever in-flight streamed content changes; used only to re-run the auto-scroll effect. */
+  partialSignal?: unknown
 }
 
 /**
@@ -29,7 +23,7 @@ function runAcrossFrames(action: () => void): void {
   })
 }
 
-export function useChatScroll({ session, isLive, pendingMessages, consumePending, sessionChangeKey, partialContentLen = 0 }: UseChatScrollOpts) {
+export function useChatScroll({ session, isLive, pendingMessages, consumePending, sessionChangeKey, partialSignal }: UseChatScrollOpts) {
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const scrollEndRef = useRef<HTMLDivElement>(null)
   const chatIsAtBottomRef = useRef(true)
@@ -50,7 +44,6 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   // When set, the next sessionChangeKey scroll will go to top instead of bottom
   const scrollToTopOnNextChangeRef = useRef(false)
 
-  const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
   // sessionChangeKey whose initial scroll placement has completed. Consumers
   // gate scroll-up paging on this so a freshly opened session (scrollTop still
@@ -78,18 +71,12 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   }, [])
 
   // Avoid triggering rerenders when scroll indicators haven't actually changed
-  const canScrollUpRef = useRef(false)
   const canScrollDownRef = useRef(false)
 
   const updateScrollIndicators = useCallback(() => {
     const el = chatScrollRef.current
     if (!el) return
-    const up = el.scrollTop > 10
     const down = el.scrollHeight - el.scrollTop - el.clientHeight > 10
-    if (up !== canScrollUpRef.current) {
-      canScrollUpRef.current = up
-      setCanScrollUp(up)
-    }
     if (down !== canScrollDownRef.current) {
       canScrollDownRef.current = down
       setCanScrollDown(down)
@@ -188,10 +175,6 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   }, [turnCount, pendingCount, consumePending, smoothScrollToEnd])
 
   // Live content -- auto-scroll (keyed on turn count + tool count + content length to catch streaming)
-  // `partialContentLen` is added so partial-assistant-message streaming
-  // (rendered below the last canonical turn while the SDK streams tokens) also
-  // triggers the auto-scroll effect. Without it, users at the bottom would see
-  // the response grow below the fold during the pre-reconciliation window.
   const lastTurn = session?.turns.at(-1)
   const liveLastTurnToolCount = lastTurn?.toolCalls.length ?? 0
   const liveLastTurnContentLen = lastTurn?.assistantText.length ?? 0
@@ -203,19 +186,18 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     }
     requestAnimationFrame(updateScrollIndicators)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
-  }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, partialContentLen, isLive, updateScrollIndicators])
+  }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, partialSignal, isLive, updateScrollIndicators])
 
   const initialScrollDone = placedKey === sessionChangeKey
 
   return useMemo(() => ({
     chatScrollRef,
     scrollEndRef,
-    canScrollUp,
     canScrollDown,
     initialScrollDone,
     handleScroll,
     scrollToBottomInstant,
     requestScrollToTop,
     resetTurnCount,
-  }), [canScrollUp, canScrollDown, initialScrollDone, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
+  }), [canScrollDown, initialScrollDone, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
 }

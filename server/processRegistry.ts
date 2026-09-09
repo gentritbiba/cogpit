@@ -1,21 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import type { AgentKind } from "../shared/session/types"
-import type { SubagentWatcher } from "./subagentWatcher"
-
-export interface PermissionRequest {
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  description?: string
-  permissionSuggestions?: Array<{ type: string; [key: string]: unknown }>
-  title?: string
-  displayName?: string
-  blockedPath?: string
-  decisionReason?: string
-  agentId?: string
-  timestamp: number
-}
 
 export interface PersistentSession {
   agentKind: AgentKind
@@ -24,22 +8,8 @@ export interface PersistentSession {
   onResult: ((msg: { type: string; subtype?: string; is_error?: boolean; result?: string }) => void) | null
   /** Set to true once the process has exited. */
   dead: boolean
-  cwd: string
-  permArgs: string[]
-  modelArgs: string[]
-  effortArgs: string[]
   /** Path to the session's JSONL file. */
   jsonlPath: string | null
-  /** Active Task tool_use IDs -> prompt text (for matching subagent files). */
-  pendingTaskCalls: Map<string, string>
-  /** Subagent directory watcher (cleaned up on process close). */
-  subagentWatcher: SubagentWatcher | null
-  /** Worktree name if session was created with --worktree. */
-  worktreeName: string | null
-  /** Temporary files created for a request, such as Codex image attachments. */
-  tempFiles?: string[]
-  /** Pending permission requests awaiting user approval. */
-  pendingPermissions: Map<string, PermissionRequest>
 }
 
 /** Child processes that are active but do not own a persistent session. */
@@ -134,7 +104,6 @@ export async function cleanupProcesses(): Promise<void> {
   }
 
   for (const [sessionId, session] of [...persistentSessions.entries()]) {
-    session.subagentWatcher?.close()
     if (!terminatedProcs.has(session.proc)) {
       try {
         session.proc.kill("SIGTERM")

@@ -177,19 +177,7 @@ export function useFileChangesData(session: ParsedSession) {
     return () => { cancelled = true }
   }, [canAccessHostFiles, filePaths])
 
-  // ── Grouped-by-file view with net diffs ─────────────────────────────────
-
   const lastTurnIndex = session.turns.length - 1
-
-  /** Group file changes by file path, compute net diff per file. */
-  const groupedByFile = useMemo(() => {
-    return buildGroupedFiles(fileChanges, "all", fileContents)
-  }, [fileChanges, fileContents])
-
-  /** Same but filtered to only the last turn. */
-  const groupedLastTurn = useMemo(() => {
-    return buildGroupedFiles(fileChanges, lastTurnIndex, fileContents)
-  }, [fileChanges, lastTurnIndex, fileContents])
 
   // Build agent metadata map (agentId → { name, type })
   const agentMap = useMemo(() => {
@@ -207,8 +195,6 @@ export function useFileChangesData(session: ParsedSession) {
   return {
     fileChanges,
     fileContents,
-    groupedByFile,
-    groupedLastTurn,
     lastTurnIndex,
     agentMap,
   }

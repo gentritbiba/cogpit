@@ -22,6 +22,7 @@ export interface CLICommand {
 export interface CLIArguments {
   query?: string
   session?: string
+  excludeSession?: string
   maxAge?: string
   limit?: number
   sessionLimit?: number
@@ -46,6 +47,7 @@ export function parseArgs(argv: string[]): CLICommand {
       for (let i = 2; i < argv.length; i++) {
         switch (argv[i]) {
           case "--session": args.session = argv[++i]; break
+          case "--exclude-session": args.excludeSession = argv[++i]; break
           case "--max-age": args.maxAge = argv[++i]; break
           case "--limit": args.limit = parseInt(argv[++i], 10); break
           case "--session-limit": args.sessionLimit = parseInt(argv[++i], 10); break
@@ -112,6 +114,7 @@ async function main() {
       }
       const searchResult = await searchSessions(cmd.args.query, {
         sessionId: cmd.args.session,
+        excludeSessionId: cmd.args.excludeSession,
         maxAge: cmd.args.maxAge,
         limit: cmd.args.limit,
         caseSensitive: cmd.args.caseSensitive,
@@ -177,6 +180,7 @@ async function main() {
   }
 
   console.log(JSON.stringify(result, null, 2))
+  if (result && typeof result === "object" && "error" in result) process.exitCode = 1
 }
 
 function printUsage() {
@@ -185,6 +189,7 @@ function printUsage() {
 Commands:
   search <query> [options]    Search across sessions
     --session <id>            Scope to single session
+    --exclude-session <id>    Omit a session and its subagents from search
     --max-age <5d>            Time window (default: 5d)
     --limit <20>              Max hits (default: 20)
     --session-limit <N>       Cap unique sessions returned

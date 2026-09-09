@@ -7,9 +7,7 @@ import { dirname, join } from "node:path"
 
 import {
   getFileType,
-  isAllowedConfigPath,
   isSafeConfigName,
-  isUserOwned,
   resolveConfigBrowserPath,
 } from "../../../routes/config-browser/configValidation"
 
@@ -44,8 +42,6 @@ describe("config-browser path validation", () => {
       writeFile(projectInstructions, "instructions", "utf-8"),
     ])
 
-    expect(isAllowedConfigPath(agentPath)).toBe(true)
-    expect(isUserOwned(agentPath)).toBe(true)
     await expect(resolveConfigBrowserPath(agentPath, { writable: true })).resolves.toEqual({
       resolvedPath: agentPath,
       canonicalPath: await realpath(agentPath),
@@ -64,7 +60,6 @@ describe("config-browser path validation", () => {
       allowMissing: true,
       writable: true,
     })).resolves.toMatchObject({ resolvedPath: safeMissingPath })
-    expect(isAllowedConfigPath(escapedPath)).toBe(false)
     await expect(resolveConfigBrowserPath(escapedPath, {
       allowMissing: true,
       writable: true,
@@ -136,7 +131,6 @@ describe("config-browser path validation", () => {
     await writeFile(cachedFile, "cached", "utf-8")
     await symlink(cachedFile, linkPath, process.platform === "win32" ? "file" : undefined)
 
-    expect(isUserOwned(cachedFile)).toBe(false)
     await expect(resolveConfigBrowserPath(cachedFile)).resolves.not.toBeNull()
     await expect(resolveConfigBrowserPath(cachedFile, { writable: true })).resolves.toBeNull()
     await expect(resolveConfigBrowserPath(linkPath, { writable: true })).resolves.toBeNull()
@@ -155,8 +149,6 @@ describe("config-browser path validation", () => {
     ])
 
     for (const path of [codexSkill, sharedSkill]) {
-      expect(isAllowedConfigPath(path)).toBe(true)
-      expect(isUserOwned(path)).toBe(true)
       await expect(resolveConfigBrowserPath(path, { writable: true })).resolves.toEqual({
         resolvedPath: path,
         canonicalPath: await realpath(path),
@@ -231,7 +223,6 @@ describe("config-browser path validation", () => {
     await mkdir(cacheDir, { recursive: true })
     await writeFile(cachedFile, "cached", "utf-8")
 
-    expect(isUserOwned(cachedFile)).toBe(false)
     await expect(resolveConfigBrowserPath(cachedFile)).resolves.not.toBeNull()
     await expect(resolveConfigBrowserPath(cachedFile, { writable: true })).resolves.toBeNull()
   })

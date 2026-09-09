@@ -46,9 +46,7 @@ const readSkillTargets = vi.fn(async () => ({ ok: true as const, targets: SKILL_
 const remove = vi.fn(async () => ({ ok: true as const }))
 const stop = vi.fn(async () => ({ ok: true as const }))
 const noop = vi.fn(async () => ({ ok: true as const }))
-const refresh = vi.fn(async () => {})
 const closePanel = vi.fn()
-const openPanel = vi.fn()
 const socketSessions: (string | null)[] = []
 
 let installed = true
@@ -67,14 +65,10 @@ function sessionsDouble(enabled: boolean): UseBrowserSessions {
     status: enabled
       ? { installed, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
       : null,
-    loading: false,
     error: listError,
-    refresh,
     create: noop,
     remove,
-    launch: noop,
     stop,
-    setNote: noop,
     readSkillTargets,
     installSkill,
   }
@@ -97,8 +91,7 @@ function socketDouble(session: string | null): UseBrowserSocket {
 
 function frameOf(ts: number): BrowserFrame {
   return {
-    bitmap: null,
-    blobUrl: null,
+    bitmap: { close: () => {} } as unknown as ImageBitmap,
     header: {
       deviceWidth: 1280,
       deviceHeight: 720,
@@ -187,7 +180,7 @@ function contextOf(session: ParsedSession | null = null): WorkspacePanelContext 
 }
 
 function panel(context = contextOf()) {
-  return <BrowserPanel context={context} active closePanel={closePanel} openPanel={openPanel} />
+  return <BrowserPanel context={context} active closePanel={closePanel} />
 }
 
 function setup(context = contextOf()) {

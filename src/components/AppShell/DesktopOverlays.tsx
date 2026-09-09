@@ -1,6 +1,7 @@
 import { lazy, useCallback, useEffect, useMemo, useState, Suspense } from "react"
 import { FIND_IN_CONVERSATION_EVENT } from "@/components/ChatArea"
 import type { CommandPaletteDevice } from "@/components/CommandPalette"
+import { DevicesDialog } from "@/components/DevicesDialog"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useDevices } from "@/hooks/useDevices"
@@ -15,7 +16,6 @@ import type { DesktopAppShellProps } from "./desktopTypes"
 
 const CommandPaletteHost = lazy(() => import("@/components/CommandPaletteHost").then((module) => ({ default: module.CommandPaletteHost })))
 const ConfigDialog = lazy(() => import("@/components/ConfigDialog").then((module) => ({ default: module.ConfigDialog })))
-const DevicesDialog = lazy(() => import("@/components/DevicesDialog").then((module) => ({ default: module.DevicesDialog })))
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then((module) => ({ default: module.KeyboardShortcutsDialog })))
 const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModal").then((module) => ({ default: module.ProjectSwitcherModal })))
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then((module) => ({ default: module.ThemeSelectorModal })))
@@ -34,16 +34,10 @@ export function DesktopOverlays({
   const { session, sessionSource } = useSessionContext()
   const { devices, activeDeviceId } = useDevices()
   const [devicesDialogMode, setDevicesDialogMode] = useState<null | "add" | "manage">(null)
-  const [lastDevicesDialogMode, setLastDevicesDialogMode] = useState<null | "add" | "manage">(null)
   const canManageDevices = can("manageDevices")
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const currentDirName = sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
-  const renderedDevicesDialogMode = devicesDialogMode ?? lastDevicesDialogMode
-
-  useEffect(() => {
-    if (devicesDialogMode) setLastDevicesDialogMode(devicesDialogMode)
-  }, [devicesDialogMode])
 
   const onKeyboardShortcutsOpenChange = chrome.onKeyboardShortcutsOpenChange
   // "?" is the only way in for someone who does not already know ⌘K.
@@ -196,15 +190,12 @@ export function DesktopOverlays({
         />
       </Suspense>
 
-      {canManageDevices && renderedDevicesDialogMode !== null && (
-        <Suspense fallback={null}>
-          <DevicesDialog
-            open={devicesDialogMode !== null}
-            initialMode={renderedDevicesDialogMode}
-            onClose={() => setDevicesDialogMode(null)}
-            onCloseComplete={() => setLastDevicesDialogMode(null)}
-          />
-        </Suspense>
+      {canManageDevices && (
+        <DevicesDialog
+          open={devicesDialogMode !== null}
+          initialMode={devicesDialogMode ?? "manage"}
+          onClose={() => setDevicesDialogMode(null)}
+        />
       )}
 
     </>

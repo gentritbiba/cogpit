@@ -10,7 +10,8 @@ import {
 } from "../providerUpdates"
 
 const mockAuthFetch = vi.hoisted(() => vi.fn())
-vi.mock("../auth", () => ({ authFetch: mockAuthFetch }))
+const mockJsonFetch = vi.hoisted(() => vi.fn())
+vi.mock("../auth", () => ({ authFetch: mockAuthFetch, jsonFetch: mockJsonFetch }))
 
 describe("pendingProviderUpdates", () => {
   it("keeps only outdated providers", () => {
@@ -46,6 +47,7 @@ describe("nextDismissals", () => {
 describe("api calls", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset()
+    mockJsonFetch.mockReset()
   })
 
   it("unwraps the advisory list", async () => {
@@ -62,21 +64,18 @@ describe("api calls", () => {
   })
 
   it("posts the provider id and returns the run result", async () => {
-    mockAuthFetch.mockResolvedValue({
+    mockJsonFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ provider: "copilot", status: "succeeded", message: "done", output: null }),
     })
     const result = await runProviderUpdate("copilot")
     expect(result.status).toBe("succeeded")
-    expect(mockAuthFetch).toHaveBeenCalledWith(
-      "/api/provider-updates/run",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ provider: "copilot" }) }),
-    )
+    expect(mockJsonFetch).toHaveBeenCalledWith("/api/provider-updates/run", { provider: "copilot" })
   })
 
   it("surfaces a server error body as a thrown message", async () => {
-    mockAuthFetch.mockResolvedValue({
+    mockJsonFetch.mockResolvedValue({
       ok: false,
       status: 403,
       json: async () => ({ error: "Admin access required" }),

@@ -5,7 +5,7 @@ import type {
   ProviderUpdatesResponse,
 } from "../../shared/contracts/providerUpdates"
 import { providerUpdateDismissKey } from "../../shared/contracts/providerUpdates"
-import { authFetch } from "./auth"
+import { authFetch, jsonFetch } from "./auth"
 
 export type {
   ProviderUpdateId,
@@ -36,11 +36,7 @@ export async function fetchProviderUpdates(signal?: AbortSignal): Promise<Provid
 export async function runProviderUpdate(
   provider: ProviderUpdateId,
 ): Promise<ProviderUpdateRunResult> {
-  const response = await authFetch("/api/provider-updates/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider }),
-  })
+  const response = await jsonFetch("/api/provider-updates/run", { provider })
   const data = (await response.json()) as Partial<ProviderUpdateRunResult> & { error?: string }
   if (!data.status) throw new Error(data.error ?? `Update failed (${response.status})`)
   return data as ProviderUpdateRunResult

@@ -1,5 +1,5 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
-import { computeStats, createEmptySessionStats } from "./sessionStats"
+import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
 import {
   findFailedNestedPatchCallIds,
@@ -237,18 +237,6 @@ function normalizePromptText(text: string): string {
   if (!trimmed) return ""
   if (SKIP_PROMPT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return ""
   return trimmed
-}
-
-function mergeTokenUsage(existing: TokenUsage | null, incoming: TokenUsage): TokenUsage {
-  if (!existing) return { ...incoming }
-  return {
-    input_tokens: existing.input_tokens + incoming.input_tokens,
-    output_tokens: existing.output_tokens + incoming.output_tokens,
-    cache_creation_input_tokens:
-      (existing.cache_creation_input_tokens ?? 0) + (incoming.cache_creation_input_tokens ?? 0),
-    cache_read_input_tokens:
-      (existing.cache_read_input_tokens ?? 0) + (incoming.cache_read_input_tokens ?? 0),
-  }
 }
 
 function parseTokenUsage(value: unknown): TokenUsage | null {

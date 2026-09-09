@@ -71,8 +71,6 @@ export interface AgentCapabilities {
    * about its input modalities. When false, vision has to be advertised.
    */
   readonly imageInput: boolean
-  /** A plan-then-approve mode exists. */
-  readonly planMode: boolean
   /** A message can be delivered into an already-running turn. */
   readonly midTurnSteering: boolean
   /** The whole session can be shut down from the composer. */
@@ -614,7 +612,6 @@ const claude: AgentDescriptor = {
     reasoningEffort: true,
     fastTier: true,
     imageInput: true,
-    planMode: true,
     midTurnSteering: false,
     stopSession: true,
     ultracode: true,
@@ -766,7 +763,6 @@ const codex: AgentDescriptor = {
     reasoningEffort: true,
     fastTier: true,
     imageInput: true,
-    planMode: true,
     midTurnSteering: true,
     stopSession: false,
     ultracode: false,
@@ -895,7 +891,6 @@ const copilot: AgentDescriptor = {
     reasoningEffort: false,
     fastTier: false,
     imageInput: false,
-    planMode: true,
     midTurnSteering: true,
     stopSession: true,
     ultracode: false,

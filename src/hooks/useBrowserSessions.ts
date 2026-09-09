@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { withBase } from "@/lib/device"
+import { readError, readJson } from "@/lib/httpJson"
 import type { BrowserSkillStatus, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 
@@ -29,15 +30,11 @@ export type SkillTarget = AgentKind | typeof ALL_SKILL_TARGETS
 
 export interface UseBrowserSessions {
   status: BrowserStatus | null
-  loading: boolean
   /** Last status-refresh failure, cleared by the next successful poll. */
   error: string | null
-  refresh: () => Promise<void>
   create: (name: string, note?: string) => Promise<BrowserActionResult>
   remove: (name: string) => Promise<BrowserActionResult>
-  launch: (name: string, url?: string) => Promise<BrowserActionResult>
   stop: (name: string) => Promise<BrowserActionResult>
-  setNote: (name: string, note: string) => Promise<BrowserActionResult>
   /** Where the browser skill can be installed, and where it already is. */
   readSkillTargets: () => Promise<SkillTargetsResult>
   installSkill: (target: SkillTarget) => Promise<SkillInstallResult>
@@ -55,24 +52,8 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
-async function readJson(res: Response): Promise<Record<string, unknown> | null> {
-  try {
-    const data = (await res.json()) as unknown
-    return data && typeof data === "object" ? (data as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
-
-/** The route's `{ error }` message, or a caller-supplied fallback. */
-async function readError(res: Response, fallback: string): Promise<string> {
-  const data = await readJson(res)
-  return typeof data?.error === "string" && data.error ? data.error : fallback
-}
-
 export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
   const [status, setStatus] = useState<BrowserStatus | null>(null)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mounted = useRef(false)
   const requestSequence = useRef(0)
@@ -88,7 +69,6 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current
     inFlight.current = true
-    setLoading(true)
     try {
       const res = await authFetch(withBase(BROWSER_API))
       const next = res.ok ? (await res.json()) as BrowserStatus : null
@@ -106,10 +86,7 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
         setError(messageOf(cause, "Could not read the browser list"))
       }
     } finally {
-      if (sequence === requestSequence.current) {
-        inFlight.current = false
-        if (mounted.current) setLoading(false)
-      }
+      if (sequence === requestSequence.current) inFlight.current = false
     }
   }, [])
 
@@ -164,22 +141,10 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
     `Could not delete ${name}`,
   ), [perform])
 
-  const launch = useCallback((name: string, url?: string) => perform(
-    sessionPath(name, "/launch"),
-    { method: "POST", ...jsonBody(url ? { url } : {}) },
-    `Could not open ${name}`,
-  ), [perform])
-
   const stop = useCallback((name: string) => perform(
     sessionPath(name, "/stop"),
     { method: "POST" },
     `Could not stop ${name}`,
-  ), [perform])
-
-  const setNote = useCallback((name: string, note: string) => perform(
-    sessionPath(name),
-    { method: "PATCH", ...jsonBody({ note }) },
-    `Could not save the note for ${name}`,
   ), [perform])
 
   const readSkillTargets = useCallback(async (): Promise<SkillTargetsResult> => {
@@ -213,14 +178,10 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
 
   return {
     status,
-    loading,
     error,
-    refresh,
     create,
     remove,
-    launch,
     stop,
-    setNote,
     readSkillTargets,
     installSkill,
   }

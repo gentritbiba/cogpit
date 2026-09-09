@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
+import { createMiddlewareRes as mockRes } from "./http-fixtures"
 
 import { requirementFor } from "../team/policy"
 import { teamAuthzMiddleware } from "../team/authz"
@@ -111,7 +112,6 @@ describe("requirementFor", () => {
     expect(requirementFor("/api/projects", "GET")).toBe("authed")
     expect(requirementFor("/api/sessions/dir/file.jsonl", "GET")).toBe("authed")
     expect(requirementFor("/api/send-message", "POST")).toBe("authed")
-    expect(requirementFor("/api/new-session", "POST")).toBe("authed")
     expect(requirementFor("/api/notifications", "GET")).toBe("authed")
     expect(requirementFor("/api/notifications/read", "POST")).toBe("authed")
     expect(requirementFor("/api/usage-cost/session", "GET")).toBe("authed")
@@ -153,18 +153,6 @@ describe("requirementFor", () => {
 })
 
 // ── teamAuthzMiddleware ─────────────────────────────────────────────────
-
-function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
-  let body = ""
-  let statusCode = 200
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn(),
-    end: (data?: string) => { body = data || "" },
-  } as unknown as ServerResponse
-  return { res, get body() { return body }, get statusCode() { return statusCode } }
-}
 
 function run(
   url: string,

@@ -4,7 +4,6 @@
  * Usage from cogpit:
  *   import { SearchIndex } from "../packages/cogpit-memory"
  *   const index = new SearchIndex("~/.claude/cogpit-memory/search-index.db")
- *   index.startWatching(dirs.PROJECTS_DIR)
  */
 
 // Core

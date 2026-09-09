@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { Stats } from "node:fs"
 import { readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
-import type { IncomingMessage } from "node:http"
-import { sendJson, type UseFn } from "../http"
+import { MAX_REQUEST_BODY_BYTES, readJsonBody, sendJson, type UseFn } from "../http"
 import { isWithinDir } from "../helpers"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -18,23 +17,6 @@ interface ProjectFileWriteBody {
   path?: unknown
   content?: unknown
   expectedMtimeMs?: unknown
-}
-
-function readBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolveBody, reject) => {
-    let body = ""
-    req.on("data", (chunk: Buffer | string) => {
-      body += chunk.toString()
-    })
-    req.on("end", () => {
-      try {
-        resolveBody(JSON.parse(body))
-      } catch (error) {
-        reject(error)
-      }
-    })
-    req.on("error", reject)
-  })
 }
 
 async function resolveProjectFile(cwd: string, filePath: string): Promise<ResolvedProjectFile> {
@@ -134,7 +116,7 @@ export function registerProjectFileContentRoutes(use: UseFn) {
 
     if (req.method === "PUT") {
       try {
-        const body = await readBody(req) as ProjectFileWriteBody
+        const body = await readJsonBody<ProjectFileWriteBody>(req, { maxBytes: MAX_REQUEST_BODY_BYTES })
         if (
           typeof body.cwd !== "string"
           || typeof body.path !== "string"

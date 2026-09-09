@@ -11,7 +11,6 @@ interface AgentCardProps {
   subagentType: string | null
   agentName: string | null
   preview: string
-  colorIndex: number
   isViewing: boolean
   isBackground?: boolean
   status: AgentStatus

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
+  jsonFetch: vi.fn(),
 }))
 
 vi.mock("@/lib/device", () => ({
@@ -11,7 +12,7 @@ vi.mock("@/lib/device", () => ({
 }))
 
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
-import { authFetch } from "@/lib/auth"
+import { authFetch, jsonFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import {
   __resetFileOpenerForTest,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/fileOpener"
 
 const mockAuthFetch = vi.mocked(authFetch)
+const mockJsonFetch = vi.mocked(jsonFetch)
 const mockIsRemoteDeviceActive = vi.mocked(isRemoteDeviceActive)
 
 const baseOptions = {
@@ -49,6 +51,7 @@ describe("useProjectWorkspace", () => {
     vi.clearAllMocks()
     mockIsRemoteDeviceActive.mockReturnValue(false)
     mockAuthFetch.mockResolvedValue(new Response(null, { status: 200 }))
+    mockJsonFetch.mockResolvedValue(new Response(null, { status: 200 }))
   })
 
   afterEach(() => __resetFileOpenerForTest())
@@ -190,7 +193,7 @@ describe("useProjectWorkspace", () => {
         line: 12,
         token: 1,
       })
-      expect(mockAuthFetch).not.toHaveBeenCalled()
+      expect(mockJsonFetch).not.toHaveBeenCalled()
     })
 
     it("opens a git diff in the workspace", () => {
@@ -261,9 +264,10 @@ describe("useProjectWorkspace", () => {
       act(() => openFile("/repo/src/app.ts"))
 
       expect(result.current.showProjectFiles).toBe(false)
-      expect(mockAuthFetch).toHaveBeenCalledWith("/api/open-in-editor", expect.objectContaining({
-        body: JSON.stringify({ path: "/repo/src/app.ts", mode: "file" }),
-      }))
+      expect(mockJsonFetch).toHaveBeenCalledWith(
+        "/api/open-in-editor",
+        expect.objectContaining({ path: "/repo/src/app.ts", mode: "file" }),
+      )
     })
   })
 })

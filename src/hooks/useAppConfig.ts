@@ -63,7 +63,6 @@ export function useAppConfig(): AppConfig {
   // Bump to re-fetch config (e.g. after authentication)
   const [fetchKey, setFetchKey] = useState(0)
   const networkRequestRef = useRef<AbortController | null>(null)
-  const retryRequestRef = useRef<AbortController | null>(null)
 
   /** Publish a resolved snapshot to local state and the file-open router. */
   const applySnapshot = useCallback((snapshot: ConfigSnapshot) => {
@@ -84,7 +83,6 @@ export function useAppConfig(): AppConfig {
 
   useEffect(() => () => {
     networkRequestRef.current?.abort()
-    retryRequestRef.current?.abort()
   }, [])
 
   useEffect(() => {
@@ -131,27 +129,7 @@ export function useAppConfig(): AppConfig {
 
   const openConfigDialog = useCallback(() => setShowConfigDialog(true), [])
 
-  const retryConfig = useCallback(() => {
-    retryRequestRef.current?.abort()
-    const controller = new AbortController()
-    retryRequestRef.current = controller
-    setConfigLoading(true)
-    setConfigError(null)
-    fetchConfig(controller.signal)
-      .then((snapshot) => {
-        if (controller.signal.aborted || retryRequestRef.current !== controller) return
-        applySnapshot(snapshot)
-      })
-      .catch((err) => {
-        if (controller.signal.aborted || retryRequestRef.current !== controller) return
-        setClaudeDir(null)
-        setConfigError(err instanceof Error ? err.message : "Failed to load configuration")
-      })
-      .finally(() => {
-        if (controller.signal.aborted || retryRequestRef.current !== controller) return
-        setConfigLoading(false)
-      })
-  }, [applySnapshot])
+  const retryConfig = useCallback(() => setFetchKey((key) => key + 1), [])
 
   return {
     configLoading,

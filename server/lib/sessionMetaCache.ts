@@ -91,14 +91,3 @@ export function getOrLoadSessionMeta(
   inFlight.set(key, request)
   return request
 }
-
-/** Remove a single entry. Safe to call even when the path is not cached. */
-export function invalidateSessionMeta(filePath: string): void {
-  cache.delete(filePath)
-}
-
-/** Clear the entire cache (e.g. for tests). */
-export function invalidateAll(): void {
-  cache.clear()
-  inFlight.clear()
-}

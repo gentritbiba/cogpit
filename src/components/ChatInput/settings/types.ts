@@ -1,6 +1,7 @@
 import type { PermissionMode } from "@/lib/permissions"
 import type { AgentKind } from "@/lib/agents"
 import type { ServiceTierOption } from "@/lib/utils"
+import type { McpServer } from "../../../../shared/contracts/projectTools"
 
 export interface SettingOption {
   value: string
@@ -8,11 +9,6 @@ export interface SettingOption {
   /** Shown in the picker list only (e.g. "Default (recommended)"). */
   menuLabel?: string
   description?: string
-}
-
-export interface McpServer {
-  name: string
-  status: "connected" | "needs_auth" | "error"
 }
 
 export interface CommonSettingsControlProps {

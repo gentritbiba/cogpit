@@ -11,15 +11,10 @@
  */
 import {
   accessSync,
-  chmodSync,
   constants as fsConstants,
-  mkdirSync,
-  readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs"
 import { join, posix, resolve, win32 } from "node:path"
 import {
@@ -32,6 +27,7 @@ import {
   nodeShimPath,
   shimPath,
 } from "./paths"
+import { writeIfChanged } from "./files"
 
 export const SHIM_VERSION = 3
 
@@ -214,24 +210,6 @@ exec node "$(dirname "$0")/${NODE_SHIM_NAME}" "$@"
 `
 }
 
-function hasContent(path: string, script: string): boolean {
-  try {
-    return readFileSync(path, "utf8") === script
-  } catch {
-    return false
-  }
-}
-
-function writeExecutable(path: string, script: string): void {
-  if (!hasContent(path, script)) {
-    mkdirSync(binDir(), { recursive: true })
-    const tmp = `${path}.tmp`
-    writeFileSync(tmp, script, { mode: 0o755 })
-    renameSync(tmp, path)
-  }
-  chmodSync(path, 0o755)
-}
-
 /** Every file the shim occupies on this host, with the script each one holds. */
 function shimFiles(
   realBinary: string,
@@ -252,7 +230,7 @@ export function ensureShim(realBinary: string | null, options: ShimOptions = {})
     for (const [path] of shimFiles("", options, platform)) rmSync(path, { force: true })
     return { path: null }
   }
-  for (const [path, script] of shimFiles(realBinary, options, platform)) writeExecutable(path, script)
+  for (const [path, script] of shimFiles(realBinary, options, platform)) writeIfChanged(path, script, 0o755)
   return { path: shimPath(platform) }
 }
 

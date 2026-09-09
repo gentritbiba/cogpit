@@ -25,7 +25,6 @@ interface DesktopWorkspacePanelsProps {
   activePanel: RegisteredWorkspacePanel | null
   services: BuiltInPanelServices
   onClosePanel: () => void
-  onOpenPanel: (panelId: string) => void
   onTogglePanel: (panelId: string) => void
   actions?: readonly WorkspaceActivityAction[]
 }
@@ -44,7 +43,6 @@ export function DesktopWorkspacePanels({
   activePanel,
   services,
   onClosePanel,
-  onOpenPanel,
   onTogglePanel,
   actions,
 }: DesktopWorkspacePanelsProps) {
@@ -74,7 +72,6 @@ export function DesktopWorkspacePanels({
                   context={context}
                   activePanelId={activePanel.id}
                   onClosePanel={onClosePanel}
-                  onOpenPanel={onOpenPanel}
                 />
               </BuiltInPanelServicesProvider>
             </ResizablePanel>

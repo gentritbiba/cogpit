@@ -9,21 +9,23 @@ CLI tool that gives any AI assistant memory of past Claude Code, Codex, and GitH
 
 Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
 
-**Prerequisite:** Bun must be installed (uses bun:sqlite for FTS5 search).
-
-## Step 1 -- Verify the tool works
+## Step 1 -- Use the installed CLI
 
 ```bash
-bunx cogpit-memory --help
+command -v cogpit-memory
+cogpit-memory --help
 ```
 
-If this prints usage info, proceed to Step 2. If `bunx` is not available, install the package globally:
+If missing, install it once, wait for installation to finish, then use the installed command:
 
 ```bash
-npm install -g cogpit-memory
+bun install --global cogpit-memory
+cogpit-memory --help
 ```
 
-Then use `cogpit-memory` directly instead of `bunx cogpit-memory`.
+The npm package requires Node.js 20 or newer. If Bun's global bin directory is not on PATH, resolve it with `bun pm bin --global` and invoke `cogpit-memory` there. Do not run parallel `bunx cogpit-memory` installs: transient native-dependency installation can race. Parallel calls to the installed CLI do not reinstall anything.
+
+JSON goes to stdout. Keep stderr separate when piping to `jq` or Python; never merge it with `2>&1` before a JSON parser. A JSON `{ "error": ... }` response exits nonzero and is a failed lookup, not an empty successful result. Use complete session IDs from discovery or search, not abbreviated IDs.
 
 ## Step 2 -- Find sessions
 
@@ -31,13 +33,13 @@ Then use `cogpit-memory` directly instead of `bunx cogpit-memory`.
 
 ```bash
 # List recent sessions (default: last 7 days, up to 20 results)
-bunx cogpit-memory sessions
+cogpit-memory sessions
 
 # Filter by working directory
-bunx cogpit-memory sessions --cwd /path/to/project
+cogpit-memory sessions --cwd /path/to/project
 
 # Customize limit and time window
-bunx cogpit-memory sessions --limit 50 --max-age 30d
+cogpit-memory sessions --limit 50 --max-age 30d
 ```
 
 Options:
@@ -53,7 +55,7 @@ Response: array of session summaries with `sessionId`, `cwd`, `model`, `firstMes
 ### Get current session for a directory
 
 ```bash
-bunx cogpit-memory sessions --current --cwd /path/to/project
+cogpit-memory sessions --current --cwd /path/to/project
 ```
 
 Returns the most recently active session for the given working directory. The `--cwd` flag is required when using `--current` (defaults to the current working directory if omitted).
@@ -63,7 +65,7 @@ Returns the most recently active session for the given working directory. The `-
 This gives you every user prompt and AI reply, plus a tool usage summary per turn. **You must call this before Layer 2 or Layer 3** -- it provides the `turnIndex` and `agentId` values you need for drill-downs.
 
 ```bash
-bunx cogpit-memory context <SESSION_ID>
+cogpit-memory context <SESSION_ID>
 ```
 
 Response shape:
@@ -117,7 +119,7 @@ Key fields:
 Use this to drill into a specific turn. Get thinking, full tool call inputs/outputs, and sub-agent summaries in chronological order.
 
 ```bash
-bunx cogpit-memory context <SESSION_ID> --turn <TURN_INDEX>
+cogpit-memory context <SESSION_ID> --turn <TURN_INDEX>
 ```
 
 Response shape:
@@ -163,7 +165,7 @@ Key details:
 Drill into a specific sub-agent's full conversation. Returns the same shape as Layer 1 (an overview of the sub-agent's own turns).
 
 ```bash
-bunx cogpit-memory context <SESSION_ID> --agent <AGENT_ID>
+cogpit-memory context <SESSION_ID> --agent <AGENT_ID>
 ```
 
 Get the `AGENT_ID` from Layer 1's `subAgents[].agentId` field.
@@ -188,7 +190,7 @@ Response shape:
 The `overview` field has the exact same shape as Layer 1. You can then drill into specific sub-agent turns:
 
 ```bash
-bunx cogpit-memory context <SESSION_ID> --agent <AGENT_ID> --turn <TURN_INDEX>
+cogpit-memory context <SESSION_ID> --agent <AGENT_ID> --turn <TURN_INDEX>
 ```
 
 This returns the same shape as Layer 2.
@@ -226,20 +228,30 @@ Cross-session search indexes every provider's history. With `--session`, Claude 
 - You know the session -> Use Layer 1 overview, then drill with Layer 2/3
 - You need to **find** which session discussed something -> Use search first, then drill into hits
 
+When recalling earlier work, exclude this session if its ID is known, so your search commands and copied results do not crowd out history:
+
+```bash
+cogpit-memory search "authentication" --max-age 90d --exclude-session "$COGPIT_SESSION_ID"
+```
+
+Only pass that flag when the environment variable is set, or supply a known full session ID. Do not guess that the most recently modified session is yours when agents share a project. Omit the flag when searching this session itself. The exclusion also covers its indexed subagents.
+
+Search automatically removes index entries for transcript files that no longer exist. It cannot recover deleted transcripts. If a file disappears between search and `context`, report that the source is unavailable and continue with other hits.
+
 ### Basic usage
 
 ```bash
 # Search recent indexed sessions from all supported CLIs (last 5 days)
-bunx cogpit-memory search "authentication"
+cogpit-memory search "authentication"
 
 # Search within a specific session
-bunx cogpit-memory search "authentication" --session <SESSION_ID>
+cogpit-memory search "authentication" --session <SESSION_ID>
 
 # Search with custom time window and more results
-bunx cogpit-memory search "authentication" --max-age 30d --limit 50
+cogpit-memory search "authentication" --max-age 30d --limit 50
 
 # Case-sensitive search
-bunx cogpit-memory search "AuthProvider" --case-sensitive
+cogpit-memory search "AuthProvider" --case-sensitive
 ```
 
 ### Options
@@ -247,6 +259,7 @@ bunx cogpit-memory search "AuthProvider" --case-sensitive
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--session` | all sessions | Scope to single session |
+| `--exclude-session` | none | Omit one session and its subagents |
 | `--max-age` | `5d` | Time window: `5d`, `12h`, `30d` |
 | `--limit` | `20` | Max total hits returned |
 | `--session-limit` | all | Cap unique sessions in results |
@@ -302,17 +315,14 @@ Locations map directly to Layer 2/3 drill-down commands -- use them to fetch ful
 
 ### Typical workflow
 
-1. Search for keyword: `bunx cogpit-memory search "auth"`
+1. Search for keyword: `cogpit-memory search "auth"`
 2. Pick a hit from results (e.g., `sessionId: "abc-123"`, `location: "turn/3/assistantMessage"`)
-3. Get full turn context: `bunx cogpit-memory context abc-123 --turn 3`
-4. If a hit is in a sub-agent with a separate transcript, get its overview: `bunx cogpit-memory context abc-123 --agent a7f3bc2`
+3. Get full turn context: `cogpit-memory context abc-123 --turn 3`
+4. If a hit is in a sub-agent with a separate transcript, get its overview: `cogpit-memory context abc-123 --agent a7f3bc2`
 
-### Performance notes
+### Search behavior
 
-- Cross-session search uses a raw-text pre-filter -- files that can't match are skipped before expensive parsing
-- Default 5-day window keeps search fast; increase `--max-age` only if needed
-- Single-session search (`--session` flag) is much faster than cross-session
-- Typical cross-session search: ~150 sessions in ~1-2 seconds
+Cross-session search uses an incrementally updated SQLite FTS5 index, with a raw-file fallback if the index is unavailable. The default window is 5 days. Increase `--max-age` for older work. FTS matches whole tokens, so `auth` does not match `authentication`. `--limit` is capped at 200; narrow a broad query or use `--session` to investigate further.
 
 ## Index management
 
@@ -320,26 +330,26 @@ The search index is an FTS5 database at `~/.claude/cogpit-memory/search-index.db
 
 ```bash
 # Show index stats (session count, staleness, DB size)
-bunx cogpit-memory index stats
+cogpit-memory index stats
 
 # Rebuild the full index from scratch
-bunx cogpit-memory index rebuild
+cogpit-memory index rebuild
 ```
 
 ## Quick reference
 
 | Goal | Command |
 |------|---------|
-| List recent sessions | `bunx cogpit-memory sessions` |
-| Sessions for a directory | `bunx cogpit-memory sessions --cwd <path>` |
-| Current session for a directory | `bunx cogpit-memory sessions --current --cwd <path>` |
-| Session overview (always first) | `bunx cogpit-memory context <sessionId>` |
-| Turn detail | `bunx cogpit-memory context <sessionId> --turn <N>` |
-| Sub-agent overview | `bunx cogpit-memory context <sessionId> --agent <agentId>` |
-| Sub-agent turn detail | `bunx cogpit-memory context <sessionId> --agent <agentId> --turn <N>` |
-| **Search indexed sessions** | `bunx cogpit-memory search "<query>"` |
-| **Search any single provider session** | `bunx cogpit-memory search "<query>" --session <sessionId>` |
-| Index stats | `bunx cogpit-memory index stats` |
-| Index rebuild | `bunx cogpit-memory index rebuild` |
+| List recent sessions | `cogpit-memory sessions` |
+| Sessions for a directory | `cogpit-memory sessions --cwd <path>` |
+| Current session for a directory | `cogpit-memory sessions --current --cwd <path>` |
+| Session overview (always first) | `cogpit-memory context <sessionId>` |
+| Turn detail | `cogpit-memory context <sessionId> --turn <N>` |
+| Sub-agent overview | `cogpit-memory context <sessionId> --agent <agentId>` |
+| Sub-agent turn detail | `cogpit-memory context <sessionId> --agent <agentId> --turn <N>` |
+| **Search indexed sessions** | `cogpit-memory search "<query>"` |
+| **Search any single provider session** | `cogpit-memory search "<query>" --session <sessionId>` |
+| Index stats | `cogpit-memory index stats` |
+| Index rebuild | `cogpit-memory index rebuild` |
 
 **Default to Layer 1 only. Drill into Layer 2/3 only when you have a specific reason.**

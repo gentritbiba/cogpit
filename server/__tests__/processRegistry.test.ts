@@ -37,7 +37,7 @@ describe("processRegistry", () => {
     expect(activeProcesses.get("shared")).toBe(proc)
   })
 
-  it("preserves watcher, signal, deletion, and force-kill ordering", () => {
+  it("preserves signal, deletion, and force-kill ordering", () => {
     const events: string[] = []
     const activeProc = {
       pid: 201,
@@ -49,16 +49,12 @@ describe("processRegistry", () => {
     }
 
     activeProcesses.set("active", activeProc as never)
-    persistentSessions.set("persistent", {
-      proc: persistentProc,
-      subagentWatcher: { close: () => events.push("watcher:close") },
-    } as never)
+    persistentSessions.set("persistent", { proc: persistentProc } as never)
 
     cleanupProcesses()
 
     expect(events).toEqual([
       "active:SIGTERM",
-      "watcher:close",
       "persistent:SIGTERM",
     ])
     expect(activeProcesses.size).toBe(0)
@@ -68,7 +64,6 @@ describe("processRegistry", () => {
 
     expect(events).toEqual([
       "active:SIGTERM",
-      "watcher:close",
       "persistent:SIGTERM",
       "active:SIGKILL",
       "persistent:SIGKILL",
@@ -78,10 +73,7 @@ describe("processRegistry", () => {
   it("signals a process only once when both registries reference it", () => {
     const proc = { pid: 303, kill: vi.fn() }
     activeProcesses.set("shared", proc as never)
-    persistentSessions.set("shared", {
-      proc,
-      subagentWatcher: { close: vi.fn() },
-    } as never)
+    persistentSessions.set("shared", { proc } as never)
 
     cleanupProcesses()
     expect(proc.kill).toHaveBeenCalledTimes(1)

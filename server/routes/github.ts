@@ -26,6 +26,7 @@ import type {
 } from "../../shared/contracts/github"
 import { sendJson, type UseFn } from "../http"
 import { resolveGitProject, runGit } from "../lib/gitProject"
+import { clampLimit, nullableString, record, stringValue } from "./apiValues"
 
 const execFile = promisify(execFileCallback)
 const MAX_RUNS = 30
@@ -135,22 +136,8 @@ class GitHubRouteError extends Error {
   }
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function stringValue(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback
-}
-
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : null
-}
-
-function nullableString(value: unknown): string | null {
-  return typeof value === "string" && value ? value : null
 }
 
 function workflowStatus(value: unknown): GitHubWorkflowStatus {
@@ -551,11 +538,6 @@ function sendRouteError(res: Parameters<typeof sendJson>[0], error: unknown): vo
     return
   }
   sendJson(res, 500, { error: "Unable to load GitHub data", code: "github_api_failed" })
-}
-
-function clampLimit(raw: string | null, fallback: number, max: number): number {
-  const requested = Number(raw ?? fallback)
-  return Number.isInteger(requested) ? Math.min(max, Math.max(1, requested)) : fallback
 }
 
 type RouteHandler = (

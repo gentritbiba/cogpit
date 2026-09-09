@@ -10,6 +10,7 @@ import { basename, dirname } from "node:path"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import type { UsageCostProvider, UsageCostTokenTotals } from "../../shared/contracts/usageCost"
 import { totalUsageCostTokens } from "../../shared/contracts/usageCost"
+import { asRecord } from "../../shared/objects"
 
 export interface UsageCostRecord {
   provider: UsageCostProvider
@@ -32,10 +33,6 @@ function parseTimestampMs(value: unknown): number | null {
   if (typeof value !== "string") return null
   const parsed = Date.parse(value)
   return Number.isNaN(parsed) ? null : parsed
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null ? value as Record<string, unknown> : null
 }
 
 function requestSpeed(value: unknown): UsageCostRecord["speed"] {

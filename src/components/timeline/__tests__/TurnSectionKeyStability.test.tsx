@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
-import type { ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
+import type { ToolCall, TurnContentBlock } from "../../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
@@ -30,7 +31,7 @@ vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus
 
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 
-vi.mock("../SubAgentPanel", () => ({ SubAgentPanel: () => <div>sub-agent</div> }))
+vi.mock("../AgentPanel", () => ({ AgentPanel: () => <div>sub-agent</div> }))
 
 vi.mock("../ThinkingBlock", () => ({ ThinkingBlock: () => <div>thinking</div> }))
 
@@ -45,21 +46,12 @@ function call(id: string, name: string): ToolCall {
   return { id, name, input: {}, result: "ok", isError: false, timestamp: "2026-08-19T12:00:00.000Z" }
 }
 
-function makeTurn(contentBlocks: TurnContentBlock[]): Turn {
-  return {
-    id: "turn-1",
-    userMessage: null,
+const makeTurn = (contentBlocks: TurnContentBlock[]) =>
+  emptyTurn({
     contentBlocks,
-    thinking: [],
-    assistantText: [],
     toolCalls: contentBlocks.flatMap((b) => (b.kind === "tool_calls" ? b.toolCalls : [])),
-    subAgentActivity: [],
     timestamp: "2026-08-19T12:00:00.000Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-  }
-}
+  })
 
 const agentBlock = (id: string): TurnContentBlock => ({
   kind: "sub_agent",

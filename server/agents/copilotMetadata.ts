@@ -1,12 +1,9 @@
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { extractCopilotMetadataFromLines } from "../../shared/session/copilot"
+import { isRecord } from "../../shared/objects"
 import { HEAD_BYTES, readHeadLines, readWholeTranscript } from "./transcriptHead"
 import type { SessionIdentity, SessionMeta, TranscriptHead } from "./types"
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
 
 function parseSimpleYamlValue(raw: string): string {
   const value = raw.trim()

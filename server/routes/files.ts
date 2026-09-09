@@ -4,23 +4,20 @@ import {
   lstat,
   join,
 } from "../helpers"
-import type { UseFn } from "../http"
+import { readJsonBody, sendJson, type UseFn } from "../http"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerFileRoutes(use: UseFn) {
   // POST /api/check-files-exist - check which files have been deleted + get line counts via git
   use("/api/check-files-exist", (req, res, next) => {
     if (req.method !== "POST") return next()
-    let body = ""
-    req.on("data", (chunk: Buffer) => (body += chunk.toString()))
-    req.on("end", async () => {
+    void (async () => {
       try {
-        const { files, dirs } = JSON.parse(body) as { files?: string[]; dirs?: string[] }
+        const { files, dirs } = await readJsonBody<{ files?: string[]; dirs?: string[] }>(req)
         const fileList = Array.isArray(files) ? files : []
         const dirList = Array.isArray(dirs) ? dirs : []
         if (fileList.length === 0 && dirList.length === 0) {
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ deleted: [] }))
+          sendJson(res, 200, { deleted: [] })
           return
         }
         const deleted: { path: string; lines: number }[] = []
@@ -163,11 +160,10 @@ export function registerFileRoutes(use: UseFn) {
           }
         }
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ deleted }))
+        sendJson(res, 200, { deleted })
       } catch {
         sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
       }
-    })
+    })()
   })
 }

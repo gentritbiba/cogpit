@@ -12,35 +12,15 @@
  * (summarizeJournal / normalizeDetail) so they can be unit-tested without fs.
  */
 import { dirs, isWithinDir, readdir, readFile, stat, join } from "../helpers"
+import type {
+  WorkflowAgent,
+  WorkflowAgentCounts,
+  WorkflowDetail,
+  WorkflowPhaseMeta,
+  WorkflowSummary,
+} from "../../shared/contracts/workflows"
 
-// ── Wire types (mirror src/lib/workflow-types.ts) ───────────────────────────
-
-export interface WorkflowPhaseMeta {
-  title: string
-  detail?: string
-}
-
-export interface WorkflowAgentEntry {
-  type: "workflow_agent"
-  index: number
-  label: string
-  phaseIndex: number
-  phaseTitle: string
-  agentId: string
-  model?: string
-  state: string
-  startedAt?: number
-  queuedAt?: number
-  attempt?: number
-  lastToolName?: string
-  lastToolSummary?: string
-  promptPreview?: string
-  lastProgressAt?: number
-  tokens?: number
-  toolCalls?: number
-  durationMs?: number
-  resultPreview?: string
-}
+// ── Journal shapes ──────────────────────────────────────────────────────────
 
 interface WorkflowPhaseEntry {
   type: "workflow_phase"
@@ -48,7 +28,7 @@ interface WorkflowPhaseEntry {
   title: string
 }
 
-type WorkflowProgressEntry = WorkflowAgentEntry | WorkflowPhaseEntry
+type WorkflowProgressEntry = WorkflowAgent | WorkflowPhaseEntry
 
 /** Raw shape of a wf_<runId>.json journal (only the fields we read). */
 export interface WorkflowJournal {
@@ -80,49 +60,7 @@ export interface WorkflowAgentResult {
   result: unknown
 }
 
-export type WorkflowResult = WorkflowAgentResult
-
-export interface WorkflowAgentCounts {
-  total: number
-  queued: number
-  running: number
-  done: number
-  error: number
-}
-
-export interface WorkflowSummary {
-  runId: string
-  taskId?: string
-  workflowName: string
-  summary: string
-  status: string
-  startTime: number
-  durationMs?: number
-  agentCount: number
-  totalTokens: number
-  totalToolCalls: number
-  phaseCount: number
-  phaseTitles: string[]
-  agentCounts: WorkflowAgentCounts
-}
-
-export interface WorkflowDetail extends WorkflowSummary {
-  defaultModel?: string
-  phases: WorkflowPhaseMeta[]
-  agents: WorkflowAgentEntry[]
-  script?: string
-  error?: string
-  resultPreview?: string
-}
-
 // ── Pure normalization ──────────────────────────────────────────────────────
-
-const TERMINAL_STATES = new Set(["done", "error", "skipped"])
-
-/** True once an agent has reached a terminal state. */
-export function isTerminalAgentState(state: string): boolean {
-  return TERMINAL_STATES.has(state)
-}
 
 function countAgents(progress: WorkflowProgressEntry[]): WorkflowAgentCounts {
   const counts: WorkflowAgentCounts = { total: 0, queued: 0, running: 0, done: 0, error: 0 }
@@ -182,7 +120,7 @@ function truncate(value: unknown, max: number): string | undefined {
 
 export function normalizeDetail(runId: string, journal: WorkflowJournal): WorkflowDetail {
   const progress = Array.isArray(journal.workflowProgress) ? journal.workflowProgress : []
-  const agents = progress.filter((e): e is WorkflowAgentEntry => e.type === "workflow_agent")
+  const agents = progress.filter((e): e is WorkflowAgent => e.type === "workflow_agent")
   return {
     ...summarizeJournal(runId, journal),
     defaultModel: journal.defaultModel,
@@ -301,7 +239,7 @@ export async function readWorkflowResult(
   dirName: string,
   sessionId: string,
   runId: string,
-): Promise<WorkflowResult | null> {
+): Promise<WorkflowAgentResult | null> {
   if (!isSafeRunId(runId)) return null
 
   const completedDir = workflowsDirFor(dirName, sessionId)
@@ -337,7 +275,7 @@ async function readLiveWorkflowDetail(
     // The events still identify the live agents even when metadata is unavailable.
   }
 
-  const agents = new Map<string, WorkflowAgentEntry>()
+  const agents = new Map<string, WorkflowAgent>()
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue
     let event: LiveWorkflowEvent

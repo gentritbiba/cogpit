@@ -8,6 +8,7 @@ import {
   isCompactBoundary,
 } from "../../../shared/session/messageTypeGuards"
 import type {
+  RawMessage,
   UserMessage,
   AssistantMessage,
   ProgressMessage,
@@ -73,154 +74,27 @@ function makeSummary(): SummaryMessage {
   } as SummaryMessage
 }
 
-// ── isUserMessage ────────────────────────────────────────────────────────────
+const FIXTURES: Record<string, RawMessage> = {
+  user: makeUser(),
+  assistant: makeAssistant(),
+  progress: makeProgress(),
+  system: makeSystem(),
+  summary: makeSummary(),
+  compactBoundary: makeSystem("compact_boundary"),
+  systemNoSubtype: makeSystem(""),
+}
 
-describe("isUserMessage", () => {
-  it("returns true for a user message", () => {
-    expect(isUserMessage(makeUser())).toBe(true)
-  })
+const GUARDS: Array<[string, (m: RawMessage) => boolean, string[]]> = [
+  ["isUserMessage", isUserMessage, ["user"]],
+  ["isAssistantMessage", isAssistantMessage, ["assistant"]],
+  ["isProgressMessage", isProgressMessage, ["progress"]],
+  ["isSystemMessage", isSystemMessage, ["system", "compactBoundary", "systemNoSubtype"]],
+  ["isSummaryMessage", isSummaryMessage, ["summary"]],
+  ["isCompactBoundary", isCompactBoundary, ["compactBoundary"]],
+]
 
-  it("returns false for an assistant message", () => {
-    expect(isUserMessage(makeAssistant())).toBe(false)
-  })
-
-  it("returns false for a progress message", () => {
-    expect(isUserMessage(makeProgress())).toBe(false)
-  })
-
-  it("returns false for a system message", () => {
-    expect(isUserMessage(makeSystem())).toBe(false)
-  })
-
-  it("returns false for a summary message", () => {
-    expect(isUserMessage(makeSummary())).toBe(false)
-  })
-})
-
-// ── isAssistantMessage ───────────────────────────────────────────────────────
-
-describe("isAssistantMessage", () => {
-  it("returns true for an assistant message", () => {
-    expect(isAssistantMessage(makeAssistant())).toBe(true)
-  })
-
-  it("returns false for a user message", () => {
-    expect(isAssistantMessage(makeUser())).toBe(false)
-  })
-
-  it("returns false for a progress message", () => {
-    expect(isAssistantMessage(makeProgress())).toBe(false)
-  })
-
-  it("returns false for a system message", () => {
-    expect(isAssistantMessage(makeSystem())).toBe(false)
-  })
-
-  it("returns false for a summary message", () => {
-    expect(isAssistantMessage(makeSummary())).toBe(false)
-  })
-})
-
-// ── isProgressMessage ────────────────────────────────────────────────────────
-
-describe("isProgressMessage", () => {
-  it("returns true for a progress message", () => {
-    expect(isProgressMessage(makeProgress())).toBe(true)
-  })
-
-  it("returns false for a user message", () => {
-    expect(isProgressMessage(makeUser())).toBe(false)
-  })
-
-  it("returns false for an assistant message", () => {
-    expect(isProgressMessage(makeAssistant())).toBe(false)
-  })
-
-  it("returns false for a system message", () => {
-    expect(isProgressMessage(makeSystem())).toBe(false)
-  })
-
-  it("returns false for a summary message", () => {
-    expect(isProgressMessage(makeSummary())).toBe(false)
-  })
-})
-
-// ── isSystemMessage ──────────────────────────────────────────────────────────
-
-describe("isSystemMessage", () => {
-  it("returns true for a system message", () => {
-    expect(isSystemMessage(makeSystem())).toBe(true)
-  })
-
-  it("returns true for compact_boundary system message", () => {
-    expect(isSystemMessage(makeSystem("compact_boundary"))).toBe(true)
-  })
-
-  it("returns false for a user message", () => {
-    expect(isSystemMessage(makeUser())).toBe(false)
-  })
-
-  it("returns false for an assistant message", () => {
-    expect(isSystemMessage(makeAssistant())).toBe(false)
-  })
-
-  it("returns false for a progress message", () => {
-    expect(isSystemMessage(makeProgress())).toBe(false)
-  })
-
-  it("returns false for a summary message", () => {
-    expect(isSystemMessage(makeSummary())).toBe(false)
-  })
-})
-
-// ── isSummaryMessage ─────────────────────────────────────────────────────────
-
-describe("isSummaryMessage", () => {
-  it("returns true for a summary message", () => {
-    expect(isSummaryMessage(makeSummary())).toBe(true)
-  })
-
-  it("returns false for a user message", () => {
-    expect(isSummaryMessage(makeUser())).toBe(false)
-  })
-
-  it("returns false for an assistant message", () => {
-    expect(isSummaryMessage(makeAssistant())).toBe(false)
-  })
-
-  it("returns false for a progress message", () => {
-    expect(isSummaryMessage(makeProgress())).toBe(false)
-  })
-
-  it("returns false for a system message", () => {
-    expect(isSummaryMessage(makeSystem())).toBe(false)
-  })
-})
-
-// ── isCompactBoundary ────────────────────────────────────────────────────────
-
-describe("isCompactBoundary", () => {
-  it("returns true for a system message with subtype compact_boundary", () => {
-    expect(isCompactBoundary(makeSystem("compact_boundary"))).toBe(true)
-  })
-
-  it("returns false for a system message with a different subtype", () => {
-    expect(isCompactBoundary(makeSystem("init"))).toBe(false)
-  })
-
-  it("returns false for a system message with no subtype", () => {
-    expect(isCompactBoundary(makeSystem(""))).toBe(false)
-  })
-
-  it("returns false for a user message", () => {
-    expect(isCompactBoundary(makeUser())).toBe(false)
-  })
-
-  it("returns false for an assistant message", () => {
-    expect(isCompactBoundary(makeAssistant())).toBe(false)
-  })
-
-  it("returns false for a summary message", () => {
-    expect(isCompactBoundary(makeSummary())).toBe(false)
+describe.each(GUARDS)("%s", (_name, guard, accepted) => {
+  it.each(Object.keys(FIXTURES))("classifies %s", (fixture) => {
+    expect(guard(FIXTURES[fixture])).toBe(accepted.includes(fixture))
   })
 })

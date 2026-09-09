@@ -1,11 +1,11 @@
 import { stat } from "node:fs/promises"
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { ServerResponse } from "node:http"
 import {
   dirs,
   isWithinDir,
   join,
 } from "../../helpers"
-import type { UseFn } from "../../http"
+import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../../http"
 import {
   isValidWorktreeName,
   parseWorktreeList,
@@ -20,63 +20,6 @@ import {
   WORKTREE_NETWORK_TIMEOUT_MS,
   WORKTREE_SCAN_CONCURRENCY,
 } from "./worktreeIo"
-
-const MAX_REQUEST_BODY_BYTES = 64 * 1024
-
-class WorktreeRequestBodyError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode: number,
-  ) {
-    super(message)
-  }
-}
-
-async function readJsonRequestBody<T>(req: IncomingMessage): Promise<T | null> {
-  const body = await new Promise<string>((resolve, reject) => {
-    let data = ""
-    let bytesRead = 0
-    let settled = false
-
-    req.on("data", (chunk: Buffer | string) => {
-      if (settled) return
-      bytesRead += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.byteLength
-      if (bytesRead > MAX_REQUEST_BODY_BYTES) {
-        settled = true
-        reject(new WorktreeRequestBodyError("Request body too large", 413))
-        return
-      }
-      data += chunk.toString()
-    })
-    req.on("end", () => {
-      if (!settled) {
-        settled = true
-        resolve(data)
-      }
-    })
-    req.on("error", () => {
-      if (!settled) {
-        settled = true
-        reject(new WorktreeRequestBodyError("Failed to read request body", 400))
-      }
-    })
-  })
-
-  if (!body) return null
-  try {
-    return JSON.parse(body) as T
-  } catch {
-    throw new WorktreeRequestBodyError("Invalid JSON body", 400)
-  }
-}
-
-function respondToBodyError(res: ServerResponse, error: unknown): void {
-  const bodyError = error instanceof WorktreeRequestBodyError
-    ? error
-    : new WorktreeRequestBodyError("Invalid request body", 400)
-  res.statusCode = bodyError.statusCode
-  res.end(JSON.stringify({ error: bodyError.message }))
-}
 
 function requireProjectDir(dirName: string, res: ServerResponse): string | null {
   const projectDir = join(dirs.PROJECTS_DIR, dirName)
@@ -159,10 +102,11 @@ export function registerWorktreeRoutes(use: UseFn) {
 
       let force = false
       try {
-        const parsed = await readJsonRequestBody<{ force?: boolean }>(req)
-        if (parsed) ({ force = false } = parsed)
+        ({ force = false } = await readJsonBody<{ force?: boolean }>(req, { allowEmpty: true }))
       } catch (error) {
-        respondToBodyError(res, error)
+        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
+          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
+        })
         return
       }
       const worktreePath = join(gitRoot, ".claude", "worktrees", worktreeName)
@@ -202,9 +146,11 @@ export function registerWorktreeRoutes(use: UseFn) {
 
       let parsed: { worktreeName?: string; title?: string; body?: string } = {}
       try {
-        parsed = await readJsonRequestBody<typeof parsed>(req) ?? {}
+        parsed = await readJsonBody<typeof parsed>(req, { allowEmpty: true })
       } catch (error) {
-        respondToBodyError(res, error)
+        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
+          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
+        })
         return
       }
       const { worktreeName, title, body: prBody } = parsed
@@ -271,14 +217,15 @@ export function registerWorktreeRoutes(use: UseFn) {
       let names: string[] | undefined
       let maxAgeDays = 7
       try {
-        const parsed = await readJsonRequestBody<{
+        ({ confirm, names, maxAgeDays = 7 } = await readJsonBody<{
           confirm?: boolean
           names?: string[]
           maxAgeDays?: number
-        }>(req)
-        if (parsed) ({ confirm, names, maxAgeDays = 7 } = parsed)
+        }>(req, { allowEmpty: true }))
       } catch (error) {
-        respondToBodyError(res, error)
+        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
+          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
+        })
         return
       }
 

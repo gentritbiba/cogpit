@@ -4,27 +4,66 @@ import type { ToolCall } from "../../../shared/session/types"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 import { useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
-interface AskUserQuestion {
+export interface AskUserQuestion {
   question: string
   header?: string
   options?: Array<{ label: string; description?: string }>
   multiSelect?: boolean
-  type?: string
+}
+
+/** The marker and label of one option row, shared by the form and the history. */
+export function QuestionOptionBody({
+  option,
+  multiSelect,
+  selected,
+  showSelectedBadge = false,
+}: {
+  option: { label: string; description?: string }
+  multiSelect?: boolean
+  selected: boolean
+  showSelectedBadge?: boolean
+}): React.ReactElement {
+  return (
+    <>
+      <span
+        className={cn(
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
+          multiSelect ? "rounded" : "rounded-full",
+          selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/30",
+        )}
+        aria-hidden="true"
+      >
+        {selected && <Check className="size-3" strokeWidth={3} data-icon="icon" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-medium">
+          {option.label}
+          {showSelectedBadge && selected && (
+            <Badge variant="secondary" className="ml-2">Selected</Badge>
+          )}
+        </span>
+        {option.description && (
+          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+            {option.description}
+          </span>
+        )}
+      </span>
+    </>
+  )
 }
 
 export function AskUserAnswerForm({
   toolCall,
   sessionId,
-  embedded = false,
 }: {
   toolCall: ToolCall
   sessionId: string
-  embedded?: boolean
 }): React.ReactElement | null {
   const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
   const [answers, setAnswers] = useState<Record<string, string>>(() => (
@@ -75,11 +114,7 @@ export function AskUserAnswerForm({
   return (
     <form
       onSubmit={(event) => { void handleSubmit(event) }}
-      className={cn(
-        "flex flex-col gap-3",
-        !embedded && "mt-2 rounded-md border bg-card p-3",
-        submitted && "pointer-events-none opacity-50",
-      )}
+      className={cn("flex flex-col gap-3", submitted && "pointer-events-none opacity-50")}
     >
       {questions.map((question, questionIndex) => {
         const isMultipleChoice = question.options && question.options.length > 0
@@ -133,26 +168,11 @@ export function AskUserAnswerForm({
                       aria-label={option.label}
                       className="h-auto w-full justify-start whitespace-normal px-3 py-2.5 text-left"
                     >
-                      <span
-                        className={cn(
-                          "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-                          question.multiSelect ? "rounded" : "rounded-full",
-                          isSelected
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-muted-foreground/30",
-                        )}
-                        aria-hidden="true"
-                      >
-                        {isSelected && <Check className="size-3" strokeWidth={3} data-icon="icon" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-xs font-medium">{option.label}</span>
-                        {option.description && (
-                          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                            {option.description}
-                          </span>
-                        )}
-                      </span>
+                      <QuestionOptionBody
+                        option={option}
+                        multiSelect={question.multiSelect}
+                        selected={isSelected}
+                      />
                     </ToggleGroupItem>
                   )
                 })}

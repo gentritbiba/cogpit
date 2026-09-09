@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { sendJson, type UseFn } from "../http"
+import { readJsonBody as readBoundedJsonBody, sendJson, type UseFn } from "../http"
 import { getInstanceId } from "./hello"
 import {
   getDevice,
@@ -219,21 +219,11 @@ function toPublic(device: HubDevice): Omit<HubDevice, "password"> {
   return rest
 }
 
-function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
-  return new Promise((resolve) => {
-    let raw = ""
-    req.on("data", (chunk: Buffer) => { raw += chunk.toString() })
-    req.on("end", () => {
-      if (!raw.trim()) return resolve({})
-      try {
-        const parsed = JSON.parse(raw)
-        resolve(parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null)
-      } catch {
-        resolve(null)
-      }
-    })
-    req.on("error", () => resolve(null))
-  })
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const parsed = await readBoundedJsonBody<unknown>(req, { allowEmpty: true }).catch(() => null)
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────

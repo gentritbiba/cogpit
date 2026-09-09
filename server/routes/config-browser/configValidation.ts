@@ -183,19 +183,6 @@ async function canonicalizePath(filePath: string, allowMissing: boolean): Promis
   }
 }
 
-/** Check the lexical shape before an asynchronous canonical filesystem check. */
-export function isAllowedConfigPath(filePath: string): boolean {
-  return classifyConfigPath(filePath) !== null
-}
-
-/** Check if a path is user-owned (not inside plugins/cache) */
-export function isUserOwned(filePath: string): boolean {
-  const policy = classifyConfigPath(filePath)
-  if (!policy) return false
-  if (policy.kind === "instructions-file") return true
-  return !isPluginCachePath(policy.resolvedPath)
-}
-
 /**
  * Resolve an allowed config-browser path and prove that symlinks do not move it
  * outside agent configuration.

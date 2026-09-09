@@ -3,17 +3,13 @@ import { type RefObject, useRef, useEffect } from "react"
 interface SwipeNavigationOptions {
   onSwipeLeft?: () => void
   onSwipeRight?: () => void
-  /** Minimum swipe distance in px (default: 50) */
-  threshold?: number
-  /** Whether swipe is enabled (default: true) */
-  enabled?: boolean
 }
+
+const SWIPE_THRESHOLD_PX = 50
 
 export function useSwipeNavigation<T extends HTMLElement = HTMLElement>({
   onSwipeLeft,
   onSwipeRight,
-  threshold = 50,
-  enabled = true,
 }: SwipeNavigationOptions): RefObject<T | null> {
   const ref = useRef<T>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
@@ -25,7 +21,7 @@ export function useSwipeNavigation<T extends HTMLElement = HTMLElement>({
 
   useEffect(() => {
     const el = ref.current
-    if (!el || !enabled) return
+    if (!el) return
 
     function handleTouchStart(e: TouchEvent) {
       const touch = e.touches[0]
@@ -40,7 +36,7 @@ export function useSwipeNavigation<T extends HTMLElement = HTMLElement>({
       touchStart.current = null
 
       // Only count horizontal swipes (dx > dy)
-      if (Math.abs(dx) < threshold || Math.abs(dx) < Math.abs(dy)) return
+      if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return
 
       if (dx > 0) {
         onSwipeRightRef.current?.()
@@ -55,7 +51,7 @@ export function useSwipeNavigation<T extends HTMLElement = HTMLElement>({
       el.removeEventListener("touchstart", handleTouchStart)
       el.removeEventListener("touchend", handleTouchEnd)
     }
-  }, [enabled, threshold])
+  }, [])
 
   return ref
 }

@@ -111,14 +111,9 @@ function stubDeferredBitmaps() {
 }
 
 describe("useBrowserSocket", () => {
-  let objectUrls = 0
-
   beforeEach(() => {
     MockWebSocket.instances = []
-    objectUrls = 0
     vi.stubGlobal("WebSocket", MockWebSocket)
-    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:frame-${++objectUrls}`)
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
     setLocation("/")
   })
 
@@ -207,7 +202,6 @@ describe("useBrowserSocket", () => {
       })
 
       expect(result.current.frame?.bitmap).toBe(bitmaps[0])
-      expect(result.current.frame?.blobUrl).toBeNull()
       expect(result.current.frame?.header.scrollOffsetY).toBe(40)
       expect(result.current.frame?.header.pageScaleFactor).toBe(2)
       expect(result.current.lastFrameAt).toBeGreaterThan(0)
@@ -262,23 +256,6 @@ describe("useBrowserSocket", () => {
       const bitmap = await deferred.settle(0)
 
       expect(bitmap.close).toHaveBeenCalledTimes(1)
-    })
-
-    it("falls back to an object url where the decoder is missing", async () => {
-      vi.stubGlobal("createImageBitmap", undefined)
-      const { result, unmount } = renderHook(() => useBrowserSocket("default"))
-      act(() => latest().open())
-
-      await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 1 }))))
-      expect(result.current.frame?.blobUrl).toBe("blob:frame-1")
-      expect(result.current.frame?.bitmap).toBeNull()
-
-      await act(async () => latest().emit(frameBuffer(makeHeader({ ts: 2 }))))
-      expect(result.current.frame?.blobUrl).toBe("blob:frame-2")
-      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-
-      unmount()
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:frame-2")
     })
 
     it("ignores a malformed frame", async () => {

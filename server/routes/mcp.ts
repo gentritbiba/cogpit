@@ -4,11 +4,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { sendJson, type UseFn } from "../http"
 import { resolveAgentCommand } from "../lib/binaryResolver"
-
-export interface McpServer {
-  name: string
-  status: "connected" | "needs_auth" | "error"
-}
+import type { McpServer } from "../../shared/contracts/projectTools"
 
 export interface McpServerConfig {
   [name: string]: Record<string, unknown>

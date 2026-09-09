@@ -5,6 +5,7 @@ dist
 **/.DS_Store
 undo-history/
 session-config/
+session-creation-requests/
 usage-model-rates.json
 audit-history/
 test-results/

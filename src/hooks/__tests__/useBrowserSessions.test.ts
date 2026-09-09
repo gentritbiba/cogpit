@@ -76,7 +76,6 @@ describe("useBrowserSessions", () => {
     expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/browser")
     expect(result.current.status).toEqual(STATUS)
-    expect(result.current.loading).toBe(false)
     expect(result.current.error).toBeNull()
   })
 
@@ -86,7 +85,6 @@ describe("useBrowserSessions", () => {
 
     expect(mockedAuthFetch).not.toHaveBeenCalled()
     expect(result.current.status).toBeNull()
-    expect(result.current.loading).toBe(false)
   })
 
   it("polls every 5 seconds while enabled and stops when disabled", async () => {
@@ -121,7 +119,6 @@ describe("useBrowserSessions", () => {
     await settle()
 
     expect(result.current.error).toBe("Network error")
-    expect(result.current.loading).toBe(false)
   })
 
   it("creates a browser and refreshes the list", async () => {
@@ -160,10 +157,7 @@ describe("useBrowserSessions", () => {
 
   it.each([
     ["remove", (hook: UseBrowserSessions) => hook.remove("../x"), "DELETE", "/api/browser/sessions/..%2Fx", undefined],
-    ["launch", (hook: UseBrowserSessions) => hook.launch("github", "https://x"), "POST", "/api/browser/sessions/github/launch", JSON.stringify({ url: "https://x" })],
-    ["launch without a url", (hook: UseBrowserSessions) => hook.launch("github"), "POST", "/api/browser/sessions/github/launch", "{}"],
     ["stop", (hook: UseBrowserSessions) => hook.stop("github"), "POST", "/api/browser/sessions/github/stop", undefined],
-    ["setNote", (hook: UseBrowserSessions) => hook.setNote("github", "work"), "PATCH", "/api/browser/sessions/github", JSON.stringify({ note: "work" })],
     ["installSkill", (hook: UseBrowserSessions) => hook.installSkill(SKILL_TARGET), "POST", "/api/browser/skill/install", JSON.stringify({ target: SKILL_TARGET })],
   ])("sends %s to the right endpoint", async (_name, call, method, path, body) => {
     const { result } = renderHook(() => useBrowserSessions(true))

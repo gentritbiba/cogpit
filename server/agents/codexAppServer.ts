@@ -2,6 +2,7 @@ import { spawn as spawnChild } from "node:child_process"
 import { createInterface } from "node:readline"
 import type { Interface as ReadlineInterface } from "node:readline"
 import packageJson from "../../package.json"
+import { isRecord } from "../../shared/objects"
 import {
   CODEX_CLIENT_CAPABILITIES,
   COMMAND_APPROVAL_METHOD,
@@ -10,7 +11,6 @@ import {
 } from "./codexAppServerProtocol"
 import type {
   ApprovalDecision,
-  ApprovalListener,
   CodexAppServerOptions,
   CodexAppServerProcess,
   CodexAppServerSpawn,
@@ -105,10 +105,6 @@ const FORCE_KILL_GRACE_MS = 1_000
 const defaultSpawn: CodexAppServerSpawn = (command, args, options) =>
   spawnChild(command, args, options)
 
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 function isRpcId(value: unknown): value is JsonRpcId {
   return typeof value === "string" || typeof value === "number"
 }
@@ -161,7 +157,6 @@ export class CodexAppServer {
 
   private readonly pendingRequests = new Map<JsonRpcId, PendingRequest>()
   private readonly notificationListeners = new Set<CodexNotificationListener>()
-  private readonly approvalListeners = new Set<ApprovalListener>()
   private readonly activeTurnIds = new Map<string, string>()
   private readonly parentThreadIds = new Map<string, string>()
   private readonly approvalsByThread = new Map<
@@ -528,15 +523,6 @@ export class CodexAppServer {
     return () => this.notificationListeners.delete(listener)
   }
 
-  onNotification(listener: CodexNotificationListener): () => void {
-    return this.subscribe(listener)
-  }
-
-  subscribeApprovals(listener: ApprovalListener): () => void {
-    this.approvalListeners.add(listener)
-    return () => this.approvalListeners.delete(listener)
-  }
-
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise
     this.shuttingDown = true
@@ -544,7 +530,6 @@ export class CodexAppServer {
       const error = new CodexAppServerError("Codex app-server client shut down")
       const child = this.child
       this.notificationListeners.clear()
-      this.approvalListeners.clear()
       if (child) {
         await this.terminateChild(child, error)
       } else {
@@ -645,7 +630,7 @@ export class CodexAppServer {
   }
 
   private handleMessage(message: unknown): void {
-    if (!isObject(message)) return
+    if (!isRecord(message)) return
     if (isRpcId(message.id) && typeof message.method === "string") {
       this.handleServerRequest({
         id: message.id,
@@ -683,7 +668,7 @@ export class CodexAppServer {
 
   private handleServerRequest(request: ServerRequest): void {
     if (request.method === CURRENT_TIME_METHOD) {
-      if (!isObject(request.params) || !stringField(request.params, "threadId")) {
+      if (!isRecord(request.params) || !stringField(request.params, "threadId")) {
         this.respondServerError(
           request.id,
           -32602,
@@ -708,7 +693,7 @@ export class CodexAppServer {
       )
       return
     }
-    if (!isObject(request.params)) {
+    if (!isRecord(request.params)) {
       this.respondServerError(
         request.id,
         -32602,
@@ -782,12 +767,12 @@ export class CodexAppServer {
   }
 
   private handleNotification(notification: CodexNotification): void {
-    const params = isObject(notification.params) ? notification.params : null
+    const params = isRecord(notification.params) ? notification.params : null
     if (params) {
       const threadId = stringField(params, "threadId")
       if (notification.method === "thread/started") {
         const thread = params.thread
-        if (isObject(thread)) {
+        if (isRecord(thread)) {
           const id = stringField(thread, "id")
           if (id) {
             this.rememberThread({
@@ -800,13 +785,13 @@ export class CodexAppServer {
         }
       } else if (notification.method === "turn/started" && threadId) {
         const turn = params.turn
-        if (isObject(turn)) {
+        if (isRecord(turn)) {
           const turnId = stringField(turn, "id")
           if (turnId) this.activeTurnIds.set(threadId, turnId)
         }
       } else if (notification.method === "turn/completed" && threadId) {
         const turn = params.turn
-        const turnId = isObject(turn) ? stringField(turn, "id") : undefined
+        const turnId = isRecord(turn) ? stringField(turn, "id") : undefined
         if (!turnId || this.activeTurnIds.get(threadId) === turnId) {
           this.activeTurnIds.delete(threadId)
         }
@@ -914,7 +899,6 @@ export class CodexAppServer {
     }
     threadApprovals.set(key, approval)
     this.approvalsByRequest.set(key, approval)
-    this.emitApprovalChanges(approval.threadId)
   }
 
   private removeApproval(requestId: JsonRpcId): void {
@@ -927,7 +911,6 @@ export class CodexAppServer {
     if (threadApprovals?.size === 0) {
       this.approvalsByThread.delete(approval.threadId)
     }
-    this.emitApprovalChanges(approval.threadId)
   }
 
   private removeApprovalsForTurn(threadId: string, turnId: string): void {
@@ -946,16 +929,12 @@ export class CodexAppServer {
       this.approvalsByRequest.delete(approvalKey(approval.requestId))
     }
     this.approvalsByThread.delete(threadId)
-    this.emitApprovalChanges(threadId)
   }
 
   private rememberThread(thread: CodexThread): void {
     const parentThreadId = thread.parentThreadId
     if (!parentThreadId || parentThreadId === thread.id) return
     this.parentThreadIds.set(thread.id, parentThreadId)
-    if (this.approvalsByThread.has(thread.id)) {
-      this.emitApprovalChanges(thread.id)
-    }
   }
 
   private threadLineage(threadId: string): string[] {
@@ -977,19 +956,6 @@ export class CodexAppServer {
     ancestorThreadId: string,
   ): boolean {
     return this.threadLineage(candidateThreadId).includes(ancestorThreadId)
-  }
-
-  private emitApprovalChanges(threadId: string): void {
-    for (const audienceThreadId of this.threadLineage(threadId)) {
-      const approvals = this.listPendingApprovals(audienceThreadId)
-      for (const listener of this.approvalListeners) {
-        try {
-          listener(audienceThreadId, approvals)
-        } catch {
-          // Consumer failures must not break the protocol reader.
-        }
-      }
-    }
   }
 
   private disconnect(
@@ -1070,23 +1036,9 @@ export class CodexAppServer {
   }
 
   private clearRuntimeState(): void {
-    const threadIds = new Set(
-      [...this.approvalsByThread.keys()].flatMap((threadId) =>
-        this.threadLineage(threadId),
-      ),
-    )
     this.activeTurnIds.clear()
     this.approvalsByRequest.clear()
     this.approvalsByThread.clear()
-    for (const threadId of threadIds) {
-      for (const listener of this.approvalListeners) {
-        try {
-          listener(threadId, [])
-        } catch {
-          // Consumer failures must not break disconnect cleanup.
-        }
-      }
-    }
     this.parentThreadIds.clear()
   }
 }

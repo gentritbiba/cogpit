@@ -4,7 +4,7 @@ import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
 import type { UseUndoRedoResult } from "@/hooks/useUndoRedo"
 import type { PtyChatStatus } from "@/hooks/usePtyChat"
 import type { PendingInteraction } from "../../shared/session/parser"
-import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
+import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 
 // ── Chat (pty) ──────────────────────────────────────────────────────────────
@@ -28,7 +28,6 @@ export interface ChatState {
 export interface ScrollState {
   chatScrollRef: RefObject<HTMLDivElement | null>
   scrollEndRef: RefObject<HTMLDivElement | null>
-  canScrollUp: boolean
   canScrollDown: boolean
   initialScrollDone: boolean
   handleScroll: () => void

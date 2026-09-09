@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
+import { createMiddlewareRes as mockRes } from "./http-fixtures"
 import { randomBytes, createHash } from "node:crypto"
 import {
   hashPassword,
@@ -219,18 +220,6 @@ describe("authMiddleware path protection", () => {
       method: opts.method ?? "GET",
       headers,
     } as unknown as IncomingMessage
-  }
-
-  function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
-    let body = ""
-    let statusCode = 200
-    const res = {
-      get statusCode() { return statusCode },
-      set statusCode(v: number) { statusCode = v },
-      setHeader: vi.fn(),
-      end: (data?: string) => { body = data || "" },
-    } as unknown as ServerResponse
-    return { res, get body() { return body }, get statusCode() { return statusCode } }
   }
 
   function run(url: string, opts: RequestOptions & { ip?: string } = {}) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import type { ParsedSession, ToolCall, Turn } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
 function toolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -14,22 +15,8 @@ function toolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   }
 }
 
-function turn(toolCalls: ToolCall[], overrides: Partial<Turn> = {}): Turn {
-  return {
-    id: "turn-1",
-    userMessage: null,
-    contentBlocks: [],
-    thinking: [],
-    assistantText: [],
-    toolCalls,
-    subAgentActivity: [],
-    timestamp: "2026-09-06T10:00:00.000Z",
-    durationMs: null,
-    tokenUsage: null,
-    model: null,
-    ...overrides,
-  }
-}
+const turn = (toolCalls: ToolCall[], overrides: Partial<Turn> = {}) =>
+  emptyTurn({ toolCalls, timestamp: "2026-09-06T10:00:00.000Z", ...overrides })
 
 function session(turns: Turn[]): ParsedSession {
   return {

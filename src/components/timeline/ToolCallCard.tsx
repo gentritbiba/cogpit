@@ -27,11 +27,9 @@ import { Badge } from "@/components/ui/badge"
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
 import { isCodexExecCall } from "../../../shared/session/codex-exec"
-import { getCommandText, getToolPresentation, getToolSummary, getToolTier } from "../../../shared/session/toolSummary"
+import { getCommandText, getToolPresentation, getToolTier } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
-
-export { getToolSummary, getToolTier }
 
 const HEADER_SECTION_CHIP_LIMIT = 4
 
@@ -360,7 +358,6 @@ export const ToolCallCard = memo(function ToolCallCard({
             <CollapsibleContent id={inputId}>
               <JsonResultHighlighted
                 result={JSON.stringify(bashCalls.length > 1 ? bashCalls.map((call) => call.input) : toolCall.input)}
-                expanded
               />
             </CollapsibleContent>
           </Collapsible>

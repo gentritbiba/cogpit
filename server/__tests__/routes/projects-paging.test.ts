@@ -14,8 +14,8 @@ vi.mock("../../sessionPaths", async (importOriginal) => {
   }
 })
 
-import type { UseFn, Middleware } from "../../helpers"
-import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { Middleware } from "../../helpers"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerProjectRoutes } from "../../routes/projects"
 
 interface TailResponse {
@@ -80,31 +80,11 @@ async function writeSession(lines: string[]): Promise<Fixture> {
   }
 }
 
-function createMockReqRes(method: string, url: string) {
-  let endData = ""
-  let statusCode = 200
-  const req = { method, url, socket: { remoteAddress: "127.0.0.1" }, headers: {} }
-  const res = {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    setHeader: vi.fn(),
-    end: vi.fn((data?: string) => { endData = data || "" }),
-    _getData: () => endData,
-    _getStatus: () => statusCode,
-  }
-  const next = vi.fn()
-  return { req: asIncomingMessage(req), res: asServerResponse(res), next }
-}
-
 describe("session file paging (?tail / ?before)", () => {
   let handlers: Map<string, Middleware>
 
   beforeEach(() => {
-    handlers = new Map()
-    const use: UseFn = (path: string, handler: Middleware) => {
-      handlers.set(path, handler)
-    }
-    registerProjectRoutes(use)
+    handlers = collectRoutes(registerProjectRoutes)
   })
 
   async function getJson<T>(query: string): Promise<T> {

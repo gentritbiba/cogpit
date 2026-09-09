@@ -39,7 +39,6 @@ describe("highlighted tool results", () => {
       <ReadResultHighlighted
         result={"  7→const value = 1\nplain line"}
         filePath="/tmp/example.ts"
-        expanded
       />,
     )
 
@@ -57,7 +56,7 @@ describe("highlighted tool results", () => {
   })
 
   it("pretty-prints JSON before highlighting it", async () => {
-    render(<JsonResultHighlighted result={'{"status":"ok"}'} expanded />)
+    render(<JsonResultHighlighted result={'{"status":"ok"}'} />)
 
     await waitFor(() => {
       expect(highlightCode).toHaveBeenCalledWith(
@@ -78,7 +77,6 @@ describe("highlighted tool results", () => {
       <ReadResultHighlighted
         result="const value"
         filePath="/tmp/example.ts"
-        expanded
       />,
     )
 
@@ -123,17 +121,17 @@ describe("highlight updates", () => {
 
   it("shows new text immediately while replacement tokens are loading", async () => {
     highlightCode.mockResolvedValueOnce([[{ content: "before", color: "#ff0000" }]])
-    const { rerender } = render(<ReadResultHighlighted result="before" filePath="example.ts" expanded />)
+    const { rerender } = render(<ReadResultHighlighted result="before" filePath="example.ts" />)
     await waitFor(() => expect(screen.getByText("before")).toHaveStyle({ color: "rgb(255, 0, 0)" }))
     highlightCode.mockReturnValueOnce(new Promise(() => {}))
-    rerender(<ReadResultHighlighted result="after" filePath="example.ts" expanded />)
+    rerender(<ReadResultHighlighted result="after" filePath="example.ts" />)
     expect(screen.getByText("after")).toBeTruthy()
     expect(screen.queryByText("before")).toBeNull()
   })
 
   it("keeps plain text when syntax highlighting rejects", async () => {
     highlightCode.mockRejectedValueOnce(new Error("Grammar unavailable"))
-    render(<ReadResultHighlighted result="readable source" filePath="example.ts" expanded />)
+    render(<ReadResultHighlighted result="readable source" filePath="example.ts" />)
     await waitFor(() => expect(highlightCode).toHaveBeenCalled())
     expect(screen.getByText("readable source")).toBeTruthy()
   })

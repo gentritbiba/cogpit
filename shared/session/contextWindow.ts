@@ -11,9 +11,6 @@
  */
 import { descriptorFor, type AgentKind } from "./agent-descriptors"
 
-/** Headroom Claude Code reserves before auto-compaction fires. */
-export const AUTO_COMPACT_BUFFER = descriptorFor("claude").contextWindow.compactBuffer
-
 export function getContextLimit(model: string, kind: AgentKind): number {
   const { defaultLimit, limits, extendedContext } = descriptorFor(kind).contextWindow
   const normalized = model.trim().toLowerCase()

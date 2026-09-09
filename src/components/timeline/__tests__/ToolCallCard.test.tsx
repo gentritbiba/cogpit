@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { getToolSummary, getToolTextStyle, getToolTier, ToolCallCard } from "../ToolCallCard"
+import { getToolTextStyle, ToolCallCard } from "../ToolCallCard"
+import { getToolSummary, getToolTier } from "../../../../shared/session/toolSummary"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
-// Mock authFetch — needed when "Open SKILL.md" button is clicked / answer submission
-const mockAuthFetchFn = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+// Mock jsonFetch — needed when "Open SKILL.md" button is clicked / answer submission
+const mockJsonFetchFn = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
 vi.mock("@/lib/auth", () => ({
-  authFetch: (...args: unknown[]) => mockAuthFetchFn(...args),
+  authFetch: vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) }),
+  jsonFetch: (...args: unknown[]) => mockJsonFetchFn(...args),
   authUrl: (url: string) => url,
   isRemoteClient: vi.fn().mockReturnValue(false),
 }))
@@ -70,60 +72,23 @@ function makeToolCall(name: string, input: Record<string, unknown>): ToolCall {
 }
 
 describe("getToolSummary", () => {
-  it("Monitor: returns bash_id and filter", () => {
-    expect(getToolSummary(makeToolCall("Monitor", { bash_id: "abc", filter: "ERROR" }))).toBe("abc · filter=ERROR")
-  })
-
-  it("Monitor: returns bash_id without filter when filter is absent", () => {
-    expect(getToolSummary(makeToolCall("Monitor", { bash_id: "abc" }))).toBe("abc")
-  })
-
-  it("CronCreate: returns schedule arrow prompt", () => {
-    expect(getToolSummary(makeToolCall("CronCreate", { schedule: "0 */6 * * *", prompt: "/babysit-prs" }))).toBe("0 */6 * * * → /babysit-prs")
-  })
-
-  it("CronList: returns empty string", () => {
-    expect(getToolSummary(makeToolCall("CronList", {}))).toBe("")
-  })
-
-  it("CronDelete: returns id", () => {
-    expect(getToolSummary(makeToolCall("CronDelete", { id: "cron_123" }))).toBe("cron_123")
-  })
-
-  it("ScheduleWakeup: returns human-friendly delay and reason", () => {
-    expect(getToolSummary(makeToolCall("ScheduleWakeup", { delaySeconds: 1800, reason: "polling deploy" }))).toBe("in 30m · polling deploy")
-  })
-
-  it("ScheduleWakeup: formats hours correctly", () => {
-    expect(getToolSummary(makeToolCall("ScheduleWakeup", { delaySeconds: 3600, reason: "hourly check" }))).toBe("in 1h · hourly check")
-  })
-
-  it("ScheduleWakeup: formats seconds correctly", () => {
-    expect(getToolSummary(makeToolCall("ScheduleWakeup", { delaySeconds: 45, reason: "quick poll" }))).toBe("in 45s · quick poll")
-  })
-
-  it("RemoteTrigger: returns action and id", () => {
-    expect(getToolSummary(makeToolCall("RemoteTrigger", { action: "run", id: "trig_42" }))).toBe("run trig_42")
-  })
-
-  it("PushNotification: returns title", () => {
-    expect(getToolSummary(makeToolCall("PushNotification", { title: "Build done", body: "..." }))).toBe("Build done")
-  })
-
-  it("EnterWorktree: returns name with path", () => {
-    expect(getToolSummary(makeToolCall("EnterWorktree", { name: "fix-auth", branch: "feat/auth", path: "/x/y" }))).toBe("fix-auth (/x/y)")
-  })
-
-  it("ExitWorktree: returns name", () => {
-    expect(getToolSummary(makeToolCall("ExitWorktree", { name: "fix-auth" }))).toBe("fix-auth")
-  })
-
-  it("Skill: returns skill name", () => {
-    expect(getToolSummary(makeToolCall("Skill", { skill: "commit", args: "" }))).toBe("commit")
-  })
-
-  it("ToolSearch: returns query", () => {
-    expect(getToolSummary(makeToolCall("ToolSearch", { query: "select:Read", max_results: 5 }))).toBe("select:Read")
+  it.each<[string, Record<string, unknown>, string]>([
+    ["Monitor", { bash_id: "abc", filter: "ERROR" }, "abc · filter=ERROR"],
+    ["Monitor", { bash_id: "abc" }, "abc"],
+    ["CronCreate", { schedule: "0 */6 * * *", prompt: "/babysit-prs" }, "0 */6 * * * → /babysit-prs"],
+    ["CronList", {}, ""],
+    ["CronDelete", { id: "cron_123" }, "cron_123"],
+    ["ScheduleWakeup", { delaySeconds: 1800, reason: "polling deploy" }, "in 30m · polling deploy"],
+    ["ScheduleWakeup", { delaySeconds: 3600, reason: "hourly check" }, "in 1h · hourly check"],
+    ["ScheduleWakeup", { delaySeconds: 45, reason: "quick poll" }, "in 45s · quick poll"],
+    ["RemoteTrigger", { action: "run", id: "trig_42" }, "run trig_42"],
+    ["PushNotification", { title: "Build done", body: "..." }, "Build done"],
+    ["EnterWorktree", { name: "fix-auth", branch: "feat/auth", path: "/x/y" }, "fix-auth (/x/y)"],
+    ["ExitWorktree", { name: "fix-auth" }, "fix-auth"],
+    ["Skill", { skill: "commit", args: "" }, "commit"],
+    ["ToolSearch", { query: "select:Read", max_results: 5 }, "select:Read"],
+  ])("summarizes %s %j as '%s'", (name, input, expected) => {
+    expect(getToolSummary(makeToolCall(name, input))).toBe(expected)
   })
 })
 
@@ -255,8 +220,8 @@ describe("ToolCallCard Skill rendering", () => {
     expect(screen.getByText("Open SKILL.md")).toBeTruthy()
   })
 
-  it("calls authFetch with correct path when Open SKILL.md is clicked", () => {
-    mockAuthFetchFn.mockClear()
+  it("calls jsonFetch with correct path when Open SKILL.md is clicked", () => {
+    mockJsonFetchFn.mockClear()
 
     const filePath = "/home/user/.claude/skills/commit/SKILL.md"
     const skillMeta: Map<string, SkillMeta> = new Map([
@@ -270,12 +235,9 @@ describe("ToolCallCard Skill rendering", () => {
     fireEvent.click(btn)
 
     expect(screen.getByRole("button", { name: /Use skill details: commit/ })).toHaveAttribute("aria-expanded", "false")
-    expect(mockAuthFetchFn).toHaveBeenCalledWith(
+    expect(mockJsonFetchFn).toHaveBeenCalledWith(
       "/api/open-in-editor",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ path: filePath, mode: "file" }),
-      }),
+      expect.objectContaining({ path: filePath, mode: "file" }),
     )
   })
 
@@ -927,7 +889,7 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
   }
 
   beforeAll(() => {
-    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+    mockJsonFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
   })
 
   beforeEach(() => {
@@ -1016,9 +978,9 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     expect(screen.queryByText("Send answer")).toBeNull()
   })
 
-  it("calls authFetch with correct payload on form submit", async () => {
-    mockAuthFetchFn.mockClear()
-    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+  it("calls jsonFetch with correct payload on form submit", async () => {
+    mockJsonFetchFn.mockClear()
+    mockJsonFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
 
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} isAgentActive={true} />)
@@ -1027,14 +989,11 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     fireEvent.click(submitBtn)
 
     await waitFor(() => {
-      expect(mockAuthFetchFn).toHaveBeenCalledWith(
+      expect(mockJsonFetchFn).toHaveBeenCalledWith(
         "/api/ask-user-answer",
-        expect.objectContaining({
-          method: "POST",
-          body: expect.stringContaining("test-session-id"),
-        }),
+        expect.objectContaining({ sessionId: "test-session-id" }),
       )
-      const payload = JSON.parse(mockAuthFetchFn.mock.calls[0][1].body as string) as { answers: Record<string, string> }
+      const payload = mockJsonFetchFn.mock.calls[0][1] as { answers: Record<string, string> }
       expect(payload.answers).toEqual({
         "What is your name?": "",
         "What do you want to do?": "",
@@ -1047,7 +1006,7 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     // /api/ask-user-answer 404s. Never make the user retype: send the answer as
     // a normal message, which resumes the session.
     mockSendMessage.mockClear()
-    mockAuthFetchFn.mockResolvedValue({
+    mockJsonFetchFn.mockResolvedValue({
       ok: false,
       status: 404,
       json: vi.fn().mockResolvedValue({ error: "Session not found" }),
@@ -1067,7 +1026,7 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
 
   it("delivers the answer as a message when the request throws", async () => {
     mockSendMessage.mockClear()
-    mockAuthFetchFn.mockRejectedValue(new Error("offline"))
+    mockJsonFetchFn.mockRejectedValue(new Error("offline"))
 
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} isAgentActive={true} />)
@@ -1103,7 +1062,7 @@ describe("ToolCallCard async questions", () => {
   }
 
   beforeEach(() => {
-    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+    mockJsonFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
     mockPendingInteraction = { type: "question", toolUseId: "tool-use-id-123", questions }
   })
 
@@ -1670,15 +1629,15 @@ describe("ToolCallCard sectioned Bash commands", () => {
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
     expect(screen.getByText("L1–80")).toBeInTheDocument()
     fireEvent.click(screen.getByTitle("Open /repo/server/routes/config.ts"))
-    expect(mockAuthFetchFn).toHaveBeenCalledWith(
+    expect(mockJsonFetchFn).toHaveBeenCalledWith(
       "/api/open-in-editor",
-      expect.objectContaining({ body: expect.stringContaining("/repo/server/routes/config.ts") }),
+      expect.objectContaining({ path: "/repo/server/routes/config.ts" }),
     )
     fireEvent.click(screen.getByRole("button", { name: /B section/ }))
     fireEvent.click(screen.getByTitle("Open /repo/src/b.ts:4"))
-    expect(mockAuthFetchFn).toHaveBeenLastCalledWith(
+    expect(mockJsonFetchFn).toHaveBeenLastCalledWith(
       "/api/open-in-editor",
-      expect.objectContaining({ body: expect.stringContaining("\"line\":4") }),
+      expect.objectContaining({ path: "/repo/src/b.ts", line: 4 }),
     )
   })
 

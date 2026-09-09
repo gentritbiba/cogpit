@@ -2,6 +2,10 @@ import { describe, it, expect } from "bun:test"
 import { parseArgs } from "../cli"
 
 describe("CLI arg parsing", () => {
+  it("parses search exclusion", () => {
+    expect(parseArgs(["search", "auth", "--exclude-session", "current"]).args.excludeSession).toBe("current")
+  })
+
   it("parses search command", () => {
     const cmd = parseArgs(["search", "authentication"])
     expect(cmd.command).toBe("search")

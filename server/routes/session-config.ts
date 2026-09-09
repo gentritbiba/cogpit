@@ -3,7 +3,7 @@ import { dirs, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../
 import { findJsonlPath } from "../sessionPaths"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
-import type { UseFn } from "../http"
+import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 
 // Per-session UI configuration (model, effort, permission mode, MCP selection …)
 // stored server-side so every Cogpit client — any browser, device, or hub-proxied
@@ -74,32 +74,22 @@ async function withTranscriptEffort(
   }
 }
 
-function collectBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = ""
-    req.on("data", (chunk: Buffer | string) => {
-      body += chunk.toString()
-      if (body.length > 64 * 1024) {
-        reject(new RouteError(413, ErrorCodes.INVALID_REQUEST, "Session config payload too large"))
-        req.destroy()
-      }
-    })
-    req.on("end", () => resolve(body))
-    req.on("error", reject)
-  })
-}
-
-function parsePatch(body: string): Record<string, unknown> {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(body)
-  } catch {
-    throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid session config JSON")
-  }
+function parsePatch(parsed: unknown): Record<string, unknown> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Session config must be a JSON object")
   }
   return parsed as Record<string, unknown>
+}
+
+async function readPatch(req: IncomingMessage): Promise<Record<string, unknown>> {
+  try {
+    return parsePatch(await readJsonBody(req))
+  } catch (error) {
+    if (error instanceof HttpBodyError) {
+      throw new RouteError(error.statusCode, ErrorCodes.INVALID_REQUEST, error.message)
+    }
+    throw error
+  }
 }
 
 export function registerSessionConfigRoutes(use: UseFn) {
@@ -119,7 +109,7 @@ export function registerSessionConfigRoutes(use: UseFn) {
       }
 
       if (req.method === "PUT" || req.method === "POST") {
-        const patch = parsePatch(await collectBody(req))
+        const patch = await readPatch(req)
         await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
         // Shallow merge; a field explicitly set to null is removed.
         const merged = { ...(await readStoredConfig(key)), ...patch }

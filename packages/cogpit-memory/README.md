@@ -15,14 +15,10 @@ event schema and `~/.copilot/session-state/` layout.
 ## Install
 
 ```bash
-npm install -g cogpit-memory
+bun install --global cogpit-memory
 ```
 
-Or run directly:
-
-```bash
-npx cogpit-memory sessions
-```
+Use the installed `cogpit-memory` command for repeated or concurrent work. Installing once avoids races between transient `bunx` installs of the native SQLite dependency. Keep stderr separate from stdout when parsing JSON.
 
 ## Quick Start
 
@@ -95,11 +91,14 @@ cogpit-memory search "bug" --session-limit 20 --hits-per-session 2  # Compact re
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--session` | all | Scope to single session |
+| `--exclude-session` | none | Exclude one session and its subagents |
 | `--max-age` | `5d` | Time window — any duration (`5d`, `30d`, `365d`) |
 | `--limit` | `20` | Max total hits returned |
 | `--session-limit` | all | Cap unique sessions in results |
 | `--hits-per-session` | all | Max hits kept per session |
 | `--case-sensitive` | `false` | Case sensitivity |
+
+Use `--exclude-session <current-session-id>` when recalling earlier work to omit your own search commands and results. Missing transcript files are removed from the index before searching. If a transcript is deleted between search and drill-down, `context` returns a JSON error and exits nonzero.
 
 Each result includes the `cwd` (working directory where the session ran) and an array of hits. Each hit includes a `location` string (e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/toolCall/tc1/result`) that maps directly to L2/L3 drill-down commands.
 

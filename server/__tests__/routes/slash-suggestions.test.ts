@@ -15,7 +15,7 @@ const fakeHome = join(tmpdir(), "slash-suggestions-home")
 
 import type { Middleware } from "../../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
-import type { SlashSuggestion } from "../../routes/slash-suggestions"
+import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
 import {
   BUILTIN_SKILLS,
   parseFrontmatter,

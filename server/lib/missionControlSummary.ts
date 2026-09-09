@@ -12,7 +12,7 @@
 import { open, stat } from "node:fs/promises"
 import { computeNetDiff } from "../../shared/diff-utils"
 import {
-  asRecord,
+  asRecordOrEmpty,
   createAccumulator,
   str,
   type SessionAccumulator,
@@ -69,7 +69,7 @@ function foldLine(acc: SessionAccumulator, line: string): void {
 
   let entry: Record<string, unknown>
   try {
-    entry = asRecord(JSON.parse(trimmed))
+    entry = asRecordOrEmpty(JSON.parse(trimmed))
   } catch {
     return
   }

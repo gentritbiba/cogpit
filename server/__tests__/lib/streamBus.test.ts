@@ -8,6 +8,8 @@ import {
   publishError,
   publishAgentProgress,
   publishPromptSuggestion,
+  publishCompacting,
+  isCompacting,
   getSnapshot,
   subscribe,
   _resetForTests,
@@ -321,4 +323,32 @@ describe("streamBus", () => {
     expect(() => publishPromptSuggestion("nobody-home", "x")).not.toThrow()
   })
 
+  it("announces a compaction to subscribers and remembers it for late ones", () => {
+    const { events } = collect()
+    publishCompacting(SID, true)
+    publishCompacting(SID, true)
+    expect(events).toEqual([{ type: "compacting", active: true }])
+    expect(isCompacting(SID)).toBe(true)
+
+    publishCompacting(SID, false)
+    expect(events).toEqual([
+      { type: "compacting", active: true },
+      { type: "compacting", active: false },
+    ])
+    expect(isCompacting(SID)).toBe(false)
+  })
+
+  it("keeps an unwatched compacting session alive until it finishes", () => {
+    publishCompacting(SID, true)
+    expect(isCompacting(SID)).toBe(true)
+    publishCompacting(SID, false)
+    expect(isCompacting(SID)).toBe(false)
+    expect(isCompacting("never-seen")).toBe(false)
+  })
+
+  it("clear ends an in-flight compaction", () => {
+    publishCompacting(SID, true)
+    clear(SID)
+    expect(isCompacting(SID)).toBe(false)
+  })
 })

@@ -1,4 +1,3 @@
-import { createSessionInventoryCache } from "../lib/sessionInventoryCache"
 import { readTranscriptHead } from "./transcriptHead"
 import type { AgentStore, SessionFileInfo, SessionIdentity } from "./types"
 
@@ -50,16 +49,37 @@ async function loadInventory(store: AgentStore): Promise<SessionInventoryEntry[]
   return entries.flatMap((entry) => entry ? [entry] : [])
 }
 
-type InventoryCache = ReturnType<typeof createSessionInventoryCache<SessionInventoryEntry>>
+const INVENTORY_TTL_MS = 1000
 
-const caches = new WeakMap<AgentStore, InventoryCache>()
+const caches = new WeakMap<AgentStore, () => Promise<SessionInventoryEntry[]>>()
+
+function createCache(store: AgentStore): () => Promise<SessionInventoryEntry[]> {
+  let cached: { loadedAt: number; entries: SessionInventoryEntry[] } | null = null
+  let inFlight: Promise<SessionInventoryEntry[]> | null = null
+
+  return () => {
+    if (cached && Date.now() - cached.loadedAt <= INVENTORY_TTL_MS) {
+      return Promise.resolve(cached.entries)
+    }
+    if (inFlight) return inFlight
+    inFlight = loadInventory(store)
+      .then((entries) => {
+        cached = { loadedAt: Date.now(), entries }
+        return entries
+      })
+      .finally(() => {
+        inFlight = null
+      })
+    return inFlight
+  }
+}
 
 /** Share the cold walk and identity reads across concurrent callers. */
 export function inventoryFor(store: AgentStore): Promise<SessionInventoryEntry[]> {
-  let cache = caches.get(store)
-  if (!cache) {
-    cache = createSessionInventoryCache(() => loadInventory(store))
-    caches.set(store, cache)
+  let get = caches.get(store)
+  if (!get) {
+    get = createCache(store)
+    caches.set(store, get)
   }
-  return cache.get()
+  return get()
 }

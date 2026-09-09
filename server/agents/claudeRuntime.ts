@@ -1,24 +1,20 @@
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import {
   dirs,
   join,
   randomUUID,
   readFile,
-  spawn,
   stat,
   unlink,
 } from "../helpers"
-import { browserAgentEnv } from "../browser/agentEnv"
-import { claudeCliPath } from "./claudeExecutable"
 import { fetchClaudeModels } from "./claudeModels"
-import { friendlySpawnError } from "./spawnError"
-import { resolveAgentCommand } from "../lib/binaryResolver"
+import { withControlQuery } from "./sdk"
 import { activeProcesses, terminateTrackedSession } from "../processRegistry"
 import {
   attachSubagentWatcher,
   cleanupAllSDKSessions,
   createSDKSession,
+  describeErrorResult,
   getSDKPermissions,
   getSDKUserQuestions,
   interruptSDKTurn,
@@ -50,17 +46,9 @@ import {
   type UserQuestionAnswers,
 } from "./runtimeTypes"
 
-/**
- * Claude Code, driven through the Anthropic Agent SDK in `../sdk-session`.
- *
- * Two spawn strategies survive here because the product has two: `/api/new-session`
- * runs the CLI once and waits for it to finish, while `/api/create-and-send`
- * opens a long-lived SDK query. `oneShot` on the request picks between them —
- * the other agents have a single strategy and ignore the flag.
- */
+/** Claude Code, driven through the Anthropic Agent SDK in `../sdk-session`. */
 
 const descriptor = descriptorFor("claude")
-const SPAWN_TIMEOUT_MS = 60_000
 const TRANSCRIPT_POLL_ATTEMPTS = 150
 const TRANSCRIPT_POLL_INTERVAL_MS = 100
 const RUNTIME_CACHE_TTL_MS = 5 * 60 * 1000
@@ -83,13 +71,7 @@ function transcriptPath(dirName: string, sessionId: string): {
  */
 function turnResultFrom(result: Record<string, unknown>): TurnResult {
   if (!result.is_error) return { isError: false }
-  const { result: text, subtype } = result
-  return {
-    isError: true,
-    message: text != null
-      ? String(text)
-      : `Claude returned an error${subtype ? ` (${subtype})` : ""}`,
-  }
+  return { isError: true, message: describeErrorResult(result) }
 }
 
 /** Wait for the SDK to materialise the transcript it names by session id. */
@@ -121,81 +103,6 @@ function watchSubagentsFor(state: SDKSessionState, filePath: string | null): voi
     if (!found) return
     state.jsonlPath = found
     attachSubagentWatcher(state)
-  })
-}
-
-/**
- * Run the CLI once and report the session only after it exits.
- *
- * The transcript is proof of work here: a run that exits without writing one
- * failed, however it exited, so the stat is what decides success.
- */
-function startOneShot(req: StartSessionRequest): Promise<StartedSession> {
-  const sessionId = randomUUID()
-  const { fileName, filePath } = transcriptPath(req.dirName, sessionId)
-  const cli = resolveAgentCommand(descriptor.binName, [
-    "-p",
-    req.message ?? "",
-    "--session-id",
-    sessionId,
-    ...descriptor.launchArgs.permissions(req.permissions),
-    ...descriptor.launchArgs.model(req.model),
-    ...descriptor.launchArgs.effort(req.effort),
-    ...(req.name ? ["--name", req.name] : []),
-  ])
-
-  // The CLI refuses to nest inside itself, and Cogpit is usually started from
-  // a Claude session, so its marker has to go.
-  const cleanEnv = browserAgentEnv({ ...process.env }, sessionId)
-  delete cleanEnv.CLAUDECODE
-
-  const child = spawn(cli.command, cli.args, {
-    cwd: req.cwd,
-    env: cleanEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-    ...cli.spawnOptions,
-  })
-
-  let stderr = ""
-  child.stdout?.on("data", () => {})
-  child.stderr?.on("data", (data: Buffer) => { stderr += data.toString() })
-
-  activeProcesses.set(sessionId, child)
-  child.on("close", () => { activeProcesses.delete(sessionId) })
-
-  return new Promise<StartedSession>((resolve, reject) => {
-    let settled = false
-    const fail = (message: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      reject(new AgentRuntimeError(500, "SPAWN_FAILED", message))
-    }
-
-    const timer = setTimeout(() => {
-      if (settled) return
-      child.kill("SIGTERM")
-      fail(stderr.trim() || "Timed out waiting for session to start")
-    }, SPAWN_TIMEOUT_MS)
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      fail(friendlySpawnError(error, "claude"))
-    })
-
-    child.on("close", async (code) => {
-      if (settled) return
-      try {
-        await stat(filePath)
-        settled = true
-        clearTimeout(timer)
-        resolve({ sessionId, dirName: req.dirName, fileName, filePath })
-      } catch {
-        fail(
-          stderr.trim()
-          || `${descriptor.binName} exited with code ${code} before creating session`,
-        )
-      }
-    })
   })
 }
 
@@ -294,45 +201,27 @@ async function describeClaudeRuntime(force = false): Promise<ClaudeRuntimeSnapsh
   }
   if (snapshotInFlight) return snapshotInFlight
 
-  snapshotInFlight = (async () => {
-    const abort = new AbortController()
-    const control = query({
-      // eslint-disable-next-line require-yield
-      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-        await new Promise(() => {})
-      })(),
-      options: {
-        abortController: abort,
-        maxTurns: 1,
-        pathToClaudeCodeExecutable: claudeCliPath(),
-      },
-    })
-
-    try {
-      const [account, usage, models, agents] = await withTimeout(
-        Promise.all([
-          bestEffort(control.accountInfo()),
-          bestEffort(control.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()),
-          bestEffort(control.supportedModels()),
-          bestEffort(control.supportedAgents()),
-        ]),
-        CONTROL_TIMEOUT_MS,
-        "claude runtime",
-      )
-      cachedSnapshot = {
-        available: true,
-        account,
-        usage,
-        models: models ?? [],
-        agents: agents ?? [],
-        fetchedAt: Date.now(),
-      }
-      return cachedSnapshot
-    } finally {
-      abort.abort()
-      control.close()
+  snapshotInFlight = withControlQuery({ maxTurns: 1 }, async (control) => {
+    const [account, usage, models, agents] = await withTimeout(
+      Promise.all([
+        bestEffort(control.accountInfo()),
+        bestEffort(control.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()),
+        bestEffort(control.supportedModels()),
+        bestEffort(control.supportedAgents()),
+      ]),
+      CONTROL_TIMEOUT_MS,
+      "claude runtime",
+    )
+    cachedSnapshot = {
+      available: true,
+      account,
+      usage,
+      models: models ?? [],
+      agents: agents ?? [],
+      fetchedAt: Date.now(),
     }
-  })()
+    return cachedSnapshot
+  })
 
   try {
     return await snapshotInFlight
@@ -348,7 +237,7 @@ export const claudeRuntime: AgentRuntime = {
   descriptor,
 
   start(req) {
-    return req.oneShot ? startOneShot(req) : startInteractive(req)
+    return startInteractive(req)
   },
 
   async send(sessionId, req: SendRequest): Promise<SendOutcome> {

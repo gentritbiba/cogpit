@@ -46,59 +46,32 @@ const RUNTIMES: Readonly<Record<AgentKind, AgentRuntime>> = Object.freeze({
   copilot: copilotRuntime,
 })
 
-export interface RuntimeRegistry {
-  runtimeFor(kind: AgentKind): AgentRuntime
-  runtimeForDirName(dirName: string | null | undefined): AgentRuntime
-  runtimeForSession(sessionId: string): AgentRuntime | null
-  allRuntimes(): readonly AgentRuntime[]
-}
-
-/**
- * Build resolvers over an arbitrary runtime table. The module-level singletons
- * below are this applied to the real table; tests inject a fake one.
- */
-export function createRuntimeRegistry(
-  runtimes: Readonly<Record<AgentKind, AgentRuntime>>,
-): RuntimeRegistry {
-  return {
-    runtimeFor: (kind) => runtimes[kind],
-    runtimeForDirName: (dirName) => runtimes[descriptorForDirName(dirName).kind],
-    /**
-     * The runtime actually holding this session, asked rather than guessed.
-     *
-     * The old code walked a fixed agent precedence and took whichever answered
-     * first with a non-empty list, so a session that was live but idle handed
-     * the id to the next agent in line. Ownership is what decides here.
-     */
-    runtimeForSession(sessionId) {
-      for (const kind of AGENT_KINDS) {
-        if (runtimes[kind].hasSession(sessionId)) return runtimes[kind]
-      }
-      return null
-    },
-    allRuntimes: () => AGENT_KINDS.map((kind) => runtimes[kind]),
-  }
-}
-
-const registry = createRuntimeRegistry(RUNTIMES)
-
 export function runtimeFor(kind: AgentKind): AgentRuntime {
-  return registry.runtimeFor(kind)
+  return RUNTIMES[kind]
 }
 
 /** The runtime owning a project dirName. Claude is the terminal arm. */
 export function runtimeForDirName(dirName: string | null | undefined): AgentRuntime {
-  return registry.runtimeForDirName(dirName)
+  return RUNTIMES[descriptorForDirName(dirName).kind]
 }
 
-/** The runtime holding live state for a session id, or null when none does. */
+/**
+ * The runtime actually holding this session, asked rather than guessed.
+ *
+ * The old code walked a fixed agent precedence and took whichever answered
+ * first with a non-empty list, so a session that was live but idle handed the
+ * id to the next agent in line. Ownership is what decides here.
+ */
 export function runtimeForSession(sessionId: string): AgentRuntime | null {
-  return registry.runtimeForSession(sessionId)
+  for (const kind of AGENT_KINDS) {
+    if (RUNTIMES[kind].hasSession(sessionId)) return RUNTIMES[kind]
+  }
+  return null
 }
 
 /** Every runtime, in agent-detection order. */
 export function allRuntimes(): readonly AgentRuntime[] {
-  return registry.allRuntimes()
+  return AGENT_KINDS.map((kind) => RUNTIMES[kind])
 }
 
 /** Whether any runtime still holds this session, open or mid-turn. */

@@ -192,7 +192,7 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2025-01-15T09:00:00Z")).toBe("3h")
   })
 
-  it("formats 1 hour ago", () => {
+  it("formats 1 hour / the 60-minute boundary as 1h", () => {
     expect(formatRelativeTime("2025-01-15T11:00:00Z")).toBe("1h")
   })
 
@@ -202,10 +202,6 @@ describe("formatRelativeTime", () => {
 
   it("formats exactly 59 minutes ago as minutes", () => {
     expect(formatRelativeTime("2025-01-15T11:01:00Z")).toBe("59m")
-  })
-
-  it("formats exactly 60 minutes ago as 1h (boundary)", () => {
-    expect(formatRelativeTime("2025-01-15T11:00:00Z")).toBe("1h")
   })
 
   it("formats exactly 23 hours ago as hours", () => {
@@ -283,6 +279,15 @@ describe("formatCost", () => {
 
   it("formats zero", () => {
     expect(formatCost(0)).toBe("$0.0000")
+  })
+
+  it("renders non-finite costs as a dash", () => {
+    // Callers divide a session cost by a count, so 0/0 and x/0 both reach here.
+    expect(formatCost(Number.NaN)).toBe("—")
+    expect(formatCost(Number.POSITIVE_INFINITY)).toBe("—")
+    expect(formatCost(Number.NEGATIVE_INFINITY)).toBe("—")
+    expect(formatCost(0 / 0)).toBe("—")
+    expect(formatCost(1 / 0)).toBe("—")
   })
 })
 

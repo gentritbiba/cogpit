@@ -4,6 +4,7 @@ import { SessionBrowser } from "@/components/session-browser"
 import { Spinner } from "@/components/ui/Spinner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import type { PendingSessionInfo } from "@/components/session-browser/types"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useSessionActions } from "@/hooks/useSessionActions"
 
@@ -35,11 +36,7 @@ interface ShellNavigation {
   actions: ShellActions
   handlers: ShellHandlers
   creatingSession: boolean
-  pendingSession: {
-    dirName: string
-    cwd?: string | null
-    firstMessage?: string
-  } | null
+  pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
   onSelectProject: (dirName: string | null) => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
