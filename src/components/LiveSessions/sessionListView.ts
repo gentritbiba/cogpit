@@ -8,11 +8,49 @@ import type { ActiveSessionInfo, RunningProcess } from "./types"
  * is the clearest label.
  */
 export function sessionTitle(s: ActiveSessionInfo, customName?: string): string {
-  const isTeammate = !!(s.teamName && s.agentName)
-  return customName || truncate(
-    s.aiTitle || (isTeammate ? s.agentName! : "") || s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId,
-    50,
-  )
+  return customName || truncate(sessionHeadline(s), 50)
+}
+
+/** The untruncated title, for surfaces with room to wrap it. */
+export function sessionHeadline(s: ActiveSessionInfo, customName?: string): string {
+  const teammateName = s.teamName && s.agentName ? s.agentName : ""
+  return customName
+    || s.aiTitle
+    || teammateName
+    || s.lastUserMessage
+    || s.firstUserMessage
+    || s.slug
+    || s.sessionId
+}
+
+/**
+ * Teammate sessions nest under their lead when the lead is in the same list;
+ * a teammate whose lead is elsewhere stays top-level so it is never lost.
+ */
+export function splitTeammates(sessions: ActiveSessionInfo[]): {
+  topLevelSessions: ActiveSessionInfo[]
+  teammatesByLead: Map<string, ActiveSessionInfo[]>
+} {
+  const ids = new Set(sessions.map((session) => session.sessionId))
+  const teammatesByLead = new Map<string, ActiveSessionInfo[]>()
+  const topLevelSessions: ActiveSessionInfo[] = []
+  for (const session of sessions) {
+    const lead = session.teamLeadSessionId
+    if (lead && lead !== session.sessionId && ids.has(lead)) {
+      const teammates = teammatesByLead.get(lead)
+      if (teammates) teammates.push(session)
+      else teammatesByLead.set(lead, [session])
+    } else {
+      topLevelSessions.push(session)
+    }
+  }
+  return { topLevelSessions, teammatesByLead }
+}
+
+/** The directory a group's new sessions belong to: the checkout itself before any worktree. */
+export function primaryProjectSession(sessions: ActiveSessionInfo[]): ActiveSessionInfo | undefined {
+  return sessions.find((session) => !parseWorktreePath(session.cwd ?? dirNameToPath(session.dirName)))
+    ?? sessions[0]
 }
 
 /** Label used when a session has no resolvable project path. */

@@ -226,6 +226,7 @@ Resolve a bare sessionId to `{ dirName, fileName }`.
 Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. It also accepts exact pull request searches such as `#157`, `honest-cms #157`, `honest-cms#157`, `PR 157`, and a pasted GitHub pull request URL. PR searches cover sessions that created the pull request or used an explicit `gh pr` action for it. The first search may build the durable transcript index in the background. Poll the same request until `X-Cogpit-PR-Index-Pending` is `0`; `X-Cogpit-PR-Index-Total` reports the number of candidate transcripts. A matching row includes `matchedPullRequestNumber`.
 
 Query parameters:
+- `?project=<dirName>` — Only that project's sessions, up to `?limit=` (default 50, max 200) instead of the per-project cap
 - `?archived=include` — Include archived sessions in the results (dimmed; auto-filtered out by default)
 
 Response headers:

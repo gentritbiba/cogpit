@@ -11,10 +11,10 @@ import { cn } from "@/lib/utils"
 
 import { SessionRow } from "./SessionRow"
 import { countLiveSessions } from "./liveSessionSummary"
-import { isSessionLive, visibleRowCount } from "./sessionListView"
+import { isSessionLive, primaryProjectSession, splitTeammates, visibleRowCount } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
-interface ProjectGroupSharedProps {
+export interface ProjectGroupSharedProps {
   activeSessionKey: string | null
   procBySession: Map<string, RunningProcess>
   killingPids: Set<number>
@@ -171,22 +171,7 @@ function ProjectGroup({
   const hasPending = Boolean(pendingSession)
   const isCollapsed = forceExpand || hasPending ? false : collapsed
 
-  const { topLevelSessions, teammatesByLead } = useMemo(() => {
-    const ids = new Set(sessions.map((session) => session.sessionId))
-    const teammatesByLead = new Map<string, ActiveSessionInfo[]>()
-    const topLevelSessions: ActiveSessionInfo[] = []
-    for (const session of sessions) {
-      const lead = session.teamLeadSessionId
-      if (lead && lead !== session.sessionId && ids.has(lead)) {
-        const teammates = teammatesByLead.get(lead)
-        if (teammates) teammates.push(session)
-        else teammatesByLead.set(lead, [session])
-      } else {
-        topLevelSessions.push(session)
-      }
-    }
-    return { topLevelSessions, teammatesByLead }
-  }, [sessions])
+  const { topLevelSessions, teammatesByLead } = useMemo(() => splitTeammates(sessions), [sessions])
 
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
   const toggleTeamCollapse = (leadId: string) => {
@@ -213,9 +198,7 @@ function ProjectGroup({
   const hiddenCount = topLevelSessions.length - visibleTopLevel.length
   const canShowLess = showAll && !forceExpand && topLevelSessions.length > collapsedLimit
 
-  const dirName = sessions.find((session) => (
-    !parseWorktreePath(session.cwd ?? dirNameToPath(session.dirName))
-  ))?.dirName ?? sessions[0]?.dirName ?? pendingSession?.dirName
+  const dirName = primaryProjectSession(sessions)?.dirName ?? pendingSession?.dirName
   const customProjectName = dirName ? projectNames[dirName] : undefined
   const archivableSessions = useMemo(
     () => sessions.filter((session) => !session.archived && !isSessionLive(session, procBySession)),
@@ -384,7 +367,7 @@ function ProjectGroup({
   )
 }
 
-function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
+export function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
   return (
     <div className="motion-enter relative flex w-full items-center gap-1.5 rounded-md bg-accent px-2 py-2 text-left">
       <Loader2 className="size-3 shrink-0 animate-spin text-info" />

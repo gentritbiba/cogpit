@@ -96,3 +96,41 @@ describe("LiveSessionsFeedback", () => {
     expect(screen.getByText("No matching sessions")).toBeInTheDocument()
   })
 })
+
+describe("LiveSessionsFeedback when focused on a project", () => {
+  const base = {
+    fetchError: null,
+    showEmpty: true,
+    searching: false,
+    loading: false,
+    sessionCount: 0,
+    onRetry: vi.fn(),
+    onShowArchived: vi.fn(),
+  }
+
+  it("names the project and offers the way back to every project", () => {
+    const onShowAllProjects = vi.fn()
+    render(
+      <LiveSessionsFeedback {...base} hiddenArchivedCount={0} focusedProject="App" onShowAllProjects={onShowAllProjects} />,
+    )
+
+    expect(screen.getByText("No sessions in App")).toBeInTheDocument()
+    expect(screen.queryByText("No sessions yet")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "All projects" }))
+    expect(onShowAllProjects).toHaveBeenCalledOnce()
+  })
+
+  it("mentions hidden archived sessions instead of claiming everything is archived", () => {
+    render(<LiveSessionsFeedback {...base} hiddenArchivedCount={4} focusedProject="App" onShowAllProjects={vi.fn()} />)
+
+    expect(screen.getByText("No sessions in App")).toBeInTheDocument()
+    expect(screen.queryByText("Everything is archived")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Show archived" })).toBeInTheDocument()
+  })
+
+  it("scopes an empty search to the project", () => {
+    render(<LiveSessionsFeedback {...base} searching hiddenArchivedCount={0} focusedProject="App" onShowAllProjects={vi.fn()} />)
+
+    expect(screen.getByText("No matching sessions in App")).toBeInTheDocument()
+  })
+})

@@ -7,17 +7,15 @@ import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { getStatusLabel } from "../../../shared/session/sessionStatus"
-import { agentKindForDirName } from "@/lib/agents"
-import { isExternallyDrivenSession } from "@/lib/sessionControl"
 import { SessionPreview } from "./SessionPreview"
-import { getStatusColor, isIdleStatus } from "./sessionStatusPresentation"
+import { getStatusColor } from "./sessionStatusPresentation"
 import { archivedReasonLabel, sessionTitle } from "./sessionListView"
+import { describeSessionRow } from "./sessionRowState"
 import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
-interface SessionRowProps {
+export interface SessionRowProps {
   session: ActiveSessionInfo
   isActiveSession: boolean
   proc: RunningProcess | undefined
@@ -69,28 +67,18 @@ export function SessionRow({
   onPrefetchSession,
   onResumeSession,
 }: SessionRowProps) {
-  const hasProcess = proc !== undefined
-  const isNativeLive = s.isActive === true
-  const isLive = hasProcess || isNativeLive
-  const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus)
-  const isDeferred = s.agentStatus === "deferred"
-  const isReadOnlySession = isExternallyDrivenSession(agentKindForDirName(s.dirName), proc)
+  const {
+    isLive,
+    isNativeIdle,
+    isDeferred,
+    isReadOnly,
+    isTeammate,
+    isArchived,
+    statusLabel,
+    dotState,
+    justFinished,
+  } = describeSessionRow(s, proc, isNewlyCompleted)
   const [resuming, setResuming] = useState(false)
-  const statusLabel = isReadOnlySession
-    ? "Read-only"
-    : isLive
-    ? (isNativeIdle
-        ? "Running"
-        : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? "Running")
-    : null
-  // Left-edge status dot. Recent (dead) sessions get no dot.
-  const dotState = isDeferred
-    ? "attention"
-    : isLive
-      ? isIdleStatus(s.agentStatus) ? "idle" : "working"
-      : null
-  const isTeammate = !!(s.teamName && s.agentName)
-  const isArchived = s.archived === true
   const archivedLabel = archivedReasonLabel(s.archivedReason)
   const title = sessionTitle(s, customName)
   const archiveAction = isArchived
@@ -118,7 +106,7 @@ export function SessionRow({
     <div
       className={cn(
         "motion-list-item group relative flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-2 transition-colors",
-        cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
+        cardStyle(isActiveSession, justFinished),
         isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
       data-archived={isArchived || undefined}
@@ -206,7 +194,7 @@ export function SessionRow({
         </Button>
       )}
 
-      {isDeferred && onResumeSession && !isReadOnlySession && (
+      {isDeferred && onResumeSession && !isReadOnly && (
         <Button
           type="button"
           variant="outline"
@@ -254,7 +242,7 @@ export function SessionRow({
         </Button>
       )}
 
-      {hasProcess && onKill && !isReadOnlySession && (
+      {proc && onKill && !isReadOnly && (
         <Button
           type="button"
           variant="ghost"

@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   renameSession: vi.fn(),
   setCollapsedGroups: vi.fn(),
+  projectScope: null as string | null,
+  setProjectScope: vi.fn(),
   showArchived: false,
   setShowArchived: vi.fn(),
   toast: Object.assign(vi.fn(), { error: vi.fn() }),
@@ -44,6 +46,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", () => ({
   authFetch: mocks.authFetch,
+  authUrl: (path: string) => path,
   jsonFetch: (input: string, body: unknown, init: RequestInit = {}) => mocks.authFetch(input, {
     method: "POST",
     ...init,
@@ -73,11 +76,11 @@ vi.mock("@/contexts/PendingHumanInputContext", () => ({
 vi.mock("@/contexts/PtyContext", () => ({ usePty: () => ({ send: mocks.ptySend }) }))
 vi.mock("@/hooks/useIsMobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/useLocalStorage", () => ({
-  useLocalStorage: (key: string) => (
-    key.includes("show-archived")
-      ? [mocks.showArchived, mocks.setShowArchived]
-      : [{}, mocks.setCollapsedGroups]
-  ),
+  useLocalStorage: (key: string) => {
+    if (key.includes("show-archived")) return [mocks.showArchived, mocks.setShowArchived]
+    if (key.includes("project-scope")) return [mocks.projectScope, mocks.setProjectScope]
+    return [{}, mocks.setCollapsedGroups]
+  },
 }))
 vi.mock("@/hooks/useProjectNames", () => ({
   useProjectNames: () => ({ names: {}, rename: mocks.renameProject }),
@@ -107,6 +110,16 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }))
 vi.mock("../AttentionStrip", () => ({ AttentionStrip: () => null }))
+vi.mock("../SessionCard", () => ({
+  SessionCard: ({ session }: { session: ActiveSessionInfo }) => (
+    <div data-testid={`card-${session.sessionId}`}>{session.sessionId}</div>
+  ),
+}))
+vi.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
+  PopoverTrigger: (props: ButtonHTMLAttributes<HTMLButtonElement>) => <button type="button" {...props} />,
+  PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
 vi.mock("../SessionRow", () => ({
   SessionRow: ({
     session,
@@ -193,10 +206,13 @@ function session(sessionId: string): ActiveSessionInfo {
   }
 }
 
+Element.prototype.scrollIntoView = vi.fn()
+
 beforeEach(() => {
   __resetCapabilitiesForTest()
   __resetDeviceRevisionsForTest()
   mocks.showArchived = false
+  mocks.projectScope = null
   localStorage.clear()
   clearSessionListCache()
   vi.clearAllMocks()
@@ -586,5 +602,65 @@ describe("LiveSessions archiving", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(toggle)
     expect(mocks.setShowArchived).toHaveBeenCalledWith(false)
+  })
+})
+
+describe("LiveSessions focused on a project", () => {
+  function inventory(...rows: ActiveSessionInfo[]) {
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input.startsWith("/api/active-sessions")) return Promise.resolve(jsonResponse(rows))
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+  }
+
+  it("lists only the focused project's sessions as cards and names it in the picker", async () => {
+    window.history.replaceState(null, "", "/")
+    mocks.projectScope = "me/lib"
+    inventory(
+      { ...session("app-1"), cwd: "/home/me/app" },
+      { ...session("lib-1"), dirName: "-home-me-lib", cwd: "/home/me/lib" },
+    )
+
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} />)
+    })
+
+    expect(screen.getByTestId("card-lib-1")).toBeInTheDocument()
+    expect(screen.queryByTestId("card-app-1")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Delete app-1" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Focused on me/lib. Change project" })).toHaveTextContent("1 session")
+    expect(screen.getByRole("button", { name: "New session in me/lib" })).toBeInTheDocument()
+  })
+
+  it("loads the project's older sessions on request and merges them in", async () => {
+    window.history.replaceState(null, "", "/")
+    mocks.projectScope = "me/app"
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input.startsWith("/api/active-sessions?project=")) {
+        return Promise.resolve(jsonResponse([
+          { ...session("app-1"), cwd: "/home/me/app" },
+          { ...session("app-old"), cwd: "/home/me/app", lastModified: "2026-01-01T10:00:00Z" },
+        ]))
+      }
+      if (input.startsWith("/api/active-sessions")) {
+        return Promise.resolve(jsonResponse([{ ...session("app-1"), cwd: "/home/me/app" }]))
+      }
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    expect(screen.queryByTestId("card-app-old")).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older sessions" }))
+    })
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?project=project-a&limit=200")
+    expect(screen.getAllByTestId(/^card-/).map((card) => card.textContent)).toEqual(["app-1", "app-old"])
+    expect(screen.queryByRole("button", { name: "Load older sessions" })).not.toBeInTheDocument()
   })
 })

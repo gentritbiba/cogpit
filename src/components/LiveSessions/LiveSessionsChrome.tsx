@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Archive, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, Archive, Layers, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -110,6 +110,9 @@ interface LiveSessionsFeedbackProps {
   sessionCount: number
   /** Archived sessions the current view keeps out of the list. */
   hiddenArchivedCount: number
+  /** The project the sidebar is focused on, when it is not showing every project. */
+  focusedProject?: string | null
+  onShowAllProjects?: () => void
   onShowArchived: () => void
   onRetry: () => void
 }
@@ -123,10 +126,12 @@ export function LiveSessionsFeedback({
   loading,
   sessionCount,
   hiddenArchivedCount,
+  focusedProject = null,
+  onShowAllProjects,
   onShowArchived,
   onRetry,
 }: LiveSessionsFeedbackProps) {
-  const allArchived = showEmpty && !searching && hiddenArchivedCount > 0
+  const empty = emptyVariant({ showEmpty, searching, focusedProject, hiddenArchivedCount })
   return (
     <>
       {fetchError && (
@@ -140,7 +145,7 @@ export function LiveSessionsFeedback({
         </Alert>
       )}
 
-      {allArchived && (
+      {empty === "archived" && (
         <Empty className="min-h-56 px-4 py-8">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -160,7 +165,35 @@ export function LiveSessionsFeedback({
         </Empty>
       )}
 
-      {showEmpty && !allArchived && (
+      {empty === "focused" && (
+        <Empty className="min-h-56 px-4 py-8">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              {searching ? <Search /> : <Activity />}
+            </EmptyMedia>
+            <EmptyTitle>
+              {searching ? `No matching sessions in ${focusedProject}` : `No sessions in ${focusedProject}`}
+            </EmptyTitle>
+            <EmptyDescription>
+              {focusedEmptyDescription(searching, hiddenArchivedCount)}
+            </EmptyDescription>
+          </EmptyHeader>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="outline" size="sm" onClick={onShowAllProjects}>
+              <Layers data-icon="inline-start" />
+              All projects
+            </Button>
+            {!searching && hiddenArchivedCount > 0 && (
+              <Button variant="ghost" size="sm" onClick={onShowArchived}>
+                <Archive data-icon="inline-start" />
+                Show archived
+              </Button>
+            )}
+          </div>
+        </Empty>
+      )}
+
+      {empty === "plain" && (
         <Empty className="min-h-56 px-4 py-8">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -189,4 +222,31 @@ export function LiveSessionsFeedback({
       )}
     </>
   )
+}
+
+/**
+ * Which empty state the list shows, if any. A focused project explains itself
+ * first, then a list emptied only by the archive filter, then the plain case.
+ */
+function emptyVariant({
+  showEmpty,
+  searching,
+  focusedProject,
+  hiddenArchivedCount,
+}: {
+  showEmpty: boolean
+  searching: boolean
+  focusedProject: string | null
+  hiddenArchivedCount: number
+}): "archived" | "focused" | "plain" | null {
+  if (!showEmpty) return null
+  if (focusedProject !== null) return "focused"
+  if (!searching && hiddenArchivedCount > 0) return "archived"
+  return "plain"
+}
+
+function focusedEmptyDescription(searching: boolean, hiddenArchivedCount: number): string {
+  if (searching) return "Try another search, or look across every project."
+  if (hiddenArchivedCount > 0) return "Its sessions may be archived. Start a new one, or look across every project."
+  return "Start a new session here, or look across every project."
 }

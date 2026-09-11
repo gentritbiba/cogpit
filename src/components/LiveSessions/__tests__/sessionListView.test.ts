@@ -5,6 +5,9 @@ import {
   groupByProject,
   isSessionLive,
   listedSessions,
+  primaryProjectSession,
+  sessionHeadline,
+  splitTeammates,
   visibleRowCount,
   UNKNOWN_PROJECT_LABEL,
 } from "../sessionListView"
@@ -121,5 +124,39 @@ describe("listedSessions", () => {
 
   it("keeps archived sessions in place when showing them", () => {
     expect(listedSessions(sessions, true)).toBe(sessions)
+  })
+})
+
+describe("sessionHeadline", () => {
+  it("prefers the custom name, then the AI title, and never truncates", () => {
+    const long = "x".repeat(80)
+    expect(sessionHeadline(makeSession({ aiTitle: long }))).toBe(long)
+    expect(sessionHeadline(makeSession({ aiTitle: "AI" }), "Mine")).toBe("Mine")
+    expect(sessionHeadline(makeSession({ lastUserMessage: "last", firstUserMessage: "first" }))).toBe("last")
+    expect(sessionHeadline(makeSession({ teamName: "t", agentName: "researcher" }))).toBe("researcher")
+  })
+})
+
+describe("splitTeammates", () => {
+  it("nests teammates under a lead in the list and keeps orphans top-level", () => {
+    const lead = makeSession({ sessionId: "lead" })
+    const teammate = makeSession({ sessionId: "tm", teamLeadSessionId: "lead" })
+    const orphan = makeSession({ sessionId: "orphan", teamLeadSessionId: "elsewhere" })
+
+    const { topLevelSessions, teammatesByLead } = splitTeammates([lead, teammate, orphan])
+
+    expect(topLevelSessions.map((s) => s.sessionId)).toEqual(["lead", "orphan"])
+    expect(teammatesByLead.get("lead")?.map((s) => s.sessionId)).toEqual(["tm"])
+  })
+})
+
+describe("primaryProjectSession", () => {
+  it("picks the first session that is not in a worktree, else the first session", () => {
+    const worktree = makeSession({ sessionId: "wt", cwd: "/work/app/.worktrees/feature" })
+    const main = makeSession({ sessionId: "main", cwd: "/work/app" })
+
+    expect(primaryProjectSession([worktree, main])?.sessionId).toBe("main")
+    expect(primaryProjectSession([worktree])?.sessionId).toBe("wt")
+    expect(primaryProjectSession([])).toBeUndefined()
   })
 })

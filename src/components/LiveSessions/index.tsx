@@ -21,11 +21,15 @@ import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
 import { setSessionsArchived } from "@/lib/sessionArchive"
-import { groupByProject, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
+import { groupByProject, isSessionLive, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
 import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
 import { ProjectGroupList } from "./ProjectGroupList"
+import { FocusedProjectList, type SessionListSharedProps } from "./FocusedProjectList"
+import { ProjectScopePicker } from "./ProjectScopePicker"
+import { mergeSessions, projectScopeOptions, scopeSessions } from "./projectScope"
+import { useOlderProjectSessions } from "./useOlderProjectSessions"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -92,6 +96,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const toggleGroupCollapsed = useCallback((key: string, collapsed: boolean) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: collapsed }))
   }, [setCollapsedGroups])
+  // Which project the sidebar is focused on; null lists every project. Kept
+  // per device like the collapse state, since projects differ between devices.
+  const [projectScope, setProjectScope] = useLocalStorage<string | null>(
+    deviceScopedKey("live-sessions-project-scope"),
+    null,
+  )
   const searching = Boolean(searchQuery.trim())
   // A search looks through everything, so archived sessions join the list
   // while one is active even when the toggle is off.
@@ -148,19 +158,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   )
   const hiddenArchivedCount = listArchived ? 0 : archivedCount
 
-  const locallyFilteredSessions = useMemo(() => {
-    if (!searching) return visibleSessions
-    return visibleSessions.filter((session) => {
-      const customSessionName = sessionNames[session.sessionId]
-      const customProjectName = projectNames[session.dirName]
-      return matchesSessionSearch(session, searchQuery, [customSessionName, customProjectName])
-    })
-  }, [visibleSessions, searching, searchQuery, sessionNames, projectNames])
-  const filteredSessions = pullRequestResults.results ?? locallyFilteredSessions
-
-  // Group sessions by project path
-  const grouped = useMemo(() => groupByProject(filteredSessions), [filteredSessions])
-
   // Cross-project triage for the attention strip (independent of search)
   const attention = useMemo(
     () => classifyAttention(
@@ -182,8 +179,54 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       awaitingPlan,
     ],
   )
+  const needsYouIds = useMemo(
+    () => new Set(attention.needsYou.map((item) => item.session.sessionId)),
+    [attention],
+  )
+  const scopeOptions = useMemo(
+    () => projectScopeOptions(visibleSessions, procBySession, projectNames, needsYouIds),
+    [visibleSessions, procBySession, projectNames, needsYouIds],
+  )
+  const focusedProject = projectScope === null
+    ? null
+    : scopeOptions.find((option) => option.key === projectScope) ?? null
+  const focusedProjectLabel = focusedProject?.customName ?? projectScope
+  const older = useOlderProjectSessions(focusedProject, listArchived)
+  const scopedSessions = useMemo(
+    () => mergeSessions(scopeSessions(visibleSessions, projectScope), older.sessions),
+    [visibleSessions, projectScope, older.sessions],
+  )
+
+  const locallyFilteredSessions = useMemo(() => {
+    if (!searching) return scopedSessions
+    return scopedSessions.filter((session) => {
+      const customSessionName = sessionNames[session.sessionId]
+      const customProjectName = projectNames[session.dirName]
+      return matchesSessionSearch(session, searchQuery, [customSessionName, customProjectName])
+    })
+  }, [scopedSessions, searching, searchQuery, sessionNames, projectNames])
+  const filteredSessions = useMemo(
+    () => (pullRequestResults.results
+      ? scopeSessions(pullRequestResults.results, projectScope)
+      : locallyFilteredSessions),
+    [pullRequestResults.results, projectScope, locallyFilteredSessions],
+  )
+
+  // Group sessions by project path
+  const grouped = useMemo(
+    () => (projectScope === null ? groupByProject(filteredSessions) : new Map<string, ActiveSessionInfo[]>()),
+    [projectScope, filteredSessions],
+  )
+
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
-  const showAttentionStrip = !searching && hasAttention
+  // Focused, every card already carries its status, so the strip would repeat it.
+  const showAttentionStrip = !searching && hasAttention && projectScope === null
+  const focusedArchivable = useMemo(
+    () => (projectScope === null
+      ? []
+      : scopedSessions.filter((session) => !session.archived && !isSessionLive(session, procBySession))),
+    [projectScope, scopedSessions, procBySession],
+  )
 
   // Focus refresh and live polling are owned by SessionInventoryProvider so the
   // sidebar and Mission Control share a single poll.
@@ -193,6 +236,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     if (!pendingSession) return null
     return projectGroupKey(pendingSession.cwd || dirNameToPath(pendingSession.dirName))
   }, [pendingSession])
+  // A focused sidebar shows a new session only when it belongs to that project.
+  const showPendingSession = projectScope === null || pendingProjectPath === projectScope
 
   // Idle-warm the LRU cache for the top few recent sessions after the sidebar
   // first loads. Subsequent clicks on any of them become cache hits and the
@@ -314,6 +359,25 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     scheduleTimeout(fetchData, 3000)
   }, [pty, fetchData, scheduleTimeout])
 
+  // Both list variants render the same sessions with the same actions; only
+  // the grouping around them differs.
+  const sessionListProps: SessionListSharedProps = {
+    activeSessionKey,
+    procBySession,
+    killingPids,
+    newlyCompleted,
+    sessionNames,
+    onSelectSession: handleSelectSession,
+    onKill: canKillAny ? handleKill : undefined,
+    onDuplicateSession,
+    onDeleteSession: onDeleteSession ? handleDeleteSession : undefined,
+    onArchiveSession: handleArchiveSession,
+    onUnarchiveSession: handleUnarchiveSession,
+    onRenameSession: renameSession,
+    onPrefetchSession,
+    onResumeSession: canUseTerminal ? handleResumeSession : undefined,
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <LiveSessionsToolbar
@@ -328,16 +392,31 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         onRefresh={() => { hapticMedium(); fetchData() }}
       />
 
+      <ProjectScopePicker
+        options={scopeOptions}
+        value={projectScope}
+        focused={focusedProject}
+        totalSessions={visibleSessions.length}
+        onChange={setProjectScope}
+        onNewSession={onNewSession}
+        creatingSession={creatingSession}
+        onRenameProject={renameProject}
+        archivableCount={focusedArchivable.length}
+        onArchiveIdle={() => handleArchiveSessions(focusedArchivable)}
+      />
+
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">
           <LiveSessionsFeedback
             fetchError={pullRequestResults.error ?? fetchError}
-            showEmpty={filteredSessions.length === 0 && !pendingSession
+            showEmpty={filteredSessions.length === 0 && !(pendingSession && showPendingSession)
               && !loading && !pullRequestResults.loading && !fetchError && !pullRequestResults.error}
             searching={searching}
             loading={loading || pullRequestResults.loading}
             sessionCount={pullRequestResults.active ? filteredSessions.length : visibleSessions.length}
             hiddenArchivedCount={hiddenArchivedCount}
+            focusedProject={focusedProjectLabel}
+            onShowAllProjects={() => setProjectScope(null)}
             onShowArchived={() => setShowArchived(true)}
             onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
@@ -363,33 +442,33 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             </div>
           )}
 
-          <ProjectGroupList
-            grouped={grouped}
-            pendingProjectPath={pendingProjectPath}
-            pendingSession={pendingSession}
-            collapsedGroups={collapsedGroups}
-            searchQuery={searchQuery}
-            activeSessionKey={activeSessionKey}
-            procBySession={procBySession}
-            killingPids={killingPids}
-            newlyCompleted={newlyCompleted}
-            sessionNames={sessionNames}
-            projectNames={projectNames}
-            onToggleCollapsed={toggleGroupCollapsed}
-            onSelectSession={handleSelectSession}
-            onKill={canKillAny ? handleKill : undefined}
-            onDuplicateSession={onDuplicateSession}
-            onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
-            onArchiveSession={handleArchiveSession}
-            onUnarchiveSession={handleUnarchiveSession}
-            onArchiveSessions={handleArchiveSessions}
-            onRenameSession={renameSession}
-            onRenameProject={renameProject}
-            onNewSession={onNewSession}
-            creatingSession={creatingSession}
-            onPrefetchSession={onPrefetchSession}
-            onResumeSession={canUseTerminal ? handleResumeSession : undefined}
-          />
+          {projectScope === null ? (
+            <ProjectGroupList
+              {...sessionListProps}
+              grouped={grouped}
+              pendingProjectPath={pendingProjectPath}
+              pendingSession={pendingSession}
+              collapsedGroups={collapsedGroups}
+              searchQuery={searchQuery}
+              projectNames={projectNames}
+              onToggleCollapsed={toggleGroupCollapsed}
+              onArchiveSessions={handleArchiveSessions}
+              onRenameProject={renameProject}
+              onNewSession={onNewSession}
+              creatingSession={creatingSession}
+            />
+          ) : (
+            <FocusedProjectList
+              {...sessionListProps}
+              sessions={filteredSessions}
+              pendingSession={showPendingSession ? pendingSession : null}
+              older={{
+                canLoad: Boolean(focusedProject) && !older.loaded && !searching,
+                loading: older.loading,
+                load: older.load,
+              }}
+            />
+          )}
 
         </div>
       </ScrollArea>
