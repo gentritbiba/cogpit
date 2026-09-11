@@ -14,6 +14,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 
 import type { ProjectScopeOption } from "./projectScope"
 
@@ -44,10 +45,31 @@ function focusedSummary(focused: ProjectScopeOption | null): string {
   return focused.live > 0 ? `${sessions}, ${focused.live} live` : sessions
 }
 
+/** Sessions blocked on the user, as a warning dot and a count. */
+function WaitingCount({ count, label, className }: { count: number; label: string; className?: string }) {
+  return (
+    <span
+      className={cn("flex shrink-0 items-center gap-1 font-medium text-warning", className)}
+      aria-label={label}
+    >
+      <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
+      {count}
+    </span>
+  )
+}
+
+/** Sessions blocked on the user in every project but the focused one. */
+function waitingElsewhere(options: ProjectScopeOption[], value: string | null): number {
+  if (value === null) return 0
+  return options.reduce((sum, option) => (option.key === value ? sum : sum + option.needsYou), 0)
+}
+
 /**
  * The sidebar's scope: every project, or one of them. Focused, the trigger
  * becomes that project's masthead — its own icon, its name, and how much of
- * it is live — and the list beneath narrows to its sessions alone.
+ * it is live — and the list beneath narrows to its sessions alone. Focus
+ * hides the attention strip, so the masthead carries a count of sessions
+ * waiting in other projects; opening the picker shows which.
  */
 export function ProjectScopePicker({
   options,
@@ -58,7 +80,7 @@ export function ProjectScopePicker({
   onNewSession,
   creatingSession,
   onRenameProject,
-  archivableCount = 0,
+  archivableCount,
   onArchiveIdle,
 }: ProjectScopePickerProps) {
   const [open, setOpen] = useState(false)
@@ -66,6 +88,7 @@ export function ProjectScopePicker({
   const summary = value === null
     ? `${plural(options.length, "project")}, ${plural(totalSessions, "session")}`
     : focusedSummary(focused)
+  const elsewhere = waitingElsewhere(options, value)
   const select = (key: string | null) => {
     onChange(key)
     setOpen(false)
@@ -93,6 +116,15 @@ export function ProjectScopePicker({
           {summary}
         </span>
       </span>
+      {elsewhere > 0 && (
+        <WaitingCount
+          count={elsewhere}
+          label={elsewhere === 1
+            ? "1 session in another project is waiting for you"
+            : `${elsewhere} sessions in other projects are waiting for you`}
+          className="rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[11px]"
+        />
+      )}
       <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     </PopoverTrigger>
   )
@@ -151,13 +183,11 @@ export function ProjectScopePicker({
                       )}
                     </span>
                     {option.needsYou > 0 && (
-                      <span
-                        className="flex shrink-0 items-center gap-1 text-xs font-medium text-warning"
-                        aria-label={`${plural(option.needsYou, "session")} waiting for you`}
-                      >
-                        <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
-                        {option.needsYou}
-                      </span>
+                      <WaitingCount
+                        count={option.needsYou}
+                        label={`${plural(option.needsYou, "session")} waiting for you`}
+                        className="text-xs"
+                      />
                     )}
                     {option.live > 0 && (
                       <span

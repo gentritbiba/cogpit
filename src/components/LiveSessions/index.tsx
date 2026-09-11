@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import { toast } from "sonner"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
@@ -339,8 +338,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     scheduleTimeout(fetchData, 3000)
   }, [pty, fetchData, scheduleTimeout])
 
-  // Both list variants render the same sessions with the same actions; only
-  // the grouping around them differs.
   const sessionListProps: SessionListSharedProps = {
     activeSessionKey,
     procBySession,
@@ -403,27 +400,25 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
           />
 
           {showAttentionStrip && (
-            <div className="flex flex-col gap-3">
-              <AttentionStrip
-                groups={attention}
-                activeSessionKey={activeSessionKey}
-                procBySession={procBySession}
-                killingPids={killingPids}
-                sessionNames={sessionNames}
-                projectNames={projectNames}
-                onSelectSession={handleSelectSession}
-                onKill={canKillAny ? handleKill : undefined}
-                onResumeSession={canUseTerminal ? handleResumeSession : undefined}
-                onPrefetchSession={onPrefetchSession}
-              />
-              <Separator />
-            </div>
+            <AttentionStrip
+              groups={attention}
+              activeSessionKey={activeSessionKey}
+              procBySession={procBySession}
+              killingPids={killingPids}
+              sessionNames={sessionNames}
+              projectNames={projectNames}
+              onSelectSession={handleSelectSession}
+              onKill={canKillAny ? handleKill : undefined}
+              onResumeSession={canUseTerminal ? handleResumeSession : undefined}
+              onPrefetchSession={onPrefetchSession}
+            />
           )}
 
           <SessionCardList
             {...sessionListProps}
             sessions={filteredSessions}
             pendingSession={showPendingSession ? pendingSession : null}
+            showProject={projectScope === null}
             older={{
               canLoad: (projectScope === null || Boolean(focusedProject)) && !older.loaded && !searching,
               loading: older.loading,

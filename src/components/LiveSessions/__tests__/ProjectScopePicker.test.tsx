@@ -73,6 +73,19 @@ describe("ProjectScopePicker", () => {
     expect(onChange).toHaveBeenCalledWith(null)
   })
 
+  it("shows how many sessions in other projects are waiting while focused", () => {
+    render(<ProjectScopePicker options={options} value="work/lib" focused={options[1]} totalSessions={15} onChange={vi.fn()} />)
+    expect(screen.getByLabelText("1 session in another project is waiting for you")).toHaveTextContent("1")
+    cleanup()
+
+    render(<ProjectScopePicker options={options} value="work/app" focused={options[0]} totalSessions={15} onChange={vi.fn()} />)
+    expect(screen.queryByLabelText(/in another project/)).not.toBeInTheDocument()
+    cleanup()
+
+    render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} />)
+    expect(screen.queryByLabelText(/in another project/)).not.toBeInTheDocument()
+  })
+
   it("keeps a focused project that has no listed sessions selectable", () => {
     render(<ProjectScopePicker options={options} value="work/gone" focused={null} totalSessions={15} onChange={vi.fn()} onNewSession={vi.fn()} />)
 

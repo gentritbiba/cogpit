@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   Bot,
   ChevronRight,
+  Folder,
   GitBranch,
   MessageSquare,
   Play,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -19,7 +21,7 @@ import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { resolveTurnCount } from "@/lib/turnCountCache"
 import { getStatusColor } from "./sessionStatusPresentation"
-import { archivedReasonLabel, sessionHeadline } from "./sessionListView"
+import { archivedReasonLabel, isUntitledSession, sessionHeadline } from "./sessionListView"
 import { describeSessionRow } from "./sessionRowState"
 import { SessionPreview } from "./SessionPreview"
 import type { SessionRowProps } from "./SessionRow"
@@ -27,18 +29,27 @@ import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 
 type SessionCardProps = SessionRowProps & {
-  /** Shown in the hover preview, since the card itself carries no project name. */
   projectLabel?: string
+  /** Where the project's icon comes from; the card falls back to a folder. */
+  projectPath?: string
+  /**
+   * Print the project above the title. On when the list mixes projects, so
+   * every card says where it belongs; off when the list is one project, where
+   * the preview still names it.
+   */
+  showProject?: boolean
 }
 
 /**
  * A session with room to breathe: the sidebar's row expanded into a card with
  * the last prompt and vitals, the same actions as the row, and a hover
- * preview with the full prompts and project for when that is still not enough.
+ * preview with the full prompts for when that is still not enough.
  */
 export function SessionCard({
   session: s,
   projectLabel,
+  projectPath,
+  showProject,
   isActiveSession,
   proc,
   killingPids,
@@ -71,6 +82,8 @@ export function SessionCard({
   } = describeSessionRow(s, proc, isNewlyCompleted)
   const [resuming, setResuming] = useState(false)
   const headline = sessionHeadline(s, customName)
+  const untitled = isUntitledSession(s, customName)
+  const projectEyebrow = showProject ? projectLabel : undefined
   const lastPrompt = s.lastUserMessage || s.firstUserMessage
   const showPrompt = Boolean(lastPrompt) && lastPrompt !== headline
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
@@ -125,6 +138,19 @@ export function SessionCard({
             />
           }
         >
+        {projectEyebrow && (
+          <span
+            data-session-project
+            className="flex items-center gap-1.5 pl-3.5 text-[11px] leading-tight text-muted-foreground"
+          >
+            <ProjectFavicon
+              projectPath={projectPath}
+              fallback={<Folder className="size-3 shrink-0" aria-hidden="true" />}
+              className="size-3"
+            />
+            <span className="truncate">{projectEyebrow}</span>
+          </span>
+        )}
         <span className="flex items-start gap-2">
           <span className="mt-[7px] flex w-1.5 shrink-0 justify-center" aria-hidden="true">
             {dotState && (
@@ -134,7 +160,12 @@ export function SessionCard({
               />
             )}
           </span>
-          <span className="line-clamp-2 flex-1 text-sm font-medium leading-snug text-foreground">
+          <span
+            className={cn(
+              "line-clamp-2 flex-1 text-sm leading-snug",
+              untitled ? "text-muted-foreground" : "font-medium text-foreground",
+            )}
+          >
             {headline}
           </span>
         </span>
@@ -200,7 +231,7 @@ export function SessionCard({
             statusLabel={statusLabel}
             customName={customName}
             worktreeName={worktreeName}
-            projectLabel={projectLabel}
+            projectLabel={projectEyebrow ? undefined : projectLabel}
           />
         </TooltipContent>
       </Tooltip>

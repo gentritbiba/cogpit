@@ -87,6 +87,23 @@ describe("SessionCard", () => {
     expect(preview.querySelector("[data-last-prompt]")).toHaveTextContent("now make it flat")
   })
 
+  it("names the project on the card when asked, and only in the preview otherwise", () => {
+    renderCard({ aiTitle: "Sidebar focus" }, { projectLabel: "App", showProject: true })
+    expect(cardBody().getByText("App")).toBeInTheDocument()
+    expect(screen.getByTestId("preview")).not.toHaveTextContent("App")
+    cleanup()
+
+    renderCard({ aiTitle: "Sidebar focus" }, { projectLabel: "App" })
+    expect(cardBody().queryByText("App")).not.toBeInTheDocument()
+    expect(screen.getByTestId("preview")).toHaveTextContent("App")
+  })
+
+  it("labels a session with no prompt as untitled instead of printing its id", () => {
+    renderCard({ sessionId: "80725bd8-25cf-485f-95c2-ac45ff8bb105" })
+    expect(cardBody().getByText("Untitled session")).toBeInTheDocument()
+    expect(cardBody().queryByText(/80725bd8/)).not.toBeInTheDocument()
+  })
+
   it("does not repeat the prompt when it is the title", () => {
     renderCard({ lastUserMessage: "Only prompt" })
 

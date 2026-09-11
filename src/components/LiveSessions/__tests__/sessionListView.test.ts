@@ -9,6 +9,7 @@ import {
   sessionHeadline,
   splitTeammates,
   UNKNOWN_PROJECT_LABEL,
+  UNTITLED_SESSION_TITLE,
 } from "../sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "../types"
 
@@ -138,5 +139,12 @@ describe("primaryProjectSession", () => {
     expect(primaryProjectSession([worktree, main])?.sessionId).toBe("main")
     expect(primaryProjectSession([worktree])?.sessionId).toBe("wt")
     expect(primaryProjectSession([])).toBeUndefined()
+  })
+})
+
+describe("sessionHeadline fallback", () => {
+  it("never shows a raw session id", () => {
+    expect(sessionHeadline(makeSession({ sessionId: "80725bd8-25cf-485f-95c2" }))).toBe(UNTITLED_SESSION_TITLE)
+    expect(sessionHeadline(makeSession({ slug: "quirky-otter" }))).toBe("quirky-otter")
   })
 })

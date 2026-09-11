@@ -1,10 +1,12 @@
-import { useMemo, useState, type MouseEvent } from "react"
+import { Fragment, useMemo, useState, type MouseEvent } from "react"
 import { History, Loader2 } from "lucide-react"
 
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 
+import { recencyBucket } from "./recencyBuckets"
 import { SessionCard } from "./SessionCard"
 import { SessionRow, type SessionRowProps } from "./SessionRow"
 import { sessionGroupKey, splitTeammates } from "./sessionListView"
@@ -33,10 +35,13 @@ type SessionCardListProps = SessionListSharedProps & {
   sessions: ActiveSessionInfo[]
   pendingSession?: PendingSessionInfo | null
   older: { canLoad: boolean; loading: boolean; load: () => void }
+  /** Name each card's project; on when the list mixes projects. */
+  showProject?: boolean
 }
 
 /**
- * The sidebar's session list: one flat run of cards, newest first, with
+ * The sidebar's session list: one flat run of cards, newest first, shelved
+ * by day ("Today", "Yesterday", ...) so a long run keeps its bearings, with
  * teammates nested under their lead as rows. The same list serves every
  * project and a focused one; only the sessions handed in differ.
  */
@@ -44,6 +49,7 @@ export function SessionCardList({
   sessions,
   pendingSession,
   older,
+  showProject,
   activeSessionKey,
   procBySession,
   killingPids,
@@ -60,7 +66,15 @@ export function SessionCardList({
   onPrefetchSession,
   onResumeSession,
 }: SessionCardListProps) {
-  const { topLevelSessions, teammatesByLead } = useMemo(() => splitTeammates(sessions), [sessions])
+  // Shelf labels come out of the same memo as the ordering they describe.
+  const { topLevelSessions, teammatesByLead, shelves } = useMemo(() => {
+    const split = splitTeammates(sessions)
+    const topLevelSessions = sortSessionsByRecency(split.topLevelSessions)
+    const now = Date.now()
+    const buckets = topLevelSessions.map((s) => recencyBucket(s.lastActivityAt || s.lastModified, now))
+    const shelves = buckets.map((bucket, i) => (bucket === buckets[i - 1] ? null : bucket))
+    return { topLevelSessions, teammatesByLead: split.teammatesByLead, shelves }
+  }, [sessions])
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
   const toggleTeam = (leadId: string) => {
     setCollapsedTeams((previous) => {
@@ -92,40 +106,40 @@ export function SessionCardList({
   return (
     <div className="flex flex-col gap-1.5" data-session-card-list>
       {pendingSession && <PendingSessionRow firstMessage={pendingSession.firstMessage} />}
-      {topLevelSessions.map((session) => {
+      {topLevelSessions.map((session, index) => {
         const key = sessionKey(session)
-        const worktree = parseWorktreePath(session.cwd ?? dirNameToPath(session.dirName))
+        const path = session.cwd ?? dirNameToPath(session.dirName)
+        const worktree = parseWorktreePath(path)
         const projectLabel = projectNames[session.dirName] ?? sessionGroupKey(session)
         const teammates = teammatesByLead.get(session.sessionId)
-        if (!teammates) {
-          return (
-            <SessionCard
-              key={key}
-              {...rowProps(session)}
-              worktreeName={worktree?.worktreeName}
-              projectLabel={projectLabel}
-            />
-          )
-        }
         const collapsed = collapsedTeams.has(session.sessionId)
+        const shelf = shelves[index]
+        const card = (
+          <SessionCard
+            {...rowProps(session)}
+            worktreeName={worktree?.worktreeName}
+            projectLabel={projectLabel}
+            projectPath={worktree?.parentPath ?? path}
+            showProject={showProject}
+            teammateCount={teammates?.length}
+            teammatesCollapsed={teammates ? collapsed : undefined}
+            onToggleTeammates={teammates ? () => toggleTeam(session.sessionId) : undefined}
+          />
+        )
         return (
-          <div key={key} className="flex flex-col gap-px">
-            <SessionCard
-              {...rowProps(session)}
-              worktreeName={worktree?.worktreeName}
-              projectLabel={projectLabel}
-              teammateCount={teammates.length}
-              teammatesCollapsed={collapsed}
-              onToggleTeammates={() => toggleTeam(session.sessionId)}
-            />
-            {!collapsed && (
-              <div className="ml-3 flex flex-col gap-px border-l pl-1">
-                {teammates.map((teammate) => (
-                  <SessionRow key={sessionKey(teammate)} {...rowProps(teammate)} />
-                ))}
+          <Fragment key={key}>
+            {shelf && <RecencyDivider label={shelf} />}
+            {teammates && !collapsed ? (
+              <div className="flex flex-col gap-px">
+                {card}
+                <div className="ml-3 flex flex-col gap-px border-l pl-1">
+                  {teammates.map((teammate) => (
+                    <SessionRow key={sessionKey(teammate)} {...rowProps(teammate)} />
+                  ))}
+                </div>
               </div>
-            )}
-          </div>
+            ) : card}
+          </Fragment>
         )
       })}
       {older.canLoad && (
@@ -143,6 +157,17 @@ export function SessionCardList({
           Load older sessions
         </Button>
       )}
+    </div>
+  )
+}
+
+function RecencyDivider({ label }: { label: string }) {
+  return (
+    <div
+      data-recency-divider
+      className="px-1 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground/80 first:pt-0"
+    >
+      {label}
     </div>
   )
 }

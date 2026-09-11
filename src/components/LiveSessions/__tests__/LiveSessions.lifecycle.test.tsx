@@ -525,7 +525,7 @@ describe("LiveSessions archiving", () => {
       session("keep"),
       expect.objectContaining({ sessionId: "done", archived: true }),
     ])
-    expect(mocks.toast).toHaveBeenCalledWith("Archived “done”", expect.objectContaining({
+    expect(mocks.toast).toHaveBeenCalledWith("Archived “Untitled session”", expect.objectContaining({
       action: expect.objectContaining({ label: "Undo" }),
     }))
 

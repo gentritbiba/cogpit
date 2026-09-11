@@ -11,8 +11,10 @@ export function sessionTitle(s: ActiveSessionInfo, customName?: string): string 
   return customName || truncate(sessionHeadline(s), 50)
 }
 
-/** The untruncated title, for surfaces with room to wrap it. */
-export function sessionHeadline(s: ActiveSessionInfo, customName?: string): string {
+/** What a session with no title, prompt or slug is called; a raw id says nothing. */
+export const UNTITLED_SESSION_TITLE = "Untitled session"
+
+function ownTitle(s: ActiveSessionInfo, customName?: string): string | undefined {
   const teammateName = s.teamName && s.agentName ? s.agentName : ""
   return customName
     || s.aiTitle
@@ -20,7 +22,17 @@ export function sessionHeadline(s: ActiveSessionInfo, customName?: string): stri
     || s.lastUserMessage
     || s.firstUserMessage
     || s.slug
-    || s.sessionId
+    || undefined
+}
+
+/** The untruncated title, for surfaces with room to wrap it. */
+export function sessionHeadline(s: ActiveSessionInfo, customName?: string): string {
+  return ownTitle(s, customName) ?? UNTITLED_SESSION_TITLE
+}
+
+/** True when the headline is the fallback rather than anything the session said. */
+export function isUntitledSession(s: ActiveSessionInfo, customName?: string): boolean {
+  return ownTitle(s, customName) === undefined
 }
 
 /**
