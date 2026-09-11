@@ -39,6 +39,7 @@ import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerAgentExecutableRoutes } from "./routes/agent-executable"
 import { registerAgentAccountRoutes } from "./routes/agent-accounts"
 import { registerScriptRoutes } from "./routes/scripts"
+import { registerSessionArchiveRoutes } from "./routes/session-archive"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
@@ -108,6 +109,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("files", registerFileRoutes),
   apiRoute("files-watch", registerFileWatchRoutes),
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
+  apiRoute("session-archive", registerSessionArchiveRoutes),
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("session-status", registerSessionStatusRoutes),

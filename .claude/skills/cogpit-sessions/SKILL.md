@@ -1,6 +1,5 @@
 ---
 name: cogpit-sessions
-description: Create and manage Claude Code sessions via the Cogpit (agent-window) HTTP API running on localhost:19384. Use when an agent needs to spawn a new Claude Code session in a project directory, send messages to existing sessions, stop sessions, list projects, or query active sessions. Triggers on requests like "start a session", "run claude in project X", "send a message to session Y", "list cogpit projects", or any programmatic interaction with the agent-window server.
 ---
 
 # Cogpit sessions API
@@ -177,6 +176,24 @@ Kill every agent process Cogpit manages. Response: `{ success, killed }`.
 
 `{ "dirName": "...", "fileName": "..." }`. Kills the session and permanently deletes its JSONL file.
 
+### POST /api/archive-sessions
+
+Archive or restore sessions on the server. Archiving only hides a session from the sidebar; the transcript is untouched.
+
+Body: `{ "sessionIds": ["...", "..."], "archived": true }`
+
+- `sessionIds` — array of 1–500 session IDs to archive or restore (duplicates are silently deduplicated)
+- `archived` — true to archive, false to restore and mark the session kept (exempt from auto-archive)
+
+Response: `{ sessionIds, archived, changed }` where `changed` is the list of session IDs whose archive state actually changed (empty array if all were already in the target state).
+
+#### Archive behavior
+
+- **Manual archive**: user archives a session via the sidebar. The server records `archived: true` with the archive timestamp.
+- **Auto-archive**: after 14 days of transcript inactivity, the session is archived unless the user restored it (it is in `kept`).
+- **Auto-unarchive**: when a transcript is written after archiving (e.g., resuming a session or sending a message from Cogpit), the session comes back on its own if the write is well after the archive action (more than 2 minutes).
+- **Restore**: user unarchives a session. It is added to `kept`, which prevents the auto-archive rule from archiving it again until the user manually archives it.
+
 ### GET /api/projects
 
 All projects with sessions: `[{ dirName, path, shortName, sessionCount, lastModified }]`.
@@ -208,7 +225,13 @@ Resolve a bare sessionId to `{ dirName, fileName }`.
 
 Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. It also accepts exact pull request searches such as `#157`, `honest-cms #157`, `honest-cms#157`, `PR 157`, and a pasted GitHub pull request URL. PR searches cover sessions that created the pull request or used an explicit `gh pr` action for it. The first search may build the durable transcript index in the background. Poll the same request until `X-Cogpit-PR-Index-Pending` is `0`; `X-Cogpit-PR-Index-Total` reports the number of candidate transcripts. A matching row includes `matchedPullRequestNumber`.
 
-Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
+Query parameters:
+- `?archived=include` — Include archived sessions in the results (dimmed; auto-filtered out by default)
+
+Response headers:
+- `X-Cogpit-Archived-Count` — Number of archived sessions that matched the query
+
+Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, `archived` (boolean, present when true), `archivedReason` (string: `"manual"` when user archived it, `"inactive"` when auto-archived), and for team members `teamName`, `agentName`, `teamLeadSessionId`.
 
 ### GET /api/running-processes
 

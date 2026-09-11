@@ -19,7 +19,8 @@ import {
   type ReactNode,
 } from "react"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceScope } from "@/lib/device"
+import { deviceScopedKey, getActiveDeviceScope } from "@/lib/device"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hasUnfinishedWork } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import {
@@ -56,6 +57,15 @@ export interface SessionInventory {
   removeSession: (sessionId: string) => void
   /** Clear a session's "just finished" highlight once the user has seen it. */
   acknowledgeCompleted: (sessionId: string) => void
+  /** The user's persisted choice to list archived sessions alongside the rest. */
+  showArchived: boolean
+  setShowArchived: (show: boolean) => void
+  /** A search looks through archived sessions too, so it asks for them while it runs. */
+  setSearchActive: (active: boolean) => void
+  /** Sessions the user has archived, whether or not they are currently listed. */
+  archivedCount: number
+  /** Reflect an archive change locally before (or without) the next fetch. */
+  setArchived: (sessionIds: readonly string[], archived: boolean) => void
 }
 
 const SessionInventoryContext = createContext<SessionInventory | null>(null)
@@ -71,8 +81,19 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
+  const [showArchivedSetting, setShowArchivedSetting] = useLocalStorage<boolean>(
+    deviceScopedKey("live-sessions-show-archived"),
+    false,
+  )
+  const showArchived = showArchivedSetting === true
+  const [searchActive, setSearchActive] = useState(false)
+  const includeArchived = showArchived || searchActive
+  const [archivedCount, setArchivedCount] = useState(0)
 
   const prevStatusRef = useRef<Map<string, string> | null>(null)
+  // Read by setArchived so back-to-back updates (an optimistic change and its
+  // rollback) each see the other's result instead of a stale render.
+  const sessionsRef = useRef(sessions)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(false)
 
@@ -100,7 +121,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     setLoading(true)
     try {
       const [sessRes, procRes] = await Promise.all([
-        authFetch("/api/active-sessions", { signal: ac.signal }),
+        authFetch(includeArchived ? "/api/active-sessions?archived=include" : "/api/active-sessions", { signal: ac.signal }),
         authFetch("/api/running-processes", { signal: ac.signal }),
       ])
       if (!isCurrentRequest()) return
@@ -111,8 +132,10 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (!isCurrentRequest()) return
       const nextSessions = Array.isArray(sessData) ? sessData as ActiveSessionInfo[] : []
       const nextProcesses = Array.isArray(procData) ? procData as RunningProcess[] : []
+      sessionsRef.current = nextSessions
       setSessions(nextSessions)
       setProcesses(nextProcesses)
+      setArchivedCount(Number(sessRes.headers.get("X-Cogpit-Archived-Count")) || 0)
       writeCachedList(sessionListCacheKeys.activeSessions, nextSessions)
       writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
       setError(null)
@@ -123,7 +146,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (isCurrentRequest()) setLoading(false)
       if (abortRef.current === ac) abortRef.current = null
     }
-  }, [mountedDeviceScope])
+  }, [mountedDeviceScope, includeArchived])
 
   const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
 
@@ -197,15 +220,34 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     })
   }, [])
 
-  const removeSession = useCallback((sessionId: string) => {
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.sessionId !== sessionId)
-      if (getActiveDeviceScope() === mountedDeviceScope) {
-        writeCachedList(sessionListCacheKeys.activeSessions, next)
-      }
-      return next
-    })
+  const replaceSessions = useCallback((next: ActiveSessionInfo[]) => {
+    sessionsRef.current = next
+    setSessions(next)
+    if (getActiveDeviceScope() === mountedDeviceScope) {
+      writeCachedList(sessionListCacheKeys.activeSessions, next)
+    }
   }, [mountedDeviceScope])
+
+  const removeSession = useCallback((sessionId: string) => {
+    replaceSessions(sessionsRef.current.filter((s) => s.sessionId !== sessionId))
+  }, [replaceSessions])
+
+  const setArchived = useCallback((sessionIds: readonly string[], archived: boolean) => {
+    const requested = new Set(sessionIds)
+    const current = sessionsRef.current
+    const changedIds = new Set(current
+      .filter((s) => requested.has(s.sessionId) && Boolean(s.archived) !== archived)
+      .map((s) => s.sessionId))
+    if (changedIds.size === 0) return
+    replaceSessions(current.map((s) => {
+      if (!changedIds.has(s.sessionId)) return s
+      if (archived) return { ...s, archived: true, archivedReason: "manual" as const }
+      const { archived: _archived, archivedReason: _archivedReason, ...rest } = s
+      return rest
+    }))
+    const delta = archived ? changedIds.size : -changedIds.size
+    setArchivedCount((count) => Math.max(0, count + delta))
+  }, [replaceSessions])
 
   const value = useMemo<SessionInventory>(() => ({
     sessions,
@@ -217,9 +259,15 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     refresh,
     removeSession,
     acknowledgeCompleted,
+    showArchived,
+    setShowArchived: setShowArchivedSetting,
+    setSearchActive,
+    archivedCount,
+    setArchived,
   }), [
     sessions, processes, procBySession, newlyCompleted, loading, error,
     refresh, removeSession, acknowledgeCompleted,
+    showArchived, setShowArchivedSetting, archivedCount, setArchived,
   ])
 
   return (

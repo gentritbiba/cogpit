@@ -109,6 +109,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   // absolute paths and all. Withholding the diffs would hide nothing that the
   // transcript does not already show.
   "session-file-changes": admin("/api/session-file-changes"),
+  "session-archive": authed("/api/archive-sessions"),
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
   "session-status": authed("/api/session-status"),

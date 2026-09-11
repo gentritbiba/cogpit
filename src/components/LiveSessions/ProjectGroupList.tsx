@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
 
 import { SessionRow } from "./SessionRow"
 import { countLiveSessions } from "./liveSessionSummary"
-import { visibleRowCount } from "./sessionListView"
+import { isSessionLive, visibleRowCount } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 interface ProjectGroupSharedProps {
@@ -26,6 +26,10 @@ interface ProjectGroupSharedProps {
   onKill?: (pid: number, event: MouseEvent) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
+  onArchiveSession?: (session: ActiveSessionInfo) => void
+  onUnarchiveSession?: (session: ActiveSessionInfo) => void
+  /** Archive every session handed over — a project's idle sessions in one go. */
+  onArchiveSessions?: (sessions: ActiveSessionInfo[]) => void
   onRenameSession?: (sessionId: string, name: string) => void
   onRenameProject?: (dirName: string, name: string) => void
   onNewSession?: (dirName: string, cwd?: string) => void
@@ -68,6 +72,9 @@ export function ProjectGroupList({
   onKill,
   onDuplicateSession,
   onDeleteSession,
+  onArchiveSession,
+  onUnarchiveSession,
+  onArchiveSessions,
   onRenameSession,
   onRenameProject,
   onNewSession,
@@ -87,6 +94,9 @@ export function ProjectGroupList({
     onKill,
     onDuplicateSession,
     onDeleteSession,
+    onArchiveSession,
+    onUnarchiveSession,
+    onArchiveSessions,
     onRenameSession,
     onRenameProject,
     onNewSession,
@@ -146,6 +156,9 @@ function ProjectGroup({
   onKill,
   onDuplicateSession,
   onDeleteSession,
+  onArchiveSession,
+  onUnarchiveSession,
+  onArchiveSessions,
   onRenameSession,
   onRenameProject,
   onNewSession,
@@ -204,6 +217,10 @@ function ProjectGroup({
     !parseWorktreePath(session.cwd ?? dirNameToPath(session.dirName))
   ))?.dirName ?? sessions[0]?.dirName ?? pendingSession?.dirName
   const customProjectName = dirName ? projectNames[dirName] : undefined
+  const archivableSessions = useMemo(
+    () => sessions.filter((session) => !session.archived && !isSessionLive(session, procBySession)),
+    [sessions, procBySession],
+  )
 
   function renderSessionRow(
     session: ActiveSessionInfo,
@@ -227,6 +244,8 @@ function ProjectGroup({
         onKill={onKill}
         onDuplicateSession={onDuplicateSession}
         onDeleteSession={onDeleteSession}
+        onArchiveSession={onArchiveSession}
+        onUnarchiveSession={onUnarchiveSession}
         onRenameSession={onRenameSession}
         onPrefetchSession={onPrefetchSession}
         onResumeSession={onResumeSession}
@@ -240,6 +259,8 @@ function ProjectGroup({
         projectLabel={projectPath}
         customName={customProjectName}
         className="sticky top-0 z-20 bg-background"
+        archivableCount={archivableSessions.length}
+        onArchiveIdle={onArchiveSessions ? () => onArchiveSessions(archivableSessions) : undefined}
         onRename={(name) => {
           if (dirName && onRenameProject) onRenameProject(dirName, name)
         }}

@@ -25,6 +25,8 @@ Copilot discovery reads events from `~/.copilot/session-state`. It does not impo
 
 The sidebar and mobile Sessions tab show live and recent sessions, with status and attention cues. Search by project, prompt, title, branch, or pull request. Enter `#157`, a project name plus `#157`, or a GitHub pull request URL to find sessions that created or worked on that PR.
 
+Archive a finished session to keep the sidebar short: hover a row and use the archive button, or right-click it. A project header's menu archives every idle session in that project at once. Archiving only hides the session from the list; the transcript is untouched, and the toast offers Undo. The archive toggle next to the search box lists archived sessions again, dimmed with an archive mark, and a search always looks through them. Archived sessions come back on their own when they get new activity, including a message sent from Cogpit. Sessions with no activity for two weeks are archived automatically; restoring one keeps it listed until you archive it again. The archive is stored on the server, so every device sees the same list.
+
 The timeline contains messages, expandable thinking blocks, tool calls, diffs, and compaction markers. Expand a command to inspect its output. Adjacent shell calls share a card, and failures stay attached to the command that produced them.
 
 Work stays expanded while a turn is live. Completed turns fold behind a duration row. Each turn has a separate file summary. Cogpit virtualizes long transcripts so you can scroll through large sessions.

@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, Archive, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 interface LiveSessionsToolbarProps {
@@ -23,7 +24,10 @@ interface LiveSessionsToolbarProps {
   isMobile: boolean
   searchQuery: string
   searchLoading: boolean
+  showArchived: boolean
+  archivedCount: number
   onSearchQueryChange: (query: string) => void
+  onToggleShowArchived: () => void
   onRefresh: () => void
 }
 
@@ -32,9 +36,15 @@ export function LiveSessionsToolbar({
   isMobile,
   searchQuery,
   searchLoading,
+  showArchived,
+  archivedCount,
   onSearchQueryChange,
+  onToggleShowArchived,
   onRefresh,
 }: LiveSessionsToolbarProps) {
+  const archivedSummary = archivedCount === 0
+    ? "No archived sessions"
+    : `${archivedCount} archived ${archivedCount === 1 ? "session" : "sessions"}`
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2">
       <InputGroup>
@@ -61,6 +71,25 @@ export function LiveSessionsToolbar({
           </InputGroupAddon>
         )}
       </InputGroup>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size={isMobile ? "icon-sm" : "icon-xs"}
+              onClick={onToggleShowArchived}
+              aria-pressed={showArchived}
+              aria-label={showArchived ? "Hide archived sessions" : "Show archived sessions"}
+              className={cn(showArchived && "bg-accent text-accent-foreground")}
+            />
+          }
+        >
+          <Archive data-icon="inline-start" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {showArchived ? "Hide archived" : "Show archived"} · {archivedSummary}
+        </TooltipContent>
+      </Tooltip>
       <Button
         variant="ghost"
         size={isMobile ? "icon-sm" : "icon-xs"}
@@ -79,6 +108,9 @@ interface LiveSessionsFeedbackProps {
   searching: boolean
   loading: boolean
   sessionCount: number
+  /** Archived sessions the current view keeps out of the list. */
+  hiddenArchivedCount: number
+  onShowArchived: () => void
   onRetry: () => void
 }
 
@@ -90,8 +122,11 @@ export function LiveSessionsFeedback({
   searching,
   loading,
   sessionCount,
+  hiddenArchivedCount,
+  onShowArchived,
   onRetry,
 }: LiveSessionsFeedbackProps) {
+  const allArchived = showEmpty && !searching && hiddenArchivedCount > 0
   return (
     <>
       {fetchError && (
@@ -105,7 +140,27 @@ export function LiveSessionsFeedback({
         </Alert>
       )}
 
-      {showEmpty && (
+      {allArchived && (
+        <Empty className="min-h-56 px-4 py-8">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Archive />
+            </EmptyMedia>
+            <EmptyTitle>Everything is archived</EmptyTitle>
+            <EmptyDescription>
+              {hiddenArchivedCount === 1
+                ? "1 archived session is hidden."
+                : `${hiddenArchivedCount} archived sessions are hidden.`}
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" size="sm" onClick={onShowArchived}>
+            <Archive data-icon="inline-start" />
+            Show archived
+          </Button>
+        </Empty>
+      )}
+
+      {showEmpty && !allArchived && (
         <Empty className="min-h-56 px-4 py-8">
           <EmptyHeader>
             <EmptyMedia variant="icon">

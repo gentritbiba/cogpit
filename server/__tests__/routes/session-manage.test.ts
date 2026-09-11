@@ -35,6 +35,9 @@ const { mockCodexAppServer, mockSDKControls, mockCopilotRuntime, mockFindJsonlPa
 
 // The process registry itself is real: the teardown helpers close over its
 // maps, so a stubbed copy would leave every kill assertion looking at nothing.
+vi.mock("../../lib/sessionArchive", () => ({
+  forgetSessions: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock("../../helpers", async () => {
   const registry = await vi.importActual<typeof import("../../processRegistry")>(
     "../../processRegistry",

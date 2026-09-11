@@ -1,9 +1,10 @@
-import { Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
+import { Archive, Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
 import { resolveTurnCount } from "@/lib/turnCountCache"
 import { getStatusColor } from "./sessionStatusPresentation"
+import { archivedReasonLabel } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 interface SessionPreviewProps {
@@ -45,6 +46,12 @@ export function SessionPreview({
         <span className="flex items-center gap-1 text-muted-foreground">
           <Users className="size-3" />
           {s.agentName} · {s.teamName}
+        </span>
+      )}
+      {s.archived && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Archive className="size-3" />
+          {archivedReasonLabel(s.archivedReason)}
         </span>
       )}
       {lastPrompt && (

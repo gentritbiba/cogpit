@@ -29,6 +29,12 @@ export function sessionGroupKey(s: ActiveSessionInfo): string {
   return projectGroupKey(s.cwd || dirNameToPath(s.dirName))
 }
 
+/** The sessions the sidebar lists: archived ones only when the user asked to see them. */
+export function listedSessions(sessions: ActiveSessionInfo[], showArchived: boolean): ActiveSessionInfo[] {
+  if (showArchived) return sessions
+  return sessions.filter((s) => !s.archived)
+}
+
 /** Group sessions by project path for compact display, sorted newest-first. */
 export function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessionInfo[]> {
   const sorted = sortSessionsByRecency(sessions)

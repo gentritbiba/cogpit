@@ -4,6 +4,7 @@ import {
   sessionGroupKey,
   groupByProject,
   isSessionLive,
+  listedSessions,
   visibleRowCount,
   UNKNOWN_PROJECT_LABEL,
 } from "../sessionListView"
@@ -105,5 +106,20 @@ describe("visibleRowCount", () => {
       dead("g"),
     ]
     expect(visibleRowCount(sessions, new Map(), 5)).toBe(7)
+  })
+})
+
+describe("listedSessions", () => {
+  const sessions = [
+    makeSession({ sessionId: "open" }),
+    makeSession({ sessionId: "archived", archived: true }),
+  ]
+
+  it("hides archived sessions unless asked to show them", () => {
+    expect(listedSessions(sessions, false).map((s) => s.sessionId)).toEqual(["open"])
+  })
+
+  it("keeps archived sessions in place when showing them", () => {
+    expect(listedSessions(sessions, true)).toBe(sessions)
   })
 })

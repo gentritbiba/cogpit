@@ -33,6 +33,7 @@ const CANONICAL_ROUTE_IDS = [
   "files",
   "files-watch",
   "session-file-changes",
+  "session-archive",
   "session-config",
   "session-context",
   "session-status",

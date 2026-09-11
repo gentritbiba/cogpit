@@ -1,5 +1,5 @@
 import { useState, useRef } from "react"
-import { Copy, Trash2, Pencil } from "lucide-react"
+import { Archive, ArchiveRestore, Copy, Trash2, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -37,6 +37,10 @@ interface SessionContextMenuProps {
   onDuplicate?: () => void
   onDelete?: () => void
   onRename?: (name: string) => void
+  onArchive?: () => void
+  onUnarchive?: () => void
+  /** A running session cannot be archived — it would only come straight back. */
+  archiveDisabled?: boolean
 }
 
 export function SessionContextMenu({
@@ -46,6 +50,9 @@ export function SessionContextMenu({
   onDuplicate,
   onDelete,
   onRename,
+  onArchive,
+  onUnarchive,
+  archiveDisabled = false,
 }: SessionContextMenuProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showRename, setShowRename] = useState(false)
@@ -63,7 +70,7 @@ export function SessionContextMenu({
       <ContextMenu>
         <ContextMenuTrigger render={<div className="w-full" />}>{children}</ContextMenuTrigger>
         <ContextMenuContent className="min-w-44">
-          {(onRename || onDuplicate) && (
+          {(onRename || onDuplicate || onArchive || onUnarchive) && (
             <ContextMenuGroup>
               {onRename && (
                 <ContextMenuItem onClick={openRename}>
@@ -77,11 +84,22 @@ export function SessionContextMenu({
                   Duplicate session
                 </ContextMenuItem>
               )}
+              {onUnarchive ? (
+                <ContextMenuItem onClick={onUnarchive}>
+                  <ArchiveRestore data-icon="inline-start" />
+                  Restore from archive
+                </ContextMenuItem>
+              ) : onArchive && (
+                <ContextMenuItem onClick={onArchive} disabled={archiveDisabled}>
+                  <Archive data-icon="inline-start" />
+                  {archiveDisabled ? "Archive (stop the session first)" : "Archive session"}
+                </ContextMenuItem>
+              )}
             </ContextMenuGroup>
           )}
           {onDelete && (
             <>
-              {(onDuplicate || onRename) && <ContextMenuSeparator />}
+              {(onDuplicate || onRename || onArchive || onUnarchive) && <ContextMenuSeparator />}
               <ContextMenuGroup>
                 <ContextMenuItem
                   variant="destructive"

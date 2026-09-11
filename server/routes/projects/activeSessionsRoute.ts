@@ -22,6 +22,7 @@ import { sendJson, type NextFn } from "../../http"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
+import { archiveReason, readArchive, setSessionsArchived, type ArchiveReason } from "../../lib/sessionArchive"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { projectLabel } from "./projectLabel"
 
@@ -36,6 +37,11 @@ interface ActiveSessionCandidate {
   size: number
   projectPath?: string
   sessionId?: string
+}
+
+/** The archive key for a candidate, before its metadata has been read. */
+function candidateId(c: ActiveSessionCandidate): string {
+  return c.sessionId || c.fileName.replace(/\.jsonl$/, "")
 }
 
 /**
@@ -92,10 +98,13 @@ export async function handleActiveSessions(
   const totalLimit = Math.min(parseInt(url.searchParams.get("limit") || String(search ? 50 : DEFAULT_TOTAL), 10), 200)
   // Optional: load sessions for a specific project only (used by "show more")
   const projectFilter = url.searchParams.get("project")?.trim() || ""
+  // Archived sessions stay out of the default list so they never crowd the
+  // per-project cap; a search always looks through them.
+  const includeArchived = Boolean(search) || url.searchParams.get("archived") === "include"
 
   try {
     // First pass: collect all session files with their mtime (cheap stat only)
-    const candidates: ActiveSessionCandidate[] = []
+    let candidates: ActiveSessionCandidate[] = []
 
     for (const store of allStores()) {
       for (const session of await store.listTopLevelSessions()) {
@@ -112,47 +121,68 @@ export async function handleActiveSessions(
       }
     }
 
+    const archive = await readArchive()
+    const now = Date.now()
+    const resumedSessionIds: string[] = []
+    const archivedById = new Map<string, ArchiveReason>()
+    for (const c of candidates) {
+      const id = candidateId(c)
+      const reason = archiveReason(archive, id, c.mtimeMs, now)
+      if (reason) archivedById.set(id, reason)
+      else if (archive.archived.has(id)) resumedSessionIds.push(id)
+    }
+    // A transcript written after archiving means the session was resumed —
+    // it comes back on its own, so the stale entry is dropped.
+    if (resumedSessionIds.length > 0) {
+      setSessionsArchived(resumedSessionIds, false).catch(() => {})
+    }
+    res.setHeader("X-Cogpit-Archived-Count", String(archivedById.size))
+    const isArchived = (c: ActiveSessionCandidate) => archivedById.has(candidateId(c))
+    // Archived rows are picked separately from the live list so they never
+    // take a listed session's place under the per-project cap.
+    const archivedCandidates = includeArchived ? candidates.filter(isArchived) : []
+    candidates = candidates.filter((c) => !isArchived(c))
+
     // Sort by mtime descending within each project, then pick top N per project
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    archivedCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
 
     const pullRequestIndex = pullRequestSearch
-      ? await getSessionPrSearchSnapshot(candidates)
+      ? await getSessionPrSearchSnapshot([...candidates, ...archivedCandidates])
       : null
     if (pullRequestIndex) {
       res.setHeader("X-Cogpit-PR-Index-Pending", String(pullRequestIndex.pending))
       res.setHeader("X-Cogpit-PR-Index-Total", String(pullRequestIndex.total))
     }
 
-    let scanPool: typeof candidates
-    if (pullRequestSearch && pullRequestIndex) {
-      scanPool = candidates.filter((candidate) => (
-        pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
-          (reference) => reference.number === pullRequestSearch.number,
-        )
-      ))
-    } else if (search) {
+    const selectPool = (pool: ActiveSessionCandidate[]): ActiveSessionCandidate[] => {
+      if (pullRequestSearch && pullRequestIndex) {
+        return pool.filter((candidate) => (
+          pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
+            (reference) => reference.number === pullRequestSearch.number,
+          )
+        ))
+      }
       // When searching, scan a wider pool then filter
-      scanPool = candidates.slice(0, 100)
-    } else if (projectFilter) {
+      if (search) return pool.slice(0, 100)
       // Loading more for a specific project — use totalLimit directly
-      scanPool = candidates.slice(0, totalLimit)
-    } else {
+      if (projectFilter) return pool.slice(0, totalLimit)
       // Default: pick top `perProject` from each project, then cap at totalLimit
-      const byProject = new Map<string, typeof candidates>()
-      for (const c of candidates) {
+      const byProject = new Map<string, ActiveSessionCandidate[]>()
+      for (const c of pool) {
         const list = byProject.get(c.dirName)
         if (list) list.push(c)
         else byProject.set(c.dirName, [c])
       }
-
-      const selected: typeof candidates = []
+      const selected: ActiveSessionCandidate[] = []
       for (const [, projectCandidates] of byProject) {
         selected.push(...projectCandidates.slice(0, perProject))
       }
       // Re-sort combined list by mtime and cap
       selected.sort((a, b) => b.mtimeMs - a.mtimeMs)
-      scanPool = selected.slice(0, totalLimit)
+      return selected.slice(0, totalLimit)
     }
+    const scanPool = [...selectPool(candidates), ...selectPool(archivedCandidates)]
 
     // Second pass: read metadata (+ search) in parallel for speed
     const q = search ? search.toLowerCase() : ""
@@ -234,6 +264,7 @@ export async function handleActiveSessions(
           && runtimeFor(descriptor.kind).activity(sessionId).running
         const hasRunningAgents = statusInfo.status === "awaiting_agents"
           && await hasFreshAgentTranscripts(c.filePath)
+        const archivedReason = archivedById.get(sessionId)
 
         return {
           dirName: c.dirName,
@@ -257,6 +288,7 @@ export async function handleActiveSessions(
           agentToolName: statusInfo.toolName,
           agentTerminalReason: statusInfo.terminalReason,
           agentPendingAgents: statusInfo.pendingAgents,
+          ...(archivedReason && { archived: true, archivedReason }),
           ...(pullRequests.length > 0 && { pullRequests }),
           ...(matchedPullRequestNumber && { matchedPullRequestNumber }),
           ...(meta.teamName && {
@@ -273,9 +305,11 @@ export async function handleActiveSessions(
 
     const results = await Promise.all(scanPool.map(loadCandidate))
 
-    const activeSessions = sortSessionsByRecency(
-      results.flatMap((session) => session ? [session] : []),
-    ).slice(0, totalLimit)
+    const loaded = results.flatMap((session) => session ? [session] : [])
+    const activeSessions = [
+      ...sortSessionsByRecency(loaded.filter((session) => !session.archived)).slice(0, totalLimit),
+      ...sortSessionsByRecency(loaded.filter((session) => session.archived)).slice(0, totalLimit),
+    ]
 
     sendJson(res, 200, activeSessions)
   } catch (err) {

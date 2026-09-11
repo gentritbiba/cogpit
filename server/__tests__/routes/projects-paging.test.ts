@@ -6,6 +6,11 @@ import { join } from "node:path"
 
 const state = vi.hoisted(() => ({ filePath: "" }))
 
+vi.mock("../../lib/sessionArchive", () => ({
+  archiveReason: () => null,
+  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
+  setSessionsArchived: vi.fn().mockResolvedValue([]),
+}))
 vi.mock("../../sessionPaths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../sessionPaths")>()
   return {

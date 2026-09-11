@@ -305,3 +305,71 @@ describe("SessionRow — pull requests and turn count", () => {
     expect(screen.queryByText("42")).toBeNull()
   })
 })
+
+describe("SessionRow — archiving", () => {
+  it("offers to archive an idle session on hover and not a live one", () => {
+    const onArchiveSession = vi.fn()
+    const session = makeSession()
+    const { rerender } = render(
+      <SessionRow
+        session={session}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onArchiveSession={onArchiveSession}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive session" }))
+    expect(onArchiveSession).toHaveBeenCalledWith(session)
+
+    rerender(
+      <SessionRow
+        session={session}
+        isActiveSession={false}
+        proc={makeProcess()}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onArchiveSession={onArchiveSession}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()
+  })
+
+  it("marks an archived session and offers to restore it", () => {
+    const onUnarchiveSession = vi.fn()
+    const session = makeSession({ archived: true, archivedReason: "manual" })
+    const { container } = render(
+      <SessionRow
+        session={session}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onArchiveSession={vi.fn()}
+        onUnarchiveSession={onUnarchiveSession}
+      />
+    )
+
+    expect(container.querySelector("[data-archived]")).not.toBeNull()
+    expect(screen.getByRole("img", { name: "Archived" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore from archive" }))
+    expect(onUnarchiveSession).toHaveBeenCalledWith(session)
+  })
+
+  it("says why an idle session was archived automatically", () => {
+    render(
+      <SessionRow
+        session={makeSession({ archived: true, archivedReason: "inactive" })}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+      />
+    )
+    expect(screen.getByRole("img", { name: "Archived after two weeks without activity" })).toBeInTheDocument()
+  })
+})

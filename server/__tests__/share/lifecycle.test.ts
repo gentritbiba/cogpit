@@ -9,6 +9,9 @@ import { join as joinPath } from "node:path"
 // import from it.
 vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn(() => false) }))
 
+vi.mock("../../lib/sessionArchive", () => ({
+  forgetSessions: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock("../../helpers", () => ({
   activeProcesses: new Map(),
   persistentSessions: new Map(),

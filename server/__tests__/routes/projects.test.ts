@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => {
     listSessionFiles: perKind(),
     runtimeRunning: vi.fn(),
     getSessionPrSearchSnapshot: vi.fn(),
+    archived: new Map<string, number>(),
+    kept: new Set<string>(),
+    setSessionsArchived: vi.fn(),
   }
 })
 
@@ -95,6 +98,15 @@ vi.mock("../../lib/sessionPrSearchIndex", () => ({
   getSessionPrSearchSnapshot: mocks.getSessionPrSearchSnapshot,
 }))
 
+vi.mock("../../lib/sessionArchive", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/sessionArchive")>("../../lib/sessionArchive")
+  return {
+    archiveReason: actual.archiveReason,
+    readArchive: async () => ({ archived: mocks.archived, kept: mocks.kept }),
+    setSessionsArchived: mocks.setSessionsArchived,
+  }
+})
+
 import {
   getSessionMeta,
   getSessionStatus,
@@ -145,6 +157,9 @@ describe("project routes", () => {
       mocks.sessionAddress[kind].mockResolvedValue(null)
     }
     mocks.runtimeRunning.mockReturnValue(false)
+    mocks.archived.clear()
+    mocks.kept.clear()
+    mocks.setSessionsArchived.mockResolvedValue([])
     mocks.getSessionPrSearchSnapshot.mockResolvedValue({
       byFile: new Map(),
       pending: 0,
@@ -553,12 +568,14 @@ describe("project routes", () => {
     })
 
     it("sorts active sessions by displayed activity time when it differs from file mtime", async () => {
+      const HOUR = 60 * 60_000
+      const RECENT = Date.now() - HOUR
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?limit=10")
 
       mocks.listTopLevelSessions.claude.mockResolvedValue([
-        claudeFile("proj-a", "mtime-newer.jsonl", Date.parse("2026-03-21T12:00:00.000Z"), 200),
-        claudeFile("proj-a", "activity-newer.jsonl", Date.parse("2026-03-21T11:00:00.000Z"), 200),
+        claudeFile("proj-a", "mtime-newer.jsonl", RECENT, 200),
+        claudeFile("proj-a", "activity-newer.jsonl", RECENT - HOUR, 200),
       ])
 
       mockedGetSessionMeta
@@ -572,7 +589,7 @@ describe("project routes", () => {
           firstUserMessage: "older visible activity",
           lastUserMessage: "older visible activity",
           timestamp: "",
-          lastTimestamp: "2026-03-20T12:00:00.000Z",
+          lastTimestamp: new Date(RECENT - 24 * HOUR).toISOString(),
           turnCount: 3,
           lineCount: 10,
         }))
@@ -586,7 +603,7 @@ describe("project routes", () => {
           firstUserMessage: "newer visible activity",
           lastUserMessage: "newer visible activity",
           timestamp: "",
-          lastTimestamp: "2026-03-21T11:30:00.000Z",
+          lastTimestamp: new Date(RECENT - HOUR / 2).toISOString(),
           turnCount: 4,
           lineCount: 12,
         }))
@@ -729,6 +746,134 @@ describe("project routes", () => {
 
       const response = JSON.parse(res._getData())
       expect(response[0].isActive).toBe(false)
+    })
+
+    describe("archived sessions", () => {
+      const NOW = Date.now()
+
+      function listTwoSessions() {
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("proj-a", "kept.jsonl", NOW, 500),
+          claudeFile("proj-a", "archived.jsonl", NOW - 60_000, 500),
+        ])
+        mockedGetSessionMeta.mockImplementation(async (filePath: string) => makeSessionMeta({
+          sessionId: filePath.endsWith("kept.jsonl") ? "kept" : "archived",
+          version: "", gitBranch: "main", model: "claude", slug: "", cwd: "/code",
+          firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
+        }))
+        mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+      }
+
+      it("leaves archived sessions out by default and reports how many there are", async () => {
+        listTwoSessions()
+        mocks.archived.set("archived", NOW + 5_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "/")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string }) => s.sessionId)).toEqual(["kept"])
+        expect(res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("1")
+        expect(mocks.setSessionsArchived).not.toHaveBeenCalled()
+      })
+
+      it("lists archived sessions flagged when asked to include them", async () => {
+        listTwoSessions()
+        mocks.archived.set("archived", NOW + 5_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "?archived=include")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response).toEqual([
+          expect.objectContaining({ sessionId: "kept" }),
+          expect.objectContaining({ sessionId: "archived", archived: true, archivedReason: "manual" }),
+        ])
+        expect(response[0]).not.toHaveProperty("archived")
+      })
+
+      it("searches through archived sessions", async () => {
+        listTwoSessions()
+        mocks.archived.set("archived", NOW + 5_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "?search=hello")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string }) => s.sessionId)).toEqual(["kept", "archived"])
+      })
+
+      it("archives a session idle for two weeks unless the user kept it", async () => {
+        const THREE_WEEKS = 21 * 24 * 60 * 60_000
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("proj-a", "kept.jsonl", NOW, 500),
+          claudeFile("proj-a", "archived.jsonl", NOW - THREE_WEEKS, 500),
+          claudeFile("proj-a", "restored.jsonl", NOW - THREE_WEEKS, 500),
+        ])
+        mockedGetSessionMeta.mockImplementation(async (filePath: string) => makeSessionMeta({
+          sessionId: filePath.split("/").at(-1)!.replace(".jsonl", ""),
+          version: "", gitBranch: "main", model: "claude", slug: "", cwd: "/code",
+          firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
+        }))
+        mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+        mocks.kept.add("restored")
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "?archived=include")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string; archivedReason?: string }) => [s.sessionId, s.archivedReason])).toEqual([
+          ["kept", undefined],
+          ["restored", undefined],
+          ["archived", "inactive"],
+        ])
+        expect(res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("1")
+        expect(mocks.setSessionsArchived).not.toHaveBeenCalled()
+      })
+
+      it("keeps archived rows from taking a listed session's place under the cap", async () => {
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("proj-a", "newest-archived.jsonl", NOW, 500),
+          claudeFile("proj-a", "first.jsonl", NOW - 1_000, 500),
+          claudeFile("proj-a", "second.jsonl", NOW - 2_000, 500),
+        ])
+        mockedGetSessionMeta.mockImplementation(async (filePath: string) => makeSessionMeta({
+          sessionId: filePath.split("/").at(-1)!.replace(".jsonl", ""),
+          version: "", gitBranch: "main", model: "claude", slug: "", cwd: "/code",
+          firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
+        }))
+        mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+        mocks.archived.set("newest-archived", NOW + 5_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "?archived=include&perProject=2&limit=2")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string }) => s.sessionId)).toEqual([
+          "first", "second", "newest-archived",
+        ])
+      })
+
+      it("brings back a session written well after it was archived", async () => {
+        listTwoSessions()
+        // Archived ten minutes before its last write: the session was resumed.
+        mocks.archived.set("archived", NOW - 60_000 - 10 * 60_000)
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", "/")
+
+        await handler(req, res, next)
+
+        const response = JSON.parse(res._getData())
+        expect(response.map((s: { sessionId: string }) => s.sessionId)).toEqual(["kept", "archived"])
+        expect(response[1]).not.toHaveProperty("archived")
+        expect(res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("0")
+        expect(mocks.setSessionsArchived).toHaveBeenCalledWith(["archived"], false)
+      })
     })
   })
 

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react"
-import { Pencil } from "lucide-react"
+import { Archive, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,6 +9,7 @@ import {
   ContextMenuContent,
   ContextMenuGroup,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import {
@@ -27,6 +28,9 @@ interface ProjectContextMenuProps {
   /** Extra classes for the trigger wrapper (e.g. sticky positioning). */
   className?: string
   onRename: (name: string) => void
+  /** Idle, unarchived sessions "Archive idle sessions" would hide. */
+  archivableCount?: number
+  onArchiveIdle?: () => void
 }
 
 export function ProjectContextMenu({
@@ -35,6 +39,8 @@ export function ProjectContextMenu({
   customName,
   className,
   onRename,
+  archivableCount = 0,
+  onArchiveIdle,
 }: ProjectContextMenuProps) {
   const [showRename, setShowRename] = useState(false)
   const [renameValue, setRenameValue] = useState("")
@@ -59,6 +65,19 @@ export function ProjectContextMenu({
               Rename project
             </ContextMenuItem>
           </ContextMenuGroup>
+          {onArchiveIdle && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuGroup>
+                <ContextMenuItem onClick={onArchiveIdle} disabled={archivableCount === 0}>
+                  <Archive data-icon="inline-start" />
+                  {archivableCount > 0
+                    ? `Archive ${archivableCount} idle ${archivableCount === 1 ? "session" : "sessions"}`
+                    : "Archive idle sessions"}
+                </ContextMenuItem>
+              </ContextMenuGroup>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 

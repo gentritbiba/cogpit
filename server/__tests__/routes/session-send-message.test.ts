@@ -76,6 +76,9 @@ vi.mock("../../agents/tempImages", () => ({
   writeTempImageFiles: vi.fn().mockResolvedValue([]),
   cleanupTempFiles: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock("../../lib/sessionArchive", () => ({
+  setSessionsArchived: vi.fn().mockResolvedValue([]),
+}))
 vi.mock("../../helpers", () => ({
   activeProcesses: mockActiveProcesses,
   persistentSessions: mockPersistentSessions,

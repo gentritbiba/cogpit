@@ -1,4 +1,5 @@
 import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
+import { setSessionsArchived } from "../lib/sessionArchive"
 import { resolveSessionAgent, runtimeFor } from "../agents/runtimes"
 import { sendAgentError } from "./agentErrors"
 import {
@@ -67,6 +68,9 @@ export function registerSessionSendRoutes(use: UseFn) {
           sendError(res, new RouteError(409, ErrorCodes.CONFLICT, "Session is already active"))
           return
         }
+        // A message to an archived session resumes it, and a resumed session
+        // belongs back in the sidebar right away.
+        setSessionsArchived([sessionId], false).catch(() => {})
 
         // A resume reports the turn's outcome on this request and nowhere else,
         // so the response stays open until it settles and carries the agent's

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
+import { toast } from "sonner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { authFetch } from "@/lib/auth"
@@ -19,7 +20,8 @@ import { useCapability } from "@/hooks/useCapability"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
-import { groupByProject, projectGroupKey } from "./sessionListView"
+import { setSessionsArchived } from "@/lib/sessionArchive"
+import { groupByProject, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
 import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
@@ -59,6 +61,11 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     refresh: fetchData,
     removeSession,
     acknowledgeCompleted,
+    showArchived,
+    setShowArchived,
+    setSearchActive,
+    archivedCount,
+    setArchived,
   } = useSessionInventory()
   const {
     awaitingPermission,
@@ -85,6 +92,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const toggleGroupCollapsed = useCallback((key: string, collapsed: boolean) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: collapsed }))
   }, [setCollapsedGroups])
+  const searching = Boolean(searchQuery.trim())
+  // A search looks through everything, so archived sessions join the list
+  // while one is active even when the toggle is off.
+  const listArchived = showArchived || searching
+  useEffect(() => {
+    setSearchActive(searching)
+    return () => setSearchActive(false)
+  }, [searching, setSearchActive])
   const sessionsRef = useRef(sessions)
   const timeoutHandlesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const mountedRef = useRef(false)
@@ -127,14 +142,20 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const isMobile = useIsMobile()
   const pullRequestResults = usePullRequestSessionSearch<ActiveSessionInfo>(searchQuery)
 
+  const visibleSessions = useMemo(
+    () => listedSessions(sessions, listArchived),
+    [sessions, listArchived],
+  )
+  const hiddenArchivedCount = listArchived ? 0 : archivedCount
+
   const locallyFilteredSessions = useMemo(() => {
-    if (!searchQuery.trim()) return sessions
-    return sessions.filter((session) => {
+    if (!searching) return visibleSessions
+    return visibleSessions.filter((session) => {
       const customSessionName = sessionNames[session.sessionId]
       const customProjectName = projectNames[session.dirName]
       return matchesSessionSearch(session, searchQuery, [customSessionName, customProjectName])
     })
-  }, [sessions, searchQuery, sessionNames, projectNames])
+  }, [visibleSessions, searching, searchQuery, sessionNames, projectNames])
   const filteredSessions = pullRequestResults.results ?? locallyFilteredSessions
 
   // Group sessions by project path
@@ -143,7 +164,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // Cross-project triage for the attention strip (independent of search)
   const attention = useMemo(
     () => classifyAttention(
-      sessions,
+      visibleSessions,
       procBySession,
       newlyCompleted,
       awaitingPermission,
@@ -152,7 +173,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       awaitingPlan,
     ),
     [
-      sessions,
+      visibleSessions,
       procBySession,
       newlyCompleted,
       awaitingPermission,
@@ -162,7 +183,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     ],
   )
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
-  const showAttentionStrip = !searchQuery.trim() && hasAttention
+  const showAttentionStrip = !searching && hasAttention
 
   // Focus refresh and live polling are owned by SessionInventoryProvider so the
   // sidebar and Mission Control share a single poll.
@@ -239,6 +260,44 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession(s.sessionId)
   }, [onDeleteSession, removeSession])
 
+  // Archive changes apply instantly and roll back if the server rejects them.
+  // The toast carries an undo so a slip never needs the archived view to fix.
+  // A poll that started before the change could land after it, so the list
+  // is refetched once the server has it.
+  const applyArchive = useCallback(async (
+    sessionIds: string[],
+    archived: boolean,
+    message: string | null,
+  ) => {
+    setArchived(sessionIds, archived)
+    const ok = await setSessionsArchived(sessionIds, archived)
+    if (!ok) {
+      setArchived(sessionIds, !archived)
+      toast.error(archived ? "Could not archive session" : "Could not restore session")
+      return
+    }
+    fetchData()
+    if (message) {
+      toast(message, {
+        action: { label: "Undo", onClick: () => { void applyArchive(sessionIds, !archived, null) } },
+      })
+    }
+  }, [setArchived, fetchData])
+
+  const handleArchiveSession = useCallback((s: ActiveSessionInfo) => {
+    void applyArchive([s.sessionId], true, `Archived “${sessionTitle(s, sessionNames[s.sessionId])}”`)
+  }, [applyArchive, sessionNames])
+
+  const handleUnarchiveSession = useCallback((s: ActiveSessionInfo) => {
+    void applyArchive([s.sessionId], false, `Restored “${sessionTitle(s, sessionNames[s.sessionId])}”`)
+  }, [applyArchive, sessionNames])
+
+  const handleArchiveSessions = useCallback((toArchive: ActiveSessionInfo[]) => {
+    if (toArchive.length === 0) return
+    const ids = toArchive.map((s) => s.sessionId)
+    void applyArchive(ids, true, `Archived ${ids.length} ${ids.length === 1 ? "session" : "sessions"}`)
+  }, [applyArchive])
+
   const handleResumeSession = useCallback((sessionId: string, cwd: string | undefined, dirName: string) => {
     const { command, args } = getResumeSpawn(agentKindForDirName(dirName), sessionId)
     const id = `resume_${crypto.randomUUID().slice(0, 8)}`
@@ -262,7 +321,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         isMobile={isMobile}
         searchQuery={searchQuery}
         searchLoading={pullRequestResults.loading}
+        showArchived={showArchived}
+        archivedCount={archivedCount}
         onSearchQueryChange={setSearchQuery}
+        onToggleShowArchived={() => setShowArchived(!showArchived)}
         onRefresh={() => { hapticMedium(); fetchData() }}
       />
 
@@ -272,9 +334,11 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             fetchError={pullRequestResults.error ?? fetchError}
             showEmpty={filteredSessions.length === 0 && !pendingSession
               && !loading && !pullRequestResults.loading && !fetchError && !pullRequestResults.error}
-            searching={Boolean(searchQuery.trim())}
+            searching={searching}
             loading={loading || pullRequestResults.loading}
-            sessionCount={pullRequestResults.active ? filteredSessions.length : sessions.length}
+            sessionCount={pullRequestResults.active ? filteredSessions.length : visibleSessions.length}
+            hiddenArchivedCount={hiddenArchivedCount}
+            onShowArchived={() => setShowArchived(true)}
             onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
 
@@ -316,6 +380,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             onKill={canKillAny ? handleKill : undefined}
             onDuplicateSession={onDuplicateSession}
             onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
+            onArchiveSession={handleArchiveSession}
+            onUnarchiveSession={handleUnarchiveSession}
+            onArchiveSessions={handleArchiveSessions}
             onRenameSession={renameSession}
             onRenameProject={renameProject}
             onNewSession={onNewSession}

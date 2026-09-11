@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, MouseEvent, MutableRefObject, ReactNode } from "react"
+import type { ButtonHTMLAttributes, MouseEvent, MutableRefObject, ReactElement, ReactNode } from "react"
+import { cloneElement, isValidElement } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActiveSessionInfo } from "../types"
@@ -36,9 +37,20 @@ const mocks = vi.hoisted(() => ({
   renameProject: vi.fn(),
   renameSession: vi.fn(),
   setCollapsedGroups: vi.fn(),
+  showArchived: false,
+  setShowArchived: vi.fn(),
+  toast: Object.assign(vi.fn(), { error: vi.fn() }),
 }))
 
-vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/lib/auth", () => ({
+  authFetch: mocks.authFetch,
+  jsonFetch: (input: string, body: unknown, init: RequestInit = {}) => mocks.authFetch(input, {
+    method: "POST",
+    ...init,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }),
+}))
 vi.mock("@/contexts/PendingHumanInputContext", () => ({
   usePendingHumanInput: () => ({
     permissionsBySession: new Map(),
@@ -61,7 +73,11 @@ vi.mock("@/contexts/PendingHumanInputContext", () => ({
 vi.mock("@/contexts/PtyContext", () => ({ usePty: () => ({ send: mocks.ptySend }) }))
 vi.mock("@/hooks/useIsMobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/useLocalStorage", () => ({
-  useLocalStorage: () => [{}, mocks.setCollapsedGroups],
+  useLocalStorage: (key: string) => (
+    key.includes("show-archived")
+      ? [mocks.showArchived, mocks.setShowArchived]
+      : [{}, mocks.setCollapsedGroups]
+  ),
 }))
 vi.mock("@/hooks/useProjectNames", () => ({
   useProjectNames: () => ({ names: {}, rename: mocks.renameProject }),
@@ -80,26 +96,49 @@ vi.mock("@/components/ui/scroll-area", () => ({
 vi.mock("@/components/ProjectContextMenu", () => ({
   ProjectContextMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
+vi.mock("sonner", () => ({ toast: mocks.toast }))
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: renderProp, children }: { render?: ReactElement; children?: ReactNode }) => (
+    isValidElement(renderProp)
+      ? cloneElement(renderProp as ReactElement<{ children?: ReactNode }>, {}, children)
+      : <>{children}</>
+  ),
+  TooltipContent: () => null,
+}))
 vi.mock("../AttentionStrip", () => ({ AttentionStrip: () => null }))
 vi.mock("../SessionRow", () => ({
   SessionRow: ({
     session,
     onDeleteSession,
+    onArchiveSession,
+    onUnarchiveSession,
     onKill,
     onResumeSession,
   }: {
     session: ActiveSessionInfo
     onDeleteSession?: (session: ActiveSessionInfo) => void
+    onArchiveSession?: (session: ActiveSessionInfo) => void
+    onUnarchiveSession?: (session: ActiveSessionInfo) => void
     onKill?: (pid: number, event: MouseEvent<HTMLButtonElement>) => void
     onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
   }) => (
-    <div>
+    <div data-archived={session.archived || undefined}>
       <button
         type="button"
         onClick={() => onDeleteSession?.(session)}
       >
         Delete {session.sessionId}
       </button>
+      {session.archived ? (
+        <button type="button" onClick={() => onUnarchiveSession?.(session)}>
+          Restore {session.sessionId}
+        </button>
+      ) : (
+        <button type="button" onClick={() => onArchiveSession?.(session)}>
+          Archive {session.sessionId}
+        </button>
+      )}
       {onKill && (
         <button
           type="button"
@@ -130,9 +169,10 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, headers: Record<string, string> = {}, ok = true): Response {
   return {
-    ok: true,
+    ok,
+    headers: new Headers(headers),
     json: vi.fn().mockResolvedValue(body),
   } as unknown as Response
 }
@@ -156,6 +196,7 @@ function session(sessionId: string): ActiveSessionInfo {
 beforeEach(() => {
   __resetCapabilitiesForTest()
   __resetDeviceRevisionsForTest()
+  mocks.showArchived = false
   localStorage.clear()
   clearSessionListCache()
   vi.clearAllMocks()
@@ -426,5 +467,124 @@ describe("LiveSessions device and unmount lifecycle", () => {
 
     expect(mocks.authFetch).toHaveBeenCalledTimes(callsBeforeUnmount)
     vi.useRealTimers()
+  })
+})
+
+describe("LiveSessions archiving", () => {
+  function archiveCalls() {
+    return mocks.authFetch.mock.calls.filter(([input]) => input === "/api/archive-sessions")
+  }
+
+  function renderWithSessions(...ids: string[]) {
+    window.history.replaceState(null, "", "/")
+    writeCachedList(sessionListCacheKeys.activeSessions, ids.map(session))
+    return renderLive(
+      <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />,
+    )
+  }
+
+  it("hides an archived session at once, persists it, and can undo from the toast", async () => {
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/archive-sessions") return Promise.resolve(jsonResponse({}))
+      return new Promise<Response>(() => {})
+    })
+    renderWithSessions("keep", "done")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Archive done" }))
+    })
+
+    expect(screen.queryByRole("button", { name: /done$/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Archive keep" })).toBeInTheDocument()
+    expect(archiveCalls()).toHaveLength(1)
+    expect(JSON.parse(String(archiveCalls()[0][1]?.body))).toEqual({ sessionIds: ["done"], archived: true })
+    expect(readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions)).toEqual([
+      session("keep"),
+      expect.objectContaining({ sessionId: "done", archived: true }),
+    ])
+    expect(mocks.toast).toHaveBeenCalledWith("Archived “done”", expect.objectContaining({
+      action: expect.objectContaining({ label: "Undo" }),
+    }))
+
+    const { action } = mocks.toast.mock.calls[0][1] as { action: { onClick: () => void } }
+    await act(async () => {
+      action.onClick()
+    })
+
+    expect(screen.getByRole("button", { name: "Archive done" })).toBeInTheDocument()
+    expect(JSON.parse(String(archiveCalls()[1][1]?.body))).toEqual({ sessionIds: ["done"], archived: false })
+  })
+
+  it("puts the session back and reports when the server refuses", async () => {
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/archive-sessions") return Promise.resolve(jsonResponse({}, {}, false))
+      return new Promise<Response>(() => {})
+    })
+    renderWithSessions("done")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Archive done" }))
+    })
+
+    expect(screen.getByRole("button", { name: "Archive done" })).toBeInTheDocument()
+    expect(mocks.toast.error).toHaveBeenCalledWith("Could not archive session")
+    expect(mocks.toast).not.toHaveBeenCalled()
+  })
+
+  it("asks the server for archived sessions while searching and shows them", async () => {
+    const archivedRow = { ...session("old-work"), firstUserMessage: "old work", archived: true }
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/active-sessions") {
+        return Promise.resolve(jsonResponse([session("keep")], { "X-Cogpit-Archived-Count": "1" }))
+      }
+      if (input === "/api/active-sessions?archived=include") {
+        return Promise.resolve(jsonResponse([session("keep"), archivedRow], { "X-Cogpit-Archived-Count": "1" }))
+      }
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+    window.history.replaceState(null, "", "/")
+    renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.queryByRole("button", { name: "Restore old-work" })).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox"), { target: { value: "old work" } })
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?archived=include", expect.anything())
+    expect(screen.getByRole("button", { name: "Restore old-work" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Archive keep" })).not.toBeInTheDocument()
+  })
+
+  it("persists the toolbar toggle and lists archived sessions while it is on", async () => {
+    const archivedRow = { ...session("old-work"), archived: true }
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/active-sessions?archived=include") {
+        return Promise.resolve(jsonResponse([session("keep"), archivedRow], { "X-Cogpit-Archived-Count": "1" }))
+      }
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+    mocks.showArchived = true
+    window.history.replaceState(null, "", "/")
+    renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?archived=include", expect.anything())
+    expect(mocks.authFetch).not.toHaveBeenCalledWith("/api/active-sessions", expect.anything())
+    expect(screen.getByRole("button", { name: "Restore old-work" })).toBeInTheDocument()
+
+    const toggle = screen.getByRole("button", { name: "Hide archived sessions" })
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(toggle)
+    expect(mocks.setShowArchived).toHaveBeenCalledWith(false)
   })
 })

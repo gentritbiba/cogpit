@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { X, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
+import { X, GitBranch, Play, Bot, Users, ChevronRight, Archive, ArchiveRestore } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -36,6 +36,8 @@ interface SessionRowProps {
   onToggleTeammates?: () => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
+  onArchiveSession?: (session: ActiveSessionInfo) => void
+  onUnarchiveSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
   /**
    * Called after the user hovers or focuses the row for ~120ms. Should warm the
@@ -61,6 +63,8 @@ export function SessionRow({
   onKill,
   onDuplicateSession,
   onDeleteSession,
+  onArchiveSession,
+  onUnarchiveSession,
   onRenameSession,
   onPrefetchSession,
   onResumeSession,
@@ -86,7 +90,12 @@ export function SessionRow({
       ? isIdleStatus(s.agentStatus) ? "idle" : "working"
       : null
   const isTeammate = !!(s.teamName && s.agentName)
+  const isArchived = s.archived === true
+  const archivedLabel = archivedReasonLabel(s.archivedReason)
   const title = sessionTitle(s, customName)
+  const archiveAction = isArchived
+    ? onUnarchiveSession && { label: "Restore from archive", icon: ArchiveRestore, run: () => onUnarchiveSession(s) }
+    : onArchiveSession && !isLive && { label: "Archive session", icon: Archive, run: () => onArchiveSession(s) }
 
   // Hover-intent prefetch: warm the session cache after a short dwell. Fires
   // on focus too so keyboard users benefit.
@@ -110,7 +119,9 @@ export function SessionRow({
       className={cn(
         "motion-list-item group relative flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-2 transition-colors",
         cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
+        isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
+      data-archived={isArchived || undefined}
     >
       <Tooltip>
         <TooltipTrigger
@@ -218,9 +229,30 @@ export function SessionRow({
       ) : (
         <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
       )}
+      {isArchived && (
+        <Archive
+          className="size-3 shrink-0 text-muted-foreground"
+          aria-label={archivedLabel}
+          role="img"
+        />
+      )}
       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
         {formatRelativeTime(s.lastActivityAt || s.lastModified)}
       </span>
+
+      {archiveAction && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={(event) => { event.stopPropagation(); archiveAction.run() }}
+          className="absolute right-0 top-0 bg-background/80 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-foreground"
+          title={archiveAction.label}
+          aria-label={archiveAction.label}
+        >
+          <archiveAction.icon data-icon="inline-start" />
+        </Button>
+      )}
 
       {hasProcess && onKill && !isReadOnlySession && (
         <Button
@@ -239,7 +271,7 @@ export function SessionRow({
     </div>
   )
 
-  if (onDuplicateSession || onDeleteSession || onRenameSession) {
+  if (onDuplicateSession || onDeleteSession || onRenameSession || onArchiveSession || onUnarchiveSession) {
     return (
       <SessionContextMenu
         sessionLabel={s.slug || s.firstUserMessage?.slice(0, 30) || s.sessionId.slice(0, 12)}
@@ -247,6 +279,9 @@ export function SessionRow({
         onDuplicate={onDuplicateSession ? () => onDuplicateSession(s.dirName, s.fileName) : undefined}
         onDelete={onDeleteSession ? () => onDeleteSession(s) : undefined}
         onRename={onRenameSession ? (name) => onRenameSession(s.sessionId, name) : undefined}
+        onArchive={onArchiveSession && !isArchived ? () => onArchiveSession(s) : undefined}
+        onUnarchive={onUnarchiveSession && isArchived ? () => onUnarchiveSession(s) : undefined}
+        archiveDisabled={isLive}
       >
         {sessionRow}
       </SessionContextMenu>
@@ -257,6 +292,10 @@ export function SessionRow({
 }
 
 // -- Helpers --
+
+export function archivedReasonLabel(reason: ActiveSessionInfo["archivedReason"]): string {
+  return reason === "inactive" ? "Archived after two weeks without activity" : "Archived"
+}
 
 function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
   if (isActive) return "bg-accent"

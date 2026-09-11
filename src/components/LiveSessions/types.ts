@@ -34,6 +34,10 @@ export interface ActiveSessionInfo {
   pullRequests?: SessionPullRequest[]
   /** Exact PR number that caused this session to appear in remote search results. */
   matchedPullRequestNumber?: number
+  /** Hidden from the sidebar; only listed when archived sessions are requested. */
+  archived?: boolean
+  /** "manual" for the user's own archive action, "inactive" for the idle-for-two-weeks rule. */
+  archivedReason?: "manual" | "inactive"
 }
 
 export interface RunningProcess {
