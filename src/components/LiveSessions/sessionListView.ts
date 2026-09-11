@@ -29,6 +29,11 @@ export function sessionGroupKey(s: ActiveSessionInfo): string {
   return projectGroupKey(s.cwd || dirNameToPath(s.dirName))
 }
 
+/** What an archived row's mark says: the user's own action or the idle rule. */
+export function archivedReasonLabel(reason: ActiveSessionInfo["archivedReason"]): string {
+  return reason === "inactive" ? "Archived after two weeks without activity" : "Archived"
+}
+
 /** The sessions the sidebar lists: archived ones only when the user asked to see them. */
 export function listedSessions(sessions: ActiveSessionInfo[], showArchived: boolean): ActiveSessionInfo[] {
   if (showArchived) return sessions

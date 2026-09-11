@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
 import { resolveTurnCount } from "@/lib/turnCountCache"
 import { getStatusColor } from "./sessionStatusPresentation"
-import { archivedReasonLabel } from "./SessionRow"
+import { archivedReasonLabel } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 interface SessionPreviewProps {

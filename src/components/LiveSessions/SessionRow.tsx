@@ -12,7 +12,7 @@ import { agentKindForDirName } from "@/lib/agents"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
 import { SessionPreview } from "./SessionPreview"
 import { getStatusColor, isIdleStatus } from "./sessionStatusPresentation"
-import { sessionTitle } from "./sessionListView"
+import { archivedReasonLabel, sessionTitle } from "./sessionListView"
 import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
@@ -292,10 +292,6 @@ export function SessionRow({
 }
 
 // -- Helpers --
-
-export function archivedReasonLabel(reason: ActiveSessionInfo["archivedReason"]): string {
-  return reason === "inactive" ? "Archived after two weeks without activity" : "Archived"
-}
 
 function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
   if (isActive) return "bg-accent"
