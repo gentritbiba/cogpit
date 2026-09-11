@@ -60,7 +60,8 @@ describe("browser home", () => {
 
   it("keeps bin beside the home and everything else inside it", () => {
     expect(binDir()).toBe(join(root, "bin"))
-    expect(shimPath()).toBe(join(root, "bin", "agent-browser"))
+    expect(shimPath("linux")).toBe(join(root, "bin", "agent-browser"))
+    expect(shimPath("win32")).toBe(join(root, "bin", "agent-browser.cmd"))
     expect(profilesDir()).toBe(join(home, "profiles"))
     expect(profileDir("github")).toBe(join(home, "profiles", "github"))
     expect(runRoot()).toBe(join(home, "run"))

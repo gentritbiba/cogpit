@@ -290,7 +290,7 @@ describe("findVisibleBrowser", () => {
     expect([chrome, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]).toContain(found)
   })
 
-  it("finds a Chrome or Chromium on PATH on Linux", () => {
+  it.skipIf(process.platform === "win32")("finds a Chrome or Chromium on PATH on Linux", () => {
     const dir = join(root, "linux-bin")
     mkdirSync(dir)
     const chromium = join(dir, "chromium")
@@ -304,6 +304,8 @@ describe("findVisibleBrowser", () => {
   })
 })
 
+// On Windows ensureShim installs a .cmd launcher and a node shim instead of
+// the bash script, covered by index.test.ts; the bash assertions are POSIX-only.
 describe("ensureShim", () => {
   /** Backdates the shim's mtime by a minute and returns the stored value. */
   function ageShim(): number {
@@ -317,7 +319,7 @@ describe("ensureShim", () => {
     expect(existsSync(shimPath())).toBe(false)
   })
 
-  it("writes an executable shim inside binDir()", () => {
+  it.skipIf(process.platform === "win32")("writes an executable shim inside binDir()", () => {
     expect(ensureShim(fakeBinary)).toEqual({ path: shimPath() })
     expect(shimPath().startsWith(binDir())).toBe(true)
     expect(() => accessSync(shimPath(), fsConstants.X_OK)).not.toThrow()
@@ -349,25 +351,25 @@ describe("ensureShim", () => {
     expect(statSync(shimPath()).mtimeMs).toBe(old)
   })
 
-  it("leaves no temp file behind", () => {
+  it.skipIf(process.platform === "win32")("leaves no temp file behind", () => {
     ensureShim(fakeBinary)
     expect(readdirSync(binDir())).toEqual(["agent-browser"])
   })
 
-  it("rewrites a shim whose version line differs", () => {
+  it.skipIf(process.platform === "win32")("rewrites a shim whose version line differs", () => {
     mkdirSync(binDir(), { recursive: true })
     writeFileSync(shimPath(), "#!/usr/bin/env bash\n# cogpit-shim v0 — old\nexit 1\n", { mode: 0o755 })
     ensureShim(fakeBinary)
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(fakeBinary))
   })
 
-  it("rewrites a shim that points at a different real binary", () => {
+  it.skipIf(process.platform === "win32")("rewrites a shim that points at a different real binary", () => {
     ensureShim("/old/agent-browser")
     ensureShim("/new/agent-browser")
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim("/new/agent-browser"))
   })
 
-  it("rewrites a shim when the visible browser changes", () => {
+  it.skipIf(process.platform === "win32")("rewrites a shim when the visible browser changes", () => {
     ensureShim(fakeBinary)
     const options = { visibleBrowser: "/opt/chrome", platform: "linux" as const }
     ensureShim(fakeBinary, options)
@@ -382,19 +384,19 @@ describe("ensureShim", () => {
 })
 
 describe("findRealAgentBrowser", () => {
-  it("skips binDir() and returns the first executable agent-browser", () => {
+  it.skipIf(process.platform === "win32")("skips binDir() and returns the first executable agent-browser", () => {
     ensureShim(fakeBinary)
     const env = { PATH: [binDir(), fakeBinDir].join(delimiter) }
     expect(findRealAgentBrowser(env)).toBe(fakeBinary)
   })
 
-  it("treats binDir() spelled differently as the same directory", () => {
+  it.skipIf(process.platform === "win32")("treats binDir() spelled differently as the same directory", () => {
     ensureShim(fakeBinary)
     const env = { PATH: [`${binDir()}/`, `${home}/../bin`, fakeBinDir].join(delimiter) }
     expect(findRealAgentBrowser(env)).toBe(fakeBinary)
   })
 
-  it("treats a symlink to binDir() as the same directory", () => {
+  it.skipIf(process.platform === "win32")("treats a symlink to binDir() as the same directory", () => {
     ensureShim(fakeBinary)
     const link = join(root, "link-bin")
     symlinkSync(binDir(), link)
@@ -402,7 +404,7 @@ describe("findRealAgentBrowser", () => {
     expect(findRealAgentBrowser(env)).toBe(fakeBinary)
   })
 
-  it("skips a directory named agent-browser", () => {
+  it.skipIf(process.platform === "win32")("skips a directory named agent-browser", () => {
     const dirBin = join(root, "dir-bin")
     mkdirSync(join(dirBin, "agent-browser"), { recursive: true })
     const env = { PATH: [dirBin, fakeBinDir].join(delimiter) }

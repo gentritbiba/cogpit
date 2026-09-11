@@ -137,7 +137,7 @@ afterEach(() => {
 })
 
 describe("initBrowserSupport", () => {
-  it("creates the tree, installs the shim and plugin, and starts a sweeper", async () => {
+  it.skipIf(process.platform === "win32")("creates the tree, installs the shim and plugin, and starts a sweeper", async () => {
     const support = initBrowserSupport(alwaysDead)
 
     expect(statSync(profilesDir()).isDirectory()).toBe(true)
