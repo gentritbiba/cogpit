@@ -1,43 +1,46 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, type MouseEvent } from "react"
 import { History, Loader2 } from "lucide-react"
 
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 
-import { PendingSessionRow, type ProjectGroupSharedProps } from "./ProjectGroupList"
 import { SessionCard } from "./SessionCard"
 import { SessionRow, type SessionRowProps } from "./SessionRow"
-import { splitTeammates } from "./sessionListView"
-import type { ActiveSessionInfo } from "./types"
+import { sessionGroupKey, splitTeammates } from "./sessionListView"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 
-/** What both sidebar lists need to render and act on a session, focused or not. */
-export type SessionListSharedProps = Pick<
-  ProjectGroupSharedProps,
-  | "activeSessionKey"
-  | "procBySession"
-  | "killingPids"
-  | "newlyCompleted"
-  | "sessionNames"
-  | "onSelectSession"
-  | "onKill"
-  | "onDuplicateSession"
-  | "onDeleteSession"
-  | "onArchiveSession"
-  | "onUnarchiveSession"
-  | "onRenameSession"
-  | "onPrefetchSession"
-  | "onResumeSession"
->
+/** What the sidebar list needs to render and act on a session. */
+export interface SessionListSharedProps {
+  activeSessionKey: string | null
+  procBySession: Map<string, RunningProcess>
+  killingPids: Set<number>
+  newlyCompleted: Set<string>
+  sessionNames: Record<string, string>
+  projectNames: Record<string, string>
+  onSelectSession: (dirName: string, fileName: string) => void
+  onKill?: (pid: number, event: MouseEvent) => void
+  onDuplicateSession?: (dirName: string, fileName: string) => void
+  onDeleteSession?: (session: ActiveSessionInfo) => void
+  onArchiveSession?: (session: ActiveSessionInfo) => void
+  onUnarchiveSession?: (session: ActiveSessionInfo) => void
+  onRenameSession?: (sessionId: string, name: string) => void
+  onPrefetchSession?: (dirName: string, fileName: string) => void
+  onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
+}
 
-type FocusedProjectListProps = SessionListSharedProps & {
+type SessionCardListProps = SessionListSharedProps & {
   sessions: ActiveSessionInfo[]
   pendingSession?: PendingSessionInfo | null
   older: { canLoad: boolean; loading: boolean; load: () => void }
 }
 
-/** One project's sessions as cards, teammates nested under their lead as rows. */
-export function FocusedProjectList({
+/**
+ * The sidebar's session list: one flat run of cards, newest first, with
+ * teammates nested under their lead as rows. The same list serves every
+ * project and a focused one; only the sessions handed in differ.
+ */
+export function SessionCardList({
   sessions,
   pendingSession,
   older,
@@ -46,6 +49,7 @@ export function FocusedProjectList({
   killingPids,
   newlyCompleted,
   sessionNames,
+  projectNames,
   onSelectSession,
   onKill,
   onDuplicateSession,
@@ -55,7 +59,7 @@ export function FocusedProjectList({
   onRenameSession,
   onPrefetchSession,
   onResumeSession,
-}: FocusedProjectListProps) {
+}: SessionCardListProps) {
   const { topLevelSessions, teammatesByLead } = useMemo(() => splitTeammates(sessions), [sessions])
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
   const toggleTeam = (leadId: string) => {
@@ -86,14 +90,22 @@ export function FocusedProjectList({
   })
 
   return (
-    <div className="flex flex-col gap-1.5" data-focused-project-list>
+    <div className="flex flex-col gap-1.5" data-session-card-list>
       {pendingSession && <PendingSessionRow firstMessage={pendingSession.firstMessage} />}
       {topLevelSessions.map((session) => {
         const key = sessionKey(session)
         const worktree = parseWorktreePath(session.cwd ?? dirNameToPath(session.dirName))
+        const projectLabel = projectNames[session.dirName] ?? sessionGroupKey(session)
         const teammates = teammatesByLead.get(session.sessionId)
         if (!teammates) {
-          return <SessionCard key={key} {...rowProps(session)} worktreeName={worktree?.worktreeName} />
+          return (
+            <SessionCard
+              key={key}
+              {...rowProps(session)}
+              worktreeName={worktree?.worktreeName}
+              projectLabel={projectLabel}
+            />
+          )
         }
         const collapsed = collapsedTeams.has(session.sessionId)
         return (
@@ -101,6 +113,7 @@ export function FocusedProjectList({
             <SessionCard
               {...rowProps(session)}
               worktreeName={worktree?.worktreeName}
+              projectLabel={projectLabel}
               teammateCount={teammates.length}
               teammatesCollapsed={collapsed}
               onToggleTeammates={() => toggleTeam(session.sessionId)}
@@ -130,6 +143,17 @@ export function FocusedProjectList({
           Load older sessions
         </Button>
       )}
+    </div>
+  )
+}
+
+function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
+  return (
+    <div className="motion-enter relative flex w-full items-center gap-1.5 rounded-lg border border-border/70 bg-accent px-3 py-2.5 text-left">
+      <Loader2 className="size-3 shrink-0 animate-spin text-info" />
+      <span className="flex-1 truncate text-sm leading-tight text-foreground">
+        {firstMessage || "New session"}
+      </span>
     </div>
   )
 }

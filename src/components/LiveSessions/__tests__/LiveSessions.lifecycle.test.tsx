@@ -110,11 +110,6 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }))
 vi.mock("../AttentionStrip", () => ({ AttentionStrip: () => null }))
-vi.mock("../SessionCard", () => ({
-  SessionCard: ({ session }: { session: ActiveSessionInfo }) => (
-    <div data-testid={`card-${session.sessionId}`}>{session.sessionId}</div>
-  ),
-}))
 vi.mock("@/components/ui/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
   PopoverTrigger: (props: ButtonHTMLAttributes<HTMLButtonElement>) => <button type="button" {...props} />,
@@ -171,6 +166,18 @@ vi.mock("../SessionRow", () => ({
     </div>
   ),
 }))
+// The list renders cards for top-level sessions and rows for teammates;
+// both use the row stand-in so these tests can act on either.
+vi.mock("../SessionCard", async () => {
+  const { SessionRow } = await import("../SessionRow")
+  return {
+    SessionCard: (props: Parameters<typeof SessionRow>[0]) => (
+      <div data-testid={`card-${props.session.sessionId}`}>
+        <SessionRow {...props} />
+      </div>
+    ),
+  }
+})
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -660,7 +667,39 @@ describe("LiveSessions focused on a project", () => {
     })
 
     expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?project=project-a&limit=200")
-    expect(screen.getAllByTestId(/^card-/).map((card) => card.textContent)).toEqual(["app-1", "app-old"])
+    expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute("data-testid"))).toEqual(["card-app-1", "card-app-old"])
     expect(screen.queryByRole("button", { name: "Load older sessions" })).not.toBeInTheDocument()
+  })
+})
+
+describe("LiveSessions across every project", () => {
+  it("lists every session as one flat run of cards and loads older ones in a single request", async () => {
+    window.history.replaceState(null, "", "/")
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input.startsWith("/api/active-sessions?")) {
+        return Promise.resolve(jsonResponse([
+          { ...session("app-1"), cwd: "/home/me/app", lastModified: "2026-09-11T10:00:00Z" },
+          { ...session("lib-old"), dirName: "-home-me-lib", cwd: "/home/me/lib", lastModified: "2026-01-01T10:00:00Z" },
+        ]))
+      }
+      if (input === "/api/active-sessions") {
+        return Promise.resolve(jsonResponse([{ ...session("app-1"), cwd: "/home/me/app", lastModified: "2026-09-11T10:00:00Z" }]))
+      }
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    expect(screen.getByTestId("card-app-1")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^me\/app/ })).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older sessions" }))
+    })
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?limit=200&perProject=100")
+    expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute("data-testid"))).toEqual(["card-app-1", "card-lib-old"])
   })
 })

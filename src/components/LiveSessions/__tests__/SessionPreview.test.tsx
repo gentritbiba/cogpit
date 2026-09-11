@@ -78,3 +78,27 @@ describe("SessionPreview", () => {
     expect(screen.queryByText(/^#\d+$/)).toBeNull()
   })
 })
+
+describe("SessionPreview prompts and project", () => {
+  it("shows how the session started and, when different, where it is now", () => {
+    render(<SessionPreview session={makeSession({ firstUserMessage: "first ask", lastUserMessage: "latest ask" })} />)
+
+    expect(screen.getByText("first ask")).toBeInTheDocument()
+    expect(screen.getByText("Started with")).toBeInTheDocument()
+    expect(screen.getByText("latest ask")).toBeInTheDocument()
+    expect(screen.getByText("Latest")).toBeInTheDocument()
+  })
+
+  it("shows a single prompt once, without labels", () => {
+    render(<SessionPreview session={makeSession({ firstUserMessage: "only ask", lastUserMessage: "only ask" })} />)
+
+    expect(screen.getAllByText("only ask")).toHaveLength(1)
+    expect(screen.queryByText("Started with")).not.toBeInTheDocument()
+    expect(screen.queryByText("Latest")).not.toBeInTheDocument()
+  })
+
+  it("names the project when the list around it does not", () => {
+    render(<SessionPreview session={makeSession()} projectLabel="me/app" />)
+    expect(screen.getByText("me/app")).toBeInTheDocument()
+  })
+})

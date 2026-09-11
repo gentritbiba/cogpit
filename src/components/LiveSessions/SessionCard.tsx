@@ -14,23 +14,31 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { resolveTurnCount } from "@/lib/turnCountCache"
 import { getStatusColor } from "./sessionStatusPresentation"
 import { archivedReasonLabel, sessionHeadline } from "./sessionListView"
 import { describeSessionRow } from "./sessionRowState"
+import { SessionPreview } from "./SessionPreview"
 import type { SessionRowProps } from "./SessionRow"
 import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 
+type SessionCardProps = SessionRowProps & {
+  /** Shown in the hover preview, since the card itself carries no project name. */
+  projectLabel?: string
+}
+
 /**
- * A session with room to breathe: the sidebar's row, expanded for the focused
- * project view where one project's sessions are the whole list. Same actions
- * as the row, plus the last prompt and vitals the row keeps in its tooltip.
+ * A session with room to breathe: the sidebar's row expanded into a card with
+ * the last prompt and vitals, the same actions as the row, and a hover
+ * preview with the full prompts and project for when that is still not enough.
  */
 export function SessionCard({
   session: s,
+  projectLabel,
   isActiveSession,
   proc,
   killingPids,
@@ -49,7 +57,7 @@ export function SessionCard({
   onRenameSession,
   onPrefetchSession,
   onResumeSession,
-}: SessionRowProps) {
+}: SessionCardProps) {
   const {
     isLive,
     isNativeIdle,
@@ -98,20 +106,25 @@ export function SessionCard({
         isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
     >
-      <button
-        type="button"
-        data-live-session
-        onClick={() => onSelectSession(s.dirName, s.fileName)}
-        onMouseEnter={onHoverStart}
-        onMouseLeave={onHoverEnd}
-        onFocus={onHoverStart}
-        onBlur={onHoverEnd}
-        aria-current={isActiveSession ? "true" : undefined}
-        className={cn(
-          "flex w-full flex-col gap-1.5 rounded-lg px-3 pt-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          hasFooter ? "pb-1.5" : "pb-2.5",
-        )}
-      >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-live-session
+              onClick={() => onSelectSession(s.dirName, s.fileName)}
+              onMouseEnter={onHoverStart}
+              onMouseLeave={onHoverEnd}
+              onFocus={onHoverStart}
+              onBlur={onHoverEnd}
+              aria-current={isActiveSession ? "true" : undefined}
+              className={cn(
+                "flex w-full flex-col gap-1.5 rounded-lg px-3 pt-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                hasFooter ? "pb-1.5" : "pb-2.5",
+              )}
+            />
+          }
+        >
         <span className="flex items-start gap-2">
           <span className="mt-[7px] flex w-1.5 shrink-0 justify-center" aria-hidden="true">
             {dotState && (
@@ -179,7 +192,18 @@ export function SessionCard({
             {formatRelativeTime(s.lastActivityAt || s.lastModified)}
           </span>
         </span>
-      </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-[320px]">
+          <SessionPreview
+            session={s}
+            proc={proc}
+            statusLabel={statusLabel}
+            customName={customName}
+            worktreeName={worktreeName}
+            projectLabel={projectLabel}
+          />
+        </TooltipContent>
+      </Tooltip>
 
       {hasFooter && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-[26px]">

@@ -8,7 +8,6 @@ import {
   primaryProjectSession,
   sessionHeadline,
   splitTeammates,
-  visibleRowCount,
   UNKNOWN_PROJECT_LABEL,
 } from "../sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "../types"
@@ -90,25 +89,6 @@ describe("isSessionLive", () => {
 
   it("is not live without a process or native activity", () => {
     expect(isSessionLive(makeSession(), new Map())).toBe(false)
-  })
-})
-
-describe("visibleRowCount", () => {
-  const dead = (id: string) => makeSession({ sessionId: id })
-
-  it("returns baseCount when no live sessions are buried", () => {
-    const sessions = [dead("a"), dead("b"), dead("c")]
-    expect(visibleRowCount(sessions, new Map(), 5)).toBe(5)
-  })
-
-  it("extends the window so a live session below the fold stays visible", () => {
-    const sessions = [
-      dead("a"), dead("b"), dead("c"), dead("d"), dead("e"),
-      dead("f"),
-      makeSession({ sessionId: "live", isActive: true }),
-      dead("g"),
-    ]
-    expect(visibleRowCount(sessions, new Map(), 5)).toBe(7)
   })
 })
 

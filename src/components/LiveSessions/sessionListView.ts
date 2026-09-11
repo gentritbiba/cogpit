@@ -103,19 +103,3 @@ export function isSessionLive(
   if (!procBySession.has(s.sessionId)) return false
   return s.agentStatus !== "completed"
 }
-
-/**
- * How many leading rows a group shows before "Show N more". Extends past
- * baseCount when a live session would otherwise be hidden below the fold.
- */
-export function visibleRowCount(
-  sessions: ActiveSessionInfo[],
-  procBySession: Map<string, RunningProcess>,
-  baseCount: number,
-): number {
-  let lastLiveIndex = -1
-  sessions.forEach((s, i) => {
-    if (isSessionLive(s, procBySession)) lastLiveIndex = i
-  })
-  return Math.max(baseCount, lastLiveIndex + 1)
-}

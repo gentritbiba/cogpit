@@ -3,8 +3,13 @@ import { toast } from "sonner"
 
 import { authFetch } from "@/lib/auth"
 
-import type { ProjectScopeOption } from "./projectScope"
 import type { ActiveSessionInfo } from "./types"
+
+/** What to load more of: every project, or the directories behind one of them. */
+export interface OlderSessionsTarget {
+  key: string
+  dirNames?: readonly string[]
+}
 
 interface OlderState {
   key: string | null
@@ -15,24 +20,29 @@ interface OlderState {
 
 const EMPTY: OlderState = { key: null, sessions: [], loading: false, loaded: false }
 
+function queriesFor(target: OlderSessionsTarget, includeArchived: boolean): URLSearchParams[] {
+  const queries = target.dirNames
+    ? target.dirNames.map((dirName) => new URLSearchParams({ project: dirName, limit: "200" }))
+    : [new URLSearchParams({ limit: "200", perProject: "100" })]
+  if (includeArchived) for (const query of queries) query.set("archived", "include")
+  return queries
+}
+
 /**
- * The inventory lists only a project's newest sessions. A focused project can
- * ask for the rest once; the answer is dropped as soon as the focused project
- * or the archived toggle changes, so it never leaks into another view.
+ * The inventory lists only the newest sessions. The list can ask for the rest
+ * once; the answer is dropped as soon as the target or the archived toggle
+ * changes, so it never leaks into another view.
  */
-export function useOlderProjectSessions(project: ProjectScopeOption | null, includeArchived: boolean) {
-  const key = project ? `${includeArchived ? "a" : "l"}:${project.key}` : null
-  const dirNames = project?.dirNames
+export function useOlderSessions(target: OlderSessionsTarget | null, includeArchived: boolean) {
+  const key = target ? `${includeArchived ? "a" : "l"}:${target.key}` : null
   const [state, setState] = useState<OlderState>(EMPTY)
   const current = state.key === key ? state : EMPTY
 
   const load = useCallback(async () => {
-    if (key === null || !dirNames?.length) return
+    if (key === null || !target) return
     setState({ key, sessions: [], loading: true, loaded: false })
     try {
-      const lists = await Promise.all(dirNames.map(async (dirName) => {
-        const params = new URLSearchParams({ project: dirName, limit: "200" })
-        if (includeArchived) params.set("archived", "include")
+      const lists = await Promise.all(queriesFor(target, includeArchived).map(async (params) => {
         const response = await authFetch(`/api/active-sessions?${params}`)
         if (!response.ok) throw new Error(`Could not load older sessions (${response.status})`)
         const body: unknown = await response.json()
@@ -43,7 +53,7 @@ export function useOlderProjectSessions(project: ProjectScopeOption | null, incl
       setState((prev) => (prev.key === key ? { ...prev, loading: false } : prev))
       toast.error(err instanceof Error ? err.message : "Could not load older sessions")
     }
-  }, [key, dirNames, includeArchived])
+  }, [key, target, includeArchived])
 
   return { sessions: current.sessions, loading: current.loading, loaded: current.loaded, load }
 }

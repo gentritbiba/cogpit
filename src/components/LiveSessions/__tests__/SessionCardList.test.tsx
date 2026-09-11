@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { FocusedProjectList } from "../FocusedProjectList"
+import { SessionCardList } from "../SessionCardList"
 import type { ActiveSessionInfo } from "../types"
 
 vi.mock("../SessionCard", () => ({
-  SessionCard: ({ session, teammateCount }: { session: ActiveSessionInfo; teammateCount?: number }) => (
-    <div data-testid={`card-${session.sessionId}`}>{teammateCount ? `team:${teammateCount}` : null}</div>
+  SessionCard: ({ session, teammateCount, projectLabel }: { session: ActiveSessionInfo; teammateCount?: number; projectLabel?: string }) => (
+    <div data-testid={`card-${session.sessionId}`}>{projectLabel} {teammateCount ? `team:${teammateCount}` : null}</div>
   ),
 }))
 vi.mock("../SessionRow", () => ({
@@ -28,7 +28,7 @@ function session(sessionId: string, overrides: Partial<ActiveSessionInfo> = {}):
 
 function renderList(sessions: ActiveSessionInfo[], older = { canLoad: false, loading: false, load: vi.fn() }, pending?: string) {
   return render(
-    <FocusedProjectList
+    <SessionCardList
       sessions={sessions}
       pendingSession={pending ? { dirName: "-work-app", firstMessage: pending } : null}
       older={older}
@@ -37,6 +37,7 @@ function renderList(sessions: ActiveSessionInfo[], older = { canLoad: false, loa
       killingPids={new Set()}
       newlyCompleted={new Set()}
       sessionNames={{}}
+      projectNames={{ "-work-app": "App" }}
       onSelectSession={vi.fn()}
     />,
   )
@@ -44,7 +45,7 @@ function renderList(sessions: ActiveSessionInfo[], older = { canLoad: false, loa
 
 afterEach(cleanup)
 
-describe("FocusedProjectList", () => {
+describe("SessionCardList", () => {
   it("renders every top-level session as a card with teammates nested as rows", () => {
     renderList([
       session("lead"),
@@ -52,7 +53,7 @@ describe("FocusedProjectList", () => {
       session("solo"),
     ])
 
-    expect(screen.getByTestId("card-lead")).toHaveTextContent("team:1")
+    expect(screen.getByTestId("card-lead")).toHaveTextContent("App team:1")
     expect(screen.getByTestId("row-tm")).toBeInTheDocument()
     expect(screen.getByTestId("card-solo")).toBeInTheDocument()
     expect(screen.queryByTestId("card-tm")).not.toBeInTheDocument()

@@ -1,5 +1,5 @@
-import type { ReactNode } from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SessionCard } from "../SessionCard"
@@ -7,6 +7,15 @@ import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 vi.mock("@/components/SessionContextMenu", () => ({
   SessionContextMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+}))
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: renderProp, children }: { render?: ReactElement; children?: ReactNode }) => (
+    isValidElement(renderProp)
+      ? cloneElement(renderProp as ReactElement<{ children?: ReactNode }>, {}, children)
+      : <>{children}</>
+  ),
+  TooltipContent: ({ children }: { children: ReactNode }) => <div data-testid="preview">{children}</div>,
 }))
 
 function session(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionInfo {
@@ -43,6 +52,11 @@ function renderCard(overrides: Partial<ActiveSessionInfo> = {}, props: Partial<P
 
 afterEach(cleanup)
 
+/** The card's clickable body, as opposed to the hover preview beside it. */
+function cardBody() {
+  return within(document.querySelector("[data-live-session]") as HTMLElement)
+}
+
 describe("SessionCard", () => {
   it("shows the whole title, the last prompt, branch, turns and selects on click", () => {
     const title = "A title long enough that the compact row would have cut it off before the end"
@@ -53,19 +67,30 @@ describe("SessionCard", () => {
       turnCount: 7,
     })
 
-    expect(screen.getByText(title)).toBeInTheDocument()
-    expect(screen.getByText("Please finish the sidebar")).toBeInTheDocument()
-    expect(screen.getByText("feature/focus")).toBeInTheDocument()
-    expect(screen.getByText("7 turns")).toBeInTheDocument()
+    const body = cardBody()
+    expect(body.getByText(title)).toBeInTheDocument()
+    expect(body.getByText("Please finish the sidebar")).toBeInTheDocument()
+    expect(body.getByText("feature/focus")).toBeInTheDocument()
+    expect(body.getByText("7 turns")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText(title))
+    fireEvent.click(body.getByText(title))
     expect(onSelectSession).toHaveBeenCalledWith("-work-app", "s.jsonl")
+  })
+
+  it("previews the project and the full first prompt on hover", () => {
+    const first = "Set up the sidebar so I can focus on one project at a time without losing the others"
+    renderCard({ aiTitle: "Sidebar focus", firstUserMessage: first, lastUserMessage: "now make it flat" }, { projectLabel: "App" })
+
+    const preview = screen.getByTestId("preview")
+    expect(preview).toHaveTextContent("App")
+    expect(preview.querySelector("[data-first-prompt]")).toHaveTextContent(first)
+    expect(preview.querySelector("[data-last-prompt]")).toHaveTextContent("now make it flat")
   })
 
   it("does not repeat the prompt when it is the title", () => {
     renderCard({ lastUserMessage: "Only prompt" })
 
-    expect(screen.getAllByText("Only prompt")).toHaveLength(1)
+    expect(cardBody().getAllByText("Only prompt")).toHaveLength(1)
   })
 
   it("marks a working session and offers to kill its process", () => {
@@ -73,7 +98,7 @@ describe("SessionCard", () => {
     renderCard({ agentStatus: "tool_use", agentToolName: "Bash" }, { proc: proc(), onKill })
 
     expect(document.querySelector('[data-status-dot="working"]')).not.toBeNull()
-    expect(screen.getByText("Using Bash")).toBeInTheDocument()
+    expect(cardBody().getByText("Using Bash")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Kill process 4242" }))
     expect(onKill).toHaveBeenCalledWith(4242, expect.anything())
     expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()

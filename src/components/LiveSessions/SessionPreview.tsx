@@ -1,4 +1,4 @@
-import { Archive, Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
+import { Archive, Cpu, Folder, GitBranch, MessageSquare, Users } from "lucide-react"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
@@ -13,12 +13,15 @@ interface SessionPreviewProps {
   statusLabel?: string | null
   customName?: string
   worktreeName?: string
+  /** The project, for lists that do not print it on the row itself. */
+  projectLabel?: string
 }
 
 /**
- * Rich hover preview shared by session rows and attention-strip rows: the
- * full title, current status, the last prompt, and session vitals — enough
- * to decide whether to switch without opening the session.
+ * Rich hover preview shared by session cards, rows and attention-strip rows:
+ * the full title, project, current status, how the session started and where
+ * it is now, and its vitals — enough to decide whether to switch without
+ * opening the session.
  */
 export function SessionPreview({
   session: s,
@@ -26,16 +29,24 @@ export function SessionPreview({
   statusLabel,
   customName,
   worktreeName,
+  projectLabel,
 }: SessionPreviewProps) {
   const fullTitle = customName || s.aiTitle
-  const lastPrompt = s.lastUserMessage || s.firstUserMessage
+  const firstPrompt = s.firstUserMessage
+  const lastPrompt = s.lastUserMessage && s.lastUserMessage !== firstPrompt ? s.lastUserMessage : undefined
   // Resolved against the client cache so a live session's count stays accurate.
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
 
   return (
-    <div className="flex w-64 flex-col gap-2 text-xs">
+    <div className="flex w-72 flex-col gap-2 text-xs">
       {fullTitle && (
         <span className="font-medium leading-snug text-foreground">{fullTitle}</span>
+      )}
+      {projectLabel && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Folder className="size-3 shrink-0" />
+          <span className="truncate">{projectLabel}</span>
+        </span>
       )}
       {statusLabel && (
         <span className={cn("font-medium", getStatusColor(s.agentStatus))}>
@@ -54,9 +65,20 @@ export function SessionPreview({
           {archivedReasonLabel(s.archivedReason)}
         </span>
       )}
+      {firstPrompt && (
+        <div className="flex flex-col gap-0.5">
+          {lastPrompt && <span className="text-[10px] text-muted-foreground/70">Started with</span>}
+          <div className="border-l-2 pl-2 text-muted-foreground">
+            <span data-first-prompt className="line-clamp-8 leading-relaxed">{firstPrompt}</span>
+          </div>
+        </div>
+      )}
       {lastPrompt && (
-        <div className="border-l-2 pl-2 text-muted-foreground">
-          <span className="line-clamp-3 leading-relaxed">{lastPrompt}</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-muted-foreground/70">Latest</span>
+          <div className="border-l-2 pl-2 text-muted-foreground">
+            <span data-last-prompt className="line-clamp-4 leading-relaxed">{lastPrompt}</span>
+          </div>
         </div>
       )}
       <PullRequestChips pullRequests={s.pullRequests} layout="list" />
