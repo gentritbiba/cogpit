@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { getToolTextStyle, ToolCallCard } from "../ToolCallCard"
 import { getToolSummary, getToolTier } from "../../../../shared/session/toolSummary"
@@ -135,15 +135,14 @@ describe("getToolTextStyle", () => {
 })
 
 describe("ToolCallCard status icon", () => {
-  it("draws nothing for a completed call", () => {
-    // Success is the ~98% case; marking it trains the eye to skip the column
-    // where failures show up.
+  it("marks completed calls with a quiet success icon", () => {
     const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), result: "contents" }
 
     render(<ToolCallCard toolCall={toolCall} />)
 
     expect(screen.queryByRole("img", { name: "Tool call failed" })).toBeNull()
     expect(screen.queryByRole("img", { name: "Tool call running" })).toBeNull()
+    expect(screen.getByRole("img", { name: "Tool call completed" })).toBeInTheDocument()
   })
 
   it("marks a failed call", () => {
@@ -156,6 +155,7 @@ describe("ToolCallCard status icon", () => {
     render(<ToolCallCard toolCall={toolCall} />)
 
     expect(screen.getByRole("img", { name: "Tool call failed" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Read file details/ })).toHaveAccessibleDescription(/failed/i)
   })
 
   it("marks a call that is still running", () => {
@@ -164,6 +164,7 @@ describe("ToolCallCard status icon", () => {
     render(<ToolCallCard toolCall={toolCall} isAgentActive />)
 
     expect(screen.getByRole("img", { name: "Tool call running" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Run command details/ })).toHaveAccessibleDescription(/running/i)
   })
 })
 
@@ -343,7 +344,8 @@ describe("ToolCallCard image reads", () => {
 
     render(<ToolCallCard toolCall={toolCall} expandToolPayloads />)
 
-    expect(screen.getAllByRole("img")).toHaveLength(1)
+    expect(screen.getAllByRole("img", { name: /Tool result image/ })).toHaveLength(1)
+    expect(screen.queryByRole("img", { name: "shot.png" })).toBeNull()
     expect(screen.getByRole("img", { name: "Tool result image 1" })).toHaveAttribute(
       "src",
       "data:image/png;base64,cG5n",
@@ -405,7 +407,7 @@ describe("ToolCallCard image reads", () => {
     render(<ToolCallCard toolCall={toolCall} />)
     fireEvent.click(screen.getByRole("button", { name: /Read file details/ }))
 
-    expect(screen.getByRole("button", { name: "Input" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Raw input" })).toBeTruthy()
     expect(document.querySelector("pre")).toBeNull()
   })
 
@@ -415,9 +417,10 @@ describe("ToolCallCard image reads", () => {
       result: "export const answer = 42",
     }
 
-    render(<ToolCallCard toolCall={toolCall} />)
+    render(<ToolCallCard toolCall={toolCall} expandToolPayloads />)
 
-    expect(screen.queryByRole("img")).toBeNull()
+    expect(screen.queryByRole("img", { name: /Tool result image/ })).toBeNull()
+    expect(screen.getByText("export const answer = 42")).toBeInTheDocument()
   })
 
   it("does not preview a failed image read", () => {
@@ -440,12 +443,12 @@ describe("ToolCallCard image reads", () => {
 
     render(<ToolCallCard toolCall={toolCall} />)
 
-    expect(screen.queryByRole("img")).toBeNull()
+    expect(screen.queryByRole("img", { name: "logo.png" })).toBeNull()
   })
 })
 
 describe("ToolCallCard desktop disclosure", () => {
-  it("uses the entire one-line header as the accessible disclosure target", () => {
+  it("uses the entire action and description header as the accessible disclosure target", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Read", { file_path: "src/example.ts" }),
       result: "export const answer = 42",
@@ -455,7 +458,7 @@ describe("ToolCallCard desktop disclosure", () => {
 
     const disclosure = screen.getByRole("button", { name: /Read file details: src\/example\.ts/ })
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByRole("button", { name: "Input" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Raw input" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Result" })).toBeNull()
 
     fireEvent.click(screen.getByText("Read file"))
@@ -466,7 +469,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(document.getElementById(panelId!)).toHaveAttribute("data-slot", "collapsible-content")
     expect(document.getElementById(panelId!)).toHaveClass("h-[var(--collapsible-panel-height)]")
     expect(screen.getByText("export const answer = 42")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Input" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Raw input" })).toBeTruthy()
   })
 
   it("supports Enter and Space through native button keyboard behavior", async () => {
@@ -564,9 +567,8 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.getByText("line 8")).toBeInTheDocument()
     expect(screen.queryByText("line 9")).toBeNull()
     const resultBlock = screen.getByText("line 1").closest("pre")
-    expect(resultBlock).toHaveClass("pl-3", "border-l", "font-mono", "text-muted-foreground")
-    expect(resultBlock).toHaveClass("max-h-96", "overflow-auto")
-    expect(resultBlock).not.toHaveClass("rounded", "p-2", "border", "bg-elevation-0")
+    expect(resultBlock).toHaveClass("font-mono", "max-h-96", "overflow-auto")
+    expect(resultBlock).toHaveAttribute("tabindex", "0")
 
     fireEvent.click(screen.getByRole("button", { name: "+2 lines" }))
     expect(screen.getByText("line 10")).toBeInTheDocument()
@@ -619,7 +621,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.queryByRole("button", { name: /^\+\d+ lines$/ })).toBeNull()
   })
 
-  it("keeps command errors readable without adding another box", () => {
+  it("exposes failed command output immediately and lets readers expand it", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Bash", { command: "failing-command" }),
       result: Array.from({ length: 10 }, (_, index) => `error ${index + 1}`).join("\n"),
@@ -628,15 +630,16 @@ describe("ToolCallCard desktop disclosure", () => {
 
     render(<ToolCallCard toolCall={toolCall} />)
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
-    fireEvent.click(screen.getByRole("button", { name: /failing-command section/ }))
 
     const resultBlock = screen.getByText(/error 1/).closest("pre")
-    expect(resultBlock).toHaveClass("pl-3", "border-l", "border-destructive/30", "text-destructive", "max-h-96", "overflow-y-auto")
-    expect(resultBlock).not.toHaveClass("rounded", "p-2", "bg-red-50", "dark:bg-red-950/30")
+    expect(resultBlock).toHaveClass("text-destructive", "max-h-96", "overflow-auto")
+    expect(screen.queryByText(/error 10/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "+2 lines" }))
     expect(screen.getByText(/error 10/)).toBeInTheDocument()
   })
 
-  it("keeps raw JSON input behind the nested input link", () => {
+  it("keeps raw JSON input behind its own disclosure", async () => {
+    const user = userEvent.setup()
     const toolCall: ToolCall = {
       ...makeToolCall("Write", { file_path: "src/example.ts", content: "export {}" }),
       result: "Wrote src/example.ts",
@@ -647,9 +650,9 @@ describe("ToolCallCard desktop disclosure", () => {
     fireEvent.click(disclosure)
 
     expect(screen.queryByText('"content"')).toBeNull()
-    const inputDisclosure = screen.getByRole("button", { name: "Input" })
+    const inputDisclosure = screen.getByRole("button", { name: "Raw input" })
     expect(inputDisclosure).toHaveAttribute("aria-expanded", "false")
-    fireEvent.click(inputDisclosure)
+    await user.click(inputDisclosure)
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     expect(inputDisclosure).toHaveAttribute("aria-expanded", "true")
@@ -657,7 +660,8 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(inputPanelId).toBeTruthy()
     expect(document.getElementById(inputPanelId!)).toHaveClass("h-[var(--collapsible-panel-height)]")
     const inputBlock = screen.getByText(/"content"/).closest("pre")
-    expect(inputBlock).toHaveClass("rounded-md", "p-2", "max-h-96", "overflow-y-auto", "border", "bg-muted/30")
+    expect(inputBlock).toHaveClass("max-h-96", "overflow-y-auto", "font-mono")
+    expect(inputBlock).toHaveAttribute("tabindex", "0")
   })
 
   it("opens only the primary panel during bulk payload expansion", () => {
@@ -671,7 +675,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.getByRole("button", { name: /Read file details: src\/example\.ts/ })).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("bulk result")).toBeTruthy()
     expect(screen.queryByText('"offset"')).toBeNull()
-    expect(screen.getByRole("button", { name: "Input" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "Raw input" })).toHaveAttribute("aria-expanded", "false")
   })
 
   it("does not collapse when a nested copy control is used", async () => {
@@ -727,6 +731,25 @@ describe("ToolCallCard Bash input rendering", () => {
     expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy()
     expect(screen.queryByText('"command"')).toBeNull()
     expect(screen.getByText("18 tests passed")).toBeTruthy()
+  })
+
+  it("keeps long command summaries bounded after opening the complete command", () => {
+    const command = Array.from({ length: 12 }, (_, index) => `bun run check:step-${index + 1}`).join("\n")
+    const toolCall: ToolCall = { ...makeToolCall("Bash", { command }), result: "Checks passed" }
+
+    render(<ToolCallCard toolCall={toolCall} />)
+
+    const disclosure = screen.getByRole("button", { name: /Run command details/ })
+    const summary = within(disclosure).getByTitle(/^bun run check:step-1/)
+    expect(summary).toHaveClass("line-clamp-2")
+    fireEvent.click(disclosure)
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(summary).toHaveClass("line-clamp-2")
+    const commandBlock = within(screen.getByRole("region", { name: "Bash command" })).getByText(/check:step-12/).closest("pre")
+    expect(commandBlock?.textContent).toBe(command)
+    expect(commandBlock).not.toHaveClass("line-clamp-2")
+    expect(screen.getByText("Checks passed")).toBeInTheDocument()
   })
 
   it("shows execution mode and additional Bash options", () => {
@@ -1200,12 +1223,17 @@ describe("ToolCallCard AskUserQuestion history", () => {
     )
 
     expect(screen.getByRole("region", { name: "Question history" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /tool calls/i })).toBeNull()
+    const disclosure = screen.getByRole("button", { name: /2 tool calls/i })
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(disclosure).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(disclosure)
+    expect(screen.getByRole("region", { name: "Question history" })).toBeInTheDocument()
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
   })
 })
 
 describe("CollapsibleToolCalls", () => {
-  it("groups adjacent Bash calls into one command card", () => {
+  it("keeps adjacent shell calls independently readable in one activity group", () => {
     const first: ToolCall = {
       ...makeToolCall("Bash", { command: "bun test", description: "Run tests" }),
       id: "bash-one",
@@ -1225,34 +1253,39 @@ describe("CollapsibleToolCalls", () => {
           { kind: "tool_calls", toolCalls: [second] },
         ]}
         expandAll
-        expandToolPayloads
+        expandToolPayloads={false}
         activeToolCallId={null}
       />,
     )
 
-    expect(screen.getAllByRole("region", { name: "Bash commands" })).toHaveLength(1)
+    expect(screen.getByText("2 tool calls")).toBeInTheDocument()
     expect(screen.getByText("2 commands")).toBeInTheDocument()
-    expect(screen.getByText("2 calls")).toBeInTheDocument()
-    expect(screen.getByText("Run tests")).toBeInTheDocument()
-    expect(screen.getByText("Build app")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Run command ×2 details/ })).toBeInTheDocument()
+    const firstDisclosure = screen.getByRole("button", { name: /Run command details: Run tests/ })
+    const secondDisclosure = screen.getByRole("button", { name: /Run command details: Build app/ })
+    expect(firstDisclosure).toHaveAttribute("aria-expanded", "false")
+    expect(secondDisclosure).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(firstDisclosure)
+    expect(screen.getByText("passed")).toBeInTheDocument()
+    expect(screen.queryByText("built")).toBeNull()
+    expect(secondDisclosure).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(secondDisclosure)
+    expect(screen.getByText("built")).toBeInTheDocument()
+    expect(screen.getAllByRole("region", { name: "Bash command" })).toHaveLength(2)
+    expect(screen.queryByRole("region", { name: "Bash commands" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Run command ×2 details/ })).toBeNull()
   })
 
-  it("marks every pending call in an active Bash group as running", () => {
-    const first: ToolCall = {
-      ...makeToolCall("Bash", { command: "bun test" }),
-      id: "bash-one",
-      result: null,
-    }
-    const second: ToolCall = {
-      ...makeToolCall("Bash", { command: "bun run build" }),
-      id: "bash-two",
-      result: null,
-    }
+  it("marks every parallel pending call as running, including non-shell tools", () => {
+    const pendingRead: ToolCall = { ...makeToolCall("Read", { file_path: "src/pending.ts" }), id: "pending-read" }
+    const pendingSearch: ToolCall = { ...makeToolCall("Grep", { pattern: "pending-symbol" }), id: "pending-search" }
+    const pendingShell: ToolCall = { ...makeToolCall("Bash", { command: "bun test" }), id: "pending-shell" }
+    const completed: ToolCall = { ...makeToolCall("Read", { file_path: "src/completed.ts" }), id: "completed", result: "source" }
 
     render(
       <CollapsibleToolCalls
-        toolCalls={[first, second]}
+        toolCalls={[pendingRead, pendingSearch, pendingShell, completed]}
         expandAll
         expandToolPayloads={false}
         activeToolCallId={null}
@@ -1260,50 +1293,22 @@ describe("CollapsibleToolCalls", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Run command ×2 details/ }))
-    expect(screen.getAllByText("running")).toHaveLength(2)
-    expect(screen.queryByText("not run")).toBeNull()
+    expect(screen.getByText("3 running")).toBeInTheDocument()
+    expect(screen.getAllByRole("img", { name: "Tool call running" })).toHaveLength(3)
+    for (const target of [/Read file details: src\/pending.ts/, /Search files details: pending-symbol/, /Run command details: bun test/]) {
+      const disclosure = screen.getByRole("button", { name: target })
+      expect(within(disclosure).getByRole("img", { name: "Tool call running" })).toBeInTheDocument()
+    }
+    expect(within(screen.getByRole("button", { name: /Read file details: src\/completed.ts/ })).queryByRole("img", { name: "Tool call running" })).toBeNull()
   })
 
-  it("starts a new Bash card after a different tool", () => {
-    const first: ToolCall = { ...makeToolCall("Bash", { command: "bun test" }), id: "bash-one", result: "passed" }
-    const read: ToolCall = { ...makeToolCall("Read", { file_path: "/tmp/a.ts" }), id: "read", result: "source" }
-    const second: ToolCall = { ...makeToolCall("Bash", { command: "bun run build" }), id: "bash-two", result: "built" }
+  it("lets the user collapse a live group and leaves its running count visible", () => {
+    const completed: ToolCall = { ...makeToolCall("Read", { file_path: "/tmp/completed.ts" }), id: "completed", result: "contents" }
+    const pending: ToolCall = { ...makeToolCall("Edit", { file_path: "/tmp/in-progress.ts" }), id: "pending" }
 
     render(
       <CollapsibleToolCalls
-        toolCalls={[first, read, second]}
-        expandAll
-        expandToolPayloads
-        activeToolCallId={null}
-      />,
-    )
-
-    expect(screen.getAllByRole("region", { name: "Bash command" })).toHaveLength(2)
-    expect(screen.queryByRole("region", { name: "Bash commands" })).toBeNull()
-  })
-
-  it("lets the user collapse a group while a tool call is still in progress", () => {
-    const completedCall: ToolCall = {
-      id: "completed-call-id",
-      name: "Read",
-      input: { file_path: "/tmp/completed.ts" },
-      result: "contents",
-      isError: false,
-      timestamp: new Date().toISOString(),
-    }
-    const inProgressCall: ToolCall = {
-      id: "in-progress-call-id",
-      name: "Edit",
-      input: { file_path: "/tmp/in-progress.ts" },
-      result: null,
-      isError: false,
-      timestamp: new Date().toISOString(),
-    }
-
-    render(
-      <CollapsibleToolCalls
-        toolCalls={[completedCall, inProgressCall]}
+        toolCalls={[completed, pending]}
         expandAll={false}
         expandToolPayloads={false}
         activeToolCallId={null}
@@ -1311,66 +1316,128 @@ describe("CollapsibleToolCalls", () => {
       />,
     )
 
-    expect(screen.getByText("/tmp/in-progress.ts")).toBeTruthy()
+    const disclosure = screen.getByRole("button", { name: /Collapse 2 tool calls/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("/tmp/in-progress.ts")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /edited 1 file, read 1 file/i }))
+    fireEvent.click(disclosure)
 
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByText("/tmp/in-progress.ts")).toBeNull()
-    expect(screen.getByRole("button", { name: /edited 1 file, read 1 file/i })).toBeTruthy()
+    expect(within(disclosure).getByText("1 running")).toBeInTheDocument()
   })
 
-  it("summarizes the collapsed group the way the Claude Code CLI does", () => {
-    const scratchpad =
-      "/private/tmp/claude-501/-Users-me-proj/0c4c77c4-afa4-4f74-9765-31452fb872fe/scratchpad/find.ts"
+  it("summarizes equivalent operations consistently across providers without duplicate tool chips", () => {
     const toolCalls: ToolCall[] = [
-      { id: "a", name: "Write", input: { file_path: scratchpad, content: "x\ny\nz" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
-      { id: "b", name: "Read", input: { file_path: "/tmp/read.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
-      { id: "c", name: "Bash", input: { command: "bun run a.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
-      { id: "d", name: "Bash", input: { command: "bun run b.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+      { ...makeToolCall("Read", { file_path: "/tmp/read.ts" }), id: "read", result: "ok" },
+      { ...makeToolCall("Bash", { command: "bun test" }), id: "bash", result: "ok" },
+      { ...makeToolCall("functions.exec_command", { cmd: "bun run build" }), id: "exec", result: "ok" },
+      { ...makeToolCall("Grep", { pattern: "needle" }), id: "search", result: "ok" },
     ]
 
     render(
       <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
-    const button = screen.getByRole("button")
-    expect(button.textContent).toContain("Made 1 scratchpad edit")
-    expect(button.textContent).toContain("+3")
-    expect(button.textContent).toContain("read 1 file")
-    expect(button.textContent).toContain("ran 2 shell commands")
-    // Tool badges remain alongside the summary.
-    expect(button.textContent).toContain("Run command ×2")
+    const disclosure = screen.getByRole("button", { name: /Expand 4 tool calls/ })
+    expect(within(disclosure).getByText("4 tool calls")).toBeInTheDocument()
+    expect(within(disclosure).getByText("1 read · 2 commands · 1 search")).toBeInTheDocument()
+    expect(within(disclosure).queryByText("Read file")).toBeNull()
+    expect(within(disclosure).queryByText(/Run command/)).toBeNull()
+    expect(screen.queryByText(/×2/)).toBeNull()
   })
 
-  it("shows failure in the collapsed summary", () => {
-    // Collapsed is the default for every historical turn, and success no longer
-    // draws an icon. If red does not reach the summary, a turn where Bash failed
-    // is indistinguishable from one where it succeeded without expanding it.
-    const failed: ToolCall[] = [
-      { id: "a", name: "Read", input: { file_path: "/tmp/a.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
-      { id: "b", name: "Bash", input: { command: "bun test" }, result: "exit 1", isError: true, timestamp: new Date().toISOString() },
+  it("gives collapsed failures an explicit count", () => {
+    const toolCalls: ToolCall[] = [
+      { ...makeToolCall("Read", { file_path: "/tmp/a.ts" }), id: "read", result: "ok" },
+      { ...makeToolCall("Bash", { command: "bun test" }), id: "shell", result: "exit 1", isError: true },
+      { ...makeToolCall("Read", { file_path: "/tmp/missing.ts" }), id: "failed-read", result: "ENOENT", isError: true },
     ]
 
     render(
-      <CollapsibleToolCalls toolCalls={failed} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
-    const bash = screen.getByText("Run command")
-    const read = screen.getByText("Read file")
-    expect(bash.className).toContain(getToolTextStyle("Bash", true))
-    expect(bash.className).not.toBe(read.className)
+    const disclosure = screen.getByRole("button", { name: /Expand 3 tool calls/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(within(disclosure).getByText("2 failed")).toHaveClass("text-destructive")
+    expect(disclosure).toHaveAccessibleDescription("2 failed")
+    expect(screen.queryByText("ENOENT")).toBeNull()
   })
 
-  it("keeps a wholly successful group free of failure ink", () => {
-    const ok: ToolCall[] = [
-      { id: "a", name: "Bash", input: { command: "bun test" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+  it("keeps successful groups free of failure and pending labels", () => {
+    const toolCalls: ToolCall[] = [
+      { ...makeToolCall("Bash", { command: "bun test" }), id: "shell", result: "ok" },
+      { ...makeToolCall("Read", { file_path: "src/a.ts" }), id: "read", result: "" },
     ]
 
     render(
-      <CollapsibleToolCalls toolCalls={ok} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
-    expect(screen.getByText("Run command").className).not.toContain(getToolTextStyle("Bash", true))
+    const disclosure = screen.getByRole("button", { name: /Expand 2 tool calls/ })
+    expect(within(disclosure).queryByText(/failed|running|no result/i)).toBeNull()
+  })
+
+  it("supports opening and closing the group with Enter and Space", async () => {
+    const user = userEvent.setup()
+    const toolCalls: ToolCall[] = [
+      { ...makeToolCall("Read", { file_path: "src/a.ts" }), id: "first", result: "first source" },
+      { ...makeToolCall("Read", { file_path: "src/b.ts" }), id: "second", result: "second source" },
+    ]
+    render(
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
+    )
+
+    const disclosure = screen.getByRole("button", { name: /Expand 2 tool calls/ })
+    const panelId = disclosure.getAttribute("aria-controls")
+    expect(panelId).toBeTruthy()
+    disclosure.focus()
+    await user.keyboard("{Enter}")
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(document.getElementById(panelId!)).toBeInTheDocument()
+    expect(screen.getByText("src/a.ts")).toBeInTheDocument()
+    await user.keyboard(" ")
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("src/a.ts")).toBeNull()
+  })
+
+  it("bounds live history while keeping older pending and failed calls visible", () => {
+    const toolCalls: ToolCall[] = Array.from({ length: 7 }, (_, index) => ({
+      ...makeToolCall("Read", { file_path: `src/step-${index}.ts` }),
+      id: `step-${index}`,
+      result: index === 0 || index === 6 ? null : index === 1 ? "ENOENT" : "contents",
+      isError: index === 1,
+    }))
+    render(
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} isAgentActive />,
+    )
+
+    for (const index of [0, 1, 4, 5, 6]) {
+      expect(screen.getByText(`src/step-${index}.ts`)).toBeInTheDocument()
+    }
+    expect(screen.queryByText("src/step-2.ts")).toBeNull()
+    expect(screen.queryByText("src/step-3.ts")).toBeNull()
+    expect(screen.getAllByRole("img", { name: "Tool call running" })).toHaveLength(2)
+    expect(screen.getByRole("img", { name: "Tool call failed" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 earlier steps" }))
+    expect(screen.getByText("src/step-2.ts")).toBeInTheDocument()
+    expect(screen.getByText("src/step-3.ts")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /earlier steps/ })).toBeNull()
+  })
+
+  it("shows missing historical results without claiming they are still running", () => {
+    const toolCalls: ToolCall[] = [
+      { ...makeToolCall("Read", { file_path: "src/a.ts" }), id: "pending" },
+      { ...makeToolCall("Read", { file_path: "src/b.ts" }), id: "done", result: "" },
+    ]
+    render(
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
+    )
+
+    expect(screen.getByText("1 no result")).toBeInTheDocument()
+    expect(screen.queryByText(/running/i)).toBeNull()
   })
 })
 
@@ -1391,6 +1458,39 @@ describe("ToolCallCard mobile payload controls", () => {
     })
   })
 
+  it.each([
+    ["Unix", "/Users/designer/projects/cogpit/src/components/timeline/", "ToolCallCard.tsx"],
+    ["Windows", "C:\\Users\\designer\\projects\\cogpit\\src\\components\\timeline\\", "ToolCallCard.tsx"],
+  ])("preserves the basename of a long %s path and keeps the full path accessible", (_platform, directory, basename) => {
+    const filePath = `${directory}${basename}`
+    const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: filePath }), result: "File contents" }
+
+    render(<ToolCallCard toolCall={toolCall} />)
+
+    const disclosure = screen.getByRole("button", { name: `Toggle Read file details: ${filePath}` })
+    const summary = within(disclosure).getByTitle(filePath)
+    expect(within(summary).getByText(directory)).toHaveClass("truncate")
+    expect(within(summary).getByText(basename)).toHaveClass("shrink-0")
+    expect(summary.textContent).toBe(filePath)
+
+    fireEvent.click(disclosure)
+    expect(within(screen.getByLabelText("Call details")).getByText(filePath)).toBeInTheDocument()
+    expect(disclosure).toHaveAccessibleName(`Toggle Read file details: ${filePath}`)
+  })
+
+  it("keeps a non-path description readable even when it mentions a long file path", () => {
+    const description = "Inspect /Users/designer/projects/cogpit/src/components/timeline/ToolCallCard.tsx"
+    const toolCall: ToolCall = { ...makeToolCall("Bash", { command: "bun run check", description }), result: "Checked" }
+
+    render(<ToolCallCard toolCall={toolCall} />)
+
+    const disclosure = screen.getByRole("button", { name: `Toggle Run command details: ${description}` })
+    const summary = within(disclosure).getByTitle(description)
+    expect(summary).toHaveClass("line-clamp-2")
+    expect(within(disclosure).getByText(description)).toBe(summary)
+    expect(within(summary).queryByText("ToolCallCard.tsx")).toBeNull()
+  })
+
   it("uses the same disclosure and detail structure on mobile", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Edit", {
@@ -1407,7 +1507,7 @@ describe("ToolCallCard mobile payload controls", () => {
     fireEvent.click(disclosure)
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByRole("button", { name: "Expand diff" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Input" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "Raw input" })).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByRole("button", { name: "Diff" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Result" })).toBeNull()
     fireEvent.click(disclosure)
@@ -1543,10 +1643,12 @@ describe("ToolCallCard sectioned Bash commands", () => {
     result: "---HOTSWAP\nserver/lib/cliProcess.ts\n---CONFIG\nline1\nline2\nline3\n---CAPS\n---ROUTE\nconfig.ts\n---TESTS\nfoo.test.ts",
   }
 
-  it("shows section chips in the header instead of the raw command", () => {
+  it("uses the command description as its readable collapsed summary", () => {
     render(<ToolCallCard toolCall={sectioned} />)
-    const chips = screen.getByLabelText("Sections: HOTSWAP, CONFIG, CAPS, ROUTE, TESTS")
-    expect(chips.textContent).toBe("HOTSWAPCONFIGCAPSROUTE+1")
+    const disclosure = screen.getByRole("button", { name: /Run command details: Survey settings infrastructure/ })
+    expect(within(disclosure).getByText("Run command")).toBeInTheDocument()
+    expect(within(disclosure).getByText("Survey settings infrastructure")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Sections:/)).toBeNull()
     expect(screen.queryByText(/echo ---HOTSWAP/)).toBeNull()
   })
 
@@ -1559,7 +1661,7 @@ describe("ToolCallCard sectioned Bash commands", () => {
     const config = screen.getByRole("button", { name: "CONFIG section: cat src/a.tsx" })
     expect(config.textContent).toContain("3 lines")
     expect(screen.queryByRole("button", { name: "CAPS section: grep -n configWrite src" })).toBeNull()
-    expect(screen.getByLabelText("CAPS section: grep -n configWrite src").textContent).toContain("no output")
+    expect(screen.getByLabelText("CAPS section: grep -n configWrite src").textContent).toContain("No output")
     expect(screen.getByRole("region", { name: "Bash commands" })).toBeInTheDocument()
     expect(screen.queryByText("line1")).toBeNull()
 
@@ -1572,8 +1674,8 @@ describe("ToolCallCard sectioned Bash commands", () => {
     const truncated: ToolCall = { ...sectioned, result: "---HOTSWAP\nserver/lib/cliProcess.ts\n---CONFIG\nline1" }
     render(<ToolCallCard toolCall={truncated} />)
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
-    expect(screen.getByLabelText(/ROUTE section/).textContent).toContain("not run")
-    expect(screen.getByText(/3 not run/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/ROUTE section/).textContent).toContain("Not run")
+    expect(screen.getAllByText("Not run")).toHaveLength(3)
   })
 
   it("names unlabelled sections after their leading command word", () => {
@@ -1582,17 +1684,19 @@ describe("ToolCallCard sectioned Bash commands", () => {
       result: "a\n---\nb",
     }
     render(<ToolCallCard toolCall={bare} />)
-    expect(screen.getByLabelText("Sections: ls, grep")).toBeInTheDocument()
+    expect(screen.getByText("2 commands · ls, grep")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Sections:/)).toBeNull()
   })
 
-  it("summarises output volume without a color-coded share bar", () => {
+  it("shows output sizes on individual sections without a redundant volume header", () => {
     render(<ToolCallCard toolCall={sectioned} />)
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
     expect(screen.queryByRole("img", { name: /Output share/ })).toBeNull()
-    expect(screen.getByText("6 lines")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "CONFIG section: cat src/a.tsx" })).toHaveTextContent("3 lines")
+    expect(screen.queryByText("6 lines")).toBeNull()
   })
 
-  it("classifies each section and counts kinds in the header", () => {
+  it("summarizes a command batch without adding aggregate kind labels", () => {
     const mixed: ToolCall = {
       ...makeToolCall("Bash", {
         command: "echo ---SRC; cat src/a.ts; echo ---FIND; grep -rn foo src; echo ---PATCH; sed -i '' 's/a/b/' src/a.ts; echo ---TEST; bun run test",
@@ -1600,24 +1704,53 @@ describe("ToolCallCard sectioned Bash commands", () => {
       result: "---SRC\nconst a = 1\n---FIND\nsrc/b.ts:4:foo\n---PATCH\n---TEST\nok",
     }
     render(<ToolCallCard toolCall={mixed} />)
-    const headerChips = screen.getByLabelText("Sections: SRC, FIND, PATCH, TEST")
-    expect(headerChips.querySelector(".text-destructive")).toBeNull()
-    expect(headerChips.textContent).toBe("SRCFINDPATCHTEST")
+    expect(screen.getByText("4 commands · SRC, FIND, PATCH, TEST")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
-    expect(screen.getByText("1 read · 1 search · 1 run · 1 write")).toBeInTheDocument()
-    expect(screen.getByLabelText("write")).toBeInTheDocument()
+    expect(screen.getByText("4 commands")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /SRC section/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /FIND section/ })).toBeInTheDocument()
+    expect(screen.getByLabelText(/PATCH section/)).toHaveTextContent("No output")
+    expect(screen.getByRole("button", { name: /TEST section/ })).toBeInTheDocument()
+    expect(screen.queryByText("1 read · 1 search · 1 run · 1 write")).toBeNull()
   })
 
-  it("flags a section whose output carries a shell failure", () => {
+  it("exposes an earlier section failure before opening a shell call that returned success", () => {
     const swallowed: ToolCall = {
       ...makeToolCall("Bash", { command: "echo ---A; cat src/missing.ts; echo ---B; ls src" }),
       result: "---A\ncat: src/missing.ts: No such file or directory\n---B\nApp.tsx",
+      isError: false,
     }
     render(<ToolCallCard toolCall={swallowed} />)
-    expect(screen.getByLabelText("Sections: A, B").querySelector(".text-destructive")?.textContent).toBe("A")
-    fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
-    expect(screen.getByText(/1 failed/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /A section/ }).textContent).toContain("failed")
+
+    const disclosure = screen.getByRole("button", { name: /Run command details/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(within(disclosure).getByText("Failed")).toBeInTheDocument()
+    expect(disclosure).toHaveAccessibleDescription(/failed/i)
+    expect(within(disclosure).getByRole("img", { name: "Tool call failed" })).toBeInTheDocument()
+    expect(within(disclosure).queryByRole("img", { name: "Tool call completed" })).toBeNull()
+
+    fireEvent.click(disclosure)
+    expect(within(screen.getByRole("button", { name: /A section/ })).getByText("Failed")).toHaveClass("text-destructive")
+  })
+
+  it("counts an earlier section failure in a collapsed activity group", () => {
+    const swallowed: ToolCall = {
+      ...makeToolCall("Bash", { command: "echo ---A; cat src/missing.ts; echo ---B; ls src" }),
+      id: "sectioned-shell",
+      result: "---A\ncat: src/missing.ts: No such file or directory\n---B\nApp.tsx",
+      isError: false,
+    }
+    const completed: ToolCall = { ...makeToolCall("Read", { file_path: "src/App.tsx" }), id: "read", result: "source" }
+
+    render(
+      <CollapsibleToolCalls toolCalls={[swallowed, completed]} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
+    )
+
+    const disclosure = screen.getByRole("button", { name: /Expand 2 tool calls/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(within(disclosure).getByText("1 failed")).toHaveClass("text-destructive")
+    expect(disclosure).toHaveAccessibleDescription("1 failed")
+    expect(screen.queryByRole("button", { name: /Run command details/ })).toBeNull()
   })
 
   it("opens files named in a command, resolved against the session cwd", () => {
@@ -1646,7 +1779,8 @@ describe("ToolCallCard sectioned Bash commands", () => {
     render(<ToolCallCard toolCall={plain} />)
     fireEvent.click(screen.getByRole("button", { name: /Run command details/ }))
     expect(screen.getByRole("region", { name: "Bash command" })).toBeInTheDocument()
-    expect(screen.getByText("1 command")).toBeInTheDocument()
-    expect(screen.getByLabelText("bun section: bun test")).toBeInTheDocument()
+    expect(screen.getByText("ok")).toBeInTheDocument()
+    expect(screen.queryByText("1 command")).toBeNull()
+    expect(screen.queryByLabelText("bun section: bun test")).toBeNull()
   })
 })

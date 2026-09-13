@@ -1,8 +1,6 @@
 import { useState, useMemo, memo, useId } from "react"
 import {
-  XCircle,
   ChevronRight,
-  Loader2,
   ExternalLink,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
@@ -19,122 +17,19 @@ import { CodexExecToolInput } from "./CodexExecToolInput"
 import {
   BashCommandCard,
   bashSections,
-  CHIP_TONE_CLASS,
-  sectionChips,
-  type SectionChip,
 } from "./BashCommandCard"
-import { Badge } from "@/components/ui/badge"
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
 import { isCodexExecCall } from "../../../shared/session/codex-exec"
 import { getCommandText, getToolPresentation, getToolTier } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
-
-const HEADER_SECTION_CHIP_LIMIT = 4
+import { ToolCallStatus, ToolOperationIcon } from "./ToolCallStatus"
+import { toolCallFailed } from "@/lib/toolActivity"
 
 export function getToolTextStyle(name: string, isError = false): string {
   if (isError) return "text-destructive"
   return getToolTier(name) === "mutating" ? "text-foreground" : "text-muted-foreground"
-}
-
-function StatusIcon({
-  toolCall,
-  isAgentActive,
-}: {
-  toolCall: ToolCall
-  isAgentActive?: boolean
-}): React.ReactElement | null {
-  if (toolCall.isError) {
-    return <XCircle role="img" aria-label="Tool call failed" className="size-4 text-destructive" data-icon="icon" />
-  }
-  if (toolCall.result === null && isAgentActive) {
-    return <Loader2 role="img" aria-label="Tool call running" className="size-4 animate-spin text-info" data-icon="icon" />
-  }
-  return null
-}
-
-function SectionChips({ chips }: { chips: SectionChip[] }): React.ReactElement {
-  const shown = chips.slice(0, HEADER_SECTION_CHIP_LIMIT)
-  const hidden = chips.length - shown.length
-  return (
-    <span className="flex min-w-0 items-center gap-1 overflow-hidden" aria-label={`Sections: ${chips.map((chip) => `${chip.name}${chip.count > 1 ? ` ×${chip.count}` : ""}`).join(", ")}`}>
-      {shown.map((chip, index) => (
-        <Badge key={index} variant="outline" className={cn("h-4 shrink-0 px-1.5 font-mono text-[10px]", CHIP_TONE_CLASS[chip.tone])}>
-          {chip.name}{chip.count > 1 ? ` ×${chip.count}` : ""}
-        </Badge>
-      ))}
-      {hidden > 0 && (
-        <span className="shrink-0 text-[10px] text-muted-foreground">+{hidden}</span>
-      )}
-    </span>
-  )
-}
-
-/** Section chips when the call is a sectioned batch, the plain summary otherwise. */
-function HeaderSummary({
-  chips,
-  summary,
-}: {
-  chips?: SectionChip[]
-  summary: string
-}): React.ReactElement | null {
-  if (chips) return <SectionChips chips={chips} />
-  if (!summary) return null
-  return (
-    <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-      {summary}
-    </span>
-  )
-}
-
-function ToolCallHeaderContent({
-  toolCall,
-  isAgentActive,
-  displayName,
-  summary,
-  sectionChips: chips,
-  nameTitle,
-  nameClass,
-  timeLabel,
-  timeIso,
-}: {
-  toolCall: ToolCall
-  isAgentActive?: boolean
-  displayName: string
-  summary: string
-  sectionChips?: SectionChip[]
-  nameTitle: string
-  nameClass: string
-  timeLabel?: string
-  timeIso?: string
-}): React.ReactElement {
-  return (
-    <>
-      {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span
-          className={cn(
-            "max-w-[50%] shrink-0 truncate font-mono text-xs",
-            nameClass,
-          )}
-          title={nameTitle}
-        >
-          {displayName}
-        </span>
-        <HeaderSummary chips={chips} summary={summary} />
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && (
-          <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
-        )}
-        {toolCall.outputReplacedByHook && (
-          <span className="text-[10px] text-info" title="Output replaced by hook">hook</span>
-        )}
-        <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
-      </div>
-    </>
-  )
 }
 
 /** Absolute path of the image a read opened, or null when it read something else. */
@@ -146,6 +41,19 @@ function imageReadPath(toolCall: ToolCall): string | null {
       ? toolCall.input.path
       : null
   return typeof path === "string" && isLocalImagePath(path) ? path : null
+}
+
+function ToolSummary({ summary, filePath, monospace }: { summary: string; filePath: boolean; monospace: boolean }) {
+  const separator = Math.max(summary.lastIndexOf("/"), summary.lastIndexOf("\\"))
+  if (filePath && summary.length > 30 && separator >= 0) {
+    return (
+      <span className="flex min-w-0 font-mono text-xs leading-5 text-muted-foreground" title={summary}>
+        <span className="truncate">{summary.slice(0, separator + 1)}</span>
+        <span className="max-w-full shrink-0 truncate">{summary.slice(separator + 1)}</span>
+      </span>
+    )
+  }
+  return <span className={cn("line-clamp-2 min-w-0 text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]", monospace && "font-mono")} title={summary}>{summary}</span>
 }
 
 function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement {
@@ -162,7 +70,6 @@ function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement 
 
 interface ToolCallCardProps {
   toolCall: ToolCall
-  groupedBashCalls?: ToolCall[]
   expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
@@ -170,7 +77,6 @@ interface ToolCallCardProps {
 
 export const ToolCallCard = memo(function ToolCallCard({
   toolCall,
-  groupedBashCalls,
   expandToolPayloads = false,
   isAgentActive,
   skillMetadata,
@@ -180,38 +86,22 @@ export const ToolCallCard = memo(function ToolCallCard({
   const [inputOpen, setInputOpen] = useState(false)
   const panelId = useId()
   const inputId = useId()
+  const statusId = useId()
   const isCodexExec = isCodexExecCall(toolCall)
   const hasCommand = !isCodexExec &&
     (toolCall.name === "Bash" || /(?:^|[._])exec_command$/.test(toolCall.name)) &&
     Boolean(getCommandText(toolCall.input))
-  const bashCalls = useMemo(
-    () => groupedBashCalls ?? (hasCommand ? [toolCall] : []),
-    [groupedBashCalls, hasCommand, toolCall],
-  )
   const presentation = useMemo(() => getToolPresentation(toolCall), [toolCall])
   const sections = useMemo(
-    () => bashCalls.length > 0 ? bashCalls.flatMap(bashSections) : null,
-    [bashCalls],
+    () => hasCommand ? bashSections(toolCall) : null,
+    [hasCommand, toolCall],
   )
-  const chips = useMemo(() => (sections && (sections.length > 1 || sections.some((section) => section.label)) ? sectionChips(sections) : undefined), [sections])
-  const displayName = bashCalls.length > 1 ? `${presentation.label} ×${bashCalls.length}` : presentation.label
+  const failed = useMemo(() => toolCallFailed(toolCall), [toolCall])
+  const displayName = presentation.label
   const nameTitle = presentation.label === toolCall.name
     ? toolCall.name
     : `${presentation.label} (${toolCall.name})`
-  const nameClass = getToolTextStyle(
-    presentation.styleName,
-    toolCall.isError || bashCalls.some((call) => call.isError),
-  )
-  const statusToolCall = useMemo(() => {
-    if (bashCalls.length <= 1) return toolCall
-    return {
-      ...toolCall,
-      result: bashCalls.some((call) => call.result === null) ? null : toolCall.result,
-      isError: bashCalls.some((call) => call.isError),
-      outputReplacedByHook: bashCalls.some((call) => call.outputReplacedByHook),
-      hookDurationMs: bashCalls.reduce((sum, call) => sum + (call.hookDurationMs ?? 0), 0),
-    }
-  }, [bashCalls, toolCall])
+  const nameClass = getToolTextStyle(presentation.styleName, failed)
   const timeLabel = toolCall.timestamp
     ? new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : undefined
@@ -219,9 +109,11 @@ export const ToolCallCard = memo(function ToolCallCard({
 
   const showPanel = expandToolPayloads || panelOpen
 
-  const summary = bashCalls.length > 1
-    ? `${sections?.length ?? bashCalls.length} commands`
-    : presentation.summary
+  const summary = hasCommand && typeof toolCall.input.description === "string" && toolCall.input.description.trim()
+    ? toolCall.input.description
+    : sections && sections.length > 1
+      ? `${sections.length} commands · ${sections.map((section) => section.label || section.command.split(/\s+/)[0]).join(", ")}`
+      : presentation.summary
   const skillMeta = toolCall.name === "Skill" && skillMetadata
     ? skillMetadata.get(summary) ?? null
     : null
@@ -235,7 +127,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   const imagePath = imageReadPath(toolCall)
   const hasResultImages = Boolean(toolCall.resultImages?.length)
   const hasImagePreview = imagePath !== null && toolCall.result?.trim() === "" && !hasResultImages
-  const showResult = toolCall.result !== null && !hasImagePreview && bashCalls.length === 0 &&
+  const showResult = toolCall.result !== null && !hasImagePreview && !hasCommand &&
     (!hasResultImages || Boolean(toolCall.result?.trim())) &&
     (!hasEditDiff || toolCall.isError)
 
@@ -257,30 +149,33 @@ export const ToolCallCard = memo(function ToolCallCard({
   }
 
   return (
-    <div className={cn("min-w-0 py-1", statusToolCall.isError && "rounded-md bg-destructive/5 px-2")}>
+    <div className={cn("min-w-0 rounded-lg", showPanel && "bg-muted/25", failed && "bg-destructive/5")} data-tool-call-id={toolCall.id}>
       <button
         type="button"
-        className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-sm text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:min-h-7"
+        className="group/tool flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         title={timeLabel}
         aria-label={`Toggle ${displayName} details${summary ? `: ${summary}` : ""}`}
         aria-expanded={showPanel}
         aria-controls={panelId}
+        aria-describedby={statusId}
         onClick={() => {
           if (!expandToolPayloads) setPanelOpen((open) => !open)
         }}
       >
-        <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground transition-transform", showPanel && "rotate-90")} aria-hidden="true" />
-        <ToolCallHeaderContent
-          toolCall={statusToolCall}
-          isAgentActive={isAgentActive}
-          displayName={displayName}
-          summary={summary}
-          sectionChips={chips}
-          nameTitle={nameTitle}
-          nameClass={nameClass}
-          timeLabel={timeLabel}
-          timeIso={timeIso}
-        />
+        <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground", failed && "text-destructive")}>
+          <ToolOperationIcon styleName={presentation.styleName} />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className={cn("text-[13px] font-medium leading-5", nameClass)} title={nameTitle}>{displayName}</span>
+          {summary && <ToolSummary summary={summary} filePath={[toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)} monospace={!hasCommand || !toolCall.input.description} />}
+        </span>
+        <span id={statusId} className="flex shrink-0 flex-col items-end gap-1">
+          <ToolCallStatus toolCall={toolCall} failed={failed} isAgentActive={isAgentActive} />
+          {Boolean(toolCall.hookDurationMs && toolCall.hookDurationMs > 0) && <span className="text-xs tabular-nums text-muted-foreground" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>}
+          {toolCall.outputReplacedByHook && <span className="text-xs text-info" title="Output replaced by hook">hook</span>}
+        </span>
+        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", showPanel && "rotate-90")} aria-hidden="true" />
+        {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
       </button>
 
       {hasImagePreview && (
@@ -324,43 +219,45 @@ export const ToolCallCard = memo(function ToolCallCard({
 
       <Collapsible open={showPanel}>
         <CollapsibleContent id={panelId}>
-          {hasEditDiff && <EditToolDiff toolCall={toolCall} />}
-          {bashCalls.length > 0 ? (
-            <BashCommandCard
-              toolCalls={bashCalls}
-              cwd={session?.cwd}
-              expandAll={expandToolPayloads}
-              isAgentActive={Boolean(isAgentActive)}
-            />
-          ) : isCodexExec ? (
-            <CodexExecToolInput input={toolCall.input} />
-          ) : !hasEditDiff ? <ToolCallInput input={toolCall.input} /> : null}
-          {showResult && (
-            <ToolResultPanel
-              result={toolCall.result ?? ""}
-              isError={toolCall.isError}
-              filePath={toolCall.name === "Read" && typeof toolCall.input.file_path === "string" ? toolCall.input.file_path : undefined}
-            />
-          )}
-          <Collapsible open={inputOpen}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="mt-1"
-              aria-expanded={inputOpen}
-              aria-controls={inputId}
-              onClick={() => setInputOpen((open) => !open)}
-            >
-              <ChevronRight data-icon="inline-start" className={cn(inputOpen && "rotate-90")} />
-              Input
-            </Button>
-            <CollapsibleContent id={inputId}>
-              <JsonResultHighlighted
-                result={JSON.stringify(bashCalls.length > 1 ? bashCalls.map((call) => call.input) : toolCall.input)}
+          <div className="min-w-0 px-3 pb-3 pt-1 sm:pl-14">
+            {hasEditDiff && <EditToolDiff toolCall={toolCall} />}
+            {hasCommand ? (
+              <BashCommandCard
+                toolCall={toolCall}
+                cwd={session?.cwd}
+                expandAll={expandToolPayloads}
+                isAgentActive={Boolean(isAgentActive)}
               />
-            </CollapsibleContent>
-          </Collapsible>
+            ) : isCodexExec ? (
+              <CodexExecToolInput input={toolCall.input} />
+            ) : !hasEditDiff ? <ToolCallInput input={toolCall.input} /> : null}
+            {showResult && (
+              <ToolResultPanel
+                result={toolCall.result ?? ""}
+                isError={toolCall.isError}
+                filePath={toolCall.name === "Read" && typeof toolCall.input.file_path === "string" ? toolCall.input.file_path : undefined}
+              />
+            )}
+            <Collapsible open={inputOpen}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="mt-1"
+                aria-expanded={inputOpen}
+                aria-controls={inputId}
+                onClick={() => setInputOpen((open) => !open)}
+              >
+                <ChevronRight data-icon="inline-start" className={cn(inputOpen && "rotate-90")} />
+                Raw input
+              </Button>
+              <CollapsibleContent id={inputId}>
+                <JsonResultHighlighted
+                  result={JSON.stringify(toolCall.input)}
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
         </CollapsibleContent>
       </Collapsible>
 

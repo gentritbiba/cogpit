@@ -256,6 +256,18 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [foldPlan, turn.contentBlocks, workVisible])
 
+  const contentBlockProps = {
+    model: turn.model,
+    effort: turn.effort,
+    expandAll,
+    expandToolPayloads,
+    activeToolCallId,
+    isAgentActive,
+    isSessionLive,
+    isMobile,
+    skillMetadata,
+  }
+
   return (
     <div
       ref={ref}
@@ -300,15 +312,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
               {leadingBlocks.length > 0 && (
                 <ContentBlocks
                   blocks={leadingBlocks}
-                  model={turn.model}
-                  effort={turn.effort}
-                  expandAll={expandAll}
-                  expandToolPayloads={expandToolPayloads}
-                  activeToolCallId={activeToolCallId}
-                  isAgentActive={isAgentActive}
-                  isSessionLive={isSessionLive}
-                  isMobile={isMobile}
-                  skillMetadata={skillMetadata}
+                  {...contentBlockProps}
                 />
               )}
               <TurnWorkFold
@@ -326,30 +330,14 @@ const TurnSectionInner = memo(function TurnSectionInner({
               {trailingBlocks.length > 0 && (
                 <ContentBlocks
                   blocks={trailingBlocks}
-                  model={turn.model}
-                  effort={turn.effort}
-                  expandAll={expandAll}
-                  expandToolPayloads={expandToolPayloads}
-                  activeToolCallId={activeToolCallId}
-                  isAgentActive={isAgentActive}
-                  isSessionLive={isSessionLive}
-                  isMobile={isMobile}
-                  skillMetadata={skillMetadata}
+                  {...contentBlockProps}
                 />
               )}
             </>
           ) : (
             <ContentBlocks
               blocks={turn.contentBlocks}
-              model={turn.model}
-              effort={turn.effort}
-              expandAll={expandAll}
-              expandToolPayloads={expandToolPayloads}
-              activeToolCallId={activeToolCallId}
-              isAgentActive={isAgentActive}
-              isSessionLive={isSessionLive}
-              isMobile={isMobile}
-              skillMetadata={skillMetadata}
+              {...contentBlockProps}
             />
           )}
 

@@ -11,9 +11,9 @@ export type TokenLine = Array<{ content: string; color?: string }>
 export type ToolResultVariant = "boxed" | "unboxed"
 
 const BOXED_CODE_BLOCK_CLASS =
-  "min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed text-muted-foreground"
+  "min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground/85"
 export const TOOL_RESULT_CLASS =
-  "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-l border-border pl-3 font-mono text-xs leading-relaxed text-muted-foreground"
+  "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground/85"
 
 export function useHighlightedTokens(
   code: string,
@@ -62,7 +62,7 @@ function HighlightedCodeBlock({
           return (
             <span key={lineIndex} className="block">
               {lineNums?.[lineIndex] && (
-                <span className="inline-block w-10 text-right mr-2 text-muted-foreground/30 select-none">
+                <span className="inline-block w-10 text-right mr-2 text-muted-foreground select-none">
                   {lineNums[lineIndex]}
                 </span>
               )}
@@ -182,10 +182,12 @@ export function ToolResultPanel({
   result,
   isError = false,
   filePath,
+  renderResult,
 }: {
   result: string
   isError?: boolean
   filePath?: string
+  renderResult?: (visible: string) => React.ReactNode
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
   const [copied, copyResult] = useCopyWithFeedback()
@@ -199,8 +201,8 @@ export function ToolResultPanel({
   const visible = expanded ? formatted : preview.text
 
   return (
-    <section className="mt-1.5 min-w-0" aria-label="Result">
-      <div className="mb-1 flex items-center justify-between gap-2">
+    <section className="mt-3 min-w-0" aria-label="Result">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className={cn("text-xs text-muted-foreground", isError && "text-destructive")}>{isError ? "Error" : "Result"}</span>
         {result.trim() && (
           <Button
@@ -217,7 +219,7 @@ export function ToolResultPanel({
       <div id={resultId}>
         {!result.trim() ? (
           <p className="text-xs text-muted-foreground">No output</p>
-        ) : filePath && !isError ? (
+        ) : renderResult ? renderResult(visible) : filePath && !isError ? (
           <ReadResultHighlighted result={visible} filePath={filePath} variant="unboxed" />
         ) : prettyJson !== null ? (
           <JsonResultHighlighted result={visible} alreadyPretty variant="unboxed" />

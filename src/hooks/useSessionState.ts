@@ -109,12 +109,15 @@ function openSession(session: ParsedSession | null) {
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case "LOAD_SESSION":
+    case "FINALIZE_SESSION":
+    case "INIT_PENDING_SESSION": {
+      const pending = action.type === "INIT_PENDING_SESSION"
       return {
         ...state,
-        ...openSession(action.session),
-        sessionSource: action.source,
-        pendingDirName: null,
-        pendingCwd: null,
+        ...openSession(pending ? null : action.session),
+        sessionSource: pending ? null : action.source,
+        pendingDirName: pending ? action.dirName : null,
+        pendingCwd: pending ? action.cwd ?? null : null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -126,6 +129,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         sessionChangeKey: state.sessionChangeKey + 1,
         mobileTab: action.isMobile ? "chat" : state.mobileTab,
       }
+    }
 
     case "GO_HOME":
       return {
@@ -246,42 +250,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "SET_DASHBOARD_PROJECT":
       if (state.dashboardProject === action.dirName) return state
       return { ...state, dashboardProject: action.dirName }
-
-    case "INIT_PENDING_SESSION":
-      return {
-        ...state,
-        ...openSession(null),
-        sessionSource: null,
-        pendingDirName: action.dirName,
-        pendingCwd: action.cwd ?? null,
-        activeTurnIndex: null,
-        activeToolCallId: null,
-        searchQuery: "",
-        ...COLLAPSED_EXPANSION,
-        mainView: "sessions",
-        currentMemberName: null,
-        dashboardProject: null,
-        sessionChangeKey: state.sessionChangeKey + 1,
-        mobileTab: action.isMobile ? "chat" : state.mobileTab,
-      }
-
-    case "FINALIZE_SESSION":
-      return {
-        ...state,
-        ...openSession(action.session),
-        sessionSource: action.source,
-        pendingDirName: null,
-        pendingCwd: null,
-        activeTurnIndex: null,
-        activeToolCallId: null,
-        searchQuery: "",
-        ...COLLAPSED_EXPANSION,
-        mainView: "sessions",
-        currentMemberName: null,
-        dashboardProject: null,
-        sessionChangeKey: state.sessionChangeKey + 1,
-        mobileTab: action.isMobile ? "chat" : state.mobileTab,
-      }
 
     case "OPEN_CONFIG":
       return { ...state, mainView: "config", configFilePath: action.filePath ?? null }

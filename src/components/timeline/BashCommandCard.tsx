@@ -5,24 +5,15 @@ import {
   Copy,
   FileText,
   FolderOpen,
+  LoaderCircle,
   PenLine,
   Play,
   Search,
-  Terminal,
   type LucideIcon,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { getCommandText } from "../../../shared/session/toolSummary"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Separator } from "@/components/ui/separator"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
@@ -36,59 +27,24 @@ import {
   type SectionKind,
 } from "@/lib/sectionedCommand"
 import { cn } from "@/lib/utils"
-import { ReadResultHighlighted } from "./ToolCallResult"
+import { TOOL_RESULT_CLASS, ToolResultPanel } from "./ToolCallResult"
 
 function sectionName(section: CommandSection): string {
   return section.label || section.command.match(/^[\w.-]+/)?.[0] || "…"
 }
 
-type ChipTone = "muted" | "failed"
-
-export interface SectionChip {
-  name: string
-  tone: ChipTone
-  count: number
+const KIND_META: Record<SectionKind, { icon: LucideIcon; label: string }> = {
+  read: { icon: FileText, label: "Read file" },
+  search: { icon: Search, label: "Search" },
+  list: { icon: FolderOpen, label: "List files" },
+  run: { icon: Play, label: "Run command" },
+  write: { icon: PenLine, label: "Update files" },
 }
 
-export function sectionChips(sections: CommandSection[]): SectionChip[] {
-  const chips: SectionChip[] = []
-  const chipByName = new Map<string, SectionChip>()
-  for (const section of sections) {
-    const name = sectionName(section)
-    const tone = analyzeSection(section).failed ? "failed" : "muted"
-    const existing = chipByName.get(name)
-    if (existing) {
-      existing.count++
-      if (tone === "failed") existing.tone = "failed"
-      continue
-    }
-    const chip: SectionChip = { name, tone, count: 1 }
-    chips.push(chip)
-    chipByName.set(name, chip)
-  }
-  return chips
-}
-
-export const CHIP_TONE_CLASS: Record<ChipTone, string> = {
-  muted: "text-muted-foreground",
-  failed: "border-destructive/30 text-destructive",
-}
-
-const KIND_META: Record<SectionKind, { icon: LucideIcon; label: string; plural: string }> = {
-  read: { icon: FileText, label: "read", plural: "reads" },
-  search: { icon: Search, label: "search", plural: "searches" },
-  list: { icon: FolderOpen, label: "list", plural: "lists" },
-  run: { icon: Play, label: "run", plural: "runs" },
-  write: { icon: PenLine, label: "write", plural: "writes" },
-}
-
-const KIND_ORDER: SectionKind[] = ["read", "search", "list", "run", "write"]
 const STANDARD_BASH_KEYS = new Set(["command", "cmd", "description", "timeout", "run_in_background"])
 
 interface BashCallView {
-  toolCall: ToolCall
   command: string
-  description?: string
   rows: CommandRowView[]
   options: string[]
 }
@@ -155,27 +111,26 @@ function toCallView(toolCall: ToolCall, isAgentActive: boolean): BashCallView {
   const analyses = sections.map(analyzeSection)
   const outerFailure = failedRowIndex(toolCall, sections, analyses)
   return {
-    toolCall,
     command: getCommandText(toolCall.input),
-    description: typeof toolCall.input.description === "string" ? toolCall.input.description : undefined,
     rows: sections.map((section, index) => ({
       section,
       analysis: analyses[index],
       failed: analyses[index].failed || index === outerFailure,
-      pending: isAgentActive && toolCall.result === null && index === sections.length - 1,
+      pending: isAgentActive && toolCall.result === null && !toolCall.isError,
     })),
     options: bashOptions(toolCall.input),
   }
 }
 
 function lineCount(output: string | null): number {
-  return output ? output.split("\n").length : 0
+  return output ? output.split(/\r\n|\r|\n/).length : 0
 }
 
 function outputSummary(row: CommandRowView): string {
-  if (row.pending) return "running"
-  if (row.section.output === null) return "not run"
-  if (row.section.output === "") return "no output"
+  if (row.failed) return "Failed"
+  if (row.pending) return "Output pending"
+  if (row.section.output === null) return "Not run"
+  if (row.section.output === "") return "No output"
   const count = lineCount(row.section.output)
   return count === 1 ? "1 line" : `${count} lines`
 }
@@ -243,237 +198,182 @@ function CommandText({
 }
 
 const GREP_LINE_RE = /^([^\s:]+):(\d+)([:-])/
-const OUTPUT_CLASS =
-  "mb-1.5 ml-6 min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-l pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
+
+function SearchOutput({ output, cwd }: { output: string; cwd: string | undefined }): React.ReactElement {
+  return (
+    <pre tabIndex={0} className={TOOL_RESULT_CLASS}>
+      {output.split(/\r\n|\r|\n/).map((line, index) => {
+        const match = line.match(GREP_LINE_RE)
+        return (
+          <span key={index} className="block">
+            {match ? (
+              <>
+                <PathLink path={match[1]} line={Number(match[2])} cwd={cwd}>
+                  {match[1]}:{match[2]}
+                </PathLink>
+                {line.slice(match[1].length + match[2].length + 1)}
+              </>
+            ) : (
+              line || " "
+            )}
+          </span>
+        )
+      })}
+    </pre>
+  )
+}
 
 function CommandOutput({ row, cwd }: { row: CommandRowView; cwd: string | undefined }): React.ReactElement {
-  const output = row.section.output ?? ""
-
-  if (row.analysis.readFile && !row.failed) {
+  if (row.section.output === null) {
     return (
-      <div className={cn(OUTPUT_CLASS, "pl-0 [&_pre]:border-0 [&_pre]:pl-3")}>
-        <ReadResultHighlighted
-          result={output}
-          filePath={row.analysis.readFile.path}
-          variant="unboxed"
-        />
-      </div>
-    )
-  }
-
-  if (row.analysis.kind === "search" && !row.failed) {
-    return (
-      <pre className={OUTPUT_CLASS}>
-        {output.split("\n").map((line, index) => {
-          const match = line.match(GREP_LINE_RE)
-          return (
-            <span key={index} className="block">
-              {match ? (
-                <>
-                  <PathLink path={match[1]} line={Number(match[2])} cwd={cwd}>
-                    {match[1]}:{match[2]}
-                  </PathLink>
-                  {line.slice(match[1].length + match[2].length + 1)}
-                </>
-              ) : (
-                line || " "
-              )}
-            </span>
-          )
-        })}
-      </pre>
+      <p className="flex items-center gap-2 py-2 text-xs text-muted-foreground" role="status">
+        {row.pending && <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />}
+        {row.pending ? "Command is running. Waiting for output…" : "Output unavailable"}
+      </p>
     )
   }
 
   return (
-    <pre className={cn(OUTPUT_CLASS, row.failed && "border-destructive/30 text-destructive")}>
-      {output}
-    </pre>
+    <ToolResultPanel
+      result={row.section.output}
+      isError={row.failed}
+      filePath={row.analysis.readFile?.path}
+      renderResult={row.analysis.kind === "search" && !row.failed
+        ? (visible) => <SearchOutput output={visible} cwd={cwd} />
+        : undefined}
+    />
   )
 }
 
 function CommandRow({
   row,
-  index,
-  defaultOpen,
+  expandAll,
   cwd,
 }: {
   row: CommandRowView
-  index: number
-  defaultOpen: boolean
+  expandAll: boolean
   cwd: string | undefined
 }): React.ReactElement {
-  const [open, setOpen] = useState(defaultOpen)
-  const name = sectionName(row.section)
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = expandAll || localOpen
   const hasOutput = row.section.output !== null && row.section.output !== ""
-  const rowLabel = `${name} section: ${row.section.command}`
-  const KindIcon = KIND_META[row.analysis.kind].icon
-  const rowClass = "group/row flex min-w-0 w-full items-center gap-2 py-2 text-left"
-
+  const rowLabel = `${sectionName(row.section)} section: ${row.section.command}`
+  const { icon: KindIcon, label: kindLabel } = KIND_META[row.analysis.kind]
+  const rowClass = "flex min-h-9 w-full min-w-0 items-center gap-2 text-left"
   const content = (
     <>
-      <span
-        className={cn(
-          "w-4 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground/60",
-          row.failed && "text-destructive",
-        )}
-        aria-hidden="true"
-      >
-        {index + 1}
+      <KindIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 break-words text-[13px] font-medium text-foreground">
+        {row.section.label || kindLabel}
       </span>
-      <KindIcon className="size-3 shrink-0 text-muted-foreground" aria-label={KIND_META[row.analysis.kind].label} />
-      <Badge
-        variant="outline"
-        className={cn("h-5 shrink-0 px-1.5 font-mono text-[10px] text-muted-foreground", row.failed && CHIP_TONE_CLASS.failed)}
-      >
-        {name}
-      </Badge>
-      <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground/85">
-        <CommandText command={row.section.command} paths={row.analysis.paths} cwd={cwd} />
-      </code>
-      {row.analysis.readFile?.from && (
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
-          L{row.analysis.readFile.from}–{row.analysis.readFile.to}
-        </span>
+      <span className={cn("shrink-0 text-xs tabular-nums text-muted-foreground", row.failed && "text-destructive")}>
+        {outputSummary(row)}
+      </span>
+      {hasOutput && (
+        <ChevronRight
+          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")}
+          aria-hidden="true"
+        />
       )}
-      <span className={cn("shrink-0 text-[10px] tabular-nums text-muted-foreground", row.failed && "font-medium text-destructive")}>
-        {row.failed ? "failed" : outputSummary(row)}
-      </span>
-      <ChevronRight
-        className={cn(
-          "size-3 shrink-0 text-muted-foreground/60 transition-transform",
-          open && "rotate-90",
-          !hasOutput && "invisible",
-        )}
-        aria-hidden="true"
-      />
     </>
   )
 
-  if (!hasOutput) {
-    return <div className={rowClass} aria-label={rowLabel}>{content}</div>
-  }
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger
-        nativeButton={false}
-        render={<div role="button" tabIndex={0} />}
-        className={cn(rowClass, "cursor-pointer rounded-sm hover:bg-muted/40")}
-        aria-label={rowLabel}
-      >
-        {content}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <CommandOutput row={row} cwd={cwd} />
-      </CollapsibleContent>
+    <Collapsible open={open} onOpenChange={(nextOpen) => { if (!expandAll) setLocalOpen(nextOpen) }} className="min-w-0 py-2">
+      {hasOutput ? (
+        <CollapsibleTrigger
+          className={cn(rowClass, "cursor-pointer rounded-md hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+          aria-label={rowLabel}
+          disabled={expandAll}
+        >
+          {content}
+        </CollapsibleTrigger>
+      ) : (
+        <div className={rowClass} aria-label={rowLabel}>{content}</div>
+      )}
+      <div className="flex min-w-0 items-start gap-2 pl-5.5">
+        <code className={cn(
+          "min-w-0 flex-1 font-mono text-xs leading-relaxed text-foreground/85",
+          open || !hasOutput ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "truncate",
+        )}>
+          <CommandText command={row.section.command} paths={row.analysis.paths} cwd={cwd} />
+        </code>
+        {row.analysis.readFile?.from && (
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            L{row.analysis.readFile.from}–{row.analysis.readFile.to}
+          </span>
+        )}
+      </div>
+      {hasOutput && (
+        <CollapsibleContent>
+          <div className="pb-1 pl-5.5">
+            <CommandOutput row={row} cwd={cwd} />
+          </div>
+        </CollapsibleContent>
+      )}
     </Collapsible>
   )
 }
 
-function kindSummary(rows: CommandRowView[]): string {
-  const counts = new Map<SectionKind, number>()
-  for (const { analysis } of rows) counts.set(analysis.kind, (counts.get(analysis.kind) ?? 0) + 1)
-  return KIND_ORDER.filter((kind) => counts.has(kind))
-    .map((kind) => {
-      const count = counts.get(kind) ?? 0
-      return `${count} ${count === 1 ? KIND_META[kind].label : KIND_META[kind].plural}`
-    })
-    .join(" · ")
-}
-
-function CallMeta({ call, index }: { call: BashCallView; index: number }): React.ReactElement {
-  return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-1 pt-2 text-[11px] text-muted-foreground">
-      <span className="font-medium text-foreground/70">Call {index + 1}</span>
-      {call.description && <span>{call.description}</span>}
-      {call.options.map((option) => (
-        <span key={option} className="font-mono text-[10px] text-muted-foreground/70">{option}</span>
-      ))}
-    </div>
-  )
-}
-
 export function BashCommandCard({
-  toolCalls,
+  toolCall,
   cwd,
   expandAll = false,
   isAgentActive = false,
 }: {
-  toolCalls: ToolCall[]
+  toolCall: ToolCall
   cwd?: string
   expandAll?: boolean
   isAgentActive?: boolean
 }): React.ReactElement {
-  const calls = useMemo(
-    () => toolCalls.map((toolCall) => toCallView(toolCall, isAgentActive)),
-    [isAgentActive, toolCalls],
+  const call = useMemo(
+    () => toCallView(toolCall, isAgentActive),
+    [isAgentActive, toolCall],
   )
-  const rows = calls.flatMap((call) => call.rows)
-  const commandCount = rows.length
-  const totalLines = rows.reduce((sum, row) => sum + lineCount(row.section.output), 0)
-  const failed = rows.filter((row) => row.failed).length
-  const notRun = rows.filter((row) => row.section.output === null && !row.pending).length
+  const commandCount = call.rows.length
   const [copied, copyCommands] = useCopyWithFeedback()
-  const allCommands = calls.map((call) => call.command).join("\n\n")
-  const singleDescription = calls.length === 1 ? calls[0].description : undefined
-  const singleOptions = calls.length === 1 ? calls[0].options : []
 
   return (
-    <Card size="sm" className="mt-1.5 min-w-0" role="region" aria-label={commandCount === 1 ? "Bash command" : "Bash commands"}>
-      <CardHeader>
-        <CardTitle className="flex min-w-0 items-center gap-2">
-          <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-          {commandCount} {commandCount === 1 ? "command" : "commands"}
-        </CardTitle>
-        <CardDescription className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 [overflow-wrap:anywhere]">
-          {calls.length > 1 && <span>{calls.length} calls</span>}
-          <span>{kindSummary(rows)}</span>
-          {singleDescription && <span className="text-foreground/70">{singleDescription}</span>}
-          {singleOptions.map((option) => (
-            <span key={option} className="font-mono text-[10px] text-muted-foreground/70">{option}</span>
-          ))}
-          <span className="ml-auto tabular-nums">
-            {totalLines} {totalLines === 1 ? "line" : "lines"}
-            {failed > 0 && <span className="font-medium text-destructive"> · {failed} failed</span>}
-            {notRun > 0 && <span> · {notRun} not run</span>}
-          </span>
-        </CardDescription>
-        <CardAction>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => copyCommands(allCommands)}
-            aria-label={copied ? "Commands copied" : commandCount === 1 ? "Copy command" : "Copy commands"}
-            title={copied ? "Copied" : commandCount === 1 ? "Copy command" : "Copy commands"}
-          >
-            {copied ? <Check data-icon="inline-start" aria-hidden="true" /> : <Copy data-icon="inline-start" aria-hidden="true" />}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <div aria-label="Command sections">
-          {calls.map((call, callIndex) => {
-            const rowOffset = calls.slice(0, callIndex).reduce((sum, item) => sum + item.rows.length, 0)
-            return (
-              <div key={call.toolCall.id}>
-                {callIndex > 0 && <Separator />}
-                {calls.length > 1 && <CallMeta call={call} index={callIndex} />}
-                {call.rows.map((row, rowIndex) => (
-                  <CommandRow
-                    key={rowIndex}
-                    row={row}
-                    index={rowOffset + rowIndex}
-                    defaultOpen={expandAll}
-                    cwd={cwd}
-                  />
-                ))}
+    <section className="min-w-0" aria-label={commandCount === 1 ? "Bash command" : "Bash commands"}>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          {commandCount === 1 ? "Command" : `${commandCount} commands`}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => copyCommands(call.command)}
+          aria-label={copied ? "Commands copied" : commandCount === 1 ? "Copy command" : "Copy commands"}
+          title={copied ? "Copied" : commandCount === 1 ? "Copy command" : "Copy commands"}
+        >
+          {copied ? <Check data-icon="inline-start" aria-hidden="true" /> : <Copy data-icon="inline-start" aria-hidden="true" />}
+        </Button>
+      </div>
+      <div className="flex min-w-0 flex-col gap-2" aria-label="Command sections">
+        {call.options.length > 0 && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+            {call.options.map((option) => <span key={option}>{option}</span>)}
+          </div>
+        )}
+        {commandCount === 1 ? (
+          <>
+            <pre className="min-w-0 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
+              <CommandText command={call.command} paths={call.rows[0].analysis.paths} cwd={cwd} />
+            </pre>
+            <CommandOutput row={call.rows[0]} cwd={cwd} />
+          </>
+        ) : (
+          <div className="min-w-0">
+            {call.rows.map((row, rowIndex) => (
+              <div key={rowIndex} className="min-w-0">
+                {rowIndex > 0 && <Separator />}
+                <CommandRow row={row} expandAll={expandAll} cwd={cwd} />
               </div>
-            )
-          })}
-        </div>
-      </CardContent>
-    </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }

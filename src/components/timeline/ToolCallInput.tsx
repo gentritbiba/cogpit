@@ -127,9 +127,9 @@ export function ToolCallInput({ input }: { input: Record<string, unknown> }): Re
       {fields.length > 0 && (
         <dl className="mt-2 flex min-w-0 flex-col gap-2" aria-label="Call details">
           {fields.map(([key, value]) => (
-            <div key={key} className="grid min-w-0 grid-cols-[minmax(4rem,auto)_minmax(0,1fr)] items-start gap-x-3 text-xs">
+            <div key={key} className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-x-3 text-xs">
               <dt className="max-w-32 break-words text-muted-foreground">{fieldLabel(key)}</dt>
-              <dd className="min-w-0"><InputText value={fieldValue(key, value)} /></dd>
+              <dd className="min-w-0 leading-relaxed"><InputText value={fieldValue(key, value)} /></dd>
             </div>
           ))}
         </dl>

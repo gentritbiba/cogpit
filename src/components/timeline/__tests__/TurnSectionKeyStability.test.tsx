@@ -63,7 +63,7 @@ describe("expanded work groups survive live updates", () => {
     const before = [{ kind: "tool_calls", toolCalls: [call("a", "Bash"), call("b", "Read")] } as TurnContentBlock]
     const { rerender } = render(<TurnSection turn={makeTurn(before)} index={0} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Run command/ }))
+    fireEvent.click(screen.getByRole("button", { name: /1 command · 1 read/ }))
     expect(screen.getAllByTestId("tool-card")).toHaveLength(2)
 
     const after: TurnContentBlock[] = [
@@ -84,7 +84,7 @@ describe("expanded work groups survive live updates", () => {
     ]
     const { rerender } = render(<TurnSection turn={makeTurn(before)} index={0} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Search files/ }))
+    fireEvent.click(screen.getByRole("button", { name: /1 search · 1 write/ }))
     expect(screen.getAllByTestId("tool-card")).toHaveLength(2)
 
     const after: TurnContentBlock[] = [before[0], before[1], agentBlock("agent-2"), group]

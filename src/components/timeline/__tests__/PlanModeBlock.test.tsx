@@ -259,7 +259,7 @@ describe("PlanModeBlock", () => {
     expect(screen.getByText("file content here")).toBeInTheDocument()
     expect(screen.queryByText(/"file_path"/)).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "Input" }))
+    fireEvent.click(screen.getByRole("button", { name: "Raw input" }))
     expect(screen.getByText(/"file_path"/)).toBeInTheDocument()
   })
 })
