@@ -1784,3 +1784,25 @@ describe("ToolCallCard sectioned Bash commands", () => {
     expect(screen.queryByLabelText("bun section: bun test")).toBeNull()
   })
 })
+
+
+describe("structured file-change results", () => {
+  it.each(["Edit", "Write"])("shows %s as awaiting review without a completed icon", (name) => {
+    const toolCall = { ...makeToolCall(name, { file_path: "/a.ts", old_string: "before", new_string: "after", content: "after" }), result: "File unchanged until owner review.", awaitingReview: true }
+    render(<ToolCallCard toolCall={toolCall} expandToolPayloads isAgentActive />)
+    expect(screen.getByText("Awaiting review")).toBeVisible()
+    expect(screen.queryByRole("img", { name: "Tool call completed" })).toBeNull()
+    expect(screen.queryByRole("img", { name: "Tool call running" })).toBeNull()
+    expect(screen.getByText("File unchanged until owner review.")).toBeVisible()
+  })
+
+  it("renders structured Bash diffs alongside stdout and discloses omitted files", () => {
+    const toolCall = { ...makeToolCall("Bash", { command: "python3 update.py" }), result: "Command output", fileDiffs: [{ filePath: "/a.ts", hunks: [{ oldStart: 10, oldLines: 1, newStart: 10, newLines: 1, lines: ["-before", "+after"] }] }], additionalFileDiffs: 2 }
+    render(<ToolCallCard toolCall={toolCall} expandToolPayloads />)
+    expect(screen.getByRole("region", { name: "File diff: /a.ts" })).toHaveTextContent("@@ -10,1 +10,1 @@")
+    expect(screen.getByRole("region", { name: "File diff: /a.ts" })).toHaveTextContent("-before")
+    expect(screen.getByRole("region", { name: "File diff: /a.ts" })).toHaveTextContent("+after")
+    expect(screen.getByText(/2 additional file diffs omitted/)).toBeVisible()
+    expect(screen.getByText("Command output")).toBeVisible()
+  })
+})

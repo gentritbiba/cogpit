@@ -34,6 +34,7 @@ import {
 } from "./messageTypeGuards"
 import { parseAgentEnvelope } from "./agentEnvelope"
 import { mergeTokenUsage } from "./sessionStats"
+import { toolResultMetadata } from "./toolResults"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
@@ -748,6 +749,8 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
                 pending.turn.toolCalls[pending.index].result =
                   extractToolResultText(block.content)
                 pending.turn.toolCalls[pending.index].isError = block.is_error === true
+                const call = pending.turn.toolCalls[pending.index]
+                Object.assign(call, toolResultMetadata(call.name, msg.toolUseResult))
                 pendingToolUses.delete(block.tool_use_id)
               }
             }

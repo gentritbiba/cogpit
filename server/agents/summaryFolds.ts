@@ -7,6 +7,7 @@ import {
   parseCustomToolOutput,
 } from "../../shared/session/codex-tool-normalization"
 import { computeContextUsage } from "../../shared/session/contextWindow"
+import { toolDiffEdits, toolResultMetadata } from "../../shared/session/toolResults"
 import {
   asRecordOrEmpty,
   foldFileEdit,
@@ -16,6 +17,7 @@ import {
   noteToolCall,
   num,
   recordEdit,
+  settleFileEdit,
   str,
   type SessionAccumulator,
 } from "./summaryAccumulator"
@@ -71,7 +73,7 @@ function foldClaudeAssistant(acc: SessionAccumulator, entry: Record<string, unkn
     const toolInput = asRecordOrEmpty(block.input)
     noteToolCall(acc, name)
     notePendingTool(acc, str(block.id), name, toolInput)
-    if (isFileEditTool(name)) foldFileEdit(acc, name, toolInput)
+    if (isFileEditTool(name)) foldFileEdit(acc, name, toolInput, str(block.id))
   }
 }
 
@@ -89,7 +91,17 @@ function foldClaudeUser(acc: SessionAccumulator, entry: Record<string, unknown>)
     if (block.type !== "tool_result") continue
     sawToolResult = true
     const id = str(block.tool_use_id)
-    if (id) acc.pendingToolUses.delete(id)
+    if (id) {
+      const pending = acc.pendingToolUses.get(id)
+      const metadata = toolResultMetadata(pending?.name ?? "", entry.toolUseResult)
+      acc.pendingToolUses.delete(id)
+      settleFileEdit(acc, id, metadata.awaitingReview === true)
+      if (block.is_error !== true && metadata.fileDiffs) {
+        for (const edit of toolDiffEdits(metadata.fileDiffs)) {
+          recordEdit(acc, edit.filePath, { oldString: edit.oldString, newString: edit.newString, isWrite: false, diffLineCounts: edit.diffLineCounts })
+        }
+      }
+    }
     acc.lastToolErrored = block.is_error === true
   }
   // A user line carrying only tool results is the agent's own loop, not a turn.

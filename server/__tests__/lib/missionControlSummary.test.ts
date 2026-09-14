@@ -390,7 +390,7 @@ describe("summarizeSession", () => {
     expect(summary!.context).toEqual({ used: 150_000, limit: 258_400, percent: 58 })
     expect(summary!.files).toEqual([
       { path: "/workspace/a.ts", additions: 2, deletions: 1 },
-      { path: "/workspace/new.ts", additions: 3, deletions: 0 },
+      { path: "/workspace/new.ts", additions: 2, deletions: 0 },
     ])
   })
 
@@ -554,4 +554,43 @@ describe("summarizeSession — corruption and rewrite guards", () => {
     const s = await summarizeSession("s", file)
     expect(s!.tokens.output).toBe(10)
   })
+})
+
+
+describe("structured edit results", () => {
+  it("removes a staged operation on append without removing earlier applied edits", async () => {
+    write([
+      assistant([{ type: "tool_use", id: "first", name: "Edit", input: { file_path: "/a", old_string: "a", new_string: "b" } }]),
+      toolResult("first"),
+      assistant([{ type: "tool_use", id: "pending", name: "Edit", input: { file_path: "/a", old_string: "b", new_string: "c\nd" } }]),
+      assistant([{ type: "tool_use", id: "new", name: "Write", input: { file_path: "/new", content: "pending" } }]),
+    ])
+    await summarizeSession("s", file)
+    for (const id of ["pending", "new"]) appendFileSync(file, JSON.stringify({ type: "user", toolUseResult: { staged: true }, message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false }] } }) + "\n")
+    const summary = await summarizeSession("s", file)
+    expect(summary!.files).toEqual([{ path: "/a", additions: 1, deletions: 1 }])
+    resetMissionControlCache()
+    expect((await summarizeSession("s", file))!.files).toEqual(summary!.files)
+  })
+
+  it("counts returned Bash diffs only once on incremental reads", async () => {
+    write([
+      assistant([{ type: "tool_use", id: "bash", name: "Bash", input: { command: "python3 update.py" } }]),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "bash" }] }, toolUseResult: { bashEditDiff: { files: [{ filePath: "/a", hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-before", "+after"] }] }], moreFiles: 0 } } }),
+    ])
+    for (let i = 0; i < 2; i++) expect((await summarizeSession("s", file))!.files).toEqual([{ path: "/a", additions: 1, deletions: 1 }])
+  })
+})
+
+
+it("keeps repeated and opposing hunks in a returned Bash diff", async () => {
+  write([
+    assistant([{ type: "tool_use", id: "bash", name: "Bash", input: { command: "python3 update.py" } }]),
+    JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "bash" }] }, toolUseResult: { bashEditDiff: {
+      files: [{ filePath: "/a", hunks: [["-old", "+new"], ["-old", "+new"], ["-new", "+old"]].map((lines, i) => ({
+        oldStart: i * 10 + 1, oldLines: 1, newStart: i * 10 + 1, newLines: 1, lines,
+      })) }], moreFiles: 0,
+    } } }),
+  ])
+  expect((await summarizeSession("s", file))!.files).toEqual([{ path: "/a", additions: 3, deletions: 3 }])
 })

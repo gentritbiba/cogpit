@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react"
 import { ChevronsUpDown, Maximize2, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { splitDiffLines } from "../../../shared/diff-utils"
 import {
   Dialog,
   DialogContent,
@@ -40,8 +41,8 @@ function getCachedDiff(oldStr: string, newStr: string): DiffLine[] {
 const LCS_MAX_PRODUCT = 250_000
 
 function computeDiff(oldStr: string, newStr: string): DiffLine[] {
-  const oldLines = oldStr.split("\n")
-  const newLines = newStr.split("\n")
+  const oldLines = splitDiffLines(oldStr)
+  const newLines = splitDiffLines(newStr)
   const m = oldLines.length
   const n = newLines.length
 

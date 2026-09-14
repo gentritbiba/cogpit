@@ -35,7 +35,7 @@ Claude token streaming is on by default. Set `COGPIT_STREAM_PARTIAL=0`, `false`,
 
 ## Messages, models, and permissions
 
-The model chip beside Send opens the provider, model, reasoning effort, and available speed controls. You can change several settings before clicking outside to close it. Image drag-and-drop and paste appear for models that accept images. Slash command suggestions come from supported project skills and commands.
+The model chip beside Send opens the provider, model, reasoning effort, and available speed controls. You can change several settings before clicking outside to close it. Image drag-and-drop and paste appear for models that accept images. Slash command suggestions include supported built-in commands and project skills and commands. Claude sessions offer `/output-style` to list output styles or switch to one.
 
 On capable Claude models, Ultracode sets XHigh effort and standing multi-agent orchestration for the current session. It is off until you enable it and does not carry into another session.
 
@@ -52,6 +52,8 @@ The session details panel shows recorded subagent status, task, duration, and to
 ## File changes, branching, and rewind
 
 The file changes panel offers a combined diff for the session or a chronological view of individual edits. Filter by turn and group changes by subagent. You can open files in your editor or inspect their git diffs.
+
+A file edit marked "Awaiting review" is a proposal. Its proposed change and result remain in the timeline, but it stays out of applied file summaries and undo. When Claude reports structured file diffs for a shell command, they appear under the command and in file summaries. The command shows any count of omitted file diffs; summaries cover the reported diffs only. Shell diffs do not add undo support for those commands.
 
 Claude Code and Codex sessions use Cogpit's history graph and file-operation reversal for undo, redo, and branches. Copilot uses native fork and rewind, with optional file restoration and no redo. Review the restoration controls before rewinding work.
 

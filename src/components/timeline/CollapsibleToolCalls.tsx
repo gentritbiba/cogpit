@@ -95,6 +95,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         <span id={statusId} className="flex shrink-0 flex-col items-end gap-1 text-xs">
           {summary.running > 0 && <span className="flex items-center gap-1.5 text-info"><Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />{summary.running} running</span>}
           {summary.failed > 0 && <span className="flex items-center gap-1.5 text-destructive"><XCircle className="size-3.5" aria-hidden="true" />{summary.failed} failed</span>}
+          {summary.awaitingReview > 0 && <span className="text-muted-foreground">{summary.awaitingReview} awaiting review</span>}
           {summary.unavailable > 0 && <span className="text-muted-foreground">{summary.unavailable} no result</span>}
         </span>
         <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")} aria-hidden="true" />

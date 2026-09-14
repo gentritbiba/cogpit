@@ -32,6 +32,7 @@ export interface SessionAccumulator {
   lastAssistantText: string | null
   /** tool_use id → the call, until its tool_result arrives. */
   pendingToolUses: Map<string, MissionControlCurrentTool>
+  pendingFileEdits: Map<string, { path: string; ops: EditOp[] }>
   /** Calls already counted, for an agent that announces the same call twice. */
   announcedToolUses: Set<string>
   /** Edit inputs already folded, so a repeated announcement adds no diff. */
@@ -52,6 +53,7 @@ export function createAccumulator(): SessionAccumulator {
     files: new Map(),
     lastAssistantText: null,
     pendingToolUses: new Map(),
+    pendingFileEdits: new Map(),
     announcedToolUses: new Set(),
     foldedFileEdits: new Set(),
     lastToolErrored: false,
@@ -103,26 +105,30 @@ export function isFileEditTool(name: string): boolean {
 }
 
 /** Fold one Edit/Write/MultiEdit/NotebookEdit call into the file accumulator. */
-export function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>): boolean {
+export function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>, toolUseId?: string): boolean {
   const path = str(input.file_path) || str(input.path) || str(input.notebook_path)
   if (!path) return false
 
-  if (name === "Write") {
-    recordEdit(acc, path, { oldString: "", newString: str(input.content), isWrite: true })
-    return true
-  }
-  // MultiEdit-style batches carry an `edits` array; a single edit carries the
-  // old/new pair on the input itself, so treat it as a batch of one.
   const edits = Array.isArray(input.edits) ? input.edits : [input]
-  for (const raw of edits) {
-    const edit = asRecordOrEmpty(raw)
-    recordEdit(acc, path, {
-      oldString: str(edit.old_string),
-      newString: str(edit.new_string),
-      isWrite: false,
+  const ops: EditOp[] = name === "Write"
+    ? [{ oldString: "", newString: str(input.content), isWrite: true }]
+    : edits.map((raw) => {
+      const edit = asRecordOrEmpty(raw)
+      return { oldString: str(edit.old_string), newString: str(edit.new_string), isWrite: false }
     })
-  }
+  for (const op of ops) recordEdit(acc, path, op)
+  if (toolUseId) acc.pendingFileEdits.set(toolUseId, { path, ops })
   return true
+}
+
+export function settleFileEdit(acc: SessionAccumulator, toolUseId: string, unchanged: boolean): void {
+  const pending = acc.pendingFileEdits.get(toolUseId)
+  acc.pendingFileEdits.delete(toolUseId)
+  if (!pending || !unchanged) return
+  const removed = new Set(pending.ops)
+  const remaining = (acc.files.get(pending.path) ?? []).filter((op) => !removed.has(op))
+  if (remaining.length) acc.files.set(pending.path, remaining)
+  else acc.files.delete(pending.path)
 }
 
 /** Keep the newest assistant prose as the card preview. */

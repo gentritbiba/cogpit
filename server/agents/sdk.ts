@@ -39,11 +39,18 @@ export function appendToSystemPrompt(
   existing: Options["systemPrompt"],
   text: string,
 ): Options["systemPrompt"] {
-  const preset = typeof existing === "object" && !Array.isArray(existing) ? existing : undefined
+  if (typeof existing === "string") return `${existing}\n\n${text}`
+  if (Array.isArray(existing)) return [...existing, text]
+  if (existing?.type === "custom") {
+    return {
+      ...existing,
+      prompt: Array.isArray(existing.prompt) ? [...existing.prompt, text] : `${existing.prompt}\n\n${text}`,
+    }
+  }
   return {
-    ...preset,
+    ...existing,
     type: "preset",
     preset: "claude_code",
-    append: preset?.append ? `${preset.append}\n\n${text}` : text,
+    append: existing?.append ? `${existing.append}\n\n${text}` : text,
   }
 }

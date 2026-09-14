@@ -11,7 +11,7 @@ function resolveFilePath(input: Record<string, unknown>): string {
 export function extractReversibleCalls(turn: Turn): ArchivedToolCall[] {
   const calls: ArchivedToolCall[] = []
   for (const tc of turn.toolCalls) {
-    if (tc.isError) continue
+    if (tc.isError || tc.awaitingReview) continue
     // Synthesized calls (recovered from Bash, split out of a MultiEdit) are
     // display-only. Undoing a recovered Write would unlink a file we cannot
     // prove was absent beforehand.

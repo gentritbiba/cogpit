@@ -16,6 +16,7 @@ export interface ToolActivityGroup {
 export interface ToolActivitySummary {
   total: number
   completed: number
+  awaitingReview: number
   failed: number
   running: number
   unavailable: number
@@ -62,6 +63,7 @@ export function summarizeToolActivity(
   const summary: ToolActivitySummary = {
     total: toolCalls.length,
     completed: 0,
+    awaitingReview: 0,
     failed: 0,
     running: 0,
     unavailable: 0,
@@ -71,6 +73,7 @@ export function summarizeToolActivity(
 
   for (const toolCall of toolCalls) {
     if (toolCallFailed(toolCall)) summary.failed++
+    else if (toolCall.awaitingReview) summary.awaitingReview++
     else if (toolCall.result !== null) summary.completed++
     else if (isAgentActive) summary.running++
     else summary.unavailable++
@@ -113,7 +116,7 @@ export function visibleToolActivity(
   const tailStart = entries.length - MAX_LIVE_TOOL_ACTIVITY_ENTRIES
   const visible = entries.filter((entry, index) => index >= tailStart || (
     entry.kind === "tool_call" && (
-      toolCallFailed(entry.toolCall) || (isAgentActive && entry.toolCall.result === null)
+      toolCallFailed(entry.toolCall) || entry.toolCall.awaitingReview || (isAgentActive && entry.toolCall.result === null)
     )
   ))
   return { visible, hidden: entries.length - visible.length }

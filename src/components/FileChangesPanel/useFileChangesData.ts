@@ -266,6 +266,7 @@ function toEditOp(tc: ToolCall): EditOp {
       ? String(tc.input.new_string ?? "")
       : String(tc.input.content ?? ""),
     isWrite: !isEdit,
+    diffLineCounts: tc.diffLineCounts,
   }
 }
 

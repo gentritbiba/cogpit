@@ -53,7 +53,7 @@ function computeTurnFileChanges(turn: Turn, cwd: string): FileChangeInfo[] {
     const newStr = isEdit
       ? String(tc.input.new_string ?? "")
       : String(tc.input.content ?? "")
-    const d = diffLineCount(oldStr, newStr)
+    const d = tc.diffLineCounts ?? diffLineCount(oldStr, newStr)
     const existing = fileMap.get(fp) ?? { add: 0, del: 0, hasEdit: false, hasWrite: false, subAgentId: null }
     existing.add += d.add
     existing.del += d.del

@@ -1,8 +1,15 @@
+export function splitDiffLines(value: string): string[] {
+  if (!value) return []
+  const lines = value.split("\n")
+  if (value.endsWith("\n")) lines.pop()
+  return lines
+}
+
 /** Count actually changed lines via LCS diff (matches EditDiffView logic exactly) */
 export function diffLineCount(oldStr: string, newStr: string): { add: number; del: number } {
   if (!oldStr && !newStr) return { add: 0, del: 0 }
-  const oldLines = oldStr ? oldStr.split("\n") : []
-  const newLines = newStr ? newStr.split("\n") : []
+  const oldLines = splitDiffLines(oldStr)
+  const newLines = splitDiffLines(newStr)
   if (oldLines.length === 0) return { add: newLines.length, del: 0 }
   if (newLines.length === 0) return { add: 0, del: oldLines.length }
 
@@ -45,6 +52,11 @@ export function diffLineCount(oldStr: string, newStr: string): { add: number; de
   return { add: on - lcs, del: om - lcs }
 }
 
+function joinDiffRegions(contents: string[]): string {
+  return contents.filter(Boolean).reduce((joined, content) =>
+    joined + (joined && !joined.endsWith("\n") ? "\n" : "") + content, "")
+}
+
 // ── Net diff across multiple edits ─────────────────────────────────────────
 
 export interface EditOp {
@@ -52,6 +64,8 @@ export interface EditOp {
   newString: string
   /** If true, this replaces the entire file (Write tool). */
   isWrite: boolean
+  /** Counts from an unmerged structured file diff. */
+  diffLineCounts?: { add: number; del: number }
 }
 
 export interface NetDiffResult {
@@ -75,12 +89,13 @@ export interface NetDiffResult {
  * Write operations replace all tracked regions (they overwrite the entire file).
  */
 export function computeNetDiff(ops: EditOp[]): NetDiffResult {
-  // Each region tracks a contiguous chunk of file content we've seen edited.
+  // Each region tracks file content observed in an edit or structured file diff.
   // `original` = what was there before any edits in this sequence touched it.
   // `current`  = what's there now after applying edits.
   interface Region {
     original: string
     current: string
+    diffLineCounts?: EditOp["diffLineCounts"]
   }
 
   let regions: Region[] = []
@@ -96,7 +111,7 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
 
     // Empty old_string = insertion (new content only), always a new region.
     if (!op.oldString) {
-      regions.push({ original: op.oldString, current: op.newString })
+      regions.push({ original: op.oldString, current: op.newString, diffLineCounts: op.diffLineCounts })
       continue
     }
 
@@ -110,6 +125,7 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
           region.current.slice(0, idx) +
           op.newString +
           region.current.slice(idx + op.oldString.length)
+        delete region.diffLineCounts
         found = true
         break
       }
@@ -126,20 +142,20 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
         // (old_string no longer exists in current content). Skip it silently.
       } else {
         // New region being edited for the first time.
-        regions.push({ original: op.oldString, current: op.newString })
+        regions.push({ original: op.oldString, current: op.newString, diffLineCounts: op.diffLineCounts })
       }
     }
   }
 
-  // Filter out regions with no net change (original === current).
-  const changed = regions.filter((r) => r.original !== r.current)
+  // Structured hunks can report changes even when their combined text matches.
+  const changed = regions.filter((r) => r.original !== r.current || r.diffLineCounts?.add || r.diffLineCounts?.del)
 
   if (changed.length === 0) {
     // If Write ops exist, the file was created/overwritten and regions were
     // reset with original===current. Show the final content as "all new".
     const hasWrite = ops.some((op) => op.isWrite)
     if (hasWrite && regions.length > 0) {
-      const content = regions.map((r) => r.current).join("\n")
+      const content = joinDiffRegions(regions.map((r) => r.current))
       if (content) {
         const counts = diffLineCount("", content)
         return { originalStr: "", currentStr: content, addCount: counts.add, delCount: counts.del }
@@ -150,10 +166,15 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
 
   // Build before/after strings. LCS in EditDiffView will find common lines
   // (context) and highlight actual additions/removals.
-  const originalStr = changed.map((r) => r.original).join("\n")
-  const currentStr = changed.map((r) => r.current).join("\n")
+  const originalStr = joinDiffRegions(changed.map((r) => r.original))
+  const currentStr = joinDiffRegions(changed.map((r) => r.current))
 
-  const counts = diffLineCount(originalStr, currentStr)
+  const counts = { add: 0, del: 0 }
+  for (const region of changed) {
+    const diff = region.diffLineCounts ?? diffLineCount(region.original, region.current)
+    counts.add += diff.add
+    counts.del += diff.del
+  }
 
   return { originalStr, currentStr, addCount: counts.add, delCount: counts.del }
 }

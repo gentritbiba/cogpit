@@ -1115,6 +1115,29 @@ describe("sdk-session stream bus wiring", () => {
     expect(streamBus.completeMessage).toHaveBeenCalledWith("st3", "msg_abc")
   })
 
+  it("keeps distinct messages when streamed and complete replies echo the same user uuid", async () => {
+    const streamBus = await loadStreamBusMock()
+    const first = { type: "message_start", message: { id: "msg_first" } }
+    const second = { type: "message_start", message: { id: "msg_second" } }
+    scriptedMessages = [
+      { type: "stream_event", event: first, user_message_uuid: "user_1" },
+      { type: "assistant", message: { id: "msg_first", content: [] }, user_message_uuid: "user_1" },
+      { type: "stream_event", event: second, user_message_uuid: "user_1" },
+      { type: "assistant", message: { id: "msg_second", content: [] }, user_message_uuid: "user_1" },
+      { type: "result", is_error: false },
+    ]
+    const { createSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "same-user-uuid", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => vi.mocked(streamBus.completeMessage).mock.calls.length === 2)
+    expect(vi.mocked(streamBus.publish).mock.calls).toEqual([
+      ["same-user-uuid", first, null], ["same-user-uuid", second, null],
+    ])
+    expect(vi.mocked(streamBus.completeMessage).mock.calls).toEqual([
+      ["same-user-uuid", "msg_first"], ["same-user-uuid", "msg_second"],
+    ])
+    expect(streamBus.publishCompleteMessage).not.toHaveBeenCalled()
+  })
+
   it("clears the bus when the turn produces a result", async () => {
     const streamBus = await loadStreamBusMock()
     const { createSDKSession } = await loadModule()

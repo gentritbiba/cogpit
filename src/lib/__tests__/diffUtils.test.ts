@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { diffLineCount, computeNetDiff } from "../../../shared/diff-utils"
+import { diffLineCount, computeNetDiff, splitDiffLines } from "../../../shared/diff-utils"
 import type { EditOp } from "../../../shared/diff-utils"
 
 describe("diffLineCount", () => {
@@ -113,5 +113,40 @@ describe("computeNetDiff", () => {
     // Net result is just the first edit: old -> new
     expect(result.originalStr).toBe("old")
     expect(result.currentStr).toBe("new")
+  })
+})
+
+
+describe("diff line terminators", () => {
+  it.each([
+    ["", []], ["\n", [""]], ["a\n", ["a"]], ["a\n\n", ["a", ""]], ["a", ["a"]],
+  ])("splits %j without treating its terminator as another line", (value, lines) => {
+    expect(splitDiffLines(value as string)).toEqual(lines)
+    expect(diffLineCount("", value as string)).toEqual({ add: lines.length, del: 0 })
+    expect(diffLineCount(value as string, "")).toEqual({ add: 0, del: lines.length })
+  })
+})
+
+describe("structured diff counts", () => {
+  it("preserves raw counts for separate regions without adding blank separators", () => {
+    const result = computeNetDiff([
+      { oldString: "a\nb\n", newString: "b\na\n", isWrite: false, diffLineCounts: { add: 2, del: 2 } },
+      { oldString: "c\n", newString: "d\n", isWrite: false },
+    ])
+    expect(result).toEqual({ originalStr: "a\nb\nc\n", currentStr: "b\na\nd\n", addCount: 3, delCount: 3 })
+  })
+
+  it("sums independent region counts without matching text across their boundaries", () => {
+    expect(computeNetDiff([
+      { oldString: "x", newString: "a", isWrite: false },
+      { oldString: "y", newString: "x", isWrite: false },
+    ])).toMatchObject({ addCount: 2, delCount: 2 })
+  })
+
+  it("drops raw counts after a later edit merges into that region", () => {
+    expect(computeNetDiff([
+      { oldString: "a\nb\n", newString: "b\na\n", isWrite: false, diffLineCounts: { add: 2, del: 2 } },
+      { oldString: "b\na\n", newString: "a\nb\n", isWrite: false, diffLineCounts: { add: 2, del: 2 } },
+    ])).toEqual({ originalStr: "", currentStr: "", addCount: 0, delCount: 0 })
   })
 })

@@ -20,6 +20,7 @@
  */
 import type { ToolCall } from "./types"
 import { parseCodexToolPatches } from "./codex-patches"
+import { toolDiffEdits } from "./toolResults"
 
 /** Marks a call this module invented, so undo and stats can skip it. */
 const SYNTHESIZED_FROM = "synthesizedFrom"
@@ -296,6 +297,16 @@ function sedEdit(seg: Segment, cwd: string | null): Recovered | null {
  * `cwd` anchors relative paths — pass the session's working directory.
  */
 export function bashEdits(tc: ToolCall, cwd: string | null = null): ToolCall[] {
+  if (tc.fileDiffs) {
+    return toolDiffEdits(tc.fileDiffs).map((edit, index) => ({
+      ...synthetic(tc, `${tc.id}:bash-${index}`, "Edit", {
+        file_path: edit.filePath,
+        old_string: edit.oldString,
+        new_string: edit.newString,
+      }),
+      diffLineCounts: edit.diffLineCounts,
+    }))
+  }
   const command = tc.input.command
   if (typeof command !== "string" || !command) return []
 
@@ -360,7 +371,7 @@ export function expandEditToolCalls(
 ): ToolCall[] {
   const out: ToolCall[] = []
   for (const tc of toolCalls) {
-    if (tc.isError) continue
+    if (tc.isError || tc.awaitingReview) continue
     if (tc.name === "Edit" || tc.name === "Write") out.push(tc)
     else if (tc.name === "MultiEdit") out.push(...multiEdits(tc, cwd))
     else if (tc.name === "Bash") out.push(...bashEdits(tc, cwd))
@@ -378,7 +389,7 @@ export function hasEditToolCalls(
   cwd: string | null = null,
 ): boolean {
   for (const tc of toolCalls) {
-    if (tc.isError) continue
+    if (tc.isError || tc.awaitingReview) continue
     if (tc.name === "Edit" || tc.name === "Write") return true
     if (tc.name === "MultiEdit" && multiEdits(tc, cwd).length > 0) return true
     if (tc.name === "Bash" && bashEdits(tc, cwd).length > 0) return true

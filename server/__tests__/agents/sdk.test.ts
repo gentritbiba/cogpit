@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest"
 import { appendToSystemPrompt } from "../../agents/sdk"
 
 describe("appendToSystemPrompt", () => {
+  it("preserves custom prompts and their snapshot setting", () => {
+    expect(appendToSystemPrompt({ type: "custom", prompt: "Original", snapshot: false }, "extra"))
+      .toEqual({ type: "custom", prompt: "Original\n\nextra", snapshot: false })
+    expect(appendToSystemPrompt({ type: "custom", prompt: ["Original"], snapshot: true }, "extra"))
+      .toEqual({ type: "custom", prompt: ["Original", "extra"], snapshot: true })
+    expect(appendToSystemPrompt("Original", "extra")).toBe("Original\n\nextra")
+    expect(appendToSystemPrompt(["Original"], "extra")).toEqual(["Original", "extra"])
+  })
+
   it("keeps the CLI's own prompt and adds the text after it", () => {
     expect(appendToSystemPrompt(undefined, "extra")).toEqual({
       type: "preset",

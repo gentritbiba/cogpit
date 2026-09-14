@@ -757,3 +757,48 @@ describe("registerSessionFileChangesRoutes", () => {
     expect(next).toHaveBeenCalled()
   })
 })
+
+
+describe("structured edit results", () => {
+  it("excludes only staged operations when an applied edit touches the same file", async () => {
+    const result = (id: string, staged: boolean) => JSON.stringify({ type: "user", toolUseResult: { staged }, message: { content: [toolResult(id)] } })
+    const { changes } = await parseSessionFileChanges(makeJsonl(
+      assistantLine([toolUse("applied", "Edit", { file_path: "/a", old_string: "before", new_string: "after" })]),
+      result("applied", false),
+      assistantLine([toolUse("staged", "Edit", { file_path: "/a", old_string: "after", new_string: "pending\nextra" })]),
+      result("staged", true),
+      assistantLine([toolUse("write", "Write", { file_path: "/new", content: "pending" })]),
+      result("write", true),
+    ), true)
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({ toolCallIds: ["applied"], additions: 1, deletions: 1, content: { originalStr: "before", currentStr: "after" } })
+  })
+
+  it("uses Bash diffs from results for commands whose edits cannot be inferred", async () => {
+    const { changes } = await parseSessionFileChanges(makeJsonl(
+      assistantLine([toolUse("bash", "Bash", { command: "python3 update.py" })]),
+      JSON.stringify({ type: "user", message: { content: [toolResult("bash")] }, toolUseResult: { bashEditDiff: {
+        files: [{ filePath: "/a", hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-before", "+after"] }] }], moreFiles: 0,
+      } } }),
+    ), true)
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({ filePath: "/a", additions: 1, deletions: 1, content: { originalStr: "before\n", currentStr: "after\n" } })
+  })
+})
+
+
+it("keeps repeated and opposing Bash hunks in one file change", async () => {
+  const { changes } = await parseSessionFileChanges(makeJsonl(
+    assistantLine([toolUse("bash", "Bash", { command: "python3 update.py" })]),
+    JSON.stringify({ type: "user", message: { content: [toolResult("bash")] }, toolUseResult: { bashEditDiff: {
+      files: [{ filePath: "/a", hunks: [["-old", "+new"], ["-old", "+new"], ["-new", "+old"]].map((lines, i) => ({
+        oldStart: i * 10 + 1, oldLines: 1, newStart: i * 10 + 1, newLines: 1, lines,
+      })) }], moreFiles: 0,
+    } } }),
+  ), true)
+  expect(changes).toHaveLength(1)
+  expect(changes[0]).toMatchObject({
+    filePath: "/a", toolCallIds: ["bash:bash-0"], additions: 3, deletions: 3,
+    content: { originalStr: "old\nold\nnew\n", currentStr: "new\nnew\nold\n" },
+  })
+})

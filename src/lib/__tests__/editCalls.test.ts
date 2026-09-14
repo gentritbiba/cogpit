@@ -313,3 +313,24 @@ describe("provenance", () => {
     expect(fromMulti.input.synthesizedFrom).toBe("MultiEdit")
   })
 })
+
+
+describe("reviewed edits and returned file diffs", () => {
+  it("excludes staged edits from file-change totals", () => {
+    const calls = [call("Edit", { file_path: "/a", old_string: "x", new_string: "y" }, { awaitingReview: true }), call("Write", { file_path: "/b", content: "new" }, { awaitingReview: true })]
+    expect(expandEditToolCalls(calls)).toEqual([])
+    expect(hasEditToolCalls(calls)).toBe(false)
+  })
+
+  it("prefers returned Bash hunks to command guesses and keeps them display-only", () => {
+    const command = call("Bash", { command: "sed -i 's/wrong/guess/' /a" }, { fileDiffs: [{ filePath: "/a", hunks: [
+      { oldStart: 10, oldLines: 2, newStart: 10, newLines: 2, lines: [" context", "-before", "+after"] },
+      { oldStart: 30, oldLines: 0, newStart: 30, newLines: 1, lines: ["+inserted", "\\ No newline at end of file"] },
+    ] }] })
+    const edits = expandEditToolCalls([command])
+    expect(edits.map(e => [e.input.old_string, e.input.new_string])).toEqual([["context\nbefore\n", "context\nafter\ninserted"]])
+    expect(edits[0].diffLineCounts).toEqual({ add: 2, del: 1 })
+    expect(edits.every(isSynthesized)).toBe(true)
+    expect(hasEditToolCalls([command])).toBe(true)
+  })
+})

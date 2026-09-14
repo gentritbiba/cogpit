@@ -30,6 +30,7 @@ const FILES = [
   "messageTypeGuards.ts",
   "sessionStats.ts",
   "turnContent.ts",
+  "toolResults.ts",
   "sessionStatus.ts",
   "interactiveState.ts",
 ] as const

@@ -163,7 +163,7 @@ export interface UserMessage extends BaseMessage {
   origin?: { kind?: string } | null
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
-  toolUseResult?: AgentToolUseResult
+  toolUseResult?: Partial<AgentToolUseResult> & { staged?: boolean; bashEditDiff?: unknown }
   sourceToolAssistantUUID?: string
 }
 
@@ -249,6 +249,8 @@ export type HookEventName =
   | "SubagentStop"
   | "PreCompact"
   | "PostCompact"
+  | "PreModelSwitch"
+  | "PostModelSwitch"
   | "PermissionDenied"
   | "TaskCreated"
   | "WorktreeCreate"
@@ -431,6 +433,11 @@ export type RawMessage =
 
 // ── Parsed Structures ───────────────────────────────────────────────────────
 
+export interface ToolFileDiff {
+  filePath: string
+  hunks: Array<{ oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }>
+}
+
 export interface ToolCall {
   id: string
   name: string
@@ -439,6 +446,11 @@ export interface ToolCall {
   /** Binary images returned by a tool, when the provider persists them. */
   resultImages?: ImageBlock[]
   isError: boolean
+  awaitingReview?: boolean
+  fileDiffs?: ToolFileDiff[]
+  additionalFileDiffs?: number
+  /** Counts from one structured file diff, before combining it with later edits. */
+  diffLineCounts?: { add: number; del: number }
   timestamp: string
   /**
    * A question whose tool result is only an acceptance receipt. Codex's

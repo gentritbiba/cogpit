@@ -703,3 +703,17 @@ describe("createEmptyUndoState", () => {
     expect(state.totalTurns).toBe(0)
   })
 })
+
+
+describe("edits awaiting owner review", () => {
+  it("never archives or undoes an unapplied Edit or Write", () => {
+    const turn = makeTurn({ toolCalls: [
+      makeEditToolCall("a.ts", "before", "after", { awaitingReview: true }),
+      makeWriteToolCall("b.ts", "new", { awaitingReview: true }),
+      makeEditToolCall("c.ts", "old", "new"),
+    ] })
+    expect(extractReversibleCalls(turn).map(c => c.filePath)).toEqual(["c.ts"])
+    expect(archiveTurn(turn, 1).toolCalls.map(c => c.filePath)).toEqual(["c.ts"])
+    expect(buildUndoOperations([makeTurn(), turn], 1, 0).map(op => op.filePath)).toEqual(["c.ts"])
+  })
+})

@@ -183,6 +183,7 @@ describe("BUILTIN_SKILLS", () => {
     const names = BUILTIN_SKILLS.map((s) => s.name)
     expect(names).toContain("simplify")
     expect(names).toContain("compact")
+    expect(names).toContain("output-style")
   })
 
   it("leaves out commands whose UX is bound to the terminal", () => {

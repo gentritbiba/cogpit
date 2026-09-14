@@ -4,6 +4,7 @@ import { findJsonlPath } from "../sessionPaths"
 import type { ToolCall, ToolUseBlock } from "../../shared/session/types"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
 import { expandEditToolCalls } from "../../shared/session/edit-calls"
+import { toolResultMetadata } from "../../shared/session/toolResults"
 import { formatForRecords, formatForText } from "../../shared/session/agents"
 import {
   findFailedNestedPatchCallIds,
@@ -33,7 +34,7 @@ export interface ComputedFileChange {
  * literal `sed -i`) are normalized into the same shape. Errors are applied
  * later from the matching tool_result, so the call starts out clean.
  */
-function editCallsFromBlock(block: ToolUseBlock, cwd: string): ToolCall[] {
+function editCallsFromBlock(block: ToolUseBlock, cwd: string, result?: unknown): ToolCall[] {
   const tc: ToolCall = {
     id: block.id,
     name: block.name,
@@ -41,6 +42,7 @@ function editCallsFromBlock(block: ToolUseBlock, cwd: string): ToolCall[] {
     result: null,
     isError: false,
     timestamp: "",
+    ...toolResultMetadata(block.name, result),
   }
   return expandEditToolCalls([tc], cwd)
 }
@@ -106,6 +108,20 @@ export async function parseSessionFileChanges(
   }
 
   const lines = jsonlContent.split("\n").filter(Boolean)
+  const records: Record<string, unknown>[] = []
+  const toolResults = new Map<string, unknown>()
+  for (const line of lines) {
+    try {
+      const record = JSON.parse(line)
+      if (!record || typeof record !== "object") continue
+      records.push(record)
+      if (record.type === "user" && record.toolUseResult && Array.isArray(record.message?.content)) {
+        for (const block of record.message.content) {
+          if (block?.type === "tool_result" && typeof block.tool_use_id === "string") toolResults.set(block.tool_use_id, record.toolUseResult)
+        }
+      }
+    } catch { /* skip malformed records */ }
+  }
 
   let cwd = ""
   let lastHumanTurnIndex = 0
@@ -133,17 +149,9 @@ export async function parseSessionFileChanges(
   const rmPaths: Array<{ path: string; turnIndex: number; isDir: boolean }> = []
 
   // The first record's shape names the format the rest of the file is in.
-  let firstObj: Record<string, unknown> | null = null
-  try { firstObj = JSON.parse(lines[0]) as Record<string, unknown> } catch { /* skip */ }
-  const isCodex = formatForRecords(firstObj ? [firstObj] : []).kind === "codex"
+  const isCodex = formatForRecords(records.slice(0, 1)).kind === "codex"
 
-  for (const line of lines) {
-    let obj: Record<string, unknown>
-    try {
-      obj = JSON.parse(line)
-    } catch {
-      continue
-    }
+  for (const obj of records) {
 
     if (isCodex) {
       // ── Codex format ──
@@ -261,7 +269,7 @@ export async function parseSessionFileChanges(
         const b = block as ToolUseBlock
         if (b.type !== "tool_use") continue
 
-        for (const call of editCallsFromBlock(b, cwd)) {
+        for (const call of editCallsFromBlock(b, cwd, toolResults.get(b.id))) {
           const filePath = String(call.input.file_path ?? call.input.path ?? "")
           if (!filePath) continue
 
@@ -290,7 +298,7 @@ export async function parseSessionFileChanges(
           accum.toolCallIds.push(call.id)
           if (isEdit) accum.hasEdit = true
           else accum.hasWrite = true
-          accum.ops.push({ oldString, newString, isWrite: !isEdit })
+          accum.ops.push({ oldString, newString, isWrite: !isEdit, diffLineCounts: call.diffLineCounts })
         }
 
         if (b.name === "Bash" && typeof b.input.command === "string") {

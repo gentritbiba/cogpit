@@ -74,8 +74,10 @@ function builtin(
  * the SDK advertises in its init message. Commands the CLI reports in
  * `terminal_slash_commands` (`/doctor`, `/color`) are left out — their UX is
  * bound to the terminal, so they can't work from this UI.
+ * `/output-style` additionally verified with CLI 2.1.270 supportedCommands().
  */
 export const BUILTIN_SKILLS: SlashSuggestion[] = [
+  builtin("output-style", "command", "List output styles or switch to one"),
   builtin("batch", "skill", "Plan a large change; background agents each open a PR"),
   builtin("claude-api", "skill", "Build and debug apps that use the Claude API"),
   builtin("code-review", "skill", "Review the current diff or a PR for bugs and cleanups"),

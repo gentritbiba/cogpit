@@ -26,6 +26,7 @@ import { getCommandText, getToolPresentation, getToolTier } from "../../../share
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { ToolCallStatus, ToolOperationIcon } from "./ToolCallStatus"
+import { ToolFileDiffs } from "./ToolFileDiffs"
 import { toolCallFailed } from "@/lib/toolActivity"
 
 export function getToolTextStyle(name: string, isError = false): string {
@@ -130,7 +131,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   const hasImagePreview = imagePath !== null && toolCall.result?.trim() === "" && !hasResultImages
   const showResult = toolCall.result !== null && !hasImagePreview && !hasCommand &&
     (!hasResultImages || Boolean(toolCall.result?.trim())) &&
-    (!hasEditDiff || toolCall.isError)
+    (!hasEditDiff || toolCall.isError || toolCall.awaitingReview)
 
   if (toolCall.name === "AskUserQuestion") {
     // Answerability comes from the session's pending interaction, never from
@@ -232,6 +233,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             ) : isCodexExec ? (
               <CodexExecToolInput input={toolCall.input} />
             ) : !hasEditDiff ? <ToolCallInput input={toolCall.input} /> : null}
+            <ToolFileDiffs fileDiffs={toolCall.fileDiffs} additionalFileDiffs={toolCall.additionalFileDiffs} />
             {showResult && (
               <ToolResultPanel
                 result={toolCall.result ?? ""}

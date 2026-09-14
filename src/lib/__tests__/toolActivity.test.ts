@@ -105,7 +105,7 @@ describe("summarizeToolActivity", () => {
 
   it("returns an empty summary without inventing activity", () => {
     expect(summarizeToolActivity([])).toEqual({
-      total: 0, completed: 0, failed: 0, running: 0, unavailable: 0,
+      total: 0, completed: 0, awaitingReview: 0, failed: 0, running: 0, unavailable: 0,
       groups: [], text: "",
     })
   })
@@ -118,6 +118,12 @@ describe("summarizeToolActivity", () => {
 })
 
 describe("toolActivityEntries", () => {
+  it("keeps an edit awaiting review visible outside the live tail", () => {
+    const calls = [call("review", "Edit", { awaitingReview: true }), ...Array.from({ length: 5 }, (_, i) => call(String(i)))]
+    expect(summarizeToolActivity(calls, true)).toMatchObject({ completed: 5, awaitingReview: 1, running: 0 })
+    const { visible } = visibleToolActivity(toolActivityEntries(calls), true, true)
+    expect(visible).toContainEqual({ kind: "tool_call", toolCall: calls[0] })
+  })
   it("flattens batches and thinking blocks without changing chronology or content", () => {
     const first = call("first")
     const second = call("second")

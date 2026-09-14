@@ -1629,3 +1629,29 @@ describe("task notification records", () => {
     expect(session.turns[0].durationMs).toBe(5000)
   })
 })
+
+
+describe("structured tool results", () => {
+  it.each(["Edit", "Write"])("preserves pending review for %s on initial and incremental parsing", (name) => {
+    const start = toJsonl([
+      userMsg("Update the file"),
+      toolUseAssistant(name, { file_path: "/a.ts", old_string: "a", new_string: "b", content: "b" }, "staged"),
+    ])
+    const result = toJsonl([toolResultMsg("staged", "Awaiting owner review; file unchanged.", false, { toolUseResult: { staged: true } })])
+    for (const parsed of [parseSession(start + "\n" + result), parseSessionAppend(parseSession(start), result)]) {
+      expect(parsed.turns[0].toolCalls[0]).toMatchObject({ awaitingReview: true, isError: false, result: "Awaiting owner review; file unchanged." })
+    }
+  })
+
+  it("keeps Bash file diffs separate from command output", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Update the file"),
+      toolUseAssistant("Bash", { command: "python3 update.py" }, "bash-diff"),
+      toolResultMsg("bash-diff", "Command output", false, { toolUseResult: { bashEditDiff: {
+        files: [{ filePath: "/a.ts", hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-before", "+after"] }] }],
+        moreFiles: 2, changedFiles: ["/a.ts", "/b.ts", "/c.ts"],
+      } } }),
+    ]))
+    expect(session.turns[0].toolCalls[0]).toMatchObject({ result: "Command output", additionalFileDiffs: 2, fileDiffs: [{ filePath: "/a.ts", hunks: [{ lines: ["-before", "+after"] }] }] })
+  })
+})

@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { makeEditToolCall, makeTurn } from "@/__tests__/fixtures"
 import { TurnChangedFiles } from "../TurnChangedFiles"
+import { expandEditToolCalls } from "../../../../shared/session/edit-calls"
+import { buildGroupedFiles } from "@/components/FileChangesPanel/useFileChangesData"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 
 describe("TurnChangedFiles", () => {
@@ -64,4 +66,24 @@ describe("TurnChangedFiles", () => {
     expect(onOpenAgent).toHaveBeenCalledTimes(1)
     window.removeEventListener(OPEN_SUBAGENT_EVENT, onOpenAgent)
   })
+})
+
+
+it("keeps grouped Bash hunk counts in the file panel and turn summary", () => {
+  const turn = makeTurn({ toolCalls: [{
+    id: "bash", name: "Bash", input: { command: "python3 update.py" }, result: "done", isError: false, timestamp: "2026-09-14T10:00:00Z",
+    fileDiffs: [{ filePath: "/project/a", hunks: [["-old", "+new"], ["-old", "+new"], ["-new", "+old"]].map((lines, i) => ({
+      oldStart: i * 10 + 1, oldLines: 1, newStart: i * 10 + 1, newLines: 1, lines,
+    })) }],
+  }] })
+  const changes = expandEditToolCalls(turn.toolCalls).map(toolCall => ({ turnIndex: 0, toolCall }))
+  const files = buildGroupedFiles(changes, "all")
+  expect(files).toHaveLength(1)
+  expect(files[0]).toMatchObject({
+    editCount: 1, addCount: 3, delCount: 3,
+    netOriginal: "old\nold\nnew\n", netCurrent: "new\nnew\nold\n",
+  })
+  render(<TurnChangedFiles turn={turn} turnIndex={0} cwd="/project" />)
+  expect(screen.getByText("+3")).toBeVisible()
+  expect(screen.getByText("-3")).toBeVisible()
 })
