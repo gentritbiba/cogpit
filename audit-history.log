@@ -4,6 +4,12 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 20260914T202923Z-834d673 - Claude staged edits and Bash diffs
+- File: `audit-history/audit-20260914T202923Z-834d673.md`
+- Status: PASS after correcting structured hunk counts and blank-line handling.
+- Validation: 6,432 app tests; 108 memory tests on Bun 1.3.14; lint, production/test typechecks, architecture, vocabulary, duplicates, shared-memory sync, and web build.
+- Scope: isolated compatibility commit, including the SDK custom-prompt prerequisite; other pending work preserved.
+
 ### 20260909T164304Z-f926dfd - README and agent session support
 - File: `audit-history/audit-20260909T164304Z-f926dfd.md`
 - Status: PASS after process-cleanup clarification and Bun version guidance.
