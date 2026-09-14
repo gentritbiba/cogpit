@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import ReactMarkdown from "react-markdown"
 import { authUrl, jsonFetch } from "@/lib/auth"
-import { markdownComponents, parseLocalFileHref } from "../markdown-components"
+import { markdownComponents, parseLocalFileHref, preprocessMediaPaths } from "../markdown-components"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
 
@@ -166,5 +166,83 @@ describe("markdown images", () => {
 
     expect(screen.getByRole("dialog", { name: "Image viewer" })).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "architecture" })).toBeInTheDocument()
+  })
+})
+
+describe("markdown videos", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockedAuthUrl.mockImplementation((url: string) => url)
+  })
+
+  it("renders a local video path as an inline player through the proxy", () => {
+    const { container } = render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![checkout flow](/tmp/checkout.mp4)"}
+      </ReactMarkdown>,
+    )
+
+    const video = container.querySelector("video")
+    expect(video).not.toBeNull()
+    expect(video).toHaveAttribute("src", "/api/local-file?path=%2Ftmp%2Fcheckout.mp4")
+    expect(video).toHaveAttribute("controls")
+    expect(video).toHaveAttribute("aria-label", "checkout flow")
+    expect(mockedAuthUrl).toHaveBeenCalledWith("/api/local-file?path=%2Ftmp%2Fcheckout.mp4")
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+  })
+
+  it("does not route external video URLs through authUrl", () => {
+    const { container } = render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![demo](https://cdn.example.com/demo.webm)"}
+      </ReactMarkdown>,
+    )
+
+    expect(container.querySelector("video")).toHaveAttribute("src", "https://cdn.example.com/demo.webm")
+    expect(mockedAuthUrl).not.toHaveBeenCalled()
+  })
+
+  it("does not request a local video for members", () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    const { container } = render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![checkout flow](/tmp/checkout.mp4)"}
+      </ReactMarkdown>,
+    )
+
+    expect(container.querySelector("video")).toBeNull()
+    expect(screen.getByText("checkout flow")).toBeInTheDocument()
+    expect(mockedAuthUrl).not.toHaveBeenCalled()
+  })
+
+  it("replaces a failed video with readable fallback text", () => {
+    const { container } = render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![missing clip](/tmp/missing.mov)"}
+      </ReactMarkdown>,
+    )
+
+    fireEvent.error(container.querySelector("video") as HTMLVideoElement)
+
+    expect(container.querySelector("video")).toBeNull()
+    expect(screen.getByRole("status")).toHaveTextContent("Video unavailable: missing clip")
+  })
+})
+
+describe("preprocessMediaPaths", () => {
+  it("promotes bare image and video paths on their own line to markdown media", () => {
+    expect(preprocessMediaPaths("Result:\n/tmp/shot.PNG\n  /tmp/run.mp4  \nnot /tmp/inline.mp4 here")).toBe(
+      "Result:\n![/tmp/shot.PNG](/tmp/shot.PNG)\n  ![/tmp/run.mp4](/tmp/run.mp4)\nnot /tmp/inline.mp4 here",
+    )
+  })
+
+  it("leaves paths that are already markdown or have other extensions alone", () => {
+    const text = "![x](/tmp/a.png)\n/tmp/notes.md\n/tmp/archive.zip"
+    expect(preprocessMediaPaths(text)).toBe(text)
   })
 })

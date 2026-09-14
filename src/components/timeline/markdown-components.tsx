@@ -2,7 +2,9 @@ import type { Components, Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { openFile } from "@/lib/fileOpener"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
-import { IMAGE_EXTENSIONS, LocalImage } from "./LocalImage"
+import { LocalImage } from "./LocalImage"
+import { LocalVideo } from "./LocalVideo"
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, hasVideoExtension } from "./localMedia"
 import { useCapability } from "@/hooks/useCapability"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -111,21 +113,23 @@ function ExternalLink({
 }
 
 /**
- * Regex to detect bare image file paths on their own line.
- * Matches absolute paths like /tmp/screenshot.png that aren't already in markdown image syntax.
- * Generated from IMAGE_EXTENSIONS to keep the two in sync.
+ * Matches an absolute image or video path standing alone on a line, such as
+ * /tmp/screenshot.png, that is not already wrapped in markdown media syntax.
  */
-const EXT_PATTERN = [...IMAGE_EXTENSIONS].map(e => e.slice(1)).join("|")
-const BARE_IMAGE_PATH_RE = new RegExp(`^([ \\t]*)(\\/[^\\s]+\\.(?:${EXT_PATTERN}))[ \\t]*$`, "gim")
+const MEDIA_EXT_PATTERN = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS].map(e => e.slice(1)).join("|")
+const BARE_MEDIA_PATH_RE = new RegExp(`^([ \\t]*)(\\/[^\\s]+\\.(?:${MEDIA_EXT_PATTERN}))[ \\t]*$`, "gim")
 
 /**
- * Pre-processes markdown text to convert bare image file paths into markdown image syntax.
+ * Converts bare media file paths into markdown image syntax so they render inline.
  * e.g. "/tmp/screenshot.png" becomes "![/tmp/screenshot.png](/tmp/screenshot.png)"
  */
-export function preprocessImagePaths(text: string): string {
-  return text.replace(BARE_IMAGE_PATH_RE, (_match, indent, path) => {
-    return `${indent}![${path}](${path})`
-  })
+export function preprocessMediaPaths(text: string): string {
+  return text.replace(BARE_MEDIA_PATH_RE, (_match, indent, path) => `${indent}![${path}](${path})`)
+}
+
+/** Markdown has one media syntax; the extension decides whether it plays or displays. */
+function MarkdownMedia({ src, alt }: { src?: string; alt?: string }): React.ReactElement {
+  return hasVideoExtension(src) ? <LocalVideo src={src} alt={alt} /> : <LocalImage src={src} alt={alt} />
 }
 
 export const markdownComponents: Components = {
@@ -284,8 +288,8 @@ export const markdownComponents: Components = {
     return <del className="line-through text-muted-foreground">{children}</del>
   },
 
-  // ── Images ─────────────────────────────────────────────────────────────────
-  img: LocalImage,
+  // ── Images and videos ──────────────────────────────────────────────────────
+  img: MarkdownMedia,
 
   // ── Task list items (GFM checkboxes) ───────────────────────────────────────
   input({ checked, ...rest }) {

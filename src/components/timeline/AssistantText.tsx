@@ -2,7 +2,7 @@ import { memo, useMemo } from "react"
 import { Check, Copy } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Button } from "@/components/ui/button"
-import { markdownComponents, markdownPlugins, preprocessImagePaths } from "./markdown-components"
+import { markdownComponents, markdownPlugins, preprocessMediaPaths } from "./markdown-components"
 import { shortenModel } from "@/lib/format"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { cn } from "@/lib/utils"
@@ -25,7 +25,7 @@ export const AssistantText = memo(function AssistantText({
   timestamp,
   compact = false,
 }: AssistantTextProps) {
-  const markdownText = useMemo(() => preprocessImagePaths(text), [text])
+  const markdownText = useMemo(() => preprocessMediaPaths(text), [text])
   const [copied, copy] = useCopyWithFeedback()
 
   if (!text) return null

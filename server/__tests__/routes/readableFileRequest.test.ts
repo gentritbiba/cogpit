@@ -42,10 +42,10 @@ describe("resolveFileRequestPath", () => {
 })
 
 describe("validateReadableFile", () => {
-  it("accepts a regular file within the endpoint limit", async () => {
+  it("accepts a regular file within the endpoint limit and reports its size", async () => {
     stat.mockResolvedValue({ isFile: () => true, size: 99 })
 
-    await expect(validateReadableFile("/tmp/notes.txt", 100)).resolves.toEqual({ ok: true })
+    await expect(validateReadableFile("/tmp/notes.txt", 100)).resolves.toEqual({ ok: true, size: 99 })
   })
 
   it("rejects directories and oversized files with stable errors", async () => {

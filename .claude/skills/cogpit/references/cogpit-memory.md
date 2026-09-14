@@ -1,0 +1,352 @@
+<!-- Generated from packages/cogpit-memory/skill/SKILL.md by scripts/sync-cogpit-skill.ts. Edit the source, then run `bun run sync-cogpit-skill`. -->
+
+# Cogpit Memory -- Session Context CLI
+
+CLI tool that gives any AI assistant memory of past Claude Code, Codex, and GitHub Copilot CLI sessions. Retrieve conversation history, tool usage, thinking, and supported sub-agent activity via a layered command structure. Session discovery, root context and cross-session full-text indexing all cover every provider. Copilot nested activity is included inline in the root session, but `context --agent` is unavailable because Copilot CLI does not write separate sub-agent transcript files.
+
+Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
+
+## Step 1 -- Use the installed CLI
+
+```bash
+command -v cogpit-memory
+cogpit-memory --help
+```
+
+If missing, install it once, wait for installation to finish, then use the installed command:
+
+```bash
+bun install --global cogpit-memory
+cogpit-memory --help
+```
+
+The npm package requires Node.js 20 or newer. If Bun's global bin directory is not on PATH, resolve it with `bun pm bin --global` and invoke `cogpit-memory` there. Do not run parallel `bunx cogpit-memory` installs: transient native-dependency installation can race. Parallel calls to the installed CLI do not reinstall anything.
+
+JSON goes to stdout. Keep stderr separate when piping to `jq` or Python; never merge it with `2>&1` before a JSON parser. A JSON `{ "error": ... }` response exits nonzero and is a failed lookup, not an empty successful result. Use complete session IDs from discovery or search, not abbreviated IDs.
+
+## Step 2 -- Find sessions
+
+### List recent sessions
+
+```bash
+# List recent sessions (default: last 7 days, up to 20 results)
+cogpit-memory sessions
+
+# Filter by working directory
+cogpit-memory sessions --cwd /path/to/project
+
+# Customize limit and time window
+cogpit-memory sessions --limit 50 --max-age 30d
+```
+
+Options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit` | `20` | Max results |
+| `--max-age` | `7d` | Time window: `7d`, `12h`, `30d` |
+| `--cwd` | all | Filter by working directory |
+
+Response: array of session summaries with `sessionId`, `cwd`, `model`, `firstMessage`, `lastMessage`, `turnCount`, `status`, `mtime`.
+
+### Get current session for a directory
+
+```bash
+cogpit-memory sessions --current --cwd /path/to/project
+```
+
+Returns the most recently active session for the given working directory. The `--cwd` flag is required when using `--current` (defaults to the current working directory if omitted).
+
+## Step 3 -- Layer 1: Get session overview (ALWAYS call this first)
+
+This gives you every user prompt and AI reply, plus a tool usage summary per turn. **You must call this before Layer 2 or Layer 3** -- it provides the `turnIndex` and `agentId` values you need for drill-downs.
+
+```bash
+cogpit-memory context <SESSION_ID>
+```
+
+Response shape:
+```json
+{
+  "sessionId": "abc-123",
+  "cwd": "/path/to/project",
+  "model": "claude-opus-4-6",
+  "branchedFrom": null,
+  "compacted": false,
+  "turns": [
+    {
+      "turnIndex": 0,
+      "userMessage": "Fix the auth bug",
+      "assistantMessage": "I found the issue...",
+      "toolSummary": { "Edit": 2, "Read": 3 },
+      "subAgents": [
+        {
+          "agentId": "a7f3bc2",
+          "name": "researcher",
+          "type": "Explore",
+          "status": "success",
+          "durationMs": 12300,
+          "toolUseCount": 8,
+          "isBackground": false
+        }
+      ],
+      "hasThinking": true,
+      "isError": false,
+      "compactionSummary": null
+    }
+  ],
+  "stats": {
+    "totalTurns": 5,
+    "totalToolCalls": 23,
+    "totalTokens": { "input": 45000, "output": 12000 }
+  }
+}
+```
+
+Key fields:
+- `userMessage` -- the human's full prompt text (`null` for synthetic turns; images, documents, and audio are shown as attachment placeholders)
+- `assistantMessage` -- the AI's full text response (`null` if only tools ran)
+- `toolSummary` -- tool name to count (e.g., `{"Read": 5, "Edit": 2}`)
+- `subAgents` -- summary of sub-agents that ran in this turn. Fields `status`, `durationMs`, `toolUseCount` may be `null` for older sessions
+- `hasThinking` -- whether thinking blocks exist (boolean only; full text is in Layer 2)
+- `compacted` -- `true` if the session was compacted (early context compressed)
+
+## Step 4 -- Layer 2: Get turn detail (one turn at a time)
+
+Use this to drill into a specific turn. Get thinking, full tool call inputs/outputs, and sub-agent summaries in chronological order.
+
+```bash
+cogpit-memory context <SESSION_ID> --turn <TURN_INDEX>
+```
+
+Response shape:
+```json
+{
+  "sessionId": "abc-123",
+  "turnIndex": 0,
+  "userMessage": "Fix the auth bug",
+  "contentBlocks": [
+    { "kind": "thinking", "text": "Let me analyze...", "timestamp": "..." },
+    { "kind": "text", "text": "I found the issue.", "timestamp": "..." },
+    {
+      "kind": "tool_calls",
+      "toolCalls": [
+        { "id": "tc1", "name": "Edit", "input": { "file_path": "/a.ts" }, "result": "done", "resultTruncated": false, "isError": false }
+      ],
+      "timestamp": "..."
+    },
+    {
+      "kind": "sub_agent",
+      "agents": [
+        { "agentId": "a7f3bc2", "name": "researcher", "type": "Explore", "prompt": "Find auth files", "resultText": "Found 3 files...", "status": "success", "durationMs": 12300, "toolUseCount": 8, "isBackground": false }
+      ],
+      "timestamp": "..."
+    }
+  ],
+  "tokenUsage": { "input": 8000, "output": 2500 },
+  "model": "claude-opus-4-6",
+  "durationMs": 15000
+}
+```
+
+Key details:
+- `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`, `queued_prompt`, `hook_event`, `plan_mode`, `recap`, `agent_message`
+- Tool call `result` is truncated at 10,000 chars -- check `resultTruncated: true`
+- Tool call `result` may be `null` if the tool hasn't returned yet
+- Sub-agent blocks show prompt + result text. When the provider writes a separate sub-agent transcript, use Layer 3 for the full conversation
+
+**Make separate requests per turn** -- do not try to batch multiple turns in one call.
+
+## Step 5 -- Layer 3: Get sub-agent / team member detail
+
+Drill into a specific sub-agent's full conversation. Returns the same shape as Layer 1 (an overview of the sub-agent's own turns).
+
+```bash
+cogpit-memory context <SESSION_ID> --agent <AGENT_ID>
+```
+
+Get the `AGENT_ID` from Layer 1's `subAgents[].agentId` field.
+
+Response shape:
+```json
+{
+  "sessionId": "abc-123",
+  "agentId": "a7f3bc2",
+  "name": "researcher",
+  "type": "Explore",
+  "parentToolCallId": "tc5",
+  "isBackground": false,
+  "teamContext": null,
+  "overview": {
+    "turns": [ "..." ],
+    "stats": { "..." }
+  }
+}
+```
+
+The `overview` field has the exact same shape as Layer 1. You can then drill into specific sub-agent turns:
+
+```bash
+cogpit-memory context <SESSION_ID> --agent <AGENT_ID> --turn <TURN_INDEX>
+```
+
+This returns the same shape as Layer 2.
+
+### Team context
+
+If the sub-agent is a team member, `teamContext` will be populated:
+```json
+{
+  "teamContext": {
+    "teamName": "admin-ui-redesign",
+    "role": "layout-dev",
+    "currentTask": { "id": "3", "subject": "Redesign layout.tsx", "status": "in_progress" }
+  }
+}
+```
+
+**Note:** Team members using `tmux` backend are not accessible via this command (they run as separate sessions).
+
+## Discovery chain
+
+The typical workflow for drilling into sub-agent activity:
+
+1. Call Layer 1 to get the session overview
+2. Look at `turns[].subAgents[]` to find agent IDs
+3. If the provider writes a separate sub-agent transcript, call Layer 3 with the `--agent` flag to get that sub-agent's overview
+4. Call Layer 3 + `--turn` to drill into a specific sub-agent turn
+5. If the sub-agent itself had sub-agents, repeat from step 2 using the sub-agent's overview
+
+## Session Search -- Find keywords across sessions
+
+Cross-session search indexes every provider's history. With `--session`, Claude Code, Codex, and Copilot CLI sessions are all supported, including user and assistant messages, thinking, tool I/O, inline sub-agent content, and compaction summaries when the provider records them.
+
+**When to use search vs Layer 1:**
+- You know the session -> Use Layer 1 overview, then drill with Layer 2/3
+- You need to **find** which session discussed something -> Use search first, then drill into hits
+
+When recalling earlier work, exclude this session if its ID is known, so your search commands and copied results do not crowd out history:
+
+```bash
+cogpit-memory search "authentication" --max-age 90d --exclude-session "$COGPIT_SESSION_ID"
+```
+
+Only pass that flag when the environment variable is set, or supply a known full session ID. Do not guess that the most recently modified session is yours when agents share a project. Omit the flag when searching this session itself. The exclusion also covers its indexed subagents.
+
+Search automatically removes index entries for transcript files that no longer exist. It cannot recover deleted transcripts. If a file disappears between search and `context`, report that the source is unavailable and continue with other hits.
+
+### Basic usage
+
+```bash
+# Search recent indexed sessions from all supported CLIs (last 5 days)
+cogpit-memory search "authentication"
+
+# Search within a specific session
+cogpit-memory search "authentication" --session <SESSION_ID>
+
+# Search with custom time window and more results
+cogpit-memory search "authentication" --max-age 30d --limit 50
+
+# Case-sensitive search
+cogpit-memory search "AuthProvider" --case-sensitive
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session` | all sessions | Scope to single session |
+| `--exclude-session` | none | Omit one session and its subagents |
+| `--max-age` | `5d` | Time window: `5d`, `12h`, `30d` |
+| `--limit` | `20` | Max total hits returned |
+| `--session-limit` | all | Cap unique sessions in results |
+| `--hits-per-session` | all | Max hits kept per session |
+| `--case-sensitive` | `false` | Case sensitivity |
+
+### Response shape
+
+```json
+{
+  "query": "authentication",
+  "totalHits": 47,
+  "returnedHits": 20,
+  "sessionsSearched": 8,
+  "results": [
+    {
+      "sessionId": "abc-123",
+      "cwd": "/path/to/project",
+      "hits": [
+        {
+          "location": "turn/3/userMessage",
+          "snippet": "...need to fix the authentication flow before...",
+          "matchCount": 2
+        },
+        {
+          "location": "turn/5/toolCall/tc_abc/result",
+          "toolName": "Read",
+          "snippet": "...export function authentication(req, res)...",
+          "matchCount": 1
+        },
+        {
+          "location": "agent/a7f3bc2/turn/1/assistantMessage",
+          "agentName": "researcher",
+          "snippet": "...found 3 authentication-related files in...",
+          "matchCount": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Location format
+
+Locations map directly to Layer 2/3 drill-down commands -- use them to fetch full context:
+- `turn/{i}/userMessage` -- user prompt -> drill with `--turn {i}`
+- `turn/{i}/assistantMessage` -- AI response -> drill with `--turn {i}`
+- `turn/{i}/thinking` -- thinking blocks -> drill with `--turn {i}`
+- `turn/{i}/toolCall/{id}/input` -- tool call input -> drill with `--turn {i}`
+- `turn/{i}/toolCall/{id}/result` -- tool call result -> drill with `--turn {i}`
+- `turn/{i}/compactionSummary` -- compaction summary -> drill with `--turn {i}`
+- `agent/{agentId}/...` -- sub-agent content; drill with `--agent {agentId}` only when the provider writes a separate transcript
+
+### Typical workflow
+
+1. Search for keyword: `cogpit-memory search "auth"`
+2. Pick a hit from results (e.g., `sessionId: "abc-123"`, `location: "turn/3/assistantMessage"`)
+3. Get full turn context: `cogpit-memory context abc-123 --turn 3`
+4. If a hit is in a sub-agent with a separate transcript, get its overview: `cogpit-memory context abc-123 --agent a7f3bc2`
+
+### Search behavior
+
+Cross-session search uses an incrementally updated SQLite FTS5 index, with a raw-file fallback if the index is unavailable. The default window is 5 days. Increase `--max-age` for older work. FTS matches whole tokens, so `auth` does not match `authentication`. `--limit` is capped at 200; narrow a broad query or use `--session` to investigate further.
+
+## Index management
+
+The search index is an FTS5 database at `~/.claude/cogpit-memory/search-index.db`. Most commands work without the index (falling back to raw file scanning), but indexed search is significantly faster.
+
+```bash
+# Show index stats (session count, staleness, DB size)
+cogpit-memory index stats
+
+# Rebuild the full index from scratch
+cogpit-memory index rebuild
+```
+
+## Quick reference
+
+| Goal | Command |
+|------|---------|
+| List recent sessions | `cogpit-memory sessions` |
+| Sessions for a directory | `cogpit-memory sessions --cwd <path>` |
+| Current session for a directory | `cogpit-memory sessions --current --cwd <path>` |
+| Session overview (always first) | `cogpit-memory context <sessionId>` |
+| Turn detail | `cogpit-memory context <sessionId> --turn <N>` |
+| Sub-agent overview | `cogpit-memory context <sessionId> --agent <agentId>` |
+| Sub-agent turn detail | `cogpit-memory context <sessionId> --agent <agentId> --turn <N>` |
+| **Search indexed sessions** | `cogpit-memory search "<query>"` |
+| **Search any single provider session** | `cogpit-memory search "<query>" --session <sessionId>` |
+| Index stats | `cogpit-memory index stats` |
+| Index rebuild | `cogpit-memory index rebuild` |
+
+**Default to Layer 1 only. Drill into Layer 2/3 only when you have a specific reason.**

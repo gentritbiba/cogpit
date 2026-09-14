@@ -6,7 +6,7 @@ type FileRequestPath =
   | { ok: false; statusCode: 400; error: string }
 
 type ReadableFileValidation =
-  | { ok: true }
+  | { ok: true; size: number }
   | { ok: false; statusCode: 404 | 413; error: string }
 
 /**
@@ -42,9 +42,8 @@ export async function validateReadableFile(
     if (info.size > maxFileSize) {
       return { ok: false, statusCode: 413, error: "File too large" }
     }
+    return { ok: true, size: info.size }
   } catch {
     return { ok: false, statusCode: 404, error: "File not found" }
   }
-
-  return { ok: true }
 }

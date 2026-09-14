@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown"
 import {
   markdownComponents,
   markdownPlugins,
-  preprocessImagePaths,
+  preprocessMediaPaths,
 } from "@/components/timeline/markdown-components"
 import { cn } from "@/lib/utils"
 import { isRecord } from "../../../shared/objects"
@@ -90,7 +90,7 @@ function humanizeKey(key: string): string {
 }
 
 function MarkdownText({ children }: { children: string }) {
-  const text = useMemo(() => preprocessImagePaths(children), [children])
+  const text = useMemo(() => preprocessMediaPaths(children), [children])
   return (
     <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
       {text}

@@ -104,6 +104,12 @@ Other agents can create and manage Claude Code sessions via the HTTP API on `loc
 
 See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for full usage, timeouts, and permissions.
 
+`.claude/skills/cogpit/` is the installable bundle for agents outside this repo
+(`npx skills add gentritbiba/agent-window --skill cogpit`). Its `references/`
+are generated from the `cogpit-sessions` skill and
+`packages/cogpit-memory/skill/SKILL.md`; edit those sources, then run
+`bun run sync-cogpit-skill`. `check:cogpit-skill-sync` fails CI on drift.
+
 ## Nested iOS Repository
 
 The `ios/` directory is a separate, private Git repository that is intentionally ignored by this parent repository. When changing anything under `ios/`, run Git commands from `ios/` and commit and push those changes to the child repository. Never stage iOS files in the parent repository, and always report the status of both repositories when a task touches both.
@@ -111,3 +117,16 @@ The `ios/` directory is a separate, private Git repository that is intentionally
 ## Browser Panel
 
 Live agent-browser streaming inside the workspace (see `docs/browser.md`). The bash shim at `~/.cogpit/bin/agent-browser` owns `--profile`, `--args`, and socket directories — never set them elsewhere or in `server/browser/daemons.ts`. Shared types live in `shared/browser/types.ts`; keep the client and server in sync there only. Cogpit prepends the shim to agent PATHs. Single-session processes receive `COGPIT_SESSION_ID`; shared processes start without an owner, with thread configuration supplying an id where supported. The shim routes to persistent profiles (`default`, named) or throwaway trees (`tmp-*`). The panel attaches via CDP over a second WebSocket and supports remote devices through the hub.
+
+## Showing Images and Videos
+
+The timeline renders markdown image syntax inline, and the same syntax plays
+videos: `![alt](/absolute/path.png)` or `![alt](/absolute/path.webm)`.
+Images (`png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`, `ico`, `avif`) open
+in the zoomable viewer; videos (`mp4`, `m4v`, `webm`, `mov`) play with controls
+and seeking. Local paths go through `/api/local-file`, which serves byte ranges
+for video. `shared/mediaTypes.ts` is the one list of extensions and MIME
+types both sides use. Remote `https://` media is blocked by the app's CSP.
+When you have a screenshot or recording to show, put the `![alt](src)` line in
+the message you write. A tool result that displays it to you does not display it
+to the user. Show milestones and evidence, not every step.

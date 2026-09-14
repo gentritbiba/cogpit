@@ -19,6 +19,7 @@
     "check:architecture": "bun scripts/check-architecture.ts",
     "check:audit": "bun scripts/check-audit.ts",
     "check:cogpit-memory-sync": "bun scripts/sync-cogpit-memory.ts --check",
+    "check:cogpit-skill-sync": "bun scripts/sync-cogpit-skill.ts --check",
     "check:duplicates": "bun scripts/check-duplicates.ts",
     "generate:icons": "bun scripts/generate-icons.ts",
     "test": "vitest run",
@@ -44,6 +45,7 @@
     "serve": "bun run build && bun server/standalone.ts",
     "serve:start": "bun server/standalone.ts",
     "sync-cogpit-memory": "bun scripts/sync-cogpit-memory.ts",
+    "sync-cogpit-skill": "bun scripts/sync-cogpit-skill.ts",
     "ui:add": "bunx shadcn@4.16.2 add"
   },
   "dependencies": {

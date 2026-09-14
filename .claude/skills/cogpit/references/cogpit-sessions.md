@@ -1,7 +1,4 @@
----
-name: cogpit-sessions
-description: Create, message, poll and stop Claude Code, Codex and Copilot sessions through the Cogpit HTTP API on localhost. Use when an agent needs to start a session in a project, send a follow-up to a running session, wait for a turn to finish, read what a session did, or list Cogpit projects and active sessions.
----
+<!-- Generated from .claude/skills/cogpit-sessions/SKILL.md by scripts/sync-cogpit-skill.ts. Edit the source, then run `bun run sync-cogpit-skill`. -->
 
 # Cogpit sessions API
 

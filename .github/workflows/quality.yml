@@ -58,6 +58,9 @@ jobs:
       - name: Check generated session core
         run: bun run check:cogpit-memory-sync
 
+      - name: Check generated cogpit skill references
+        run: bun run check:cogpit-skill-sync
+
       - name: Type-check production code
         run: bun run typecheck
 

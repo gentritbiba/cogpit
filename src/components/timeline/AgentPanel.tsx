@@ -7,7 +7,7 @@ import { buildAgentLabelMap, buildParentToolByAgent } from "./agent-utils"
 import { useSubagentContent } from "@/hooks/useSubagentContent"
 import { useSessionContext } from "@/contexts/SessionContext"
 import ReactMarkdown from "react-markdown"
-import { markdownComponents, markdownPlugins, preprocessImagePaths } from "./markdown-components"
+import { markdownComponents, markdownPlugins, preprocessMediaPaths } from "./markdown-components"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { capabilitiesForDirName } from "@/lib/agents"
@@ -227,7 +227,7 @@ function AgentReturnItem({
   onOpen,
 }: AgentReturnItemProps): React.ReactElement {
   const text = message?.text
-  const markdownText = useMemo(() => preprocessImagePaths((text ?? []).join("\n\n")), [text])
+  const markdownText = useMemo(() => preprocessMediaPaths((text ?? []).join("\n\n")), [text])
   const hasText = (text?.length ?? 0) > 0
   const isRunning = stats?.status != null && stats.status !== "completed" && stats.status !== "async_launched"
   const isCompleted = stats?.status === "completed"

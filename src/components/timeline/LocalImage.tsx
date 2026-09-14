@@ -1,45 +1,11 @@
 import { useState } from "react"
 import { Maximize2 } from "lucide-react"
-import { authUrl } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 import { useCapability } from "@/hooks/useCapability"
+import { isLocalImagePath, resolveMediaSrc } from "./localMedia"
 import { Button } from "@/components/ui/button"
-
-export const IMAGE_EXTENSIONS = new Set([
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
-])
-
-/** True when the path ends in an extension the image proxy can serve. */
-export function hasImageExtension(path: string | undefined): boolean {
-  if (!path) return false
-  const dot = path.lastIndexOf(".")
-  if (dot === -1) return false
-  return IMAGE_EXTENSIONS.has(path.slice(dot).toLowerCase())
-}
-
-/** True when the src looks like a local absolute file path to an image */
-export function isLocalImagePath(src: string | undefined): boolean {
-  if (!src) return false
-  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) return false
-  if (!src.startsWith("/")) return false
-  return hasImageExtension(src)
-}
-
-/**
- * Rewrite local image paths to go through the API proxy. `authUrl` applies the
- * active device prefix and appends the auth token for remote clients — fixing a
- * pre-existing bug where remote <img> loads were token-less (and so 401'd) and
- * routing the request to the active device via the hub proxy. Only the proxy
- * URL is wrapped; external/data URLs pass through untouched so the token is
- * never leaked to a third-party host.
- */
-export function resolveImageSrc(src: string | undefined): string | undefined {
-  if (!src) return src
-  if (isLocalImagePath(src)) return authUrl(`/api/local-file?path=${encodeURIComponent(src)}`)
-  return src
-}
 
 /**
  * Image component that proxies local file paths through /api/local-file
@@ -64,7 +30,7 @@ export function LocalImage({
   const [failedSrc, setFailedSrc] = useState<string | undefined>()
   const imageGallery = useOptionalImageGallery()
   const localImageBlocked = isLocalImagePath(src) && !canAccessHostFiles
-  const resolved = localImageBlocked ? undefined : resolveImageSrc(src)
+  const resolved = localImageBlocked ? undefined : resolveMediaSrc(src)
   const viewerImage: ImageViewerItem | null = resolved
     ? { id, src: resolved, alt: alt ?? "Rendered image", label: alt || "Rendered image" }
     : null

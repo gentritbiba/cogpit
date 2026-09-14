@@ -14,7 +14,7 @@ The web timeline shares tool-call components across desktop, Electron, and mobil
 - Calls with structured details keep original input and script source behind an explicit “Raw input” disclosure. Unknown calls and scripts without recoverable nested operations fall back to formatted input or source. Expanding all payloads does not expand the separate raw-input disclosure.
 - Long output has a bounded preview and a control to reveal the complete value. Empty completed output is distinct from a call that is still running.
 - An edit failure must show its error even when the proposed diff is available.
-- Images remain images and can be opened independently of text output. On the web, persisted result images take precedence over a local-file preview for image reads.
+- Images and videos referenced with markdown image syntax render inline: images open in the zoomable viewer, and `mp4`, `m4v`, `webm` and `mov` files play with controls and seek over HTTP byte ranges. Only absolute local paths render, served by the Cogpit proxy; the CSP blocks remote `https://` media. On the web, persisted result images take precedence over a local-file preview for image reads.
 - Phone layouts keep summaries within the available width and use touch-sized controls. Long file paths must not squeeze short operation names out of the header.
 
 ## Operation names
