@@ -26,7 +26,7 @@ for (const name of names) {
       if (file.imports.length || file.dynamicImports.length) throw new Error(`${name} has an external runtime import`)
       for (const id of Object.keys(file.modules)) {
         if (id.startsWith("\0")) continue
-        const path = id.split("?")[0]
+        const path = resolve(id.split("?")[0])
         if (!allowed.some((directory) => path === directory || path.startsWith(directory + sep))) throw new Error(`${name} imports private host code: ${relative(root, path)}`)
       }
     }
