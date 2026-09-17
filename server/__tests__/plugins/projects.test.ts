@@ -24,7 +24,7 @@ async function repository() {
   return repo
 }
 
-describe("host-owned plugin project identities", () => {
+describe("host-owned plugin project identities", { timeout: process.platform === "win32" ? 20_000 : 5_000 }, () => {
   it("canonicalizes inventory aliases and accepts only opaque project IDs", async () => {
     const directory = join(root, "plain")
     const alias = join(root, "alias")

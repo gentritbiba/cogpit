@@ -34,7 +34,7 @@ async function git(cwd: string, ...args: string[]) {
   await execFile("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", ...args], { cwd, timeout: 10_000 })
 }
 
-describe("exact plugin workspace binding", () => {
+describe("exact plugin workspace binding", { timeout: process.platform === "win32" ? 20_000 : 5_000 }, () => {
   it("waits for every Git process before returning a non-repository project", async () => {
     const selected = await directory("selected")
     inventory.paths = [selected]

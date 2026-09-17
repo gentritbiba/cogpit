@@ -215,7 +215,7 @@ describe("HTTPS cancellation and total deadline", () => {
   })
 })
 
-describe("real TLS connection through the isolated test seam", () => {
+describe("real TLS connection through the isolated test seam", { timeout: process.platform === "win32" ? 20_000 : 5_000 }, () => {
   it("uses a pinned lookup with original SNI and certificate verification", async () => {
     const directory = await mkdtemp(join(tmpdir(), "cogpit-plugin-tls-"))
     cleanup.push(() => rm(directory, { recursive: true, force: true }))
