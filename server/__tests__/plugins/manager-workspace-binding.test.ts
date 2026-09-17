@@ -66,7 +66,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { await manager.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
-describe("manager workspace-bound integrations", () => {
+describe("manager workspace-bound integrations", { timeout: process.platform === "win32" ? 20_000 : 5_000 }, () => {
   it("acknowledges readiness without loading package data or enumerating projects again", async () => {
     const activation = await lease()
     const payload = vi.spyOn(manager.store, "payload"), inventory = vi.spyOn(manager.projects, "resolveWorkspace")
