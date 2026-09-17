@@ -15,15 +15,12 @@ vi.mock("@/lib/undo-engine", () => ({
   buildUndoOperations: vi.fn(() => []),
   buildRedoFromArchived: vi.fn(() => []),
   summarizeOperations: vi.fn(() => ({
-    turnCount: 1,
     fileCount: 0,
     filePaths: [],
     operationCount: 0,
   })),
-  createEmptyUndoState: vi.fn((sessionId: string, totalTurns: number) => ({
+  createEmptyUndoState: vi.fn((sessionId: string) => ({
     sessionId,
-    currentTurnIndex: totalTurns - 1,
-    totalTurns,
     branches: [],
     activeBranchId: null,
   })),
@@ -36,6 +33,8 @@ vi.mock("@/lib/undo-engine", () => ({
     jsonlLines: [],
   })),
   collectChildBranches: vi.fn(() => ({ retained: [], scooped: [] })),
+  resolveBranchPoints: vi.fn((branches: unknown[]) => branches),
+  anchorChildBranches: vi.fn(() => []),
   splitChildBranches: vi.fn(() => ({ restored: [], remaining: [] })),
 }))
 
@@ -128,8 +127,6 @@ function makeBranch(overrides: Partial<Branch> = {}): Branch {
 function makeUndoState(overrides: Partial<UndoState> = {}): UndoState {
   return {
     sessionId: "test-session",
-    currentTurnIndex: 2,
-    totalTurns: 3,
     branches: [],
     activeBranchId: null,
     ...overrides,
@@ -293,8 +290,6 @@ describe("useUndoRedo", () => {
       const branch = makeBranch({ branchPointTurnIndex: 1 })
       const undoState = makeUndoState({
         branches: [branch],
-        currentTurnIndex: 1,
-        totalTurns: 2,
       })
       setupMockFetch(undoState)
 

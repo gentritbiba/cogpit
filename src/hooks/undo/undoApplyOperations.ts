@@ -5,6 +5,7 @@
 import type { ParsedSession, UndoState, Branch } from "../../../shared/session/types"
 import type { SessionSource } from "../useLiveSession"
 import {
+  anchorChildBranches,
   buildUndoOperations,
   buildRedoFromArchived,
   createBranch,
@@ -12,7 +13,7 @@ import {
   splitChildBranches,
   type FileOperation,
 } from "@/lib/undo-engine"
-import { findCutoffLine, findCutoffLineForTurn, type UndoConfirmState } from "./undoHelpers"
+import { findCutoffLine, resolveUndoCut, type UndoConfirmState, type UndoCut } from "./undoHelpers"
 import type { UndoSessionMutation } from "../../../shared/contracts/undo"
 import { capabilitiesForDirName } from "@/lib/agents"
 
@@ -35,6 +36,31 @@ export interface UndoTransaction {
 
 export type CommitUndoTransaction = (transaction: UndoTransaction) => Promise<void>
 
+const TURN_NOT_FOUND = "Unable to locate the selected turn in the current session file"
+
+/** The cut that keeps the first `keepTurnCount` loaded turns, or an aborted apply when it cannot be placed. */
+function locateCut(
+  session: ParsedSession,
+  sessionSource: SessionSource,
+  allLines: string[],
+  keepTurnCount: number,
+  setApplyError: (e: string) => void,
+): UndoCut {
+  const cut = resolveUndoCut(
+    allLines,
+    session.turns[keepTurnCount - 1],
+    session.turns[keepTurnCount],
+    keepTurnCount,
+    session.turns.length,
+    sessionSource.dirName,
+  )
+  if (!cut) {
+    setApplyError(TURN_NOT_FOUND)
+    throw new ApplyAbort()
+  }
+  return cut
+}
+
 export async function applyUndo(
   confirmState: UndoConfirmState,
   session: ParsedSession,
@@ -50,25 +76,18 @@ export async function applyUndo(
   const allLines = freshRawText.split("\n").filter(Boolean)
   // `allLines` is the whole file while `session.turns` may be only its tail, so
   // the cut has to be anchored to the turn itself, not to its window index.
-  const cutoffLine = findCutoffLineForTurn(
-    allLines,
-    session.turns[effectiveTarget],
-    keepTurnCount,
-    sessionSource.dirName,
-  )
+  const { cutoffLine, branchPointTurnId } = locateCut(session, sessionSource, allLines, keepTurnCount, setApplyError)
   const removedJsonlLines = allLines.slice(cutoffLine)
 
   if (removedJsonlLines.length === 0) {
-    setApplyError("Unable to locate the selected turn in the current session file")
+    setApplyError(TURN_NOT_FOUND)
     throw new ApplyAbort()
   }
 
   const { retained, scooped } = collectChildBranches(state.branches, effectiveTarget)
-  const branch = createBranch(session.turns, effectiveTarget, removedJsonlLines, scooped)
+  const branch = createBranch(session.turns, effectiveTarget, removedJsonlLines, scooped, branchPointTurnId)
   const nextState: UndoState = {
     ...state,
-    currentTurnIndex: effectiveTarget,
-    totalTurns: keepTurnCount,
     branches: [...retained, branch],
     activeBranchId: null,
   }
@@ -96,6 +115,45 @@ export async function applyUndo(
   })
 }
 
+/**
+ * What restoring `branch` through archived turn `upToIdx` puts back into the
+ * transcript, and what takes the branch's place in the undo state: the rest of
+ * a partly restored branch plus the children that fork inside the restored
+ * range, or all of its children once it is restored whole.
+ */
+function restoreFromBranch(
+  branch: Branch,
+  upToIdx: number,
+  dirName: string,
+): { restoredLines: string[]; replacement: Branch[] } {
+  const redoTurnCount = upToIdx + 1
+  const children = anchorChildBranches(branch)
+  const cutoff = upToIdx < branch.turns.length - 1
+    ? findCutoffLine(branch.jsonlLines, redoTurnCount, dirName)
+    : branch.jsonlLines.length
+  const restoredLines = branch.jsonlLines.slice(0, cutoff)
+  const remainingLines = branch.jsonlLines.slice(cutoff)
+  if (remainingLines.length === 0) return { restoredLines, replacement: children }
+
+  const { restored, remaining } = splitChildBranches(children, branch.branchPointTurnIndex, redoTurnCount)
+  return {
+    restoredLines,
+    replacement: [
+      {
+        ...branch,
+        branchPointTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
+        // Without an id on the archived turn the index is all there is.
+        branchPointTurnId: branch.turns[redoTurnCount - 1]?.id,
+        turns: branch.turns.slice(redoTurnCount),
+        jsonlLines: remainingLines,
+        label: branch.turns[redoTurnCount]?.userMessage || branch.label,
+        childBranches: remaining.length > 0 ? remaining : undefined,
+      },
+      ...restored,
+    ],
+  }
+}
+
 export async function applyRedo(
   confirmState: UndoConfirmState,
   sessionSource: SessionSource,
@@ -104,47 +162,13 @@ export async function applyRedo(
   freshRawText: string,
   commitTransaction: CommitUndoTransaction,
 ): Promise<void> {
-  const isPartial = confirmState.redoUpToArchiveIndex !== undefined
-    && confirmState.redoUpToArchiveIndex < branch.turns.length - 1
   const upToIdx = confirmState.redoUpToArchiveIndex ?? branch.turns.length - 1
-  const redoTurnCount = upToIdx + 1
-
+  const { restoredLines, replacement } = restoreFromBranch(branch, upToIdx, sessionSource.dirName)
   const ops = buildRedoFromArchived(branch.turns, upToIdx)
-  const cutoff = isPartial
-    ? findCutoffLine(branch.jsonlLines, redoTurnCount, sessionSource.dirName)
-    : branch.jsonlLines.length
-  const linesToAppend = branch.jsonlLines.slice(0, cutoff)
-  const remainingLines = branch.jsonlLines.slice(cutoff)
-  const children = branch.childBranches ?? []
-  let newBranches: Branch[]
-  if (isPartial && remainingLines.length > 0) {
-    const { restored, remaining: remainingChildren } = splitChildBranches(
-      children, branch.branchPointTurnIndex, redoTurnCount
-    )
-    const updatedBranch: Branch = {
-      ...branch,
-      branchPointTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
-      turns: branch.turns.slice(redoTurnCount),
-      jsonlLines: remainingLines,
-      label: branch.turns[redoTurnCount]?.userMessage || branch.label,
-      childBranches: remainingChildren.length > 0 ? remainingChildren : undefined,
-    }
-    newBranches = [
-      ...state.branches.map((b) => b.id === branch.id ? updatedBranch : b),
-      ...restored,
-    ]
-  } else {
-    newBranches = [
-      ...state.branches.filter((b) => b.id !== branch.id),
-      ...children,
-    ]
-  }
 
   const nextState: UndoState = {
     ...state,
-    currentTurnIndex: state.currentTurnIndex + redoTurnCount,
-    totalTurns: state.totalTurns + redoTurnCount,
-    branches: newBranches,
+    branches: [...state.branches.filter((b) => b.id !== branch.id), ...replacement],
     activeBranchId: null,
   }
   const currentLines = freshRawText.split("\n").filter(Boolean)
@@ -153,7 +177,7 @@ export async function applyRedo(
     sessionSource,
     sessionMutation: {
       type: "append",
-      lines: linesToAppend,
+      lines: restoredLines,
       expectedLineCount: currentLines.length,
     },
     state: nextState,
@@ -168,6 +192,7 @@ export async function applyBranchSwitch(
   freshRawText: string,
   confirmState: UndoConfirmState,
   commitTransaction: CommitUndoTransaction,
+  setApplyError: (e: string) => void,
 ): Promise<void> {
   let updatedBranches = [...state.branches]
   let sessionLines = freshRawText.split("\n").filter(Boolean)
@@ -184,62 +209,25 @@ export async function applyBranchSwitch(
     updatedBranches = retained
 
     const keepTurnCount = branch.branchPointTurnIndex + 1
-    const cutoffLine = findCutoffLineForTurn(
-      sessionLines,
-      session.turns[branch.branchPointTurnIndex],
-      keepTurnCount,
-      sessionSource.dirName,
-    )
+    const { cutoffLine, branchPointTurnId } = locateCut(session, sessionSource, sessionLines, keepTurnCount, setApplyError)
     const removedJsonlLines = sessionLines.slice(cutoffLine)
 
     if (removedJsonlLines.length > 0) {
-      const currentBranch = createBranch(session.turns, branch.branchPointTurnIndex, removedJsonlLines, scooped)
+      const currentBranch = createBranch(session.turns, branch.branchPointTurnIndex, removedJsonlLines, scooped, branchPointTurnId)
       updatedBranches = [...updatedBranches, currentBranch]
       sessionLines = sessionLines.slice(0, cutoffLine)
     }
   }
 
   const upToIdx = confirmState.branchTurnIndex ?? branch.turns.length - 1
-  const redoTurnCount = upToIdx + 1
-  const isPartial = upToIdx < branch.turns.length - 1
-  const redoOps = buildRedoFromArchived(branch.turns, upToIdx)
-  operations.push(...redoOps)
-  const jsonlCutoff = isPartial
-    ? findCutoffLine(branch.jsonlLines, redoTurnCount, sessionSource.dirName)
-    : branch.jsonlLines.length
-  const restoredJsonlLines = branch.jsonlLines.slice(0, jsonlCutoff)
-  const remainingJsonlLines = branch.jsonlLines.slice(jsonlCutoff)
-
-  const children = branch.childBranches ?? []
-  let targetReplacement: Branch[]
-  if (isPartial && remainingJsonlLines.length > 0) {
-    const { restored, remaining } = splitChildBranches(
-      children,
-      branch.branchPointTurnIndex,
-      redoTurnCount,
-    )
-    targetReplacement = [
-      {
-        ...branch,
-        branchPointTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
-        turns: branch.turns.slice(redoTurnCount),
-        jsonlLines: remainingJsonlLines,
-        label: branch.turns[redoTurnCount]?.userMessage || branch.label,
-        childBranches: remaining.length > 0 ? remaining : undefined,
-      },
-      ...restored,
-    ]
-  } else {
-    targetReplacement = children
-  }
+  const { restoredLines, replacement } = restoreFromBranch(branch, upToIdx, sessionSource.dirName)
+  operations.push(...buildRedoFromArchived(branch.turns, upToIdx))
 
   const nextState: UndoState = {
     ...state,
-    currentTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
-    totalTurns: branch.branchPointTurnIndex + 1 + redoTurnCount,
     branches: [
       ...updatedBranches.filter((b) => b.id !== branch.id),
-      ...targetReplacement,
+      ...replacement,
     ],
     activeBranchId: null,
   }
@@ -250,7 +238,7 @@ export async function applyBranchSwitch(
     sessionMutation: {
       type: "splice",
       keepLines: sessionLines.length,
-      lines: restoredJsonlLines,
+      lines: restoredLines,
       expectedLineCount: freshRawText.split("\n").filter(Boolean).length,
     },
     state: nextState,

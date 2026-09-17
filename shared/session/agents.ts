@@ -227,17 +227,18 @@ export function turnBoundaryLines(
   format: AgentFormat,
   lines: readonly string[],
 ): number[] {
-  const records = lines.map((line) => {
-    try {
-      const parsed: unknown = JSON.parse(line)
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {}
-    } catch {
-      return {}
-    }
-  })
-  return format.turnBoundaries(records)
+  return format.turnBoundaries(lines.map(parseRecord))
+}
+
+function parseRecord(line: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(line)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 /**
@@ -266,34 +267,40 @@ export function cutLineAfterTurnIndex(
 }
 
 /**
- * The line to cut at to keep everything through the turn containing the record
- * whose `uuid` is `turnUuid`. Correct even when the caller has only a tail of
- * the transcript loaded, so its turn indexes do not match file order.
+ * Each turn's first line paired with the id the parser gives that turn, in file
+ * order. Null when the two do not pair up, which would mean the ids cannot be
+ * trusted to name these lines.
  *
- * `"keep-all"` means the uuid was found in the last turn (nothing to remove);
- * null means it was not found at all, and the caller should fall back to an
- * index-based cut.
+ * This is what lets a caller holding only the loaded tail of a transcript name
+ * a turn: its window index says nothing about file order, but its id does.
  */
-export function cutLineAfterUuid(
+export function turnStartsWithIds(
   format: AgentFormat,
   lines: readonly string[],
-  turnUuid: string,
+): { line: number; id: string }[] | null {
+  const starts = turnBoundaryLines(format, lines)
+  const turns = format.parse(lines.join("\n"), { skipStats: true }).turns
+  if (turns.length !== starts.length) return null
+  return starts.map((line, index) => ({ line, id: turns[index].id }))
+}
+
+/**
+ * The line to cut at to keep everything through the turn whose id is `turnId`.
+ *
+ * `"keep-all"` means it is the last turn (nothing to remove); null means no
+ * turn has that id — an agent may leave a turn unlabelled — and the caller
+ * should fall back to an index-based cut.
+ */
+export function cutLineAfterTurnId(
+  format: AgentFormat,
+  lines: readonly string[],
+  turnId: string,
 ): number | "keep-all" | null {
-  let targetLine = -1
-  for (let index = 0; index < lines.length; index++) {
-    if (!lines[index].includes(turnUuid)) continue
-    try {
-      const parsed = JSON.parse(lines[index]) as Record<string, unknown>
-      if (parsed?.uuid === turnUuid) {
-        targetLine = index
-        break
-      }
-    } catch {
-      // A malformed line carries no uuid to match.
-    }
-  }
-  if (targetLine < 0) return null
-  return turnBoundaryLines(format, lines).find((line) => line > targetLine) ?? "keep-all"
+  const starts = turnStartsWithIds(format, lines)
+  if (!starts) return null
+  const index = starts.findLastIndex((start) => start.id === turnId)
+  if (index < 0) return null
+  return starts[index + 1]?.line ?? "keep-all"
 }
 
 /**

@@ -7,6 +7,9 @@ import {
   createBranch,
   collectChildBranches,
   splitChildBranches,
+  resolveBranchPoints,
+  anchorChildBranches,
+  UNLOADED_BRANCH_POINT,
   summarizeOperations,
   createEmptyUndoState,
 } from "@/lib/undo-engine"
@@ -635,21 +638,19 @@ describe("summarizeOperations", () => {
   it("returns zero counts for empty operations", () => {
     const summary = summarizeOperations([])
     expect(summary).toEqual({
-      turnCount: 0,
       fileCount: 0,
       filePaths: [],
       operationCount: 0,
     })
   })
 
-  it("counts unique turns and files", () => {
+  it("counts unique files across turns", () => {
     const ops: FileOperation[] = [
       { type: "reverse-edit", filePath: "a.ts", oldString: "x", newString: "y", turnIndex: 1 },
       { type: "reverse-edit", filePath: "b.ts", oldString: "x", newString: "y", turnIndex: 1 },
       { type: "delete-write", filePath: "a.ts", content: "c", turnIndex: 2 },
     ]
     const summary = summarizeOperations(ops)
-    expect(summary.turnCount).toBe(2)      // turns 1 and 2
     expect(summary.fileCount).toBe(2)      // a.ts and b.ts
     expect(summary.operationCount).toBe(3) // 3 operations
     expect(summary.filePaths).toContain("a.ts")
@@ -671,7 +672,6 @@ describe("summarizeOperations", () => {
       { type: "create-write", filePath: "new.ts", content: "hello", turnIndex: 5 },
     ]
     const summary = summarizeOperations(ops)
-    expect(summary.turnCount).toBe(1)
     expect(summary.fileCount).toBe(1)
     expect(summary.operationCount).toBe(1)
   })
@@ -680,30 +680,14 @@ describe("summarizeOperations", () => {
 // ── createEmptyUndoState ──────────────────────────────────────────────────
 
 describe("createEmptyUndoState", () => {
-  it("creates state with correct defaults", () => {
-    const state = createEmptyUndoState("session-123", 5)
-    expect(state).toEqual({
+  it("starts with no branches", () => {
+    expect(createEmptyUndoState("session-123")).toEqual({
       sessionId: "session-123",
-      currentTurnIndex: 4,  // totalTurns - 1
-      totalTurns: 5,
       branches: [],
       activeBranchId: null,
     })
   })
-
-  it("handles single turn", () => {
-    const state = createEmptyUndoState("s1", 1)
-    expect(state.currentTurnIndex).toBe(0)
-    expect(state.totalTurns).toBe(1)
-  })
-
-  it("handles zero turns (edge case)", () => {
-    const state = createEmptyUndoState("s1", 0)
-    expect(state.currentTurnIndex).toBe(-1)
-    expect(state.totalTurns).toBe(0)
-  })
 })
-
 
 describe("edits awaiting owner review", () => {
   it("never archives or undoes an unapplied Edit or Write", () => {
@@ -715,5 +699,71 @@ describe("edits awaiting owner review", () => {
     expect(extractReversibleCalls(turn).map(c => c.filePath)).toEqual(["c.ts"])
     expect(archiveTurn(turn, 1).toolCalls.map(c => c.filePath)).toEqual(["c.ts"])
     expect(buildUndoOperations([makeTurn(), turn], 1, 0).map(op => op.filePath)).toEqual(["c.ts"])
+  })
+})
+
+// ── Turn-id anchoring ─────────────────────────────────────────────────────
+
+describe("turn-id anchoring", () => {
+  function branchAt(id: string, index: number, turnId?: string | null): Branch {
+    return {
+      id,
+      createdAt: "2025-01-15T10:00:00Z",
+      branchPointTurnIndex: index,
+      ...(turnId !== undefined ? { branchPointTurnId: turnId } : {}),
+      label: id,
+      turns: [],
+      jsonlLines: [],
+    }
+  }
+
+  it("archives the turn id and records the fork turn id on the branch", () => {
+    const turns = [makeTurn({ id: "u-1" }), makeTurn({ id: "u-2" }), makeTurn({ id: "u-3" })]
+    const branch = createBranch(turns, 0, ["line"], undefined, "u-1")
+    expect(branch.branchPointTurnId).toBe("u-1")
+    expect(branch.turns.map((t) => t.id)).toEqual(["u-2", "u-3"])
+  })
+
+  it("leaves the fork turn id off when the caller could not verify one", () => {
+    const branch = createBranch([makeTurn({}), makeTurn({})], 0, ["line"])
+    expect("branchPointTurnId" in branch).toBe(false)
+  })
+
+  it("re-resolves a branch to wherever its fork turn sits in the loaded window", () => {
+    // Saved while 20 turns were loaded (fork at 18); 21 are loaded now.
+    const turns = Array.from({ length: 21 }, (_, i) => makeTurn({ id: `u-${i}` }))
+    const [resolved] = resolveBranchPoints([branchAt("b", 18, "u-20")], turns)
+    expect(resolved.branchPointTurnIndex).toBe(20)
+  })
+
+  it("marks a branch whose fork turn is not loaded, and keeps legacy and empty anchors", () => {
+    const turns = [makeTurn({ id: "u-5" })]
+    const resolved = resolveBranchPoints(
+      [branchAt("old", 3, "u-1"), branchAt("legacy", 0), branchAt("root", 7, null)],
+      turns,
+    )
+    expect(resolved.map((b) => b.branchPointTurnIndex)).toEqual([UNLOADED_BRANCH_POINT, 0, -1])
+  })
+
+  it("never scoops an unloaded branch into a new archive", () => {
+    const { retained, scooped } = collectChildBranches(
+      [branchAt("old", UNLOADED_BRANCH_POINT, "u-1")],
+      -1,
+    )
+    expect(retained).toHaveLength(1)
+    expect(scooped).toHaveLength(0)
+  })
+
+  it("places child branches by their fork turn inside the archived range", () => {
+    const parent: Branch = {
+      ...branchAt("parent", 40, "u-40"),
+      turns: [
+        { ...archiveTurn(makeTurn({ id: "a-1" }), 5) },
+        { ...archiveTurn(makeTurn({ id: "a-2" }), 6) },
+      ],
+      childBranches: [branchAt("child", 6, "a-2"), branchAt("legacy-child", 9)],
+    }
+    const children = anchorChildBranches(parent)
+    expect(children.map((b) => b.branchPointTurnIndex)).toEqual([42, 9])
   })
 })

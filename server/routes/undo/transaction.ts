@@ -148,6 +148,14 @@ async function executeTransaction(request: UndoTransactionRequest): Promise<numb
     throw new UndoOperationError(400, "File operations cannot target managed undo files")
   }
 
+  // Measured before the preflight: resuming a cold session appends bookkeeping
+  // records, which would otherwise read as the transcript having moved on. The
+  // write below replaces the file, so those records are dropped with it.
+  const sessionSnapshot = await readSnapshot(sessionPath)
+  if (!sessionSnapshot.existed) throw new UndoOperationError(409, "Session file no longer exists")
+  const nextSessionContent = applySessionMutation(sessionSnapshot.content, request.session.mutation)
+  const stateSnapshot = await readSnapshot(statePath)
+
   let useCheckpoint = false
   if (request.checkpoint) {
     const preflight = await rewindClaudeFiles(
@@ -158,54 +166,41 @@ async function executeTransaction(request: UndoTransactionRequest): Promise<numb
     )
     useCheckpoint = preflight.canRewind === true
   }
-
-  const sessionSnapshot = await readSnapshot(sessionPath)
-  if (!sessionSnapshot.existed) throw new UndoOperationError(409, "Session file no longer exists")
-  const nextSessionContent = applySessionMutation(sessionSnapshot.content, request.session.mutation)
-  const stateSnapshot = await readSnapshot(statePath)
   await mkdir(dirs.UNDO_DIR, { recursive: true })
 
-  let fileBatchStarted = false
-  let sessionCommitted = false
-  let stateCommitted = false
   try {
-    if (!useCheckpoint) {
-      fileBatchStarted = true
-      await commitFileOperations(batch)
-    }
-    await writeOwnerOnlyText(sessionPath, nextSessionContent)
-    sessionCommitted = true
-    await writeOwnerOnlyJson(statePath, request.state)
-    stateCommitted = true
-
+    // Files first, in both arms. A cold session is rewound by resuming its
+    // transcript, and the checkpoint is only found while the target message is
+    // still in the file, so the rewind has to precede the cut.
     if (useCheckpoint && request.checkpoint) {
-      // The native rewind may update only part of the project before failing.
-      // Mark the prepared batch as started so its captured originals restore
-      // every affected path if the checkpoint cannot complete atomically.
-      fileBatchStarted = true
       const result = await rewindClaudeFiles(
         request.checkpoint.sessionId,
         request.checkpoint.userMessageId,
         request.checkpoint.cwd,
       )
       if (result.canRewind !== true) throw new Error("Claude checkpoint rewind was not applied")
+    } else {
+      await commitFileOperations(batch)
     }
+    await writeOwnerOnlyText(sessionPath, nextSessionContent)
+    await writeOwnerOnlyJson(statePath, request.state)
     return useCheckpoint ? 0 : batch.operationCount
   } catch (error) {
+    // Everything rolls back, including the batch a checkpoint never committed:
+    // a native rewind can change part of the project before failing, and the
+    // batch's captured originals are what restore those paths.
     const rollbackErrors: string[] = []
-    if (sessionCommitted || stateCommitted || fileBatchStarted) {
-      for (const [filePath, snapshot] of [
-        [sessionPath, sessionSnapshot],
-        [statePath, stateSnapshot],
-      ] as const) {
-        try {
-          await restoreSnapshot(filePath, snapshot)
-        } catch (rollbackError) {
-          rollbackErrors.push(`${filePath}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
-        }
+    for (const [filePath, snapshot] of [
+      [sessionPath, sessionSnapshot],
+      [statePath, stateSnapshot],
+    ] as const) {
+      try {
+        await restoreSnapshot(filePath, snapshot)
+      } catch (rollbackError) {
+        rollbackErrors.push(`${filePath}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
       }
     }
-    if (fileBatchStarted) rollbackErrors.push(...await rollbackFileOperations(batch))
+    rollbackErrors.push(...await rollbackFileOperations(batch))
     const suffix = rollbackErrors.length > 0
       ? `; rollback incomplete: ${rollbackErrors.join("; ")}`
       : ""

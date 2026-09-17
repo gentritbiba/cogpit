@@ -9,6 +9,7 @@ import {
   buildUndoOperations,
   buildRedoFromArchived,
   createEmptyUndoState,
+  resolveBranchPoints,
 } from "@/lib/undo-engine"
 import { buildSummary, type UndoConfirmState } from "./undo/undoHelpers"
 import {
@@ -133,7 +134,13 @@ export function useUndoRedo(
     }
   }, [])
 
-  const branches = undoState?.branches ?? EMPTY_BRANCHES
+  const storedBranches = undoState?.branches ?? EMPTY_BRANCHES
+  const loadedTurns = session?.turns
+  // Indexed against the turns loaded right now; see resolveBranchPoints.
+  const branches = useMemo(
+    () => loadedTurns ? resolveBranchPoints(storedBranches, loadedTurns) : storedBranches,
+    [storedBranches, loadedTurns],
+  )
 
   // canRedo: true if most recent branch's branchPoint + 1 === current session length
   // (no new turns added since the undo)
@@ -299,7 +306,10 @@ export function useUndoRedo(
         return
       }
 
-      const state = undoState ?? createEmptyUndoState(session.sessionId, session.turns.length)
+      const state = {
+        ...(undoState ?? createEmptyUndoState(session.sessionId)),
+        branches,
+      }
 
       // Fetch the current JSONL content from disk. sessionSource.rawText may
       // be stale if SSE streaming added lines after the session was loaded.
@@ -321,7 +331,7 @@ export function useUndoRedo(
       } else if (confirmState.type === "branch-switch") {
         const branch = branches.find((b) => b.id === confirmState.branchId)
         if (!branch) { setConfirmState(null); return }
-        await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, confirmState, commitUndoTransaction)
+        await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, confirmState, commitUndoTransaction, setApplyError)
       }
 
       // Stop the live session so it restarts fresh from the truncated

@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   cutLineAfterTurnIndex,
-  cutLineAfterUuid,
+  cutLineAfterTurnId,
   cutLineForTurnCount,
   formatFor,
   turnBoundaryLines,
 } from "../../../shared/session/agents"
-import { findCutoffLine, findCutoffLineForTurn } from "@/hooks/undo/undoHelpers"
+import { findCutoffLine, resolveUndoCut } from "@/hooks/undo/undoHelpers"
 
 /**
  * The one turn-boundary scan, and the thing it exists to prevent.
@@ -82,11 +82,11 @@ describe("Claude turn boundaries", () => {
     expect(turnBoundaryLines(claude, lines)).toEqual([1])
   })
 
-  it("cuts after the turn containing a uuid, however much of the file is loaded", () => {
-    expect(cutLineAfterUuid(claude, CLAUDE_LINES, "u1")).toBe(4)
-    // A uuid inside the last turn leaves nothing to remove.
-    expect(cutLineAfterUuid(claude, CLAUDE_LINES, "u2")).toBe("keep-all")
-    expect(cutLineAfterUuid(claude, CLAUDE_LINES, "not-here")).toBeNull()
+  it("cuts after the turn with a given id, however much of the file is loaded", () => {
+    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "u1")).toBe(4)
+    // The last turn leaves nothing to remove.
+    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "u2")).toBe("keep-all")
+    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "not-here")).toBeNull()
   })
 
   it("ignores a malformed line instead of shifting every index after it", () => {
@@ -110,6 +110,16 @@ describe("Codex turn boundaries", () => {
     // turn that no longer exists.
     expect(turnBoundaryLines(codex, lines)).toEqual([1, 4])
     expect(cutLineForTurnCount(codex, lines, 1)).toBe(4)
+  })
+
+  it("cuts by the parser's turn id, which no Codex record carries as a uuid", () => {
+    const labelled = jsonl([1, 2, 3].flatMap((n) => [
+      { timestamp: `2026-01-01T00:0${n}:00Z`, type: "turn_context", payload: { cwd: "/tmp", turn_id: `t-${n}` } },
+      { timestamp: `2026-01-01T00:0${n}:01Z`, type: "event_msg", payload: { type: "user_message", message: `ask ${n}` } },
+    ]))
+    const ids = codex.parse(labelled.join("\n")).turns.map((turn) => turn.id)
+    expect(cutLineAfterTurnId(codex, labelled, ids[1])).toBe(4)
+    expect(cutLineAfterTurnId(codex, labelled, ids[2])).toBe("keep-all")
   })
 
   it("does not open a second turn for an event carrying no message text", () => {
@@ -165,25 +175,23 @@ describe("cutting a window-relative turn out of a full transcript", () => {
 
   // The user scrolled a 4-turn session that only paged in the last two turns,
   // so "keep through the first visible turn" means turn 3 of the file.
-  const loadedWindow = [{ id: "u3" }, { id: "u4" }] as Parameters<
-    typeof findCutoffLineForTurn
-  >[1][]
+  const loadedWindow = [{ id: "u3" }, { id: "u4" }] as Parameters<typeof resolveUndoCut>[1][]
 
   it("anchors the cut to the turn, not to its position in the window", () => {
-    expect(findCutoffLineForTurn(fullFile, loadedWindow[0], 1, null)).toBe(6)
+    expect(resolveUndoCut(fullFile, loadedWindow[0], loadedWindow[1], 1, 2, null)?.cutoffLine).toBe(6)
   })
 
   it("is the bug: the same cut by window index keeps one turn instead of three", () => {
     expect(findCutoffLine(fullFile, 1, null)).toBe(2)
   })
 
-  it("falls back to the index cut when the turn carries no matchable id", () => {
-    expect(findCutoffLineForTurn(fullFile, { id: "not-in-file" } as never, 3, null))
+  it("falls back to the index cut when the turn carries no matchable id and everything is loaded", () => {
+    expect(resolveUndoCut(fullFile, { id: "not-in-file" } as never, undefined, 3, 4, null)?.cutoffLine)
       .toBe(findCutoffLine(fullFile, 3, null))
   })
 
   it("keeps the whole file when the last turn is the one retained", () => {
-    expect(findCutoffLineForTurn(fullFile, loadedWindow[1], 2, null)).toBe(fullFile.length)
+    expect(resolveUndoCut(fullFile, loadedWindow[1], undefined, 2, 2, null)?.cutoffLine).toBe(fullFile.length)
   })
 })
 

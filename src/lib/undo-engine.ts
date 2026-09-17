@@ -40,6 +40,7 @@ export function extractReversibleCalls(turn: Turn): ArchivedToolCall[] {
 export function archiveTurn(turn: Turn, index: number): ArchivedTurn {
   return {
     index,
+    id: turn.id,
     userMessage: getUserMessageText(turn.userMessage),
     toolCalls: extractReversibleCalls(turn),
     thinkingBlocks: turn.thinking.map((t) => t.thinking),
@@ -147,7 +148,8 @@ export function createBranch(
   turns: Turn[],
   branchPointTurnIndex: number,
   jsonlLines: string[],
-  childBranches?: Branch[]
+  childBranches?: Branch[],
+  branchPointTurnId?: string | null,
 ): Branch {
   const archivedTurns: ArchivedTurn[] = []
   for (let i = branchPointTurnIndex + 1; i < turns.length; i++) {
@@ -163,11 +165,58 @@ export function createBranch(
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     branchPointTurnIndex,
+    ...(branchPointTurnId !== undefined ? { branchPointTurnId } : {}),
     label,
     turns: archivedTurns,
     jsonlLines,
     ...(childBranches && childBranches.length > 0 ? { childBranches } : {}),
   }
+}
+
+// ── Turn-id anchoring ────────────────────────────────────────────────────
+
+/**
+ * Index given to a branch whose fork turn is not among the loaded turns. It is
+ * below every real cutoff, so such a branch is never shown, never offered for
+ * redo and never scooped into a new archive.
+ */
+export const UNLOADED_BRANCH_POINT = -2
+
+/**
+ * Branches with `branchPointTurnIndex` re-resolved against the loaded turns.
+ *
+ * Only the tail of a long session is loaded and the window moves on every
+ * reload and every older page, so a stored index stops meaning anything. The
+ * fork turn's id does not move.
+ */
+export function resolveBranchPoints(branches: Branch[], turns: Turn[]): Branch[] {
+  const indexById = new Map(turns.map((turn, index) => [turn.id, index]))
+  let moved = false
+  const resolved = branches.map((branch) => {
+    const { branchPointTurnId } = branch
+    if (branchPointTurnId === undefined) return branch
+    const index = branchPointTurnId === null
+      ? -1
+      : indexById.get(branchPointTurnId) ?? UNLOADED_BRANCH_POINT
+    if (index === branch.branchPointTurnIndex) return branch
+    moved = true
+    return { ...branch, branchPointTurnIndex: index }
+  })
+  return moved ? resolved : branches
+}
+
+/**
+ * A branch's children, indexed relative to where the branch itself now sits.
+ * A child forks from a turn inside its parent's archived range.
+ */
+export function anchorChildBranches(branch: Branch): Branch[] {
+  return (branch.childBranches ?? []).map((child) => {
+    if (typeof child.branchPointTurnId !== "string") return child
+    const offset = branch.turns.findIndex((turn) => turn.id === child.branchPointTurnId)
+    return offset < 0
+      ? child
+      : { ...child, branchPointTurnIndex: branch.branchPointTurnIndex + 1 + offset }
+  })
 }
 
 // ── Nested branch helpers ────────────────────────────────────────────────
@@ -225,28 +274,17 @@ export interface OperationSummary {
   operationCount: number
 }
 
-export function summarizeOperations(ops: FileOperation[]): OperationSummary {
-  const files = new Set<string>()
-  const turns = new Set<number>()
-  for (const op of ops) {
-    files.add(op.filePath)
-    turns.add(op.turnIndex)
-  }
-  return {
-    turnCount: turns.size,
-    fileCount: files.size,
-    filePaths: [...files],
-    operationCount: ops.length,
-  }
+/** What the operations touch. How many turns move is the caller's to say: most turns touch no file. */
+export function summarizeOperations(ops: FileOperation[]): Omit<OperationSummary, "turnCount"> {
+  const files = new Set(ops.map((op) => op.filePath))
+  return { fileCount: files.size, filePaths: [...files], operationCount: ops.length }
 }
 
 // ── Create empty undo state ──────────────────────────────────────────────
 
-export function createEmptyUndoState(sessionId: string, totalTurns: number): UndoState {
+export function createEmptyUndoState(sessionId: string): UndoState {
   return {
     sessionId,
-    currentTurnIndex: totalTurns - 1,
-    totalTurns,
     branches: [],
     activeBranchId: null,
   }

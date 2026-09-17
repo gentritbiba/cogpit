@@ -195,8 +195,6 @@ describe("undo routes", () => {
     function makeTransactionState() {
       return {
         sessionId: "session-1",
-        currentTurnIndex: 0,
-        totalTurns: 1,
         branches: [],
         activeBranchId: null,
       }
@@ -339,6 +337,19 @@ describe("undo routes", () => {
         "/home/testuser/project",
       )
       expect(mockedWriteFile).not.toHaveBeenCalled()
+      // A cold session is rewound by resuming its transcript, which can only
+      // find the checkpoint while the target message is still in the file.
+      expect(checkpointControls.rewindClaudeFiles.mock.invocationCallOrder[1]).toBeLessThan(
+        atomicFiles.writeOwnerOnlyText.mock.invocationCallOrder[0],
+      )
+      // Resuming a cold session for the preflight appends bookkeeping records,
+      // so the transcript is measured against expectedLineCount before it.
+      const sessionRead = mockedReadFile.mock.calls.findIndex(
+        ([path]) => path === "/tmp/test-projects/proj/sess.jsonl",
+      )
+      expect(mockedReadFile.mock.invocationCallOrder[sessionRead]).toBeLessThan(
+        checkpointControls.rewindClaudeFiles.mock.invocationCallOrder[0],
+      )
     })
 
     it("restores JSONL and state when a preflighted checkpoint cannot be applied", async () => {

@@ -8,13 +8,32 @@ import {
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import {
   cutLineAfterTurnIndex,
-  cutLineAfterUuid,
+  cutLineAfterTurnId,
   formatFor,
+  type AgentFormat,
 } from "../../../shared/session/agents"
 import { storeForDirName, storeForPath } from "../../agents"
 import { runtimeForDirName } from "../../agents/runtimes"
 import { resolveSessionFilePath } from "../../sessionPaths"
 import { sendJson, withJsonBody, type UseFn } from "../../http"
+
+/**
+ * Prefer the turn-id cut — exact regardless of how much of the session the
+ * client had loaded. Fall back to the index cut when the id is absent or
+ * unmatched (an agent may leave a turn unlabelled). Null keeps everything.
+ */
+function branchCutLine(
+  format: AgentFormat,
+  lines: readonly string[],
+  turnIndex: number | undefined,
+  turnId: string | undefined,
+): number | null {
+  if (turnId) {
+    const byId = cutLineAfterTurnId(format, lines, turnId)
+    if (byId !== null) return byId === "keep-all" ? null : byId
+  }
+  return turnIndex != null ? cutLineAfterTurnIndex(format, lines, turnIndex) : null
+}
 
 export function registerBranchSessionRoute(use: UseFn) {
   use("/api/branch-session", (req, res, next) => {
@@ -68,26 +87,8 @@ export function registerBranchSessionRoute(use: UseFn) {
         }
 
         const format = formatFor(descriptor.kind)
-        if (turnIndex != null || typeof turnUuid === "string") {
-          // Prefer the uuid cut — exact regardless of how much of the session
-          // the client had loaded. Fall back to the index cut when the uuid is
-          // absent or unmatched (not every agent writes stable uuids).
-          let truncLine: number | null = null
-          let resolvedByUuid = false
-          if (typeof turnUuid === "string" && turnUuid) {
-            const byUuid = cutLineAfterUuid(format, lines, turnUuid)
-            if (byUuid !== null) {
-              resolvedByUuid = true
-              truncLine = byUuid === "keep-all" ? null : byUuid
-            }
-          }
-          if (!resolvedByUuid && turnIndex != null) {
-            truncLine = cutLineAfterTurnIndex(format, lines, turnIndex)
-          }
-          if (truncLine !== null) {
-            lines = lines.slice(0, truncLine)
-          }
-        }
+        const truncLine = branchCutLine(format, lines, turnIndex, turnUuid)
+        if (truncLine !== null) lines = lines.slice(0, truncLine)
 
         const newSessionId = randomUUID()
         const { record, originalId } = format.brandBranch(

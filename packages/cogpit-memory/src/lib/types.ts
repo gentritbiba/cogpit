@@ -628,6 +628,8 @@ export interface ArchivedToolCall {
 
 export interface ArchivedTurn {
   index: number
+  /** The archived turn's `Turn.id`. Absent on archives written before ids were kept. */
+  id?: string
   userMessage: string | null
   toolCalls: ArchivedToolCall[]
   thinkingBlocks: string[]
@@ -639,7 +641,14 @@ export interface ArchivedTurn {
 export interface Branch {
   id: string
   createdAt: string
+  /**
+   * Position of the fork turn among the turns loaded when this was written.
+   * Only a long session's tail is loaded, so it is re-resolved from
+   * `branchPointTurnId` on every read and trusted as stored only without one.
+   */
   branchPointTurnIndex: number
+  /** `Turn.id` of the last turn kept before the fork; null when none was kept. */
+  branchPointTurnId?: string | null
   label: string
   turns: ArchivedTurn[]
   jsonlLines: string[]
@@ -649,8 +658,6 @@ export interface Branch {
 
 export interface UndoState {
   sessionId: string
-  currentTurnIndex: number
-  totalTurns: number
   branches: Branch[]
   activeBranchId: string | null
 }
