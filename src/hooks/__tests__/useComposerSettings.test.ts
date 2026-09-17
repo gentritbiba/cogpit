@@ -92,6 +92,21 @@ describe("useComposerSettings", () => {
     vi.useRealTimers()
   })
 
+  it("keeps the draft limit when creation finishes and resets it for another session", () => {
+    const { result, rerender } = renderSettings({ agentKind: "codex" })
+    expect(result.current.contextWindowAvailable).toBe(true)
+    act(() => result.current.setContextWindowTokens(1000000))
+    rerender({ agentKind: "codex", source: sessionSource })
+    expect(result.current.contextWindowTokens).toBe(1000000)
+    rerender({ agentKind: "codex", source: { ...sessionSource, fileName: "other.jsonl" } })
+    expect(result.current.contextWindowTokens).toBeNull()
+    act(() => result.current.setContextWindowTokens(200000))
+    rerender({ agentKind: "codex", source: null, pendingDirName: "new-project" })
+    expect(result.current.contextWindowTokens).toBeNull()
+    rerender({ agentKind: "claude" })
+    expect(result.current.contextWindowAvailable).toBe(false)
+  })
+
   it("derives provider capabilities and pins ultracode to xhigh", () => {
     const { result } = renderSettings({ agentKind: "claude", session: makeSession() })
 

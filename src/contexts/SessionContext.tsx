@@ -1,5 +1,6 @@
 import { createContext, useContext, type RefObject, type ReactNode } from "react"
 import type { ParsedSession } from "../../shared/session/types"
+import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
 import type { UseUndoRedoResult } from "@/hooks/useUndoRedo"
 import type { PtyChatStatus } from "@/hooks/usePtyChat"
@@ -53,6 +54,8 @@ export interface SessionContextValue {
   turnError: string | null
   /** Predicted next prompt from the last turn (null when the CLI sent none) */
   promptSuggestion: string | null
+  /** The runtime refused the turn on a spent allowance (null while it is serving) */
+  rateLimit: RateLimitBlock | null
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

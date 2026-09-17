@@ -3,6 +3,7 @@
  * so that heavy child-process work (claude CLI, PTY sessions, search indexing)
  * never blocks the main process event loop or freezes the UI.
  */
+import { CLICKUP_CONFIG_FILE } from "../server/lib/clickupConfig"
 import { createServerComposition } from "../server/app-server"
 import { getConfig } from "../server/config"
 import { removePortFile, writePortFile } from "../server/lib/portFile"
@@ -23,6 +24,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
   try {
     const { httpServer } = await createServerComposition(staticDir, userDataDir, {
       mode: "electron",
+      legacyClickUpPath: CLICKUP_CONFIG_FILE,
       viteDevUrl: process.env.ELECTRON_RENDERER_URL,
     })
 

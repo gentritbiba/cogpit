@@ -1,3 +1,5 @@
+import { BUILTIN_SKILLS } from "../agents/claudeCommands"
+export { BUILTIN_SKILLS }
 import { soleDescriptorWhere } from "../../shared/session/agent-descriptors"
 import { readdir, readFile } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
@@ -55,47 +57,6 @@ async function scanSkillsDir(
 const BUILTIN_PUBLISHERS = new Set([
   "claude-plugins-official",
 ])
-
-function builtin(
-  name: string,
-  type: "command" | "skill",
-  description: string,
-): SlashSuggestion {
-  return { name, description, type, source: "built-in", filePath: "" }
-}
-
-/**
- * Skills and commands bundled into the Claude Code binary itself.
- * These aren't discoverable from the filesystem — they're hardcoded in the CLI.
- * Descriptions are the CLI's own command-menu wording.
- *
- * Verified against CLI 2.1.245: the roster is the intersection of the bundled
- * skills at https://code.claude.com/docs/en/commands and the `slash_commands`
- * the SDK advertises in its init message. Commands the CLI reports in
- * `terminal_slash_commands` (`/doctor`, `/color`) are left out — their UX is
- * bound to the terminal, so they can't work from this UI.
- * `/output-style` additionally verified with CLI 2.1.270 supportedCommands().
- */
-export const BUILTIN_SKILLS: SlashSuggestion[] = [
-  builtin("output-style", "command", "List output styles or switch to one"),
-  builtin("batch", "skill", "Plan a large change; background agents each open a PR"),
-  builtin("claude-api", "skill", "Build and debug apps that use the Claude API"),
-  builtin("code-review", "skill", "Review the current diff or a PR for bugs and cleanups"),
-  builtin("dataviz", "skill", "Chart and dashboard design guidance"),
-  builtin("debug", "skill", "Turn on debug logging and investigate problems"),
-  builtin("design-sync", "skill", "Push your design system components to claude.ai/design"),
-  builtin("fewer-permission-prompts", "skill", "Pre-approve safe read-only commands based on your usage"),
-  builtin("loop", "skill", "Repeat a prompt or command on an interval (e.g. /loop 5m /foo)"),
-  builtin("run", "skill", "Launch this project's app to see your change working"),
-  builtin("run-skill-generator", "skill", "Create a skill that knows how to run this project's app"),
-  builtin("simplify", "skill", "Clean up the changed code without changing behavior"),
-  builtin("verify", "skill", "Build and run your app to confirm a code change does what it should"),
-  builtin("compact", "command", "Free up context by summarizing the conversation so far"),
-  builtin("init", "command", "Initialize a new CLAUDE.md file with codebase documentation"),
-  builtin("schedule", "command", "Create and manage scheduled remote Claude Code agents"),
-  builtin("security-review", "command", "Complete a security review of the pending changes on the current branch"),
-  builtin("update-config", "command", "Change settings: hooks, permissions, environment variables"),
-]
 
 /**
  * Scan a directory for .md files and return a suggestion for each.

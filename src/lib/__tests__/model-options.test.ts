@@ -28,6 +28,15 @@ describe("model options store", () => {
     expect(values).toContain("")
   })
 
+  it("offers Astra without guessing the user's configured default", () => {
+    const models = fallbackModelsFor("codex")
+    expect(models.find((model) => model.value === "")?.resolvedModel).toBeUndefined()
+    const astra = models.find((model) => model.value === "gpt-6-astra")
+    expect(astra?.supportedReasoningEfforts?.map((effort) => effort.value)).toContain("ultra")
+    expect(astra?.serviceTiers?.[0].description).toBe("2× speed with increased usage")
+    expect(models.find((model) => model.value === "gpt-5.6-sol")?.isDefault).not.toBe(true)
+  })
+
   it("keeps Copilot fallbacks minimal and conservative until the live catalog loads", () => {
     const copilot = getModelOptions("copilot")
     expect(fallbackModelsFor("copilot").map((option) => option.value)).toEqual(["", "auto"])

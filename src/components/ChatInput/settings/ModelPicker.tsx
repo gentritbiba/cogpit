@@ -1,3 +1,4 @@
+import { ContextWindowControl } from "./ContextWindowControl"
 import { useId, type ReactNode } from "react"
 import { Sparkles, Zap } from "lucide-react"
 import { Popover, PopoverTrigger } from "@/components/ui/popover"
@@ -5,7 +6,7 @@ import { Toggle } from "@/components/ui/toggle"
 import { capabilitiesFor, type AgentKind } from "@/lib/agents"
 import { loadModelCatalog } from "@/hooks/useModelOptions"
 import { cn, type ServiceTierOption } from "@/lib/utils"
-import { EffortSlider } from "./EffortSlider"
+import { SettingsSlider } from "./SettingsSlider"
 import { AGENT_OPTIONS } from "./modelOptions"
 import {
   PickerChip,
@@ -30,6 +31,8 @@ interface ModelPickerProps {
   effortOptions: readonly SettingOption[]
   onEffortChange: (effort: string) => void
   fastTier?: ServiceTierOption
+  contextWindowTokens?: number | null
+  onContextWindowTokensChange?: (tokens: number | null) => void
   fastModeEnabled?: boolean
   onFastModeEnabledChange?: (enabled: boolean) => void
   ultracodeEnabled?: boolean
@@ -48,6 +51,8 @@ export function ModelPicker({
   selectedEffort,
   effortOptions,
   onEffortChange,
+  contextWindowTokens,
+  onContextWindowTokensChange,
   fastTier,
   fastModeEnabled = false,
   onFastModeEnabledChange,
@@ -67,6 +72,7 @@ export function ModelPicker({
   // model lacks it, so switching models explains what changed instead of
   // silently dropping a control.
   const showEffort = capabilities.reasoningEffort
+  const showContext = capabilities.configurableContextWindow && !!onContextWindowTokensChange
   const showFast = capabilities.fastTier
   const showUltracode = capabilities.ultracode
   const fastAvailable = !!fastTier && !!onFastModeEnabledChange
@@ -119,7 +125,7 @@ export function ModelPicker({
         className="w-[34rem] max-w-[calc(100vw-1.5rem)]"
       >
         <div className="grid min-h-0 flex-1 grid-cols-[10.5rem_minmax(0,1fr)] overflow-hidden">
-          <div className="flex flex-col border-r bg-muted/30 p-1.5">
+          <div className="flex min-h-0 flex-col overflow-y-auto border-r bg-muted/30 p-1.5">
             <PickerSectionLabel id={providerLabelId}>Provider</PickerSectionLabel>
             <PickerList
               value={agentKind}
@@ -146,8 +152,11 @@ export function ModelPicker({
           <div className="flex min-h-0 flex-col p-1.5">
             <div className="flex items-center justify-between gap-2 pr-0.5">
               <PickerSectionLabel id={modelLabelId}>Model</PickerSectionLabel>
-              {(showFast || showUltracode) && (
+              {(showContext || showFast || showUltracode) && (
                 <div className="flex items-center gap-1">
+                  {showContext && (
+                    <ContextWindowControl value={contextWindowTokens ?? null} onChange={onContextWindowTokensChange!} />
+                  )}
                   {showFast && (
                     <ModeToggle
                       label="Fast mode"
@@ -216,7 +225,7 @@ export function ModelPicker({
             </div>
             {effortOptions.length > 0
               ? (
-                <EffortSlider
+                <SettingsSlider
                   options={effortOptions}
                   value={selectedEffort}
                   onChange={onEffortChange}

@@ -21,6 +21,7 @@ interface UseProjectSessionLaunchOptions {
   pendingCwd: string | null
   model: string
   effort: string
+  contextWindowTokens?: number | null
   fastMode: boolean
   ultracode: boolean
   mcpConfig: string | null
@@ -44,6 +45,7 @@ export function useProjectSessionLaunch({
   pendingCwd,
   model,
   effort,
+  contextWindowTokens,
   fastMode,
   ultracode,
   mcpConfig,
@@ -67,6 +69,7 @@ export function useProjectSessionLaunch({
     onModelRejected,
     model,
     effort,
+    contextWindowTokens,
     fastMode,
     ultracode,
     mcpConfig,
@@ -74,8 +77,12 @@ export function useProjectSessionLaunch({
   const beginNewSession = newSession.handleNewSession
 
   const [pendingAgentSource, setPendingAgentSource] = useState<{
-    /** The lossy-encoded agent's directory for `cwd`, as the server knows it. */
-    discoveredDirName: string
+    /**
+     * The lossy-encoded agent's directory for `cwd`, as the server knows it.
+     * Null when that agent has never run here; its dirName is then encoded
+     * fresh from the cwd, so every provider stays selectable.
+     */
+    discoveredDirName: string | null
     cwd: string
   } | null>(null)
   const discoveredDirNameCacheRef = useRef(new Map<string, string | null>())
@@ -124,7 +131,7 @@ export function useProjectSessionLaunch({
       ? projectDirNameFor(startsInLossyKind, normalizedCwd)
       : await resolveDiscoveredDirName(normalizedCwd)
 
-    setPendingAgentSource(discoveredDirName ? { discoveredDirName, cwd: normalizedCwd } : null)
+    setPendingAgentSource({ discoveredDirName, cwd: normalizedCwd })
     beginNewSession(
       startsInLossyKind && discoveredDirName ? discoveredDirName : dirName,
       normalizedCwd,
@@ -141,7 +148,7 @@ export function useProjectSessionLaunch({
     const nextDirName = projectDirNameFor(
       agentKind,
       pendingAgentSource.cwd,
-      pendingAgentSource.discoveredDirName,
+      pendingAgentSource.discoveredDirName ?? undefined,
     )
     beginNewSession(nextDirName, pendingAgentSource.cwd)
   }, [pendingAgentSource, beginNewSession])

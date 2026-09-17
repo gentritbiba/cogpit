@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react"
-import { Search, X } from "lucide-react"
+import { ArrowLeft, Search, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,6 +63,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
   const [sections, setSections] = useState<ConfigTreeSection[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedFile, setSelectedFile] = useState<ConfigItem | null>(null)
+  const [mobileBrowse, setMobileBrowse] = useState(false)
   const [creating, setCreating] = useState<{ category: Category; globalDir: string | null; projectDir: string | null; fileType: "command" | "skill" | "agent" } | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [renamingItem, setRenamingItem] = useState<ConfigItem | null>(null)
@@ -117,6 +120,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
   const handleSelect = useCallback((item: ConfigItem) => {
     setSelectedFile(item)
+    setMobileBrowse(false)
     setCreating(null)
   }, [])
 
@@ -211,7 +215,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
   return (
     <div className="flex flex-1 min-h-0 min-w-0">
-      <div className="flex min-h-0 w-80 shrink-0 flex-col border-r bg-sidebar">
+      <div className={cn("min-h-0 shrink-0 flex-col border-r bg-sidebar md:flex md:w-80", selectedFile && !mobileBrowse ? "hidden" : "flex w-full")}>
         <div className="flex h-11 items-center gap-2 border-b px-3">
           <span className="text-sm font-medium text-foreground">Configuration</span>
           {projectPath && (
@@ -280,11 +284,16 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
         </ScrollArea>
       </div>
 
-      {selectedFile ? (
-        <ConfigEditor file={selectedFile} onDeleted={handleDeleted} readOnly={!canWriteConfig} />
-      ) : (
-        <EmptyState />
-      )}
+      <div className={cn("min-h-0 min-w-0 flex-1 flex-col md:flex", selectedFile && !mobileBrowse ? "flex" : "hidden")}>
+        {selectedFile ? (
+          <>
+            <Button variant="ghost" className="min-h-11 shrink-0 justify-start md:hidden" onClick={() => setMobileBrowse(true)}>
+              <ArrowLeft data-icon="inline-start" />All configuration files
+            </Button>
+            <ConfigEditor file={selectedFile} onDeleted={handleDeleted} readOnly={!canWriteConfig} />
+          </>
+        ) : <EmptyState />}
+      </div>
 
       <AlertDialog
         open={pendingDeleteItem !== null}

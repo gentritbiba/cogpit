@@ -16,9 +16,11 @@ import type {
   UserDialogResult,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
+import type { PermissionRequest } from "../shared/contracts/permissions"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { claudeCliPath } from "./agents/claudeExecutable"
 import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
+import { readSdkRateLimit } from "./agents/rateLimit"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
@@ -52,18 +54,9 @@ export const streamingEnabledForTest = streamingEnabled
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-export interface PermissionRequestData {
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  title?: string
-  displayName?: string
-  description?: string
-  decisionReason?: string
-  blockedPath?: string
+export interface PermissionRequestData extends Omit<PermissionRequest, "suggestions" | "availableDecisions"> {
   suggestions?: PermissionUpdate[]
-  timestamp: number
+  suppressAlwaysAllowRule?: boolean
 }
 
 interface PendingPermission extends PermissionRequestData {
@@ -185,11 +178,12 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
     // regular tools — the callback is registered only so AskUserQuestion (above)
     // has somewhere to route its answers. If the CLI ever does call it, auto-
     // allow instead of queuing an invisible permission request.
-    if (state.permissionMode === "bypassPermissions") {
+    const requiresExplicitChoice = options.defaultToNo || options.suppressAlwaysAllowRule
+    if (state.permissionMode === "bypassPermissions" && !requiresExplicitChoice) {
       return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
     }
 
-    if (state.sessionAllowedTools.has(toolName)) {
+    if (state.sessionAllowedTools.has(toolName) && !requiresExplicitChoice) {
       return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
     }
 
@@ -207,6 +201,8 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
         decisionReason: options.decisionReason,
         blockedPath: options.blockedPath,
         suggestions: options.suggestions,
+        defaultToNo: options.defaultToNo,
+        suppressAlwaysAllowRule: options.suppressAlwaysAllowRule,
         timestamp: Date.now(),
         resolve,
       }
@@ -572,6 +568,14 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     // status (with a compact_result) when it is done.
     const status = (msg as unknown as { status?: string | null }).status
     streamBus.publishCompacting(state.sessionId, status === "compacting")
+  }
+
+  if (msg.type === "rate_limit_event") {
+    // The runtime reports every change, so an "allowed" report is what lifts a
+    // block — the refused turn's own result says only that it failed, never
+    // that the allowance came back.
+    const info = (msg as unknown as { rate_limit_info?: unknown }).rate_limit_info
+    streamBus.publishRateLimit(state.sessionId, readSdkRateLimit(info))
   }
 
   if (msg.type === "system" && msg.subtype === "task_progress") {
@@ -1147,7 +1151,8 @@ function applyDecision(
     pending.resolve({ behavior: "deny", message: "User declined tool execution." })
     return
   }
-  if (behavior === "allow_always") {
+  const remember = behavior === "allow_always" && !pending.suppressAlwaysAllowRule
+  if (remember) {
     if (!pending.suggestions?.length) {
       state.sessionAllowedTools.add(pending.toolName)
     }
@@ -1155,7 +1160,7 @@ function applyDecision(
   pending.resolve({
     behavior: "allow",
     updatedInput: pending.input,
-    ...(behavior === "allow_always" && pending.suggestions?.length
+    ...(remember && pending.suggestions?.length
       ? { updatedPermissions: pending.suggestions }
       : {}),
   })

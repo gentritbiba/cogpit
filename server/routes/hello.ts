@@ -39,6 +39,10 @@ const VERSION: string = (() => {
  */
 const INSTANCE_ID: string = randomBytes(8).toString("hex")
 
+export function getAppVersion(): string {
+  return VERSION
+}
+
 /** This instance's per-boot id, consumed by the hub's self-add check. */
 export function getInstanceId(): string {
   return INSTANCE_ID

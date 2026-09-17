@@ -197,6 +197,9 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     slashSuggestionsLoading: false,
     // Suggestions are offered next to the composer, and a guest has none.
     promptSuggestion: null,
+    // A share is read-only and the allowance belongs to the host's account, so
+    // there is nothing here a guest could act on.
+    rateLimit: null,
     actions: {
       handleStopSession,
       handleOpenBranches: noop,

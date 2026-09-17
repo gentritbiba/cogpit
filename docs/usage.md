@@ -124,6 +124,6 @@ Claude Code sessions can be shared with a guest through a passphrase-protected l
 
 Browse and edit the installed CLIs' instruction files, settings, and skills at global and project scope. Commands, agents, themes, and MCP configuration appear for CLIs that support them. Cogpit writes changes to disk when you save.
 
-GitHub, ClickUp, and Vercel panels are read-only integrations. GitHub uses your authenticated `gh` CLI for Actions, pull requests, and issues. ClickUp uses a personal API token and supports a linked list per project. Vercel uses CLI 50.5.1 or newer and the project linked at the exact session root. The [plugin guide](plugins.md) covers setup and the compile-time API for custom panels. Runtime plugin installation is not supported.
+GitHub, ClickUp, Vercel, and Cloudflare panels are read-only integrations. GitHub uses your authenticated `gh` CLI for Actions, pull requests, and issues. ClickUp uses a personal API token and supports a linked list per project. Vercel uses CLI 50.5.1 or newer and the project linked at the exact session root. Cloudflare uses Wrangler 4.65.0 or newer and the nearest Wrangler configuration in the workspace. The [plugin guide](plugins.md) covers setup, installation from signed `.cogpit-plugin` files, and the SDK for building custom panels. Runtime plugins can be installed through Plugins → Install from file without rebuilding Cogpit.
 
 Press `Cmd+K` to open the command palette. Customize shortcuts in settings, with conflict detection. Cogpit includes Dark, Deep OLED, and Light themes.

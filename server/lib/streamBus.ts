@@ -17,6 +17,7 @@
  * completes. `completeMessage()` is called at that moment, so a late
  * subscriber's snapshot never duplicates what the JSONL tail already serves.
  */
+import type { RateLimitBlock } from "../../shared/session/rateLimit"
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ export type StreamBusEvent =
   | { type: "agent_progress"; toolUseId: string; summary: string }
   | { type: "prompt_suggestion"; suggestion: string }
   | { type: "compacting"; active: boolean }
+  | { type: "rate_limit"; block: RateLimitBlock | null }
 
 /**
  * Minimal structural type for the Anthropic raw stream events we consume —
@@ -93,6 +95,8 @@ interface SessionStreamState {
   listeners: Set<Listener>
   /** The runtime is summarising context; nothing streams until it finishes. */
   compacting: boolean
+  /** The runtime refused the turn on a spent allowance; null while it is serving. */
+  rateLimit: RateLimitBlock | null
 }
 
 const sessions = new Map<string, SessionStreamState>()
@@ -107,6 +111,7 @@ function getOrCreate(sessionId: string): SessionStreamState {
       flushTimer: null,
       listeners: new Set(),
       compacting: false,
+      rateLimit: null,
     }
     sessions.set(sessionId, state)
   }
@@ -120,7 +125,8 @@ function maybeGc(sessionId: string, state: SessionStreamState): void {
     state.messages.size === 0 &&
     state.lanes.size === 0 &&
     state.pending.length === 0 &&
-    !state.compacting
+    !state.compacting &&
+    state.rateLimit === null
   ) {
     if (state.flushTimer) clearTimeout(state.flushTimer)
     sessions.delete(sessionId)
@@ -436,6 +442,32 @@ export function publishCompacting(sessionId: string, active: boolean): void {
 
 export function isCompacting(sessionId: string): boolean {
   return sessions.get(sessionId)?.compacting ?? false
+}
+
+/**
+ * Raise or lift the rate-limit block on a session.
+ *
+ * Unlike every other flag here this one deliberately outlives `clear()`: the
+ * refused turn ends in a `result` the instant it is refused, so a block torn
+ * down with the rest of the turn's state would never reach the client that
+ * needs to show it. It lifts only when the runtime reports the session served
+ * again, which is also what lets an unwatched blocked session be collected.
+ */
+export function publishRateLimit(sessionId: string, block: RateLimitBlock | null): void {
+  const state = block ? getOrCreate(sessionId) : sessions.get(sessionId)
+  if (!state || sameBlock(state.rateLimit, block)) return
+  state.rateLimit = block
+  emit(state, { type: "rate_limit", block })
+  if (!block) maybeGc(sessionId, state)
+}
+
+export function getRateLimit(sessionId: string): RateLimitBlock | null {
+  return sessions.get(sessionId)?.rateLimit ?? null
+}
+
+function sameBlock(a: RateLimitBlock | null, b: RateLimitBlock | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.limit === b.limit && a.resetsAt === b.resetsAt && a.lowPriority === b.lowPriority
 }
 
 /**

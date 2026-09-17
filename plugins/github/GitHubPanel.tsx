@@ -1,11 +1,11 @@
+import { GitHubNavigation } from "./navigation.js"
 import { useState, type ReactNode } from "react"
-import { AlertCircle, ArrowUpRight, RefreshCw, X } from "lucide-react"
-import type { GitHubErrorResponse } from "../../shared/contracts/github"
+import { AlertCircle, ArrowUpRight, RefreshCw } from "lucide-react"
+import type { GitHubErrorResponse } from "@cogpit/plugin-integrations"
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-  Badge,
   Button,
   cn,
   Skeleton,
@@ -14,21 +14,25 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-  type WorkspacePanelIndicatorProps,
-  type WorkspacePanelProps,
-} from "@/plugin-api"
-import { ActionsTab, isActive, isFailed, type BranchFocus } from "./ActionsTab"
-import { IssuesTab } from "./IssuesTab"
-import { PullRequestsTab, isOpen } from "./PullRequestsTab"
+} from "@cogpit/plugin-ui"
+import { ActionsTab, isActive, type BranchFocus } from "./ActionsTab.js"
+import { IssuesTab } from "./IssuesTab.js"
+import { PullRequestsTab, isOpen } from "./PullRequestsTab.js"
 import {
   useGitHubActions,
   useGitHubIssues,
   useGitHubPulls,
   useGitHubPullSessions,
   type GitHubResourceState,
-} from "./githubStore"
+} from "./githubStore.js"
 
 type Tab = "actions" | "pulls" | "issues"
+export interface GitHubPanelContext {
+  projectKey: string | null
+  composePrompt?: (text: string) => void
+  openSession?: (handle: string) => void
+}
+export interface GitHubPanelProps { context: GitHubPanelContext; active: boolean; openExternal?: (url: string) => void }
 
 const REFRESH_LABEL: Record<Tab, string> = {
   actions: "Refresh GitHub Actions",
@@ -103,57 +107,14 @@ function TabCount({ value, attention }: { value: number | null; attention?: bool
   )
 }
 
-export function GitHubIndicator({ context }: WorkspacePanelIndicatorProps) {
-  const enabled = context.projectPath !== null
-  const { data } = useGitHubActions(context.projectPath, enabled)
-  const pulls = useGitHubPulls(context.projectPath, enabled)
-  const activeCount = data?.runs.filter((run) => isActive(run.status)).length ?? 0
-  const latestFailed = data?.runs[0]?.conclusion ? isFailed(data.runs[0].conclusion) : false
-  const reviewCount = pulls.data?.pulls.filter((pull) => isOpen(pull) && pull.reviewRequested).length ?? 0
-
-  if (activeCount > 0) {
-    return (
-      <Badge
-        className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]"
-        aria-label={`${activeCount} active GitHub Actions run${activeCount === 1 ? "" : "s"}`}
-      >
-        {activeCount}
-      </Badge>
-    )
-  }
-  if (latestFailed) {
-    return (
-      <Badge
-        variant="destructive"
-        className="absolute -right-0.5 -top-0.5 size-3 p-0 text-[8px]"
-        aria-label="Latest GitHub Actions run failed"
-      >
-        !
-      </Badge>
-    )
-  }
-  if (reviewCount > 0) {
-    return (
-      <Badge
-        variant="secondary"
-        className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]"
-        aria-label={`${reviewCount} pull request${reviewCount === 1 ? "" : "s"} waiting for your review`}
-      >
-        {reviewCount}
-      </Badge>
-    )
-  }
-  return null
-}
-
-export function GitHubPanel({ context, active, closePanel }: WorkspacePanelProps) {
+export function GitHubPanel({ context, active, openExternal }: GitHubPanelProps) {
   const [tab, setTab] = useState<Tab>("actions")
   const [focus, setFocus] = useState<BranchFocus | null>(null)
-  const projectPath = context.projectPath
-  const runs = useGitHubActions(projectPath, active)
-  const pulls = useGitHubPulls(projectPath, active)
-  const pullSessions = useGitHubPullSessions(projectPath, active && tab === "pulls")
-  const issues = useGitHubIssues(projectPath, active && tab === "issues")
+  const projectKey = context.projectKey
+  const runs = useGitHubActions(projectKey, active)
+  const pulls = useGitHubPulls(projectKey, active)
+  const pullSessions = useGitHubPullSessions(projectKey, active && tab === "pulls")
+  const issues = useGitHubIssues(projectKey, active && tab === "issues")
   const current = { actions: runs, pulls, issues }[tab]
 
   function showChecks(branch: string): void {
@@ -166,11 +127,15 @@ export function GitHubPanel({ context, active, closePanel }: WorkspacePanelProps
   const openIssues = issues.data ? issues.data.issues.filter((issue) => issue.state === "open").length : null
 
   return (
-    <Tabs
+    <GitHubNavigation.Provider value={openExternal}><Tabs
       value={tab}
       onValueChange={(value) => { if (isTab(value)) setTab(value) }}
       className="size-full min-h-0 gap-0"
       aria-label="GitHub panel"
+      onClickCapture={(event) => {
+        const link = event.target instanceof Element ? event.target.closest("a[href]") : null
+        if (link && openExternal) { event.preventDefault(); event.stopPropagation(); openExternal(link.getAttribute("href")!) }
+      }}
     >
       <header className="flex h-12 shrink-0 items-center gap-2 border-b pl-4 pr-2">
         <div className="min-w-0 flex-1">
@@ -195,13 +160,10 @@ export function GitHubPanel({ context, active, closePanel }: WorkspacePanelProps
           variant="ghost"
           size="icon-sm"
           onClick={() => { void current.refresh() }}
-          disabled={current.loading || current.refreshing || !projectPath}
+          disabled={current.loading || current.refreshing || !projectKey}
           aria-label={REFRESH_LABEL[tab]}
         >
           {current.refreshing ? <Spinner /> : <RefreshCw />}
-        </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close GitHub">
-          <X />
         </Button>
       </header>
 
@@ -225,16 +187,16 @@ export function GitHubPanel({ context, active, closePanel }: WorkspacePanelProps
       <div className="flex min-h-0 flex-1 flex-col">
         <TabsContent value="actions" className="flex min-h-0 flex-col">
           <ResourceFrame state={runs} loadingLabel="Loading workflow runs" onRetry={() => { void runs.refresh() }}>
-            {(data) => projectPath && <ActionsTab data={data} projectPath={projectPath} focus={focus} />}
+            {(data) => projectKey && <ActionsTab data={data} projectKey={projectKey} focus={focus} />}
           </ResourceFrame>
         </TabsContent>
         <TabsContent value="pulls" className="flex min-h-0 flex-col">
           <ResourceFrame state={pulls} loadingLabel="Loading pull requests" onRetry={() => { void pulls.refresh() }}>
-            {(data) => projectPath && (
+            {(data) => projectKey && (
               <PullRequestsTab
                 data={data}
                 sessions={pullSessions.data?.sessions ?? []}
-                projectPath={projectPath}
+                projectKey={projectKey}
                 openSession={context.openSession}
                 onShowChecks={showChecks}
               />
@@ -249,6 +211,6 @@ export function GitHubPanel({ context, active, closePanel }: WorkspacePanelProps
           </ResourceFrame>
         </TabsContent>
       </div>
-    </Tabs>
+    </Tabs></GitHubNavigation.Provider>
   )
 }

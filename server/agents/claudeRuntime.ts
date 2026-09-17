@@ -334,9 +334,9 @@ export const claudeRuntime: AgentRuntime = {
     return ids.flatMap((id) => getSDKPermissions(id).map((request) => ({
       ...request,
       sessionId: id,
-      // The SDK parks every request on the same callback, so all three
-      // decisions are always answerable.
-      availableDecisions: ["allow", "allow_always", "deny"] as ApprovalDecision[],
+      availableDecisions: (request.suppressAlwaysAllowRule
+        ? ["allow", "deny"]
+        : ["allow", "allow_always", "deny"]) as ApprovalDecision[],
     })))
   },
 

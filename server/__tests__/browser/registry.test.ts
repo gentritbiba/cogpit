@@ -138,6 +138,7 @@ describe("listBrowsers", () => {
         name: "default",
         isDefault: true,
         running: false,
+        archived: false,
         note: null,
         createdAt: null,
         lastUsedAt: null,
@@ -424,5 +425,68 @@ describe("touchLastUrl", () => {
     expect(() => touchLastUrl("tmp-x", "https://example.com")).not.toThrow()
     expect(existsSync(registryFile())).toBe(false)
     expect(existsSync(home)).toBe(false)
+  })
+})
+
+describe("browser archiving", () => {
+  const old = new Date(Date.now() - 25 * 60 * 60 * 1000)
+
+  it("archives stopped browsers after 24 hours, including profiles without registry entries", async () => {
+    writeDriver("old", "session", old)
+    writeDriver("recent", "session", new Date())
+    writeRegistry({ version: 1, sessions: { unused: { createdAt: old.toISOString() } } })
+    const sessions = await listBrowsers(neverRunning)
+    expect(sessions.find((session) => session.name === "old")?.archived).toBe(true)
+    expect(sessions.find((session) => session.name === "unused")?.archived).toBe(true)
+    expect(sessions.find((session) => session.name === "recent")?.archived).toBe(false)
+    expect(existsSync(profileDir("old"))).toBe(true)
+  })
+
+  it("keeps running browsers and default visible regardless of age", async () => {
+    writeDriver("default", "session", old)
+    writeDriver("working", "session", old)
+    const sessions = await listBrowsers(async (name) => name === "working")
+    expect(sessions.every((session) => !session.archived)).toBe(true)
+    expect(() => updateBrowser("default", { archived: true })).toThrow(BrowserNameError)
+  })
+
+  it("archives without deleting profile data, restores, and resets the inactivity period", async () => {
+    createBrowser("work", "Saved login")
+    const saved = join(profileDir("work"), "saved-login")
+    writeFileSync(saved, "keep me")
+    writeDriver("work", "session", old)
+    updateBrowser("work", { archived: true })
+    expect((await readBrowser("work", neverRunning)).archived).toBe(true)
+    expect(readRegistry().sessions.work.archivedAt).toBeDefined()
+    expect(readFileSync(saved, "utf8")).toBe("keep me")
+    updateBrowser("work", { archived: false })
+    expect((await readBrowser("work", neverRunning)).archived).toBe(false)
+    expect(readRegistry().sessions.work.archivedAt).toBeUndefined()
+    expect(readRegistry().sessions.work.restoredAt).toBeDefined()
+    expect(readFileSync(saved, "utf8")).toBe("keep me")
+  })
+
+  it("brings an archived browser back when an agent uses it again", async () => {
+    createBrowser("work")
+    updateBrowser("work", { archived: true })
+    const afterArchive = new Date(Date.now() + 1_000)
+    writeDriver("work", "session", afterArchive)
+    expect((await readBrowser("work", neverRunning)).archived).toBe(false)
+  })
+
+  it("archives exactly at the 24 hour boundary and ages a restored browser again", async () => {
+    const now = Date.now()
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+    try {
+      writeDriver("work", "session", new Date(now - 24 * 60 * 60 * 1000 + 1))
+      expect((await readBrowser("work", neverRunning)).archived).toBe(false)
+      clock.mockReturnValue(now + 1)
+      expect((await readBrowser("work", neverRunning)).archived).toBe(true)
+      updateBrowser("work", { archived: false })
+      clock.mockReturnValue(now + 25 * 60 * 60 * 1000)
+      expect((await readBrowser("work", neverRunning)).archived).toBe(true)
+    } finally {
+      clock.mockRestore()
+    }
   })
 })

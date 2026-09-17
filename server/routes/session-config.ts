@@ -1,3 +1,4 @@
+import { isValidContextWindowTokens } from "../../shared/session/contextWindowSettings"
 import type { IncomingMessage } from "node:http"
 import { dirs, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../helpers"
 import { findJsonlPath } from "../sessionPaths"
@@ -78,7 +79,11 @@ function parsePatch(parsed: unknown): Record<string, unknown> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Session config must be a JSON object")
   }
-  return parsed as Record<string, unknown>
+  const patch = parsed as Record<string, unknown>
+  if (!isValidContextWindowTokens(patch.contextWindowTokens)) {
+    throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Context window must be a positive whole number of tokens or null")
+  }
+  return patch
 }
 
 async function readPatch(req: IncomingMessage): Promise<Record<string, unknown>> {

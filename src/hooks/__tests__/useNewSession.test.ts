@@ -110,8 +110,8 @@ describe("useNewSession", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
-  it("createAndSend preserves the exact cwd and promotes immediately", async () => {
-    const { result } = renderHook(() => useNewSession(defaultOpts))
+  it("createAndSend preserves cwd and context limit and promotes immediately", async () => {
+    const { result } = renderHook(() => useNewSession({ ...defaultOpts, contextWindowTokens: 1000000 }))
 
     // Set up the pending dirName
     act(() => {
@@ -142,6 +142,7 @@ describe("useNewSession", () => {
     expect(sessionId).toBe("session-123")
     const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     expect(body.cwd).toBe("/tmp/my-project")
+    expect(body.contextWindowTokens).toBe(1000000)
     expect(result.current.creatingSession).toBe(false)
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({

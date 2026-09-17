@@ -22,6 +22,7 @@ import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
 import { shareRequestAllowed } from "./share/allowlist"
 import { getShareWithHash, touchShare } from "./share/registry"
 import { markShareGuestRequest } from "./share/requestGuest"
+import { clearRequestAuthentication, setRequestAuthentication } from "./requestAuthentication"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -957,6 +958,7 @@ function handleShareRequest(
 }
 
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  clearRequestAuthentication(req)
   if (isTeamEdition()) return teamAuthMiddleware(req, res, next)
 
   const url = req.url || "/"
@@ -981,6 +983,10 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
       return sendJson(res, 403, { error: "Untrusted request source" })
     }
+    const token = validSessionToken(req)
+    setRequestAuthentication(req, token
+      ? { kind: "session", token, principal: getSessionPrincipal(token) }
+      : { kind: "local" })
     return next()
   }
 
@@ -999,6 +1005,7 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
   }
 
   trackAuthenticatedHttpStream(req, res, sessionToken)
+  setRequestAuthentication(req, { kind: "session", token: sessionToken, principal: getSessionPrincipal(sessionToken) })
   next()
 }
 
@@ -1057,5 +1064,6 @@ function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: Nex
   }
 
   trackAuthenticatedHttpStream(req, res, token)
+  setRequestAuthentication(req, { kind: "session", token, principal })
   next()
 }

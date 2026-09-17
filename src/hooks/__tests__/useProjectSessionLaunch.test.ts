@@ -116,7 +116,7 @@ describe("useProjectSessionLaunch", () => {
     expect(mockAuthFetch).toHaveBeenCalledOnce()
   })
 
-  it("still starts Codex when no matching Claude project exists", async () => {
+  it("still starts Codex when no matching Claude project exists, and can switch to Claude", async () => {
     mockAuthFetch.mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }))
     const { result } = renderHook(() => useProjectSessionLaunch(baseOptions))
     const codexDirName = encodeCodexDirName("/new-repo")
@@ -129,7 +129,14 @@ describe("useProjectSessionLaunch", () => {
       cwd: "/new-repo",
       isMobile: false,
     })
-    expect(result.current.pendingAgentKindChange).toBeUndefined()
+
+    act(() => result.current.pendingAgentKindChange?.("claude"))
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "INIT_PENDING_SESSION",
+      dirName: "-new-repo",
+      cwd: "/new-repo",
+      isMobile: false,
+    })
   })
 
   it("looks the project path up when a sidebar entry only knows the dirName", async () => {

@@ -42,6 +42,7 @@ export function PermissionPrompt({
   onRespond,
 }: PermissionPromptProps) {
   const available = DECISION_BUTTONS.filter((button) => supports(request, button.decision))
+  if (request.defaultToNo) available.sort((a, b) => Number(b.decision === "deny") - Number(a.decision === "deny"))
   // "Always" alone is not an answer — without allow or deny the card cannot
   // resolve the request and has to say so.
   const answerable = available.some((button) => button.decision !== "allow_always")
@@ -73,7 +74,8 @@ export function PermissionPrompt({
         <div className="col-start-2 mt-3 flex items-center gap-2">
           {available.map(({ decision, label, variant }) => (
             <Button
-              key={decision}
+              key={`${request.requestId}:${decision}`}
+              autoFocus={request.defaultToNo && decision === "deny"}
               size="xs"
               variant={variant}
               disabled={responding}

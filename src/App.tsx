@@ -13,7 +13,7 @@ import { AppStatusToasts } from "@/components/AppStatusToasts"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
-import { GoalControlsBlock, GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
+import { GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
 import { cn } from "@/lib/utils"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
@@ -208,6 +208,12 @@ export default function App() {
   }, [configAdminEnabled, slashSuggestions.suggestions])
 
   // Project-scoped process panel, terminal/editor actions, and right workspace.
+  const openWorkspacePanel = panels.openWorkspacePanel
+  const openProjectWorkspacePanel = useCallback((panelId: string) => {
+    openWorkspacePanel(panelId)
+    if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "workspace" })
+  }, [openWorkspacePanel, isMobile, dispatch])
+
   const {
     processPanel,
     currentCwd,
@@ -231,11 +237,9 @@ export default function App() {
     sessionDirName: state.sessionSource?.dirName,
     pendingDirName: state.pendingDirName,
     dashboardProject: state.dashboardProject,
-    // Only the desktop shell mounts the file workspace; mobile open requests
-    // fall through to the host editor.
-    supportsFileWorkspace: !isMobile && hostFilesEnabled,
+    supportsFileWorkspace: hostFilesEnabled,
     activeWorkspacePanel: panels.activeWorkspacePanel,
-    openWorkspacePanel: panels.openWorkspacePanel,
+    openWorkspacePanel: openProjectWorkspacePanel,
     closeWorkspacePanel: panels.closeWorkspacePanel,
   })
 
@@ -304,7 +308,6 @@ export default function App() {
   const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
 
   // Force-show file changes panel when a file is clicked in TurnChangedFiles
-  const openWorkspacePanel = panels.openWorkspacePanel
   useEffect(() => {
     if (!hostFilesEnabled) return
     const handler = () => {
@@ -331,7 +334,7 @@ export default function App() {
   // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
   const {
-    isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion,
+    isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion, rateLimit,
   } = useLiveSession(
     state.sessionSource,
     (updated) => {
@@ -361,6 +364,9 @@ export default function App() {
     : permReqs.plan ?? transcriptInteraction
 
   const {
+    contextWindowTokens,
+    setContextWindowTokens,
+    contextWindowAvailable,
     selectedModel,
     setSelectedModel,
     selectedEffort,
@@ -398,17 +404,19 @@ export default function App() {
     values: {
       model: selectedModel,
       effort: selectedEffort,
+      contextWindowTokens,
       fastMode: fastModeEnabled,
       ultracode: ultracodeEnabled,
       permissionMode: perms.config.mode,
     },
     onHydrate: useCallback((config: SessionConfig) => {
+      setContextWindowTokens(config.contextWindowTokens ?? null)
       if (config.model !== undefined) setSelectedModel(config.model)
       if (config.effort !== undefined) setSelectedEffort(config.effort)
       if (config.fastMode !== undefined) setFastModeEnabled(config.fastMode)
       if (config.ultracode !== undefined) setUltracodeEnabled(config.ultracode)
       if (config.permissionMode) permsSetMode(config.permissionMode)
-    }, [setSelectedModel, setSelectedEffort, setFastModeEnabled, setUltracodeEnabled, permsSetMode]),
+    }, [setContextWindowTokens, setSelectedModel, setSelectedEffort, setFastModeEnabled, setUltracodeEnabled, permsSetMode]),
   })
 
   // MCP server selection
@@ -459,6 +467,7 @@ export default function App() {
     onModelRejected: handleModelRejected,
     model: selectedModel,
     effort: effectiveEffort,
+    contextWindowTokens: contextWindowAvailable ? contextWindowTokens : undefined,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
@@ -473,6 +482,7 @@ export default function App() {
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
     effort: effectiveEffort,
+    contextWindowTokens: contextWindowAvailable ? contextWindowTokens : undefined,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
@@ -799,6 +809,7 @@ export default function App() {
     isCompacting,
     turnError,
     promptSuggestion,
+    rateLimit,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -820,7 +831,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState, isCompacting, turnError, promptSuggestion,
+    isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit,
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
@@ -1037,12 +1048,15 @@ export default function App() {
 
   const buildChatInputSettings = (includeGoal: boolean) => (
     <ChatInputSettings
+      mobile={isMobile}
       agentKind={currentAgentKind}
       onAgentKindChange={isNewSession ? pendingAgentKindChange : undefined}
       selectedModel={selectedModel}
       onModelChange={setSelectedModel}
       selectedEffort={effectiveEffort}
       onEffortChange={setSelectedEffort}
+      contextWindowTokens={contextWindowTokens}
+      onContextWindowTokensChange={contextWindowAvailable ? setContextWindowTokens : undefined}
       fastModeEnabled={fastModeActive}
       onFastModeEnabledChange={fastModeAvailable ? setFastModeEnabled : undefined}
       isNewSession={isNewSession}
@@ -1061,9 +1075,8 @@ export default function App() {
       onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
-      mobileExtra={isMobile && includeGoal && goalSession ? <GoalControlsBlock /> : undefined}
-      trailingExtra={!isMobile && includeGoal && goalSession ? <GoalTrigger /> : undefined}
-      mobile={isMobile}
+      mobileExtra={includeGoal && goalSession ? <GoalTrigger /> : undefined}
+      trailingExtra={includeGoal && goalSession ? <GoalTrigger /> : undefined}
     />
   )
   const chatInputSettingsNode = buildChatInputSettings(true)
@@ -1071,15 +1084,13 @@ export default function App() {
 
   const composer = (
     <div className={cn("shrink-0", isMobile && "bg-background")}>
-      {!isMobile && <GoalSection />}
+      <GoalSection />
       <ChatInput
         ref={chatInputRef}
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
-        compact={isMobile}
-        leadingAccessory={isMobile ? chatInputSettingsNode : undefined}
-        footer={isMobile ? undefined : chatInputSettingsNode}
+        footer={chatInputSettingsNode}
       />
     </div>
   )
@@ -1101,9 +1112,7 @@ export default function App() {
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
-        compact={isMobile}
-        leadingAccessory={isMobile ? previewChatInputSettingsNode : undefined}
-        footer={isMobile ? undefined : previewChatInputSettingsNode}
+        footer={previewChatInputSettingsNode}
       />
     </div>
   )
@@ -1118,7 +1127,7 @@ export default function App() {
 
   // Server discovery when StatsPanel is hidden — StatsPanel has its own BackgroundServers instance
   const statsPanelVisible = isMobile
-    ? state.mobileTab === "stats"
+    ? state.mobileTab === "workspace" && panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
     : panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
   const backgroundServers = state.session && !statsPanelVisible && (
     <div className="hidden">
@@ -1165,6 +1174,7 @@ export default function App() {
       <StreamingOverlayProvider value={streamingOverlay} agentProgress={agentProgress}>
         <MobileAppShell
           navigation={{
+            panels,
             actions,
             handlers,
             creatingSession,
@@ -1175,6 +1185,7 @@ export default function App() {
             onPrefetchSession: prefetchSession,
           }}
           sessionView={{
+            chatInputRef,
             searchInputRef,
             teamMembersBar,
             activeComposer: activeReadOnlyNode || chatInputNode,
@@ -1191,6 +1202,11 @@ export default function App() {
             pendingPath,
           }}
           project={{
+            currentCwd,
+            supportsWorktrees,
+            worktrees: worktreeData,
+            projectFilesRoot,
+            projectFilesRequest,
             processPanel,
             backgroundAgents,
             hasFileChanges: hostFilesEnabled && hasFileChanges,

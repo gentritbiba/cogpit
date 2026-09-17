@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "react",
+      "react-dom"
+    ],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "runtime.tsx",
+    "GitHubPanel.tsx",
+    "githubStore.ts",
+    "ActionsTab.tsx",
+    "PullRequestsTab.tsx",
+    "IssuesTab.tsx",
+    "useExpandable.ts"
+  ]
+}

@@ -453,6 +453,25 @@ describe("LiveSessions device and unmount lifecycle", () => {
     deviceBView.unmount()
   })
 
+  it.each(["http", "network"])("reports a %s failure when stopping a session", async (failure) => {
+    window.history.replaceState(null, "", "/")
+    writeCachedList(sessionListCacheKeys.activeSessions, [session("failed-stop")])
+    mocks.authFetch.mockImplementation((input) => {
+      if (input === "/api/kill-process") {
+        return failure === "http"
+          ? Promise.resolve(new Response(null, { status: 403 }))
+          : Promise.reject(new Error("Network error"))
+      }
+      return new Promise<Response>(() => {})
+    })
+    renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Kill failed-stop" }))
+    await act(async () => { await Promise.resolve() })
+
+    expect(mocks.toast.error).toHaveBeenCalledWith("Could not stop session")
+  })
+
   it("clears delayed kill and resume work when the component unmounts", async () => {
     vi.useFakeTimers()
     window.history.replaceState(null, "", "/")

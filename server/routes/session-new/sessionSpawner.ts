@@ -38,6 +38,7 @@ interface NewSessionBody {
   permissions?: StartSessionRequest["permissions"]
   model?: string
   effort?: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
   worktreeName?: string
@@ -146,7 +147,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     withJsonBody<NewSessionBody>(req, res, async (body) => {
       const {
         requestId, dirName, cwd, message, images, permissions,
-        model, effort, fastMode, ultracode, worktreeName, mcpConfig, name,
+        model, effort, contextWindowTokens, fastMode, ultracode, worktreeName, mcpConfig, name,
       } = body
       if (!dirName || (!message && (!images || !images.length))) {
         sendError(res, new RouteError(
@@ -162,6 +163,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
         permissions,
         model,
         effort,
+        contextWindowTokens,
         fastMode,
         ultracode,
         worktreeName,

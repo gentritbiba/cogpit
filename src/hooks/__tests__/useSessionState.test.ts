@@ -418,9 +418,9 @@ describe("useSessionState", () => {
 
     it("returns same state when the tab is unchanged", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "stats" })
+      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "workspace" })
       const stateAfter = getState(hook)
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "stats" })
+      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "workspace" })
       expect(getState(hook)).toBe(stateAfter)
     })
   })
@@ -581,11 +581,11 @@ describe("useSessionState", () => {
       expect(getState(hook).mobileTab).toBe("sessions")
     })
 
-    it("falls back from stats to sessions when no session", () => {
+    it("keeps workspace available without a session", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "stats" })
+      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "workspace" })
       dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false })
-      expect(getState(hook).mobileTab).toBe("sessions")
+      expect(getState(hook).mobileTab).toBe("workspace")
     })
 
     it("keeps chat tab when session exists", () => {

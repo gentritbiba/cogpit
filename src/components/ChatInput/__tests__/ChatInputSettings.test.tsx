@@ -16,6 +16,24 @@ function openModelPicker(name: RegExp | string) {
 }
 
 describe("ChatInputSettings", () => {
+  it.each([false, true])("edits context tokens beside model settings, mobile=%s", async (mobile) => {
+    const onChange = vi.fn()
+    render(<ChatInputSettings mobile={mobile} agentKind="codex" selectedModel="" onModelChange={vi.fn()}
+      selectedEffort="high" onEffortChange={vi.fn()} isNewSession contextWindowTokens={500000}
+      onContextWindowTokensChange={onChange} />)
+    if (mobile) fireEvent.click(screen.getByRole("button", { name: "Session controls" }))
+    else openModelPicker(/^Codex/)
+    fireEvent.click(await screen.findByRole("button", { name: "Context window: 500k" }))
+    expect(onChange).toHaveBeenCalledWith(1000000)
+  })
+
+  it("hides the context override for providers without that capability", () => {
+    render(<ChatInputSettings agentKind="claude" selectedModel="" onModelChange={vi.fn()}
+      selectedEffort="high" onEffortChange={vi.fn()} isNewSession onContextWindowTokensChange={vi.fn()} />)
+    openModelPicker(/^Claude/)
+    expect(screen.queryByRole("button", { name: /^Context window:/ })).not.toBeInTheDocument()
+  })
+
   it("lets new sessions switch provider inside the picker without closing it", () => {
     const onAgentKindChange = vi.fn()
 
@@ -127,6 +145,31 @@ describe("ChatInputSettings", () => {
     })
   })
 
+  it("offers automatic approval review and worktrees for new Codex sessions", () => {
+    const onPermissionModeChange = vi.fn()
+    const onWorktreeEnabledChange = vi.fn()
+    render(
+      <ChatInputSettings
+        agentKind="codex"
+        selectedModel="gpt-6-astra"
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        permissionMode="default"
+        onPermissionModeChange={onPermissionModeChange}
+        worktreeEnabled={false}
+        onWorktreeEnabledChange={onWorktreeEnabledChange}
+        isNewSession
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Worktree" }))
+    expect(onWorktreeEnabledChange).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByRole("button", { name: "Permissions: Workspace" }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Auto review/ }))
+    expect(onPermissionModeChange).toHaveBeenCalledWith("auto")
+  })
+
   it("selects a codex model and keeps the picker open", () => {
     const onModelChange = vi.fn()
 
@@ -142,7 +185,7 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    const panel = openModelPicker(/^Codex · GPT-5\.6 Sol · High$/)
+    const panel = openModelPicker(/^Codex · Default · High$/)
     fireEvent.click(within(panel).getByRole("radio", { name: /GPT-5\.6 Terra/i }))
 
     expect(onModelChange).toHaveBeenCalledWith("gpt-5.6-terra")

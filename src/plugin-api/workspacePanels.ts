@@ -65,6 +65,8 @@ export interface RegisteredWorkspacePanel extends Omit<WorkspacePanelDefinition,
   id: string
   pluginId: string
   localId: string
+  componentProps?: Record<string, unknown>
+  indicatorProps?: Record<string, unknown>
 }
 
 const ID_PATTERN = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/

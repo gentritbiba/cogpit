@@ -38,19 +38,67 @@ function client(overrides: Partial<CodexExecutionClient> = {}): CodexExecutionCl
 }
 
 describe("Codex execution mappings", () => {
+  it("passes the context limit on start and resume without losing browser configuration", async () => {
+    vi.mocked(codexBrowserConfig).mockResolvedValue({ developer_instructions: "Browser instructions" })
+    const runtime = client()
+    await startCodexExecution(runtime, { cwd: "/work", message: "Build", contextWindowTokens: 1000000 })
+    expect(runtime.startThread).toHaveBeenCalledWith(expect.objectContaining({
+      config: { model_context_window: 1000000, developer_instructions: "Browser instructions" },
+    }))
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Next", contextWindowTokens: 200000, reloadContextWindow: true })
+    expect(runtime.resumeThread).toHaveBeenLastCalledWith("thread-1", expect.objectContaining({
+      config: { model_context_window: 200000, developer_instructions: "Browser instructions" },
+    }))
+    expect(runtime.call).toHaveBeenCalledWith("thread/unsubscribe", { threadId: "thread-1" })
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Reset", contextWindowTokens: null, reloadContextWindow: true })
+    expect(runtime.resumeThread).toHaveBeenLastCalledWith("thread-1", expect.objectContaining({
+      config: { developer_instructions: "Browser instructions" },
+    }))
+  })
+
+  it("omits the override for defaults and unsubscribes before an idle reset", async () => {
+    const runtime = client()
+    await startCodexExecution(runtime, { cwd: "/work", contextWindowTokens: null })
+    expect(runtime.startThread).toHaveBeenCalledWith(expect.not.objectContaining({ config: expect.anything() }))
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Reset", contextWindowTokens: null, reloadContextWindow: true })
+    expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", { cwd: "/work", config: {} })
+    expect(vi.mocked(runtime.call).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(runtime.resumeThread).mock.invocationCallOrder[0])
+  })
+
+  it("keeps a running turn subscribed when a limit changes while steering", async () => {
+    const runtime = client({ getActiveTurnId: vi.fn().mockReturnValue("running") })
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Steer", contextWindowTokens: 1000000, reloadContextWindow: true })
+    expect(runtime.call).not.toHaveBeenCalled()
+    expect(runtime.resumeThread).not.toHaveBeenCalled()
+    expect(runtime.steerTurn).toHaveBeenCalled()
+  })
+
   it("maps workspace, plan, and explicit full access safely", () => {
     expect(buildCodexAccessSettings()).toEqual({
       approvalPolicy: "on-request",
+      approvalsReviewer: "user",
       sandbox: "workspace-write",
     })
     expect(buildCodexAccessSettings({ mode: "plan" })).toEqual({
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandbox: "read-only",
     })
     expect(buildCodexAccessSettings({ mode: "bypassPermissions" })).toEqual({
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandbox: "danger-full-access",
     })
+  })
+
+  it("routes automatic reviews through the sandbox and restores user review when disabled", async () => {
+    const runtime = client()
+    await startCodexExecution(runtime, { cwd: "/work", message: "Build", permissions: { mode: "auto" } })
+    expect(runtime.startThread).toHaveBeenCalledWith(expect.objectContaining({ sandbox: "workspace-write", approvalsReviewer: "auto_review" }))
+    expect(runtime.startTurn).toHaveBeenCalledWith(expect.objectContaining({ sandboxPolicy: expect.objectContaining({ type: "workspaceWrite" }), approvalsReviewer: "auto_review" }))
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Next", permissions: { mode: "default" } })
+    expect(runtime.resumeThread).toHaveBeenLastCalledWith("thread-1", expect.objectContaining({ approvalsReviewer: "user" }))
+    expect(runtime.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({ approvalsReviewer: "user" }))
   })
 
   it("converts text and images into native UserInput", () => {
@@ -79,6 +127,7 @@ describe("Codex execution mappings", () => {
       model: "gpt-5.6-sol",
       serviceTier: "priority",
       approvalPolicy: "on-request",
+      approvalsReviewer: "user",
       sandbox: "workspace-write",
     })
     expect(runtime.startTurn).toHaveBeenCalledWith(expect.objectContaining({
@@ -109,6 +158,7 @@ describe("Codex execution mappings", () => {
     expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", {
       cwd: "/work/project",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandbox: "read-only",
       serviceTier: null,
     })
@@ -139,6 +189,18 @@ describe("Codex execution mappings", () => {
       "turn-active",
     )
     expect(result.action).toBe("steered")
+  })
+
+  it("preserves saved permission profiles and model settings when a resume omits overrides", async () => {
+    const runtime = client()
+    await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Continue" })
+
+    expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", { cwd: "/work" })
+    expect(runtime.startTurn).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      input: [{ type: "text", text: "Continue", text_elements: [] }],
+      cwd: "/work",
+    })
   })
 
   it("configures browser routing and instructions before the first turn in full access mode", async () => {

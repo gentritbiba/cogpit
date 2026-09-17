@@ -130,6 +130,21 @@ async function patchSession(
   const patch: BrowserPatch = {}
   if (body.note === null) patch.note = null
   else if (typeof body.note === "string") patch.note = body.note
+  if (body.archived !== undefined) {
+    if (typeof body.archived !== "boolean") {
+      sendJson(res, 400, { error: "archived must be a boolean" })
+      return
+    }
+    if (body.archived && name === DEFAULT_BROWSER) {
+      sendJson(res, 400, { error: `The ${DEFAULT_BROWSER} browser cannot be archived` })
+      return
+    }
+    if (body.archived && await deps.isRunning(name)) {
+      sendJson(res, 409, { error: "Stop the browser before archiving it" })
+      return
+    }
+    patch.archived = body.archived
+  }
   deps.updateBrowser(name, patch)
   sendJson(res, 200, await deps.readBrowser(name, deps.isRunning))
 }

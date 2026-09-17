@@ -9,6 +9,7 @@ import {
 export interface ComposerConfigValues {
   model: string
   effort: string
+  contextWindowTokens: number | null
   fastMode: boolean
   ultracode: boolean
   permissionMode: SessionConfig["permissionMode"]
@@ -17,10 +18,15 @@ export interface ComposerConfigValues {
 const COMPOSER_FIELDS: ReadonlyArray<keyof ComposerConfigValues> = [
   "model",
   "effort",
+  "contextWindowTokens",
   "fastMode",
   "ultracode",
   "permissionMode",
 ]
+
+function serializeConfig(values: ComposerConfigValues): string {
+  return JSON.stringify(values, [...COMPOSER_FIELDS])
+}
 
 interface UseSessionConfigSyncOptions {
   /** Session fileName, or null while composing a new session (nothing to sync yet). */
@@ -70,15 +76,16 @@ export function useSessionConfigSync({
         const hydrated: ComposerConfigValues = {
           model: config.model ?? current.model,
           effort: config.effort ?? current.effort,
+          contextWindowTokens: config.contextWindowTokens ?? null,
           fastMode: config.fastMode ?? current.fastMode,
           ultracode: config.ultracode ?? current.ultracode,
           permissionMode: config.permissionMode ?? current.permissionMode,
         }
-        lastSyncedRef.current = JSON.stringify(hydrated)
+        lastSyncedRef.current = serializeConfig(hydrated)
       } else {
         // Nothing stored yet — seed the session with the current values.
         saveSessionConfig(sessionKey, valuesRef.current)
-        lastSyncedRef.current = JSON.stringify(valuesRef.current)
+        lastSyncedRef.current = serializeConfig(valuesRef.current)
       }
       hydratedKeyRef.current = sessionKey
     })
@@ -87,7 +94,7 @@ export function useSessionConfigSync({
     }
   }, [sessionKey])
 
-  const serialized = JSON.stringify(values)
+  const serialized = serializeConfig(values)
   useEffect(() => {
     if (!sessionKey || hydratedKeyRef.current !== sessionKey) return
     if (serialized === lastSyncedRef.current) return

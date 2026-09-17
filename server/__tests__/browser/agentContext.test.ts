@@ -23,6 +23,11 @@ describe("BROWSER_CONTEXT_APPEND", () => {
     expect(BROWSER_CONTEXT_APPEND).toContain("cogpit-browser")
   })
 
+  it("keeps browsers headless and points a bot check at the skill", () => {
+    expect(BROWSER_CONTEXT_APPEND).toContain("headless")
+    expect(BROWSER_CONTEXT_APPEND).toContain("COGPIT_BROWSER_HEADED=1")
+  })
+
   it("stays short enough to send on every request", () => {
     expect(BROWSER_CONTEXT_APPEND.length).toBeLessThan(1800)
   })

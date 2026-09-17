@@ -5,6 +5,7 @@
 import { useState, useCallback, startTransition } from "react"
 import { useLocalStorage } from "./useLocalStorage"
 import type { SessionState, SessionAction } from "./useSessionState"
+import { canonicalPluginPanelId } from "@/plugins/panelAliases"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 /**
@@ -96,7 +97,7 @@ export function usePanelState(
       if (state.mainView === "config") dispatch({ type: "CLOSE_CONFIG" })
       if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
       setStoredWorkspacePanel((current) => (
-        returningToSessions || current !== panelId ? panelId : null
+        returningToSessions || canonicalPluginPanelId(current) !== canonicalPluginPanelId(panelId) ? panelId : null
       ))
     })
   }, [dispatch, setStoredWorkspacePanel, state.mainView])

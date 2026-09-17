@@ -29,6 +29,7 @@ export function useComposerSettings({
   // An empty model or effort delegates to the provider's recommended default.
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedEffort, setSelectedEffort] = useState("")
+  const [contextWindowTokens, setContextWindowTokens] = useState<number | null>(null)
   const [fastModeEnabled, setFastModeEnabled] = useState(false)
   const [ultracodeEnabled, setUltracodeEnabled] = useState(false)
 
@@ -62,11 +63,13 @@ export function useComposerSettings({
     // toggle the user set while writing that first message.
     if (previous === null || previous === sessionKey) return
     setUltracodeEnabled(false)
+    setContextWindowTokens(null)
   }, [sessionKey])
 
   useEffect(() => {
     if (!pendingDirName) return
     setUltracodeEnabled(false)
+    setContextWindowTokens(null)
   }, [pendingDirName])
 
   const handleModelRejected = useCallback((rejectedModel: string) => {
@@ -123,6 +126,9 @@ export function useComposerSettings({
   }, [isLive, rawMessages, effectiveAgentKind])
 
   return {
+    contextWindowTokens,
+    setContextWindowTokens,
+    contextWindowAvailable: capabilitiesFor(effectiveAgentKind).configurableContextWindow,
     selectedModel,
     setSelectedModel,
     selectedEffort,

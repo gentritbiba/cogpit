@@ -72,7 +72,8 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
     : false
   const canDeny = current ? supportsDecision(current, "deny") : false
   const canAllowAll =
-    remaining > 1 && requests.every((request) => supportsDecision(request, "allow"))
+    remaining > 1 && requests.every((request) => !request.defaultToNo && supportsDecision(request, "allow"))
+  const approvalShortcuts = !current?.defaultToNo
 
   // Keyboard shortcuts:
   //   A = allow once · S = always for session · D = deny · Shift+A = allow all (multi)
@@ -85,10 +86,10 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
     if (key === "a" && e.shiftKey && canAllowAll) {
       e.preventDefault()
       onRespondAll("allow")
-    } else if (key === "a" && canAllow) {
+    } else if (key === "a" && canAllow && approvalShortcuts) {
       e.preventDefault()
       onRespond(current.requestId, "allow")
-    } else if (key === "s" && canAllowAlways) {
+    } else if (key === "s" && canAllowAlways && approvalShortcuts) {
       e.preventDefault()
       onRespond(current.requestId, "allow_always")
     } else if (key === "d" && canDeny) {
@@ -151,6 +152,8 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
         <div className="flex shrink-0 items-center gap-1.5">
           {canDeny && (
             <Button
+              key={current.requestId}
+              autoFocus={current.defaultToNo}
               variant="ghost"
               size="sm"
               className="text-destructive"
@@ -171,12 +174,12 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
               disabled={isLoading}
               onClick={() => onRespond(current.requestId, "allow_always")}
               title={hasScopedSuggestion
-                ? "Apply Claude's suggested scoped permission rule (S)"
-                : `Allow ${current.toolName} for this session (S)`}
+                ? `Apply the suggested scoped permission rule${approvalShortcuts ? " (S)" : ""}`
+                : `Allow ${current.toolName} for this session${approvalShortcuts ? " (S)" : ""}`}
             >
               <InfinityIcon data-icon="inline-start" />
               {hasScopedSuggestion ? "Remember rule" : "Session"}
-              <kbd className="ml-0.5 font-mono text-xs text-muted-foreground">S</kbd>
+              {approvalShortcuts && <kbd className="ml-0.5 font-mono text-xs text-muted-foreground">S</kbd>}
             </Button>
           )}
 
@@ -198,11 +201,11 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
               size="sm"
               disabled={isLoading}
               onClick={() => onRespond(current.requestId, "allow")}
-              title="Allow once (A)"
+              title={approvalShortcuts ? "Allow once (A)" : "Allow once"}
             >
               <Check data-icon="inline-start" />
               Allow
-              <kbd className="ml-0.5 font-mono text-xs opacity-70">A</kbd>
+              {approvalShortcuts && <kbd className="ml-0.5 font-mono text-xs opacity-70">A</kbd>}
             </Button>
           )}
 

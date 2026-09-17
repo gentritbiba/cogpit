@@ -16,6 +16,8 @@ test-results/
 .claude/worktrees/
 /ios/
 process-state.json
+/runtime-plugins/
+/runtime-plugin-connections/
 packages/cogpit-memory/cogpit-memory
 .claude/deployments.md
 
@@ -23,3 +25,8 @@ packages/cogpit-memory/cogpit-memory
 /artifacts
 qa-notes.md
 /marketing
+
+/generated/runtime-plugins/
+/generated/runtime-plugin-seeds/
+
+/plugin-host-classification/

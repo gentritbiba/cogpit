@@ -2,17 +2,26 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Middleware, UseFn } from "../../http"
-import type { LinkedVercelProject } from "../../routes/vercel-deployments"
+import { EventEmitter } from "node:events"
+import type { PluginIntegrationExecutor } from "../../plugins/integrationTypes"
+import type { PluginIntegrationRequest } from "@cogpit/plugin-contracts"
+import { PluginAuthorizationError } from "../../plugins/authorization"
+import type { LinkedVercelProject } from "../../plugins/integrations/vercel"
+import { registerVercelDeploymentRoutes } from "../../routes/vercel-deployments"
 import {
   parseBuildLogsResponse,
   parseDeploymentsResponse,
-  registerVercelDeploymentRoutes,
   resolveLinkedVercelProject,
   runVercelApi,
-} from "../../routes/vercel-deployments"
+} from "../../plugins/integrations/vercel"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+
+const policy = vi.hoisted(() => vi.fn())
+vi.mock("../../plugins/manager", () => ({ getPluginManager: () => ({ runLegacyIntegration: policy }) }))
+const context = { workspacePath: "/repo", signal: new AbortController().signal, authorize: async () => {} }
+beforeEach(() => { policy.mockReset().mockImplementation((_req, options: { projectPath: string; signal: AbortSignal }, input: PluginIntegrationRequest, execute: PluginIntegrationExecutor) => execute(input, { ...context, workspacePath: options.projectPath, signal: options.signal })) })
 
 const project: LinkedVercelProject = {
   root: "/repo",
@@ -55,7 +64,7 @@ afterEach(async () => {
 })
 
 function harness(apiResponse: unknown) {
-  const vercelApi = vi.fn().mockResolvedValue(apiResponse)
+  const vercelApi = vi.fn().mockImplementation((_project, endpoint: string) => Promise.resolve(endpoint.startsWith("/v13/") ? { id: deployment.uid, projectId: project.projectId } : apiResponse))
   const resolveProject = vi.fn().mockResolvedValue(project)
   const handlers = new Map<string, Middleware>()
   const use: UseFn = (path, handler) => { handlers.set(path, handler) }
@@ -65,18 +74,27 @@ function harness(apiResponse: unknown) {
 
 async function request(handler: Middleware, url: string) {
   let body = ""
-  const response = asServerResponse({
+  const response = asServerResponse(Object.assign(new EventEmitter(), {
     statusCode: 200,
     setHeader: vi.fn(),
+    writableEnded: false,
     end: (value?: string) => { body = value ?? "" },
-  })
+  }))
   const next = vi.fn()
-  await handler(asIncomingMessage({ method: "GET", url }), response, next)
+  await handler(asIncomingMessage(Object.assign(new EventEmitter(), { method: "GET", url })), response, next)
   return { status: response.statusCode, data: body ? JSON.parse(body) : null, next }
 }
 
 describe("Vercel deployment routes", () => {
-  it("only accepts a Vercel link at the exact active-session root", async () => {
+  it("runs compatibility requests through the installed-plugin policy", async () => {
+    const { handlers, vercelApi } = harness({ deployments: [] })
+    policy.mockRejectedValueOnce(new PluginAuthorizationError(403, "PERMISSION_REQUIRED", "Plugin is disabled"))
+    const response = await request(getRouteHandler(handlers, "/api/vercel-deployments"), "/?cwd=%2Frepo")
+    expect(response).toMatchObject({ status: 403, data: { code: "PERMISSION_REQUIRED", error: "Plugin is disabled" } })
+    expect(policy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ pluginId: "cogpit.vercel", projectPath: "/repo", signal: expect.any(AbortSignal) }), { integration: "vercel", operation: "deployments", limit: 20 }, expect.any(Function))
+    expect(vercelApi).not.toHaveBeenCalled()
+  })
+  it("does not inherit an unrelated parent link outside a Git repository", async () => {
     const parent = await mkdtemp(join(tmpdir(), "cogpit-vercel-root-"))
     temporaryRoots.push(parent)
     const child = join(parent, "app")
@@ -145,10 +163,11 @@ describe("Vercel deployment routes", () => {
       projectUrl: "https://vercel.com/acme/web",
     })
     expect(response.data.deployments).toHaveLength(1)
-    expect(resolveProject).toHaveBeenCalledWith("/repo")
+    expect(resolveProject).toHaveBeenCalledWith("/repo", expect.any(AbortSignal))
     expect(vercelApi).toHaveBeenCalledWith(
       project,
       "/v7/deployments?projectId=prj_project123&teamId=team_team123&limit=5",
+      expect.objectContaining({ workspacePath: "/repo", signal: expect.any(AbortSignal) }),
     )
   })
 
@@ -167,6 +186,7 @@ describe("Vercel deployment routes", () => {
     expect(vercelApi).toHaveBeenCalledWith(
       project,
       `/v3/deployments/${deployment.uid}/events?teamId=team_team123&direction=backward&limit=100`,
+      expect.objectContaining({ workspacePath: "/repo", signal: expect.any(AbortSignal) }),
     )
   })
 
@@ -185,12 +205,12 @@ describe("Vercel deployment routes", () => {
   it("refuses to invoke the api command when Vercel CLI is too old", async () => {
     const runCommand = vi.fn().mockResolvedValue({ stdout: "48.1.6\n", stderr: "" })
 
-    await expect(runVercelApi(project, "/v7/deployments", runCommand)).rejects.toMatchObject({
+    await expect(runVercelApi(project, "/v7/deployments", context, runCommand)).rejects.toMatchObject({
       status: 503,
       code: "vercel_cli_too_old",
     })
     expect(runCommand).toHaveBeenCalledOnce()
-    expect(runCommand).toHaveBeenCalledWith(project.root, ["--version"])
+    expect(runCommand).toHaveBeenCalledWith(project.root, ["--version"], context)
   })
 
   it("runs a current CLI with read-only api arguments", async () => {
@@ -198,7 +218,7 @@ describe("Vercel deployment routes", () => {
       .mockResolvedValueOnce({ stdout: "Vercel CLI 59.11.2\n59.11.2\n", stderr: "" })
       .mockResolvedValueOnce({ stdout: JSON.stringify({ deployments: [] }), stderr: "" })
 
-    await expect(runVercelApi(project, "/v7/deployments", runCommand)).resolves.toEqual({ deployments: [] })
+    await expect(runVercelApi(project, "/v7/deployments", context, runCommand)).resolves.toEqual({ deployments: [] })
     expect(runCommand.mock.calls[1]).toEqual([
       project.root,
       [
@@ -210,6 +230,7 @@ describe("Vercel deployment routes", () => {
         "--non-interactive",
         "--no-color",
       ],
+      context,
     ])
   })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { createContext, useContext, useCallback, useEffect, useSyncExternalStore } from "react"
 import type {
   GitHubActionsJobsResponse,
   GitHubActionsRunsResponse,
@@ -7,8 +7,9 @@ import type {
   GitHubPullFilesResponse,
   GitHubPullSessionsResponse,
   GitHubPullsResponse,
-} from "../../shared/contracts/github"
-import { authFetch } from "@/plugin-api"
+} from "@cogpit/plugin-integrations"
+import type { PluginClient } from "@cogpit/plugin-sdk"
+import type { GitHubIntegrationRequest } from "@cogpit/plugin-contracts"
 
 export interface GitHubResourceState<T> {
   data: T | null
@@ -24,10 +25,13 @@ interface StoreEntry<T> {
   fetchedAt: number
   settleTimer: number | null
   settleAttempts: number
+  active: number
 }
 
 interface ResourceDefinition<T> {
-  endpoint: (projectPath: string) => string
+  input: GitHubIntegrationRequest
+  client: Pick<PluginClient, "integrations">
+  signal: AbortSignal
   pollIntervalMs: number
   fallbackError: string
   stores: Map<string, StoreEntry<T>>
@@ -52,37 +56,47 @@ const SETUP_ERROR_CODES = new Set<GitHubErrorResponse["code"]>([
   "no_github_remote",
 ])
 
-const actions: ResourceDefinition<GitHubActionsRunsResponse> = {
-  endpoint: (projectPath) => `/api/github/actions?cwd=${encodeURIComponent(projectPath)}&limit=20`,
-  pollIntervalMs: 10_000,
-  fallbackError: "Unable to load GitHub Actions",
-  stores: new Map(),
+export function createGitHubStore(client: Pick<PluginClient, "integrations">) {
+  const controller = new AbortController()
+  const resource = <T>(input: GitHubIntegrationRequest, pollIntervalMs: number, fallbackError: string, settling?: (data: T) => boolean): ResourceDefinition<T> => ({ input, pollIntervalMs, fallbackError, stores: new Map(), client, signal: controller.signal, settling })
+  const actions = resource<GitHubActionsRunsResponse>({ integration: "github", operation: "actions", limit: 20 }, 10000, "Unable to load GitHub Actions")
+  const pulls = resource<GitHubPullsResponse>({ integration: "github", operation: "pulls", limit: 30 }, 30000, "Unable to load pull requests")
+  const issues = resource<GitHubIssuesResponse>({ integration: "github", operation: "issues", limit: 30 }, 60000, "Unable to load issues")
+  const pullSessions = resource<GitHubPullSessionsResponse>({ integration: "github", operation: "pullSessions" }, 30000, "Unable to match sessions to pull requests", data => data.pending > 0)
+  return {
+    actions, pulls, issues, pullSessions,
+    details: {
+      actionsJobs: (_projectKey: string, runId: number) => request<GitHubActionsJobsResponse>(client, { integration: "github", operation: "actionJobs", runId }, controller.signal),
+      pullFiles: (_projectKey: string, number: number) => request<GitHubPullFilesResponse>(client, { integration: "github", operation: "pullFiles", number }, controller.signal),
+    },
+    dispose() {
+      controller.abort()
+      for (const resource of [actions, pulls, issues, pullSessions]) {
+        for (const store of resource.stores.values()) { if (store.settleTimer !== null) window.clearTimeout(store.settleTimer); store.listeners.clear() }
+        resource.stores.clear()
+      }
+    },
+  }
+}
+export type GitHubStore = ReturnType<typeof createGitHubStore>
+const StoreContext = createContext<GitHubStore | null>(null)
+export const GitHubStoreProvider = StoreContext.Provider
+function useStore(): GitHubStore {
+  const store = useContext(StoreContext)
+  if (!store) throw new Error("GitHub requires its runtime store")
+  return store
+}
+export function useGitHubDetails() { return useStore().details }
+async function request<T>(client: Pick<PluginClient, "integrations">, input: GitHubIntegrationRequest, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted()
+  const result = await client.integrations.request(input, { signal })
+  signal.throwIfAborted()
+  if (!result.ok) throw { code: result.error.code, error: result.error.message }
+  return result.data as unknown as T
 }
 
-const pulls: ResourceDefinition<GitHubPullsResponse> = {
-  endpoint: (projectPath) => `/api/github/pulls?cwd=${encodeURIComponent(projectPath)}&limit=30`,
-  pollIntervalMs: 30_000,
-  fallbackError: "Unable to load pull requests",
-  stores: new Map(),
-}
-
-const issues: ResourceDefinition<GitHubIssuesResponse> = {
-  endpoint: (projectPath) => `/api/github/issues?cwd=${encodeURIComponent(projectPath)}&limit=30`,
-  pollIntervalMs: 60_000,
-  fallbackError: "Unable to load issues",
-  stores: new Map(),
-}
-
-const pullSessions: ResourceDefinition<GitHubPullSessionsResponse> = {
-  endpoint: (projectPath) => `/api/github/pulls/sessions?cwd=${encodeURIComponent(projectPath)}`,
-  pollIntervalMs: 30_000,
-  fallbackError: "Unable to match sessions to pull requests",
-  stores: new Map(),
-  settling: (data) => data.pending > 0,
-}
-
-function storeFor<T>(resource: ResourceDefinition<T>, projectPath: string): StoreEntry<T> {
-  let store = resource.stores.get(projectPath)
+function storeFor<T>(resource: ResourceDefinition<T>, projectKey: string): StoreEntry<T> {
+  let store = resource.stores.get(projectKey)
   if (!store) {
     store = {
       snapshot: EMPTY_STATE,
@@ -91,8 +105,9 @@ function storeFor<T>(resource: ResourceDefinition<T>, projectPath: string): Stor
       fetchedAt: 0,
       settleTimer: null,
       settleAttempts: 0,
+      active: 0,
     }
-    resource.stores.set(projectPath, store)
+    resource.stores.set(projectKey, store)
   }
   return store
 }
@@ -100,18 +115,6 @@ function storeFor<T>(resource: ResourceDefinition<T>, projectPath: string): Stor
 function publish<T>(store: StoreEntry<T>, snapshot: GitHubResourceState<T>): void {
   store.snapshot = snapshot
   for (const listener of store.listeners) listener()
-}
-
-async function responseError(response: Response): Promise<GitHubErrorResponse> {
-  try {
-    const value = await response.json() as Partial<GitHubErrorResponse>
-    if (typeof value.error === "string" && typeof value.code === "string") {
-      return value as GitHubErrorResponse
-    }
-  } catch {
-    // Fall back to a stable message when the dependency returned no JSON.
-  }
-  return { error: `GitHub request failed (${response.status})`, code: "github_api_failed" }
 }
 
 export function toErrorResponse(error: unknown, fallback: string): GitHubErrorResponse {
@@ -122,8 +125,9 @@ export function toErrorResponse(error: unknown, fallback: string): GitHubErrorRe
   }
 }
 
-async function load<T>(resource: ResourceDefinition<T>, projectPath: string, force = false): Promise<void> {
-  const store = storeFor(resource, projectPath)
+async function load<T>(resource: ResourceDefinition<T>, projectKey: string, force = false): Promise<void> {
+  if (resource.signal.aborted) return
+  const store = storeFor(resource, projectKey)
   if (store.request) return store.request
   if (!force && store.snapshot.error && SETUP_ERROR_CODES.has(store.snapshot.error.code)) return
   if (!force && store.fetchedAt > 0 && Date.now() - store.fetchedAt < CACHE_WINDOW_MS) return
@@ -140,23 +144,23 @@ async function load<T>(resource: ResourceDefinition<T>, projectPath: string, for
     })
   }
 
-  store.request = authFetch(resource.endpoint(projectPath))
-    .then(async (response) => {
-      if (!response.ok) throw await responseError(response)
-      const data = await response.json() as T
+  store.request = request<T>(resource.client, resource.input, resource.signal)
+    .then((data) => {
+      if (resource.signal.aborted) return
       store.fetchedAt = Date.now()
       publish(store, { data, error: null, loading: false, refreshing: false })
-      if (resource.settling?.(data) && store.settleAttempts < SETTLE_MAX_ATTEMPTS) {
+      if (resource.settling?.(data) && store.active > 0 && store.settleAttempts < SETTLE_MAX_ATTEMPTS) {
         store.settleAttempts += 1
         store.settleTimer = window.setTimeout(() => {
           store.settleTimer = null
-          void load(resource, projectPath, true)
+          if (store.active > 0 && document.visibilityState !== "hidden") void load(resource, projectKey, true)
         }, SETTLE_RETRY_MS)
       } else {
         store.settleAttempts = 0
       }
     })
     .catch((error: unknown) => {
+      if (resource.signal.aborted) return
       publish(store, {
         ...store.snapshot,
         error: toErrorResponse(error, resource.fallbackError),
@@ -171,8 +175,8 @@ async function load<T>(resource: ResourceDefinition<T>, projectPath: string, for
   return store.request
 }
 
-function useGitHubResource<T>(resource: ResourceDefinition<T>, projectPath: string | null, enabled: boolean) {
-  const path = projectPath ?? ""
+function useGitHubResource<T>(resource: ResourceDefinition<T>, projectKey: string | null, enabled: boolean) {
+  const path = projectKey ?? ""
   const state = useSyncExternalStore(
     useCallback((listener: () => void) => {
       if (!path) return () => undefined
@@ -189,50 +193,33 @@ function useGitHubResource<T>(resource: ResourceDefinition<T>, projectPath: stri
 
   useEffect(() => {
     if (!enabled || !path) return
+    const store = storeFor(resource, path)
+    store.active++
     void load(resource, path)
-    const interval = window.setInterval(() => { void load(resource, path) }, resource.pollIntervalMs)
-    return () => window.clearInterval(interval)
+    const interval = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(resource, path) }, resource.pollIntervalMs)
+    return () => {
+      window.clearInterval(interval)
+      store.active--
+      if (store.active === 0 && store.settleTimer !== null) { window.clearTimeout(store.settleTimer); store.settleTimer = null }
+    }
   }, [resource, enabled, path])
 
   const refresh = useCallback(() => path ? load(resource, path, true) : Promise.resolve(), [resource, path])
   return { ...state, refresh }
 }
 
-export function useGitHubActions(projectPath: string | null, enabled: boolean) {
-  return useGitHubResource(actions, projectPath, enabled)
+export function useGitHubActions(projectKey: string | null, enabled: boolean) {
+  return useGitHubResource(useStore().actions, projectKey, enabled)
 }
 
-export function useGitHubPulls(projectPath: string | null, enabled: boolean) {
-  return useGitHubResource(pulls, projectPath, enabled)
+export function useGitHubPulls(projectKey: string | null, enabled: boolean) {
+  return useGitHubResource(useStore().pulls, projectKey, enabled)
 }
 
-export function useGitHubIssues(projectPath: string | null, enabled: boolean) {
-  return useGitHubResource(issues, projectPath, enabled)
+export function useGitHubIssues(projectKey: string | null, enabled: boolean) {
+  return useGitHubResource(useStore().issues, projectKey, enabled)
 }
 
-export function useGitHubPullSessions(projectPath: string | null, enabled: boolean) {
-  return useGitHubResource(pullSessions, projectPath, enabled)
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await authFetch(url)
-  if (!response.ok) throw await responseError(response)
-  return response.json() as Promise<T>
-}
-
-export function fetchGitHubActionsJobs(projectPath: string, runId: number): Promise<GitHubActionsJobsResponse> {
-  return fetchJson(`/api/github/actions/jobs?cwd=${encodeURIComponent(projectPath)}&runId=${runId}`)
-}
-
-export function fetchGitHubPullFiles(projectPath: string, number: number): Promise<GitHubPullFilesResponse> {
-  return fetchJson(`/api/github/pulls/files?cwd=${encodeURIComponent(projectPath)}&number=${number}`)
-}
-
-export function __resetGitHubStoreForTest(): void {
-  for (const resource of [actions, pulls, issues, pullSessions]) {
-    for (const store of resource.stores.values()) {
-      if (store.settleTimer !== null) window.clearTimeout(store.settleTimer)
-    }
-    resource.stores.clear()
-  }
+export function useGitHubPullSessions(projectKey: string | null, enabled: boolean) {
+  return useGitHubResource(useStore().pullSessions, projectKey, enabled)
 }

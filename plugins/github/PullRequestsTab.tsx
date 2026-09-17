@@ -1,3 +1,4 @@
+import { useGitHubNavigation, Description } from "./navigation.js"
 import { useMemo, useState, type ReactNode } from "react"
 import {
   ArrowRight,
@@ -24,7 +25,7 @@ import type {
   GitHubPullSession,
   GitHubPullState,
   GitHubPullsResponse,
-} from "../../shared/contracts/github"
+} from "@cogpit/plugin-integrations"
 import {
   Button,
   cn,
@@ -41,10 +42,9 @@ import {
   CommentCount,
   FilterBar,
   TabEmpty,
-  Description,
-} from "@/plugin-api"
-import { fetchGitHubPullFiles } from "./githubStore"
-import { useExpandable, type LazyResourceState } from "./useExpandable"
+} from "@cogpit/plugin-ui"
+import { useGitHubDetails } from "./githubStore.js"
+import { useExpandable, type LazyResourceState } from "./useExpandable.js"
 
 type Filter = "all" | "mine" | "branch"
 
@@ -221,22 +221,22 @@ function SessionChips({
   openSession,
 }: {
   sessions: GitHubPullSession[]
-  openSession: ((dirName: string, fileName: string) => void) | undefined
+  openSession: ((handle: string) => void) | undefined
 }) {
   return (
     <div className="flex flex-wrap gap-1 pl-[26px] pr-1 pb-1" aria-label="Sessions on this pull request">
       {sessions.map((session) => (
         <button
-          key={session.sessionId}
+          key={session.handle}
           type="button"
           className="inline-flex h-5 max-w-full items-center gap-1 rounded-full border px-1.5 text-[10px] leading-none text-muted-foreground outline-none hover:border-foreground/30 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-default disabled:hover:border-border disabled:hover:text-muted-foreground"
-          onClick={() => openSession?.(session.dirName, session.fileName)}
+          onClick={() => openSession?.(session.handle)}
           disabled={!openSession}
-          aria-label={`Open session: ${session.title || session.sessionId}`}
-          title={session.title || session.sessionId}
+          aria-label={`Open session: ${session.title || session.handle}`}
+          title={session.title || session.handle}
         >
           <MessagesSquare className="size-3 shrink-0" aria-hidden />
-          <span className="truncate">{session.title || session.sessionId.slice(0, 8)}</span>
+          <span className="truncate">{session.title || session.handle.slice(0, 8)}</span>
         </button>
       ))}
     </div>
@@ -245,17 +245,19 @@ function SessionChips({
 
 interface PullRowProps {
   pull: GitHubPullRequest
-  projectPath: string
+  projectKey: string
   currentBranch: string | null
   sessions: GitHubPullSession[]
-  openSession: ((dirName: string, fileName: string) => void) | undefined
+  openSession: ((handle: string) => void) | undefined
   onShowChecks: (branch: string) => void
   now: number
 }
 
-function PullRow({ pull, projectPath, currentBranch, sessions, openSession, onShowChecks, now }: PullRowProps) {
+function PullRow({ pull, projectKey, currentBranch, sessions, openSession, onShowChecks, now }: PullRowProps) {
+  const openExternal = useGitHubNavigation()
+  const { pullFiles: fetchGitHubPullFiles } = useGitHubDetails()
   const { open, state: files, onOpenChange } = useExpandable(
-    () => fetchGitHubPullFiles(projectPath, pull.number),
+    () => fetchGitHubPullFiles(projectKey, pull.number),
     "Unable to load changed files",
   )
   const onCurrentBranch = currentBranch !== null && pull.headBranch === currentBranch
@@ -305,7 +307,7 @@ function PullRow({ pull, projectPath, currentBranch, sessions, openSession, onSh
               size="icon-xs"
               className="size-6 text-muted-foreground opacity-0 transition-opacity group-hover/pull:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label={`Open #${pull.number} on GitHub`}
-              onClick={() => window.open(pull.url, "_blank", "noopener,noreferrer")}
+              onClick={() => openExternal?.(pull.url)}
             >
               <ArrowUpRight />
             </Button>
@@ -342,14 +344,14 @@ export function sessionsByPull(sessions: readonly GitHubPullSession[]): Map<numb
 export function PullRequestsTab({
   data,
   sessions,
-  projectPath,
+  projectKey,
   openSession,
   onShowChecks,
 }: {
   data: GitHubPullsResponse
   sessions: readonly GitHubPullSession[]
-  projectPath: string
-  openSession: ((dirName: string, fileName: string) => void) | undefined
+  projectKey: string
+  openSession: ((handle: string) => void) | undefined
   onShowChecks: (branch: string) => void
 }) {
   const [filter, setFilter] = useState<Filter>("all")
@@ -379,7 +381,7 @@ export function PullRequestsTab({
     <PullRow
       key={pull.number}
       pull={pull}
-      projectPath={projectPath}
+      projectKey={projectKey}
       currentBranch={data.branch}
       sessions={linked.get(pull.number) ?? []}
       openSession={openSession}

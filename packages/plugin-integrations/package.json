@@ -1,0 +1,42 @@
+{
+  "name": "@cogpit/plugin-integrations",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./clickup": {
+      "types": "./dist/clickup.d.ts",
+      "import": "./dist/clickup.js"
+    },
+    "./normalizeClickUp": {
+      "types": "./dist/normalizeClickUp.d.ts",
+      "import": "./dist/normalizeClickUp.js"
+    },
+    "./github": {
+      "types": "./dist/github.d.ts",
+      "import": "./dist/github.js"
+    },
+    "./vercel": {
+      "types": "./dist/vercel.d.ts",
+      "import": "./dist/vercel.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare.d.ts",
+      "import": "./dist/cloudflare.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2"
+  }
+}

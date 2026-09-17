@@ -128,9 +128,7 @@ export function useSessionActions({
   const handleMobileTabChange = useCallback(
     (tab: MobileTab) => {
       if (tab === mobileTab) return
-      startTransition(() => {
-        dispatch({ type: "SET_MOBILE_TAB", tab })
-      })
+      dispatch({ type: "SET_MOBILE_TAB", tab })
     },
     [dispatch, mobileTab]
   )

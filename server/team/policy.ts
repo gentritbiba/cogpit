@@ -23,6 +23,7 @@ function admin(...prefixes: string[]): PolicyRule[] {
  * anything unlisted, so a forgotten path locks down instead of leaking.
  */
 export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
+  plugins: admin("/api/plugins"),
   hello: [{ prefix: "/api/hello", requires: "public" }],
   devices: [
     { prefix: "/api/hub/devices", methods: ["GET"], requires: "authed" },

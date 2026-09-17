@@ -556,20 +556,20 @@ describe("useSessionActions", () => {
       const opts = makeDefaultOpts()
       const { result } = renderHook(() => useSessionActions(opts))
 
-      act(() => result.current.handleMobileTabChange("stats"))
+      act(() => result.current.handleMobileTabChange("workspace"))
 
       expect(opts.dispatch).toHaveBeenCalledWith({
         type: "SET_MOBILE_TAB",
-        tab: "stats",
+        tab: "workspace",
       })
     })
 
     it("does not restart navigation when the selected tab is already active", () => {
       const opts = makeDefaultOpts()
-      opts.mobileTab = "stats"
+      opts.mobileTab = "workspace"
       const { result } = renderHook(() => useSessionActions(opts))
 
-      act(() => result.current.handleMobileTabChange("stats"))
+      act(() => result.current.handleMobileTabChange("workspace"))
 
       expect(opts.dispatch).not.toHaveBeenCalled()
     })

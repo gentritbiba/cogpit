@@ -79,6 +79,7 @@ function summarizeRequest(
     ...(request.title && { title: request.title }),
     ...(request.description && { description: request.description }),
     ...(request.availableDecisions && { availableDecisions: request.availableDecisions }),
+    ...(request.defaultToNo && { defaultToNo: true }),
     timestamp: request.timestamp,
   }
 }

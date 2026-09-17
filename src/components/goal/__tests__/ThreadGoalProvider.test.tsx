@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ThreadGoalProvider } from "@/components/goal/ThreadGoalProvider"
-import { GoalControlsBlock } from "@/components/goal"
+import { GoalSection, GoalTrigger } from "@/components/goal"
 import { authFetch } from "@/lib/auth"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
@@ -11,7 +11,8 @@ const mockedFetch = vi.mocked(authFetch)
 function renderGoalUi(threadId = "thread-1") {
   return render(
     <ThreadGoalProvider agentKind="codex" threadId={threadId}>
-      <GoalControlsBlock />
+      <GoalSection />
+      <GoalTrigger />
     </ThreadGoalProvider>,
   )
 }

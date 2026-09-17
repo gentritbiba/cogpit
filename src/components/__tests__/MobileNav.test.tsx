@@ -39,22 +39,22 @@ describe("MobileNav", () => {
 
     const sessionsTab = screen.getByRole("button", { name: "Sessions" })
     const chatTab = screen.getByRole("button", { name: "Chat" })
-    const statsTab = screen.getByRole("button", { name: "Stats" })
+    const statsTab = screen.getByRole("button", { name: "Workspace" })
 
     expect(sessionsTab).not.toHaveAttribute("aria-current")
     expect(chatTab).toHaveAttribute("aria-current", "page")
     expect(statsTab).not.toHaveAttribute("aria-current")
     expect(screen.queryByText("Sessions")).not.toBeInTheDocument()
     expect(screen.queryByText("Chat")).not.toBeInTheDocument()
-    expect(screen.queryByText("Stats")).not.toBeInTheDocument()
+    expect(screen.queryByText("Workspace")).not.toBeInTheDocument()
 
     fireEvent.click(statsTab)
 
     expect(mocks.hapticLight).toHaveBeenCalledOnce()
-    expect(onTabChange).toHaveBeenCalledWith("stats")
+    expect(onTabChange).toHaveBeenCalledWith("workspace")
   })
 
-  it("only exposes tabs that are available for the current view", () => {
+  it("keeps workspace tools reachable without a session", () => {
     mocks.session = null
 
     render(
@@ -66,6 +66,6 @@ describe("MobileNav", () => {
 
     expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Stats" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument()
   })
 })

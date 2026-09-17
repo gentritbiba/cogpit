@@ -11,6 +11,10 @@ import { describeEditionSuppression, initEdition } from "./team/edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { allRuntimes } from "./agents/runtimes"
+import { initializeAppPlugins } from "./plugins/startup"
+import { captureLegacyPluginHost } from "./plugins/legacyHost"
+import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
+import { disposeHubPluginRelay } from "./hub/pluginRelay"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -28,6 +32,7 @@ export function sessionApiPlugin(): Plugin {
       // registering middleware so the first request observes the same ready
       // config/registry state as Electron and standalone composition.
       const dataDir = fileURLToPath(new URL("..", import.meta.url))
+      const legacyHost = await captureLegacyPluginHost(dataDir)
       await Promise.all([
         loadConfig(),
         initDeviceRegistry(dataDir),
@@ -41,6 +46,10 @@ export function sessionApiPlugin(): Plugin {
       initEdition({ shell: "dev", configEdition })
       const suppression = describeEditionSuppression(process.env, configEdition, "dev")
       if (suppression) console.warn(suppression)
+      const pluginManager = await initializeAppPlugins(dataDir, { legacyHost, legacyClickUpPath: CLICKUP_CONFIG_FILE })
+      server.httpServer?.on("close", () => {
+        void Promise.all([pluginManager.close(), disposeHubPluginRelay()])
+      })
 
       // Security middleware (before all routes)
       server.middlewares.use(devSecurityHeaders)

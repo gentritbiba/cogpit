@@ -23,6 +23,8 @@ export interface CommonSettingsControlProps {
   effortOptions: readonly SettingOption[]
   onEffortChange: (effort: string) => void
   fastTier?: ServiceTierOption
+  contextWindowTokens?: number | null
+  onContextWindowTokensChange?: (tokens: number | null) => void
   fastModeEnabled?: boolean
   onFastModeEnabledChange?: (enabled: boolean) => void
   isNewSession: boolean

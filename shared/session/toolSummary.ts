@@ -68,6 +68,8 @@ const TOOL_LABELS: Readonly<Record<string, { label: string; styleName: string }>
   EnterWorktree: { label: "Enter worktree", styleName: "EnterWorktree" },
   ExitWorktree: { label: "Exit worktree", styleName: "ExitWorktree" },
   Workflow: { label: "Run workflow", styleName: "Workflow" },
+  SendFeedback: { label: "Draft feedback", styleName: "Mcp" },
+  Artifact: { label: "Artifact", styleName: "Mcp" },
   exec_command: { label: "Run command", styleName: "Bash" },
   write_stdin: { label: "Continue command", styleName: "Bash" },
   apply_patch: { label: "Apply patch", styleName: "Edit" },
@@ -637,10 +639,13 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return String(input.task_id ?? "")
     case "Workflow":
       return workflowSummary(input)
+    case "SendFeedback":
+      return firstString(input.title, input.details)
+    case "Artifact":
+      return [firstString(input.action), firstString(input.title, input.file_path, input.url), firstString(input.asset_id)].filter(Boolean).join(" · ")
     case "StructuredOutput":
     case "ReportFindings":
     case "DesignSync":
-    case "Artifact":
     case "LSP":
       return schemaFreeSummary(input) || firstStringValue(input)
     case "spawn_agent":

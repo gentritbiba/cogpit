@@ -1,6 +1,5 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { authFetch } from "@/lib/auth"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { openProjectTerminal } from "@/lib/openTerminal"
 import { useProcessPanel } from "@/hooks/useProcessPanel"
 import {
   registerBuiltInFileOpener,
@@ -18,10 +17,7 @@ interface UseProjectWorkspaceOptions {
   sessionDirName: string | null | undefined
   pendingDirName: string | null
   dashboardProject: string | null
-  /**
-   * Whether this shell renders the file workspace. Layouts without it (mobile)
-   * decline built-in open requests so they fall through to the host editor.
-   */
+  /** Whether this viewer can access the host's file workspace. */
   supportsFileWorkspace: boolean
   activeWorkspacePanel: string | null
   openWorkspacePanel: (panelId: string) => void
@@ -77,32 +73,18 @@ export function useProjectWorkspace({
     [pendingPath, pendingDirName],
   )
 
+  const terminalTarget = useCallback(() => ({
+    path: sessionCwd ?? pendingPath ?? undefined,
+    dirName: sessionDirName ?? pendingDirName ?? dashboardProject ?? undefined,
+  }), [sessionCwd, pendingPath, sessionDirName, pendingDirName, dashboardProject])
+
   const handleOpenTerminal = useCallback(() => {
-    // Native terminal windows can only be opened on the local device.
-    if (isRemoteDeviceActive()) { console.warn("[open-terminal] unavailable for remote devices"); return }
-    const projectPath = sessionCwd ?? pendingPath ?? undefined
-    const dirName = sessionDirName ?? pendingDirName ?? dashboardProject ?? undefined
-    if (!projectPath && !dirName) { console.warn("[open-terminal] no project path available"); return }
-    authFetch("/api/open-terminal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, dirName }),
-    }).then((res) => {
-      if (!res.ok) res.json().then((data) => console.error("[open-terminal]", data.error)).catch(() => {})
-    }).catch((error) => console.error("[open-terminal] fetch failed:", error))
-  }, [sessionCwd, pendingPath, sessionDirName, pendingDirName, dashboardProject])
+    openProjectTerminal(terminalTarget())
+  }, [terminalTarget])
 
   const handleMcpAuth = useCallback((_serverName: string) => {
-    if (isRemoteDeviceActive()) { console.warn("[mcp-auth] unavailable for remote devices"); return }
-    const projectPath = sessionCwd ?? pendingPath ?? undefined
-    const dirName = sessionDirName ?? pendingDirName ?? dashboardProject ?? undefined
-    if (!projectPath && !dirName) return
-    authFetch("/api/open-terminal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, dirName, command: "claude /mcp" }),
-    }).catch((error) => console.error("[mcp-auth] open-terminal failed:", error))
-  }, [sessionCwd, pendingPath, sessionDirName, pendingDirName, dashboardProject])
+    openProjectTerminal({ ...terminalTarget(), command: "claude /mcp" })
+  }, [terminalTarget])
 
   const handleToggleIntegratedTerminal = useCallback(() => {
     const terminals = [...processPanel.processes.values()].filter((entry) => entry.type === "terminal")

@@ -1,6 +1,7 @@
 import { getStatusLabel } from "../../../shared/session/sessionStatus"
 import { agentKindForDirName } from "@/lib/agents"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
+import { isSessionLive } from "./sessionListView"
 import { isIdleStatus } from "./sessionStatusPresentation"
 import type { STATUS_DOT } from "./statusDot"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
@@ -8,6 +9,7 @@ import type { ActiveSessionInfo, RunningProcess } from "./types"
 export interface SessionRowState {
   hasProcess: boolean
   isLive: boolean
+  isRunning: boolean
   /** A natively driven session whose agent is waiting for the next instruction. */
   isNativeIdle: boolean
   isDeferred: boolean
@@ -37,6 +39,7 @@ export function describeSessionRow(
   return {
     hasProcess,
     isLive,
+    isRunning: isSessionLive(s, proc),
     isNativeIdle,
     isDeferred,
     isReadOnly,

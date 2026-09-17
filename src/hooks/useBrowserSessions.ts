@@ -35,6 +35,7 @@ export interface UseBrowserSessions {
   create: (name: string, note?: string) => Promise<BrowserActionResult>
   remove: (name: string) => Promise<BrowserActionResult>
   stop: (name: string) => Promise<BrowserActionResult>
+  setArchived: (name: string, archived: boolean) => Promise<BrowserActionResult>
   /** Where the browser skill can be installed, and where it already is. */
   readSkillTargets: () => Promise<SkillTargetsResult>
   installSkill: (target: SkillTarget) => Promise<SkillInstallResult>
@@ -147,6 +148,12 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
     `Could not stop ${name}`,
   ), [perform])
 
+  const setArchived = useCallback((name: string, archived: boolean) => perform(
+    sessionPath(name),
+    { method: "PATCH", ...jsonBody({ archived }) },
+    `Could not ${archived ? "archive" : "restore"} ${name}`,
+  ), [perform])
+
   const readSkillTargets = useCallback(async (): Promise<SkillTargetsResult> => {
     const fallback = "Could not read where the browser skill is installed"
     let res: Response
@@ -182,6 +189,7 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
     create,
     remove,
     stop,
+    setArchived,
     readSkillTargets,
     installSkill,
   }

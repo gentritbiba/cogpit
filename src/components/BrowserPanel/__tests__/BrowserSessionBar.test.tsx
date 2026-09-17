@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { BrowserSessionBar } from "@/components/BrowserPanel/BrowserSessionBar"
 import type { BrowserActionResult } from "@/hooks/useBrowserSessions"
@@ -40,6 +40,7 @@ function setup(props: Partial<Props> = {}) {
     ),
     onRemove: vi.fn(),
     onStop: vi.fn(),
+    onSetArchived: vi.fn(async () => ({ ok: true as const })),
     onShowDefault: vi.fn(),
     onClose: vi.fn(),
   }
@@ -58,7 +59,7 @@ function setup(props: Partial<Props> = {}) {
 
 async function openMenu(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Switch browser" }))
-  return screen.findByRole("menuitemradio", { name: /^default/ })
+  return screen.findByRole("button", { name: "Switch to default" })
 }
 
 describe("BrowserSessionBar", () => {
@@ -95,8 +96,8 @@ describe("BrowserSessionBar", () => {
     const { user, onSelect } = setup()
     await openMenu(user)
 
-    expect(screen.getByRole("menuitemradio", { name: /^default/ })).toBeInTheDocument()
-    const work = screen.getByRole("menuitemradio", { name: /^work/ })
+    expect(screen.getByRole("button", { name: "Switch to default" })).toBeInTheDocument()
+    const work = screen.getByRole("button", { name: "Switch to work" })
     expect(work).toHaveTextContent("2m ago")
 
     await user.click(work)
@@ -107,21 +108,21 @@ describe("BrowserSessionBar", () => {
     const { user } = setup({
       sessions: [
         sessionOf({ driverSessionId: "cogpit-1" }),
-        { ...WORK, driverSessionId: "cogpit-2" },
+        { ...WORK, running: true, driverSessionId: "cogpit-2" },
       ],
     })
     await openMenu(user)
 
-    expect(screen.getByRole("menuitemradio", { name: /^default/ }))
+    expect(screen.getByRole("button", { name: "Switch to default" }))
       .not.toHaveTextContent("driven by another session")
-    expect(screen.getByRole("menuitemradio", { name: /^work/ }))
+    expect(screen.getByRole("button", { name: "Switch to work" }))
       .toHaveTextContent("driven by another session")
   })
 
   it("refuses an invalid name inline without asking the server", async () => {
     const { user, onCreate } = setup()
     await openMenu(user)
-    await user.click(screen.getByRole("menuitem", { name: "New browser…" }))
+    await user.click(screen.getByRole("button", { name: "New browser…" }))
 
     await user.type(await screen.findByLabelText("Name"), "Bad Name")
 
@@ -139,7 +140,7 @@ describe("BrowserSessionBar", () => {
     )
     const { user, onSelect } = setup({ onCreate })
     await openMenu(user)
-    await user.click(screen.getByRole("menuitem", { name: "New browser…" }))
+    await user.click(screen.getByRole("button", { name: "New browser…" }))
 
     await user.type(await screen.findByLabelText("Name"), "work")
     await user.type(screen.getByLabelText(/^Note/), "signed in as me")
@@ -153,7 +154,7 @@ describe("BrowserSessionBar", () => {
   it("selects a browser it just created", async () => {
     const { user, onSelect } = setup()
     await openMenu(user)
-    await user.click(screen.getByRole("menuitem", { name: "New browser…" }))
+    await user.click(screen.getByRole("button", { name: "New browser…" }))
 
     await user.type(await screen.findByLabelText("Name"), "shop")
     await user.click(screen.getByRole("button", { name: "Create browser" }))
@@ -165,7 +166,7 @@ describe("BrowserSessionBar", () => {
     const { user, onOpenSkill } = setup()
     await openMenu(user)
 
-    await user.click(screen.getByRole("menuitem", { name: "Agent skill…" }))
+    await user.click(screen.getByRole("button", { name: "Agent skill…" }))
     expect(onOpenSkill).toHaveBeenCalledTimes(1)
   })
 
@@ -173,14 +174,14 @@ describe("BrowserSessionBar", () => {
     const { user } = setup()
     await openMenu(user)
 
-    expect(screen.queryByRole("menuitem", { name: "Delete…" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("menuitem", { name: "Stop" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument()
   })
 
   it("confirms before deleting a named browser", async () => {
     const { user, onRemove } = setup({ selected: "work" })
     await openMenu(user)
-    await user.click(screen.getByRole("menuitem", { name: "Delete…" }))
+    await user.click(screen.getByRole("button", { name: "Delete…" }))
 
     expect(await screen.findByRole("heading", { name: "Delete work?" })).toBeInTheDocument()
     expect(screen.getByText(/signed out/i)).toBeInTheDocument()
@@ -196,7 +197,7 @@ describe("BrowserSessionBar", () => {
       sessions: [sessionOf(), { ...WORK, running: true }],
     })
     await openMenu(user)
-    await user.click(screen.getByRole("menuitem", { name: "Stop" }))
+    await user.click(screen.getByRole("button", { name: "Stop" }))
 
     expect(onStop).toHaveBeenCalledWith("work")
   })
@@ -211,5 +212,75 @@ describe("BrowserSessionBar", () => {
 
     await user.click(screen.getByRole("button", { name: "Close browser panel" }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("browser picker archive", () => {
+  const archived = { ...WORK, name: "old-project", archived: true }
+
+  it("collapses archived browsers and finds them by name or note", async () => {
+    const { user } = setup({ sessions: [sessionOf(), WORK, { ...archived, note: "Billing login" }] })
+    await openMenu(user)
+    expect(screen.queryByRole("button", { name: "Restore and switch to old-project" })).not.toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Search browsers" }), "billing")
+    expect(screen.getByRole("button", { name: "Restore and switch to old-project" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Switch to work" })).not.toBeInTheDocument()
+  })
+
+  it("restores an archived browser before selecting it", async () => {
+    const { user, onSetArchived, onSelect } = setup({ sessions: [sessionOf(), archived] })
+    await openMenu(user)
+    await user.click(screen.getByRole("button", { name: /Archived/ }))
+    await user.click(screen.getByRole("button", { name: "Restore and switch to old-project" }))
+    expect(onSetArchived).toHaveBeenCalledWith("old-project", false)
+    expect(onSelect).toHaveBeenCalledWith("old-project")
+  })
+
+  it("keeps the picker open and does not switch when restoring fails", async () => {
+    const onSetArchived = vi.fn(async () => ({ ok: false as const, error: "Offline" }))
+    const { user, onSelect } = setup({ sessions: [sessionOf(), archived], onSetArchived })
+    await openMenu(user)
+    await user.click(screen.getByRole("button", { name: /Archived/ }))
+    await user.click(screen.getByRole("button", { name: "Restore and switch to old-project" }))
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox", { name: "Search browsers" })).toBeInTheDocument()
+  })
+
+  it("archives a stopped browser without selecting or deleting it", async () => {
+    const { user, onSetArchived, onSelect, onRemove } = setup()
+    await openMenu(user)
+    await user.click(screen.getByRole("button", { name: "Archive work" }))
+    expect(onSetArchived).toHaveBeenCalledWith("work", true)
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(onRemove).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "Archive default" })).not.toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Search browsers" })).toHaveFocus()
+  })
+
+  it("keeps the current and running browsers visible, without an archive action for running browsers", async () => {
+    const { user } = setup({ selected: "old-project", sessions: [sessionOf(), archived, { ...WORK, archived: true, running: true }] })
+    await openMenu(user)
+    expect(screen.getByRole("button", { name: "Switch to old-project" })).toHaveAttribute("aria-current", "true")
+    expect(screen.getByRole("button", { name: "Switch to work" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Archive work" })).not.toBeInTheDocument()
+  })
+
+  it("does not claim a stopped browser is still driven elsewhere", async () => {
+    const { user } = setup({ sessions: [sessionOf(), { ...WORK, driverSessionId: "other-session" }] })
+    await openMenu(user)
+    expect(screen.queryByText("driven by another session")).not.toBeInTheDocument()
+  })
+
+  it("can close with the X or Escape and clears search on reopening", async () => {
+    const { user } = setup()
+    await openMenu(user)
+    await user.type(screen.getByRole("textbox", { name: "Search browsers" }), "missing")
+    expect(screen.getByText("No browsers found.")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Close browser picker" }))
+    await openMenu(user)
+    expect(screen.getByRole("textbox", { name: "Search browsers" })).toHaveValue("")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Search browsers" })).not.toBeInTheDocument())
+    expect(screen.getByRole("button", { name: "Switch browser" })).toHaveFocus()
   })
 })

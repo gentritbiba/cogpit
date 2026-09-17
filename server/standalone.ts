@@ -4,6 +4,7 @@
  * Applies standalone bootstrap policy, then delegates to the shared server
  * composition through a server-owned adapter.
  */
+import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { join } from "node:path"
 import { homedir, hostname, networkInterfaces } from "node:os"
 import { removePortFile } from "./lib/portFile"
@@ -28,6 +29,7 @@ let runtime: Awaited<ReturnType<typeof startStandaloneServer>>
 try {
   runtime = await startStandaloneServer({
     staticDir,
+    legacyClickUpPath: CLICKUP_CONFIG_FILE,
     dataDir,
     host,
     port,

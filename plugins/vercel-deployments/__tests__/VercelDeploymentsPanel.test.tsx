@@ -9,12 +9,12 @@ import type { WorkspacePanelContext } from "@/plugin-api"
 
 const storeMocks = vi.hoisted(() => ({
   useVercelDeployments: vi.fn(),
-  fetchVercelBuildLogs: vi.fn(),
+  fetchBuildLogs: vi.fn(),
 }))
 
 vi.mock("../vercelDeploymentsStore", () => storeMocks)
 
-import { VercelDeploymentsIndicator, VercelDeploymentsPanel, productionSummary } from "../VercelDeploymentsPanel"
+import { VercelDeploymentsPanel, productionSummary } from "../VercelDeploymentsPanel"
 
 const deploymentsResponse: VercelDeploymentsResponse = {
   projectId: "prj_project123",
@@ -84,6 +84,8 @@ const logsResponse: VercelBuildLogsResponse = {
   ],
 }
 
+const openExternal = vi.fn().mockResolvedValue(null)
+
 const context: WorkspacePanelContext = {
   session: null,
   sessionChangeKey: 0,
@@ -99,6 +101,7 @@ function state(overrides: Record<string, unknown> = {}) {
     loading: false,
     refreshing: false,
     refresh: vi.fn().mockResolvedValue(undefined),
+    fetchBuildLogs: storeMocks.fetchBuildLogs,
     ...overrides,
   }
 }
@@ -109,6 +112,7 @@ function renderPanel() {
       context={context}
       active
       closePanel={vi.fn()}
+      openExternal={openExternal}
     />,
   )
 }
@@ -134,14 +138,15 @@ describe("VercelDeploymentsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     storeMocks.useVercelDeployments.mockReturnValue(state())
-    storeMocks.fetchVercelBuildLogs.mockResolvedValue(logsResponse)
+    storeMocks.fetchBuildLogs.mockResolvedValue(logsResponse)
   })
 
   it("shows normalized project deployments and marks only production rows", () => {
     renderPanel()
 
     expect(screen.getByRole("heading", { name: "Vercel Deployments" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "web" })).toHaveAttribute("href", "https://vercel.com/acme/web")
+    expect(screen.getByRole("link", { name: "web" })).toBeInTheDocument()
+    expect(document.querySelector("a")).toBeNull()
     expect(within(screen.getByRole("article", { name: "Ship production" })).getByText("prod")).toBeInTheDocument()
     expect(within(screen.getByRole("article", { name: "Add search" })).queryByText("prod")).not.toBeInTheDocument()
     expect(screen.getByRole("article", { name: "Break the build" })).toBeInTheDocument()
@@ -184,10 +189,10 @@ describe("VercelDeploymentsPanel", () => {
     const user = userEvent.setup()
     renderPanel()
 
-    expect(storeMocks.fetchVercelBuildLogs).not.toHaveBeenCalled()
+    expect(storeMocks.fetchBuildLogs).not.toHaveBeenCalled()
     await user.click(screen.getByRole("button", { name: "Ship production: Building" }))
 
-    expect(storeMocks.fetchVercelBuildLogs).toHaveBeenCalledWith("/repo", "dpl_building123")
+    expect(storeMocks.fetchBuildLogs).toHaveBeenCalledWith("dpl_building123", expect.any(AbortSignal))
     expect(await screen.findByText("Running build")).toBeVisible()
     expect(screen.getByText("Deploying outputs")).toBeVisible()
   })
@@ -209,6 +214,41 @@ describe("VercelDeploymentsPanel", () => {
     expect(screen.queryByRole("article", { name: "Add search" })).not.toBeInTheDocument()
   })
 
+  it("sends project, deployment, inspector and production links through the supplied navigation callback", async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.click(screen.getByRole("link", { name: "web" }))
+    expect(openExternal).toHaveBeenLastCalledWith("https://vercel.com/acme/web")
+    await user.click(screen.getByRole("button", { name: "Open Ship production" }))
+    expect(openExternal).toHaveBeenLastCalledWith(deploymentsResponse.deployments[0].url)
+    await user.click(screen.getByRole("button", { name: "Ship production: Building" }))
+    await user.click(screen.getByRole("link", { name: "Inspect on Vercel" }))
+    expect(openExternal).toHaveBeenLastCalledWith(deploymentsResponse.deployments[0].inspectorUrl)
+    expect(document.querySelectorAll("a")).toHaveLength(0)
+  })
+
+  it("aborts pending log reads when collapsed or unmounted", async () => {
+    const user = userEvent.setup()
+    storeMocks.fetchBuildLogs.mockImplementation(() => new Promise(() => {}))
+    const mounted = renderPanel()
+    await user.click(screen.getByRole("button", { name: "Ship production: Building" }))
+    const first = storeMocks.fetchBuildLogs.mock.calls[0]![1] as AbortSignal
+    await user.click(screen.getByRole("button", { name: "Ship production: Building" }))
+    expect(first.aborted).toBe(true)
+    await user.click(screen.getByRole("button", { name: "Ship production: Building" }))
+    const second = storeMocks.fetchBuildLogs.mock.calls[1]![1] as AbortSignal
+    mounted.unmount()
+    expect(second.aborted).toBe(true)
+  })
+
+  it("treats canceled external-link confirmation as a normal action", async () => {
+    const user = userEvent.setup()
+    openExternal.mockRejectedValueOnce({ code: "CANCELED" })
+    renderPanel()
+    await user.click(screen.getByRole("link", { name: "web" }))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("explains how to update an older Vercel CLI", () => {
     storeMocks.useVercelDeployments.mockReturnValue(state({
       data: null,
@@ -223,8 +263,4 @@ describe("VercelDeploymentsPanel", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 
-  it("renders the active deployment count on the workspace rail", () => {
-    render(<VercelDeploymentsIndicator context={context} active={false} />)
-    expect(screen.getByLabelText("1 active Vercel deployment")).toHaveTextContent("1")
-  })
 })

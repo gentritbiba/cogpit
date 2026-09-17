@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.cloudflare",
+  "publisher": "cogpit",
+  "name": "Cloudflare Workers",
+  "version": "1.0.0",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": { "pluginApi": "^1.0.0", "client": ">=2.6.6", "host": ">=2.7.0" },
+  "protocol": 1,
+  "requires": { "client": { "workspace.panel": "^1.0.0", "navigation.external": "^1.0.0" }, "host": { "integrations.cloudflare": "^1.0.0", "connections.request": "^1.0.0" } },
+  "optional": { "client": {}, "host": {} },
+  "browser": ["message-channel", "blob-script", "web-crypto"],
+  "contributes": { "panels": [{ "id": "workers", "title": "Cloudflare Workers", "icon": "assets/icon.png", "order": 46, "defaultSize": "42%", "minSize": "380px", "maxSize": "68%", "when": "project-selected" }] },
+  "permissions": { "context": ["project.identity"], "composer": [], "navigation": ["external"], "connections": [{ "id": "cloudflare", "definition": "connections/cloudflare.json", "operations": ["workers"] }], "integrations": [{ "id": "cloudflare", "operations": ["workspace", "deployments", "version"] }] },
+  "stateVersion": 1
+}

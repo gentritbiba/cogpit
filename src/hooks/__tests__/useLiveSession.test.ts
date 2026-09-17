@@ -312,6 +312,69 @@ describe("useLiveSession", () => {
     expect(result.current.promptSuggestion).toBeNull()
   })
 
+  it("raises a rate-limit block and lifts it when the allowance returns", () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    expect(result.current.rateLimit).toBeNull()
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "rate_limit", block })
+    })
+    expect(result.current.rateLimit).toEqual(block)
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "rate_limit", block: null })
+    })
+    expect(result.current.rateLimit).toBeNull()
+  })
+
+  /**
+   * The refused turn produces a result, and a result clears the stream — so a
+   * block wiped by stream_clear would vanish in the same tick it arrived.
+   */
+  it("keeps the block across the stream_clear the refused turn triggers", () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "rate_limit", block })
+      getLastEventSource().simulateMessage({ type: "stream_clear" })
+    })
+    expect(result.current.rateLimit).toEqual(block)
+  })
+
+  it("drops the block once a later turn produces tokens", () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "rate_limit", block })
+      getLastEventSource().simulateMessage({ type: "stream_delta", events: [] })
+    })
+    expect(result.current.rateLimit).toBeNull()
+  })
+
+  it("does not carry a block across a session switch", () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const { result, rerender } = renderHook(
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      { initialProps: { src: source } },
+    )
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "rate_limit", block })
+    })
+    expect(result.current.rateLimit).toEqual(block)
+
+    rerender({ src: { dirName: "dir", fileName: "b.jsonl", rawText: "{}" } })
+    expect(result.current.rateLimit).toBeNull()
+  })
+
   it("tracks a compaction from start to finish", () => {
     const source: SessionSource = {
       dirName: "dir",

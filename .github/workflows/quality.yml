@@ -100,6 +100,9 @@ jobs:
         working-directory: packages/cogpit-cli
         run: bun run test:contracts
 
+      - name: Verify public plugin packages outside the repository
+        run: bun run test:contracts:plugins
+
   # Windows is a release target, but nothing used to exercise it — the win NSIS
   # config sat unbuilt while POSIX assumptions (/tmp, /bin/zsh, "/" joins, bare
   # spawn of .cmd shims) accumulated across the server. This job is deliberately
@@ -134,6 +137,9 @@ jobs:
 
       - name: Test application and server
         run: bun run test
+
+      - name: Verify public plugin packages outside the repository
+        run: bun run test:contracts:plugins
 
       - name: Test install-free Cogpit CLI
         working-directory: packages/cogpit-cli

@@ -62,6 +62,7 @@ describe("AgentDescriptor.launchArgs", () => {
   })
 
   it("keeps `codex exec` sandboxed, since it cannot prompt for approval", () => {
+    expect(codex.permissions({ mode: "auto" })).toEqual(["--approve-for-me"])
     expect(codex.permissions({ mode: "plan" }))
       .toEqual(["--sandbox", "read-only", "-c", 'approval_policy="never"'])
     expect(codex.permissions({ mode: "acceptEdits" }))

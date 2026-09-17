@@ -45,17 +45,18 @@ function imageReadPath(toolCall: ToolCall): string | null {
   return typeof path === "string" && isLocalImagePath(path) ? path : null
 }
 
-function ToolSummary({ summary, filePath, monospace }: { summary: string; filePath: boolean; monospace: boolean }) {
+/** The row's headline: what the call is for (intent, target path, skill name), read before the tool name. */
+function ToolSummary({ summary, filePath, monospace, className }: { summary: string; filePath: boolean; monospace: boolean; className: string }) {
   const separator = Math.max(summary.lastIndexOf("/"), summary.lastIndexOf("\\"))
   if (filePath && summary.length > 30 && separator >= 0) {
     return (
-      <span className="flex min-w-0 font-mono text-xs leading-5 text-muted-foreground" title={summary}>
+      <span className={cn("flex min-w-0 font-mono leading-5", className)} title={summary}>
         <span className="truncate">{summary.slice(0, separator + 1)}</span>
         <span className="max-w-full shrink-0 truncate">{summary.slice(separator + 1)}</span>
       </span>
     )
   }
-  return <span className={cn("line-clamp-2 min-w-0 text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]", monospace && "font-mono")} title={summary}>{summary}</span>
+  return <span className={cn("line-clamp-2 min-w-0 leading-5 [overflow-wrap:anywhere]", monospace && "font-mono", className)} title={summary}>{summary}</span>
 }
 
 function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement {
@@ -168,8 +169,15 @@ export const ToolCallCard = memo(function ToolCallCard({
           <ToolOperationIcon styleName={presentation.styleName} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn("text-[13px] font-medium leading-5", nameClass)} title={nameTitle}>{displayName}</span>
-          {summary && <ToolSummary summary={summary} filePath={[toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)} monospace={!hasCommand || !toolCall.input.description} />}
+          {summary && (
+            <ToolSummary
+              summary={summary}
+              filePath={[toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)}
+              monospace={!hasCommand || !toolCall.input.description}
+              className={cn("text-[13px] font-medium", nameClass)}
+            />
+          )}
+          <span className={cn(summary ? "text-xs text-muted-foreground" : cn("text-[13px] font-medium", nameClass), "leading-5")} title={nameTitle}>{displayName}</span>
         </span>
         <span id={statusId} className="flex shrink-0 flex-col items-end gap-1">
           <ToolCallStatus toolCall={toolCall} failed={failed} isAgentActive={isAgentActive} />

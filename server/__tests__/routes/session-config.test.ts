@@ -261,3 +261,17 @@ describe("session-config transcript effort overlay", () => {
     expect(res.json()).toEqual({ effort: "medium" })
   })
 })
+
+describe("context window config", () => {
+  it("persists a limit and removes it on reset", async () => {
+    expect((await invoke("PUT", "/context.jsonl", JSON.stringify({ contextWindowTokens: 1000000 }))).statusCode).toBe(200)
+    expect((await invoke("GET", "/context.jsonl")).json()).toMatchObject({ contextWindowTokens: 1000000 })
+    await invoke("PUT", "/context.jsonl", JSON.stringify({ contextWindowTokens: null }))
+    expect((await invoke("GET", "/context.jsonl")).json()).not.toHaveProperty("contextWindowTokens")
+  })
+
+  it.each([0, -1, 1.5, "1000000", true, 9007199254740992])("rejects invalid context limit %s", async (contextWindowTokens) => {
+    const res = await invoke("PUT", "/context.jsonl", JSON.stringify({ contextWindowTokens }))
+    expect(res.statusCode).toBe(400)
+  })
+})

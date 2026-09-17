@@ -493,3 +493,31 @@ describe("unknown sub-paths", () => {
     expect(call.next).toHaveBeenCalled()
   })
 })
+
+describe("PATCH browser archive state", () => {
+  it.each([true, false])("sets archived to %s without stopping or deleting a browser", async (archived) => {
+    const call = await drive("PATCH", "/sessions/work", { archived })
+    expect(call.status()).toBe(200)
+    expect(deps.updateBrowser).toHaveBeenCalledWith("work", { archived })
+    expect(deps.stop).not.toHaveBeenCalled()
+    expect(deps.removeBrowser).not.toHaveBeenCalled()
+  })
+
+  it("rejects archiving a running browser without any mutation", async () => {
+    deps.isRunning.mockResolvedValue(true)
+    const call = await drive("PATCH", "/sessions/work", { archived: true })
+    expect(call.status()).toBe(409)
+    expect(deps.updateBrowser).not.toHaveBeenCalled()
+    expect(deps.stop).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["default", true],
+    ["work", "true"],
+    ["work", null],
+  ])("rejects an invalid archive request for %s", async (name, archived) => {
+    const call = await drive("PATCH", `/sessions/${name}`, { archived })
+    expect(call.status()).toBe(400)
+    expect(deps.updateBrowser).not.toHaveBeenCalled()
+  })
+})

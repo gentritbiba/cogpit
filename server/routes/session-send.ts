@@ -47,6 +47,7 @@ export function registerSessionSendRoutes(use: UseFn) {
           permissions: parsed.permissions,
           model: parsed.model,
           effort: parsed.effort,
+          contextWindowTokens: parsed.contextWindowTokens,
           fastMode: parsed.fastMode,
           ultracode: parsed.ultracode,
           mcpConfig: parsed.mcpConfig,

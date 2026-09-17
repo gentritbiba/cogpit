@@ -16,6 +16,7 @@ const mockSave = saveSessionConfig as unknown as ReturnType<typeof vi.fn>
 const VALUES: ComposerConfigValues = {
   model: "",
   effort: "high",
+  contextWindowTokens: null,
   fastMode: false,
   ultracode: false,
   permissionMode: "bypassPermissions",
@@ -134,4 +135,16 @@ describe("useSessionConfigSync", () => {
     })
     expect(mockFetch).toHaveBeenCalledWith("session-b.jsonl")
   })
+})
+
+it("hydrates a session's own context limit and clears it for a session with no override", async () => {
+  const onHydrate = vi.fn()
+  mockFetch.mockResolvedValue({ contextWindowTokens: 1000000 })
+  const { rerender } = renderSync({ sessionKey: "context-a.jsonl", values: { ...VALUES, contextWindowTokens: null }, onHydrate })
+  await waitFor(() => expect(onHydrate).toHaveBeenCalledWith({ contextWindowTokens: 1000000 }))
+  mockFetch.mockResolvedValue({ model: "default" })
+  rerender({ sessionKey: "context-b.jsonl", values: { ...VALUES, contextWindowTokens: 1000000 } })
+  await waitFor(() => expect(onHydrate).toHaveBeenLastCalledWith({ model: "default" }))
+  rerender({ sessionKey: "context-b.jsonl", values: { ...VALUES, model: "default", contextWindowTokens: null } })
+  expect(mockSave).not.toHaveBeenCalled()
 })

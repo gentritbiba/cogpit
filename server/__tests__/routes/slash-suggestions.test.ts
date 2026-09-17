@@ -183,7 +183,13 @@ describe("BUILTIN_SKILLS", () => {
     const names = BUILTIN_SKILLS.map((s) => s.name)
     expect(names).toContain("simplify")
     expect(names).toContain("compact")
-    expect(names).toContain("output-style")
+  })
+
+  it("offers current headless commands and the workflow reference", () => {
+    const names = BUILTIN_SKILLS.map((s) => s.name)
+    for (const name of ["advisor", "reload-plugins", "reload-skills", "skill-doctor", "workflow-authoring", "output-style"]) {
+      expect(names).toContain(name)
+    }
   })
 
   it("leaves out commands whose UX is bound to the terminal", () => {

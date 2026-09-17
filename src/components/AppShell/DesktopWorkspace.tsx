@@ -1,6 +1,7 @@
-import { lazy, Suspense } from "react"
+import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
+import { lazy, Suspense, useCallback, useState } from "react"
 import type { ReactNode } from "react"
-import { Code2, FolderSearch, LayoutGrid, SlidersHorizontal, TerminalSquare } from "lucide-react"
+import { Code2, FolderSearch, LayoutGrid, Puzzle, SlidersHorizontal, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
@@ -18,7 +19,8 @@ import { dirNameToPath } from "@/lib/format"
 import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import type { ProjectPromptContext, WorkspacePanelContext } from "@/plugin-api"
-import { workspacePanels } from "@/plugins/registry"
+import { useRuntimePlugins } from "@/plugins/useRuntimePlugins"
+import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
 import { SessionInputFooter } from "./SessionInputFooter"
 import { NewSessionHeadline } from "./NewSessionHero"
 import {
@@ -37,6 +39,7 @@ import type { DesktopAppShellProps } from "./desktopTypes"
 
 const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((module) => ({ default: module.ConfigBrowser })))
 const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then((module) => ({ default: module.PreviewPanel })))
+const PluginsDialog = lazy(() => import("@/plugins/PluginsDialog").then((module) => ({ default: module.PluginsDialog })))
 
 type DesktopViewProps = Pick<
   DesktopAppShellProps,
@@ -213,6 +216,11 @@ export function DesktopWorkspace({
 }: DesktopAppShellProps) {
   const { state, config } = useAppContext()
   const { session, sessionSource } = useSessionContext()
+  const [pluginsOpen, setPluginsOpen] = useState(() => new URLSearchParams(window.location.search).get("pluginSafeMode") === "1")
+  const [pluginSettingsId, setPluginSettingsId] = useState<string>()
+  const openPluginSettings = useCallback((pluginId: string) => { setPluginSettingsId(pluginId); setPluginsOpen(true) }, [])
+  const runtimePlugins = useRuntimePlugins(can("configWrite"))
+  const workspacePanels = useRuntimeWorkspacePanels({ ...runtimePlugins, projectPath: project.currentCwd ?? null, openSettings: openPluginSettings })
 
   function composePrompt(text: string): void {
     const current = sessionView.chatInputRef.current?.getText().trimEnd() ?? ""
@@ -260,7 +268,7 @@ export function DesktopWorkspace({
   }
   const visiblePanels = availableWorkspacePanels(workspacePanels, panelContext)
   const activePanel = state.mainView === "sessions"
-    ? visiblePanels.find((panel) => panel.id === navigation.panels.activeWorkspacePanel)
+    ? resolvePluginPanelPreference(navigation.panels.activeWorkspacePanel, visiblePanels)
     : null
   const worktreeDirName = sessionSource?.dirName
     ?? state.pendingDirName
@@ -334,6 +342,12 @@ export function DesktopWorkspace({
             onSelect: navigation.panels.handleToggleMission,
           },
           ...(can("configWrite") ? [{
+            id: "plugins",
+            title: "Plugins",
+            icon: Puzzle,
+            active: pluginsOpen,
+            onSelect: () => setPluginsOpen(true),
+          }, {
             id: "config",
             title: "Config",
             icon: SlidersHorizontal,
@@ -359,6 +373,10 @@ export function DesktopWorkspace({
           <PreviewPanel cwd={project.currentCwd} onClose={project.onCloseRightWorkspace} />
         </Suspense>
       )}
+
+      {pluginsOpen && can("configWrite") && <Suspense fallback={null}>
+        <PluginsDialog client={runtimePlugins.client} state={runtimePlugins} currentPath={project.currentCwd ?? null} initialPluginId={pluginSettingsId} onClose={() => { setPluginsOpen(false); setPluginSettingsId(undefined) }} />
+      </Suspense>}
 
     </div>
   )

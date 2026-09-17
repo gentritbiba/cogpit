@@ -3,7 +3,32 @@ import { dirname, extname, join, resolve } from "node:path"
 import ts from "typescript"
 import { collectSourceRoots, relativePath, root } from "./lib/sourceFiles"
 
-const sourceRoots = ["shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src"] as const
+const publicPackages: Record<string, string> = {
+  "@cogpit/plugin-contracts": "packages/plugin-contracts",
+  "@cogpit/plugin-sdk": "packages/plugin-sdk",
+  "@cogpit/plugin-ui": "packages/plugin-ui",
+  "@cogpit/plugin-integrations": "packages/plugin-integrations",
+  "@cogpit/plugin-tools": "packages/plugin-tools",
+}
+const publicExports = new Map<string, string>()
+const packageDependencies = new Map<string, Set<string>>()
+/** Packages that ship a CLI run under Node and may use its built-in modules. */
+const nodePackages = new Set<string>()
+for (const [name, directory] of Object.entries(publicPackages)) {
+  const manifest = JSON.parse(await readFile(join(root, directory, "package.json"), "utf8")) as {
+    exports: Record<string, string | { import: string }>
+    bin?: Record<string, string>
+    dependencies?: Record<string, string>
+    peerDependencies?: Record<string, string>
+  }
+  if (manifest.bin) nodePackages.add(directory)
+  for (const [key, target] of Object.entries(manifest.exports)) {
+    const entry = typeof target === "string" ? target : target.import
+    publicExports.set(key === "." ? name : name + key.slice(1), join(root, directory, entry.replace(/^\.\/dist\//u, "src/")))
+  }
+  packageDependencies.set(directory, new Set(Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })))
+}
+const sourceRoots = ["shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src", ...Object.values(publicPackages).map((path) => `${path}/src`)]
 const emittedExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"])
 
 interface ImportReference {
@@ -55,7 +80,9 @@ function extractImports(source: string, fileName: string): ImportReference[] {
 
 function resolveLocalImport(source: string, specifier: string, files: Set<string>): string | null {
   let unresolved: string
-  if (specifier.startsWith("@/")) {
+  if (publicExports.has(specifier)) {
+    unresolved = publicExports.get(specifier)!
+  } else if (specifier.startsWith("@/")) {
     unresolved = join(root, "src", specifier.slice(2))
   } else if (specifier.startsWith(".")) {
     unresolved = resolve(dirname(source), specifier)
@@ -91,19 +118,26 @@ function layer(path: string): "shared" | "src" | "plugin" | "server" | "electron
 }
 
 function isForbiddenCrossLayerEdge(edge: Edge): boolean {
+  if (edge.source.startsWith("packages/plugin-contracts/")) {
+    return !edge.target.startsWith("packages/plugin-contracts/")
+  }
+  for (const directory of ["packages/plugin-sdk", "packages/plugin-tools"]) {
+    if (edge.source.startsWith(`${directory}/`)) return !edge.target.startsWith(`${directory}/`) && !edge.target.startsWith("packages/plugin-contracts/")
+  }
+  for (const directory of ["packages/plugin-ui", "packages/plugin-integrations"]) {
+    if (edge.source.startsWith(`${directory}/`)) return !edge.target.startsWith(`${directory}/`)
+  }
+  if (edge.source.startsWith("plugins/")) {
+    const ownDirectory = edge.source.split("/").slice(0, 2).join("/") + "/"
+    return !edge.target.startsWith(ownDirectory) && !edge.target.startsWith("packages/plugin-")
+  }
+  if (edge.target.startsWith("plugins/")) return true
   const sourceLayer = layer(edge.source)
   const targetLayer = layer(edge.target)
   if (!sourceLayer || !targetLayer || sourceLayer === targetLayer) return false
 
-  if (sourceLayer === "plugin") {
-    return targetLayer !== "plugin"
-      && targetLayer !== "shared"
-      && !edge.target.startsWith("src/plugin-api/")
-  }
-  if (targetLayer === "plugin") {
-    return edge.source !== "src/plugins/registry.ts"
-  }
   if (targetLayer === "shared") return false
+  if (sourceLayer === "shared" && (edge.target.startsWith("packages/plugin-contracts/") || edge.target.startsWith("packages/plugin-integrations/"))) return false
   if (sourceLayer === "shared") return true
   if (sourceLayer === "package") return targetLayer !== "package"
   if (sourceLayer === "src") return targetLayer === "server" || targetLayer === "electron"
@@ -159,17 +193,35 @@ function findCycles(graph: Map<string, string[]>): string[][] {
 const absoluteFiles = await collectSourceRoots(sourceRoots)
 const fileSet = new Set(absoluteFiles)
 const edges: Edge[] = []
+const violations: string[] = []
 
 for (const source of absoluteFiles) {
   const contents = await readFile(source, "utf8")
   for (const reference of extractImports(contents, source)) {
+    const localSource = relativePath(source)
+    for (const [name, directory] of Object.entries(publicPackages)) {
+      if (reference.specifier.startsWith(`${name}/`) && !publicExports.has(reference.specifier)) {
+        violations.push(`${localSource}:${reference.line} imports a private package subpath: ${reference.specifier}`)
+      }
+      if (!localSource.startsWith(`${directory}/`) && reference.specifier.startsWith(".")) {
+        const target = resolveLocalImport(source, reference.specifier, fileSet)
+        if (target && relativePath(target).startsWith(`${directory}/`)) {
+          violations.push(`${localSource}:${reference.line} must use the public ${name} export`)
+        }
+      }
+    }
+    for (const [directory, permitted] of packageDependencies) {
+      if (!localSource.startsWith(`${directory}/`) || reference.specifier.startsWith(".")) continue
+      if (reference.specifier.startsWith("node:") && nodePackages.has(directory)) continue
+      const dependency = reference.specifier.startsWith("@") ? reference.specifier.split("/").slice(0, 2).join("/") : reference.specifier.split("/")[0]
+      if (!permitted.has(dependency)) violations.push(`${localSource}:${reference.line} imports an undeclared browser dependency: ${reference.specifier}`)
+    }
     const target = resolveLocalImport(source, reference.specifier, fileSet)
     if (!target) continue
     edges.push({ source: relativePath(source), target: relativePath(target), line: reference.line })
   }
 }
 
-const violations: string[] = []
 for (const edge of edges) {
   if (isForbiddenCrossLayerEdge(edge)) {
     violations.push(`${edge.source}:${edge.line} must not import ${edge.target}`)

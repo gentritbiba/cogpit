@@ -1,18 +1,17 @@
 import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
-import { MessageSquare, FolderOpen, BarChart3 } from "lucide-react"
+import { MessageSquare, FolderOpen, PanelsTopLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { hapticLight } from "@/lib/haptics"
 
-export type MobileTab = "chat" | "sessions" | "stats"
+export type MobileTab = "chat" | "sessions" | "workspace"
 
 interface TabDefinition {
   id: MobileTab
   label: string
   icon: LucideIcon
-  requiresSession?: boolean
 }
 
 interface MobileNavProps {
@@ -23,26 +22,21 @@ interface MobileNavProps {
 const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "sessions", label: "Sessions", icon: FolderOpen },
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "stats", label: "Stats", icon: BarChart3, requiresSession: true },
+  { id: "workspace", label: "Workspace", icon: PanelsTopLeft },
 ]
 
 export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
 }: MobileNavProps) {
-  const { session, isLive } = useSessionContext()
-  const hasSession = session !== null
-  const visibleTabs = TAB_DEFINITIONS.filter((t) => {
-    if (t.requiresSession && !hasSession) return false
-    return true
-  })
+  const { isLive } = useSessionContext()
 
   return (
     <nav
       className="flex shrink-0 items-stretch border-t bg-background pb-[env(safe-area-inset-bottom)]"
       aria-label="Navigation"
     >
-      {visibleTabs.map((tab) => {
+      {TAB_DEFINITIONS.map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
         return (

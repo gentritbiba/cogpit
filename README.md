@@ -28,7 +28,7 @@ It runs on your machine and uses your existing CLI logins. Cogpit is free, MIT-l
 - Resume existing Claude Code, Codex, and Copilot CLI sessions. Find them by project, prompt, branch, or pull request. A live session list shows what is running and what needs your attention.
 - Review every file an agent touched. Open files in the built-in editor, inspect changes by turn, or compare the session's combined diff.
 - Open the Browser panel to watch and interact with the browser your agent is using. Take over a login or check a page together, then let the agent continue. The shared default browser and named browser sessions keep their logins between runs.
-- Keep terminals, project scripts, and GitHub pull requests beside the chat. GitHub, ClickUp, and Vercel panels bring their status into the workspace.
+- Keep terminals, project scripts, and GitHub pull requests beside the chat. GitHub, ClickUp, Vercel, and Cloudflare panels bring their status into the workspace.
 - Inspect token usage and available account limits. See published-price cost estimates when the provider exposes enough data.
 - Revisit an earlier turn and try another approach. Branching, rewind, and file restoration follow each CLI's supported controls.
 - Connect another machine or open Cogpit from your phone. Answer an agent without sitting at the computer running it.
@@ -98,6 +98,10 @@ See production and preview deployments, inspect build logs, and open the preview
 
 ![Cogpit Vercel panel showing production status, preview deployments, and expanded build logs](docs/images/cogpit-vercel-deployments.png)
 
+### Cloudflare Workers
+
+See which version of the Worker is live, the routes, cron triggers and bindings each environment declares, and the recent deployment history read through your own Wrangler login. Expand a deployment for its version number, commit tag and compatibility settings.
+
 These panels use the services you connect in Cogpit. See [integration setup](docs/plugins.md) and [Browser panel setup](docs/browser.md), including persistent sessions and platform support.
 
 ## Common questions
@@ -144,7 +148,7 @@ React, TypeScript, Vite, Electron, Tailwind CSS, and Express. [Architecture](ARC
 - [Using Cogpit](docs/usage.md): session controls, history, file changes, goals, and notifications.
 - [Browser panel](docs/browser.md): shared browsing, persistent logins, and setup.
 - [Self-hosting](docs/self-hosting.md): headless servers, HTTPS, and authentication.
-- [Integrations and plugins](docs/plugins.md): GitHub, ClickUp, Vercel, and custom panels.
+- [Integrations and plugins](docs/plugins.md): GitHub, ClickUp, Vercel, Cloudflare, and custom panels.
 - [cogpit-memory](packages/cogpit-memory/README.md): search and inspect agent sessions from the command line.
 
 ## License

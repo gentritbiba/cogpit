@@ -20,6 +20,7 @@ interface UseNewSessionOpts {
   onModelRejected?: (model: string) => void
   model: string
   effort: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
   mcpConfig?: string | null
@@ -230,6 +231,7 @@ export function useNewSession({
   onModelRejected,
   model,
   effort,
+  contextWindowTokens,
   fastMode,
   ultracode,
   mcpConfig,
@@ -292,6 +294,7 @@ export function useNewSession({
           images,
           permissions: permissionsConfig,
           effort: effort || undefined,
+          contextWindowTokens,
           fastMode: fastMode ? true : undefined,
           ultracode: capabilities.ultracode && ultracode ? true : undefined,
           name: capabilities.namedSessions ? (sessionName || undefined) : undefined,
@@ -348,7 +351,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
+    [permissionsConfig, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

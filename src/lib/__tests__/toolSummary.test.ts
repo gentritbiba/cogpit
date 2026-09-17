@@ -157,6 +157,11 @@ describe("getToolSummary — schema-driven payloads", () => {
     expect(summarize("LSP", { action: "definition", file: "src/a.ts" })).toBe("definition")
   })
 
+  it("summarizes feedback drafts and artifact operations", () => {
+    expect(summarize("SendFeedback", { type: "bug", title: "Lost tool output", details: "Detailed report" })).toBe("Lost tool output")
+    expect(summarize("Artifact", { action: "upload_asset", url: "https://claude.ai/public/artifacts/demo", file_path: "/tmp/chart.png" })).toBe("upload_asset · /tmp/chart.png")
+  })
+
   it("Artifact: stays empty when nothing in the payload reads as a gist", () => {
     expect(summarize("Artifact", { version: 3 })).toBe("")
   })

@@ -6,7 +6,7 @@ import { manualChunks } from "./build/manualChunks"
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ["@cogpit/plugin-contracts", "@cogpit/plugin-integrations"] })],
     build: {
       outDir: "out/main",
       lib: {

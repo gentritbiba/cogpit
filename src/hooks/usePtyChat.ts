@@ -16,6 +16,7 @@ interface UsePtyChatOpts {
   onPermissionsApplied?: () => void
   model?: string
   effort?: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
   mcpConfig?: string | null
@@ -29,7 +30,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, onModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -140,6 +141,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           cwd: cwd || undefined,
           permissions: permsConfig,
           effort: effort || undefined,
+          contextWindowTokens,
           fastMode: fastMode ? true : undefined,
           ultracode: ultracode ? true : undefined,
           mcpConfig: mcpConfig || undefined,
@@ -182,7 +184,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onModelRejected, readOnly, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, onModelRejected, readOnly, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.

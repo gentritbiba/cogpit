@@ -23,6 +23,8 @@ export function DesktopChatInputSettings({
   selectedEffort,
   effortOptions,
   onEffortChange,
+  contextWindowTokens,
+  onContextWindowTokensChange,
   fastTier,
   fastModeEnabled,
   onFastModeEnabledChange,
@@ -100,6 +102,8 @@ export function DesktopChatInputSettings({
         selectedEffort={selectedEffort}
         effortOptions={effortOptions}
         onEffortChange={onEffortChange}
+        contextWindowTokens={contextWindowTokens}
+        onContextWindowTokensChange={onContextWindowTokensChange}
         fastTier={fastTier}
         fastModeEnabled={fastModeEnabled}
         onFastModeEnabledChange={onFastModeEnabledChange

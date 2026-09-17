@@ -1,94 +1,40 @@
-import { mkdir, readFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { lstat, readFile } from "node:fs/promises"
+import { basename, dirname, isAbsolute, join } from "node:path"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
-import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { z } from "zod"
+import { durableWrite, exists, regularFile } from "../plugins/durable"
+import { parseJsonText } from "../plugins/json"
+import { PluginDataError, type DataGuard } from "../plugins/privateStore"
 
-/**
- * ClickUp credentials and project links, in ~/.cogpit/clickup.json with an
- * environment override for the token so a headless box needs no file.
- *
- * Kept out of AppConfig on purpose: the token is a bearer secret and AppConfig
- * is served to the renderer.
- */
-export interface ClickUpConfig {
-  token: string | null
-  /** Personal token was set from the environment; the file cannot change it. */
-  tokenFromEnv: boolean
-  /** Absolute project path → linked ClickUp list id. */
-  projects: Record<string, string>
-}
-
+const tokenSchema = z.string().regex(/^pk_[A-Za-z0-9_]{8,4093}$/)
 export const CLICKUP_CONFIG_FILE = join(homedir(), ".cogpit", "clickup.json")
-const TOKEN_PATTERN = /^pk_[A-Za-z0-9_]{8,}$/
-
-let configPath = CLICKUP_CONFIG_FILE
-
-/** Test seam: point the store at a temporary file. */
-export function setClickUpConfigPath(path: string): void {
-  configPath = path
-}
-
-export function isClickUpToken(value: unknown): value is string {
-  return typeof value === "string" && TOKEN_PATTERN.test(value)
-}
-
-interface StoredFile {
-  token?: string
-  projects?: Record<string, string>
-}
-
-async function readStored(): Promise<StoredFile> {
-  let raw: string
+const storedSchema = z.strictObject({ token: tokenSchema.optional(), projects: z.record(z.string().max(4096).refine(isAbsolute), z.string().regex(/^\d{1,128}$/)).optional() }).refine(value => Object.keys(value.projects ?? {}).length <= 1024)
+export interface LegacyClickUpConfig { bytes: Buffer; hash: string; token?: string; projects: Record<string, string> }
+export function isClickUpToken(value: unknown): value is string { return tokenSchema.safeParse(value).success }
+export async function readLegacyClickUpConfig(path: string): Promise<LegacyClickUpConfig | null> {
+  if (!isAbsolute(path)) throw new PluginDataError("INVALID_REQUEST", "Legacy configuration requires an explicit absolute path")
   try {
-    raw = await readFile(configPath, "utf8")
-  } catch {
-    return {}
-  }
+    if (!await exists(path)) return null
+    const info = await lstat(path)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) throw new Error("Invalid legacy file")
+    const bytes = await readFile(path)
+    const config = storedSchema.parse(parseJsonText(bytes, 1024 * 1024))
+    return { bytes, hash: createHash("sha256").update(bytes).digest("hex"), token: config.token, projects: config.projects ?? {} }
+  } catch { throw new PluginDataError("CAPABILITY_UNAVAILABLE", "Legacy ClickUp configuration requires inspection; the original file was preserved") }
+}
+export async function backupLegacyClickUpConfig(path: string, config: LegacyClickUpConfig, preparedAt: number, guard: DataGuard): Promise<string> {
+  const name = `${basename(path)}.pre-runtime-${new Date(preparedAt).toISOString().replace(/[:.]/g, "-")}-${config.hash.slice(0, 16)}.backup`
+  const destination = join(dirname(path), name)
+  await guard()
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
-    const source = parsed as Record<string, unknown>
-    const projects: Record<string, string> = {}
-    const storedProjects = source.projects
-    if (typeof storedProjects === "object" && storedProjects !== null) {
-      for (const [path, listId] of Object.entries(storedProjects as Record<string, unknown>)) {
-        if (typeof listId === "string" && /^\d+$/.test(listId)) projects[path] = listId
-      }
-    }
-    return { token: isClickUpToken(source.token) ? source.token : undefined, projects }
-  } catch {
-    return {}
+    if (await exists(destination)) {
+      if (createHash("sha256").update(await regularFile(destination)).digest("hex") !== config.hash || process.platform !== "win32" && (await lstat(destination)).mode & 0o077) throw new Error("Invalid backup")
+    } else await durableWrite(destination, config.bytes, { label: "legacy-clickup-backup", guard: async () => { await guard() } })
+    await guard()
+    return name
+  } catch (error) {
+    if (error instanceof PluginDataError) throw error
+    throw new PluginDataError("CAPABILITY_UNAVAILABLE", "The owner-only legacy ClickUp backup could not be verified")
   }
-}
-
-/** Cogpit's own name first; ClickUp's conventional one so an existing shell export works. */
-const TOKEN_ENV_VARS = ["COGPIT_CLICKUP_TOKEN", "CLICKUP_API_TOKEN"] as const
-
-export async function loadClickUpConfig(): Promise<ClickUpConfig> {
-  const stored = await readStored()
-  const envToken = TOKEN_ENV_VARS.map((name) => process.env[name]?.trim()).find(isClickUpToken)
-  if (envToken) {
-    return { token: envToken, tokenFromEnv: true, projects: stored.projects ?? {} }
-  }
-  return { token: stored.token ?? null, tokenFromEnv: false, projects: stored.projects ?? {} }
-}
-
-async function writeStored(next: StoredFile): Promise<void> {
-  await mkdir(dirname(configPath), { recursive: true })
-  const file: StoredFile = { projects: next.projects ?? {} }
-  if (next.token) file.token = next.token
-  await writeOwnerOnlyJson(configPath, file)
-}
-
-export async function saveClickUpToken(token: string | null): Promise<void> {
-  const stored = await readStored()
-  await writeStored({ ...stored, token: token ?? undefined })
-}
-
-export async function saveClickUpProjectLink(projectPath: string, listId: string | null): Promise<void> {
-  const stored = await readStored()
-  const projects = { ...stored.projects }
-  if (listId === null) delete projects[projectPath]
-  else projects[projectPath] = listId
-  await writeStored({ ...stored, projects })
 }

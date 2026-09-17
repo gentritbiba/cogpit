@@ -1,5 +1,3 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
 import {
   capabilitiesFor,
   type AgentKind,
@@ -11,9 +9,7 @@ import { fallbackModelsFor } from "./agents/models"
 
 export type { EffortOption, ModelOption, ServiceTierOption }
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+export { cn } from "@cogpit/plugin-ui/utils"
 
 // ── Model options ────────────────────────────────────────────────────────────
 // Static fallback lists live in ./agents/models. At runtime the app fetches the

@@ -85,6 +85,20 @@ describe("COGPIT_BROWSER_SKILL", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("agent-browser set viewport <w> <h>")
   })
 
+  it("keeps browsers headless and reserves a window for a bot check the user must pass", () => {
+    expect(COGPIT_BROWSER_SKILL).toMatch(/## Headless by default/)
+    expect(COGPIT_BROWSER_SKILL).toContain("COGPIT_BROWSER_HEADED=1 agent-browser --session <name> open <url>")
+    expect(COGPIT_BROWSER_SKILL).toContain("Verify you are human")
+    expect(COGPIT_BROWSER_SKILL).toMatch(/close that browser so the next task starts\s+headless/)
+    expect(COGPIT_BROWSER_SKILL).toMatch(/only honoured on the call that launches the browser/)
+  })
+
+  it("shows how to mark up a screenshot and clean the overlay up afterwards", () => {
+    expect(COGPIT_BROWSER_SKILL).toMatch(/## Marking up screenshots/)
+    expect(COGPIT_BROWSER_SKILL).toContain("agent-browser eval --stdin")
+    expect(COGPIT_BROWSER_SKILL).toContain("window.__markup?.svg.remove()")
+  })
+
   it("tells the agent to name the browser and to hand logins to the user", () => {
     expect(COGPIT_BROWSER_SKILL).toContain("open the Browser panel to watch")
     expect(COGPIT_BROWSER_SKILL).toMatch(/log in inside the Browser panel/)

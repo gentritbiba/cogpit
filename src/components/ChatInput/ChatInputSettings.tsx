@@ -14,6 +14,8 @@ export interface ChatInputSettingsProps {
   onModelChange: (model: string) => void
   selectedEffort: string
   onEffortChange: (effort: string) => void
+  contextWindowTokens?: number | null
+  onContextWindowTokensChange?: (tokens: number | null) => void
   fastModeEnabled?: boolean
   onFastModeEnabledChange?: (enabled: boolean) => void
   isNewSession: boolean
@@ -59,6 +61,8 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   onModelChange,
   selectedEffort,
   onEffortChange,
+  contextWindowTokens,
+  onContextWindowTokensChange,
   fastModeEnabled,
   onFastModeEnabledChange,
   isNewSession,
@@ -139,6 +143,8 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     selectedEffort: normalizeEffort(selectedEffort),
     effortOptions,
     onEffortChange: handleEffortChange,
+    contextWindowTokens,
+    onContextWindowTokensChange,
     fastTier,
     fastModeEnabled,
     onFastModeEnabledChange,

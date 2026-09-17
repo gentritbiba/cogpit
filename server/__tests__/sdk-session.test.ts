@@ -30,7 +30,7 @@ interface CapturedCall {
     canUseTool?: (
       toolName: string,
       input: Record<string, unknown>,
-      options: { toolUseID: string; signal?: AbortSignal },
+      options: { toolUseID: string; signal?: AbortSignal; defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean; suggestions?: Array<Record<string, unknown>> },
     ) => Promise<unknown>
     onElicitation?: (
       request: Record<string, unknown>,
@@ -380,6 +380,29 @@ describe("sdk-session AskUserQuestion handling", () => {
       behavior: "allow",
       updatedInput: { ...input, answers: { "Which option?": "A" } },
     })
+  })
+
+  it.each(["bypassPermissions", "default"])("honors request-specific approval restrictions in %s mode", async (permissionMode) => {
+    holdQueryOpen = true
+    const { createSDKSession, sdkSessions, resolvePermission, getSDKPermissions } = await loadModule()
+    createSDKSession({ sessionId: "restricted-approval", message: "Test", cwd: "/tmp", permissionMode })
+    await waitUntil(() => captured.length > 0)
+    sdkSessions.get("restricted-approval")!.sessionAllowedTools.add("Artifact")
+    const canUseTool = captured[0].options.canUseTool!
+    const result = canUseTool("Artifact", { url: "https://claude.ai/public/artifacts/example" }, {
+      toolUseID: "restricted",
+      defaultToNo: true,
+      suppressAlwaysAllowRule: true,
+      suggestions: [{ type: "addRules", rules: [{ toolName: "Artifact" }], behavior: "allow", destination: "session" }],
+    })
+    expect(getSDKPermissions("restricted-approval")[0]).toMatchObject({ defaultToNo: true, suppressAlwaysAllowRule: true })
+    resolvePermission("restricted-approval", "restricted", "allow_always")
+    expect(await result).toEqual({ behavior: "allow", updatedInput: { url: "https://claude.ai/public/artifacts/example" } })
+
+    const next = canUseTool("Artifact", {}, { toolUseID: "next", suppressAlwaysAllowRule: true })
+    expect(getSDKPermissions("restricted-approval")).toHaveLength(1)
+    resolvePermission("restricted-approval", "next", "deny")
+    expect(await next).toMatchObject({ behavior: "deny" })
   })
 
   it("auto-allows regular tools via canUseTool in bypassPermissions mode", async () => {

@@ -5,8 +5,8 @@ import type {
   GitHubPullFilesResponse,
   GitHubPullSessionsResponse,
   GitHubPullsResponse,
-} from "../../../shared/contracts/github"
-import type { WorkspacePanelContext } from "@/plugin-api"
+} from "@cogpit/plugin-integrations"
+import type { GitHubPanelContext } from "../GitHubPanel"
 
 const storeMocks = vi.hoisted(() => ({
   useGitHubActions: vi.fn(),
@@ -18,9 +18,9 @@ const storeMocks = vi.hoisted(() => ({
   toErrorResponse: vi.fn((_error: unknown, fallback: string) => ({ error: fallback, code: "github_api_failed" })),
 }))
 
-vi.mock("../githubStore", () => storeMocks)
+vi.mock("../githubStore", () => ({ ...storeMocks, useGitHubDetails: () => ({ actionsJobs: storeMocks.fetchGitHubActionsJobs, pullFiles: storeMocks.fetchGitHubPullFiles }) }))
 
-import { GitHubIndicator, GitHubPanel } from "../GitHubPanel"
+import { GitHubPanel } from "../GitHubPanel"
 
 const quiet = { checks: null, review: null, reviewRequested: false, conflicts: false, comments: 0 }
 
@@ -87,8 +87,8 @@ const sessionsResponse: GitHubPullSessionsResponse = {
   repository: "acme/app",
   pending: 0,
   sessions: [
-    { dirName: "-repo", fileName: "abc.jsonl", sessionId: "abc", title: "Guard the empty cart", numbers: [128] },
-    { dirName: "-repo", fileName: "def.jsonl", sessionId: "def", title: "", numbers: [128, 121] },
+    { handle: "abc", title: "Guard the empty cart", numbers: [128] },
+    { handle: "def", title: "", numbers: [128, 121] },
   ],
 }
 
@@ -104,12 +104,8 @@ const filesResponse: GitHubPullFilesResponse = {
 
 const openSession = vi.fn()
 
-const context: WorkspacePanelContext = {
-  session: null,
-  sessionChangeKey: 0,
-  projectPath: "/repo",
-  hasFileChanges: false,
-  canAccessHostFiles: true,
+const context: GitHubPanelContext = {
+  projectKey: "/repo",
   openSession,
 }
 
@@ -126,7 +122,7 @@ function state(overrides: Record<string, unknown> = {}) {
 
 async function renderPullsTab() {
   const user = userEvent.setup()
-  render(<GitHubPanel context={context} active closePanel={vi.fn()} />)
+  render(<GitHubPanel context={context} active />)
   await user.click(screen.getByRole("tab", { name: /Pull requests/ }))
   return user
 }
@@ -264,7 +260,7 @@ describe("GitHubPanel pull requests tab", () => {
       .queryByLabelText("Sessions on this pull request")).not.toBeInTheDocument()
 
     await user.click(within(checkout).getByRole("button", { name: "Open session: Guard the empty cart" }))
-    expect(openSession).toHaveBeenCalledWith("-repo", "abc.jsonl")
+    expect(openSession).toHaveBeenCalledWith("abc")
   })
 
   it("folds long descriptions until asked", async () => {
@@ -281,10 +277,6 @@ describe("GitHubPanel pull requests tab", () => {
     expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true")
   })
 
-  it("counts pull requests waiting for review on the workspace rail", () => {
-    render(<GitHubIndicator context={context} active={false} />)
-    expect(screen.getByLabelText("1 pull request waiting for your review")).toHaveTextContent("1")
-  })
 
   it("shows an empty state when the repository has no pull requests", async () => {
     storeMocks.useGitHubPulls.mockReturnValue(state({ data: { ...pullsResponse, pulls: [] } }))

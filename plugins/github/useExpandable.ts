@@ -1,6 +1,6 @@
 import { useState } from "react"
-import type { GitHubErrorResponse } from "../../shared/contracts/github"
-import { toErrorResponse } from "./githubStore"
+import type { GitHubErrorResponse } from "@cogpit/plugin-integrations"
+import { toErrorResponse } from "./githubStore.js"
 
 export interface LazyResourceState<T> {
   data: T | null

@@ -75,21 +75,21 @@ describe("groupByProject", () => {
 
 describe("isSessionLive", () => {
   it("is live for native app-server sessions", () => {
-    expect(isSessionLive(makeSession({ isActive: true }), new Map())).toBe(true)
+    expect(isSessionLive(makeSession({ isActive: true }), undefined)).toBe(true)
   })
 
   it("is live for a tracked process that has not completed", () => {
     const s = makeSession({ sessionId: "x", agentStatus: "thinking" })
-    expect(isSessionLive(s, new Map([["x", makeProc("x")]]))).toBe(true)
+    expect(isSessionLive(s, makeProc("x"))).toBe(true)
   })
 
   it("is not live for a tracked process that completed", () => {
     const s = makeSession({ sessionId: "x", agentStatus: "completed" })
-    expect(isSessionLive(s, new Map([["x", makeProc("x")]]))).toBe(false)
+    expect(isSessionLive(s, makeProc("x"))).toBe(false)
   })
 
   it("is not live without a process or native activity", () => {
-    expect(isSessionLive(makeSession(), new Map())).toBe(false)
+    expect(isSessionLive(makeSession(), undefined)).toBe(false)
   })
 })
 

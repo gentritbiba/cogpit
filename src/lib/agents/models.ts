@@ -40,7 +40,6 @@ const CODEX_FAST_TIER: ServiceTierOption[] = [
 ]
 
 const SOL_CAPABILITIES: Partial<ModelOption> = {
-  isDefault: true,
   defaultReasoningEffort: "medium",
   supportedReasoningEfforts: CODEX_ULTRA_EFFORTS,
   inputModalities: ["text", "image"],
@@ -49,7 +48,8 @@ const SOL_CAPABILITIES: Partial<ModelOption> = {
 }
 
 const CODEX_MODELS: readonly ModelOption[] = [
-  { value: "", label: "Default", description: "Use Codex's recommended model (GPT-5.6 Sol)", resolvedModel: "gpt-5.6-sol", ...SOL_CAPABILITIES },
+  { value: "", label: "Default", description: "Use the model configured in Codex" },
+  { value: "gpt-6-astra", label: "GPT-6 Astra", description: "For complex, demanding work", ...SOL_CAPABILITIES, serviceTiers: [{ value: "priority", label: "Fast", description: "2× speed with increased usage" }] },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Flagship model for the most ambitious work", ...SOL_CAPABILITIES },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra", description: "Balanced model for everyday work", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_ULTRA_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna", description: "Fastest, most cost-efficient model", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_STANDARD_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },

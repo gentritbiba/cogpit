@@ -4,6 +4,8 @@ export interface BrowserSessionInfo {
   name: string
   isDefault: boolean
   running: boolean
+  /** Absent on older hosts. Archiving preserves the browser's profile. */
+  archived?: boolean
   note: string | null
   createdAt: string | null
   lastUsedAt: string | null

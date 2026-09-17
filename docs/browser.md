@@ -45,21 +45,23 @@ agent-browser's daemon listens on a loopback TCP port there rather than a unix s
 
 ### Window or headless
 
-agent-browser's own download is Chromium's headless shell. Its user agent says `HeadlessChrome`, and bot checks such as Cloudflare's challenge page refuse it outright, so a human clicking "Verify you are human" in the panel loops forever. Named browsers therefore open in a real window whenever Cogpit finds a full browser at startup: `Google Chrome.app` or `Chromium.app` in `/Applications` or `~/Applications` on macOS, `google-chrome`, `google-chrome-stable`, `chromium` or `chromium-browser` on PATH on Linux. The shim then sets, for named browsers only:
+Every browser Cogpit launches is headless; nothing appears on the desktop, and the panel is how the user watches. A window is opened only on request, and only for one reason: agent-browser's own download is Chromium's headless shell, its user agent says `HeadlessChrome`, and bot checks such as Cloudflare's challenge page refuse it outright, so a human clicking "Verify you are human" in the panel loops forever. When the agent hits such a check it closes the browser and relaunches it with `COGPIT_BROWSER_HEADED=1` set on the `open` call, then asks the user to pass the check in the window or in the panel. The variable is read on the call that spawns the daemon, so it has to accompany the launch; the browser stays windowed until it is closed.
+
+A window needs a full browser, which Cogpit looks for at startup: `Google Chrome.app` or `Chromium.app` in `/Applications` or `~/Applications` on macOS, `google-chrome`, `google-chrome-stable`, `chromium` or `chromium-browser` on PATH on Linux. When the request is honoured the shim sets, for named browsers only:
 
 - `AGENT_BROWSER_HEADED=1` and `AGENT_BROWSER_EXECUTABLE_PATH=<that browser>`
 - `--disable-blink-features=AutomationControlled` alongside the debugging port. Chromium reports `navigator.webdriver = true` whenever a debugging port is open, even in a normal window, and Cloudflare's Turnstile fails on that flag alone (error `600010`, "There was a problem with verification"). The person driving the panel is not automation, so the flag is off.
 
-The window opens behind Cogpit without taking focus; the panel streams it the same way it streams a headless page, and you can use the window directly too. On Linux the shim only opens a window when `$DISPLAY` or `$WAYLAND_DISPLAY` is set in the agent's environment; a box with no display, or a machine with no full browser, stays headless. Throwaway `tmp-*` browsers are always headless, and so is Windows for now: the Node shim does not look for a browser.
+The window opens behind Cogpit without taking focus; the panel streams it the same way it streams a headless page, and you can use the window directly too. On Linux the shim only opens a window when `$DISPLAY` or `$WAYLAND_DISPLAY` is set in the agent's environment; a box with no display, or a machine with no full browser, stays headless whatever the variable says. Throwaway `tmp-*` browsers are always headless, and so is Windows for now: the Node shim does not look for a browser.
 
-The visible browser is resolved once, when the shim is written at startup. Install Chrome and restart Cogpit to pick it up. To keep named browsers headless on a machine that has Chrome, set `COGPIT_BROWSER_HEADLESS=1` in the environment Cogpit starts agents with; a Mac driven remotely over a tunnel is the usual reason.
+The visible browser is resolved once, when the shim is written at startup. Install Chrome and restart Cogpit to pick it up.
 
 ## Browser Types
 
 | Type | Visibility | Persistence | Socket Dir | Profile | Use |
 |------|------------|-------------|-----------|---------|-----|
-| `default` | Panel | Persistent | `run/shared` | `profiles/default` | All work needing login, default choice |
-| Named (e.g., `github`) | Panel | Persistent | `run/shared` | `profiles/github` | Isolated accounts, long-lived work |
+| `default` | Panel; a window only on request | Persistent | `run/shared` | `profiles/default` | All work needing login, default choice |
+| Named (e.g., `github`) | Panel; a window only on request | Persistent | `run/shared` | `profiles/github` | Isolated accounts, long-lived work |
 | Throwaway (e.g., `tmp-s1`) | Hidden | None | `run/<session-id>` or `run/shared` | None | Subagent scratch work, auto-cleanup |
 
 Subagents must use `--session tmp-<short-id>` and close when done. In sessions Cogpit starts through the SDK, recognized subagent browser calls are redirected onto a `tmp-` browser before they run. See "What every agent is told" below for coverage and limitations.
@@ -92,7 +94,7 @@ A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Code
     <session-id>/       # Throwaway browsers for one Cogpit session
       tmp-abc123.pid
       ...
-  sessions.json         # Metadata: notes, createdAt, last URLs
+  sessions.json         # Metadata: notes, createdAt, last URLs, archive/restore timestamps
   sweeper.owner         # pid + start time of the Cogpit allowed to reap this tree
   plugin/
     .claude-plugin/
@@ -105,6 +107,10 @@ A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Code
 ```
 
 `lastUsedAt` in the API is the mtime of `.driver`, not a field in `sessions.json`.
+
+The browser picker has search and a bounded, scrollable list. Running browsers appear first after `default`. Stopped named browsers move to **Archived** after 24 hours without activity. The current selection stays visible. Search includes archived browser names and notes; selecting an archived result restores it before switching. A row's archive button hides a stopped browser immediately without deleting its profile or saved logins. Running browsers must be stopped before they can be archived.
+
+`PATCH /api/browser/sessions/:name` accepts `{ "archived": true }` or `{ "archived": false }`. Explicit archive and restore timestamps persist in `sessions.json`; automatic archiving is computed from `.driver` activity, the last restore, or creation time when there is no activity. Profiles created through the CLI without registry metadata use their directory creation time as a fallback. New agent activity makes an archived browser visible again. Default and running browsers are never archived. No browser processes are stopped by archiving.
 
 ## How the Panel Attaches
 
@@ -190,7 +196,9 @@ The skill covers:
 - Named browsers: `--session name`, list via `GET /api/browser`, add notes via `PATCH`
 - **Subagent rule**: `--session tmp-<short-id>`, `close` when done, never touch `default` or named browsers
 - Flags never to pass: `--profile`, `--state`, `--session-name`, `--args`, `--headed`
+- Headless by default: relaunch with `COGPIT_BROWSER_HEADED=1` only for a bot check the user must pass, and close it afterwards
 - Login hand-off: ask the user to log in in the Browser panel, then continue
+- Marking up screenshots: inject an SVG overlay with `eval --stdin` to box, circle or point an arrow at elements, capture, then remove it
 
 The standard `agent-browser` skill still applies for all commands.
 
@@ -256,7 +264,7 @@ A stale `DevToolsActivePort` file can make the attach fail:
 
 **A site's human-verification loops or says "There was a problem with verification"**
 
-The browser is running headless. Check `~/.cogpit/bin/agent-browser` for an `AGENT_BROWSER_HEADED=1` line: if it is missing, Cogpit found no full Chrome or Chromium at startup (see "Window or headless"). On Linux, also make sure the agent's environment has a display.
+The browser is running headless, which is the default. Close it and relaunch it with `COGPIT_BROWSER_HEADED=1 agent-browser --session <name> open <url>`, then pass the check in the window or the panel. If no window appears, check `~/.cogpit/bin/agent-browser` for an `AGENT_BROWSER_HEADED=1` line: when it is missing, Cogpit found no full Chrome or Chromium at startup (see "Window or headless"). On Linux, also make sure the agent's environment has a display.
 
 **"agent-browser" not installed on this machine**
 

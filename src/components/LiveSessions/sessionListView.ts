@@ -109,9 +109,9 @@ export function groupByProject(sessions: ActiveSessionInfo[]): Map<string, Activ
  */
 export function isSessionLive(
   s: ActiveSessionInfo,
-  procBySession: Map<string, RunningProcess>,
+  proc: RunningProcess | undefined,
 ): boolean {
   if (s.isActive) return true
-  if (!procBySession.has(s.sessionId)) return false
+  if (!proc) return false
   return s.agentStatus !== "completed"
 }

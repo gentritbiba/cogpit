@@ -1,5 +1,10 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { GitHubIntegrationRequest } from "@cogpit/plugin-contracts"
+import type { PluginIntegrationContext } from "../../plugins/integrationTypes"
+vi.mock("../../plugins/manager", () => ({ getPluginManager: () => ({
+  runLegacyIntegration: async (_req: unknown, options: { projectPath: string; signal: AbortSignal }, input: GitHubIntegrationRequest, execute: (input: GitHubIntegrationRequest, context: PluginIntegrationContext) => Promise<unknown>) => execute(input, { workspacePath: options.projectPath, signal: options.signal, authorize: async () => {} }),
+}) }))
 import type { Middleware, UseFn } from "../../http"
 import {
   ISSUES_QUERY,
@@ -241,6 +246,7 @@ describe("GitHub routes", () => {
     expect(githubApi).toHaveBeenCalledWith(
       { host: "github.com", owner: "acme", name: "app" },
       "repos/acme/app/actions/runs?per_page=5",
+      expect.any(AbortSignal),
     )
   })
 
@@ -256,6 +262,7 @@ describe("GitHub routes", () => {
     expect(githubApi).toHaveBeenCalledWith(
       expect.anything(),
       "repos/acme/app/actions/runs/42/jobs?filter=latest&per_page=100",
+      expect.any(AbortSignal),
     )
   })
 
@@ -305,6 +312,7 @@ describe("GitHub routes", () => {
       { host: "github.com", owner: "acme", name: "app" },
       ISSUES_QUERY,
       { owner: "acme", name: "app", open: 10, closed: 15 },
+      expect.any(AbortSignal),
     )
   })
 
@@ -322,6 +330,7 @@ describe("GitHub routes", () => {
       { host: "github.com", owner: "acme", name: "app" },
       PULLS_QUERY,
       { owner: "acme", name: "app", first: 10 },
+      expect.any(AbortSignal),
     )
   })
 
@@ -354,6 +363,7 @@ describe("GitHub routes", () => {
     expect(githubApi).toHaveBeenCalledWith(
       expect.anything(),
       "repos/acme/app/pulls/128/files?per_page=100",
+      expect.any(AbortSignal),
     )
 
     const { handlers: fullHandlers } = harness(Array.from({ length: 100 }, () => pullFile))

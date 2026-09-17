@@ -237,7 +237,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "GUARD_MOBILE_TAB": {
       let tab = state.mobileTab
-      if (!action.hasSession && (tab === "stats" || tab === "chat")) {
+      if (!action.hasSession && tab === "chat") {
         tab = "sessions"
       }
       return tab !== state.mobileTab ? { ...state, mobileTab: tab } : state

@@ -31,6 +31,15 @@ await build({
   format: "esm",
   target: "node20.11",
   packages: "external",
+  plugins: [{
+    name: "bundle-plugin-packages",
+    setup(builder) {
+      builder.onResolve({ filter: /^@cogpit\/plugin-(?:contracts|integrations)(?:\/[^/]+)?$/ }, ({ path }) => {
+        const [, directory, entry = "index"] = path.split("/")
+        return { path: join(repoRoot, "packages", directory, "dist", entry + ".js") }
+      })
+    },
+  }],
   banner: { js: "#!/usr/bin/env node" },
   sourcemap: false,
 })

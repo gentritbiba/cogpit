@@ -1,3 +1,4 @@
+import { ContextWindowControl } from "./ContextWindowControl"
 import type { ReactNode } from "react"
 import { GitBranch, RefreshCw, Settings2, X, Zap } from "lucide-react"
 import { cn, type ModelOption } from "@/lib/utils"
@@ -75,6 +76,7 @@ function MobileSelectControl({
   return (
     <MobileControl label={label}>
       <Select
+        items={options}
         value={value}
         onValueChange={(nextValue) => {
           if (nextValue !== null) onChange(nextValue)
@@ -103,6 +105,8 @@ function MobileSelectControl({
 }
 
 interface MobileModelControlsProps {
+  contextWindowTokens?: number | null
+  onContextWindowTokensChange?: (tokens: number | null) => void
   agentKind: AgentKind
   onAgentKindChange?: (agentKind: AgentKind) => void
   selectedModel: string
@@ -122,6 +126,8 @@ interface MobileModelControlsProps {
 }
 
 function MobileModelControls({
+  contextWindowTokens,
+  onContextWindowTokensChange,
   agentKind,
   onAgentKindChange,
   selectedModel,
@@ -141,9 +147,14 @@ function MobileModelControls({
 }: MobileModelControlsProps) {
   return (
     <section aria-labelledby="mobile-model-controls" className="flex flex-col gap-2">
-      <h3 id="mobile-model-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Model and behavior
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 id="mobile-model-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Model and behavior
+        </h3>
+        {capabilitiesFor(agentKind).configurableContextWindow && onContextWindowTokensChange && (
+          <ContextWindowControl value={contextWindowTokens ?? null} onChange={onContextWindowTokensChange} />
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {onAgentKindChange && (
           <MobileSelectControl
@@ -355,6 +366,8 @@ export function MobileChatInputSettings({
   selectedEffort,
   effortOptions,
   onEffortChange,
+  contextWindowTokens,
+  onContextWindowTokensChange,
   fastTier,
   fastModeEnabled,
   onFastModeEnabledChange,
@@ -431,6 +444,8 @@ export function MobileChatInputSettings({
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
             <MobileModelControls
+              contextWindowTokens={contextWindowTokens}
+              onContextWindowTokensChange={onContextWindowTokensChange}
               agentKind={agentKind}
               onAgentKindChange={onAgentKindChange}
               selectedModel={selectedModel}

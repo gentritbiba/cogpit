@@ -35,7 +35,7 @@ export function isSessionActive(
   procBySession: Map<string, RunningProcess>,
   now: number = Date.now(),
 ): boolean {
-  if (isSessionLive(session, procBySession)) return true
+  if (isSessionLive(session, procBySession.get(session.sessionId))) return true
   if (session.agentStatus === "completed") return false
   if (!session.agentStatus) return false
   return isRecentlyActive(session, now)

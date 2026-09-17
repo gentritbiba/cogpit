@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, utilityProcess } from "electr
 import { execFileSync, execSync } from "node:child_process"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
+import { installNavigationPolicy } from "./navigationPolicy.ts"
 import {
   ATTENTION_WINDOW_EVENTS,
   handleWorkerNotification,
@@ -86,20 +87,7 @@ async function createWindow(port: number) {
     },
   })
 
-  // Open external links in system browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: "deny" }
-  })
-
-  // Intercept in-page link clicks that would navigate away from the app
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    const appOrigin = `http://127.0.0.1:${port}`
-    if (!url.startsWith(appOrigin)) {
-      event.preventDefault()
-      shell.openExternal(url)
-    }
-  })
+  installNavigationPolicy(mainWindow.webContents, `http://127.0.0.1:${port}`, (url) => shell.openExternal(url))
 
   // Always load from the Express server — it serves the built renderer
   // and handles all API routes on the same origin (no proxy needed).

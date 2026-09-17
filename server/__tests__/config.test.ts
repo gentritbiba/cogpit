@@ -443,7 +443,7 @@ describe("saveConfig", () => {
     // Mode is passed at creation so a brand-new config.local.json is never even
     // briefly world-readable (writeFile's mode only applies on file creation).
     expect(options).toEqual({ encoding: "utf-8", mode: 0o600 })
-    expect(JSON.parse(content as string)).toEqual(config)
+    expect(JSON.parse(content as string)).toEqual({ ...config, runtimePluginsVersion: 1 })
   })
 
   it("chmods the config file to 0600 after writing (may hold a password)", async () => {
@@ -556,7 +556,7 @@ describe("env network override", () => {
     await saveConfig({ claudeDir: "/home/.claude" })
 
     const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
-    expect(written).toEqual({ claudeDir: "/home/.claude", networkAccess: false })
+    expect(written).toEqual({ claudeDir: "/home/.claude", networkAccess: false, runtimePluginsVersion: 1 })
   })
 
   it("still persists a user-set password (different hash) while an override is active", async () => {

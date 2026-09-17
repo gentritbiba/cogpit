@@ -1,3 +1,4 @@
+import { useGitHubNavigation, Description } from "./navigation.js"
 import { useState } from "react"
 import {
   ArrowUpRight,
@@ -18,7 +19,7 @@ import type {
   GitHubIssueLinkedPull,
   GitHubIssueState,
   GitHubIssuesResponse,
-} from "../../shared/contracts/github"
+} from "@cogpit/plugin-integrations"
 import {
   Button,
   cn,
@@ -34,8 +35,7 @@ import {
   CommentCount,
   FilterBar,
   TabEmpty,
-  Description,
-} from "@/plugin-api"
+} from "@cogpit/plugin-ui"
 
 type Who = "all" | "assigned" | "opened" | "unassigned"
 
@@ -144,6 +144,7 @@ interface IssueRowProps {
 }
 
 function IssueRow({ issue, viewer, now, onPickLabel, onShowPull, composePrompt }: IssueRowProps) {
+  const openExternal = useGitHubNavigation()
   const [open, setOpen] = useState(false)
   const activity = issue.state === "open" ? issue.updatedAt : (issue.closedAt ?? issue.updatedAt)
   const body = issue.body.trim()
@@ -197,7 +198,7 @@ function IssueRow({ issue, viewer, now, onPickLabel, onShowPull, composePrompt }
               size="icon-xs"
               className="size-6 text-muted-foreground opacity-0 transition-opacity group-hover/issue:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label={`Open #${issue.number} on GitHub`}
-              onClick={() => window.open(issue.url, "_blank", "noopener,noreferrer")}
+              onClick={() => openExternal?.(issue.url)}
             >
               <ArrowUpRight />
             </Button>

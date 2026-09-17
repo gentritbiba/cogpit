@@ -69,6 +69,7 @@ export interface MissionControlPermission {
   description?: string
   /** Decisions the underlying provider accepts for this exact request. */
   availableDecisions?: ("allow" | "allow_always" | "deny")[]
+  defaultToNo?: boolean
   timestamp: number
 }
 

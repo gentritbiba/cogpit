@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   GitHubActionsJobsResponse,
   GitHubActionsRunsResponse,
-} from "../../../shared/contracts/github"
-import type { WorkspacePanelContext } from "@/plugin-api"
+} from "@cogpit/plugin-integrations"
+import type { GitHubPanelContext } from "../GitHubPanel"
 
 const storeMocks = vi.hoisted(() => ({
   useGitHubActions: vi.fn(),
@@ -17,9 +17,9 @@ const storeMocks = vi.hoisted(() => ({
   toErrorResponse: vi.fn((_error: unknown, fallback: string) => ({ error: fallback, code: "github_api_failed" })),
 }))
 
-vi.mock("../githubStore", () => storeMocks)
+vi.mock("../githubStore", () => ({ ...storeMocks, useGitHubDetails: () => ({ actionsJobs: storeMocks.fetchGitHubActionsJobs, pullFiles: storeMocks.fetchGitHubPullFiles }) }))
 
-import { GitHubIndicator, GitHubPanel } from "../GitHubPanel"
+import { GitHubPanel } from "../GitHubPanel"
 import { groupRunsByCommit } from "../ActionsTab"
 
 const runsResponse: GitHubActionsRunsResponse = {
@@ -107,12 +107,8 @@ const jobsResponse: GitHubActionsJobsResponse = {
   }],
 }
 
-const context: WorkspacePanelContext = {
-  session: null,
-  sessionChangeKey: 0,
-  projectPath: "/repo",
-  hasFileChanges: false,
-  canAccessHostFiles: true,
+const context: GitHubPanelContext = {
+  projectKey: "/repo",
 }
 
 function state(overrides: Record<string, unknown> = {}) {
@@ -131,7 +127,6 @@ function renderPanel() {
     <GitHubPanel
       context={context}
       active
-      closePanel={vi.fn()}
     />,
   )
 }
@@ -147,6 +142,16 @@ describe("groupRunsByCommit", () => {
 })
 
 describe("GitHubPanel actions tab", () => {
+  it("routes repository and workflow links through the injected host navigation", async () => {
+    const openExternal = vi.fn(), user = userEvent.setup()
+    render(<GitHubPanel context={context} active openExternal={openExternal} />)
+    await user.click(screen.getByRole("link", { name: "acme/app" }))
+    expect(openExternal).toHaveBeenLastCalledWith("https://github.com/acme/app/actions")
+    await user.click(screen.getByRole("button", { name: "Open Deploy #18 on GitHub" }))
+    expect(openExternal).toHaveBeenLastCalledWith("https://github.com/acme/app/actions/runs/3")
+    expect(screen.queryByRole("button", { name: "Close GitHub" })).not.toBeInTheDocument()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     storeMocks.useGitHubActions.mockReturnValue(state())
@@ -223,8 +228,4 @@ describe("GitHubPanel actions tab", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 
-  it("renders the active workflow count on the workspace rail", () => {
-    render(<GitHubIndicator context={context} active={false} />)
-    expect(screen.getByLabelText("1 active GitHub Actions run")).toHaveTextContent("1")
-  })
 })

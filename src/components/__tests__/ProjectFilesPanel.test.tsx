@@ -92,6 +92,19 @@ describe("ProjectFilesPanel", () => {
     })
   })
 
+  it("keeps unsaved edits when browsing files on a phone and reopening the same file", async () => {
+    const user = userEvent.setup()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+    await user.click(await screen.findByRole("button", { name: "src" }))
+    await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Editing src/App.tsx" }), { target: { value: "unsaved draft" } })
+    await user.click(screen.getByRole("button", { name: "Back to file browser" }))
+    await user.click(screen.getByRole("button", { name: /App\.tsx/ }))
+    expect(screen.getByRole("textbox", { name: "Editing src/App.tsx" })).toHaveValue("unsaved draft")
+    expect(screen.getByText("Unsaved")).toBeInTheDocument()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
   it("keeps conflict errors visible without marking the edit saved", async () => {
     const user = userEvent.setup()
     mocks.authFetch.mockImplementation((url: string, init?: RequestInit) => {

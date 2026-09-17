@@ -4,6 +4,9 @@ import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useProcessPanel } from "@/hooks/useProcessPanel"
 import type { useSessionActions } from "@/hooks/useSessionActions"
+import type { ChatInputHandle } from "@/components/ChatInput"
+import type { DesktopPanels, DesktopWorktrees } from "./desktopTypes"
+import type { BuiltInEditorRequest } from "@/lib/fileOpener"
 
 export type MobileSessionActions = Pick<
   ReturnType<typeof useSessionActions>,
@@ -21,6 +24,7 @@ export type MobileAppHandlers = Pick<
 >
 
 export interface MobileNavigation {
+  panels: Pick<DesktopPanels, "activeWorkspacePanel" | "openWorkspacePanel" | "closeWorkspacePanel">
   actions: MobileSessionActions
   handlers: MobileAppHandlers
   creatingSession: boolean
@@ -32,6 +36,7 @@ export interface MobileNavigation {
 }
 
 export interface MobileSessionView {
+  chatInputRef: RefObject<ChatInputHandle | null>
   searchInputRef: RefObject<HTMLInputElement | null>
   teamMembersBar: ReactNode
   activeComposer: ReactNode
@@ -49,6 +54,11 @@ export interface MobileSessionView {
 }
 
 export interface MobileProject {
+  currentCwd: string | undefined
+  supportsWorktrees: boolean
+  worktrees: DesktopWorktrees
+  projectFilesRoot: string | undefined
+  projectFilesRequest: BuiltInEditorRequest | null
   processPanel: Pick<
     ReturnType<typeof useProcessPanel>,
     "handleToggleServer" | "handleServersChanged"

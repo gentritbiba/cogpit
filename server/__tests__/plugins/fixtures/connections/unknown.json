@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "id": "meridian",
+  "label": "Previously unknown fixture provider",
+  "secret": { "id": "apiKey", "label": "API key" },
+  "auth": { "header": "X-API-Key", "scheme": "raw" },
+  "validationOperation": "validate",
+  "resources": {
+    "space": { "label": "Space", "options": { "operation": "spaces", "items": "/items", "id": "/key", "label": "/display/name" } }
+  },
+  "operations": {
+    "validate": { "audience": "setup", "origin": "https://api.meridian.test", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "profile" }], "args": {}, "query": {} },
+    "spaces": { "audience": "setup", "origin": "https://api.meridian.test", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "spaces" }], "args": {}, "query": {} },
+    "document": { "audience": "panel", "origin": "https://api.meridian.test", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "spaces" }, { "resource": "space" }, { "literal": "documents" }, { "arg": "document" }], "args": { "document": { "type": "string", "required": true, "maxLength": 128 }, "q": { "type": "string", "maxLength": 128 }, "limit": { "type": "integer", "min": 1, "max": 100 }, "archived": { "type": "boolean" }, "locale": { "type": "string", "maxLength": 8, "enum": ["en", "sq"] } }, "query": { "search": "q", "limit": "limit", "archived": "archived", "locale": "locale" } }
+  }
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { authUrl } from "@/lib/auth"
 import type { ParsedSession } from "../../shared/session/types"
+import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { AgentKind } from "@/lib/agents"
 import { sessionCache } from "@/lib/sessionCache"
 import {
@@ -54,6 +55,10 @@ export function useLiveSession(
   // Predicted next prompt for the composer. The CLI suppresses these on the
   // first turn, in plan mode, and after an error, so null is the normal case.
   const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null)
+  // The runtime refused the turn on a spent allowance. Sticky by design: the
+  // refusal ends the turn, so this has to outlive the stream_clear that follows
+  // it and lift only when the allowance comes back or a later turn runs.
+  const [rateLimit, setRateLimit] = useState<RateLimitBlock | null>(null)
   // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
   // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
   const [streamingOverlay, setStreamingOverlay] = useState<StreamingOverlay>(EMPTY_OVERLAY)
@@ -105,8 +110,10 @@ export function useLiveSession(
   // rawText only changes on explicit session load/reload, not during SSE streaming.
   useEffect(() => {
     // A prediction belongs to the turn that produced it — never to whatever
-    // session is loaded next.
+    // session is loaded next. A block belongs to the session that hit it; the
+    // watcher replays a standing one on connect.
     setPromptSuggestion(null)
+    setRateLimit(null)
     if (!dirName || !fileName) {
       setIsLive(false)
       setSseState("disconnected")
@@ -301,7 +308,12 @@ export function useLiveSession(
           // and so is a suggestion predicting the prompt that just went out.
           setTurnError(null)
           setPromptSuggestion(null)
+          // A turn that streams tokens is a turn being served, whatever the
+          // last rate-limit report said.
+          setRateLimit(null)
           setOverlay(applyDeltas(overlayRef.current, data.events ?? []))
+        } else if (data.type === "rate_limit") {
+          setRateLimit((data.block as RateLimitBlock | null) ?? null)
         } else if (data.type === "agent_progress") {
           setIsLive(true)
           resetStaleTimer()
@@ -362,5 +374,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, rawText, watchOffset])
 
-  return { isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion }
+  return { isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion, rateLimit }
 }

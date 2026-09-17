@@ -390,6 +390,13 @@ export function registerFileWatchRoutes(use: UseFn) {
       }
     }
     if (streamBus.isCompacting(sessionId)) sendCompacting(true)
+    // A block is raised once, when the turn is refused, and stays up until the
+    // allowance returns — so a client opening the session afterwards has to be
+    // told about it here or it would show no reason for the session stopping.
+    const rateLimit = streamBus.getRateLimit(sessionId)
+    if (rateLimit) {
+      res.write(`data: ${JSON.stringify({ type: "rate_limit", block: rateLimit })}\n\n`)
+    }
     const snapshot = streamBus.getSnapshot(sessionId)
     if (snapshot && snapshot.length > 0) {
       res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)

@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "id": "figma",
+  "label": "Figma",
+  "secret": {
+    "id": "token",
+    "label": "Personal access token"
+  },
+  "auth": {
+    "header": "X-Figma-Token",
+    "scheme": "raw"
+  },
+  "validationOperation": "validate",
+  "identity": {
+    "viewer": "/id"
+  },
+  "resources": {
+    "file": {
+      "label": "File",
+      "scope": "project",
+      "input": {
+        "allowId": true,
+        "urls": [
+          {
+            "origin": "https://www.figma.com",
+            "pathMarker": "file"
+          },
+          {
+            "origin": "https://www.figma.com",
+            "pathMarker": "design"
+          },
+          {
+            "origin": "https://www.figma.com",
+            "pathMarker": "board"
+          }
+        ],
+        "validation": {
+          "operation": "validateFile",
+          "argument": "candidate",
+          "label": "/name"
+        }
+      }
+    }
+  },
+  "operations": {
+    "validate": {
+      "audience": "setup",
+      "origin": "https://api.figma.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "v1"
+        },
+        {
+          "literal": "me"
+        }
+      ],
+      "args": {},
+      "query": {}
+    },
+    "validateFile": {
+      "audience": "setup",
+      "origin": "https://api.figma.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "v1"
+        },
+        {
+          "literal": "files"
+        },
+        {
+          "arg": "candidate"
+        }
+      ],
+      "args": {
+        "candidate": {
+          "type": "string",
+          "required": true,
+          "maxLength": 128
+        }
+      },
+      "query": {
+        "depth": {
+          "literal": 1
+        }
+      }
+    },
+    "file": {
+      "audience": "panel",
+      "origin": "https://api.figma.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "v1"
+        },
+        {
+          "literal": "files"
+        },
+        {
+          "resource": "file"
+        }
+      ],
+      "args": {
+        "depth": {
+          "type": "integer",
+          "min": 1,
+          "max": 2
+        }
+      },
+      "query": {
+        "depth": {
+          "arg": "depth"
+        }
+      }
+    },
+    "nodes": {
+      "audience": "panel",
+      "origin": "https://api.figma.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "v1"
+        },
+        {
+          "literal": "files"
+        },
+        {
+          "resource": "file"
+        },
+        {
+          "literal": "nodes"
+        }
+      ],
+      "args": {
+        "ids": {
+          "type": "string",
+          "required": true,
+          "maxLength": 128
+        }
+      },
+      "query": {
+        "ids": {
+          "arg": "ids"
+        },
+        "depth": {
+          "literal": 1
+        }
+      }
+    }
+  }
+}

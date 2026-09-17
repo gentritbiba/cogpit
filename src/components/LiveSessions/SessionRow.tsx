@@ -69,6 +69,7 @@ export function SessionRow({
 }: SessionRowProps) {
   const {
     isLive,
+    isRunning,
     isNativeIdle,
     isDeferred,
     isReadOnly,
@@ -83,7 +84,7 @@ export function SessionRow({
   const title = sessionTitle(s, customName)
   const archiveAction = isArchived
     ? onUnarchiveSession && { label: "Restore from archive", icon: ArchiveRestore, run: () => onUnarchiveSession(s) }
-    : onArchiveSession && !isLive && { label: "Archive session", icon: Archive, run: () => onArchiveSession(s) }
+    : onArchiveSession && !isRunning && { label: "Archive session", icon: Archive, run: () => onArchiveSession(s) }
 
   // Hover-intent prefetch: warm the session cache after a short dwell. Fires
   // on focus too so keyboard users benefit.
@@ -242,7 +243,7 @@ export function SessionRow({
         </Button>
       )}
 
-      {proc && onKill && !isReadOnly && (
+      {proc && onKill && isRunning && !isArchived && !isReadOnly && (
         <Button
           type="button"
           variant="ghost"
@@ -269,7 +270,7 @@ export function SessionRow({
         onRename={onRenameSession ? (name) => onRenameSession(s.sessionId, name) : undefined}
         onArchive={onArchiveSession && !isArchived ? () => onArchiveSession(s) : undefined}
         onUnarchive={onUnarchiveSession && isArchived ? () => onUnarchiveSession(s) : undefined}
-        archiveDisabled={isLive}
+        archiveDisabled={isRunning}
       >
         {sessionRow}
       </SessionContextMenu>

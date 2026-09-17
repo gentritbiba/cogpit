@@ -49,7 +49,7 @@ vi.mock("../../agents/runtimes", () => ({
 }))
 
 import { registerFileWatchRoutes } from "../../routes/files-watch"
-import { publish, clear, _resetForTests } from "../../lib/streamBus"
+import { publish, clear, publishRateLimit, _resetForTests } from "../../lib/streamBus"
 import type { UseFn, Middleware } from "../../helpers"
 
 function getHandler(path: string): Middleware {
@@ -165,6 +165,39 @@ describe("/api/watch stream-bus forwarding", () => {
     const all = deltas.flatMap((d) => d.events as Array<{ delta: string }>)
     expect(all.some((d) => d.delta === "live!")).toBe(true)
     expect(events.some((e) => e.type === "stream_clear")).toBe(true)
+    closeConnection()
+  })
+
+  /**
+   * The block is raised at the moment the turn is refused, which is usually
+   * before anyone is watching — reopening the session has to surface it, or the
+   * timeline just stops with no stated reason.
+   */
+  it("replays a standing rate-limit block to a client that connects after it", async () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    publishRateLimit(SESSION, block)
+
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl`)
+    expect(parseFrames(frames)).toContainEqual({ type: "rate_limit", block })
+    closeConnection()
+  })
+
+  it("forwards a block raised and lifted while connected", async () => {
+    const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl`)
+
+    publishRateLimit(SESSION, block)
+    publishRateLimit(SESSION, null)
+
+    const events = parseFrames(frames)
+    expect(events).toContainEqual({ type: "rate_limit", block })
+    expect(events).toContainEqual({ type: "rate_limit", block: null })
+    closeConnection()
+  })
+
+  it("says nothing about rate limits for a session that was never blocked", async () => {
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl`)
+    expect(parseFrames(frames).some((e) => e.type === "rate_limit")).toBe(false)
     closeConnection()
   })
 

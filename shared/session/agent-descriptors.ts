@@ -26,7 +26,7 @@ export { AGENT_KINDS } from "./types"
  * point: a fourth CLI adds one row here instead of a new arm in 40 conditionals.
  */
 export interface AgentCapabilities {
-  /** Git worktrees, which Cogpit stores under the Claude projects tree. */
+  /** Launch a session in a worktree managed by its CLI. */
   readonly worktrees: boolean
   /** MCP server configuration can be passed at spawn time. */
   readonly mcp: boolean
@@ -64,8 +64,18 @@ export interface AgentCapabilities {
    * exist only for models whose live catalog entry advertises them.
    */
   readonly reasoningEffort: boolean
+  readonly configurableContextWindow: boolean
   /** A faster/priority service tier can be requested. */
   readonly fastTier: boolean
+  /**
+   * The CLI can carry a session past a spent session allowance by continuing at
+   * lower priority, spending the weekly allowance to do it. The mode is reached
+   * only from the CLI's own terminal UI — no flag, no setting, and nothing on
+   * the programmatic interface Cogpit drives — so the hand-off is all Cogpit
+   * can offer. Never true for an agent billed per request, which has no
+   * allowance to run out of in the first place.
+   */
+  readonly lowPriorityInTerminal: boolean
   /**
    * Images may be attached when the selected model's catalog entry says nothing
    * about its input modalities. When false, vision has to be advertised.
@@ -610,7 +620,9 @@ const claude: AgentDescriptor = {
     nativeRewind: false,
     fileCheckpoints: true,
     reasoningEffort: true,
+    configurableContextWindow: false,
     fastTier: true,
+    lowPriorityInTerminal: true,
     imageInput: true,
     midTurnSteering: false,
     stopSession: true,
@@ -681,6 +693,7 @@ const codex: AgentDescriptor = {
     permissions: (permissions) => {
       const mode = permissions?.mode || "default"
       if (mode === "bypassPermissions") return ["--dangerously-bypass-approvals-and-sandbox"]
+      if (mode === "auto") return ["--approve-for-me"]
       // `codex exec` is non-interactive, so it cannot present an approval
       // prompt. Keep execution inside a sandbox and return denied operations to
       // the model instead of silently granting full machine access. The
@@ -747,7 +760,7 @@ const codex: AgentDescriptor = {
     extendedContext: null,
   },
   capabilities: {
-    worktrees: false,
+    worktrees: true,
     mcp: false,
     slashCommands: false,
     workflows: false,
@@ -761,7 +774,9 @@ const codex: AgentDescriptor = {
     nativeRewind: false,
     fileCheckpoints: false,
     reasoningEffort: true,
+    configurableContextWindow: true,
     fastTier: true,
+    lowPriorityInTerminal: false,
     imageInput: true,
     midTurnSteering: true,
     stopSession: false,
@@ -770,7 +785,7 @@ const codex: AgentDescriptor = {
     externalProcesses: false,
     accountSwitching: false,
     modelFallbackNotices: false,
-    autoPermissionMode: "never",
+    autoPermissionMode: "always",
     settingsApply: "next-turn",
     turnLiveness: "runtime",
     tokenStreaming: true,
@@ -889,7 +904,9 @@ const copilot: AgentDescriptor = {
     fileCheckpoints: false,
     // Effort is only offered for models whose catalog entry advertises it.
     reasoningEffort: false,
+    configurableContextWindow: false,
     fastTier: false,
+    lowPriorityInTerminal: false,
     imageInput: false,
     midTurnSteering: true,
     stopSession: true,
@@ -989,3 +1006,5 @@ export function sessionIdFromFileName(kind: AgentKind, fileName: string): string
 export function isSessionUuid(value: string): boolean {
   return SESSION_UUID_RE.test(value)
 }
+
+export const PERSISTED_AGENT_HOME_FIELD = "claudeDir"

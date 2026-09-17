@@ -50,6 +50,9 @@ describe("ChatInputSettings mobile", () => {
     const modelSelect = within(sheet).getByRole("combobox", { name: "Model" })
     const effortSelect = within(sheet).getByRole("combobox", { name: "Reasoning effort" })
     const accessSelect = within(sheet).getByRole("combobox", { name: "Access policy" })
+    expect(agentSelect).toHaveTextContent("Codex")
+    expect(modelSelect).toHaveTextContent("GPT-5.6 Sol")
+    expect(effortSelect).toHaveTextContent("Medium")
     const selectOption = async (trigger: HTMLElement, name: string) => {
       await user.click(trigger)
       const option = await screen.findByRole("option", { name })

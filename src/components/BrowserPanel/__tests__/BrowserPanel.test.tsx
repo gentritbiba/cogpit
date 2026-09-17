@@ -44,6 +44,7 @@ const SKILL_TARGETS: BrowserSkillTarget[] = [
 const installSkill = vi.fn(async () => ({ ok: true as const, paths: ["/home/me/.second/skills/cogpit-browser"] }))
 const readSkillTargets = vi.fn(async () => ({ ok: true as const, targets: SKILL_TARGETS }))
 const remove = vi.fn(async () => ({ ok: true as const }))
+const setArchived = vi.fn(async (_name: string, _archived: boolean) => ({ ok: true as const }))
 const stop = vi.fn(async () => ({ ok: true as const }))
 const noop = vi.fn(async () => ({ ok: true as const }))
 const closePanel = vi.fn()
@@ -69,6 +70,7 @@ function sessionsDouble(enabled: boolean): UseBrowserSessions {
     create: noop,
     remove,
     stop,
+    setArchived,
     readSkillTargets,
     installSkill,
   }
@@ -242,7 +244,7 @@ describe("BrowserPanel", () => {
     const { user } = setup()
 
     await user.click(screen.getByRole("button", { name: "Switch browser" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Agent skill…" }))
+    await user.click(await screen.findByRole("button", { name: "Agent skill…" }))
 
     expect(await screen.findByRole("heading", { name: "Agent skill" })).toBeInTheDocument()
     for (const target of SKILL_TARGETS) {
@@ -315,7 +317,7 @@ describe("BrowserPanel", () => {
     const { user, rerender } = setup()
 
     await user.click(screen.getByRole("button", { name: "Switch browser" }))
-    await user.click(await screen.findByRole("menuitemradio", { name: /^shop/ }))
+    await user.click(await screen.findByRole("button", { name: "Switch to shop" }))
     await waitFor(() => expect(selectedName()).toContain("shop"))
 
     rerender(panel(contextOf(sessionDriving("agent-browser --session work open https://example.com"))))
@@ -392,5 +394,24 @@ describe("BrowserPanel", () => {
 
     expect(screen.queryByText("Could not attach to the page")).not.toBeInTheDocument()
     expect(screen.getByRole("application", { name: "Browser viewport" })).toBeInTheDocument()
+  })
+})
+
+describe("BrowserPanel archiving", () => {
+  it("switches to default only after the selected browser is archived successfully", async () => {
+    browsers = [browserOf(), browserOf({ name: "work", isDefault: false, running: false })]
+    const { user } = setup()
+    await user.click(screen.getByRole("button", { name: "Switch browser" }))
+    await user.click(screen.getByRole("button", { name: "Switch to work" }))
+    await user.click(screen.getByRole("button", { name: "Switch browser" }))
+    await user.click(await screen.findByRole("button", { name: "Archive work" }))
+    expect(setArchived).toHaveBeenCalledWith("work", true)
+    await waitFor(() => expect(selectedName()).toContain("default"))
+  })
+
+  it("does not follow stale transcript activity into an archived browser", async () => {
+    browsers = [browserOf(), browserOf({ name: "work", isDefault: false, running: false, archived: true })]
+    setup(contextOf(sessionDriving("agent-browser --session work open https://example.com")))
+    expect(selectedName()).toContain("default")
   })
 })

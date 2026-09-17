@@ -11,6 +11,7 @@ import { deviceScopedKey } from "@/lib/device"
 export interface SessionConfig {
   model?: string
   effort?: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
   permissionMode?: PermissionMode

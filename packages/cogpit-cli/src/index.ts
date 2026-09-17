@@ -1,3 +1,4 @@
+import { CLICKUP_CONFIG_FILE } from "../../../server/lib/clickupConfig"
 import { spawn } from "node:child_process"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -160,6 +161,7 @@ async function startPackagedServer(
   const { startStandaloneServer } = await import("../../../server/standalone-runtime")
   return startStandaloneServer({
     staticDir: join(import.meta.dirname, "web"),
+    legacyClickUpPath: CLICKUP_CONFIG_FILE,
     dataDir: options.dataDir ?? join(homedir(), ".config", "cogpit"),
     host: "127.0.0.1",
     port: options.port,

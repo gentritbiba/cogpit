@@ -23,6 +23,26 @@ function request(
 }
 
 describe("PermissionRequestBar", () => {
+  it("requires an explicit approval for a prompt that defaults to no", () => {
+    const onRespond = vi.fn()
+    const onRespondAll = vi.fn()
+    render(<PermissionRequestBar
+      requests={[request({ defaultToNo: true, availableDecisions: ["allow", "deny"] }), request({ requestId: "second" })]}
+      responding={new Set()}
+      onRespond={onRespond}
+      onRespondAll={onRespondAll}
+    />)
+
+    expect(screen.getByRole("button", { name: /Deny/ })).toHaveFocus()
+    expect(screen.queryByRole("button", { name: /Allow all/ })).not.toBeInTheDocument()
+    for (const key of ["a", "s"]) fireEvent.keyDown(window, { key })
+    fireEvent.keyDown(window, { key: "A", shiftKey: true })
+    expect(onRespond).not.toHaveBeenCalled()
+    expect(onRespondAll).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }))
+    expect(onRespond).toHaveBeenCalledWith("approval-1", "allow")
+  })
+
   it("only renders and shortcuts decisions offered by the request", () => {
     const onRespond = vi.fn()
     render(

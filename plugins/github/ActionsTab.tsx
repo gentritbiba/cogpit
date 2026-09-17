@@ -1,3 +1,4 @@
+import { useGitHubNavigation } from "./navigation.js"
 import { useEffect, useMemo, useState } from "react"
 import {
   ArrowUpRight,
@@ -17,7 +18,7 @@ import type {
   GitHubActionsStep,
   GitHubWorkflowConclusion,
   GitHubWorkflowStatus,
-} from "../../shared/contracts/github"
+} from "@cogpit/plugin-integrations"
 import {
   Button,
   cn,
@@ -33,9 +34,9 @@ import {
   useNow,
   FilterBar,
   TabEmpty,
-} from "@/plugin-api"
-import { fetchGitHubActionsJobs } from "./githubStore"
-import { useExpandable } from "./useExpandable"
+} from "@cogpit/plugin-ui"
+import { useGitHubDetails } from "./githubStore.js"
+import { useExpandable } from "./useExpandable.js"
 
 /** Visual weight of a run, from the one that needs attention to the one that needs none. */
 type Tone = "live" | "fail" | "pass" | "quiet"
@@ -161,12 +162,14 @@ function JobBlock({ job, now }: { job: GitHubActionsJob; now: number }) {
   )
 }
 
-function RunRow({ run, projectPath, now }: { run: GitHubActionsRun; projectPath: string; now: number }) {
+function RunRow({ run, projectKey, now }: { run: GitHubActionsRun; projectKey: string; now: number }) {
+  const openExternal = useGitHubNavigation()
+  const { actionsJobs: fetchGitHubActionsJobs } = useGitHubDetails()
   const tone = toneOf(run.status, run.conclusion)
   const active = tone === "live"
   // A running job list keeps changing, so reload it on every reopen.
   const { open, state: jobsState, onOpenChange } = useExpandable(
-    () => fetchGitHubActionsJobs(projectPath, run.id),
+    () => fetchGitHubActionsJobs(projectKey, run.id),
     "Unable to load workflow jobs",
     active,
   )
@@ -206,7 +209,7 @@ function RunRow({ run, projectPath, now }: { run: GitHubActionsRun; projectPath:
           size="icon-xs"
           className="size-6 text-muted-foreground opacity-0 transition-opacity group-hover/run:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
           aria-label={`Open ${run.name} #${run.runNumber} on GitHub`}
-          onClick={() => window.open(run.url, "_blank", "noopener,noreferrer")}
+          onClick={() => openExternal?.(run.url)}
         >
           <ArrowUpRight />
         </Button>
@@ -270,7 +273,7 @@ export function groupRunsByCommit(runs: readonly GitHubActionsRun[]): CommitGrou
   })
 }
 
-function CommitBlock({ group, projectPath, now }: { group: CommitGroup; projectPath: string; now: number }) {
+function CommitBlock({ group, projectKey, now }: { group: CommitGroup; projectKey: string; now: number }) {
   return (
     <article className="relative pl-3" aria-label={group.title}>
       <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[group.tone])} />
@@ -290,7 +293,7 @@ function CommitBlock({ group, projectPath, now }: { group: CommitGroup; projectP
         </p>
       </header>
       <div className="-ml-1 flex flex-col">
-        {group.runs.map((run) => <RunRow key={run.id} run={run} projectPath={projectPath} now={now} />)}
+        {group.runs.map((run) => <RunRow key={run.id} run={run} projectKey={projectKey} now={now} />)}
       </div>
     </article>
   )
@@ -311,11 +314,11 @@ function emptyFilterMessage(filter: Filter, branch: string | null): string {
 function RunsLedger({
   data,
   filter,
-  projectPath,
+  projectKey,
 }: {
   data: GitHubActionsRunsResponse
   filter: Filter
-  projectPath: string
+  projectKey: string
 }) {
   const runs = useMemo(() => applyFilter(data.runs, filter), [data, filter])
   const groups = useMemo(() => groupRunsByCommit(runs), [runs])
@@ -341,7 +344,7 @@ function RunsLedger({
     <ScrollArea className="min-h-0 flex-1">
       <div className="flex flex-col gap-5 px-3 py-3">
         {groups.map((group) => (
-          <CommitBlock key={group.sha || group.runs[0].id} group={group} projectPath={projectPath} now={now} />
+          <CommitBlock key={group.sha || group.runs[0].id} group={group} projectKey={projectKey} now={now} />
         ))}
       </div>
     </ScrollArea>
@@ -355,11 +358,11 @@ export interface BranchFocus {
 
 export function ActionsTab({
   data,
-  projectPath,
+  projectKey,
   focus,
 }: {
   data: GitHubActionsRunsResponse
-  projectPath: string
+  projectKey: string
   focus: BranchFocus | null
 }) {
   const [filter, setFilter] = useState<Filter>("all")
@@ -417,7 +420,7 @@ export function ActionsTab({
           </FilterChip>
         </FilterBar>
       )}
-      <RunsLedger data={data} filter={effectiveFilter} projectPath={projectPath} />
+      <RunsLedger data={data} filter={effectiveFilter} projectKey={projectKey} />
     </>
   )
 }

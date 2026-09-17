@@ -50,6 +50,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     create,
     remove,
     stop,
+    setArchived,
     readSkillTargets,
     installSkill,
   } = useBrowserSessions(active)
@@ -62,7 +63,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   // Walking the transcript per frame would cost more than painting one.
   const activity = useMemo(() => latestBrowserActivity(context.session), [context.session])
   const driven = activity?.session ?? null
-  const drivenExists = sessions.some((session) => session.name === driven)
+  const drivenExists = sessions.some((session) => session.name === driven && !session.archived)
 
   useEffect(() => {
     if (!followAgent || driven === null || driven === selected || !drivenExists) return
@@ -77,9 +78,13 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
 
   const run = useCallback(async (action: () => Promise<BrowserActionResult>) => {
     setBusy(true)
-    const result = await action()
-    setBusy(false)
-    if (!result.ok) setActionError(result.error)
+    try {
+      const result = await action()
+      setActionError(result.ok ? null : result.error)
+      return result
+    } finally {
+      setBusy(false)
+    }
   }, [])
 
   const { send } = socket
@@ -100,6 +105,11 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     void run(() => remove(name))
   }, [select, run, remove])
   const handleStop = useCallback((name: string) => void run(() => stop(name)), [run, stop])
+  const handleSetArchived = useCallback(async (name: string, archived: boolean) => {
+    const result = await run(() => setArchived(name, archived))
+    if (result.ok && archived && name === selected) select(DEFAULT_BROWSER)
+    return result
+  }, [run, setArchived, selected, select])
 
   const navigate = useCallback((url: string) => send({ type: "navigate", url }), [send])
   const goBack = useCallback(() => send({ type: "back" }), [send])
@@ -135,6 +145,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
         onCreate={create}
         onRemove={handleRemove}
         onStop={handleStop}
+        onSetArchived={handleSetArchived}
         onShowDefault={showDefault}
         onClose={closePanel}
       />

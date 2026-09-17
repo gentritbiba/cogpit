@@ -1,3 +1,4 @@
+import type { PermissionRequest } from "../../shared/contracts/permissions"
 import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
 import {
@@ -9,21 +10,7 @@ import type { PlanApprovalState } from "../../shared/session/interactiveState"
 
 export type { PermissionDecision }
 
-export interface PermissionRequest {
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  title?: string
-  displayName?: string
-  description?: string
-  decisionReason?: string
-  blockedPath?: string
-  suggestions?: Array<Record<string, unknown>>
-  timestamp: number
-  /** Decisions this provider allows for this exact request. Omitted by legacy providers. */
-  availableDecisions?: PermissionDecision[]
-}
+export type { PermissionRequest } from "../../shared/contracts/permissions"
 
 // Permission requests need to feel responsive, but this poll must not become a
 // render clock for the entire session tree. Electron also throttles the window

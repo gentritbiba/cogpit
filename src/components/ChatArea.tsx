@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/input-group"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
+import { RateLimitBanner } from "@/components/RateLimitBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
@@ -45,7 +46,7 @@ export const ChatArea = memo(function ChatArea({
   onMobileSearchClose,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
-  const { session } = useSessionContext()
+  const { session, sessionSource, rateLimit } = useSessionContext()
   const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery } = state
@@ -81,10 +82,13 @@ export const ChatArea = memo(function ChatArea({
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
+  const rateLimitBanner = rateLimit && sessionSource
+    ? { block: rateLimit, dirName: sessionSource.dirName, fileName: sessionSource.fileName }
+    : null
   const showTimeline = currentSession.turns.length > 0 || pendingMessages.length === 0
 
   return (
-    <div className={cn("relative bg-background", isMobile ? "flex min-h-0 flex-1 flex-col" : "min-h-0 flex-1")}>
+    <div className="relative flex min-h-0 flex-1 flex-col bg-background">
       {/* Mobile search is intentionally on-demand so it does not consume a row. */}
       {isMobile && mobileSearchOpen && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-background px-3 py-2">
@@ -111,8 +115,16 @@ export const ChatArea = memo(function ChatArea({
         </div>
       )}
 
+      {/* The desktop session chrome floats over the top of this column, so the
+          banner clears it the same way the team bar does. */}
+      {rateLimitBanner && (
+        <div className={cn("shrink-0", !isMobile && "pt-10")}>
+          <RateLimitBanner {...rateLimitBanner} cwd={currentSession.cwd} />
+        </div>
+      )}
+
       {/* Scrollable chat area */}
-      <div className={cn("relative", isMobile ? "flex-1 min-h-0" : "h-full")}>
+      <div className="relative min-h-0 flex-1">
         <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
         <StickyPromptBanner
           session={currentSession}
@@ -123,7 +135,7 @@ export const ChatArea = memo(function ChatArea({
           onScroll={handleScroll}
           className={cn("h-full overflow-x-hidden overflow-y-auto bg-background", isMobile && "mobile-scroll")}
         >
-          <div className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6 pt-14", hasTodos ? "pb-48" : "pb-32")}>
+          <div className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimitBanner ? "pt-4" : "pt-14", hasTodos ? "pb-48" : "pb-32")}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
                 <ConversationTimeline

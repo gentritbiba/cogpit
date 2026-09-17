@@ -1,3 +1,4 @@
+import type { PermissionRequest } from "../../shared/contracts/permissions"
 import type { MissionControlQuestion } from "../../shared/contracts/missionControl"
 import type { UsageCostTokenTotals } from "../../shared/contracts/usageCost"
 import type {
@@ -36,6 +37,7 @@ export interface AgentTurnSettings {
   permissions?: AgentPermissions
   model?: string
   effort?: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
   mcpConfig?: string | null
@@ -95,20 +97,8 @@ export interface SendOutcome {
 }
 
 /** A pending tool approval, in the shape the permission bar renders. */
-export interface PendingApproval {
+export interface PendingApproval extends PermissionRequest {
   sessionId: string
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  title?: string
-  displayName?: string
-  description?: string
-  decisionReason?: string
-  blockedPath?: string
-  /** Scoped permission rules the agent proposed alongside the request. */
-  suggestions?: Array<Record<string, unknown>>
-  timestamp: number
   availableDecisions: ApprovalDecision[]
 }
 

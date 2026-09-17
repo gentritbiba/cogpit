@@ -237,7 +237,9 @@ const TurnSectionInner = memo(function TurnSectionInner({
   )
   // Undefined follows the global setting. A click becomes a local override,
   // so the disclosure never ignores the user while "expand all" is active.
-  const [workExpanded, setWorkExpanded] = useState<boolean | undefined>(undefined)
+  // A turn mounted mid-work is pinned open from the start: the reader is
+  // watching it, and the settle that follows must not fold it under them.
+  const [workExpanded, setWorkExpanded] = useState<boolean | undefined>(() => isTurnDone ? undefined : true)
   const workVisible = workExpanded ?? (expandAll || !isTurnDone)
 
   const { leadingBlocks, trailingBlocks } = useMemo(() => {
@@ -274,7 +276,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       data-turn-index={index}
       className={cn(
         "group relative",
-        isMobile ? "px-1 py-3" : "px-4 py-5",
+        isMobile ? "px-0 py-5" : "px-4 py-5",
         isActive && "rounded-lg ring-1 ring-ring/40",
       )}
     >
@@ -289,11 +291,11 @@ const TurnSectionInner = memo(function TurnSectionInner({
       />
 
       {isNear ? (
-        <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
+        <div ref={contentRef} className="flex flex-col gap-3">
           {turn.userMessage && (
             <MaybePromptContextMenu index={index}>
               <div data-turn-prompt className={cn(
-                isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
+                "rounded-lg p-3",
                 PROMPT_CARD,
               )}>
                 <UserMessage
@@ -301,7 +303,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   timestamp={turn.timestamp}
                   onEditCommand={onEditCommand}
                   onExpandCommand={onExpandCommand}
-                  compact={isMobile}
                 />
               </div>
             </MaybePromptContextMenu>
@@ -325,7 +326,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
                 }
                 expanded={workVisible}
                 onToggle={() => setWorkExpanded(!workVisible)}
-                compact={isMobile}
               />
               {trailingBlocks.length > 0 && (
                 <ContentBlocks
@@ -385,7 +385,7 @@ function TurnHeader({
       {/* The turn boundary is carried by the accented user message below; this
           number is a label for cross-referencing panels, not a second cue. */}
       <span className="shrink-0 font-mono text-xs text-muted-foreground">
-        {isMobile ? `Turn ${index + 1}` : index + 1}
+        {index + 1}
       </span>
       <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
       {onRestoreToHere && (
@@ -492,7 +492,7 @@ function ContentBlocks({
   const elements: React.ReactNode[] = []
   // Indent for every nested block, so the rails all line up.
   const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
-  const stackGap = isMobile ? "gap-2" : "gap-3"
+  const stackGap = "gap-3"
 
   const keyUses = new Map<string, number>()
   const keyFor = (block: TurnContentBlock, index: number) => {
@@ -548,7 +548,6 @@ function ContentBlocks({
                 model={model}
                 effort={effort}
                 timestamp={block.timestamp}
-                compact={isMobile}
               />
             ))}
           </div>
@@ -578,12 +577,12 @@ function ContentBlocks({
         <div
           key={keyFor(block, i)}
           className={cn(
-            isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
+            "rounded-lg p-3",
             PROMPT_CARD,
           )}
         >
           <Badge variant="outline" className="mb-2">Queued while working</Badge>
-          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact={isMobile} />
+          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} />
         </div>
       )
       i++

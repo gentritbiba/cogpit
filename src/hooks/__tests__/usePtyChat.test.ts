@@ -67,6 +67,7 @@ describe("usePtyChat", () => {
       usePtyChat({
         sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
         ultracode: true,
+        contextWindowTokens: 200000,
       })
     )
 
@@ -82,6 +83,7 @@ describe("usePtyChat", () => {
     }))
     const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     expect(body.ultracode).toBe(true)
+    expect(body.contextWindowTokens).toBe(200000)
   })
 
   it("sets error status on failed response", async () => {

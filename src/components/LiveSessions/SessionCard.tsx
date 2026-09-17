@@ -71,6 +71,7 @@ export function SessionCard({
 }: SessionCardProps) {
   const {
     isLive,
+    isRunning,
     isNativeIdle,
     isDeferred,
     isReadOnly,
@@ -90,7 +91,7 @@ export function SessionCard({
   const archivedLabel = archivedReasonLabel(s.archivedReason)
   const archiveAction = isArchived
     ? onUnarchiveSession && { label: "Restore from archive", icon: ArchiveRestore, run: () => onUnarchiveSession(s) }
-    : onArchiveSession && !isLive && { label: "Archive session", icon: Archive, run: () => onArchiveSession(s) }
+    : onArchiveSession && !isRunning && { label: "Archive session", icon: Archive, run: () => onArchiveSession(s) }
   const canResume = isDeferred && Boolean(onResumeSession) && !isReadOnly
   const hasTeamToggle = Boolean(teammateCount) && Boolean(onToggleTeammates)
   const hasPullRequests = Boolean(s.matchedPullRequestNumber) || Boolean(s.pullRequests?.length)
@@ -294,7 +295,7 @@ export function SessionCard({
         </Button>
       )}
 
-      {proc && onKill && !isReadOnly && (
+      {proc && onKill && isRunning && !isArchived && !isReadOnly && (
         <Button
           type="button"
           variant="ghost"
@@ -321,7 +322,7 @@ export function SessionCard({
         onRename={onRenameSession ? (name) => onRenameSession(s.sessionId, name) : undefined}
         onArchive={onArchiveSession && !isArchived ? () => onArchiveSession(s) : undefined}
         onUnarchive={onUnarchiveSession && isArchived ? () => onUnarchiveSession(s) : undefined}
-        archiveDisabled={isLive}
+        archiveDisabled={isRunning}
       >
         {card}
       </SessionContextMenu>

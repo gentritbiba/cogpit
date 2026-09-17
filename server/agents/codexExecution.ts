@@ -40,7 +40,9 @@ export interface CodexExecutionOptions {
   permissions?: PermissionsConfig
   model?: string
   effort?: string
+  contextWindowTokens?: number | null
   fastMode?: boolean
+  reloadContextWindow?: boolean
 }
 
 export interface CodexThreadIdentity {
@@ -61,6 +63,7 @@ type SandboxMode = "workspace-write" | "read-only" | "danger-full-access"
 export interface CodexAccessSettings {
   approvalPolicy: ApprovalPolicy
   sandbox: SandboxMode
+  approvalsReviewer: "user" | "auto_review"
 }
 
 class CodexCompatibilityUnavailableError extends Error {
@@ -80,11 +83,13 @@ export function buildCodexAccessSettings(
 ): CodexAccessSettings {
   switch (permissions?.mode) {
     case "bypassPermissions":
-      return { approvalPolicy: "never", sandbox: "danger-full-access" }
+      return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" }
     case "plan":
-      return { approvalPolicy: "never", sandbox: "read-only" }
+      return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" }
+    case "auto":
+      return { approvalPolicy: "on-request", sandbox: "workspace-write", approvalsReviewer: "auto_review" }
     default:
-      return { approvalPolicy: "on-request", sandbox: "workspace-write" }
+      return { approvalPolicy: "on-request", sandbox: "workspace-write", approvalsReviewer: "user" }
   }
 }
 
@@ -133,27 +138,30 @@ export function buildCodexUserInput(
 }
 
 async function threadSettings(client: CodexExecutionClient, options: CodexExecutionOptions, sessionId?: string): Promise<JsonObject> {
-  const access = buildCodexAccessSettings(options.permissions)
-  const settings: JsonObject = {
-    cwd: options.cwd,
-    approvalPolicy: access.approvalPolicy,
-    sandbox: access.sandbox,
+  const settings: JsonObject = { cwd: options.cwd }
+  if (!sessionId || options.permissions) {
+    Object.assign(settings, buildCodexAccessSettings(options.permissions))
   }
   const model = nonEmpty(options.model)
   if (model) settings.model = model
   const tier = serviceTier(options.fastMode)
   if (tier !== undefined) settings.serviceTier = tier
   const browserConfig = await codexBrowserConfig(client, options.cwd, sessionId)
-  if (Object.keys(browserConfig).length > 0) settings.config = browserConfig
+  const config: JsonObject = { ...browserConfig }
+  if (options.contextWindowTokens != null) {
+    config.model_context_window = options.contextWindowTokens
+  }
+  if (Object.keys(config).length > 0 || options.reloadContextWindow) settings.config = config
   return settings
 }
 
-function turnSettings(options: CodexExecutionOptions): JsonObject {
-  const access = buildCodexAccessSettings(options.permissions)
-  const settings: JsonObject = {
-    cwd: options.cwd,
-    approvalPolicy: access.approvalPolicy,
-    sandboxPolicy: sandboxPolicy(access.sandbox),
+function turnSettings(options: CodexExecutionOptions, isResume = false): JsonObject {
+  const settings: JsonObject = { cwd: options.cwd }
+  if (!isResume || options.permissions) {
+    const access = buildCodexAccessSettings(options.permissions)
+    settings.approvalPolicy = access.approvalPolicy
+    settings.approvalsReviewer = access.approvalsReviewer
+    settings.sandboxPolicy = sandboxPolicy(access.sandbox)
   }
   const model = nonEmpty(options.model)
   const effort = nonEmpty(options.effort)
@@ -230,6 +238,9 @@ export async function continueCodexExecution(
     return { action: "steered", threadId, turnId: steered.turnId }
   }
 
+  if (options.reloadContextWindow) {
+    await client.call("thread/unsubscribe", { threadId })
+  }
   const resumed = await client.resumeThread(threadId, {
     ...await threadSettings(client, options, threadId),
   })
@@ -249,7 +260,7 @@ export async function continueCodexExecution(
   const turn = await client.startTurn({
     threadId: resumedThreadId,
     input,
-    ...turnSettings(options),
+    ...turnSettings(options, true),
   })
   return {
     action: "started",

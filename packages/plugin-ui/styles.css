@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./theme.css";
+@source "./dist";
+@source "./src";
+
+html, body, #root { height: 100%; }
+body { margin: 0; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.status-icon-spin {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  animation: status-icon-spin var(--motion-duration-spinner) linear infinite;
+}
+@keyframes status-icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.clickup",
+  "publisher": "cogpit",
+  "name": "ClickUp",
+  "version": "1.0.0",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": {
+    "pluginApi": "^1.0.0",
+    "client": ">=2.6.6",
+    "host": ">=2.6.6"
+  },
+  "protocol": 1,
+  "requires": {
+    "client": {
+      "workspace.panel": "^1.0.0",
+      "navigation.external": "^1.0.0",
+      "composer.append": "^1.0.0"
+    },
+    "host": {
+      "connections.request": "^1.0.0"
+    }
+  },
+  "optional": {
+    "client": {},
+    "host": {}
+  },
+  "browser": [
+    "message-channel",
+    "blob-script",
+    "web-crypto"
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "tasks",
+        "title": "ClickUp",
+        "icon": "assets/icon.png",
+        "order": 42,
+        "defaultSize": "38%",
+        "minSize": "360px",
+        "maxSize": "62%",
+        "when": "always"
+      }
+    ]
+  },
+  "permissions": {
+    "context": [
+      "project.identity"
+    ],
+    "composer": [
+      "append"
+    ],
+    "navigation": [
+      "external"
+    ],
+    "connections": [
+      {
+        "id": "clickup",
+        "definition": "connections/clickup.json",
+        "operations": [
+          "viewer",
+          "mine",
+          "list",
+          "tasks"
+        ]
+      }
+    ]
+  },
+  "stateVersion": 1
+}

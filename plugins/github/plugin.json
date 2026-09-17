@@ -1,0 +1,77 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.github",
+  "publisher": "cogpit",
+  "name": "GitHub",
+  "version": "1.0.0",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": {
+    "pluginApi": "^1.0.0",
+    "client": ">=2.6.6",
+    "host": ">=2.6.6"
+  },
+  "protocol": 1,
+  "requires": {
+    "client": {
+      "workspace.panel": "^1.0.0",
+      "navigation.external": "^1.0.0",
+      "composer.append": "^1.0.0",
+      "navigation.session": "^1.0.0"
+    },
+    "host": {
+      "integrations.github": "^1.0.0"
+    }
+  },
+  "optional": {
+    "client": {},
+    "host": {}
+  },
+  "browser": [
+    "message-channel",
+    "blob-script",
+    "web-crypto"
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "repository",
+        "title": "GitHub",
+        "icon": "assets/icon.png",
+        "order": 40,
+        "defaultSize": "38%",
+        "minSize": "360px",
+        "maxSize": "62%",
+        "when": "project-selected"
+      }
+    ]
+  },
+  "permissions": {
+    "context": [
+      "project.identity"
+    ],
+    "composer": [
+      "append"
+    ],
+    "navigation": [
+      "external",
+      "session"
+    ],
+    "connections": [],
+    "integrations": [
+      {
+        "id": "github",
+        "operations": [
+          "actions",
+          "actionJobs",
+          "pulls",
+          "pullFiles",
+          "pullSessions",
+          "issues"
+        ]
+      }
+    ]
+  },
+  "stateVersion": 1
+}

@@ -1,6 +1,5 @@
 import { memo, useId, useState } from "react"
-import { ChevronDown, CircleStop, Crosshair, Plus, Sparkles, Trash2, TriangleAlert, X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { CircleStop, Crosshair, Plus, Sparkles, Trash2, TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -22,20 +21,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Toggle } from "@/components/ui/toggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { formatRelativeTime } from "@/lib/format"
+import { BrowserSessionPicker } from "./BrowserSessionPicker"
 import { cn } from "@/lib/utils"
 import type { BrowserActionResult } from "@/hooks/useBrowserSessions"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
@@ -50,7 +40,6 @@ export const DEFAULT_BROWSER = "default"
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
 const NAME_RULE = "Lowercase letters, numbers, - and _, starting with a letter or number (40 max)."
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 interface BrowserSessionBarProps {
   sessions: BrowserSessionInfo[]
@@ -67,31 +56,9 @@ interface BrowserSessionBarProps {
   onCreate: (name: string, note: string) => Promise<BrowserActionResult>
   onRemove: (name: string) => void
   onStop: (name: string) => void
+  onSetArchived: (name: string, archived: boolean) => Promise<BrowserActionResult>
   onShowDefault: () => void
   onClose: () => void
-}
-
-/** "2m ago" while it is recent, a plain date once it is older than a week. */
-function lastUsedLabel(iso: string | null): string | null {
-  if (!iso) return null
-  const at = new Date(iso).getTime()
-  if (Number.isNaN(at)) return null
-  if (Date.now() - at >= WEEK_MS) return new Date(at).toLocaleDateString()
-  const relative = formatRelativeTime(iso)
-  return relative === "now" ? "just now" : `${relative} ago`
-}
-
-function StatusDot({ running, className }: { running: boolean; className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "size-2 shrink-0 rounded-full",
-        running ? "bg-emerald-500" : "ring-1 ring-muted-foreground/50 ring-inset",
-        className,
-      )}
-    />
-  )
 }
 
 export const BrowserSessionBar = memo(function BrowserSessionBar({
@@ -106,6 +73,7 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
   onCreate,
   onRemove,
   onStop,
+  onSetArchived,
   onShowDefault,
   onClose,
 }: BrowserSessionBarProps) {
@@ -154,81 +122,37 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
         !isDefault && "border-amber-500/40 bg-amber-500/10",
       )}
     >
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<Button variant="ghost" size="xs" aria-label="Switch browser" className="max-w-40" />}
-        >
-          <StatusDot running={selectedInfo?.running ?? false} />
-          <span className="truncate">{selected}</span>
-          <ChevronDown data-icon="inline-end" className="opacity-60" />
-        </DropdownMenuTrigger>
-
-        <DropdownMenuContent align="start" sideOffset={6} className="w-72">
-          <DropdownMenuRadioGroup value={selected} onValueChange={(value: string) => onSelect(value)}>
-            {sessions.map((session) => {
-              const lastUsed = lastUsedLabel(session.lastUsedAt)
-              const drivenElsewhere = session.driverSessionId !== null
-                && session.driverSessionId !== currentSessionId
-              return (
-                <DropdownMenuRadioItem key={session.name} value={session.name} className="items-start py-1.5">
-                  <StatusDot running={session.running} className="mt-[0.4rem]" />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate">{session.name}</span>
-                      <span className="sr-only">{session.running ? "running" : "stopped"}</span>
-                      {session.isDefault && (
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[0.65rem] font-normal">
-                          Default
-                        </Badge>
-                      )}
-                      {lastUsed && (
-                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">{lastUsed}</span>
-                      )}
-                    </span>
-                    {drivenElsewhere && (
-                      <span className="truncate text-xs text-muted-foreground">
-                        driven by another session
-                      </span>
-                    )}
-                  </span>
-                </DropdownMenuRadioItem>
-              )
-            })}
-          </DropdownMenuRadioGroup>
-
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem disabled={busy} onClick={openCreate}>
-            <Plus />
+      <BrowserSessionPicker
+        sessions={sessions}
+        selected={selected}
+        currentSessionId={currentSessionId}
+        busy={busy}
+        onSelect={onSelect}
+        onSetArchived={onSetArchived}
+      >
+        {(close) => <>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => { close(); openCreate() }}>
+            <Plus data-icon="inline-start" />
             New browser…
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={onOpenSkill}>
-            <Sparkles />
-            Agent skill…
-          </DropdownMenuItem>
-
-          {!isDefault && (
-            <>
-              <DropdownMenuItem
-                disabled={busy || !selectedInfo?.running}
-                onClick={() => onStop(selected)}
-              >
-                <CircleStop />
+          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="xs" onClick={() => { close(); onOpenSkill() }}>
+              <Sparkles data-icon="inline-start" />
+              Agent skill…
+            </Button>
+            {!isDefault && <>
+              <Button variant="ghost" size="xs" disabled={busy || !selectedInfo?.running} onClick={() => { close(); onStop(selected) }}>
+                <CircleStop data-icon="inline-start" />
                 Stop
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={busy}
-                onClick={() => setDeleteTarget(selected)}
-              >
-                <Trash2 />
+              </Button>
+              <Button variant="ghost" size="xs" disabled={busy} onClick={() => { close(); setDeleteTarget(selected) }}>
+                <Trash2 data-icon="inline-start" />
                 Delete…
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              </Button>
+            </>}
+          </div>
+        </>}
+      </BrowserSessionPicker>
 
       <span className="flex-1" />
 

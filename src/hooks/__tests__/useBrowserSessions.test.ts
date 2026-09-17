@@ -157,6 +157,8 @@ describe("useBrowserSessions", () => {
 
   it.each([
     ["remove", (hook: UseBrowserSessions) => hook.remove("../x"), "DELETE", "/api/browser/sessions/..%2Fx", undefined],
+    ["archive", (hook: UseBrowserSessions) => hook.setArchived("github", true), "PATCH", "/api/browser/sessions/github", JSON.stringify({ archived: true })],
+    ["restore", (hook: UseBrowserSessions) => hook.setArchived("github", false), "PATCH", "/api/browser/sessions/github", JSON.stringify({ archived: false })],
     ["stop", (hook: UseBrowserSessions) => hook.stop("github"), "POST", "/api/browser/sessions/github/stop", undefined],
     ["installSkill", (hook: UseBrowserSessions) => hook.installSkill(SKILL_TARGET), "POST", "/api/browser/skill/install", JSON.stringify({ target: SKILL_TARGET })],
   ])("sends %s to the right endpoint", async (_name, call, method, path, body) => {

@@ -15,8 +15,9 @@ export type GitProject =
   }
   | { ok: false; status: number; error: string }
 
-export function runGit(cwd: string, args: string[]) {
+export function runGit(cwd: string, args: string[], signal?: AbortSignal) {
   return execFile("git", args, {
+    signal,
     cwd,
     encoding: "utf-8",
     maxBuffer: 8 * 1024 * 1024,
@@ -30,7 +31,8 @@ export function runGit(cwd: string, args: string[]) {
  * Callers decide what a missing repository means, so that case succeeds with a
  * null root rather than failing.
  */
-export async function resolveGitProject(cwd: string): Promise<GitProject> {
+export async function resolveGitProject(cwd: string, signal?: AbortSignal): Promise<GitProject> {
+  signal?.throwIfAborted()
   if (!isAbsolute(cwd)) return { ok: false, status: 400, error: "cwd must be an absolute path" }
 
   let projectPath: string
@@ -40,13 +42,15 @@ export async function resolveGitProject(cwd: string): Promise<GitProject> {
       return { ok: false, status: 400, error: "cwd must be a directory" }
     }
   } catch {
+    signal?.throwIfAborted()
     return { ok: false, status: 404, error: "Project directory not found" }
   }
 
   try {
-    const result = await runGit(projectPath, ["rev-parse", "--show-toplevel"])
+    const result = await runGit(projectPath, ["rev-parse", "--show-toplevel"], signal)
     return { ok: true, projectPath, root: await realpath(result.stdout.trim()) }
   } catch (error) {
+    signal?.throwIfAborted()
     const candidate = error as NodeJS.ErrnoException & { stderr?: string }
     if (candidate.code === "ENOENT") {
       return { ok: false, status: 503, error: "Git is not installed or not available in PATH" }

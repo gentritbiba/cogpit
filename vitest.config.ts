@@ -18,6 +18,9 @@ export default defineConfig({
       "plugins/**/*.test.tsx",
       "server/**/*.test.ts",
       "electron/**/*.test.ts",
+      "packages/plugin-contracts/**/*.test.ts",
+      "packages/plugin-sdk/**/*.test.ts",
+      "packages/plugin-tools/**/*.test.ts",
     ],
     coverage: {
       provider: "v8",

@@ -8,7 +8,7 @@ import {
   Search,
   X,
 } from "lucide-react"
-import type { ClickUpPriority, ClickUpTask, ClickUpUser } from "../../shared/contracts/clickup"
+import type { ClickUpPriority, ClickUpTask, ClickUpUser } from "@cogpit/plugin-integrations"
 import {
   Button,
   ClosedFold,
@@ -25,7 +25,7 @@ import {
   ScrollArea,
   TabEmpty,
   useNow,
-} from "@/plugin-api"
+} from "@cogpit/plugin-ui"
 import {
   applyFilters,
   EMPTY_FILTERS,
@@ -38,7 +38,7 @@ import {
   taskPrompt,
   type DueFilter,
   type TaskFilters,
-} from "./filters"
+} from "./filters.js"
 
 const PRIORITY_CLASS: Record<ClickUpPriority, string> = {
   urgent: "text-destructive",
@@ -103,12 +103,14 @@ function TaskRow({
   now,
   onPickStatus,
   composePrompt,
+  openExternal,
 }: {
   task: ClickUpTask
   viewer: ClickUpUser
   now: number
   onPickStatus: (status: string) => void
   composePrompt: ((text: string) => void) | undefined
+  openExternal: (url: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const finished = isFinished(task)
@@ -152,7 +154,7 @@ function TaskRow({
               size="icon-xs"
               className="size-6 text-muted-foreground opacity-0 transition-opacity group-hover/task:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label={`Open ${task.customId ?? task.name} in ClickUp`}
-              onClick={() => window.open(task.url, "_blank", "noopener,noreferrer")}
+              onClick={() => openExternal(task.url)}
             >
               <ArrowUpRight />
             </Button>
@@ -160,7 +162,7 @@ function TaskRow({
         </div>
         <CollapsibleContent>
           <div className="flex flex-col gap-3 py-2 pl-1 pr-1">
-            {description ? <Description body={description} /> : <p className="text-xs leading-5 text-muted-foreground">No description.</p>}
+            {description ? <Description body={description} openExternal={openExternal} /> : <p className="text-xs leading-5 text-muted-foreground">No description.</p>}
 
             <ul className="flex flex-wrap gap-1" aria-label="Task details">
               <li>
@@ -188,7 +190,7 @@ function TaskRow({
                   Add to prompt
                 </Button>
               )}
-              <Button variant="outline" size="xs" render={<a href={task.url} target="_blank" rel="noopener noreferrer" />}>
+              <Button variant="outline" size="xs" onClick={() => openExternal(task.url)}>
                 Open in ClickUp
                 <ArrowUpRight data-icon="inline-end" />
               </Button>
@@ -204,6 +206,7 @@ export function TaskList({
   tasks,
   viewer,
   composePrompt,
+  openExternal,
   emptyTitle,
   emptyDescription,
   truncated,
@@ -211,6 +214,7 @@ export function TaskList({
   tasks: ClickUpTask[]
   viewer: ClickUpUser
   composePrompt: ((text: string) => void) | undefined
+  openExternal: (url: string) => void
   emptyTitle: string
   emptyDescription: string
   truncated: boolean
@@ -243,6 +247,7 @@ export function TaskList({
       now={now}
       onPickStatus={(status) => set({ status })}
       composePrompt={composePrompt}
+      openExternal={openExternal}
     />
   )
 

@@ -207,7 +207,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const focusedArchivable = useMemo(
     () => (projectScope === null
       ? []
-      : scopedSessions.filter((session) => !session.archived && !isSessionLive(session, procBySession))),
+      : scopedSessions.filter((session) => !session.archived && !isSessionLive(session, procBySession.get(session.sessionId)))),
     [projectScope, scopedSessions, procBySession],
   )
 
@@ -257,13 +257,16 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     e.stopPropagation()
     setKillingPids(prev => new Set(prev).add(pid))
     try {
-      await authFetch("/api/kill-process", {
+      const response = await authFetch("/api/kill-process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       })
+      if (!response.ok) throw new Error("Could not stop session")
       scheduleTimeout(fetchData, 1500)
-    } catch { /* ignore */ }
+    } catch {
+      toast.error("Could not stop session")
+    }
     scheduleTimeout(() => {
       setKillingPids(prev => {
         const next = new Set(prev)

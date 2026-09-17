@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "id": "clickup",
+  "label": "ClickUp",
+  "secret": {
+    "id": "token",
+    "label": "API token"
+  },
+  "auth": {
+    "header": "Authorization",
+    "scheme": "raw"
+  },
+  "validationOperation": "validate",
+  "identity": {
+    "viewer": "/user/id"
+  },
+  "resources": {
+    "workspace": {
+      "label": "Workspace",
+      "scope": "connection",
+      "options": {
+        "operation": "workspaces",
+        "items": "/teams",
+        "id": "/id",
+        "label": "/name"
+      }
+    },
+    "space": {
+      "label": "Space",
+      "scope": "project",
+      "dependsOn": [
+        "workspace"
+      ],
+      "options": {
+        "operation": "spaces",
+        "items": "/spaces",
+        "id": "/id",
+        "label": "/name"
+      }
+    },
+    "list": {
+      "label": "List",
+      "scope": "project",
+      "dependsOn": [
+        "space"
+      ],
+      "options": [
+        {
+          "operation": "looseLists",
+          "items": "/lists",
+          "id": "/id",
+          "label": "/name"
+        },
+        {
+          "operation": "folders",
+          "items": "/folders",
+          "id": "/id",
+          "label": "/name",
+          "nested": "/lists"
+        }
+      ],
+      "input": {
+        "allowId": true,
+        "urls": [
+          {
+            "origin": "https://app.clickup.com",
+            "pathMarker": "li"
+          }
+        ],
+        "validation": {
+          "operation": "validateList",
+          "argument": "candidate",
+          "id": "/id",
+          "label": "/name",
+          "parents": {
+            "space": "/space/id"
+          }
+        }
+      }
+    }
+  },
+  "operations": {
+    "validate": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "user"
+        }
+      ],
+      "args": {},
+      "query": {}
+    },
+    "workspaces": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "team"
+        }
+      ],
+      "args": {},
+      "query": {}
+    },
+    "spaces": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "team"
+        },
+        {
+          "resource": "workspace"
+        },
+        {
+          "literal": "space"
+        }
+      ],
+      "args": {},
+      "query": {
+        "archived": {
+          "literal": false
+        }
+      }
+    },
+    "looseLists": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "space"
+        },
+        {
+          "resource": "space"
+        },
+        {
+          "literal": "list"
+        }
+      ],
+      "args": {},
+      "query": {
+        "archived": {
+          "literal": false
+        }
+      }
+    },
+    "folders": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "space"
+        },
+        {
+          "resource": "space"
+        },
+        {
+          "literal": "folder"
+        }
+      ],
+      "args": {},
+      "query": {
+        "archived": {
+          "literal": false
+        }
+      }
+    },
+    "validateList": {
+      "audience": "setup",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "list"
+        },
+        {
+          "arg": "candidate"
+        }
+      ],
+      "args": {
+        "candidate": {
+          "type": "string",
+          "required": true,
+          "maxLength": 128
+        }
+      },
+      "query": {}
+    },
+    "mine": {
+      "audience": "panel",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "team"
+        },
+        {
+          "resource": "workspace"
+        },
+        {
+          "literal": "task"
+        }
+      ],
+      "args": {
+        "page": {
+          "type": "integer",
+          "min": 0,
+          "max": 2
+        }
+      },
+      "query": {
+        "assignees[]": {
+          "identity": "viewer"
+        },
+        "include_closed": {
+          "literal": false
+        },
+        "subtasks": {
+          "literal": true
+        },
+        "order_by": {
+          "literal": "due_date"
+        },
+        "reverse": {
+          "literal": true
+        },
+        "page": {
+          "arg": "page"
+        }
+      }
+    },
+    "tasks": {
+      "audience": "panel",
+      "origin": "https://api.clickup.com",
+      "method": "GET",
+      "path": [
+        {
+          "literal": "api"
+        },
+        {
+          "literal": "v2"
+        },
+        {
+          "literal": "list"
+        },
+        {
+          "resource": "list"
+        },
+        {
+          "literal": "task"
+        }
+      ],
+      "args": {
+        "page": {
+          "type": "integer",
+          "min": 0,
+          "max": 2
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "updatedAfter": {
+          "type": "integer",
+          "min": 0,
+          "max": 9007199254740991
+        }
+      },
+      "query": {
+        "page": {
+          "arg": "page"
+        },
+        "include_closed": {
+          "arg": "closed"
+        },
+        "date_updated_gt": {
+          "arg": "updatedAfter"
+        },
+        "subtasks": {
+          "literal": true
+        }
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import {
   AGENT_KINDS,
+  PERSISTED_AGENT_HOME_FIELD,
   allDescriptors,
   descriptorFor,
   soleDescriptorWhere,
@@ -69,7 +70,7 @@ export interface AppConfig {
    * the rest being discovered. The field keeps its historical name on disk
    * and on the wire.
    */
-  claudeDir: string
+  [PERSISTED_AGENT_HOME_FIELD]: string
   /** Agent new sessions default to. */
   defaultAgent?: AgentKind
   /**
@@ -244,7 +245,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
         networkPassword = hashPassword(networkPassword)
         // Write the hashed password back to disk so migration only happens once.
         const migrated = { ...parsed, networkPassword }
-        await writeOwnerOnlyJson(CONFIG_PATH, migrated, CONFIG_FILE_MODE)
+        await writeOwnerOnlyJson(CONFIG_PATH, { ...migrated, runtimePluginsVersion: 1 }, CONFIG_FILE_MODE)
       }
 
       // Existing installations may predate the owner-only creation mode used
@@ -289,7 +290,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
 
 export async function saveConfig(config: AppConfig): Promise<void> {
   const toPersist = stripEnvOverride(config)
-  await writeOwnerOnlyJson(CONFIG_PATH, toPersist, CONFIG_FILE_MODE)
+  await writeOwnerOnlyJson(CONFIG_PATH, { ...toPersist, runtimePluginsVersion: 1 }, CONFIG_FILE_MODE)
   cachedConfig = toPersist
   configuredEditionValue = toPersist.edition
 }

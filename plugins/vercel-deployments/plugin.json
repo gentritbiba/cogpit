@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.vercel",
+  "publisher": "cogpit",
+  "name": "Vercel Deployments",
+  "version": "1.0.1",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": { "pluginApi": "^1.0.0", "client": ">=2.6.6", "host": ">=2.7.0" },
+  "protocol": 1,
+  "requires": { "client": { "workspace.panel": "^1.0.0", "navigation.external": "^1.0.0" }, "host": { "integrations.vercel": "^1.0.0" } },
+  "optional": { "client": {}, "host": {} },
+  "browser": ["message-channel", "blob-script", "web-crypto"],
+  "contributes": { "panels": [{ "id": "deployments", "title": "Vercel Deployments", "icon": "assets/icon.png", "order": 45, "defaultSize": "42%", "minSize": "380px", "maxSize": "68%", "when": "project-selected" }] },
+  "permissions": { "context": ["project.identity"], "composer": [], "navigation": ["external"], "connections": [], "integrations": [{ "id": "vercel", "operations": ["deployments", "buildLogs"] }] },
+  "stateVersion": 1
+}

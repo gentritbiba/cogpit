@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -16,12 +16,11 @@ import type {
   VercelDeploymentsErrorResponse,
   VercelDeploymentsResponse,
   VercelDeploymentState,
-} from "../../shared/contracts/vercelDeployments"
+} from "@cogpit/plugin-integrations"
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-  Badge,
   Button,
   cn,
   Collapsible,
@@ -37,10 +36,17 @@ import {
   ScrollArea,
   Skeleton,
   Spinner,
-  type WorkspacePanelIndicatorProps,
-  type WorkspacePanelProps,
-} from "@/plugin-api"
-import { fetchVercelBuildLogs, useVercelDeployments } from "./vercelDeploymentsStore"
+} from "@cogpit/plugin-ui"
+import { useVercelDeployments } from "./vercelDeploymentsStore.js"
+
+export interface VercelPanelProps {
+  context: { projectPath: string | null }
+  active: boolean
+  closePanel?: () => void
+  openExternal: (url: string) => Promise<unknown>
+}
+type FetchBuildLogs = (deploymentId: string, signal?: AbortSignal) => Promise<VercelBuildLogsResponse>
+const NavigationContext = createContext<VercelPanelProps["openExternal"]>(() => Promise.reject(new Error("Navigation is unavailable")))
 
 type Filter = "all" | "failed" | "preview" | "production"
 type Tone = "live" | "fail" | "pass"
@@ -157,7 +163,7 @@ function errorHelp(error: VercelDeploymentsErrorResponse): string {
   if (error.code === "vercel_missing") return "Install Vercel CLI on the Cogpit host, then refresh."
   if (error.code === "vercel_cli_too_old") return "Update Vercel CLI to 50.5.1 or newer, then refresh."
   if (error.code === "vercel_auth_required") return "Run `vercel login` on the Cogpit host, then refresh."
-  if (error.code === "vercel_project_unlinked") return "Run `vercel link` from this exact project root."
+  if (error.code === "vercel_project_unlinked") return "Run `vercel link` in this folder or its repository root. This panel checks again automatically."
   if (error.code === "vercel_access_denied") return "Sign in to an account with access to the linked Vercel project."
   return "Check the linked project and your Vercel access, then try again."
 }
@@ -206,17 +212,19 @@ function BuildLogs({ logs }: { logs: VercelBuildLogsResponse }) {
   )
 }
 
-function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+function ExternalLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
+  const openExternal = useContext(NavigationContext)
+  const [error, setError] = useState<string | null>(null)
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex min-w-0 items-center gap-0.5 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:underline"
+    <><button
+      type="button"
+      role="link"
+      onClick={() => { setError(null); void openExternal(href).catch(failure => { if (failure?.code !== "CANCELED") setError("Unable to open this link") }) }}
+      className={cn("inline-flex min-w-0 items-center gap-0.5 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:underline", className)}
     >
       <span className="truncate">{children}</span>
       <ArrowUpRight className="size-3 shrink-0" />
-    </a>
+    </button>{error && <span role="alert" className="text-xs text-destructive">{error}</span>}</>
   )
 }
 
@@ -224,13 +232,18 @@ function DeploymentRow({
   deployment,
   projectPath,
   now,
+  fetchBuildLogs,
 }: {
   deployment: VercelDeployment
   projectPath: string
   now: number
+  fetchBuildLogs: FetchBuildLogs
 }) {
   const [open, setOpen] = useState(false)
   const [logsState, setLogsState] = useState<LogsState>(EMPTY_LOGS)
+  const logRequest = useRef<AbortController | null>(null)
+  const openExternal = useContext(NavigationContext)
+  useEffect(() => () => { logRequest.current?.abort() }, [projectPath, fetchBuildLogs])
   const tone = toneOf(deployment.state)
   const elapsed = duration(deployment, now)
   const title = deploymentTitle(deployment)
@@ -239,12 +252,16 @@ function DeploymentRow({
 
   async function loadLogs(): Promise<void> {
     if (logsState.loading) return
+    const abort = new AbortController()
+    logRequest.current = abort
     setLogsState((current) => ({ ...current, error: null, loading: true }))
     try {
-      const data = await fetchVercelBuildLogs(projectPath, deployment.id)
+      const data = await fetchBuildLogs(deployment.id, abort.signal)
+      if (abort.signal.aborted) return
       setLogsState({ data, error: null, loading: false })
     } catch (error) {
-      const detail = error as Partial<VercelDeploymentsErrorResponse>
+      if (abort.signal.aborted) return
+      const detail = error && typeof error === "object" ? error as Partial<VercelDeploymentsErrorResponse> : {}
       setLogsState({
         data: null,
         error: {
@@ -258,6 +275,7 @@ function DeploymentRow({
 
   function handleOpenChange(next: boolean): void {
     setOpen(next)
+    if (!next) { logRequest.current?.abort(); setLogsState(current => ({ ...current, loading: false })) }
     if (next && (!logsState.data || isActive(deployment.state))) void loadLogs()
   }
 
@@ -303,7 +321,7 @@ function DeploymentRow({
               size="icon-xs"
               className="mt-0.5 size-6 text-muted-foreground opacity-0 transition-opacity group-hover/deployment:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label={`Open ${title}`}
-              onClick={() => window.open(deployment.url ?? "", "_blank", "noopener,noreferrer")}
+              onClick={() => { void openExternal(deployment.url!).catch(() => {}) }}
             >
               <ArrowUpRight />
             </Button>
@@ -377,15 +395,12 @@ function LiveProduction({ deployments, now }: { deployments: readonly VercelDepl
         {shown.commitSha && <span className="shrink-0">{shown.commitSha.slice(0, 7)}</span>}
         <span className="min-w-0 flex-1" />
         {shown.url && host && (
-          <a
+          <ExternalLink
             href={shown.url}
-            target="_blank"
-            rel="noopener noreferrer"
             className="inline-flex min-w-0 max-w-[60%] items-center gap-0.5 font-sans text-[11px] text-foreground/80 outline-none hover:text-foreground focus-visible:underline"
           >
-            <span className="truncate">{host}</span>
-            <ArrowUpRight className="size-3 shrink-0" />
-          </a>
+            {host}
+          </ExternalLink>
         )}
       </p>
       {live && pending && pendingTone && (
@@ -418,10 +433,12 @@ function DeploymentLedger({
   data,
   filter,
   projectPath,
+  fetchBuildLogs,
 }: {
   data: VercelDeploymentsResponse
   filter: Filter
   projectPath: string
+  fetchBuildLogs: FetchBuildLogs
 }) {
   const deployments = useMemo(() => applyFilter(data.deployments, filter), [data.deployments, filter])
   const now = useNow(data.deployments.some((deployment) => isActive(deployment.state)))
@@ -445,7 +462,7 @@ function DeploymentLedger({
       ) : (
         <div className="flex flex-col gap-3 px-3 py-3">
           {deployments.map((deployment) => (
-            <DeploymentRow key={deployment.id} deployment={deployment} projectPath={projectPath} now={now} />
+            <DeploymentRow key={`${projectPath}:${deployment.id}`} deployment={deployment} projectPath={projectPath} now={now} fetchBuildLogs={fetchBuildLogs} />
           ))}
         </div>
       )}
@@ -453,37 +470,8 @@ function DeploymentLedger({
   )
 }
 
-export function VercelDeploymentsIndicator({ context }: WorkspacePanelIndicatorProps) {
-  const { data } = useVercelDeployments(context.projectPath, context.projectPath !== null)
-  const activeCount = data?.deployments.filter((deployment) => isActive(deployment.state)).length ?? 0
-  const latestFailed = data?.deployments[0] ? isFailed(data.deployments[0].state) : false
-
-  if (activeCount > 0) {
-    return (
-      <Badge
-        className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]"
-        aria-label={`${activeCount} active Vercel deployment${activeCount === 1 ? "" : "s"}`}
-      >
-        {activeCount}
-      </Badge>
-    )
-  }
-  if (latestFailed) {
-    return (
-      <Badge
-        variant="destructive"
-        className="absolute -right-0.5 -top-0.5 size-3 p-0 text-[8px]"
-        aria-label="Latest Vercel deployment failed"
-      >
-        !
-      </Badge>
-    )
-  }
-  return null
-}
-
-export function VercelDeploymentsPanel({ context, active, closePanel }: WorkspacePanelProps) {
-  const { data, error, loading, refreshing, refresh } = useVercelDeployments(context.projectPath, active)
+export function VercelDeploymentsPanel({ context, active, closePanel, openExternal }: VercelPanelProps) {
+  const { data, error, loading, refreshing, refresh, fetchBuildLogs } = useVercelDeployments(context.projectPath, active)
   const [filter, setFilter] = useState<Filter>("all")
   const projectPath = context.projectPath
   const deployments = data?.deployments ?? []
@@ -496,22 +484,19 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
   const effectiveFilter = filter !== "all" && counts[filter] === 0 ? "all" : filter
 
   return (
-    <section className="flex size-full min-h-0 flex-col" aria-label="Vercel deployments panel">
+    <NavigationContext.Provider value={openExternal}><section className="flex size-full min-h-0 flex-col" aria-label="Vercel deployments panel">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b pl-4 pr-2">
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium leading-tight">Vercel Deployments</h2>
           {data?.projectUrl ? (
-            <a
+            <ExternalLink
               href={data.projectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="inline-flex max-w-full items-center gap-0.5 truncate text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:underline"
             >
-              <span className="truncate">{data.projectName}</span>
-              <ArrowUpRight className="size-3 shrink-0" />
-            </a>
+              {data.projectName}
+            </ExternalLink>
           ) : (
-            <p className="truncate text-[11px] text-muted-foreground">Project linked at the session root</p>
+            <p className="truncate text-[11px] text-muted-foreground">Deployments for this workspace</p>
           )}
         </div>
         <Button
@@ -524,9 +509,9 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
         >
           {refreshing ? <Spinner /> : <RefreshCw />}
         </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close Vercel deployments">
+        {closePanel && <Button type="button" variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close Vercel deployments">
           <X />
-        </Button>
+        </Button>}
       </header>
 
       {data && data.deployments.length > 0 && (
@@ -576,7 +561,7 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
           </Alert>
         </div>
       )}
-      {data && projectPath && <DeploymentLedger data={data} filter={effectiveFilter} projectPath={projectPath} />}
+      {data && projectPath && <DeploymentLedger data={data} filter={effectiveFilter} projectPath={projectPath} fetchBuildLogs={fetchBuildLogs} />}
       {!loading && !data && !error && (
         <Empty className="border-0">
           <EmptyHeader>
@@ -585,6 +570,6 @@ export function VercelDeploymentsPanel({ context, active, closePanel }: Workspac
           </EmptyHeader>
         </Empty>
       )}
-    </section>
+    </section></NavigationContext.Provider>
   )
 }

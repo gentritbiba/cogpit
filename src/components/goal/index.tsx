@@ -59,13 +59,3 @@ export function GoalTrigger() {
     </Button>
   )
 }
-
-/** Both pieces stacked, for the mobile settings sheet where there is no row. */
-export function GoalControlsBlock() {
-  return (
-    <>
-      <GoalSection />
-      <GoalTrigger />
-    </>
-  )
-}

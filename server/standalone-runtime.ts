@@ -1,3 +1,4 @@
+import { captureLegacyPluginHost } from "./plugins/legacyHost"
 import { existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -30,6 +31,7 @@ export interface StartStandaloneServerOptions {
   port?: number
   env?: NodeJS.ProcessEnv
   publishPort?: boolean
+  legacyClickUpPath?: string
 }
 
 export interface RunningStandaloneServer {
@@ -76,7 +78,9 @@ export async function startStandaloneServer({
   port = 19384,
   env = process.env,
   publishPort = false,
+  legacyClickUpPath,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
+  const legacyPluginHost = await captureLegacyPluginHost(dataDir)
   mkdirSync(dataDir, { recursive: true })
 
   const configPath = join(dataDir, "config.local.json")
@@ -130,6 +134,8 @@ export async function startStandaloneServer({
 
   const composition = await createServerComposition(staticDir, dataDir, {
     mode: "standalone",
+    legacyPluginHost,
+    legacyClickUpPath,
     viteDevUrl: process.env.ELECTRON_RENDERER_URL,
   })
   let boundPort: number

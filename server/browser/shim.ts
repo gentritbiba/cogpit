@@ -44,7 +44,7 @@ const MARKER = `cogpit-shim v${SHIM_VERSION} — routes agent-browser into Cogpi
 const VISIBLE_BROWSER_ARGS = "--remote-debugging-port=0,--disable-blink-features=AutomationControlled"
 
 export interface ShimOptions {
-  /** A full Chrome or Chromium to open named browsers in a real window; null keeps them headless. */
+  /** A full Chrome or Chromium that can open a named browser in a real window on request; null keeps them headless. */
   visibleBrowser?: string | null
   /** Which host's shim to render; defaults to this process's platform. */
   platform?: NodeJS.Platform
@@ -56,15 +56,16 @@ function shellQuoted(value: string): string {
 }
 
 /**
- * Headless Chromium fails bot checks by user agent alone, so named browsers open
- * in a real window when a display can show one. macOS always has one; Linux
- * only when the agent's environment names an X or Wayland display. Setting
- * `COGPIT_BROWSER_HEADLESS` keeps them headless anyway. Throwaways stay
+ * Named browsers stay headless unless the launching call sets
+ * `COGPIT_BROWSER_HEADED`: a window on the user's desktop is only worth it when
+ * a bot check refuses headless Chromium's user agent and a human has to pass
+ * it. Even then a window needs a display, which macOS always has and Linux
+ * only when the agent's environment names an X or Wayland one. Throwaways stay
  * headless: nobody watches them.
  */
 function renderVisibleBrowser(visibleBrowser: string | null, platform: NodeJS.Platform): string {
   if (!visibleBrowser || (platform !== "darwin" && platform !== "linux")) return ""
-  const conditions = [`[ -z "\${COGPIT_BROWSER_HEADLESS:-}" ]`]
+  const conditions = [`[ -n "\${COGPIT_BROWSER_HEADED:-}" ]`]
   if (platform === "linux") conditions.push(`[ -n "\${DISPLAY:-}\${WAYLAND_DISPLAY:-}" ]`)
   return `if ${conditions.join(" && ")}; then
 export AGENT_BROWSER_HEADED=1

@@ -15,6 +15,7 @@ import type { NextFn } from "../http"
 import { isTeamEdition } from "../team/edition"
 import { requirementFor } from "../team/policy"
 import { getRequestPrincipal } from "../team/requestPrincipal"
+import { getHubPluginRelay, isPluginRelayHeader, isPluginRelayPath } from "./pluginRelay"
 
 /**
  * Multi-device hub reverse proxy.
@@ -129,6 +130,7 @@ function buildOutboundHeaders(incoming: IncomingHttpHeaders, body: Buffer, token
   for (const [key, value] of Object.entries(incoming)) {
     if (value === undefined) continue
     if (OUTBOUND_STRIP.has(key.toLowerCase())) continue
+    if (isPluginRelayHeader(key)) continue
     headers[key] = value
   }
   headers["content-length"] = String(body.length)
@@ -288,6 +290,10 @@ function dispatch(
 ): void {
   const strippedQuery = stripHubToken(rawQuery)
   const outboundPath = rest + (strippedQuery ? `?${strippedQuery}` : "")
+  if (isPluginRelayPath(rest)) {
+    void getHubPluginRelay().forward(req, res, deviceId, method, outboundPath, body)
+    return
+  }
 
   // `responded` guards the single client-facing outcome: either a JSON error or
   // the start of a piped response. Once set, later errors only tear down.
@@ -556,6 +562,7 @@ async function openDeviceUpgrade(
         || lower === "origin"
         || lower === "referer"
         || lower.startsWith("sec-fetch-")
+        || isPluginRelayHeader(lower)
       ) continue
       headers[key] = value
     }

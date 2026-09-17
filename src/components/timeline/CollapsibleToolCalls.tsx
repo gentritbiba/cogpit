@@ -106,7 +106,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
             {tail.hidden > 0 && <Button type="button" variant="ghost" size="sm" className="mb-1 ml-2" onClick={() => setOpenOverride(true)}>Show {tail.hidden} earlier {tail.hidden === 1 ? "step" : "steps"}</Button>}
             {tail.visible.map((entry) => entry.kind === "tool_call"
               ? renderCall(entry.toolCall)
-              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} className="px-3 py-1"><ThinkingBlock blocks={entry.blocks} expandAll={false} /></div>)}
+              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} className="px-3 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
           </div>
         </CollapsibleContent>
       </Collapsible>

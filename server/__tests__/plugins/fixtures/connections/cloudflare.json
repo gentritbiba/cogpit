@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "id": "cloudflare",
+  "label": "Cloudflare fixture",
+  "secret": { "id": "token", "label": "API token" },
+  "auth": { "header": "Authorization", "scheme": "bearer" },
+  "validationOperation": "validate",
+  "resources": {
+    "account": { "label": "Account", "options": { "operation": "accounts", "items": "/result", "id": "/id", "label": "/name" } },
+    "worker": { "label": "Worker", "options": { "operation": "workers", "items": "/result", "id": "/id", "label": "/id" } }
+  },
+  "operations": {
+    "validate": { "audience": "setup", "origin": "https://api.cloudflare.com", "method": "GET", "path": [{ "literal": "client" }, { "literal": "v4" }, { "literal": "user" }, { "literal": "tokens" }, { "literal": "verify" }], "args": {}, "query": {} },
+    "accounts": { "audience": "setup", "origin": "https://api.cloudflare.com", "method": "GET", "path": [{ "literal": "client" }, { "literal": "v4" }, { "literal": "accounts" }], "args": {}, "query": {} },
+    "workers": { "audience": "setup", "origin": "https://api.cloudflare.com", "method": "GET", "path": [{ "literal": "client" }, { "literal": "v4" }, { "literal": "accounts" }, { "resource": "account" }, { "literal": "workers" }, { "literal": "scripts" }], "args": {}, "query": {} },
+    "deployments": { "audience": "panel", "origin": "https://api.cloudflare.com", "method": "GET", "path": [{ "literal": "client" }, { "literal": "v4" }, { "literal": "accounts" }, { "resource": "account" }, { "literal": "workers" }, { "literal": "scripts" }, { "resource": "worker" }, { "literal": "deployments" }], "args": {}, "query": {} }
+  }
+}

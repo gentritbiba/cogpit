@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": "figma",
+  "label": "Figma fixture",
+  "secret": { "id": "token", "label": "Personal access token" },
+  "auth": { "header": "X-Figma-Token", "scheme": "raw" },
+  "validationOperation": "validate",
+  "resources": {
+    "file": { "label": "File", "options": { "operation": "files", "items": "/files", "id": "/key", "label": "/name" } }
+  },
+  "operations": {
+    "validate": { "audience": "setup", "origin": "https://api.figma.com", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "me" }], "args": {}, "query": {} },
+    "files": { "audience": "setup", "origin": "https://api.figma.com", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "projects" }, { "literal": "fixture-project" }, { "literal": "files" }], "args": {}, "query": {} },
+    "file": { "audience": "panel", "origin": "https://api.figma.com", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "files" }, { "resource": "file" }], "args": { "depth": { "type": "integer", "min": 1, "max": 10 } }, "query": { "depth": "depth" } },
+    "nodes": { "audience": "panel", "origin": "https://api.figma.com", "method": "GET", "path": [{ "literal": "v1" }, { "literal": "files" }, { "resource": "file" }, { "literal": "nodes" }], "args": { "ids": { "type": "string", "required": true, "maxLength": 128 } }, "query": { "ids": "ids" } }
+  }
+}

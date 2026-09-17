@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, FileCode2, FolderTree, GitBranch, MessageSquarePlus, RefreshCw, Save, Search, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, FileCode2, FolderTree, GitBranch, MessageSquarePlus, RefreshCw, Save, Search, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -188,6 +188,7 @@ export function ProjectFilesPanel({
   const [reloadToken, setReloadToken] = useState(0)
   const skipListCacheRef = useRef(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [mobileBrowse, setMobileBrowse] = useState(true)
   const [content, setContent] = useState("")
   const [savedContent, setSavedContent] = useState("")
   const [mtimeMs, setMtimeMs] = useState<number | null>(null)
@@ -376,6 +377,7 @@ export function ProjectFilesPanel({
 
   const openFile = useCallback(({ path, mode, line }: OpenTarget) => {
     setSelectedPath(path)
+    setMobileBrowse(false)
     if (mode === "edit") {
       // Markdown reads best rendered; a caret target means the caller wants the source.
       setViewMode(isMarkdownPath(path) && !line ? "preview" : "edit")
@@ -404,7 +406,10 @@ export function ProjectFilesPanel({
   }, [dirty, openFile])
 
   const selectFile = useCallback((path: string) => {
-    if (path === selectedPath) return
+    if (path === selectedPath) {
+      setMobileBrowse(false)
+      return
+    }
     const mode = fileScope === "changes" && changedFiles.has(path) ? "diff" : "edit"
     requestOpen({ path, mode })
   }, [changedFiles, fileScope, requestOpen, selectedPath])
@@ -611,7 +616,7 @@ export function ProjectFilesPanel({
       )}
 
       <div className="flex min-h-0 flex-1">
-        <section aria-label="File browser" className="flex w-56 shrink-0 flex-col">
+        <section aria-label="File browser" className={cn("min-h-0 shrink-0 flex-col md:flex md:w-56", selectedPath && !mobileBrowse ? "hidden" : "flex w-full")}>
           <div className="flex flex-col gap-2 p-2">
             <div className="flex items-center gap-1">
               <InputGroup className="min-w-0 flex-1">
@@ -729,13 +734,16 @@ export function ProjectFilesPanel({
           </ScrollArea>
         </section>
 
-        <Separator orientation="vertical" />
+        <Separator orientation="vertical" className="hidden md:block" />
 
-        <section aria-label="File editor" className="flex min-w-0 flex-1 flex-col">
+        <section aria-label="File editor" className={cn("min-h-0 min-w-0 flex-1 flex-col md:flex", selectedPath && !mobileBrowse ? "flex" : "hidden")}>
           {selectedPath ? (
             <>
-              <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-                <div className="min-w-0 flex-1">
+              <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 px-3 py-1 md:flex-nowrap">
+                <Button variant="ghost" size="icon-lg" className="md:hidden" onClick={() => setMobileBrowse(true)} aria-label="Back to file browser">
+                  <ArrowLeft data-icon="inline-start" />
+                </Button>
+                <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] md:basis-auto">
                   <p className="truncate text-xs font-medium" title={selectedPath}>{selectedName}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{selectedPath}</p>
                 </div>
@@ -765,7 +773,7 @@ export function ProjectFilesPanel({
                 {viewMode !== "diff" && dirty && <Badge variant="outline">Unsaved</Badge>}
                 {viewMode !== "diff" && !dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
                 {viewMode !== "diff" && mtimeMs !== null && (
-                  <span className="text-xs text-muted-foreground">{displayBytes(size)}</span>
+                  <span className="hidden text-xs text-muted-foreground md:inline">{displayBytes(size)}</span>
                 )}
                 {onAddToPrompt && (
                   <Button

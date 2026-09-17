@@ -16,11 +16,14 @@ import {
 } from "./paths"
 
 export const REGISTRY_VERSION = 1
+export const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000
 
 export interface RegistryEntry {
   note?: string
   createdAt: string
   lastUrl?: string
+  archivedAt?: string
+  restoredAt?: string
 }
 
 export interface BrowserRegistry {
@@ -31,6 +34,7 @@ export interface BrowserRegistry {
 export interface BrowserPatch {
   note?: string | null
   lastUrl?: string
+  archived?: boolean
 }
 
 export class BrowserExistsError extends Error {
@@ -62,6 +66,8 @@ function parseEntry(value: unknown): RegistryEntry | null {
   const entry: RegistryEntry = { createdAt: value.createdAt }
   if (typeof value.note === "string") entry.note = value.note
   if (typeof value.lastUrl === "string") entry.lastUrl = value.lastUrl
+  if (typeof value.archivedAt === "string") entry.archivedAt = value.archivedAt
+  if (typeof value.restoredAt === "string") entry.restoredAt = value.restoredAt
   return entry
 }
 
@@ -101,6 +107,11 @@ function applyPatch(registry: BrowserRegistry, name: string, patch: BrowserPatch
   if (patch.note === null) delete entry.note
   else if (patch.note !== undefined) entry.note = patch.note
   if (patch.lastUrl !== undefined) entry.lastUrl = patch.lastUrl
+  if (patch.archived === true) entry.archivedAt = new Date().toISOString()
+  if (patch.archived === false) {
+    delete entry.archivedAt
+    entry.restoredAt = new Date().toISOString()
+  }
   registry.sessions[name] = entry
   return entry
 }
@@ -127,14 +138,30 @@ function readDriver(name: string): Pick<BrowserSessionInfo, "lastUsedAt" | "driv
 }
 
 function describeBrowser(name: string, entry: RegistryEntry | undefined, running: boolean): BrowserSessionInfo {
+  const driver = readDriver(name)
+  const lastActivity = Math.max(
+    Date.parse(driver.lastUsedAt ?? "") || 0,
+    Date.parse(entry?.restoredAt ?? "") || 0,
+  )
+  const archivedAt = Date.parse(entry?.archivedAt ?? "") || 0
+  let createdAt = Date.parse(entry?.createdAt ?? "") || 0
+  if (!createdAt && !lastActivity) {
+    try { createdAt = statSync(profileDir(name)).birthtimeMs } catch { /* No profile yet. */ }
+  }
+  const usedAt = lastActivity || createdAt
+  const archived = name !== DEFAULT_BROWSER && !running && (
+    (archivedAt > 0 && archivedAt >= lastActivity)
+    || (usedAt > 0 && Date.now() - usedAt >= AUTO_ARCHIVE_AFTER_MS)
+  )
   return {
     name,
     isDefault: name === DEFAULT_BROWSER,
     running,
+    archived,
     note: entry?.note ?? null,
     createdAt: entry?.createdAt ?? null,
     lastUrl: entry?.lastUrl ?? null,
-    ...readDriver(name),
+    ...driver,
   }
 }
 
@@ -182,6 +209,9 @@ export function createBrowser(name: string, note?: string): BrowserSessionInfo {
 
 export function updateBrowser(name: string, patch: BrowserPatch): RegistryEntry {
   assertNamedBrowser(name)
+  if (name === DEFAULT_BROWSER && patch.archived === true) {
+    throw new BrowserNameError(`The ${DEFAULT_BROWSER} browser cannot be archived`)
+  }
   const registry = readRegistry()
   if (!browserExists(registry, name)) throw new BrowserNotFoundError(name)
   const entry = applyPatch(registry, name, patch)

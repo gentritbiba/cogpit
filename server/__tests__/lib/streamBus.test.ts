@@ -10,6 +10,8 @@ import {
   publishPromptSuggestion,
   publishCompacting,
   isCompacting,
+  publishRateLimit,
+  getRateLimit,
   getSnapshot,
   subscribe,
   _resetForTests,
@@ -350,5 +352,63 @@ describe("streamBus", () => {
     publishCompacting(SID, true)
     clear(SID)
     expect(isCompacting(SID)).toBe(false)
+  })
+})
+
+describe("streamBus rate-limit blocks", () => {
+  const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
+
+  it("announces a block to subscribers and remembers it for late ones", () => {
+    const { events } = collect()
+    publishRateLimit(SID, block)
+    expect(events).toEqual([{ type: "rate_limit", block }])
+    expect(getRateLimit(SID)).toEqual(block)
+  })
+
+  it("re-announces only when the block actually changes", () => {
+    const { events } = collect()
+    publishRateLimit(SID, block)
+    publishRateLimit(SID, { ...block })
+    expect(events).toHaveLength(1)
+
+    publishRateLimit(SID, { ...block, resetsAt: 1_760_009_999 })
+    expect(events).toHaveLength(2)
+  })
+
+  it("lifts the block when the runtime serves the session again", () => {
+    const { events } = collect()
+    publishRateLimit(SID, block)
+    publishRateLimit(SID, null)
+    expect(events).toEqual([
+      { type: "rate_limit", block },
+      { type: "rate_limit", block: null },
+    ])
+    expect(getRateLimit(SID)).toBeNull()
+  })
+
+  it("ignores a lift for a session that was never blocked", () => {
+    const { events } = collect()
+    publishRateLimit(SID, null)
+    expect(events).toEqual([])
+    expect(getRateLimit("never-seen")).toBeNull()
+  })
+
+  /**
+   * A rejected turn produces a `result` immediately, and every result clears
+   * the session's stream state. The block has to outlive that or the banner
+   * would be wiped in the same tick it appeared.
+   */
+  it("survives the clear that the rejected turn's own result triggers", () => {
+    publishRateLimit(SID, block)
+    clear(SID)
+    expect(getRateLimit(SID)).toEqual(block)
+  })
+
+  it("keeps an unwatched blocked session alive until the block lifts", () => {
+    publishRateLimit(SID, block)
+    clear(SID)
+    expect(getRateLimit(SID)).toEqual(block)
+    publishRateLimit(SID, null)
+    expect(getRateLimit(SID)).toBeNull()
   })
 })

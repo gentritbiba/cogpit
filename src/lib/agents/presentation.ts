@@ -88,6 +88,7 @@ const PERMISSION_MODES: Record<AgentKind, readonly PermissionModeOption[]> = {
   codex: [
     { value: "default", label: "Workspace", description: "Write inside the project sandbox" },
     { value: "plan", label: "Read only", description: "Inspect and plan without writing" },
+    { value: "auto", label: "Auto review", description: "Review approval requests automatically, with the workspace sandbox" },
     { value: "bypassPermissions", label: "Full access", description: "No sandbox or approval checks" },
   ],
   copilot: [

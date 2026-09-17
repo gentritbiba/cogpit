@@ -21,6 +21,9 @@ import {
 } from "./helpers"
 import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
+import { initializeAppPlugins } from "./plugins/startup"
+import { captureLegacyPluginHost, type LegacyHostClassification } from "./plugins/legacyHost"
+import { disposeHubPluginRelay } from "./hub/pluginRelay"
 import { refreshDirs } from "./sessionPaths"
 import { rejectWebsocketUpgrade } from "./security"
 import { teamAuthzMiddleware } from "./team/authz"
@@ -41,6 +44,8 @@ import type { HubMode } from "./routes/hello"
 export interface AppServerEnvironment {
   mode: Extract<HubMode, "electron" | "standalone">
   viteDevUrl?: string
+  legacyPluginHost?: LegacyHostClassification
+  legacyClickUpPath?: string
 }
 
 /**
@@ -58,6 +63,7 @@ export async function createServerComposition(
   // those paths correct across later config reloads.
   setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
+  const legacyHost = environment.legacyPluginHost ?? await captureLegacyPluginHost(userDataDir)
   await loadConfig()
   const configEdition = getConfiguredEditionValue()
 
@@ -81,6 +87,7 @@ export async function createServerComposition(
   await initDeviceRegistry(userDataDir)
   await initShareRegistry(userDataDir)
   refreshDirs()
+  const pluginManager = await initializeAppPlugins(userDataDir, { legacyHost, legacyClickUpPath: environment.legacyClickUpPath })
 
   const app = express()
   const httpServer = createServer(app)
@@ -221,6 +228,8 @@ export async function createServerComposition(
       upgradedSockets.clear()
 
       await Promise.all([
+        pluginManager.close(),
+        disposeHubPluginRelay(),
         new Promise<void>((resolve) => wss.close(() => resolve())),
         new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),

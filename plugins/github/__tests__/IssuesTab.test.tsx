@@ -1,8 +1,8 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { GitHubIssuesResponse } from "../../../shared/contracts/github"
-import type { WorkspacePanelContext } from "@/plugin-api"
+import type { GitHubIssuesResponse } from "@cogpit/plugin-integrations"
+import type { GitHubPanelContext } from "../GitHubPanel"
 
 const storeMocks = vi.hoisted(() => ({
   useGitHubActions: vi.fn(),
@@ -14,7 +14,7 @@ const storeMocks = vi.hoisted(() => ({
   toErrorResponse: vi.fn((_error: unknown, fallback: string) => ({ error: fallback, code: "github_api_failed" })),
 }))
 
-vi.mock("../githubStore", () => storeMocks)
+vi.mock("../githubStore", () => ({ ...storeMocks, useGitHubDetails: () => ({ actionsJobs: storeMocks.fetchGitHubActionsJobs, pullFiles: storeMocks.fetchGitHubPullFiles }) }))
 
 import { GitHubPanel } from "../GitHubPanel"
 import { issuePrompt } from "../IssuesTab"
@@ -74,12 +74,8 @@ const issuesResponse: GitHubIssuesResponse = {
 
 const composePrompt = vi.fn()
 
-const context: WorkspacePanelContext = {
-  session: null,
-  sessionChangeKey: 0,
-  projectPath: "/repo",
-  hasFileChanges: false,
-  canAccessHostFiles: true,
+const context: GitHubPanelContext = {
+  projectKey: "/repo",
   composePrompt,
 }
 
@@ -96,7 +92,7 @@ function state(overrides: Record<string, unknown> = {}) {
 
 async function renderIssuesTab() {
   const user = userEvent.setup()
-  render(<GitHubPanel context={context} active closePanel={vi.fn()} />)
+  render(<GitHubPanel context={context} active />)
   await user.click(screen.getByRole("tab", { name: /Issues/ }))
   return user
 }

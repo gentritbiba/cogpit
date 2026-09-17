@@ -1,4 +1,4 @@
-import type { ClickUpPriority, ClickUpStatus, ClickUpTask } from "../../shared/contracts/clickup"
+import type { ClickUpPriority, ClickUpStatus, ClickUpTask } from "@cogpit/plugin-integrations"
 
 export type DueFilter = "all" | "overdue" | "today" | "week" | "none"
 

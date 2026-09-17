@@ -113,7 +113,7 @@ export function WorkspaceActivityBar({
             onClick={() => onTogglePanel(panel.id)}
           >
             {Indicator ? (
-              <Indicator context={context} active={active} />
+              <Indicator {...panel.indicatorProps} context={context} active={active} />
             ) : badge !== null && badge !== undefined && (
               <Badge className="absolute -right-1 -top-1 min-w-4 px-1 text-[9px]" variant="secondary">
                 {badge}
@@ -131,6 +131,7 @@ interface WorkspacePanelHostProps {
   context: WorkspacePanelContext
   activePanelId: string
   onClosePanel: () => void
+  active?: boolean
 }
 
 export function WorkspacePanelHost({
@@ -138,6 +139,7 @@ export function WorkspacePanelHost({
   context,
   activePanelId,
   onClosePanel,
+  active: hostActive = true,
 }: WorkspacePanelHostProps) {
   const [visited, setVisited] = useState(() => new Set([activePanelId]))
 
@@ -153,8 +155,9 @@ export function WorkspacePanelHost({
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-background">
       {panels.map((panel) => {
-        const active = panel.id === activePanelId
-        if (!active && (!panel.keepAlive || !visited.has(panel.id))) return null
+        const selected = panel.id === activePanelId
+        const active = selected && hostActive
+        if (!selected && (!panel.keepAlive || !visited.has(panel.id))) return null
         const Panel = panel.component
         return (
           <div
@@ -163,6 +166,7 @@ export function WorkspacePanelHost({
             aria-hidden={!active}
           >
             <Panel
+              {...panel.componentProps}
               context={context}
               active={active}
               closePanel={onClosePanel}

@@ -1,0 +1,34 @@
+diff --git a/dist/chunks/lib-q6ns0vZr.js b/dist/chunks/lib-q6ns0vZr.js
+index fe0d0c62c9a4159f17437d44e8d128db4bea2ae4..a121b827f5efc8aceb4c5de6c16a386786e59aef 100644
+--- a/dist/chunks/lib-q6ns0vZr.js
++++ b/dist/chunks/lib-q6ns0vZr.js
+@@ -800,14 +800,6 @@ const __filename = import.meta.filename;
+ const __dirname = import.meta.dirname;
+ const require = __cjs_mod__.createRequire(import.meta.url);
+ `;
+-const ESMStaticImportRe = /(?<=\s|^|;)import\s*([\s"']*(?<imports>[\p{L}\p{M}\w\t\n\r $*,/{}@.]+)from\s*)?["']\s*(?<specifier>(?<="\s*)[^"]*[^\s"](?=\s*")|(?<='\s*)[^']*[^\s'](?=\s*'))\s*["'][\s;]*/gmu;
+-function findStaticImports(code) {
+-    const matches = [];
+-    for (const match of code.matchAll(ESMStaticImportRe)) {
+-        matches.push({ end: (match.index || 0) + match[0].length });
+-    }
+-    return matches;
+-}
+ function esmShimPlugin() {
+     const CJSShim = supportImportMetaPaths() ? CJSShim_node_20_11 : CJSShim_normal;
+     return {
+@@ -819,8 +811,12 @@ function esmShimPlugin() {
+                 if (code.includes(CJSShim) || !CJSyntaxRe.test(code)) {
+                     return null;
+                 }
+-                const lastESMImport = findStaticImports(code).pop();
+-                const indexToAppend = lastESMImport ? lastESMImport.end : 0;
++                let indexToAppend = 0;
++                for (const node of this.parse(code).body) {
++                    if (node.type === 'ImportDeclaration') {
++                        indexToAppend = node.end;
++                    }
++                }
+                 const s = new MagicString(code);
+                 s.appendRight(indexToAppend, CJSShim);
+                 return {

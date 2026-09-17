@@ -1,3 +1,4 @@
+import { isValidContextWindowTokens } from "../../shared/session/contextWindowSettings"
 import type { ChildProcess } from "node:child_process"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { asRecord } from "../../shared/objects"
@@ -86,6 +87,12 @@ function sessionsRoot(): string {
   return storeFor("codex").sessionsRoot() ?? ""
 }
 
+function validateContextWindow(value: unknown): void {
+  if (!isValidContextWindowTokens(value)) {
+    throw new AgentRuntimeError(400, "INVALID_REQUEST", "Context window must be a positive whole number of tokens or null")
+  }
+}
+
 function executionOptions(
   req: StartSessionRequest | (SendRequest & { cwd: string }),
 ): CodexExecutionOptions {
@@ -96,6 +103,7 @@ function executionOptions(
     permissions: req.permissions,
     model: req.model,
     effort: req.effort,
+    contextWindowTokens: req.contextWindowTokens,
     fastMode: req.fastMode,
   }
 }
@@ -107,7 +115,7 @@ type ThreadSettings = Omit<CodexExecutionOptions, "message" | "images">
 const rememberedSettings = new Map<string, ThreadSettings>()
 
 function rememberThreadSettings(sessionId: string, options: CodexExecutionOptions): void {
-  const { message: _message, images: _images, ...settings } = options
+  const { message: _message, images: _images, reloadContextWindow: _reload, ...settings } = options
   rememberedSettings.set(sessionId, settings)
 }
 
@@ -123,10 +131,16 @@ async function waitForNewSession(
   knownPaths: Set<string>,
   startedAt: number,
   timeoutMs = SESSION_DISCOVERY_TIMEOUT_MS,
+  readStartedId?: () => string | null,
+  shouldStop?: () => boolean,
 ): Promise<CodexIdentity | null> {
   const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const match = await findNewestCodexSessionForCwd(cwd, knownPaths, startedAt)
+  while (!shouldStop?.() && Date.now() < deadline) {
+    const startedId = readStartedId?.()
+    const filePath = startedId ? await storeFor("codex").findSessionFile(startedId) : null
+    const match = readStartedId
+      ? (filePath && startedId ? getCodexThreadIdentity({ id: startedId, path: filePath }) : null)
+      : await findNewestCodexSessionForCwd(cwd, knownPaths, startedAt)
     if (match) return match
     await new Promise((resolve) => setTimeout(resolve, SESSION_DISCOVERY_INTERVAL_MS))
   }
@@ -177,6 +191,7 @@ function legacyArgs(
     modelArgs: descriptor.launchArgs.model(req.model),
     effortArgs: descriptor.launchArgs.effort(req.effort),
     turnArgs: [
+      ...(req.contextWindowTokens != null ? ["-c", `model_context_window=${req.contextWindowTokens}`] : []),
       ...descriptor.launchArgs.fastTier(req.fastMode),
       ...imagePaths.flatMap((filePath) => ["-i", filePath]),
     ],
@@ -226,6 +241,7 @@ async function startLegacy(
   const cli = resolveAgentCommand(descriptor.binName, [
     "exec",
     "--json",
+    ...(req.worktreeName ? ["--enable", "worktrees", "--worktree"] : []),
     ...args.permArgs,
     ...args.modelArgs,
     ...args.effortArgs,
@@ -248,7 +264,9 @@ async function startLegacy(
   return new Promise<StartedSession>((resolve, reject) => {
     let settled = false
     let sessionId: string | null = null
-    const discovery = waitForNewSession(req.cwd, knownPaths, startedAt)
+    let startedThreadId: string | null = null
+    const discovery = waitForNewSession(req.cwd, knownPaths, startedAt, SESSION_DISCOVERY_TIMEOUT_MS,
+      req.worktreeName ? () => startedThreadId : undefined, () => settled)
     const stdoutLines: string[] = []
 
     const succeed = async (identity: CodexIdentity, initialContent?: string) => {
@@ -266,9 +284,12 @@ async function startLegacy(
           // The client polls for it.
         }
       }
+      const worktreeIdentity = req.worktreeName
+        ? await storeFor("codex").readIdentity(identity.filePath).catch(() => null)
+        : null
       resolve({
         sessionId: identity.sessionId,
-        dirName: req.dirName,
+        dirName: worktreeIdentity?.cwd ? descriptor.dirName.encode(worktreeIdentity.cwd) : req.dirName,
         fileName: identity.fileName,
         filePath: identity.filePath,
         initialContent: content,
@@ -284,6 +305,10 @@ async function startLegacy(
     reader.on("line", (line: string) => {
       if (stdoutLines.length < MAX_INITIAL_STDOUT_LINES) stdoutLines.push(line)
       if (settled) return
+      try {
+        const event = JSON.parse(line)
+        if (event.type === "thread.started" && typeof event.thread_id === "string") startedThreadId = event.thread_id
+      } catch { /* ignore non-JSON diagnostics */ }
       const identity = identityFromMetaLine(line)
       if (identity) void succeed(identity, stdoutLines.join("\n"))
     })
@@ -625,10 +650,12 @@ export const codexRuntime: AgentRuntime = {
   descriptor,
 
   async start(req) {
+    validateContextWindow(req.contextWindowTokens)
     const knownPaths = new Set(
       (await storeFor("codex").listSessionFiles()).map((file) => file.filePath),
     )
     const startedAt = Date.now()
+    if (req.worktreeName) return startLegacy(req, knownPaths)
     try {
       const options = executionOptions(req)
       const started = await startCodexExecution(codexAppServer, options)
@@ -665,6 +692,7 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async send(sessionId, req) {
+    validateContextWindow(req.contextWindowTokens)
     const legacy = persistentSessions.get(sessionId)
     if (legacy && !legacy.dead) {
       // The pre-app-server CLI runs one turn per process and takes no input
@@ -678,8 +706,11 @@ export const codexRuntime: AgentRuntime = {
     codexQuestions.clear(sessionId)
     try {
       const options = executionOptions({ ...req, cwd })
+      const previous = rememberedSettings.get(sessionId)
+      options.reloadContextWindow = req.contextWindowTokens !== undefined
+        && (!previous || req.contextWindowTokens !== previous.contextWindowTokens)
       const result = await continueCodexExecution(codexAppServer, sessionId, options)
-      rememberThreadSettings(sessionId, options)
+      if (result.action === "started") rememberThreadSettings(sessionId, options)
       return { delivery: result.action, turnId: result.turnId }
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {

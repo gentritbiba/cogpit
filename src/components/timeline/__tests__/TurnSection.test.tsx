@@ -7,12 +7,13 @@ const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
   isLive: true,
   undoEnabled: false,
+  isMobile: false,
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
     state: { activeTurnIndex: 0, activeToolCallId: "question-1", expandAll: false },
-    isMobile: false,
+    isMobile: mocks.isMobile,
   }),
 }))
 
@@ -47,7 +48,7 @@ vi.mock("../AgentStatusIndicator", () => ({
 }))
 
 vi.mock("../AssistantText", () => ({
-  AssistantText: ({ text }: { text: string }) => <div>{text}</div>,
+  AssistantText: ({ text, compact }: { text: string; compact?: boolean }) => <div data-testid="assistant-text" data-compact={String(Boolean(compact))}>{text}</div>,
 }))
 
 vi.mock("../CollapsibleToolCalls", () => ({
@@ -138,6 +139,15 @@ function makeSession(): ParsedSession {
 describe("TurnSection work disclosure", () => {
   beforeEach(() => {
     mocks.status = "thinking"
+    mocks.isMobile = false
+  })
+
+  it("keeps desktop response metadata and controls enabled on mobile", () => {
+    mocks.isMobile = true
+    render(<TurnSection turn={turn} index={0} />)
+    for (const text of screen.getAllByTestId("assistant-text")) {
+      expect(text).toHaveAttribute("data-compact", "false")
+    }
   })
 
   it("keeps active streaming output and pending tool interactions open by default", () => {
@@ -160,6 +170,18 @@ describe("TurnSection work disclosure", () => {
     render(<TurnSection turn={blockedTurn} index={0} />)
 
     expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()
+  })
+
+  it("keeps work the reader watched open once the turn settles", () => {
+    const { rerender } = render(<TurnSection turn={turn} index={0} />)
+    expect(screen.getByRole("button", { name: /working for/i })).toHaveAttribute("aria-expanded", "true")
+
+    mocks.status = "completed"
+    rerender(<TurnSection turn={turn} index={0} />)
+
+    expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("Streaming response")).toBeInTheDocument()
+    expect(screen.getByText("Final response")).toBeInTheDocument()
   })
 
   it("still folds completed work by default", () => {

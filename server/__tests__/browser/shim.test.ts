@@ -229,23 +229,31 @@ describe.skipIf(process.platform === "win32")("shim routing with a visible brows
     return file
   }
 
-  it("opens named browsers in a window on macOS with automation signalling off", () => {
+  it("keeps named browsers headless by default even when a window could open", () => {
     const run = runShim(["--session", "github", "open", "x"], {}, shimFor("darwin"))
+    expect(run.headed).toBe("")
+    expect(run.executable).toBe("")
+    expect(run.args).toBe("--remote-debugging-port=0")
+    expect(run.profile).toBe(join(home, "profiles", "github"))
+  })
+
+  it("opens a window on macOS when COGPIT_BROWSER_HEADED asks for one, with automation signalling off", () => {
+    const run = runShim(["--session", "github", "open", "x"], { COGPIT_BROWSER_HEADED: "1" }, shimFor("darwin"))
     expect(run.headed).toBe("1")
     expect(run.executable).toBe(chrome)
     expect(run.args).toBe(HEADED_ARGS)
     expect(run.profile).toBe(join(home, "profiles", "github"))
   })
 
-  it("keeps tmp-* browsers headless and unmanaged", () => {
-    const run = runShim(["--session", "tmp-1", "open", "x"], {}, shimFor("darwin"))
+  it("keeps tmp-* browsers headless and unmanaged even when a window is asked for", () => {
+    const run = runShim(["--session", "tmp-1", "open", "x"], { COGPIT_BROWSER_HEADED: "1" }, shimFor("darwin"))
     expect(run.headed).toBe("")
     expect(run.executable).toBe("")
     expect(run.args).toBe("")
   })
 
   it("stays headless on Linux without a display", () => {
-    const run = runShim(["open", "x"], {}, shimFor("linux"))
+    const run = runShim(["open", "x"], { COGPIT_BROWSER_HEADED: "1" }, shimFor("linux"))
     expect(run.headed).toBe("")
     expect(run.executable).toBe("")
     expect(run.args).toBe("--remote-debugging-port=0")
@@ -254,23 +262,23 @@ describe.skipIf(process.platform === "win32")("shim routing with a visible brows
   it.each([
     ["DISPLAY", { DISPLAY: ":0" }],
     ["WAYLAND_DISPLAY", { WAYLAND_DISPLAY: "wayland-0" }],
-  ])("opens a window on Linux when %s is set", (_label, env) => {
-    const run = runShim(["open", "x"], env, shimFor("linux"))
+  ])("opens a window on Linux when asked and %s is set", (_label, env) => {
+    const run = runShim(["open", "x"], { COGPIT_BROWSER_HEADED: "1", ...env }, shimFor("linux"))
     expect(run.headed).toBe("1")
     expect(run.executable).toBe(chrome)
     expect(run.args).toBe(HEADED_ARGS)
   })
 
-  it("stays headless when COGPIT_BROWSER_HEADLESS is set", () => {
-    const run = runShim(["open", "x"], { COGPIT_BROWSER_HEADLESS: "1" }, shimFor("darwin"))
+  it("stays headless on Linux with a display when no window is asked for", () => {
+    const run = runShim(["open", "x"], { DISPLAY: ":0" }, shimFor("linux"))
     expect(run.headed).toBe("")
-    expect(run.executable).toBe("")
     expect(run.args).toBe("--remote-debugging-port=0")
   })
 
-  it("stays headless when no visible browser was found", () => {
-    const run = runShim(["open", "x"])
+  it("stays headless when asked for a window but no visible browser was found", () => {
+    const run = runShim(["open", "x"], { COGPIT_BROWSER_HEADED: "1" })
     expect(run.headed).toBe("")
+    expect(run.executable).toBe("")
     expect(run.args).toBe("--remote-debugging-port=0")
   })
 
