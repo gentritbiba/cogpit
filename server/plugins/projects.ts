@@ -20,11 +20,15 @@ async function canonicalDirectory(path: string): Promise<string | null> {
 
 async function inspectProject(canonical: string): Promise<ProjectInspection | null> {
   try {
-    const [commonResult, topResult, worktrees] = await Promise.all([
+    const results = await Promise.allSettled([
       runGit(canonical, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
       runGit(canonical, ["rev-parse", "--show-toplevel"]),
       runGit(canonical, ["worktree", "list", "--porcelain", "-z"]),
     ])
+    const [commonResult, topResult, worktrees] = results.map(result => {
+      if (result.status === "rejected") throw result.reason
+      return result.value
+    })
     const common = await realpath(resolve(canonical, commonResult.stdout.trim()))
     const top = await realpath(topResult.stdout.trim())
     const paths: string[] = []

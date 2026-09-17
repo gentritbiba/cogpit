@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { execFile as callbackExecFile } from "node:child_process"
+import { ChildProcess, execFile as callbackExecFile } from "node:child_process"
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -35,6 +35,30 @@ async function git(cwd: string, ...args: string[]) {
 }
 
 describe("exact plugin workspace binding", () => {
+  it("waits for every Git process before returning a non-repository project", async () => {
+    const selected = await directory("selected")
+    inventory.paths = [selected]
+    let finishSecond!: () => void
+    let finishThird!: () => void
+    vi.mocked(runGit)
+      .mockRejectedValueOnce({ stderr: "fatal: not a git repository" })
+      .mockReturnValueOnce(Object.assign(new Promise<{ stdout: string; stderr: string }>(resolve => { finishSecond = () => resolve({ stdout: "", stderr: "" }) }), { child: new ChildProcess() }))
+      .mockReturnValueOnce(Object.assign(new Promise<{ stdout: string; stderr: string }>(resolve => { finishThird = () => resolve({ stdout: "", stderr: "" }) }), { child: new ChildProcess() }))
+    let completed = false
+    const pending = projects.list().then(value => { completed = true; return value })
+    try {
+      await vi.waitFor(() => expect(finishThird).toBeTypeOf("function"))
+      expect(completed).toBe(false)
+      finishSecond()
+      await new Promise(resolve => setImmediate(resolve))
+      expect(completed).toBe(false)
+    } finally {
+      finishSecond?.()
+      finishThird?.()
+    }
+    expect((await pending)[0].paths).toEqual([selected])
+  })
+
   it("validates the selected workspace without running Git against unrelated projects again", async () => {
     const selected = await directory("selected"), unrelated = await directory("unrelated")
     inventory.paths = [selected, unrelated]

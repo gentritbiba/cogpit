@@ -62,11 +62,11 @@ describe("Vercel installed-package integration", () => {
     await expect(runVercelApi(project, "/v7/deployments", owner, command)).rejects.toThrow("Revoked")
     expect(command).toHaveBeenCalledOnce()
   })
-  it("aborts the actual spawned CLI process when its activation signal is canceled", async () => {
+  it("closes the spawned CLI on cancellation even if it ignores SIGTERM", async () => {
     const directory = await mkdtemp(join(tmpdir(), "cogpit-vercel-cli-")), pidFile = join(directory, "pid")
     let childPid = 0
     const abort = new AbortController()
-    resolver.mockReturnValue({ command: process.execPath, args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(()=>{},1000)`], spawnOptions: {} })
+    resolver.mockReturnValue({ command: process.execPath, args: ["-e", `process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(()=>{},1000)`], spawnOptions: {} })
     try {
       const pending = executeVercel(directory, ["--version"], { ...context(abort.signal), workspacePath: directory })
       const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })

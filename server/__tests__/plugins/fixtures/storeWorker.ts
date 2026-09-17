@@ -7,7 +7,14 @@ import { join } from "node:path"
 const [, , root, mode, crashStep] = process.argv
 let armed = mode === "bootstrap"
 if (armed) process.send?.({ ready: true })
-const store = await openPluginStore(root, { host, crashHook: step => { if (armed && step === crashStep) process.kill(process.pid, "SIGKILL") } })
+const store = await openPluginStore(root, { host, crashHook: async step => {
+  if (armed && step === crashStep) {
+    await new Promise<void>(() => {
+      process.on("message", () => {})
+      process.send?.({ crashStep: step })
+    })
+  }
+} })
 if (!store.snapshot().available) throw new Error(store.snapshot().error)
 if (mode === "hold") {
   process.send?.({ ready: true })

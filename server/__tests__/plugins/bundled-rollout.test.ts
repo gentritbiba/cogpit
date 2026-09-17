@@ -10,7 +10,7 @@ import { openPluginStore, type PluginStore } from "../../plugins/store"
 
 const ids = ["cogpit.clickup", "cogpit.cloudflare", "cogpit.github", "cogpit.vercel"]
 const legacyIds = ["cogpit.clickup", "cogpit.github", "cogpit.vercel"]
-const SLOW = 20_000
+const SLOW = process.platform === "win32" ? 60_000 : 20_000
 const seeds = loadAppPluginSeeds()
 const client = appSeedClientDescriptor()
 const authorize = async () => {}

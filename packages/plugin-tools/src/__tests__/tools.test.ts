@@ -69,7 +69,9 @@ describe("publisher keys and bundles", () => {
     expect(rootFingerprint(store)).toMatch(/^[a-f0-9]{64}$/)
     const path = join(directory, "keys", "dev-me.json")
     await savePublisher(path, store)
-    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    const mode = (await stat(path)).mode
+    if (process.platform === "win32") expect(mode & 0o600).toBe(0o600)
+    else expect(mode & 0o777).toBe(0o600)
     expect(await loadPublisher(path)).toEqual(store)
   })
 

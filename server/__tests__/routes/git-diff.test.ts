@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { execFile as execFileCallback } from "node:child_process"
 import { EventEmitter } from "node:events"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -61,7 +61,7 @@ function diffUrl(cwd: string, path: string, originalPath?: string) {
   return `/api/git-diff?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}${original}`
 }
 
-describe("git diff route", () => {
+describe("git diff route", { timeout: process.platform === "win32" ? 20_000 : 5_000 }, () => {
   it("returns committed and working-tree content for a modified file", async () => {
     const root = await createRepository()
     await writeFile(join(root, "tracked.txt"), "one\ntwo\n", "utf-8")
@@ -118,9 +118,8 @@ describe("git diff route", () => {
 
   it("resolves paths relative to a subdirectory cwd", async () => {
     const root = await createRepository()
-    await execFile("git", ["init", "-b", "main"], { cwd: root })
     const nested = join(root, "packages", "app")
-    await execFile("mkdir", ["-p", nested])
+    await mkdir(nested, { recursive: true })
     await writeFile(join(nested, "nested.txt"), "one\n", "utf-8")
     await commitAll(root, "initial")
     await writeFile(join(nested, "nested.txt"), "two\n", "utf-8")

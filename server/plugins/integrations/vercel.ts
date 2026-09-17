@@ -258,7 +258,7 @@ async function authorize(context: PluginIntegrationContext): Promise<void> {
 export async function executeVercel(cwd: string, args: string[], context: PluginIntegrationContext): Promise<VercelCommandResult> {
   await authorize(context)
   const cli = resolveAgentCommand("vercel", args)
-  const result = await execFile(cli.command, cli.args, {
+  const pending = execFile(cli.command, cli.args, {
     cwd,
     encoding: "utf-8",
     env: {
@@ -270,10 +270,18 @@ export async function executeVercel(cwd: string, args: string[], context: Plugin
     timeout: 30_000,
     windowsHide: true,
     ...cli.spawnOptions,
+    killSignal: "SIGKILL",
     signal: context.signal,
   })
-  await authorize(context)
-  return { stdout: result.stdout, stderr: result.stderr }
+  const closed = new Promise<void>(resolve => pending.child.once("close", () => resolve()))
+  try {
+    const result = await pending
+    await authorize(context)
+    return { stdout: result.stdout, stderr: result.stderr }
+  } finally {
+    if (context.signal.aborted) pending.child.kill("SIGKILL")
+    await closed
+  }
 }
 
 function parseCliVersion(output: string): [number, number, number] | null {

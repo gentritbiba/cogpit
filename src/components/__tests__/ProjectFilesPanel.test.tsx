@@ -10,6 +10,11 @@ function jsonResponse(data: unknown, ok = true, status = ok ? 200 : 500) {
   return { ok, status, json: async () => data }
 }
 
+function getCodeLine(text: string) {
+  return screen.getByText((_, element) => element?.textContent === text
+    && !Array.from(element.children).some(child => child.textContent === text))
+}
+
 /** Mirror of the server's directory listing so tree requests see the same files as search. */
 function treeResponse(files: string[], url: string) {
   const directory = new URL(url, "http://localhost").searchParams.get("dir") ?? ""
@@ -174,8 +179,10 @@ describe("ProjectFilesPanel", () => {
     await user.click(await screen.findByRole("button", { name: "Changes" }))
     await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
 
-    expect(await screen.findByText("const value = 1")).toBeInTheDocument()
-    expect(screen.getByText("const value = 2")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(getCodeLine("const value = 1")).toBeInTheDocument()
+      expect(getCodeLine("const value = 2")).toBeInTheDocument()
+    })
     expect(screen.getByText("+1")).toBeInTheDocument()
     expect(screen.getByText("-1")).toBeInTheDocument()
     expect(screen.queryByRole("textbox", { name: "Editing src/App.tsx" })).not.toBeInTheDocument()
@@ -187,7 +194,7 @@ describe("ProjectFilesPanel", () => {
 
     await user.click(await screen.findByRole("button", { name: "Changes" }))
     await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
-    await screen.findByText("const value = 2")
+    await waitFor(() => expect(getCodeLine("const value = 2")).toBeInTheDocument())
     await user.click(screen.getByRole("button", { name: "Edit" }))
 
     expect(await screen.findByRole("textbox", { name: "Editing src/App.tsx" })).toHaveValue("const value = 1\n")

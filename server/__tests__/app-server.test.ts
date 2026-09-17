@@ -21,12 +21,21 @@ import {
 type AppServerFactory = (
   staticDir: string,
   userDataDir: string,
-) => Promise<{ httpServer: Server }>
+) => ReturnType<typeof createServerComposition>
 
-const createAppServer = (staticDir: string, userDataDir: string) =>
-  createServerComposition(staticDir, userDataDir, { mode: "electron", viteDevUrl: process.env.ELECTRON_RENDERER_URL })
-const createStandaloneAppServer = (staticDir: string, userDataDir: string) =>
-  createServerComposition(staticDir, userDataDir, { mode: "standalone", viteDevUrl: process.env.ELECTRON_RENDERER_URL })
+const compositions = new Map<Server, () => Promise<void>>()
+async function createComposition(staticDir: string, userDataDir: string, mode: "electron" | "standalone") {
+  const composition = await createServerComposition(staticDir, userDataDir, { mode, viteDevUrl: process.env.ELECTRON_RENDERER_URL })
+  const dispose = async () => {
+    await composition.dispose()
+    compositions.delete(composition.httpServer)
+    openServers.delete(composition.httpServer)
+  }
+  compositions.set(composition.httpServer, dispose)
+  return { ...composition, dispose }
+}
+const createAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "electron")
+const createStandaloneAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "standalone")
 
 const adapterCases: ReadonlyArray<readonly [
   name: string,
@@ -61,6 +70,11 @@ async function listen(server: Server): Promise<string> {
 }
 
 async function close(server: Server): Promise<void> {
+  const dispose = compositions.get(server)
+  if (dispose) {
+    await dispose()
+    return
+  }
   if (!server.listening) {
     openServers.delete(server)
     return
@@ -90,12 +104,12 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await Promise.all([...new Set([...openServers, ...compositions.keys()])].map(close))
   delete process.env.ELECTRON_RENDERER_URL
   if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
   else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
   if (previousSkillHome === undefined) delete process.env.COGPIT_SKILL_HOME
   else process.env.COGPIT_SKILL_HOME = previousSkillHome
-  await Promise.all([...openServers].map(close))
   await rm(fixtureRoot, { recursive: true, force: true })
 })
 
