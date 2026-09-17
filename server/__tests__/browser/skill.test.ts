@@ -47,6 +47,13 @@ function manifestFile(): string {
 const AGE = new Date(Date.now() - 60_000)
 
 describe("COGPIT_BROWSER_SKILL", () => {
+  it("teaches request reuse and a fresh human handoff when clearance expires", () => {
+    expect(COGPIT_BROWSER_SKILL).toContain("/api/browser/sessions/default/request")
+    expect(COGPIT_BROWSER_SKILL).toContain("state: challenge-required")
+    expect(COGPIT_BROWSER_SKILL).toContain("Wait for their confirmation before retrying")
+    expect(COGPIT_BROWSER_SKILL).toContain("Subagents must not use this")
+    expect(COGPIT_BROWSER_SKILL).toContain("Never export clearance cookies")
+  })
   it("declares the skill in frontmatter with a description", () => {
     const lines = COGPIT_BROWSER_SKILL.split("\n")
     expect(lines[0]).toBe("---")

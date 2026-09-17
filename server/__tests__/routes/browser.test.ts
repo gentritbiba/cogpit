@@ -5,6 +5,8 @@ import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../shared/bro
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 import { BrowserNameError, DEFAULT_BROWSER } from "../../browser/paths"
 import { BrowserExistsError, BrowserNotFoundError, type BrowserPatch } from "../../browser/registry"
+import { BrowserRequestError } from "../../browser/request"
+import type { BrowserRequest, BrowserRequestResult } from "../../../shared/browser/types"
 import type { Middleware, UseFn } from "../../http"
 import { registerBrowserRoutes, type BrowserRouteDeps } from "../../routes/browser"
 
@@ -49,6 +51,10 @@ function createDeps() {
     isRunning: vi.fn(async () => false),
     launch: vi.fn(async (_name: string, _url: string) => undefined),
     stop: vi.fn(async (_name: string) => undefined),
+    request: vi.fn(async (name: string, request: BrowserRequest): Promise<BrowserRequestResult> => ({
+      browser: name, targetId: "tab-1", state: "complete", url: request.url,
+      status: 200, headers: { "content-type": "application/json" }, body: "{}", truncated: false,
+    })),
     installSkill: vi.fn((target: string) => `/tmp/home/.${target}/skills/cogpit-browser`),
     installSkillEverywhere: vi.fn(() => SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit-browser`)),
     skillTargets: vi.fn(() => SKILL_KINDS.map(skillTarget)),
@@ -120,6 +126,39 @@ async function drive(method: string, url: string, body?: unknown) {
 
 beforeEach(() => {
   deps = createDeps()
+})
+
+describe("browser-backed requests", () => {
+  it("returns the origin response through the chosen browser", async () => {
+    const response = await drive("POST", "/sessions/work/request", { url: "https://example.com/api", method: "HEAD", targetId: "tab-1" })
+    expect(response.status()).toBe(200)
+    expect(deps.request).toHaveBeenCalledWith("work", { url: "https://example.com/api", method: "HEAD", targetId: "tab-1" })
+    expect(response.body()).toMatchObject({ browser: "work", status: 200, state: "complete" })
+  })
+
+  it("stops at a challenge and reports the tab for the human handoff", async () => {
+    deps.request.mockResolvedValue({ browser: "work", targetId: "tab-1", state: "challenge-required",
+      url: "https://example.com/api", status: 403, headers: { "cf-mitigated": "challenge" }, body: "Check", truncated: false })
+    const response = await drive("POST", "/sessions/work/request", { url: "https://example.com/api" })
+    expect(response.status()).toBe(409)
+    expect(response.body()).toMatchObject({ state: "challenge-required", targetId: "tab-1", status: 403 })
+    expect(deps.request).toHaveBeenCalledTimes(1)
+    expect(deps.launch).not.toHaveBeenCalled()
+  })
+
+  it.each([{ url: "file:///etc/passwd" }, { url: "https://example.com", method: "POST" },
+    { url: "https://user:password@example.com" }, { url: "https://example.com", headers: { Cookie: "secret" } }])("rejects unsupported requests: %j", async (body) => {
+    const response = await drive("POST", "/sessions/work/request", body)
+    expect(response.status()).toBe(400)
+    expect(deps.request).not.toHaveBeenCalled()
+  })
+
+  it("reports missing browser state and transport failures", async () => {
+    deps.request.mockRejectedValueOnce(new BrowserRequestError("Open the browser first", 409))
+    expect((await drive("POST", "/sessions/work/request", { url: "https://example.com" })).status()).toBe(409)
+    deps.request.mockRejectedValueOnce(new Error("CDP disconnected"))
+    expect((await drive("POST", "/sessions/work/request", { url: "https://example.com" })).status()).toBe(502)
+  })
 })
 
 // ── GET /api/browser ────────────────────────────────────────────────────────

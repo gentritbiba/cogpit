@@ -8,6 +8,31 @@ The Browser panel displays the agent's Chromium in real time over the `/__browse
 
 Browser tabs are persistent. The shared `default` browser keeps cookies and localStorage across session restarts. You can create named browsers (`github`, `work-gmail`) for isolated, long-lived work. Subagents get private throwaway browsers (`tmp-*`) that are reaped automatically.
 
+## Reusing human verification
+
+Solve a site's challenge once in a managed browser, then use that same browser for subsequent pages and requests. When headless Chromium cannot pass the challenge, follow the windowed handoff below and keep the browser windowed for the rest of the task. Cloudflare clearance belongs to the site and visitor/device, expires according to the site's configuration, and does not exempt requests from rate limits or stronger checks. Cookie persistence alone does not guarantee that a later browser restart or different machine will stay cleared.
+
+The main agent can read HTML, JSON and other text through the open browser without changing the selected page:
+
+```bash
+PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"
+curl -sS "http://localhost:$PORT/api/browser/sessions/default/request" \
+  -H 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/api/items","method":"GET"}'
+```
+
+An existing tab must match the exact origin. If several match, supply its CDP `targetId`. The endpoint supports `GET` and `HEAD`; request bodies, custom headers and embedded URL credentials are rejected. Native Chromium `fetch` runs in an isolated execution world in the selected tab, uses the browser's cookies and network stack, and retains browser origin restrictions. It never reads or exports the cookie jar, launches a browser, or navigates a tab. Subagents must not use this endpoint to access shared browser sessions.
+
+The result contains `browser`, `targetId`, `state`, `url`, destination `status`, response `headers`, text `body` and `truncated`. HTTP 200 means Cogpit completed the request, even if the destination returned 404 or 500. Responses are limited to 2 MiB and requests abort after 8 seconds. Binary download support is outside this endpoint.
+
+- HTTP 409 with `state: challenge-required` detects Cloudflare's `cf-mitigated: challenge` response header. The helper aborts the download and returns an empty body immediately, so a stalled challenge page cannot prevent handoff. Stop requests to that site, navigate to the returned URL in the same browser, and hand it to the user. Resume only after their confirmation. Other captcha providers and plain block pages require inspection of the destination status/body.
+- HTTP 409 with `state: navigation-required` means the site redirected. Use browser navigation before retrying. Fetch redirects are not followed, so the request cannot silently move to a different origin.
+- Other errors report invalid input, a stopped browser, missing/ambiguous tabs, timeouts or browser failures. No request is automatically retried.
+
+This local API uses the same Cogpit authorization as the other browser routes. The `curl` request reaches Cogpit; Chromium makes the request to the website. No captcha-solving service or cookie transfer to external clients is involved.
+
+References: [Cloudflare clearance](https://developers.cloudflare.com/cloudflare-challenges/concepts/clearance/), [challenge passage](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/challenge-passage/), [challenge detection](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/).
+
 ## The Shim
 
 The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that routes every `agent-browser` call into Cogpit's managed tree. The first call spawns a daemon; that daemon inherits the call's environment, so the shim decides the profile, socket dir, and debugging port at spawn time.

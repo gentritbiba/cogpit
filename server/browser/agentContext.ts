@@ -18,7 +18,7 @@ export const BROWSER_CONTEXT_APPEND = [
   "Leave the `default` browser running unless asked to close it; the user may still be using it. You cannot tell whether the panel is open or see Cogpit's layout from website snapshots.",
   "Browsers run headless; the panel is how the user watches. Open a window only when a bot check (Cloudflare, a captcha) refuses headless Chromium: close that browser, relaunch with `COGPIT_BROWSER_HEADED=1` on the `open`, ask the user to pass the check, and close it when done.",
   "Subagents must use private `--session tmp-<id>` browsers, invisible to the user, and close them when done. Never use the user's default or named browsers from a subagent.",
-  "The `cogpit-browser` skill has the full manual, including named-browser management and flags Cogpit owns.",
+  "Reuse human clearance for pages and HTTP requests in that browser; see the `cogpit-browser` skill.",
 ].join("\n")
 
 /** The only tool carrying a shell command in the sessions this hook runs in. */

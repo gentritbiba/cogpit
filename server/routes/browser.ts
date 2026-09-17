@@ -12,9 +12,10 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 
 import { MAX_URL_LENGTH } from "../../shared/browser/protocol"
 import { resolveNavigationUrl } from "../../shared/browser/url"
-import type { BrowserSessionInfo, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
+import type { BrowserRequest, BrowserRequestResult, BrowserSessionInfo, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import { isRunning, launch, stop } from "../browser/daemons"
+import { BrowserRequestError, parseBrowserRequest, requestInBrowser } from "../browser/request"
 import { assertNamedBrowser, BrowserNameError, DEFAULT_BROWSER } from "../browser/paths"
 import {
   BrowserExistsError,
@@ -42,6 +43,7 @@ export interface BrowserRouteDeps {
   isRunning: RunningProbe
   launch: (name: string, url: string) => Promise<void>
   stop: (name: string) => Promise<void>
+  request: (name: string, request: BrowserRequest) => Promise<BrowserRequestResult>
   installSkill: (target: AgentKind) => string
   installSkillEverywhere: () => string[]
   skillTargets: () => BrowserSkillTarget[]
@@ -59,6 +61,7 @@ export const defaultBrowserRouteDeps: BrowserRouteDeps = {
   isRunning: (name) => isRunning(name),
   launch: (name, url) => launch(name, url),
   stop: (name) => stop(name),
+  request: (name, request) => requestInBrowser(name, request),
   installSkill: (target) => installSkill(target),
   installSkillEverywhere: () => installSkillEverywhere(),
   skillTargets: () => skillTargets(),
@@ -200,6 +203,18 @@ async function stopSession(name: string, res: ServerResponse, deps: BrowserRoute
   sendJson(res, 200, { ok: true })
 }
 
+async function requestSession(name: string, body: Record<string, unknown>, res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
+  const request = parseBrowserRequest(body)
+  try {
+    const result = await deps.request(name, request)
+    res.setHeader("Cache-Control", "no-store")
+    sendJson(res, result.state === "complete" ? 200 : 409, result)
+  } catch (error) {
+    if (error instanceof BrowserRequestError) throw error
+    sendJson(res, 502, { error: messageOf(error) })
+  }
+}
+
 /**
  * The only writes Cogpit makes inside the user's own config, so they happen
  * here and nowhere else — nothing installs the skill on its own.
@@ -259,6 +274,7 @@ async function dispatch(
   if (method !== "POST") return next()
   if (action === "launch") return launchSession(name, await readBody(req), res, deps)
   if (action === "stop") return stopSession(name, res, deps)
+  if (action === "request") return requestSession(name, await readBody(req), res, deps)
   return next()
 }
 
@@ -267,6 +283,7 @@ function sendError(res: ServerResponse, error: unknown): void {
   if (error instanceof BrowserNotFoundError) return sendJson(res, 404, { error: error.message })
   if (error instanceof BrowserExistsError) return sendJson(res, 409, { error: error.message })
   if (error instanceof HttpBodyError) return sendJson(res, error.statusCode, { error: error.message })
+  if (error instanceof BrowserRequestError) return sendJson(res, error.statusCode, { error: error.message })
   throw error
 }
 

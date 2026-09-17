@@ -20,6 +20,23 @@ export interface BrowserStatus {
   sessions: BrowserSessionInfo[]
 }
 
+export interface BrowserRequest {
+  url: string
+  method?: "GET" | "HEAD"
+  targetId?: string
+}
+
+export interface BrowserRequestResult {
+  browser: string
+  targetId: string
+  state: "complete" | "challenge-required" | "navigation-required"
+  url: string
+  status: number
+  headers: Record<string, string>
+  body: string
+  truncated: boolean
+}
+
 /** One agent CLI the browser skill can be installed for, and whether it is. */
 export interface BrowserSkillTarget {
   kind: AgentKind
