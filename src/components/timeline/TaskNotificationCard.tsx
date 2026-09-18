@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { Bell, ChevronDown, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { parseTaskNotifications, type TaskNotification } from "@/lib/userMessageContent"
@@ -27,11 +27,14 @@ const STATUS_STYLES = {
   running: { Icon: RunningIcon, color: "text-warning", bg: "border-warning/20 bg-warning/5", badgeVariant: "outline", label: "Running" },
 } as const
 
+const EVENT_STYLE = { Icon: Bell, color: "text-muted-foreground", bg: "border-border/40 bg-muted/30", badgeVariant: "outline" } as const
+
 export function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
   const [expanded, setExpanded] = useState(false)
-  const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES] ?? STATUS_STYLES.running
+  const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES]
+    ?? { ...EVENT_STYLE, label: notification.status || "Event" }
   const { Icon: StatusIcon } = statusStyle
-  const hasDetail = notification.result.length > 0 || notification.outputFile.length > 0
+  const hasDetail = notification.result.length > 0 || notification.event.length > 0 || notification.outputFile.length > 0
   const Chevron = expanded ? ChevronDown : ChevronRight
 
   return (
@@ -70,6 +73,9 @@ export function TaskNotificationCard({ notification }: { notification: TaskNotif
                     <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
                       {notification.result}
                     </ReactMarkdown>
+                  )}
+                  {notification.event && (
+                    <div className="whitespace-pre-wrap break-words font-mono text-xs">{notification.event}</div>
                   )}
                   {notification.outputFile && (
                     <div className="mt-2">

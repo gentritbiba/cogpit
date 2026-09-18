@@ -112,6 +112,8 @@ export interface TaskNotification {
   status: string
   summary: string
   result: string
+  /** What a Monitor printed. Those notifications report an event and carry no status. */
+  event: string
 }
 
 const TASK_NOTIFICATION_RE = /<task-notification>([\s\S]*?)<\/task-notification>/g
@@ -135,6 +137,7 @@ export function parseTaskNotifications(text: string): {
         status: extractTag(inner, "status"),
         summary: extractTag(inner, "summary"),
         result: extractTag(inner, "result"),
+        event: extractTag(inner, "event"),
       })
       return ""
     })

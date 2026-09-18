@@ -5,10 +5,9 @@ type IconProps = ComponentProps<"svg">
 
 export function ProcessingIcon({ className, ...props }: IconProps) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className={cn("size-5", className)} {...props}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className={cn("status-icon-spin size-5", className)} {...props}>
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.2" />
       <path
-        className="status-icon-spin"
         d="M12 2A10 10 0 0 1 22 12"
         stroke="currentColor"
         strokeWidth="2"
@@ -50,17 +49,15 @@ export function FailedIcon({ className, ...props }: IconProps) {
 
 export function RunningIcon({ className, ...props }: IconProps) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className={cn("size-5", className)} {...props}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className={cn("status-icon-spin size-5", className)} {...props}>
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.1" />
       <path
-        className="status-icon-spin"
         d="M12 2A10 10 0 0 1 22 12"
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"
       />
       <path
-        className="status-icon-spin"
         d="M12 22A10 10 0 0 1 2 12"
         stroke="currentColor"
         strokeWidth="2"

@@ -9,8 +9,6 @@ body { margin: 0; }
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .status-icon-spin {
-  transform-box: view-box;
-  transform-origin: 12px 12px;
   animation: status-icon-spin var(--motion-duration-spinner) linear infinite;
 }
 @keyframes status-icon-spin { to { transform: rotate(360deg); } }

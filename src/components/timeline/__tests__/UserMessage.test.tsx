@@ -88,6 +88,41 @@ describe("UserMessage — image attachments", () => {
   })
 })
 
+describe("UserMessage — task notification status", () => {
+  const monitorEvent = `<task-notification>
+<task-id>bui2kf6o0</task-id>
+<summary>Monitor event: "wait for the review gate"</summary>
+<event>reviewer output updated</event>
+</task-notification>`
+
+  it("shows a Monitor event as a finished event, never as a running task", () => {
+    const { container } = render(<UserMessage content={monitorEvent} timestamp="" />)
+
+    expect(screen.getByText("Event")).toBeInTheDocument()
+    expect(screen.queryByText("Running")).not.toBeInTheDocument()
+    expect(container.querySelector(".status-icon-spin")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Show detail" }))
+    expect(screen.getByText("reviewer output updated")).toBeInTheDocument()
+  })
+
+  it("spins only for an explicit running status", () => {
+    const running = "<task-notification><status>running</status><summary>Build</summary></task-notification>"
+    const { container } = render(<UserMessage content={running} timestamp="" />)
+
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(container.querySelector(".status-icon-spin")).not.toBeNull()
+  })
+
+  it("labels an unrecognised status with its own name and no spinner", () => {
+    const killed = "<task-notification><status>killed</status><summary>Build</summary></task-notification>"
+    const { container } = render(<UserMessage content={killed} timestamp="" />)
+
+    expect(screen.getByText("killed")).toBeInTheDocument()
+    expect(container.querySelector(".status-icon-spin")).toBeNull()
+  })
+})
+
 describe("UserMessage — animated disclosures", () => {
   it("uses the measured collapsible panel for task details", () => {
     const notification = `<task-notification>

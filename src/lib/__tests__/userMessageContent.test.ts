@@ -85,7 +85,19 @@ describe("parseTaskNotifications", () => {
       status: "",
       summary: "",
       result: "",
+      event: "",
     })
+  })
+
+  it("reads the event text of a status-less Monitor notification", () => {
+    const input = `<task-notification>
+<task-id>bui2kf6o0</task-id>
+<summary>Monitor event: "wait for the review gate"</summary>
+<event>reviewer output updated</event>
+</task-notification>`
+    const [notification] = parseTaskNotifications(input).notifications
+    expect(notification.status).toBe("")
+    expect(notification.event).toBe("reviewer output updated")
   })
 })
 

@@ -244,8 +244,6 @@ html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
 /* Functional status motion. These replace SVG SMIL so reduced-motion rules can
    pause every loop and leave a legible static icon. */
 .status-icon-spin {
-  transform-box: view-box;
-  transform-origin: 12px 12px;
   animation: status-icon-spin var(--motion-duration-spinner) linear infinite;
 }
 
