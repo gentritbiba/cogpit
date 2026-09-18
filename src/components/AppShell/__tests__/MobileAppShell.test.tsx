@@ -35,7 +35,7 @@ function props(): MobileAppShellProps {
         handleDuplicateSessionByPath: vi.fn(), handleDuplicateSession: vi.fn(), handleDeleteSession: vi.fn(),
         handleMobileJumpToTurn: vi.fn(), handleLoadSessionScrollAware: vi.fn(),
       },
-      creatingSession: false, pendingSession: null, onStartNewSession: vi.fn(), onSelectProject: vi.fn(),
+      creatingSession: false, pendingSession: null, onStartNewSession: vi.fn(), onStartNewFolder: vi.fn(), onSelectProject: vi.fn(),
       liveSessionsRefreshRef: { current: null }, onPrefetchSession: vi.fn(),
     },
     sessionView: {

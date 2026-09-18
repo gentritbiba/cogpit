@@ -44,6 +44,26 @@ export function buildProcMap(processes: RunningProcess[]): Map<string, RunningPr
   return map
 }
 
+/**
+ * Fold a fetched list into what is known to be archived. A listed row settles
+ * its own id either way; ids the list does not mention keep their last state,
+ * since the default list simply leaves archived sessions out.
+ */
+export function learnArchivedIds(
+  known: ReadonlySet<string>,
+  listed: readonly ActiveSessionInfo[],
+): ReadonlySet<string> {
+  let next: Set<string> | null = null
+  for (const row of listed) {
+    const archived = Boolean(row.archived)
+    if (known.has(row.sessionId) === archived) continue
+    next ??= new Set(known)
+    if (archived) next.add(row.sessionId)
+    else next.delete(row.sessionId)
+  }
+  return next ?? known
+}
+
 export interface SessionInventory {
   sessions: ActiveSessionInfo[]
   processes: RunningProcess[]
@@ -64,6 +84,12 @@ export interface SessionInventory {
   setSearchActive: (active: boolean) => void
   /** Sessions the user has archived, whether or not they are currently listed. */
   archivedCount: number
+  /**
+   * Whether a session is archived, as far as this client has seen. The default
+   * list omits archived rows, so this outlives the row: a session archived from
+   * its own chat still reads as archived after the next refresh drops it.
+   */
+  isArchived: (sessionId: string) => boolean
   /** Reflect an archive change locally before (or without) the next fetch. */
   setArchived: (sessionIds: readonly string[], archived: boolean) => void
 }
@@ -89,6 +115,14 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const [searchActive, setSearchActive] = useState(false)
   const includeArchived = showArchived || searchActive
   const [archivedCount, setArchivedCount] = useState(0)
+  // Seeded from the cached list so a session archived before a reload still
+  // reads as archived. Read by setArchived for the same reason as sessionsRef.
+  const archivedIdsRef = useRef<ReadonlySet<string>>(learnArchivedIds(new Set(), sessions))
+  const [archivedIds, setArchivedIds] = useState<ReadonlySet<string>>(archivedIdsRef.current)
+  const replaceArchivedIds = useCallback((next: ReadonlySet<string>) => {
+    archivedIdsRef.current = next
+    setArchivedIds(next)
+  }, [])
 
   const prevStatusRef = useRef<Map<string, string> | null>(null)
   // Read by setArchived so back-to-back updates (an optimistic change and its
@@ -135,6 +169,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       sessionsRef.current = nextSessions
       setSessions(nextSessions)
       setProcesses(nextProcesses)
+      replaceArchivedIds(learnArchivedIds(archivedIdsRef.current, nextSessions))
       setArchivedCount(Number(sessRes.headers.get("X-Cogpit-Archived-Count")) || 0)
       writeCachedList(sessionListCacheKeys.activeSessions, nextSessions)
       writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
@@ -146,7 +181,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (isCurrentRequest()) setLoading(false)
       if (abortRef.current === ac) abortRef.current = null
     }
-  }, [mountedDeviceScope, includeArchived])
+  }, [mountedDeviceScope, includeArchived, replaceArchivedIds])
 
   const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
 
@@ -233,13 +268,16 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   }, [replaceSessions])
 
   const setArchived = useCallback((sessionIds: readonly string[], archived: boolean) => {
-    const requested = new Set(sessionIds)
-    const current = sessionsRef.current
-    const changedIds = new Set(current
-      .filter((s) => requested.has(s.sessionId) && Boolean(s.archived) !== archived)
-      .map((s) => s.sessionId))
+    const known = archivedIdsRef.current
+    const changedIds = new Set(sessionIds.filter((id) => known.has(id) !== archived))
     if (changedIds.size === 0) return
-    replaceSessions(current.map((s) => {
+    const nextKnown = new Set(known)
+    for (const id of changedIds) {
+      if (archived) nextKnown.add(id)
+      else nextKnown.delete(id)
+    }
+    replaceArchivedIds(nextKnown)
+    replaceSessions(sessionsRef.current.map((s) => {
       if (!changedIds.has(s.sessionId)) return s
       if (archived) return { ...s, archived: true, archivedReason: "manual" as const }
       const { archived: _archived, archivedReason: _archivedReason, ...rest } = s
@@ -247,7 +285,9 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     }))
     const delta = archived ? changedIds.size : -changedIds.size
     setArchivedCount((count) => Math.max(0, count + delta))
-  }, [replaceSessions])
+  }, [replaceArchivedIds, replaceSessions])
+
+  const isArchived = useCallback((sessionId: string) => archivedIds.has(sessionId), [archivedIds])
 
   const value = useMemo<SessionInventory>(() => ({
     sessions,
@@ -263,11 +303,12 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     setShowArchived: setShowArchivedSetting,
     setSearchActive,
     archivedCount,
+    isArchived,
     setArchived,
   }), [
     sessions, processes, procBySession, newlyCompleted, loading, error,
     refresh, removeSession, acknowledgeCompleted,
-    showArchived, setShowArchivedSetting, archivedCount, setArchived,
+    showArchived, setShowArchivedSetting, archivedCount, isArchived, setArchived,
   ])
 
   return (

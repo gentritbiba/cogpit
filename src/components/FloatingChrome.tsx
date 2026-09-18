@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DisabledHint } from "@/components/ui/disabled-hint"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +42,7 @@ import { useSessionContext } from "@/contexts/SessionContext"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useCapability } from "@/hooks/useCapability"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import { can } from "@/lib/capabilities"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
@@ -109,6 +111,7 @@ export const FloatingChrome = memo(function FloatingChrome({
     () => mergePullRequests(extractPullRequests(sessionTurns ?? []), scanned),
     [sessionTurns, scanned],
   )
+  const archiveToggle = useSessionArchiveToggle(session?.sessionId ?? "", isLive)
   const activeAgentKind = sessionSource
     ? sessionSource.agentKind ?? agentKindForDirName(sessionSource.dirName)
     : defaultAgentKind
@@ -220,6 +223,14 @@ export const FloatingChrome = memo(function FloatingChrome({
               <ShareButton sessionId={session.sessionId} />
             </div>
           )}
+          {session && !isSubAgent && archiveToggle && (
+            <PillIconButton
+              icon={archiveToggle.icon}
+              label={archiveToggle.label}
+              disabledReason={archiveToggle.disabledReason}
+              onClick={archiveToggle.toggle}
+            />
+          )}
 
           <div className={cn(FLOATING_PILL, PILL_ROW)}>
             <DropdownMenu>
@@ -288,9 +299,26 @@ interface PillIconButtonProps {
   icon: LucideIcon
   label: string
   onClick: () => void
+  /** Why the button is greyed out; shown instead of the label while disabled. */
+  disabledReason?: string
 }
 
-function PillIconButton({ icon: Icon, label, onClick }: PillIconButtonProps) {
+function PillIconButton({ icon: Icon, label, onClick, disabledReason }: PillIconButtonProps) {
+  if (disabledReason) {
+    return (
+      <DisabledHint reason={disabledReason}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled
+          aria-label={label}
+          className={cn(FLOATING_PILL, "size-8 shrink-0")}
+        >
+          <Icon data-icon="inline-start" />
+        </Button>
+      </DisabledHint>
+    )
+  }
   return (
     <Tooltip>
       <TooltipTrigger

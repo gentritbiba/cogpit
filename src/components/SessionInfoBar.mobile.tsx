@@ -24,6 +24,7 @@ import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ContextBadge } from "@/components/header-shared"
+import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { projectName } from "@/lib/format"
 import type { ParsedSession, RawMessage } from "../../shared/session/types"
@@ -46,6 +47,7 @@ interface MobileSessionInfoBarProps extends SessionInfoBarProps {
   session: ParsedSession
   sessionSource: SessionSource | null
   isSubAgentView: boolean
+  isLive: boolean
   claudeRawMessages: readonly RawMessage[]
 }
 
@@ -53,6 +55,7 @@ export function MobileSessionInfoBar({
   session,
   sessionSource,
   isSubAgentView,
+  isLive,
   claudeRawMessages,
   creatingSession,
   onNewSession,
@@ -66,6 +69,8 @@ export function MobileSessionInfoBar({
   expandAll,
   onToggleExpandAll,
 }: MobileSessionInfoBarProps) {
+  const archiveToggle = useSessionArchiveToggle(session.sessionId, isLive)
+
   const handleNewSession = () => {
     if (!sessionSource) return
     onNewSession(sessionSource.dirName, session.cwd)
@@ -127,6 +132,17 @@ export function MobileSessionInfoBar({
               <DropdownMenuItem onClick={onDuplicateSession}>
                 <Copy />
                 <span>Duplicate session</span>
+              </DropdownMenuItem>
+            )}
+            {archiveToggle && !isSubAgentView && (
+              <DropdownMenuItem onClick={archiveToggle.toggle} disabled={Boolean(archiveToggle.disabledReason)}>
+                <archiveToggle.icon />
+                <span className="flex flex-col">
+                  {archiveToggle.label}
+                  {archiveToggle.disabledReason && (
+                    <span className="text-xs text-muted-foreground">{archiveToggle.disabledReason}</span>
+                  )}
+                </span>
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>

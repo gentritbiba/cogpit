@@ -28,7 +28,11 @@ const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
   jsonFetch: vi.fn(),
   toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+  toast: vi.fn(),
   inventorySessions: [] as ActiveSessionInfo[],
+  setArchived: vi.fn(),
+  refreshInventory: vi.fn(),
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -42,7 +46,13 @@ vi.mock("@/contexts/SessionContext", () => ({
   }),
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
-  useSessionInventoryOptional: () => ({ sessions: mocks.inventorySessions }),
+  useSessionInventoryOptional: () => ({
+    sessions: mocks.inventorySessions,
+    isArchived: (sessionId: string) =>
+      Boolean(mocks.inventorySessions.find((s) => s.sessionId === sessionId)?.archived),
+    setArchived: mocks.setArchived,
+    refresh: mocks.refreshInventory,
+  }),
 }))
 vi.mock("@/hooks/useCopyWithFeedback", () => ({
   useCopyWithFeedback: () => [false, mocks.copy],
@@ -53,7 +63,9 @@ vi.mock("@/lib/utils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/utils")>()),
   copyToClipboard: mocks.copyToClipboard,
 }))
-vi.mock("sonner", () => ({ toast: { success: mocks.toastSuccess } }))
+vi.mock("sonner", () => ({
+  toast: Object.assign(mocks.toast, { success: mocks.toastSuccess, error: mocks.toastError }),
+}))
 vi.mock("@/components/TokenUsageWidget", () => ({ TokenUsageIndicator: () => null }))
 vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => null }))
 vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
@@ -130,7 +142,11 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
   }
 }
 
-function withScannedSession(sessionId: string, pullRequests: ActiveSessionInfo["pullRequests"]): void {
+function withScannedSession(
+  sessionId: string,
+  pullRequests: ActiveSessionInfo["pullRequests"],
+  extra: Partial<ActiveSessionInfo> = {},
+): void {
   mocks.inventorySessions = [{
     dirName: "d",
     projectShortName: "P",
@@ -139,6 +155,7 @@ function withScannedSession(sessionId: string, pullRequests: ActiveSessionInfo["
     lastModified: "2026-08-14T10:00:00.000Z",
     size: 1,
     pullRequests,
+    ...extra,
   }]
 }
 
@@ -453,6 +470,77 @@ describe("FloatingChrome", () => {
     await user.click(screen.getByRole("button", { name: "More actions" }))
     await user.click(await screen.findByRole("menuitem", { name: "Server monitor\u2026" }))
     expect(screen.getByTestId("power-monitor")).toBeInTheDocument()
+  })
+})
+
+describe("FloatingChrome archive", () => {
+  beforeEach(() => {
+    mocks.session = makeSession()
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", rawText: "", agentKind: "claude" }
+    mocks.isLive = false
+    mocks.inventorySessions = []
+    mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it("archives the open session, refreshes the inventory and offers an undo", async () => {
+    renderChrome()
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive session" }))
+
+    expect(mocks.setArchived).toHaveBeenCalledWith(["test-session-id"], true)
+    await vi.waitFor(() => expect(mocks.jsonFetch).toHaveBeenCalledWith(
+      "/api/archive-sessions",
+      { sessionIds: ["test-session-id"], archived: true },
+    ))
+    await vi.waitFor(() => expect(mocks.refreshInventory).toHaveBeenCalled())
+    expect(mocks.toast).toHaveBeenCalledWith("Session archived", expect.objectContaining({
+      action: expect.objectContaining({ label: "Undo" }),
+    }))
+  })
+
+  it("rolls back when the server refuses", async () => {
+    mocks.jsonFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
+    renderChrome()
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive session" }))
+
+    await vi.waitFor(() => expect(mocks.setArchived).toHaveBeenCalledWith(["test-session-id"], false))
+    expect(mocks.toastError).toHaveBeenCalledWith("Could not archive session")
+    expect(mocks.refreshInventory).not.toHaveBeenCalled()
+  })
+
+  it("restores an archived session instead", async () => {
+    withScannedSession("test-session-id", undefined, { archived: true, archivedReason: "manual" })
+    renderChrome()
+
+    expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Restore from archive" }))
+
+    await vi.waitFor(() => expect(mocks.jsonFetch).toHaveBeenCalledWith(
+      "/api/archive-sessions",
+      { sessionIds: ["test-session-id"], archived: false },
+    ))
+  })
+
+  it("explains that a live session has to stop first", () => {
+    mocks.isLive = true
+    renderChrome()
+
+    const button = screen.getByRole("button", { name: "Archive session" })
+    expect(button).toBeDisabled()
+    expect(screen.getByLabelText("Stop the session before archiving it")).toBeInTheDocument()
+  })
+
+  it("withholds archiving from a sub-agent view", () => {
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", rawText: "", agentKind: "claude" }
+    renderChrome()
+
+    expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
   })
 })
 

@@ -19,7 +19,7 @@ import { useCapability } from "@/hooks/useCapability"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
-import { setSessionsArchived } from "@/lib/sessionArchive"
+import { useSessionArchive } from "@/hooks/useSessionArchive"
 import { isSessionLive, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -69,7 +69,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     setShowArchived,
     setSearchActive,
     archivedCount,
-    setArchived,
   } = useSessionInventory()
   const {
     awaitingPermission,
@@ -287,29 +286,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession(s.sessionId)
   }, [onDeleteSession, removeSession])
 
-  // Archive changes apply instantly and roll back if the server rejects them.
-  // The toast carries an undo so a slip never needs the archived view to fix.
-  // A poll that started before the change could land after it, so the list
-  // is refetched once the server has it.
-  const applyArchive = useCallback(async (
-    sessionIds: string[],
-    archived: boolean,
-    message: string | null,
-  ) => {
-    setArchived(sessionIds, archived)
-    const ok = await setSessionsArchived(sessionIds, archived)
-    if (!ok) {
-      setArchived(sessionIds, !archived)
-      toast.error(archived ? "Could not archive session" : "Could not restore session")
-      return
-    }
-    fetchData()
-    if (message) {
-      toast(message, {
-        action: { label: "Undo", onClick: () => { void applyArchive(sessionIds, !archived, null) } },
-      })
-    }
-  }, [setArchived, fetchData])
+  const applyArchive = useSessionArchive()
 
   const handleArchiveSession = useCallback((s: ActiveSessionInfo) => {
     void applyArchive([s.sessionId], true, `Archived “${sessionTitle(s, sessionNames[s.sessionId])}”`)

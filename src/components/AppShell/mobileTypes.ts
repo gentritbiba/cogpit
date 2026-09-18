@@ -30,6 +30,7 @@ export interface MobileNavigation {
   creatingSession: boolean
   pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
+  onStartNewFolder: (cwd: string) => void
   onSelectProject: (dirName: string | null) => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
   onPrefetchSession: (dirName: string, fileName: string) => void

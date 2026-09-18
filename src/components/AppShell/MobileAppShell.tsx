@@ -124,7 +124,7 @@ export function MobileAppShell({
 function MobileChat({
   navigation, sessionView, project, chrome, searchOpen, onSearchOpenChange,
 }: MobileAppShellProps & { searchOpen: boolean; onSearchOpenChange: (open: boolean) => void }) {
-  const { state } = useAppContext()
+  const { state, config } = useAppContext()
   const { session, isSubAgentView } = useSessionContext()
 
   return (
@@ -162,7 +162,14 @@ function MobileChat({
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
-              <NewSessionHeadline projectPath={sessionView.pendingPath ?? null} />
+              <NewSessionHeadline
+                projectPath={sessionView.pendingPath ?? null}
+                switcher={{
+                  onNewSession: navigation.onStartNewSession,
+                  onNewFolder: navigation.onStartNewFolder,
+                  defaultAgentKind: config.defaultAgentKind,
+                }}
+              />
               {can("terminal") && (
                 <Button
                   variant="outline"

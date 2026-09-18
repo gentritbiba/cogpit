@@ -8,7 +8,7 @@ import { capabilitiesForDirName } from "@/lib/agents"
 
 export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBarProps) {
   const { isMobile } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
+  const { session, sessionSource, isLive } = useSessionContext()
   if (!isMobile || !session) return null
 
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
@@ -22,6 +22,7 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
       session={session}
       sessionSource={sessionSource}
       isSubAgentView={subAgentInfo !== null}
+      isLive={isLive}
       claudeRawMessages={contextRawMessages}
     />
   )

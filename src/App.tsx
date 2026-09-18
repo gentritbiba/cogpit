@@ -1180,6 +1180,7 @@ export default function App() {
             creatingSession,
             pendingSession: pendingSessionInfo,
             onStartNewSession: handleStartNewSession,
+            onStartNewFolder: handleStartNewFolder,
             onSelectProject: handleSelectProject,
             liveSessionsRefreshRef,
             onPrefetchSession: prefetchSession,

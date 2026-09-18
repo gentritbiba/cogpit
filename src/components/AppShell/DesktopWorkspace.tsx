@@ -89,7 +89,7 @@ function DesktopMainView({
   view,
   floatingChrome,
 }: DesktopViewProps & { view: DesktopMainView; floatingChrome: ReactNode }) {
-  const { state } = useAppContext()
+  const { state, config } = useAppContext()
   const { session, sessionSource } = useSessionContext()
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
@@ -155,7 +155,14 @@ function DesktopMainView({
             </div>
           </div>
         ) : (
-          <NewSessionHeadline projectPath={pendingPath} />
+          <NewSessionHeadline
+            projectPath={pendingPath}
+            switcher={{
+              onNewSession: navigation.onStartNewSession,
+              onNewFolder: navigation.onStartNewFolder,
+              defaultAgentKind: config.defaultAgentKind,
+            }}
+          />
         )}
         <SessionInputFooter>{sessionView.pendingComposer}</SessionInputFooter>
         {!hasPendingTurns && (
