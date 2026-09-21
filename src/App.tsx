@@ -874,7 +874,7 @@ export default function App() {
   if (!networkAuth.authChecked) {
     return (
       <div
-        className="dark flex h-dvh items-center justify-center bg-background"
+        className="dark flex h-dvh items-center justify-center bg-canvas"
         role="status"
         aria-label="Checking authentication"
       >
@@ -902,7 +902,7 @@ export default function App() {
   if (!identityReady) {
     return (
       <div
-        className="dark flex h-dvh items-center justify-center bg-background"
+        className="dark flex h-dvh items-center justify-center bg-canvas"
         role="status"
         aria-label="Loading identity"
       >
@@ -914,7 +914,7 @@ export default function App() {
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-background" role="status" aria-label="Loading">
+      <div className="dark flex h-dvh items-center justify-center bg-canvas" role="status" aria-label="Loading">
         <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
@@ -922,7 +922,7 @@ export default function App() {
 
   if (config.configError) {
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-background text-foreground">
+      <div className="dark flex h-dvh items-center justify-center bg-canvas text-foreground">
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -945,7 +945,7 @@ export default function App() {
   if (!config.claudeDir) {
     if (configAdminEnabled) return <SetupScreen onConfigured={config.setClaudeDir} />
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
+      <div className="dark flex h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Cogpit is waiting for an administrator to finish server setup.
       </div>
     )

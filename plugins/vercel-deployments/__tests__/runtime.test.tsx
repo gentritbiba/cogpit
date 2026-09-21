@@ -10,7 +10,7 @@ const data = { projectId: "prj_a", projectName: "Project A", projectUrl: null, t
 let dispose: (() => void) | undefined
 let sdk: ReturnType<typeof makeSdk>
 function makeSdk() {
-  const listeners: { context?: (value: PluginContext) => void; visibility?: (value: boolean) => void; theme?: (value: PluginContext["theme"]) => void } = {}
+  const listeners: { context?: (value: PluginContext) => void; visibility?: (value: boolean) => void } = {}
   return {
     listeners,
     ready: vi.fn(async () => null), dispose: vi.fn(),
@@ -18,7 +18,6 @@ function makeSdk() {
     navigation: { openExternal: vi.fn(async () => null) },
     onContextChange: vi.fn((listener: (value: PluginContext) => void) => { listeners.context = listener; return vi.fn() }),
     onVisibilityChange: vi.fn((listener: (value: boolean) => void) => { listeners.visibility = listener; return vi.fn() }),
-    onThemeChange: vi.fn((listener: (value: PluginContext["theme"]) => void) => { listeners.theme = listener; return vi.fn() }),
   }
 }
 beforeEach(() => { sdk = makeSdk(); mocks.createPluginClient.mockReturnValue(sdk) })
@@ -63,6 +62,6 @@ describe("Vercel package runtime entry", () => {
     expect(signal.aborted).toBe(true)
     expect(sdk.dispose).toHaveBeenCalledOnce()
     expect(document.querySelector("#root")).toBeNull()
-    for (const method of [sdk.onContextChange, sdk.onVisibilityChange, sdk.onThemeChange]) expect(method.mock.results[0]!.value).toHaveBeenCalledOnce()
+    for (const method of [sdk.onContextChange, sdk.onVisibilityChange]) expect(method.mock.results[0]!.value).toHaveBeenCalledOnce()
   })
 })

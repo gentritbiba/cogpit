@@ -81,7 +81,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
           : "border-border",
       )}
     >
-      <div className="group sticky top-0 z-10 flex w-full items-center rounded-t-lg bg-card transition-colors hover:bg-accent">
+      <div className="group sticky top-0 z-10 flex w-full items-center rounded-t-lg bg-popover">
         <Button
           type="button"
           variant="ghost"

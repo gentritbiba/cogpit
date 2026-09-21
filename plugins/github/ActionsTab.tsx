@@ -275,7 +275,7 @@ export function groupRunsByCommit(runs: readonly GitHubActionsRun[]): CommitGrou
 
 function CommitBlock({ group, projectKey, now }: { group: CommitGroup; projectKey: string; now: number }) {
   return (
-    <article className="relative pl-3" aria-label={group.title}>
+    <article className="relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={group.title}>
       <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[group.tone])} />
       <header className="mb-1 min-w-0">
         <h3 className="truncate text-[13px] font-medium leading-5" title={group.title}>{group.title}</h3>

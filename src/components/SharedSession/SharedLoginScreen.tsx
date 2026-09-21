@@ -90,7 +90,7 @@ export function SharedLoginScreen({ sessionId, onAuthenticated }: SharedLoginScr
   }, [onAuthenticated, passphrase, sessionId])
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-8">
       <form onSubmit={handleSubmit} className="w-full max-w-sm">
         <Card>
           <CardHeader>

@@ -76,7 +76,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const description = [summary.text, thinkingLabel].filter(Boolean).join(" · ")
 
   return (
-    <div className="min-w-0 rounded-xl border border-border/80 bg-card/50" data-tool-activity="">
+    <div className="min-w-0 rounded-xl border border-border/80 bg-card" data-tool-activity="">
       <button
         type="button"
         className="flex min-h-14 w-full min-w-0 items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

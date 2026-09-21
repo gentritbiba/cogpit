@@ -63,8 +63,8 @@ function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "size-8 border border-white/10 bg-white/[0.06] text-white/75",
-        "hover:bg-white/10 hover:text-white focus-visible:ring-white/40",
+        "size-8 border border-border bg-background text-foreground/75",
+        "hover:bg-accent hover:text-foreground focus-visible:ring-ring/40",
         "disabled:pointer-events-none disabled:opacity-30",
         className,
       )}
@@ -157,7 +157,7 @@ export function ImageViewer({
         showCloseButton={false}
         onKeyDown={handleKeyDown}
         className={cn(
-          "flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl border-white/10 bg-black p-0 text-white",
+          "flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl border-border bg-popover p-0 text-foreground",
           "sm:h-[min(820px,calc(100dvh-2rem))] sm:w-[min(1120px,calc(100vw-2rem))] sm:max-w-none",
         )}
       >
@@ -166,16 +166,16 @@ export function ImageViewer({
           View and navigate images from this session.
         </DialogDescription>
 
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-black/20 px-2.5 sm:px-3">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-white/[0.06]">
-            <ImageIcon className="size-3.5 text-white/65" data-icon="icon" />
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-2.5 sm:px-3">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background">
+            <ImageIcon className="size-3.5 text-foreground/65" data-icon="icon" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium text-white/90">
+            <div className="truncate text-xs font-medium text-foreground/90">
               {current.label || current.alt || "Session image"}
             </div>
             {hasMultiple && (
-              <div className="text-xs tabular-nums text-white/50">
+              <div className="text-xs tabular-nums text-foreground/50">
                 {index + 1} of {images.length}
               </div>
             )}
@@ -194,7 +194,7 @@ export function ImageViewer({
               variant="ghost"
               size="sm"
               onClick={resetZoom}
-              className="min-w-12 px-1.5 font-mono text-xs tabular-nums text-white/60 hover:bg-white/[0.06] hover:text-white"
+              className="min-w-12 px-1.5 font-mono text-xs tabular-nums text-foreground/60 hover:bg-background hover:text-foreground"
               aria-label="Reset zoom"
               title="Reset zoom"
             >
@@ -207,7 +207,7 @@ export function ImageViewer({
             >
               <Plus className="size-3.5" data-icon="icon" />
             </IconButton>
-            <div className="mx-1 h-5 w-px bg-white/10" />
+            <div className="mx-1 h-5 w-px bg-border" />
             <IconButton label="Close image viewer" onClick={onClose}>
               <X className="size-4" data-icon="icon" />
             </IconButton>
@@ -255,7 +255,7 @@ export function ImageViewer({
                 label="Previous image"
                 disabled={!canGoPrev}
                 onClick={goPrev}
-                className="absolute left-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-black/45 backdrop-blur sm:left-3"
+                className="absolute left-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-popover backdrop-blur sm:left-3"
               >
                 <ChevronLeft className="size-5" data-icon="icon" />
               </IconButton>
@@ -263,7 +263,7 @@ export function ImageViewer({
                 label="Next image"
                 disabled={!canGoNext}
                 onClick={goNext}
-                className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-black/45 backdrop-blur sm:right-3"
+                className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-popover backdrop-blur sm:right-3"
               >
                 <ChevronRight className="size-5" data-icon="icon" />
               </IconButton>
@@ -271,7 +271,7 @@ export function ImageViewer({
           )}
 
           {zoomPercent === 100 && (
-            <div className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white/60 sm:flex">
+            <div className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 rounded-full bg-popover px-2.5 py-1 text-xs text-foreground/60 sm:flex">
               <Maximize2 className="size-3" data-icon="inline-start" />
               Scroll or double-click to zoom · drag to pan
             </div>
@@ -279,7 +279,7 @@ export function ImageViewer({
         </div>
 
         {hasMultiple && (
-          <footer className="shrink-0 border-t border-white/10 bg-black/25 px-2 py-2">
+          <footer className="shrink-0 border-t border-border bg-background px-2 py-2">
             <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
               {images.map((image, imageIndex) => (
                 <Button
@@ -290,10 +290,10 @@ export function ImageViewer({
                   aria-label={`View image ${imageIndex + 1}`}
                   aria-current={imageIndex === index ? "true" : undefined}
                   className={cn(
-                    "relative size-12 shrink-0 overflow-hidden rounded-md border bg-white/[0.04] p-0.5 sm:h-14 sm:w-[4.5rem]",
+                    "relative size-12 shrink-0 overflow-hidden rounded-md border bg-background p-0.5 sm:h-14 sm:w-[4.5rem]",
                     imageIndex === index
-                      ? "border-white ring-1 ring-white/40"
-                      : "border-white/10 opacity-55 hover:border-white/25 hover:opacity-90",
+                      ? "border-foreground ring-1 ring-ring/40"
+                      : "border-border opacity-55 hover:border-foreground/25 hover:opacity-90",
                   )}
                 >
                   <img
@@ -302,7 +302,7 @@ export function ImageViewer({
                     draggable={false}
                     className="size-full rounded-[3px] object-cover"
                   />
-                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 font-mono text-xs text-white/80">
+                  <span className="absolute bottom-0.5 right-0.5 rounded bg-popover px-1 font-mono text-xs text-foreground/80">
                     {imageIndex + 1}
                   </span>
                 </Button>

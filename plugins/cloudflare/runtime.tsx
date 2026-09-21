@@ -23,14 +23,10 @@ export function mountCloudflare({ port, context: initialContext }: CloudflarePlu
   let context = initialContext, store = makeStore(), account = makeAccountStore(), disposed = false
   const openExternal = (url: string) => client.navigation.openExternal(url)
   function render() {
-    document.documentElement.classList.toggle("dark", context.theme.mode === "dark")
-    document.documentElement.classList.toggle("reduced-motion", context.reducedMotion)
-    document.documentElement.lang = context.locale
     root.render(<CloudflareProvider value={store}><CloudflarePanel key={context.project?.id ?? "none"} context={{ projectPath: context.project?.id ?? null }} active={context.visible} openExternal={openExternal} account={account} /></CloudflareProvider>)
   }
   const unsubscribe = [
     client.onContextChange(next => { store.dispose(); account.dispose(); store = makeStore(); account = makeAccountStore(); context = next; render() }),
-    client.onThemeChange(theme => { context = { ...context, theme }; render() }),
     client.onVisibilityChange(visible => { context = { ...context, visible }; render() }),
   ]
   function dispose() {

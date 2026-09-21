@@ -12,7 +12,7 @@ export function DesktopAppShell({
   chrome,
 }: DesktopAppShellProps) {
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground">
+    <div className="flex h-dvh flex-col bg-canvas text-foreground">
       {chrome.backgroundServers}
       <UpdateBanner />
       <ProviderUpdateBanner />

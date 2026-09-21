@@ -264,7 +264,7 @@ function PullRow({ pull, projectKey, currentBranch, sessions, openSession, onSho
   const activity = isOpen(pull) ? pull.updatedAt : (pull.closedAt ?? pull.updatedAt)
 
   return (
-    <article className="relative pl-3" aria-label={pull.title}>
+    <article className="relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={pull.title}>
       <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[pull.state])} />
       <Collapsible open={open} onOpenChange={onOpenChange}>
         <div className="group/pull flex items-start gap-1 pr-1">

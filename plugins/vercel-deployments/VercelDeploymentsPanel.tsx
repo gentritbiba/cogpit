@@ -171,7 +171,7 @@ function errorHelp(error: VercelDeploymentsErrorResponse): string {
 function LoadingDeployments() {
   return (
     <div className="flex flex-col gap-4 px-3 py-4" aria-label="Loading Vercel deployments">
-      <div className="flex flex-col gap-2 rounded-md border px-3 py-2.5">
+      <div className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2.5">
         <Skeleton className="h-2.5 w-16" />
         <Skeleton className="h-3.5 w-3/4" />
         <Skeleton className="h-2.5 w-1/2" />
@@ -281,7 +281,7 @@ function DeploymentRow({
 
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
-      <article className="group/deployment relative pl-3" aria-label={title}>
+      <article className="group/deployment relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={title}>
         <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[tone])} />
         <div className="flex items-start gap-1">
           <CollapsibleTrigger

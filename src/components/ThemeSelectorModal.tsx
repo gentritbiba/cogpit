@@ -11,7 +11,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { type ThemeId, themes } from "@/hooks/useTheme"
+import { type ThemeId, themes } from "@/lib/themes"
 import { chatWidths, useChatWidth } from "@/lib/chatWidth"
 
 interface ThemeSelectorModalProps {

@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { toast } from "sonner"
 import { Toaster } from "@/components/ui/sonner"
-import type { ThemeId } from "@/hooks/useTheme"
+import { themeMode, type ThemeId } from "@/lib/themes"
 
 interface AppStatusToastsProps {
   activeError: string | null
@@ -59,7 +59,7 @@ export function AppStatusToasts({
 
   return (
     <Toaster
-      theme={theme === "light" ? "light" : "dark"}
+      theme={themeMode(theme)}
       position="bottom-center"
       closeButton
       visibleToasts={3}

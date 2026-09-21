@@ -9,7 +9,7 @@ interface SessionInputFooterProps {
 export function SessionInputFooter({ floating, children }: SessionInputFooterProps) {
   if (floating) {
     return (
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-background via-background/70 to-transparent pt-4">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-canvas via-canvas/70 to-transparent pt-4">
         <div className="pointer-events-auto w-full max-w-[var(--chat-width)] px-3 pb-3">
           {children}
         </div>

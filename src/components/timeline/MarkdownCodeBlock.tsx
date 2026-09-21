@@ -125,8 +125,8 @@ function HighlightedCodeBlock({
   const Chevron = collapsed ? ChevronRight : ChevronDown
 
   return (
-    <div className="my-3 overflow-hidden rounded-lg border border-border bg-muted/20">
-      <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-1.5">
+    <div className="my-3 overflow-hidden rounded-lg border border-border bg-muted">
+      <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
         <div className="flex items-center gap-2">
           {isLong && (
             <Button

@@ -72,10 +72,7 @@ export function HighlightedEditor({
       <pre
         ref={preRef}
         aria-hidden
-        className={cn(
-          "absolute inset-0 overflow-hidden font-mono text-[13px] leading-relaxed p-4 m-0 pointer-events-none whitespace-pre-wrap break-words",
-          readOnly && "opacity-70",
-        )}
+        className="absolute inset-0 overflow-hidden font-mono text-[13px] leading-relaxed p-4 m-0 pointer-events-none whitespace-pre-wrap break-words"
       >
         {tokens ? (
           tokens.map((line, i) => (
@@ -104,7 +101,7 @@ export function HighlightedEditor({
         spellCheck={false}
         className={cn(
           "absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] leading-relaxed p-4 outline-none",
-          "text-transparent caret-foreground selection:bg-info/30",
+          "text-transparent caret-foreground selection:bg-selection",
           "scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border",
           readOnly && "cursor-default",
         )}

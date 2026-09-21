@@ -5,9 +5,11 @@ import tailwindcss from '@tailwindcss/vite'
 import { sessionApiPlugin } from './server/api-plugin'
 import { ptyPlugin } from './server/pty-plugin'
 import { manualChunks } from './build/manualChunks'
+import { themeBootstrap } from './build/themeBootstrap'
 
 export default defineConfig({
   plugins: [
+    themeBootstrap(),
     react({
       babel: {
         plugins: [['babel-plugin-react-compiler']],

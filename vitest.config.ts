@@ -8,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    css: { include: [/theme\.css\?raw$/] },
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/__tests__/setup.ts"],

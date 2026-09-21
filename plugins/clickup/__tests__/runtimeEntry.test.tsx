@@ -15,17 +15,13 @@ function mount(client = fakeClient()) {
   return { client, stop }
 }
 describe("ClickUp frame entry lifetime", () => {
-  it("binds the supplied port, renders its own React root, and follows theme/visibility/context events", async () => {
+  it("binds the supplied port, renders its own React root, and follows visibility/context events", async () => {
     const { client, stop } = mount()
     await screen.findByRole("article", { name: "Task 1" })
     expect(client.ready).toHaveBeenCalledOnce()
-    expect(document.documentElement.classList.contains("dark")).toBe(true)
-    act(() => vi.mocked(client.onThemeChange).mock.calls[0][0]({ mode: "light", tokens: { "--background": "#fff" } }))
-    expect(document.documentElement.classList.contains("dark")).toBe(false)
-    expect(document.documentElement.style.getPropertyValue("--background")).toBe("#fff")
-    act(() => vi.mocked(client.onContextChange).mock.calls[0][0]({ ...runtimeContext, reducedMotion: true, theme: { mode: "dark", tokens: {} } }))
-    expect(document.documentElement.style.getPropertyValue("--background")).toBe("")
-    expect(document.documentElement.classList.contains("reduced-motion")).toBe(true)
+    expect(client.onThemeChange).not.toHaveBeenCalled()
+    act(() => vi.mocked(client.onVisibilityChange).mock.calls[0][0](false))
+    act(() => vi.mocked(client.onContextChange).mock.calls[0][0]({ ...runtimeContext, reducedMotion: true }))
     act(stop)
     act(stop)
     expect(client.dispose).toHaveBeenCalledOnce()
@@ -50,9 +46,8 @@ describe("ClickUp frame entry lifetime", () => {
     expect(screen.getByRole("article", { name: "Task new" })).toBeInTheDocument()
   })
   it("unsubscribes every SDK event and aborts pending calls when the frame closes", async () => {
-    const client = fakeClient(), stopContext = vi.fn(), stopTheme = vi.fn(), stopVisibility = vi.fn(), pending = deferred<typeof connectionStatus>()
+    const client = fakeClient(), stopContext = vi.fn(), stopVisibility = vi.fn(), pending = deferred<typeof connectionStatus>()
     vi.mocked(client.onContextChange).mockReturnValue(stopContext)
-    vi.mocked(client.onThemeChange).mockReturnValue(stopTheme)
     vi.mocked(client.onVisibilityChange).mockReturnValue(stopVisibility)
     vi.mocked(client.connections.status).mockReturnValue(pending.promise)
     mount(client)
@@ -61,7 +56,7 @@ describe("ClickUp frame entry lifetime", () => {
     act(() => window.dispatchEvent(new Event("pagehide")))
     expect(signal.aborted).toBe(true)
     expect(client.dispose).toHaveBeenCalledOnce()
-    for (const stop of [stopContext, stopTheme, stopVisibility]) expect(stop).toHaveBeenCalledOnce()
+    for (const stop of [stopContext, stopVisibility]) expect(stop).toHaveBeenCalledOnce()
     await act(async () => { pending.reject(new Error("late error")); await pending.promise.catch(() => undefined) })
     expect(document.getElementById("root")).toBeNull()
   })

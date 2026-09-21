@@ -287,7 +287,7 @@ export function SessionCard({
           variant="ghost"
           size="icon-xs"
           onClick={archiveAction.run}
-          className="absolute bottom-1.5 right-1.5 bg-background/80 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-foreground"
+          className="absolute bottom-1.5 right-1.5 bg-popover text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-foreground"
           title={archiveAction.label}
           aria-label={archiveAction.label}
         >
@@ -302,7 +302,7 @@ export function SessionCard({
           size="icon-xs"
           onClick={(event) => onKill(proc.pid, event)}
           disabled={killingPids.has(proc.pid)}
-          className="absolute bottom-1.5 right-1.5 bg-background/80 text-destructive opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+          className="absolute bottom-1.5 right-1.5 bg-popover text-destructive opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
           title={`Kill PID ${proc.pid}`}
           aria-label={`Kill process ${proc.pid}`}
         >
@@ -335,5 +335,5 @@ export function SessionCard({
 function surface(isActive: boolean, justFinished: boolean): string {
   if (isActive) return "border-foreground/15 bg-accent"
   if (justFinished) return "border-success/30 bg-success/10"
-  return "border-border/70 hover:border-border hover:bg-accent/50"
+  return "border-border/70 bg-card hover:border-border hover:bg-accent"
 }

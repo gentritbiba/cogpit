@@ -162,7 +162,7 @@ export function WorkflowDetailView({
       )}
 
       <div className="grid items-start gap-6 md:grid-cols-[180px_minmax(0,1fr)]">
-        <nav className="sticky top-0 hidden rounded-lg border bg-card p-2 md:block" aria-label="Workflow phases">
+        <nav className="sticky top-0 hidden rounded-lg border bg-popover p-2 md:block" aria-label="Workflow phases">
           <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">
             Run outline
           </p>

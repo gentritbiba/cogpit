@@ -25,7 +25,7 @@ const streamingMarkdownComponents: Components = {
       )
     }
     return (
-      <pre className="my-1.5 overflow-x-auto rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed">
+      <pre className="my-1.5 overflow-x-auto rounded-md border bg-muted p-2 font-mono text-xs leading-relaxed">
         <code>{String(children).replace(/\n$/, "")}</code>
       </pre>
     )

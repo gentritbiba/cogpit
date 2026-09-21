@@ -282,7 +282,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const scopeLabel = getScopeLabel()
 
   return (
-    <div className="view-transition-file-panel panel-enter-bottom flex h-full min-w-0 flex-col overflow-hidden bg-card">
+    <div className="view-transition-file-panel panel-enter-bottom flex h-full min-w-0 flex-col overflow-hidden bg-canvas">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
         <FileCode2 data-icon="inline-start" className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-foreground">
@@ -413,7 +413,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
       <div className="relative flex-1 min-h-0">
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-background to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-canvas to-transparent transition-opacity duration-200",
             canScrollUp ? "opacity-100" : "opacity-0"
           )}
         />
@@ -459,7 +459,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         </div>
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-background to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-canvas to-transparent transition-opacity duration-200",
             canScrollDown ? "opacity-100" : "opacity-0"
           )}
         />

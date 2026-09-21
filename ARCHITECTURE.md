@@ -188,3 +188,16 @@ the session list, undo, notifications, cost accounting or the config browser.
 Prefer a capability or descriptor field. Some of these areas still contain
 budgeted references from before the agent layer; migrate those references when
 they block the new CLI.
+
+## Theme ownership
+
+`packages/plugin-ui/theme.css` is the shared color contract for the app and plugins. `.theme-layered` defines the translucent surface system; `.dark` switches it from white canvas/black layers to black canvas/white layers. Change `--surface-opacity` there to adjust every layer.
+
+- Page and sidebar shells use `bg-canvas` / `bg-sidebar`. Layout wrappers stay transparent.
+- Cards, editors, tool results and controls use semantic backgrounds (`bg-card`, `bg-background`, `bg-muted`). Nested surfaces compound naturally. Components never check the selected theme.
+- Floating menus, sticky overlays and dialogs use `bg-popover`, an opaque color derived from the canvas and surface opacity so underlying text cannot bleed through.
+- `src/lib/themes.ts` owns theme choices, persistence and root classes. Both the startup module and `useTheme` call it. `build/themeBootstrap.ts` emits that module as a small blocking script for web and Electron, applying the saved theme before the app renders.
+- `src/plugins/runtimeContext.ts` derives the public color-token names from the stylesheet. The sandbox shell applies tokens, mode, locale and motion preferences before plugin code runs and updates them on host events. Plugins use `@cogpit/plugin-ui` without their own theme effects.
+- The shared `HighlightedEditor` serves project files and configuration files. Shiki follows the root mode. `readTerminalTheme` adapts the same tokens to xterm; its canvas and viewport remain transparent, and theme changes preserve the terminal instance and output.
+
+Provider status colors, syntax highlighting and external webpage/media content retain their own meaning. New application surfaces use the shared tokens instead of literal neutral colors or per-theme overrides.

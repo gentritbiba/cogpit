@@ -34,7 +34,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
     const message = this.state.error.message || "An unexpected render error occurred."
     return (
-      <main className="flex h-dvh items-center justify-center bg-background p-6 text-foreground">
+      <main className="flex h-dvh items-center justify-center bg-canvas p-6 text-foreground">
         <Card className="w-full max-w-lg text-center">
           <CardHeader className="justify-items-center">
             <AlertTriangle aria-hidden="true" className="mb-2 size-8 text-destructive" />

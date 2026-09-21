@@ -150,7 +150,7 @@ function IssueRow({ issue, viewer, now, onPickLabel, onShowPull, composePrompt }
   const body = issue.body.trim()
 
   return (
-    <article className="relative pl-3" aria-label={issue.title}>
+    <article className="relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={issue.title}>
       <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", RAIL_CLASS[issue.state])} />
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="group/issue flex items-start gap-1 pr-1">

@@ -45,7 +45,13 @@ const packResult = JSON.parse(pack.stdout)[0]
 const files = packResult.files
 assert.ok(files.some((file) => file.path === "dist/cli.js"))
 assert.ok(files.some((file) => file.path === "dist/web/index.html"))
-assert.ok(files.some((file) => file.path === "dist/web/theme-bootstrap.js"))
+const pageHtml = readFileSync("dist/web/index.html", "utf8")
+assert.match(pageHtml, /<script src="\/theme-bootstrap\.js"><\/script>\s*<\/head>/)
+const pageScripts = [...pageHtml.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)]
+assert.ok(pageScripts.length > 0, "the web app must include its bundled startup code")
+for (const [, src] of pageScripts) {
+  assert.ok(files.some((file) => file.path === `dist/web/${src.replace(/^\//, "")}`), `Missing startup asset: ${src}`)
+}
 assert.ok(files.some((file) => file.path.startsWith("dist/web/assets/")))
 assert.ok(files.some((file) => file.path === "LICENSE"))
 assert.equal(files.find((file) => file.path === "dist/cli.js")?.mode, 0o755)

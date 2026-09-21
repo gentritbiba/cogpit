@@ -13,15 +13,8 @@ export function mountClickUp({ port, context: initialContext }: ClickUpPluginEnt
   const root = createRoot(element)
   let context = initialContext
   let store = createClickUpRuntimeStore(client)
-  let tokens = new Set<string>()
   let disposed = false
   function render() {
-    document.documentElement.classList.toggle("dark", context.theme.mode === "dark")
-    document.documentElement.classList.toggle("reduced-motion", context.reducedMotion)
-    for (const name of tokens) document.documentElement.style.removeProperty(name)
-    tokens = new Set(Object.keys(context.theme.tokens))
-    for (const [name, value] of Object.entries(context.theme.tokens)) document.documentElement.style.setProperty(name, value)
-    document.documentElement.lang = context.locale
     root.render(<RuntimePanel key={context.project?.id ?? "none"} client={client} context={context} store={store} />)
   }
   const unsubscribe = [
@@ -30,7 +23,6 @@ export function mountClickUp({ port, context: initialContext }: ClickUpPluginEnt
       context = next
       render()
     }),
-    client.onThemeChange((theme) => { context = { ...context, theme }; render() }),
     client.onVisibilityChange((visible) => { context = { ...context, visible }; render() }),
   ]
   function dispose() {

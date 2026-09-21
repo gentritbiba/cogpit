@@ -45,7 +45,7 @@ function SearchHeader({ searchInputRef }: SearchHeaderProps): React.JSX.Element 
   const { state: { searchQuery, expandAll }, dispatch } = useAppContext()
   const { actions: { handleToggleExpandAll } } = useSessionContext()
   return (
-    <div className="sticky top-0 border-b bg-background px-3 py-3">
+    <div className="sticky top-0 border-b bg-popover px-3 py-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">Session details</span>
         <Button
@@ -103,7 +103,7 @@ export const StatsPanel = memo(function StatsPanel({
 
   return (
     <aside className={cn(
-      "h-full min-h-0 shrink-0 overflow-y-auto bg-background",
+      "h-full min-h-0 shrink-0 overflow-y-auto bg-canvas",
       isMobile ? "mobile-scroll w-full flex-1" : "w-full",
     )}>
       {searchInputRef && (

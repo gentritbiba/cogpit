@@ -36,7 +36,7 @@ export function PreviewAppShell({
   const { session } = useSessionContext()
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-foreground">
       {session ? (
         <main className="relative flex min-h-0 flex-1 flex-col">
           <ChatArea

@@ -1,3 +1,4 @@
+import type { ThemeId } from "@/lib/themes"
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
 import type { AgentKind } from "@/lib/agents"
@@ -23,10 +24,10 @@ export interface AppConfig {
 // ── Theme ───────────────────────────────────────────────────────────────────
 
 export interface ThemeContext {
-  theme: "dark" | "oled" | "light"
-  activeTheme: "dark" | "oled" | "light"
-  setTheme: (id: "dark" | "oled" | "light") => void
-  setPreview: (id: "dark" | "oled" | "light" | null) => void
+  theme: ThemeId
+  activeTheme: ThemeId
+  setTheme: (id: ThemeId) => void
+  setPreview: (id: ThemeId | null) => void
 }
 
 // ── Combined App Context ────────────────────────────────────────────────────

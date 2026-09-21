@@ -153,7 +153,7 @@ export function WorkspacePanelHost({
   }, [activePanelId])
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-background">
+    <div className="relative h-full min-h-0 overflow-hidden bg-canvas">
       {panels.map((panel) => {
         const selected = panel.id === activePanelId
         const active = selected && hostActive

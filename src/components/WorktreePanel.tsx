@@ -196,7 +196,7 @@ export function WorktreePanel({
 
   return (
     <>
-      <aside aria-label="Worktrees" className="flex size-full min-h-0 flex-col bg-background">
+      <aside aria-label="Worktrees" className="flex size-full min-h-0 flex-col bg-canvas">
         <div className="flex h-10 shrink-0 items-center gap-2 px-3">
           <GitBranch data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Worktrees</h2>

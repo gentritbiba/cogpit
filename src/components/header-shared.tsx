@@ -16,7 +16,7 @@ import type { RawMessage } from "../../shared/session/types"
  * The one surface for everything that floats over the chat pane now that
  * there is no top bar. Callers add their own height (`h-8` / `size-8`).
  */
-export const FLOATING_PILL = "rounded-full border bg-background/80 shadow-sm backdrop-blur"
+export const FLOATING_PILL = "rounded-full border bg-popover shadow-sm"
 
 // ── LiveIndicator ────────────────────────────────────────────────────────────
 

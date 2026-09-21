@@ -416,7 +416,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             {images.map((img, i) => (
               <div key={img.id} className="motion-list-item relative group/thumb">
                 <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
-                <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeImage(i)} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-background p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
+                <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeImage(i)} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
                   <X className="size-3" data-icon="icon" />
                 </Button>
               </div>
@@ -436,7 +436,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}
 
         <div className={cn(
-          "relative overflow-hidden border bg-composer-surface/85 shadow-lg shadow-black/5 backdrop-blur-xl transition-[border-color,box-shadow] duration-150",
+          "relative overflow-hidden border bg-popover shadow-lg shadow-black/5 transition-[border-color,box-shadow] duration-150",
           stacked ? "rounded-3xl" : "rounded-xl",
           getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
           "focus-within:ring-3",
@@ -482,7 +482,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               aria-activedescendant={activeSuggestionId}
               rows={1}
               className={cn(
-                "min-h-0 w-full resize-none rounded-none border-0 bg-transparent text-sm text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent",
+                "min-h-0 w-full resize-none rounded-none border-0 bg-transparent text-sm text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0",
                 getTextareaLayoutClass(stacked, isMultiline, compact),
               )}
             />

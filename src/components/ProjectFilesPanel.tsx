@@ -583,7 +583,7 @@ export function ProjectFilesPanel({
     <aside
       ref={panelRef}
       aria-label="Project files"
-      className="relative flex size-full min-h-0 flex-col bg-background"
+      className="relative flex size-full min-h-0 flex-col bg-canvas"
     >
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
         <FolderTree data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />

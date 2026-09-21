@@ -1,3 +1,4 @@
+@import "@xterm/xterm/css/xterm.css" layer(base);
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
@@ -70,7 +71,7 @@ html.electron .drag-strip {
 }
 
 /* Native window control insets — only in Electron where the title bar is
-   hidden. public/theme-bootstrap.js sets "electron"/"electron-win" on <html>
+   hidden. src/theme-bootstrap.ts sets "electron"/"electron-win" on <html>
    from the user agent. */
 html.electron:not(.electron-win) .window-inset-start {
   padding-left: 84px;
@@ -337,4 +338,13 @@ mark.find-in-session-highlight {
 }
 mark.find-in-session-active {
   background-color: color-mix(in oklab, var(--warning) 65%, transparent);
+}
+
+.xterm .xterm-viewport {
+  background-color: transparent;
+}
+
+.xterm .composition-view {
+  background: var(--popover);
+  color: var(--foreground);
 }

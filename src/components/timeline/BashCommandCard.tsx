@@ -358,7 +358,7 @@ export function BashCommandCard({
         )}
         {commandCount === 1 ? (
           <>
-            <pre className="min-w-0 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
+            <pre className="min-w-0 whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
               <CommandText command={call.command} paths={call.rows[0].analysis.paths} cwd={cwd} />
             </pre>
             <CommandOutput row={call.rows[0]} cwd={cwd} />

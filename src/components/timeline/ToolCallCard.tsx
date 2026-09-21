@@ -152,7 +152,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   }
 
   return (
-    <div className={cn("min-w-0 rounded-lg", showPanel && "bg-muted/25", failed && "bg-destructive/5")} data-tool-call-id={toolCall.id}>
+    <div className={cn("min-w-0 rounded-lg", showPanel && "bg-muted", failed && "bg-destructive/5")} data-tool-call-id={toolCall.id}>
       <button
         type="button"
         className="group/tool flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

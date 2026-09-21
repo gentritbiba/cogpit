@@ -6,33 +6,7 @@ import { Quote } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { usePty } from "@/contexts/PtyContext"
 import { matchesKeybinding } from "@/lib/keybindings"
-import "@xterm/xterm/css/xterm.css"
-
-// ── Theme — hardcoded hex values matching dark theme CSS variables ────────────
-
-const TERMINAL_THEME = {
-  background: "#1a1a2e",
-  foreground: "#f5f5f5",
-  cursor: "#f5f5f5",
-  cursorAccent: "#1a1a2e",
-  selectionBackground: "rgba(255,255,255,0.15)",
-  black: "#1a1a2e",
-  red: "#ff5555",
-  green: "#50fa7b",
-  yellow: "#f1fa8c",
-  blue: "#6272a4",
-  magenta: "#ff79c6",
-  cyan: "#8be9fd",
-  white: "#f8f8f2",
-  brightBlack: "#6272a4",
-  brightRed: "#ff6e6e",
-  brightGreen: "#69ff94",
-  brightYellow: "#ffffa5",
-  brightBlue: "#d6acff",
-  brightMagenta: "#ff92df",
-  brightCyan: "#a4ffff",
-  brightWhite: "#ffffff",
-}
+import { readTerminalTheme } from "@/lib/terminalTheme"
 
 export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onRequestClose, onAddContext }: {
   processId: string
@@ -94,7 +68,7 @@ export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onR
     if (!container) return
 
     const terminal = new Terminal({
-      theme: TERMINAL_THEME,
+      theme: readTerminalTheme(container),
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
       fontSize: 12,
       lineHeight: 1.4,
@@ -110,6 +84,10 @@ export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onR
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(webLinksAddon)
     terminal.open(container)
+    const themeObserver = new MutationObserver(() => {
+      terminal.options.theme = readTerminalTheme(container)
+    })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] })
     terminal.attachCustomKeyEventHandler((event) => {
       if (matchesKeybinding("newIntegratedTerminal", event)) {
         if (event.type === "keydown") shortcutCallbacksRef.current.onRequestNew?.()
@@ -152,6 +130,7 @@ export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onR
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       resizeObserver.disconnect()
+      themeObserver.disconnect()
       dataDisposable.dispose()
       selectionDisposable.dispose()
       pty.unsubscribe(processId)
@@ -168,7 +147,7 @@ export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onR
   }, [])
 
   return (
-    <div className="relative size-full bg-[#1a1a2e]">
+    <div className="relative size-full bg-background">
       <div
         ref={containerRef}
         className="size-full p-1"

@@ -118,7 +118,7 @@ function TaskRow({
   const location = locationLabel(task.folderName, task.listName)
 
   return (
-    <article className="relative pl-3" aria-label={task.name}>
+    <article className="relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={task.name}>
       <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 rounded-full" style={{ backgroundColor: task.status.color }} />
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="group/task flex items-start gap-1 pr-1">

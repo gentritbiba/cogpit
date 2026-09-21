@@ -78,7 +78,7 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
   }, [onConfigured, path, save])
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8 text-foreground">
+    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-8 text-foreground">
       <form
         className="w-full max-w-lg"
         onSubmit={(event) => {

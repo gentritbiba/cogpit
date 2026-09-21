@@ -11,9 +11,9 @@ export type TokenLine = Array<{ content: string; color?: string }>
 export type ToolResultVariant = "boxed" | "unboxed"
 
 const BOXED_CODE_BLOCK_CLASS =
-  "min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground/85"
+  "min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed text-foreground/85"
 export const TOOL_RESULT_CLASS =
-  "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground/85"
+  "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground/85"
 
 export function useHighlightedTokens(
   code: string,

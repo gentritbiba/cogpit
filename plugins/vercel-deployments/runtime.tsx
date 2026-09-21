@@ -19,14 +19,10 @@ export function mountVercel({ port, context: initialContext }: VercelPluginEntry
   let context = initialContext, store = makeStore(), disposed = false
   const openExternal = (url: string) => client.navigation.openExternal(url)
   function render() {
-    document.documentElement.classList.toggle("dark", context.theme.mode === "dark")
-    document.documentElement.classList.toggle("reduced-motion", context.reducedMotion)
-    document.documentElement.lang = context.locale
     root.render(<VercelDeploymentsProvider value={store}><VercelDeploymentsPanel key={context.project?.id ?? "none"} context={{ projectPath: context.project?.id ?? null }} active={context.visible} openExternal={openExternal} /></VercelDeploymentsProvider>)
   }
   const unsubscribe = [
     client.onContextChange(next => { store.dispose(); store = makeStore(); context = next; render() }),
-    client.onThemeChange(theme => { context = { ...context, theme }; render() }),
     client.onVisibilityChange(visible => { context = { ...context, visible }; render() }),
   ]
   function dispose() {

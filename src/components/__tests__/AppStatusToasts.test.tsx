@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AppStatusToasts } from "@/components/AppStatusToasts"
 
@@ -9,13 +9,20 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("sonner", () => ({
-  Toaster: () => <div data-testid="toaster" />,
+  Toaster: ({ theme }: { theme: string }) => <div data-testid="toaster" data-theme={theme} />,
   toast: mocks,
 }))
 
 describe("AppStatusToasts", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it.each([
+    ["layered-light", "light"], ["layered", "dark"], ["light", "light"], ["dark", "dark"], ["oled", "dark"],
+  ] as const)("uses %s presentation for status toasts", (theme, mode) => {
+    render(<AppStatusToasts activeError={null} modelFallbackNotice={null} dismissModelFallbackNotice={vi.fn()} connectionLost={false} theme={theme} />)
+    expect(screen.getByTestId("toaster")).toHaveAttribute("data-theme", mode)
   })
 
   it("publishes errors, model fallbacks, and connection failures with stable IDs", async () => {

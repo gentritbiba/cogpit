@@ -278,11 +278,11 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                   decoding="async"
                   className="max-h-64 max-w-full rounded-lg object-contain sm:max-w-md"
                 />
-                <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
+                <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-border bg-popover text-foreground/70 opacity-80 backdrop-blur transition-[color,opacity] group-hover/image:text-foreground sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
                   <Maximize2 className="size-3.5" data-icon="icon" />
                 </span>
                 {imageUrls.length > 1 && (
-                  <span className="absolute bottom-2 right-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-xs text-white/80">
+                  <span className="absolute bottom-2 right-2 rounded-md bg-popover px-1.5 py-0.5 font-mono text-xs text-foreground/80">
                     {i + 1} / {imageUrls.length}
                   </span>
                 )}

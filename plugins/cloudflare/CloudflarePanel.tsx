@@ -123,7 +123,7 @@ function ExternalLink({ href, children, className }: { href: string; children: R
 function LoadingRows({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-4 px-3 py-4" aria-label={label}>
-      <div className="flex flex-col gap-2 rounded-md border px-3 py-2.5">
+      <div className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2.5">
         <Skeleton className="h-2.5 w-16" />
         <Skeleton className="h-3.5 w-3/4" />
         <Skeleton className="h-2.5 w-1/2" />
@@ -164,7 +164,7 @@ function BindingList({ bindings, emptyText }: { bindings: readonly { name: strin
 
 function Configuration({ workspace, environment }: { workspace: CloudflareWorkspace; environment: CloudflareEnvironment }) {
   return (
-    <section aria-label="Configuration" className="mx-3 mt-3 rounded-md border px-3 py-2.5">
+    <section aria-label="Configuration" className="mx-3 mt-3 rounded-md border bg-card px-3 py-2.5">
       <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Configuration · {workspace.configPath}</p>
       <dl className="flex flex-col gap-1">
         <Fact label="Worker">{environment.workerName}</Fact>
@@ -251,7 +251,7 @@ function DeploymentRow({ deployment, rowKey, now, fetchVersion }: { deployment: 
 
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
-      <article className="group/deployment relative pl-3" aria-label={title}>
+      <article className="group/deployment relative rounded-md bg-card py-2 pl-3 pr-2" aria-label={title}>
         <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5 rounded-full", deployment.triggeredBy === "rollback" ? "bg-warning" : "bg-border")} />
         <CollapsibleTrigger
           className="flex w-full min-w-0 flex-col gap-0.5 rounded-sm px-1 py-1 text-left outline-none hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/20"

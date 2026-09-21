@@ -3,6 +3,8 @@
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --color-canvas: var(--canvas);
+  --color-selection: var(--selection);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -65,6 +67,13 @@
   --motion-distance-md: 8px;
   --motion-distance-lg: 12px;
   --motion-stagger-step: 20ms;
+  --canvas: var(--background);
+  --selection: rgba(0, 0, 0, 0.2);
+  --terminal-selection: color-mix(in srgb, var(--foreground) 20%, var(--canvas));
+  --terminal-black: #171717;
+  --terminal-white: #fafafa;
+  --terminal-magenta: #b83ba4;
+  --terminal-cyan: #008fa3;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -109,6 +118,10 @@
 }
 
 .dark {
+  --selection: rgba(255, 255, 255, 0.2);
+  --terminal-magenta: #e879f9;
+  --terminal-cyan: #22d3ee;
+  --canvas: var(--background);
   --background: oklch(0.105 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.13 0 0);
@@ -186,12 +199,41 @@
   --sidebar-ring: oklch(0.439 0 0);
 }
 
+.theme-layered {
+  --surface-opacity: 3%;
+  --canvas: #fff;
+  --surface-rgb: 0 0 0;
+  --surface: rgb(var(--surface-rgb) / var(--surface-opacity));
+  --surface-hover: rgb(var(--surface-rgb) / calc(var(--surface-opacity) * 2));
+  --background: var(--surface);
+  --card: var(--surface);
+  --secondary: var(--surface);
+  --muted: var(--surface);
+  --muted-foreground: oklch(0.5 0 0);
+  --prompt-surface: var(--surface);
+  --composer-surface: var(--surface);
+  --sidebar: var(--canvas);
+  --accent: var(--surface-hover);
+  --sidebar-accent: var(--surface-hover);
+  --border: rgb(var(--surface-rgb) / 8%);
+  --input: var(--border);
+  --sidebar-border: var(--border);
+  /* Portals need a canvas beneath their layers to cover the page behind them. */
+  --popover: color-mix(in srgb, var(--canvas), rgb(var(--surface-rgb)) calc(var(--surface-opacity) * 2));
+}
+
+.dark.theme-layered {
+  --canvas: #000;
+  --surface-rgb: 255 255 255;
+  --muted-foreground: oklch(0.708 0 0);
+}
+
 @layer base {
   * {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
     font-family: var(--font-sans);
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     font-optical-sizing: auto;
@@ -207,4 +249,3 @@
     cursor: pointer;
   }
 }
-

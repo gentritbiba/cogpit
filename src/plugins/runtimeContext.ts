@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react"
 import type { PluginContext, PluginManifest } from "@cogpit/plugin-contracts"
 import type { PluginProjectSummary } from "../../shared/contracts/pluginManagement"
+import themeCss from "../../packages/plugin-ui/theme.css?raw"
 
 export const PLUGIN_THEME_TOKENS = [
-  "--background", "--foreground", "--card", "--card-foreground", "--popover", "--popover-foreground",
-  "--primary", "--primary-foreground", "--secondary", "--secondary-foreground", "--muted", "--muted-foreground",
-  "--accent", "--accent-foreground", "--destructive", "--destructive-foreground", "--success", "--success-foreground",
-  "--warning", "--warning-foreground", "--info", "--info-foreground", "--border", "--input", "--ring", "--radius",
-] as const
+  ...Array.from(themeCss.matchAll(/--color-[\w-]+:\s*var\((--[\w-]+)\)/g), (match) => match[1]),
+  "--surface-opacity", "--surface-rgb", "--surface", "--surface-hover", "--radius", "--font-sans", "--font-mono",
+]
 type Presentation = Pick<PluginContext, "theme" | "locale" | "reducedMotion">
 
 export function readPluginPresentation(): Presentation {

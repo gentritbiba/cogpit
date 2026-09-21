@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath, URL } from "node:url"
 import { manualChunks } from "./build/manualChunks"
+import { themeBootstrap } from "./build/themeBootstrap"
 
 export default defineConfig({
   main: {
@@ -44,6 +45,7 @@ export default defineConfig({
       },
     },
     plugins: [
+      themeBootstrap(),
       react({
         babel: {
           plugins: [["babel-plugin-react-compiler"]],

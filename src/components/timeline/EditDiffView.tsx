@@ -505,12 +505,12 @@ export function EditDiffView({
   return (
     <>
       <div className={cn(
-        "overflow-hidden rounded border border-border bg-muted/20",
+        "overflow-hidden rounded border border-border bg-muted",
         isCompact && "mt-1.5",
         hideHeader && "border-0 rounded-none"
       )}>
         {!hideHeader && (
-          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border bg-muted/40 px-2 py-1">
+          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-border bg-muted px-2 py-1">
             <span className="truncate font-mono text-xs text-muted-foreground">
               {shortPath}
             </span>
@@ -543,7 +543,7 @@ export function EditDiffView({
 
       {isCompact && (
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-          <DialogContent className="flex max-h-[85vh] flex-col border-border bg-background sm:max-w-4xl">
+          <DialogContent className="flex max-h-[85vh] flex-col border-border bg-popover sm:max-w-4xl">
             <DialogHeader>
               <DialogTitle className="font-mono text-sm text-foreground flex min-w-0 flex-wrap items-center gap-3 [overflow-wrap:anywhere]">
                 {filePath}

@@ -54,7 +54,7 @@ function DesktopSessionContent({
   if (!session) return null
 
   return (
-    <div className="flex min-h-0 flex-1 bg-background">
+    <div className="flex min-h-0 flex-1">
       <div className="relative flex h-full min-h-0 flex-1 flex-col">
         {floatingChrome}
         {sessionView.teamMembersBar && (
@@ -142,7 +142,7 @@ function DesktopMainView({
     return (
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+          "flex min-h-0 min-w-0 flex-1 flex-col",
           // Before the first message there is no transcript to sit above, so the
           // composer becomes the page instead of hugging the bottom edge.
           !hasPendingTurns && "justify-center gap-4",
@@ -313,7 +313,7 @@ export function DesktopWorkspace({
   )
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">
           <PrimarySessionBrowser navigation={navigation} header={sidebarHeader} />

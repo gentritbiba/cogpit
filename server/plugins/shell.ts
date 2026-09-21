@@ -15,6 +15,8 @@ const script = String.raw`(() => {
     let previousTokens = []
     const applyTheme = (theme) => {
       document.documentElement.style.colorScheme = theme.mode
+      document.documentElement.classList.toggle("dark", theme.mode === "dark")
+      document.documentElement.classList.toggle("theme-layered", Boolean(theme.tokens["--surface"]))
       for (const key of previousTokens) document.documentElement.style.removeProperty(key)
       previousTokens = Object.keys(theme.tokens)
       for (const [key, value] of Object.entries(theme.tokens)) document.documentElement.style.setProperty(key, String(value))
@@ -75,7 +77,7 @@ const script = String.raw`(() => {
   })
 })()`
 const hash = createHash("sha256").update(script).digest("base64")
-export const PLUGIN_SHELL_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cogpit plugin</title></head><body><script>${script}</script></body></html>`
+export const PLUGIN_SHELL_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cogpit plugin</title><style>html,body{height:100%;margin:0}body{background:var(--canvas,var(--background));color:var(--foreground)}[data-reduced-motion="true"] *,[data-reduced-motion="true"] *::before,[data-reduced-motion="true"] *::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;scroll-behavior:auto!important}</style></head><body><script>${script}</script></body></html>`
 export const PLUGIN_SHELL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy": `default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'none'; script-src 'sha256-${hash}' blob:; style-src 'unsafe-inline'; img-src blob:; font-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'; sandbox allow-scripts`,

@@ -112,6 +112,7 @@
     "electron": "^41.10.4",
     "electron-builder": "^26.15.3",
     "electron-vite": "5.0.0",
+    "esbuild": "0.25.12",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "globals": "^15.14.0",

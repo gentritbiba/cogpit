@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest"
 import { ThemeSelectorModal } from "@/components/ThemeSelectorModal"
 
 describe("ThemeSelectorModal", () => {
-  it("previews focused themes and applies the selected theme", async () => {
+  it.each([
+    ["light", "Light"],
+    ["layered-light", "Layered Light"],
+  ] as const)("previews and selects %s", async (id, name) => {
     const user = userEvent.setup()
     const onClose = vi.fn()
     const onSelectTheme = vi.fn()
@@ -20,15 +23,15 @@ describe("ThemeSelectorModal", () => {
       />,
     )
 
-    const lightTheme = screen.getByRole("button", { name: /Light/ })
+    const lightTheme = screen.getByRole("button", { name })
     lightTheme.focus()
 
     await waitFor(() => {
-      expect(onPreviewTheme).toHaveBeenLastCalledWith("light")
+      expect(onPreviewTheme).toHaveBeenLastCalledWith(id)
     })
 
     await user.click(lightTheme)
-    expect(onSelectTheme).toHaveBeenCalledWith("light")
+    expect(onSelectTheme).toHaveBeenCalledWith(id)
     expect(onClose).toHaveBeenCalledOnce()
   })
 })

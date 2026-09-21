@@ -368,7 +368,7 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
       />
       {focused && (
         <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
-          <span className="rounded-full bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground shadow-xs backdrop-blur-sm">
+          <span className="rounded-full bg-popover px-2 py-0.5 text-[10px] text-muted-foreground shadow-xs">
             {KEYBOARD_HINT}
           </span>
         </div>

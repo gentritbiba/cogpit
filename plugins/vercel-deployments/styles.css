@@ -1,6 +1,2 @@
 @import "@cogpit/plugin-ui/styles.css";
 @source "./VercelDeploymentsPanel.tsx";
-.reduced-motion *, .reduced-motion *::before, .reduced-motion *::after {
-  animation-duration: 1ms !important; animation-iteration-count: 1 !important;
-  transition-duration: 1ms !important; scroll-behavior: auto !important;
-}

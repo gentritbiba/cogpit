@@ -26,7 +26,7 @@ export function SharedSessionView({ info }: SharedSessionViewProps) {
   return (
     <ShareScopedProviders info={info}>
       {(view: ShareViewState) => (
-        <div className="flex h-dvh min-h-0 flex-col bg-background">
+        <div className="flex h-dvh min-h-0 flex-col bg-canvas">
           <header className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
             <Users className="size-4 text-muted-foreground" aria-hidden="true" />
             <h1 className="truncate text-sm font-medium text-foreground">{info.title}</h1>
