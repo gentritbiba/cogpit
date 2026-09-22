@@ -15,9 +15,9 @@ vi.mock("../PluginFrame", () => ({ PluginFrame: (props: PluginFrameProps) => {
   if (props.active) frame.current = props
   return <div data-testid="plugin-frame" />
 } }))
-function setup(overrides: Partial<RuntimePluginPanelProps> = {}, strict = false) {
+function setup(overrides: Partial<RuntimePluginPanelProps> = {}, strict = false, extras: Partial<Pick<RuntimePanelClient, "resolveSession" | "sessionHandle">> = {}) {
   const client = { lease: vi.fn<RuntimePanelClient["lease"]>(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), payload: vi.fn(async () => new ArrayBuffer(2)),
-    renewLease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), revokeLease: vi.fn(async () => {}), call: vi.fn(async () => null) }
+    renewLease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })), revokeLease: vi.fn(async () => {}), call: vi.fn(async () => null), ...extras }
   const props: RuntimePluginPanelProps = { client, plugin: panelPlugin, activation: "host-session-1", registryRevision: 1, project: panelProject,
     context: panelWorkspace, active: true, closePanel: vi.fn(), ...overrides }
   const element = <RuntimePluginPanel {...props} />
@@ -75,6 +75,27 @@ describe("installed runtime panel", () => {
     await waitFor(() => expect(value.client.lease).toHaveBeenCalledTimes(5))
     expect(value.client.revokeLease).toHaveBeenCalledTimes(4)
     expect(screen.getAllByTestId("plugin-frame")).toHaveLength(1)
+  })
+  it("names the open session to a plugin granted session identity, by handle only", async () => {
+    const handle = `s_${"c".repeat(48)}`
+    const sessionHandle = vi.fn(async () => handle)
+    const manifest = { ...panelPlugin.manifest, permissions: { ...panelPlugin.manifest.permissions, context: ["session.identity" as const] } }
+    const address = { dirName: "-private-repo", fileName: "session-a.jsonl" }
+    const value = setup({ plugin: { ...panelPlugin, manifest }, context: { ...panelWorkspace, sessionAddress: address } }, false, { sessionHandle })
+    await screen.findByTestId("plugin-frame")
+    await waitFor(() => expect(frame.current?.context.session).toEqual({ handle }))
+    expect(sessionHandle).toHaveBeenCalledWith("lease-1", address, expect.any(AbortSignal))
+    expect(JSON.stringify(frame.current?.context)).not.toContain("session-a.jsonl")
+    value.rerender(<RuntimePluginPanel {...value.props} context={{ ...panelWorkspace, sessionAddress: null }} />)
+    await waitFor(() => expect(frame.current?.context.session).toBeNull())
+    expect(sessionHandle).toHaveBeenCalledTimes(1)
+  })
+  it("does not name the open session to a plugin without session identity", async () => {
+    const sessionHandle = vi.fn(async () => `s_${"c".repeat(48)}`)
+    setup({ context: { ...panelWorkspace, sessionAddress: { dirName: "-private-repo", fileName: "session-a.jsonl" } } }, false, { sessionHandle })
+    await screen.findByTestId("plugin-frame")
+    expect(frame.current?.context).not.toHaveProperty("session")
+    expect(sessionHandle).not.toHaveBeenCalled()
   })
   it("keeps the loaded panel when switching sessions within the same workspace", async () => {
     const value = setup(); await screen.findByTestId("plugin-frame")

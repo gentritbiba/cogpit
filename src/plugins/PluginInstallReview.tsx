@@ -8,17 +8,21 @@ const integrationLabels: Readonly<Record<string, string>> = {
   issues: "issues", deployments: "deployments", buildLogs: "build logs", workspace: "Worker configuration and account", version: "version details",
 }
 
+function integrationLine(integrationId: string, operation: string): string {
+  if (operation === "pullSessions") return "Read related Cogpit sessions for the selected GitHub repository"
+  if (operation === "mergePull") return "Merge pull requests in the selected GitHub repository when you confirm, using this host's signed-in CLI"
+  return `Read ${integrationNames[integrationId]} ${integrationLabels[operation]} using this host's signed-in CLI`
+}
+
 function accessLines(manifest: PluginManifest): string[] {
   const permissions = manifest.permissions
   return [
-    ...permissions.context.map(() => "Read the selected project's name and plugin identifier"),
+    ...permissions.context.map((kind) => kind === "session.identity" ? "Recognise the open session among related sessions, by handle only" : "Read the selected project's name and plugin identifier"),
     ...permissions.composer.map(() => "Append text to your draft message"),
     ...permissions.navigation.map((kind) => kind === "external" ? "Ask Cogpit to open HTTPS links" : "Open permitted sessions"),
     ...(permissions.storage ? [`Store up to ${permissions.storage.quotaKiB} KiB of ${permissions.storage.scope} settings`] : []),
     ...permissions.connections.flatMap((connection) => connection.operations.map((operation) => `Use connection ${connection.id}: ${operation}`)),
-    ...permissions.integrations.flatMap((integration) => integration.operations.map((operation) => operation === "pullSessions"
-      ? "Read related Cogpit sessions for the selected GitHub repository"
-      : `Read ${integrationNames[integration.id]} ${integrationLabels[operation]} using this host's signed-in CLI`)),
+    ...permissions.integrations.flatMap((integration) => integration.operations.map((operation) => integrationLine(integration.id, operation))),
   ]
 }
 

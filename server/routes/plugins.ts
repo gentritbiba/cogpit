@@ -53,7 +53,7 @@ export function registerPluginRoutes(use: UseFn): void {
       return
     }
     const recognized = ["/session", "/status", "/workspace/resolve", "/publishers", "/stage", "/stage-seed", "/leases", "/connections", "/connections/credential", "/connections/options", "/connections/select", "/connections/disconnect", "/connections/clear-data", "/connections/import-legacy"].includes(path)
-      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|session))?$/.test(path)
+      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|session|session-handle))?$/.test(path)
     if (!recognized) { sendJson(res, 404, { code: "NOT_FOUND", error: "Unknown plugin endpoint" }); return }
     const requestAbort = new AbortController()
     const abort = () => requestAbort.abort()
@@ -232,6 +232,13 @@ export function registerPluginRoutes(use: UseFn): void {
           const address = await manager.resolveSession(req, id, handle, requestAbort.signal)
           authorize()
           sendJson(res, 200, address)
+          return
+        }
+        if (method === "POST" && operation === "session-handle") {
+          const address = z.strictObject({ dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await readJsonBody(req, { maxBytes: 32_768 }))
+          const handle = await manager.presentSession(req, id, address, requestAbort.signal)
+          authorize()
+          sendJson(res, 200, handle)
           return
         }
         if (method === "POST" && operation === "call") {

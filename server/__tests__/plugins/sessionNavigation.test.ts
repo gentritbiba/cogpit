@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ resolve: vi.fn(), meta: vi.fn(), sessionId: vi.fn() }))
+const mocks = vi.hoisted(() => ({ resolve: vi.fn(), meta: vi.fn(), sessionId: vi.fn(), sessionAddress: vi.fn() }))
 vi.mock("../../sessionPaths", () => ({ resolveSessionFilePath: mocks.resolve }))
 vi.mock("../../sessionMetadata", () => ({ getSessionMeta: mocks.meta }))
-vi.mock("../../agents", () => ({ storeForDirName: () => ({ descriptor: { sessionFile: { sessionId: mocks.sessionId } } }) }))
+vi.mock("../../agents", () => ({ storeForDirName: () => ({ descriptor: { sessionFile: { sessionId: mocks.sessionId } }, sessionAddress: mocks.sessionAddress }) }))
 import { PluginSessionNavigation } from "../../plugins/sessionNavigation"
 import type { PluginLease } from "../../plugins/leases"
 import type { GitHubPullSession, GitHubPullSessionsResponse } from "../../../shared/contracts/github"
@@ -35,6 +35,7 @@ beforeEach(async () => {
   mocks.resolve.mockReset().mockResolvedValue(transcript)
   mocks.meta.mockReset().mockResolvedValue({ cwd: workspace, sessionId: address.sessionId })
   mocks.sessionId.mockReset().mockReturnValue(null)
+  mocks.sessionAddress.mockReset().mockResolvedValue({ dirName: address.dirName, fileName: address.fileName })
 })
 afterEach(async () => { controller.abort(); await rm(root, { recursive: true, force: true }) })
 
@@ -125,6 +126,48 @@ describe("lease-bound session navigation", () => {
       return { cwd: workspace, sessionId: address.sessionId }
     })
     await expect(navigation.resolve(lease, presented(), authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
+  })
+
+  it("names the open session with the same handle its pull request listing carries", async () => {
+    const { handle } = await navigation.presentCurrent(lease, address, authorize)
+    expect(handle).toMatch(/^s_[a-f0-9]{48}$/)
+    expect(presented()).toBe(handle)
+    await expect(navigation.presentCurrent(lease, address, authorize)).resolves.toEqual({ handle })
+    await expect(navigation.resolve(lease, handle, authorize)).resolves.toEqual({ dirName: address.dirName, fileName: address.fileName })
+  })
+
+  it("keys the handle by the inventory's address when the client names the transcript by id placeholder", async () => {
+    const placeholder = { dirName: address.dirName, fileName: `${address.sessionId}.jsonl` }
+    const { handle } = await navigation.presentCurrent(lease, placeholder, authorize)
+    expect(mocks.resolve).toHaveBeenCalledWith(placeholder.dirName, placeholder.fileName)
+    expect(mocks.sessionAddress).toHaveBeenCalledWith(transcript)
+    expect(presented()).toBe(handle)
+    await expect(navigation.resolve(lease, handle, authorize)).resolves.toEqual({ dirName: address.dirName, fileName: address.fileName })
+    mocks.sessionAddress.mockResolvedValueOnce(null)
+    await expect(navigation.presentCurrent(lease, placeholder, authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
+  })
+
+  it("issues a fresh handle when the transcript at the address is a different session", async () => {
+    const { handle } = await navigation.presentCurrent(lease, address, authorize)
+    mocks.meta.mockResolvedValue({ cwd: workspace, sessionId: "another-session" })
+    const { handle: other } = await navigation.presentCurrent(lease, address, authorize)
+    expect(other).not.toBe(handle)
+    expect(navigation.present(lease, response([{ ...session, sessionId: "another-session" }])).sessions[0].handle).toBe(other)
+  })
+
+  it("refuses to name a session outside the lease's workspace, without one, or for a revoked lease", async () => {
+    const other = join(root, "other-worktree")
+    await mkdir(other)
+    mocks.meta.mockResolvedValue({ cwd: other, sessionId: address.sessionId })
+    await expect(navigation.presentCurrent(lease, address, authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
+    mocks.meta.mockResolvedValue({ cwd: workspace, sessionId: address.sessionId })
+    await expect(navigation.presentCurrent({ ...lease, workspacePath: null }, address, authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
+    mocks.resolve.mockResolvedValueOnce(null)
+    await expect(navigation.presentCurrent(lease, address, authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
+    const denied = vi.fn().mockRejectedValue(new Error("No longer authorized"))
+    await expect(navigation.presentCurrent(lease, address, denied)).rejects.toThrow("No longer authorized")
+    controller.abort()
+    await expect(navigation.presentCurrent(lease, address, authorize)).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
   })
 
   it("bounds each response and evicts older handles after the lease handle budget is reached", async () => {

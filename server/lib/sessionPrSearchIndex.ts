@@ -19,8 +19,11 @@ interface IndexEntry extends SessionPullRequestData {
   mtimeMs: number
 }
 
+/** Bumped whenever the scanner learns a transcript shape, so cached misses are scanned again. */
+const INDEX_VERSION = 2
+
 interface PersistedIndex {
-  version: 1
+  version: typeof INDEX_VERSION
   entries: Array<[string, IndexEntry]>
 }
 
@@ -77,7 +80,7 @@ async function loadIndex(): Promise<void> {
       const parsed: unknown = JSON.parse(raw)
       if (typeof parsed !== "object" || parsed === null) return
       const candidate = parsed as Partial<PersistedIndex>
-      if (candidate.version !== 1 || !Array.isArray(candidate.entries)) return
+      if (candidate.version !== INDEX_VERSION || !Array.isArray(candidate.entries)) return
       entries = new Map(candidate.entries.filter(
         (item): item is [string, IndexEntry] => (
           Array.isArray(item) && typeof item[0] === "string" && isIndexEntry(item[1])
@@ -98,7 +101,7 @@ async function loadIndex(): Promise<void> {
 async function persistIndex(expectedGeneration: number): Promise<void> {
   if (expectedGeneration !== generation || !activeIndexPath) return
   await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
-  const payload: PersistedIndex = { version: 1, entries: [...entries] }
+  const payload: PersistedIndex = { version: INDEX_VERSION, entries: [...entries] }
   await writeOwnerOnlyJson(activeIndexPath, payload)
 }
 

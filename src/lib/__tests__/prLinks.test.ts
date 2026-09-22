@@ -244,6 +244,45 @@ const CODEX_RESULT = JSON.stringify({
   payload: { type: "function_call_output", call_id: "call_1", output: "https://github.com/o/r/pull/22" },
 })
 
+/** Codex's unified exec: the tool output arrives before the command finishes and holds nothing. */
+const CODEX_UNIFIED_CREATE = JSON.stringify({
+  type: "response_item",
+  timestamp: "2026-09-21T17:16:02.000Z",
+  payload: {
+    type: "custom_tool_call",
+    call_id: "call_unified",
+    name: "exec",
+    input: "text(await tools.exec_command({cmd:\"gh pr create --repo HonestCMS/cms --title 'Unified exec'\",\"workdir\":\"/repo\"}));\n",
+  },
+})
+
+const CODEX_UNIFIED_EARLY_OUTPUT = JSON.stringify({
+  type: "response_item",
+  timestamp: "2026-09-21T17:16:03.000Z",
+  payload: {
+    type: "custom_tool_call_output",
+    call_id: "call_unified",
+    output: [{ type: "input_text", text: "Script completed\nOutput:\n" }, { type: "input_text", text: "{\"chunk_id\":\"96bfc5\",\"session_id\":78736,\"output\":\"\"}" }],
+  },
+})
+
+const CODEX_UNIFIED_COMPLETED = JSON.stringify({
+  type: "event_msg",
+  timestamp: "2026-09-21T17:16:05.000Z",
+  payload: {
+    type: "item_completed",
+    item: {
+      type: "CommandExecution",
+      id: "exec-8c0bd464",
+      command: ["/bin/zsh", "-lc", "gh pr create --repo HonestCMS/cms --title 'Unified exec'"],
+      status: "completed",
+      stdout: "https://github.com/HonestCMS/cms/pull/198\n",
+      aggregated_output: "https://github.com/HonestCMS/cms/pull/198\n",
+      exit_code: 0,
+    },
+  },
+})
+
 const COPILOT_CREATE = JSON.stringify({
   type: "tool.execution_start",
   id: "event-1",
@@ -287,6 +326,14 @@ describe("scanPullRequests", () => {
     const prs = scanPullRequests(`${CODEX_CREATE}\n${CODEX_RESULT}\n`)
     expect(prs).toHaveLength(1)
     expect(prs[0]).toMatchObject({ number: 22, title: "From Codex", toolCallId: "call_1" })
+  })
+
+  it("reads a Codex unified exec create from its completed command item", () => {
+    const prs = scanPullRequests(`${CODEX_UNIFIED_CREATE}\n${CODEX_UNIFIED_EARLY_OUTPUT}\n${CODEX_UNIFIED_COMPLETED}\n`)
+    expect(prs).toHaveLength(1)
+    expect(prs[0]).toMatchObject({ number: 198, repo: "HonestCMS/cms", title: "Unified exec", toolCallId: "exec-8c0bd464", timestamp: "2026-09-21T17:16:05.000Z" })
+    const failed = CODEX_UNIFIED_COMPLETED.replace('"exit_code":0', '"exit_code":1')
+    expect(scanPullRequests(`${CODEX_UNIFIED_CREATE}\n${failed}\n`)).toEqual([])
   })
 
   it("pairs Copilot tool events with their output", () => {

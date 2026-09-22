@@ -4,6 +4,8 @@ import type {
   GitHubActionsRunsResponse,
   GitHubErrorResponse,
   GitHubIssuesResponse,
+  GitHubMergeMethod,
+  GitHubMergePullResponse,
   GitHubPullFilesResponse,
   GitHubPullSessionsResponse,
   GitHubPullsResponse,
@@ -60,7 +62,8 @@ export function createGitHubStore(client: Pick<PluginClient, "integrations">) {
   const controller = new AbortController()
   const resource = <T>(input: GitHubIntegrationRequest, pollIntervalMs: number, fallbackError: string, settling?: (data: T) => boolean): ResourceDefinition<T> => ({ input, pollIntervalMs, fallbackError, stores: new Map(), client, signal: controller.signal, settling })
   const actions = resource<GitHubActionsRunsResponse>({ integration: "github", operation: "actions", limit: 20 }, 10000, "Unable to load GitHub Actions")
-  const pulls = resource<GitHubPullsResponse>({ integration: "github", operation: "pulls", limit: 30 }, 30000, "Unable to load pull requests")
+  // GitHub computes mergeability lazily, so a first answer of "unknown" resolves on a quick re-read.
+  const pulls = resource<GitHubPullsResponse>({ integration: "github", operation: "pulls", limit: 30 }, 30000, "Unable to load pull requests", data => data.pulls.some(pull => pull.mergeState === "unknown"))
   const issues = resource<GitHubIssuesResponse>({ integration: "github", operation: "issues", limit: 30 }, 60000, "Unable to load issues")
   const pullSessions = resource<GitHubPullSessionsResponse>({ integration: "github", operation: "pullSessions" }, 30000, "Unable to match sessions to pull requests", data => data.pending > 0)
   return {
@@ -68,6 +71,7 @@ export function createGitHubStore(client: Pick<PluginClient, "integrations">) {
     details: {
       actionsJobs: (_projectKey: string, runId: number) => request<GitHubActionsJobsResponse>(client, { integration: "github", operation: "actionJobs", runId }, controller.signal),
       pullFiles: (_projectKey: string, number: number) => request<GitHubPullFilesResponse>(client, { integration: "github", operation: "pullFiles", number }, controller.signal),
+      mergePull: (_projectKey: string, number: number, method: GitHubMergeMethod, headSha: string) => request<GitHubMergePullResponse>(client, { integration: "github", operation: "mergePull", number, method, headSha }, controller.signal),
     },
     dispose() {
       controller.abort()

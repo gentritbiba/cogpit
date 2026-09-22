@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
-import { executeGitHubIntegration, runGitHubApi, type GitHubDependencies } from "../../plugins/integrations/github"
+import { executeGitHubIntegration, runGitHubApi, runGitHubMutation, type GitHubDependencies } from "../../plugins/integrations/github"
 
 function fixture() {
   const controller = new AbortController()
@@ -13,10 +13,44 @@ function fixture() {
     resolveProject: vi.fn().mockResolvedValue({ ok: true, root: "/repo", projectPath: "/repo" }),
     git: vi.fn().mockImplementation(async (_cwd, args) => ({ stdout: args[0] === "remote" ? "git@github.com:acme/app.git" : "main", stderr: "" })),
     githubApi: vi.fn().mockResolvedValue({ workflow_runs: [] }),
+    githubMutate: vi.fn().mockResolvedValue({ merged: true, sha: "c".repeat(40), message: "Pull Request successfully merged" }),
     githubGraphql: vi.fn(), pullRequestSessions: vi.fn(),
   }
   return { controller, authorize, deps, context: { workspacePath: "/repo", signal: controller.signal, authorize } }
 }
+const headSha = "b".repeat(40)
+
+describe("GitHub merge operation", () => {
+  it("merges through the REST endpoint with the method and head commit pinned", async () => {
+    const { deps, context } = fixture()
+    await expect(executeGitHubIntegration({ integration: "github", operation: "mergePull", number: 128, method: "squash", headSha }, context, deps))
+      .resolves.toEqual({ repository: "acme/app", number: 128, merged: true, sha: "c".repeat(40), message: "Pull Request successfully merged" })
+    expect(deps.githubMutate).toHaveBeenCalledWith({ host: "github.com", owner: "acme", name: "app" }, "PUT", "repos/acme/app/pulls/128/merge", { merge_method: "squash", sha: headSha }, context.signal)
+  })
+  it.each([
+    { number: 0, headSha },
+    { number: 1.5, headSha },
+    { number: 128, headSha: "abc123" },
+  ])("refuses a malformed merge target before contacting GitHub: %o", async (target) => {
+    const { deps, context } = fixture()
+    await expect(executeGitHubIntegration({ integration: "github", operation: "mergePull", method: "merge", ...target }, context, deps)).rejects.toMatchObject({ status: 400 })
+    expect(deps.githubMutate).not.toHaveBeenCalled()
+  })
+  it("rejects a merge GitHub reports as not performed", async () => {
+    const { deps, context } = fixture()
+    vi.mocked(deps.githubMutate).mockResolvedValueOnce({ merged: "yes" })
+    await expect(executeGitHubIntegration({ integration: "github", operation: "mergePull", number: 128, method: "merge", headSha }, context, deps)).rejects.toMatchObject({ code: "invalid_response" })
+  })
+  it.skipIf(process.platform === "win32")("surfaces GitHub's reason and status when the CLI reports a refused merge", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "cogpit-github-merge-"))
+    await writeFile(join(directory, "gh"), `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ message: "Pull Request is not mergeable" }))\nprocess.stderr.write("gh: Pull Request is not mergeable (HTTP 405)\\n")\nprocess.exit(1)\n`, { mode: 0o700 })
+    vi.stubEnv("PATH", `${directory}${delimiter}${dirname(process.execPath)}`)
+    try {
+      await expect(runGitHubMutation({ host: "github.com", owner: "acme", name: "app" }, "PUT", "repos/acme/app/pulls/128/merge", { merge_method: "merge", sha: headSha }))
+        .rejects.toMatchObject({ status: 405, code: "github_api_failed", message: "GitHub declined the change: Pull Request is not mergeable" })
+    } finally { vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true }) }
+  })
+})
 describe("GitHub native integration cancellation and authority", () => {
   it.skipIf(process.platform === "win32")("terminates an actual CLI request when its activation is canceled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "cogpit-github-cli-")), marker = join(directory, "started")

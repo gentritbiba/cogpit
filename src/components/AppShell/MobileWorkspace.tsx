@@ -51,6 +51,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
 
   const context: WorkspacePanelContext = {
     session,
+    sessionAddress: sessionSource ? { dirName: sessionSource.dirName, fileName: sessionSource.fileName } : null,
     sessionChangeKey: state.sessionChangeKey,
     projectPath: project.currentCwd ?? null,
     hasFileChanges: project.hasFileChanges,

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { CONTRACT_LIMITS, type JsonValue } from "./json.js"
 import { parseSchema } from "./schema.js"
 
-const githubOperations = ["actions", "actionJobs", "pulls", "pullFiles", "pullSessions", "issues"] as const
+const githubOperations = ["actions", "actionJobs", "pulls", "pullFiles", "pullSessions", "issues", "mergePull"] as const
 const vercelOperations = ["deployments", "buildLogs"] as const
 const cloudflareOperations = ["workspace", "deployments", "version"] as const
 const operations = <T extends readonly [string, ...string[]]>(values: T) => z.array(z.enum(values)).min(1).max(values.length).refine(list => new Set(list).size === list.length, "Duplicate operation")
@@ -24,6 +24,7 @@ const githubRequestSchema = z.discriminatedUnion("operation", [
   z.strictObject({ ...github, operation: z.literal("pullFiles"), number: positive }),
   z.strictObject({ ...github, operation: z.literal("pullSessions") }),
   z.strictObject({ ...github, operation: z.literal("issues"), limit: positive.max(50).optional() }),
+  z.strictObject({ ...github, operation: z.literal("mergePull"), number: positive, method: z.enum(["merge", "squash", "rebase"]), headSha: z.string().regex(/^[0-9a-f]{40}$/) }),
 ])
 const vercelRequestSchema = z.discriminatedUnion("operation", [
   z.strictObject({ ...vercel, operation: z.literal("deployments"), limit: positive.max(30).optional() }),

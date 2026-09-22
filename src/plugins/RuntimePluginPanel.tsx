@@ -1,5 +1,5 @@
 import { X } from "lucide-react"
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { InstalledPlugin } from "../../shared/contracts/plugins"
 import type { PluginProjectSummary } from "../../shared/contracts/pluginManagement"
@@ -71,6 +71,18 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   const canOpenSession = plugin.manifest.permissions.navigation.includes("session") && !!context.openSession
   const workspacePath = project ? context.projectPath : null
   const canOpenExternal = plugin.manifest.permissions.navigation.includes("external")
+  const address = plugin.manifest.permissions.context.includes("session.identity") && client.sessionHandle && workspacePath ? context.sessionAddress ?? null : null
+  const dirName = address?.dirName ?? null, fileName = address?.fileName ?? null
+  const [sessionHandle, setSessionHandle] = useState<{ leaseId: string; dirName: string; fileName: string; handle: string } | null>(null)
+  useEffect(() => {
+    if (!loaded || !dirName || !fileName) return
+    const controller = new AbortController()
+    client.sessionHandle!(loaded.leaseId, { dirName, fileName }, controller.signal)
+      .then((handle) => { if (!controller.signal.aborted) setSessionHandle({ leaseId: loaded.leaseId, dirName, fileName, handle }) })
+      .catch(() => { /* A session outside this workspace, or one the host cannot name, simply has no handle. */ })
+    return () => controller.abort()
+  }, [client, loaded, dirName, fileName])
+  const currentHandle = sessionHandle && loaded && sessionHandle.leaseId === loaded.leaseId && sessionHandle.dirName === dirName && sessionHandle.fileName === fileName ? sessionHandle.handle : null
   useLayoutEffect(() => {
     const runtime = createRuntimePanelActivation({ client, pluginId, digest, projectId, workspacePath, contextEpoch, active: currentActive.current,
       ...(canAppend ? { appendDraft: (text: string) => composePrompt.current?.(text) } : {}),
@@ -83,6 +95,6 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>
   if (!loaded) return <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>
   return <><PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
-    context={pluginPanelContext(plugin.manifest, project, active, presentation)} active={active} title={title ?? plugin.manifest.name}
+    context={pluginPanelContext(plugin.manifest, project, active, presentation, currentHandle)} active={active} title={title ?? plugin.manifest.name}
     execute={loaded.runtime.execute} onError={loaded.runtime.fail} />{dialog}</>
 }

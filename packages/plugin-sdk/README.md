@@ -35,4 +35,4 @@ if (result.ok) renderPulls(result.data)
 else showSetupMessage(result.error.code)
 ```
 
-The host permits only the fixed read operations in the contracts. Workspace paths and CLI arguments are not request parameters. GitHub `pullSessions` returns opaque handles for `navigation.openSession`; storage addresses never enter the frame. Require `navigation.session` on the client when using session links.
+The host permits only the fixed operations in the contracts. Workspace paths and CLI arguments are not request parameters. GitHub `pullSessions` returns opaque handles for `navigation.openSession`; storage addresses never enter the frame. Require `navigation.session` on the client when using session links. With the `session.identity` context permission, `client.context.session` carries the open chat session as the same kind of handle (or `null`), and `onContextChange` fires when it changes; compare it with `pullSessions` handles to recognise the current session. GitHub `mergePull` is the one write: it takes a pull request number, a merge method the repository allows and the full head SHA the plugin last displayed.

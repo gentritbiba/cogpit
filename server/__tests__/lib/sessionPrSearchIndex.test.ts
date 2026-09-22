@@ -45,6 +45,23 @@ afterEach(() => {
 })
 
 describe("getSessionPrSearchSnapshot", () => {
+  it("discards a persisted index written by an older scanner and scans again", async () => {
+    writeFileSync(file, `${command("gh pr view 157 --repo honest-cms/site")}\n`)
+    const stale = candidate()
+    writeFileSync(join(dir, "pr-search-index.json"), JSON.stringify({
+      version: 1,
+      entries: [[file, { size: stale.size, mtimeMs: stale.mtimeMs, pullRequests: [], references: [] }]],
+    }))
+
+    const initial = await getSessionPrSearchSnapshot([candidate()])
+    expect(initial.pending).toBe(1)
+    await vi.waitFor(async () => {
+      const completed = await getSessionPrSearchSnapshot([candidate()])
+      expect(completed.pending).toBe(0)
+      expect(completed.byFile.get(file)?.references[0]?.number).toBe(157)
+    })
+  })
+
   it("indexes transcripts in the background and reloads the durable result", async () => {
     writeFileSync(file, `${command("gh pr view 157 --repo honest-cms/site")}\n`)
 

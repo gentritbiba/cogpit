@@ -11,8 +11,11 @@ const theme = z.strictObject({
   mode: z.enum(["light", "dark"]),
   tokens: z.record(z.string().regex(/^--[a-z][a-z0-9-]{0,63}$/u), boundedText(256)).refine((value) => Object.keys(value).length <= 64),
 })
+const sessionHandle = z.string().regex(/^s_[a-f0-9]{48}$/u)
+/** The open chat session as an opaque handle, present only for plugins granted `session.identity`. */
+const session = z.strictObject({ handle: sessionHandle }).nullable().optional()
 export const pluginContextSchema = z.strictObject({
-  project, theme, locale: z.string().min(1).max(64), reducedMotion: z.boolean(), visible: z.boolean(),
+  project, theme, locale: z.string().min(1).max(64), reducedMotion: z.boolean(), visible: z.boolean(), session,
 })
 export type PluginContext = z.infer<typeof pluginContextSchema>
 export function parsePluginContext(value: unknown): PluginContext { return parseSchema(pluginContextSchema, value, CONTRACT_LIMITS.responseBytes) }
@@ -68,6 +71,8 @@ export type PluginEvent =
   | { protocol: 1; type: "event"; event: "context"; value: PluginContext }
   | { protocol: 1; type: "event"; event: "theme"; value: PluginContext["theme"] }
   | { protocol: 1; type: "event"; event: "visibility"; value: boolean }
+  /** The open chat session changed under a live panel; unlike `context`, in-flight requests stay valid. */
+  | { protocol: 1; type: "event"; event: "session"; value: { handle: string } | null }
   | { protocol: 1; type: "event"; event: "dispose"; value: null }
 export type FrameMessage = PluginRequest | PluginEvent
   | { protocol: 1; type: "result"; id: string; value: JsonValue }
@@ -78,6 +83,7 @@ const eventSchema = z.discriminatedUnion("event", [
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("context"), value: pluginContextSchema }),
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("theme"), value: theme }),
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("visibility"), value: z.boolean() }),
+  z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("session"), value: z.strictObject({ handle: sessionHandle }).nullable() }),
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("dispose"), value: z.null() }),
 ])
 const envelopeSchema = z.union([

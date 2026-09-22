@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { GitHubErrorResponse } from "@cogpit/plugin-integrations"
 import { toErrorResponse } from "./githubStore.js"
 
@@ -12,21 +12,24 @@ const EMPTY_STATE: LazyResourceState<never> = { data: null, error: null, loading
 
 /**
  * Detail behind a collapsible row: fetched the first time it opens, and again
- * on every open while `stale` says the row is still moving.
+ * on every open while `stale` says the row is still moving. A row that starts
+ * open fetches on mount.
  */
 export function useExpandable<T>(
   fetchDetail: () => Promise<T>,
   fallbackError: string,
   stale = false,
+  initiallyOpen = false,
 ): {
   open: boolean
   state: LazyResourceState<T>
   onOpenChange: (next: boolean) => void
 } {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(initiallyOpen)
   const [state, setState] = useState<LazyResourceState<T>>(EMPTY_STATE)
+  const pendingInitialLoad = useRef(initiallyOpen)
 
-  async function load(): Promise<void> {
+  const load = useCallback(async (): Promise<void> => {
     if (state.loading) return
     setState((current) => ({ ...current, error: null, loading: true }))
     try {
@@ -34,7 +37,13 @@ export function useExpandable<T>(
     } catch (error) {
       setState({ data: null, error: toErrorResponse(error, fallbackError), loading: false })
     }
-  }
+  }, [fetchDetail, fallbackError, state.loading])
+
+  useEffect(() => {
+    if (!pendingInitialLoad.current) return
+    pendingInitialLoad.current = false
+    void load()
+  }, [load])
 
   function onOpenChange(next: boolean): void {
     setOpen(next)

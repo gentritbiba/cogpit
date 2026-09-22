@@ -126,6 +126,23 @@ describe("runtime frame controller", () => {
     expect(value.onDispose).toHaveBeenCalledOnce()
     expect(value.port1.closed).toBe(true)
   })
+  it("announces a changed open session as its own event while keeping in-flight requests alive", async () => {
+    let signal!: AbortSignal
+    const value = fixture((_request, current) => { signal = current; return new Promise<JsonValue>(() => {}) })
+    await connect(value)
+    value.port1.receive(request("r1", "storage.get", { key: "setting" }))
+    const session = { handle: `s_${"a".repeat(48)}` }
+    value.controller.updateContext({ ...context, session })
+    expect(value.port1.sent).toContainEqual({ protocol: 1, type: "event", event: "session", value: session })
+    expect(signal.aborted).toBe(false)
+    const sessionEvents = () => value.port1.sent.filter((message) => (message as { event?: string }).event === "session")
+    value.controller.updateContext({ ...context, session: null })
+    expect(sessionEvents()).toHaveLength(2)
+    expect(sessionEvents()[1]).toMatchObject({ value: null })
+    value.controller.updateContext({ ...context, session: null })
+    expect(sessionEvents()).toHaveLength(2)
+    expect(value.port1.sent.some((message) => (message as { event?: string }).event === "context")).toBe(false)
+  })
   it("suspends hidden panels and cancels in-flight requests", async () => {
     let signal!: AbortSignal
     const execute = vi.fn((_request: PluginRequest, current: AbortSignal) => { signal = current; return new Promise<JsonValue>(() => {}) })

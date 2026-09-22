@@ -178,7 +178,10 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
       if (!delivered) return
       if (old.locale !== next.locale || old.reducedMotion !== next.reducedMotion) {
         cancelAll(false, true); post({ protocol: 1, type: "event", event: "context", value: { ...next, visible: active } })
-      } else if (JSON.stringify(old.theme) !== JSON.stringify(next.theme)) post({ protocol: 1, type: "event", event: "theme", value: next.theme })
+      } else {
+        if (old.session?.handle !== next.session?.handle) post({ protocol: 1, type: "event", event: "session", value: next.session ?? null })
+        if (JSON.stringify(old.theme) !== JSON.stringify(next.theme)) post({ protocol: 1, type: "event", event: "theme", value: next.theme })
+      }
     },
   }
 }

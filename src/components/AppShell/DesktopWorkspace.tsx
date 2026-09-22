@@ -265,6 +265,7 @@ export function DesktopWorkspace({
 
   const panelContext: WorkspacePanelContext = {
     session,
+    sessionAddress: sessionSource ? { dirName: sessionSource.dirName, fileName: sessionSource.fileName } : null,
     sessionChangeKey: state.sessionChangeKey,
     projectPath: project.currentCwd ?? null,
     hasFileChanges: project.hasFileChanges,

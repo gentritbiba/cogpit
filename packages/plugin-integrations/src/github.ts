@@ -70,6 +70,22 @@ export interface GitHubActionsJobsResponse {
 export type GitHubPullState = "open" | "draft" | "merged" | "closed"
 export type GitHubPullChecks = "success" | "failure" | "pending"
 export type GitHubPullReview = "approved" | "changes_requested" | "review_required"
+/**
+ * GitHub's verdict on merging right now. `clean` and `unstable` (non-required
+ * checks failing) merge; `behind` merges unless protection requires an
+ * up-to-date branch; `blocked` waits on reviews or required checks; `unknown`
+ * means GitHub is still computing and the answer arrives on the next poll.
+ */
+export type GitHubPullMergeState = "clean" | "unstable" | "behind" | "blocked" | "conflicts" | "unknown"
+export type GitHubMergeMethod = "merge" | "squash" | "rebase"
+
+/** How far the head commit's checks have come, counted across every check run and commit status. */
+export interface GitHubPullCheckProgress {
+  total: number
+  completed: number
+  /** At least one check reports from GitHub Actions in this repository. */
+  actions: boolean
+}
 
 export interface GitHubPullRequest {
   number: number
@@ -85,12 +101,18 @@ export interface GitHubPullRequest {
   closedAt: string | null
   /** Rolled-up result of the checks on the head commit; null when the commit has none. */
   checks: GitHubPullChecks | null
+  /** Per-check progress behind `checks`; null when the commit has none. */
+  checkProgress: GitHubPullCheckProgress | null
   /** GitHub's review decision; null when the repository requires no review. */
   review: GitHubPullReview | null
   /** The signed-in GitHub user is a requested reviewer. */
   reviewRequested: boolean
   conflicts: boolean
   comments: number
+  /** Null once the pull request is merged, closed or still a draft. */
+  mergeState: GitHubPullMergeState | null
+  /** Full SHA of the head commit, pinned on merge so a changed branch is never merged unseen. */
+  headSha: string
 }
 
 export type GitHubPullFileStatus =
@@ -116,7 +138,18 @@ export interface GitHubPullsResponse {
   branch: string | null
   /** GitHub login of the signed-in user, for "mine" filters. */
   viewer: string | null
+  /** Merge methods the repository allows, with the viewer's usual one first. */
+  mergeMethods: GitHubMergeMethod[]
   pulls: GitHubPullRequest[]
+}
+
+export interface GitHubMergePullResponse {
+  repository: string
+  number: number
+  merged: boolean
+  /** SHA of the merge commit, when GitHub reports one. */
+  sha: string | null
+  message: string
 }
 
 /** An opaque host-authorized reference to a session associated with these pull requests. */

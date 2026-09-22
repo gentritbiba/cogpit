@@ -610,6 +610,15 @@ export class PluginManager {
     } finally { context.dispose() }
   }
 
+  async presentSession(req: IncomingMessage, leaseId: string, address: { dirName: string; fileName: string }, signal?: AbortSignal): Promise<{ handle: string }> {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal }, lease)
+    try {
+      if (!context.plugin.manifest.permissions.context.includes("session.identity")) throw new PluginDataError("PERMISSION_REQUIRED", "Session identity has not been granted")
+      return await this.sessionNavigation.presentCurrent(lease, address, context.guard)
+    } finally { context.dispose() }
+  }
+
   async call(req: IncomingMessage, leaseId: string, request: PluginRequest, options: { signal?: AbortSignal } = {}): Promise<JsonValue> {
     const lease = this.resolveLease(req, leaseId)
     options.signal?.throwIfAborted()

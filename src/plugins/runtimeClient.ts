@@ -246,6 +246,10 @@ export class RuntimePluginClient {
   async resolveSession(id: string, handle: string, signal: AbortSignal): Promise<{ dirName: string; fileName: string }> {
     return z.strictObject({ dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await this.json(`leases/${encodeURIComponent(id)}/session`, { handle }, "POST", signal))
   }
+  /** The opaque handle a plugin on this lease sees for the open session. */
+  async sessionHandle(id: string, address: { dirName: string; fileName: string }, signal: AbortSignal): Promise<string> {
+    return z.strictObject({ handle: z.string().regex(/^s_[a-f0-9]{48}$/) }).parse(await this.json(`leases/${encodeURIComponent(id)}/session-handle`, address, "POST", signal)).handle
+  }
   async resolveWorkspace(workspacePath: string, signal: AbortSignal): Promise<PluginProjectSummary | null> {
     return pluginProjectSchema.nullable().parse(await this.json("workspace/resolve", { workspacePath }, "POST", signal))
   }

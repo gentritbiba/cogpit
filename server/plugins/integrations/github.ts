@@ -13,10 +13,14 @@ import type {
   GitHubIssueLabel,
   GitHubIssueLinkedPull,
   GitHubIssuesResponse,
+  GitHubMergeMethod,
+  GitHubMergePullResponse,
+  GitHubPullCheckProgress,
   GitHubPullChecks,
   GitHubPullFile,
   GitHubPullFileStatus,
   GitHubPullFilesResponse,
+  GitHubPullMergeState,
   GitHubPullRequest,
   GitHubPullReview,
   GitHubPullSessionsResponse,
@@ -80,6 +84,8 @@ export interface GitHubDependencies {
   resolveProject: typeof resolveGitProject
   git: (cwd: string, args: string[], signal?: AbortSignal) => Promise<{ stdout: string; stderr: string }>
   githubApi: (repository: GitHubRepository, endpoint: string, signal?: AbortSignal) => Promise<unknown>
+  /** A write to the REST API; `fields` become string form fields of the request body. */
+  githubMutate: (repository: GitHubRepository, method: "PUT", endpoint: string, fields: Record<string, string>, signal?: AbortSignal) => Promise<unknown>
   githubGraphql: (
     repository: GitHubRepository,
     query: string,
@@ -91,13 +97,17 @@ export interface GitHubDependencies {
 
 /**
  * One request for the whole pull request list, including the signals the list
- * endpoint leaves out: check rollup, review decision, requested reviewers,
- * merge conflicts, and comment count.
+ * endpoint leaves out: check rollup with its individual runs, review decision,
+ * requested reviewers, merge state, and comment count.
  */
 export const PULLS_QUERY = `
 query($owner: String!, $name: String!, $first: Int!) {
   viewer { login }
   repository(owner: $owner, name: $name) {
+    mergeCommitAllowed
+    squashMergeAllowed
+    rebaseMergeAllowed
+    viewerDefaultMergeMethod
     pullRequests(first: $first, orderBy: { field: UPDATED_AT, direction: DESC }) {
       nodes {
         number
@@ -108,6 +118,7 @@ query($owner: String!, $name: String!, $first: Int!) {
         url
         author { login }
         headRefName
+        headRefOid
         baseRefName
         createdAt
         updatedAt
@@ -115,12 +126,26 @@ query($owner: String!, $name: String!, $first: Int!) {
         mergedAt
         reviewDecision
         mergeable
+        mergeStateStatus
+        viewerCanUpdate
         comments { totalCount }
         reviewRequests(first: 30) {
           nodes { requestedReviewer { ... on User { login } } }
         }
         commits(last: 1) {
-          nodes { commit { statusCheckRollup { state } } }
+          nodes { commit { statusCheckRollup {
+            state
+            contexts(first: 20) {
+              totalCount
+              checkRunCountsByState { state count }
+              statusContextCount
+              nodes {
+                __typename
+                ... on CheckRun { detailsUrl }
+                ... on StatusContext { state targetUrl }
+              }
+            }
+          } } }
         }
       }
     }
@@ -297,6 +322,64 @@ function nodes(value: unknown): unknown[] {
   return Array.isArray(list) ? list : []
 }
 
+const ACTIONS_RUN_URL = /^https:\/\/[^/]+\/[^/]+\/[^/]+\/actions\/runs\/\d+/
+
+/**
+ * Check runs are counted by GitHub; commit statuses only carry a state per
+ * node, so a pending one past the loaded page counts as done and the ring
+ * fills a touch early for repositories with many external statuses.
+ */
+function checkProgress(rollup: Record<string, unknown> | null): GitHubPullCheckProgress | null {
+  const contexts = record(rollup?.contexts)
+  const total = numberValue(contexts?.totalCount) ?? 0
+  if (total === 0) return null
+  const runStates = Array.isArray(contexts?.checkRunCountsByState) ? contexts.checkRunCountsByState : []
+  const completedRuns = runStates.reduce<number>((sum, entry) => {
+    const item = record(entry)
+    return item?.state === "COMPLETED" ? sum + (numberValue(item.count) ?? 0) : sum
+  }, 0)
+  let pendingStatuses = 0
+  let actions = false
+  for (const node of nodes(contexts)) {
+    const context = record(node)
+    if (!context) continue
+    if (context.__typename === "CheckRun") {
+      if (ACTIONS_RUN_URL.test(stringValue(context.detailsUrl))) actions = true
+    } else {
+      if (context.state === "PENDING" || context.state === "EXPECTED") pendingStatuses += 1
+      if (ACTIONS_RUN_URL.test(stringValue(context.targetUrl))) actions = true
+    }
+  }
+  const statuses = numberValue(contexts?.statusContextCount) ?? 0
+  const completed = Math.min(total, completedRuns + Math.max(0, statuses - pendingStatuses))
+  return { total, completed, actions }
+}
+
+function pullMergeState(source: Record<string, unknown>, state: GitHubPullState): GitHubPullMergeState | null {
+  if (state !== "open") return null
+  if (source.viewerCanUpdate === false) return "blocked"
+  switch (source.mergeStateStatus) {
+    case "CLEAN": case "HAS_HOOKS": return "clean"
+    case "UNSTABLE": return "unstable"
+    case "BEHIND": return "behind"
+    case "BLOCKED": return "blocked"
+    case "DIRTY": return "conflicts"
+    default: return source.mergeable === "CONFLICTING" ? "conflicts" : "unknown"
+  }
+}
+
+const MERGE_METHODS: Record<string, GitHubMergeMethod> = { MERGE: "merge", SQUASH: "squash", REBASE: "rebase" }
+
+function mergeMethods(repository: Record<string, unknown> | null): GitHubMergeMethod[] {
+  const allowed: GitHubMergeMethod[] = []
+  if (repository?.mergeCommitAllowed === true) allowed.push("merge")
+  if (repository?.squashMergeAllowed === true) allowed.push("squash")
+  if (repository?.rebaseMergeAllowed === true) allowed.push("rebase")
+  const preferred = MERGE_METHODS[stringValue(repository?.viewerDefaultMergeMethod)]
+  if (!preferred || !allowed.includes(preferred)) return allowed
+  return [preferred, ...allowed.filter((method) => method !== preferred)]
+}
+
 function parsePull(value: unknown, viewer: string): GitHubPullRequest | null {
   const source = record(value)
   if (!source) return null
@@ -305,7 +388,7 @@ function parsePull(value: unknown, viewer: string): GitHubPullRequest | null {
   if (number === null || !url.startsWith("https://")) return null
   const mergedAt = nullableString(source.mergedAt)
   const state = pullStateOf(source)
-  const headCommit = record(nodes(source.commits)[0])?.commit
+  const rollup = record(record(record(nodes(source.commits)[0])?.commit)?.statusCheckRollup)
   const reviewers = nodes(source.reviewRequests)
     .map((request) => stringValue(record(record(request)?.requestedReviewer)?.login))
 
@@ -321,12 +404,23 @@ function parsePull(value: unknown, viewer: string): GitHubPullRequest | null {
     createdAt: stringValue(source.createdAt),
     updatedAt: stringValue(source.updatedAt),
     closedAt: mergedAt ?? nullableString(source.closedAt),
-    checks: pullChecks(record(record(headCommit)?.statusCheckRollup)?.state),
+    checks: pullChecks(rollup?.state),
+    checkProgress: checkProgress(rollup),
     review: pullReview(source.reviewDecision),
     reviewRequested: viewer !== "" && reviewers.includes(viewer),
     conflicts: source.mergeable === "CONFLICTING",
     comments: numberValue(record(source.comments)?.totalCount) ?? 0,
+    mergeState: pullMergeState(source, state),
+    headSha: stringValue(source.headRefOid),
   }
+}
+
+export function parseMergeResponse(value: unknown, number: number): Omit<GitHubMergePullResponse, "repository"> {
+  const source = record(value)
+  if (!source || typeof source.merged !== "boolean") {
+    throw new GitHubRouteError(502, "invalid_response", "GitHub returned an invalid merge response")
+  }
+  return { number, merged: source.merged, sha: nullableString(source.sha), message: stringValue(source.message) }
 }
 
 function parsePullFile(value: unknown): GitHubPullFile | null {
@@ -422,15 +516,17 @@ export function parseIssuesResponse(value: unknown): { viewer: string | null; is
   }
 }
 
-export function parsePullsResponse(value: unknown): { viewer: string | null; pulls: GitHubPullRequest[] } {
+export function parsePullsResponse(value: unknown): { viewer: string | null; mergeMethods: GitHubMergeMethod[]; pulls: GitHubPullRequest[] } {
   const data = record(record(value)?.data)
-  const list = record(record(data?.repository)?.pullRequests)?.nodes
+  const repository = record(data?.repository)
+  const list = record(repository?.pullRequests)?.nodes
   if (!data || !Array.isArray(list)) {
     throw new GitHubRouteError(502, "invalid_response", "GitHub returned an invalid pull request response")
   }
   const viewer = stringValue(record(data.viewer)?.login)
   return {
     viewer: viewer || null,
+    mergeMethods: mergeMethods(repository),
     pulls: list.map((node) => parsePull(node, viewer)).filter((pull): pull is GitHubPullRequest => pull !== null),
   }
 }
@@ -466,7 +562,23 @@ export function runGitHubGraphql(
   return runGh(args, signal)
 }
 
-async function runGh(args: string[], signal?: AbortSignal): Promise<unknown> {
+export function runGitHubMutation(
+  repository: GitHubRepository,
+  method: "PUT",
+  endpoint: string,
+  fields: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const args = ["api", "-X", method, endpoint, "--hostname", repository.host, "-H", "Accept: application/vnd.github+json"]
+  for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
+  return runGh(args, signal, { refusal: "GitHub declined the change" })
+}
+
+/** `gh api` reports a refused request as `gh: <reason> (HTTP <status>)` on stderr. */
+const GH_HTTP_FAILURE = /^gh: (.+?) \(HTTP (\d{3})\)/m
+
+/** With `refusal`, a request GitHub turned down surfaces its reason under that prefix instead of the generic failure. */
+async function runGh(args: string[], signal?: AbortSignal, options: { refusal?: string } = {}): Promise<unknown> {
   try {
     const result = await execFile("gh", args, {
       signal,
@@ -487,7 +599,11 @@ async function runGh(args: string[], signal?: AbortSignal): Promise<unknown> {
     if (/auth login|not logged|authentication|oauth token/i.test(detail)) {
       throw new GitHubRouteError(503, "gh_auth_required", "Sign in with `gh auth login` to view this repository on GitHub")
     }
-    throw new GitHubRouteError(502, "github_api_failed", "GitHub data is unavailable")
+    const refused = options.refusal ? GH_HTTP_FAILURE.exec(failure.stderr ?? "") : null
+    if (refused) {
+      throw new GitHubRouteError(Number(refused[2]), "github_api_failed", `${options.refusal}: ${refused[1].slice(0, 200)}`)
+    }
+    throw new GitHubRouteError(502, "github_api_failed", options.refusal ?? "GitHub data is unavailable")
   }
 }
 
@@ -495,6 +611,7 @@ const defaultDependencies: GitHubDependencies = {
   resolveProject: resolveGitProject,
   git: runGit,
   githubApi: runGitHubApi,
+  githubMutate: runGitHubMutation,
   githubGraphql: runGitHubGraphql,
   pullRequestSessions: listProjectPullRequestSessions,
 }
@@ -538,7 +655,7 @@ function repositoryUrl(repository: GitHubRepository): string {
   return `https://${repository.host}/${repository.owner}/${repository.name}`
 }
 
-export type GitHubIntegrationResponse = GitHubActionsRunsResponse | GitHubActionsJobsResponse | GitHubPullsResponse | GitHubIssuesResponse | GitHubPullSessionsResponse | GitHubPullFilesResponse
+export type GitHubIntegrationResponse = GitHubActionsRunsResponse | GitHubActionsJobsResponse | GitHubPullsResponse | GitHubIssuesResponse | GitHubPullSessionsResponse | GitHubPullFilesResponse | GitHubMergePullResponse
 
 export async function executeGitHubIntegration(
   input: GitHubIntegrationRequest,
@@ -554,11 +671,13 @@ export async function executeGitHubIntegration(
     resolveProject: cwd => guarded(() => dependencies.resolveProject(cwd, context.signal)),
     git: (cwd, args) => guarded(() => dependencies.git(cwd, args, context.signal)),
     githubApi: (repository, endpoint) => guarded(() => dependencies.githubApi(repository, endpoint, context.signal)),
+    githubMutate: (repository, method, endpoint, fields) => guarded(() => dependencies.githubMutate(repository, method, endpoint, fields, context.signal)),
     githubGraphql: (repository, query, variables) => guarded(() => dependencies.githubGraphql(repository, query, variables, context.signal)),
     pullRequestSessions: (projectPath, repository) => guarded(() => dependencies.pullRequestSessions(projectPath, repository)),
   }
   if (input.operation === "actionJobs" && (!Number.isSafeInteger(input.runId) || input.runId < 1)) throw new GitHubRouteError(400, "github_api_failed", "runId must be a positive integer")
-  if (input.operation === "pullFiles" && (!Number.isSafeInteger(input.number) || input.number < 1)) throw new GitHubRouteError(400, "github_api_failed", "number must be a positive integer")
+  if ((input.operation === "pullFiles" || input.operation === "mergePull") && (!Number.isSafeInteger(input.number) || input.number < 1)) throw new GitHubRouteError(400, "github_api_failed", "number must be a positive integer")
+  if (input.operation === "mergePull" && !/^[0-9a-f]{40}$/.test(input.headSha)) throw new GitHubRouteError(400, "github_api_failed", "headSha must be a full commit SHA")
   const { repository, branch, projectPath } = await resolveRepository(context.workspacePath, deps, check)
   const name = repositoryName(repository), url = repositoryUrl(repository)
   switch (input.operation) {
@@ -574,7 +693,11 @@ export async function executeGitHubIntegration(
     case "pulls": {
       const limit = clampLimit(input.limit?.toString() ?? null, DEFAULT_PULLS, MAX_PULLS)
       const result = parsePullsResponse(await deps.githubGraphql(repository, PULLS_QUERY, { owner: repository.owner, name: repository.name, first: limit }))
-      return { repository: name, repositoryUrl: url, branch, viewer: result.viewer, pulls: result.pulls.slice(0, limit) }
+      return { repository: name, repositoryUrl: url, branch, viewer: result.viewer, mergeMethods: result.mergeMethods, pulls: result.pulls.slice(0, limit) }
+    }
+    case "mergePull": {
+      const result = await deps.githubMutate(repository, "PUT", `repos/${name}/pulls/${input.number}/merge`, { merge_method: input.method, sha: input.headSha })
+      return { repository: name, ...parseMergeResponse(result, input.number) }
     }
     case "issues": {
       const limit = clampLimit(input.limit?.toString() ?? null, DEFAULT_ISSUES, MAX_ISSUES)

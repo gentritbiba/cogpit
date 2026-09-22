@@ -126,6 +126,23 @@ describe("plugin client", () => {
     port.receive({ protocol: 1, type: "event", event: "context", value: context })
     await Promise.resolve(); expect(listener).toHaveBeenCalledTimes(1)
   })
+  it("swaps the open session in place, notifying context listeners without canceling active requests", async () => {
+    const { port, client } = fixture()
+    const listener = vi.fn()
+    client.onContextChange(listener)
+    const pending = client.storage.get("setting")
+    const session = { handle: `s_${"b".repeat(48)}` }
+    port.receive({ protocol: 1, type: "event", event: "session", value: session })
+    await Promise.resolve()
+    expect(client.context.session).toEqual(session)
+    expect(Object.isFrozen(client.context)).toBe(true)
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ session }))
+    port.reply(0, true)
+    await expect(pending).resolves.toBe(true)
+    port.receive({ protocol: 1, type: "event", event: "session", value: null })
+    await Promise.resolve()
+    expect(client.context.session).toBeNull()
+  })
   it("updates theme and visibility separately without canceling active requests", async () => {
     const { port, client } = fixture()
     const pending = client.storage.get("setting")

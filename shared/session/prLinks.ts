@@ -265,6 +265,18 @@ export function createPullRequestScanner(): PullRequestScanner {
     if (match) recordReference({ number: Number(match[3]), repo: `${match[1]}/${match[2]}` })
   }
 
+  /**
+   * The unified exec tool answers its call as soon as the command starts, so
+   * a create's url only arrives later, on the completed CommandExecution item
+   * that repeats the command beside its output.
+   */
+  function recordCompletedCommand(item: unknown, timestamp: string) {
+    if (!isRecord(item) || item.type !== "CommandExecution" || typeof item.id !== "string") return
+    recordToolCall(item.id, item, timestamp)
+    const output = item.aggregated_output ?? item.stdout ?? item.formatted_output
+    recordResult(item.id, output, typeof item.exit_code === "number" && item.exit_code !== 0)
+  }
+
   /** Codex serializes tool arguments as a JSON string. */
   function parseArgs(raw: unknown): Record<string, unknown> {
     if (isRecord(raw)) return raw
@@ -304,6 +316,8 @@ export function createPullRequestScanner(): PullRequestScanner {
         recordToolCall(payload.call_id, parseArgs(payload.arguments ?? payload.input), timestamp)
       } else if (type === "function_call_output" || type === "custom_tool_call_output") {
         recordResult(payload.call_id, payload.output, false)
+      } else if (type === "item_completed") {
+        recordCompletedCommand(payload.item, timestamp)
       }
       return
     }

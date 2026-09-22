@@ -13,6 +13,8 @@ export interface ProjectPromptContext {
 /** Stable workspace data available to every compile-time panel plugin. */
 export interface WorkspacePanelContext {
   session: ParsedSession | null
+  /** Storage address of `session`, for hosts that need to name it to a server. */
+  sessionAddress?: { dirName: string; fileName: string } | null
   sessionChangeKey: number
   projectPath: string | null
   hasFileChanges: boolean

@@ -177,6 +177,26 @@ describe("wire schema", () => {
     expect(parsePluginContext(context)).toEqual(context)
     expect(() => parsePluginContext({ ...context, session: { transcript: "private" } })).toThrow()
   })
+  it("carries the open session only as an opaque handle", () => {
+    const context = { project: null, theme: { mode: "light", tokens: {} }, locale: "en", visible: true, reducedMotion: false }
+    const handle = `s_${"a".repeat(48)}`
+    expect(parsePluginContext({ ...context, session: { handle } })).toEqual({ ...context, session: { handle } })
+    expect(parsePluginContext({ ...context, session: null })).toEqual({ ...context, session: null })
+    for (const session of [{ handle: "session.jsonl" }, { handle, dirName: "-repo" }, { handle, title: "Fix checkout" }, { id: "abc" }]) {
+      expect(() => parsePluginContext({ ...context, session })).toThrow(ContractValidationError)
+    }
+    const event = { protocol: 1, type: "event", event: "session", value: { handle } }
+    expect(parseFrameMessage(event)).toEqual(event)
+    expect(parseFrameMessage({ ...event, value: null })).toEqual({ ...event, value: null })
+    expect(() => parseFrameMessage({ ...event, value: { handle, fileName: "session.jsonl" } })).toThrow(ContractValidationError)
+  })
+  it("grants session identity as a context permission alongside project identity", () => {
+    const input = manifestInput()
+    expect(parseManifest({ ...input, permissions: { context: ["project.identity", "session.identity"] } }).permissions.context).toEqual(["project.identity", "session.identity"])
+    for (const context of [["session.identity", "session.identity"], ["session.transcript"], ["project.identity", "project.identity"]]) {
+      expect(() => parseManifest({ ...input, permissions: { context } })).toThrow(ContractValidationError)
+    }
+  })
 })
 
 
@@ -200,6 +220,14 @@ describe("native integration contracts", () => {
     }
     const cloudflare = { integration: "cloudflare", operation: "version", environment: "staging", versionId: "a5d6631d-f96f-4917-bec2-5a31678c58fe" }
     expect(parseIntegrationRequest(cloudflare)).toEqual(cloudflare)
+  })
+  it("pins a merge to a pull request number, an allowed method and the full head commit", () => {
+    const merge = { integration: "github", operation: "mergePull", number: 128, method: "squash", headSha: "b".repeat(40) }
+    expect(parseIntegrationRequest(merge)).toEqual(merge)
+    for (const invalid of [{ ...merge, headSha: "b".repeat(7) }, { ...merge, method: "fast-forward" }, { ...merge, number: 0 }, { ...merge, deleteBranch: true }, { ...merge, headSha: undefined }]) {
+      expect(() => parseIntegrationRequest(invalid)).toThrow(ContractValidationError)
+    }
+    expect(parseManifest({ ...manifestInput(), permissions: { integrations: [{ id: "github", operations: ["pulls", "mergePull"] }] } }).permissions.integrations[0].operations).toEqual(["pulls", "mergePull"])
   })
   it("accepts read grants and rejects duplicate or unknown grants", () => {
     const input = manifestInput()

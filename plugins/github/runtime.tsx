@@ -17,7 +17,7 @@ function RuntimeGitHubPanel({ client, context, store }: { client: PluginClient; 
   }
   return <GitHubStoreProvider value={store}>
     {error && <p role="alert" className="border-b p-3 text-xs text-destructive">{error}</p>}
-    <GitHubPanel active={context.visible} context={{ projectKey: context.project?.id ?? null,
+    <GitHubPanel active={context.visible} context={{ projectKey: context.project?.id ?? null, sessionHandle: context.session?.handle ?? null,
       openSession: handle => action(() => client.navigation.openSession(handle), "Unable to open that session."),
       composePrompt: text => action(() => client.composer.append(text), "Unable to add this issue to your draft."),
     }} openExternal={url => action(() => client.navigation.openExternal(url), "Unable to open that link.")} />

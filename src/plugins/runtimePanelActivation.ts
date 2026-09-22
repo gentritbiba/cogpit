@@ -1,7 +1,7 @@
 import type { JsonValue, PluginRequest } from "@cogpit/plugin-contracts"
 import type { RuntimeLease, RuntimePluginClient } from "./runtimeClient"
 
-export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession">>
+export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession" | "sessionHandle">>
 export interface RuntimePanelActivation {
   execute(request: PluginRequest, signal: AbortSignal): Promise<JsonValue>
   setActive(active: boolean): void

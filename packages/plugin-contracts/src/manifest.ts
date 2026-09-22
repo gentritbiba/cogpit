@@ -5,7 +5,7 @@ import { canonicalPath, identifier, label, parseSchema } from "./schema.js"
 import { integrationPermissionSchema } from "./integrations.js"
 
 export const PROTOCOL_MAJOR = 1 as const
-export const PLUGIN_API_VERSION = "1.0.0"
+export const PLUGIN_API_VERSION = "1.1.0"
 export const RUNTIME = "browser-iife-v1" as const
 export const versionSchema = z.string().max(128).refine((value) => valid(value) === value, "Expected strict SemVer")
 const range = z.string().min(1).max(256).refine((value) => validRange(value) !== null, "Expected a SemVer range")
@@ -38,7 +38,7 @@ export const manifestSchema = z.strictObject({
     when: z.enum(["always", "project-selected"]).default("project-selected"),
   })).min(1).max(8) }),
   permissions: z.strictObject({
-    context: z.array(z.literal("project.identity")).max(1).default([]),
+    context: z.array(z.enum(["project.identity", "session.identity"])).max(2).refine(unique).default([]),
     composer: z.array(z.literal("append")).max(1).default([]),
     navigation: z.array(z.enum(["external", "session"])).max(2).refine(unique).default([]),
     connections: z.array(z.strictObject({ id: identifier, definition: canonicalPath, operations: names.min(1) })).max(8).default([]),

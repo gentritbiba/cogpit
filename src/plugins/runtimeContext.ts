@@ -24,13 +24,21 @@ export function readPluginPresentation(): Presentation {
   }
 }
 
-export function pluginPanelContext(manifest: PluginManifest, project: PluginProjectSummary | null, visible: boolean, presentation: Presentation): PluginContext {
+export function pluginPanelContext(manifest: PluginManifest, project: PluginProjectSummary | null, visible: boolean, presentation: Presentation, sessionHandle: string | null = null): PluginContext {
   let name = ""
   for (const character of project?.name.trim() ?? "") {
     if (name.length + character.length > 128) break
     if (character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127) name += character
   }
-  return { ...presentation, project: project && manifest.permissions.context.includes("project.identity") ? { id: project.id, name: name.trim() || "Project" } : null, visible }
+  // Packages built against contracts 1.0.0 validate their context strictly, so
+  // the key only exists for plugins that asked for it.
+  const session = manifest.permissions.context.includes("session.identity") ? { session: sessionHandle ? { handle: sessionHandle } : null } : {}
+  return {
+    ...presentation,
+    project: project && manifest.permissions.context.includes("project.identity") ? { id: project.id, name: name.trim() || "Project" } : null,
+    visible,
+    ...session,
+  }
 }
 
 export function usePluginPresentation(): Presentation {

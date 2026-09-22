@@ -70,10 +70,24 @@ const pullRequest = {
   mergedAt: null,
   reviewDecision: "REVIEW_REQUIRED",
   mergeable: "MERGEABLE",
+  mergeStateStatus: "BLOCKED",
+  viewerCanUpdate: true,
+  headRefOid: "b".repeat(40),
   comments: { totalCount: 3 },
   reviewRequests: { nodes: [{ requestedReviewer: { login: "hubot" } }] },
-  commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE", contexts: {
+    totalCount: 3,
+    checkRunCountsByState: [{ state: "COMPLETED", count: 1 }, { state: "IN_PROGRESS", count: 1 }],
+    statusContextCount: 1,
+    nodes: [
+      { __typename: "CheckRun", detailsUrl: "https://github.com/acme/app/actions/runs/42/job/100" },
+      { __typename: "CheckRun", detailsUrl: "https://github.com/acme/app/actions/runs/43/job/101" },
+      { __typename: "StatusContext", state: "SUCCESS", targetUrl: "https://vercel.com/acme/app/dpl_1" },
+    ],
+  } } } }] },
 }
+
+const repositorySettings = { mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, viewerDefaultMergeMethod: "SQUASH" }
 
 const issue = {
   number: 12,
@@ -104,7 +118,7 @@ function issuesResponse(open: unknown[], closed: unknown[] = [], viewer = "hubot
 }
 
 function graphqlResponse(pulls: unknown[], viewer = "hubot") {
-  return { data: { viewer: { login: viewer }, repository: { pullRequests: { nodes: pulls } } } }
+  return { data: { viewer: { login: viewer }, repository: { ...repositorySettings, pullRequests: { nodes: pulls } } } }
 }
 
 const pullFile = {
@@ -128,6 +142,7 @@ function harness(apiResponse: unknown) {
       return Promise.resolve({ stdout: "main\n", stderr: "" })
     }),
     githubApi,
+    githubMutate: vi.fn(),
     githubGraphql,
     pullRequestSessions,
   }
@@ -193,6 +208,7 @@ describe("GitHub routes", () => {
   it("maps pull requests and their files to the public contract", () => {
     const parsed = parsePullsResponse(graphqlResponse([pullRequest]))
     expect(parsed.viewer).toBe("hubot")
+    expect(parsed.mergeMethods).toEqual(["squash", "merge"])
     expect(parsed.pulls[0]).toMatchObject({
       number: 128,
       title: "Fix checkout flow",
@@ -202,13 +218,16 @@ describe("GitHub routes", () => {
       baseBranch: "main",
       closedAt: null,
       checks: "failure",
+      checkProgress: { total: 3, completed: 2, actions: true },
       review: "review_required",
       reviewRequested: true,
       conflicts: false,
       comments: 3,
+      mergeState: "blocked",
+      headSha: "b".repeat(40),
     })
     expect(parsePullsResponse(graphqlResponse([pullRequest], "octocat")).pulls[0].reviewRequested).toBe(false)
-    expect(parsePullsResponse(graphqlResponse([{ ...pullRequest, isDraft: true }])).pulls[0].state).toBe("draft")
+    expect(parsePullsResponse(graphqlResponse([{ ...pullRequest, isDraft: true }])).pulls[0]).toMatchObject({ state: "draft", mergeState: null })
     expect(parsePullsResponse(graphqlResponse([{
       ...pullRequest,
       state: "MERGED",
@@ -216,13 +235,36 @@ describe("GitHub routes", () => {
       mergedAt: "2026-09-02T11:00:00Z",
       mergeable: "UNKNOWN",
       commits: { nodes: [] },
-    }])).pulls[0]).toMatchObject({ state: "merged", closedAt: "2026-09-02T11:00:00Z", checks: null })
+    }])).pulls[0]).toMatchObject({ state: "merged", closedAt: "2026-09-02T11:00:00Z", checks: null, checkProgress: null, mergeState: null })
     expect(parsePullsResponse(graphqlResponse([{
       ...pullRequest,
       state: "CLOSED",
       closedAt: "2026-09-02T11:00:00Z",
       mergeable: "CONFLICTING",
     }])).pulls[0]).toMatchObject({ state: "closed", conflicts: true })
+    const mergeStates = [
+      [{ mergeStateStatus: "CLEAN" }, "clean"],
+      [{ mergeStateStatus: "HAS_HOOKS" }, "clean"],
+      [{ mergeStateStatus: "UNSTABLE" }, "unstable"],
+      [{ mergeStateStatus: "BEHIND" }, "behind"],
+      [{ mergeStateStatus: "DIRTY" }, "conflicts"],
+      [{ mergeStateStatus: "UNKNOWN", mergeable: "CONFLICTING" }, "conflicts"],
+      [{ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" }, "unknown"],
+      [{ mergeStateStatus: "CLEAN", viewerCanUpdate: false }, "blocked"],
+    ] as const
+    for (const [overrides, expected] of mergeStates) {
+      expect(parsePullsResponse(graphqlResponse([{ ...pullRequest, ...overrides }])).pulls[0].mergeState).toBe(expected)
+    }
+    const external = { __typename: "StatusContext", state: "PENDING", targetUrl: "https://ci.example.com/build/9" }
+    expect(parsePullsResponse(graphqlResponse([{
+      ...pullRequest,
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING", contexts: { totalCount: 1, checkRunCountsByState: [], statusContextCount: 1, nodes: [external] } } } }] },
+    }])).pulls[0]).toMatchObject({ checks: "pending", checkProgress: { total: 1, completed: 0, actions: false } })
+    expect(parsePullsResponse(graphqlResponse([{
+      ...pullRequest,
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING", contexts: { totalCount: 150, checkRunCountsByState: [{ state: "COMPLETED", count: 140 }, { state: "QUEUED", count: 10 }], statusContextCount: 0, nodes: [] } } } }] },
+    }])).pulls[0].checkProgress).toEqual({ total: 150, completed: 140, actions: false })
+    expect(parsePullsResponse({ data: { viewer: null, repository: { pullRequests: { nodes: [] } } } }).mergeMethods).toEqual([])
     expect(() => parsePullsResponse({ data: { viewer: null } })).toThrow(/invalid pull request/)
     expect(parsePullFilesResponse([pullFile, { filename: "" }])).toEqual([{
       path: "src/checkout.ts",
@@ -387,6 +429,7 @@ describe("GitHub routes", () => {
       resolveProject: vi.fn().mockResolvedValue({ ok: true, projectPath: "/repo", root: null }),
       git: vi.fn(),
       githubApi: vi.fn(),
+      githubMutate: vi.fn(),
       githubGraphql: vi.fn(),
       pullRequestSessions: vi.fn(),
     }

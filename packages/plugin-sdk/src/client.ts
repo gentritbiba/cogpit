@@ -132,6 +132,9 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
     } else if (message.event === "theme") {
       context = immutableContext({ ...context, theme: message.value })
       notify(themeListeners, context.theme)
+    } else if (message.event === "session") {
+      context = immutableContext({ ...context, session: message.value })
+      notify(contextListeners, context)
     } else {
       context = immutableContext({ ...context, visible: message.value })
       notify(visibilityListeners, context.visible)
