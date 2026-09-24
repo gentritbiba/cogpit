@@ -1,23 +1,31 @@
 import { useEffect, useRef, useState } from "react"
-import { authUrl } from "@/lib/auth"
+import { openSessionStream } from "@/lib/sessionStream"
 
 const DEFAULT_STALE_AFTER_MS = 30_000
 
+interface LiveEventStreamOptions {
+  /** Called when the server refuses to reopen the stream because the caller cannot see what it watches. */
+  onLost?: () => void
+  staleAfterMs?: number
+}
+
 /**
  * Subscribe to the shared `{type:"init"|"update"}` SSE protocol used by
- * filesystem-backed live indicators.
+ * filesystem-backed live indicators of one session's work.
  */
 export function useLiveEventStream(
   url: string | null,
   onUpdate: () => void,
-  staleAfterMs = DEFAULT_STALE_AFTER_MS,
+  { onLost, staleAfterMs = DEFAULT_STALE_AFTER_MS }: LiveEventStreamOptions = {},
 ): { isLive: boolean } {
   const [isLive, setIsLive] = useState(false)
   const onUpdateRef = useRef(onUpdate)
+  const onLostRef = useRef(onLost)
 
   useEffect(() => {
     onUpdateRef.current = onUpdate
-  }, [onUpdate])
+    onLostRef.current = onLost
+  }, [onUpdate, onLost])
 
   useEffect(() => {
     if (!url) {
@@ -27,7 +35,8 @@ export function useLiveEventStream(
 
     let active = true
     let staleTimer: ReturnType<typeof setTimeout> | null = null
-    const eventSource = new EventSource(authUrl(url))
+    const stream = openSessionStream(url, { onLost: () => onLostRef.current?.() })
+    const eventSource = stream.source
     setIsLive(false)
 
     const resetStaleTimer = () => {
@@ -59,7 +68,7 @@ export function useLiveEventStream(
 
     return () => {
       active = false
-      eventSource.close()
+      stream.close()
       if (staleTimer) clearTimeout(staleTimer)
     }
   }, [url, staleAfterMs])

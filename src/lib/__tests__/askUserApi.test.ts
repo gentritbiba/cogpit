@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { joinMultiSelect, submitUserQuestionAnswers } from "@/lib/askUserApi"
 
 function ok(status = 200): Response {
-  return { ok: status >= 200 && status < 300, status } as Response
+  return new Response(null, { status })
 }
 
 function lastCall(): [string, RequestInit] {

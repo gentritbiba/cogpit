@@ -1,14 +1,16 @@
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useState, type ReactNode } from "react"
 import { TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatArea } from "@/components/ChatArea"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
+import { FolderBrowserHost } from "@/components/FolderBrowserHost"
 import { MobileNav, type MobileTab } from "@/components/MobileNav"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { useEditionUi, useMainView } from "@/edition/hooks"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { can } from "@/lib/capabilities"
 import { hapticLight } from "@/lib/haptics"
@@ -18,6 +20,7 @@ import { adjacentMobileTab, MOBILE_TAB_ORDER } from "./mobileView"
 import { MobileWorkspace } from "./MobileWorkspace"
 import { NewSessionHeadline } from "./NewSessionHero"
 import {
+  ExtensionMainView,
   PrimarySessionBrowser,
   ProjectDashboard,
 } from "./SharedAppViews"
@@ -31,13 +34,17 @@ export function MobileAppShell({
   project,
   chrome,
 }: MobileAppShellProps) {
-  const { state } = useAppContext()
+  const { state, config } = useAppContext()
   const { session } = useSessionContext()
   const [searchOpen, setSearchOpen] = useState(false)
+  const { AccountControl } = useEditionUi()
+  const extensionView = useMainView(state.mainView === "extension" ? state.extensionViewId : null)
+  // Workspace panels, and main views that ask for it, scroll sideways themselves.
+  const swipeLocked = state.mobileTab === "workspace" || extensionView?.locksSwipe === true
 
   const swipeRef = useSwipeNavigation<HTMLElement>({
     onSwipeLeft: () => {
-      if (state.mobileTab === "workspace") return
+      if (swipeLocked) return
       const nextTab = adjacentMobileTab(MOBILE_TAB_ORDER, state.mobileTab, 1)
       if (nextTab) {
         hapticLight()
@@ -45,7 +52,7 @@ export function MobileAppShell({
       }
     },
     onSwipeRight: () => {
-      if (state.mobileTab === "workspace") return
+      if (swipeLocked) return
       const nextTab = adjacentMobileTab(MOBILE_TAB_ORDER, state.mobileTab, -1)
       if (nextTab) {
         hapticLight()
@@ -54,8 +61,18 @@ export function MobileAppShell({
     },
   })
 
+  const headerAccessory = AccountControl && (
+    <AccountControl
+      mobile
+      onLogout={chrome.onLogout}
+      onOpenMainView={navigation.panels.openMainView}
+      className="ml-auto"
+    />
+  )
+
   const changeTab = (tab: MobileTab): void => {
     setSearchOpen(false)
+    if (extensionView) navigation.panels.closeMainView()
     navigation.actions.handleMobileTabChange(tab)
   }
 
@@ -67,6 +84,7 @@ export function MobileAppShell({
       {!(state.mobileTab === "chat" && session) && (
         <div className="motion-slide-down-in flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />
+          {headerAccessory}
         </div>
       )}
       <main ref={swipeRef} className="app-view-transition relative flex flex-1 min-h-0 overflow-hidden">
@@ -84,6 +102,7 @@ export function MobileAppShell({
             sessionView={sessionView}
             project={project}
             chrome={chrome}
+            headerAccessory={headerAccessory}
             searchOpen={searchOpen}
             onSearchOpenChange={setSearchOpen}
           />
@@ -96,6 +115,12 @@ export function MobileAppShell({
         >
           <MobileWorkspace navigation={navigation} sessionView={sessionView} project={project} chrome={chrome} active={state.mobileTab === "workspace"} />
         </div>
+
+        {extensionView && (
+          <div className="absolute inset-0 z-10 flex min-h-0 min-w-0 flex-col bg-canvas">
+            <ExtensionMainView view={extensionView} onClose={navigation.panels.closeMainView} />
+          </div>
+        )}
       </main>
 
       {chrome.workflowsPanel}
@@ -107,6 +132,11 @@ export function MobileAppShell({
 
       {chrome.undoDialog}
       {chrome.branchModal}
+      <FolderBrowserHost
+        onNewSession={navigation.onStartNewSession}
+        onNewFolder={navigation.onStartNewFolder}
+        defaultAgentKind={config.defaultAgentKind}
+      />
       {session && project.hasFileChanges && (
         <Suspense fallback={null}>
           <MobileFileChanges
@@ -121,9 +151,15 @@ export function MobileAppShell({
   )
 }
 
+interface MobileChatProps extends MobileAppShellProps {
+  headerAccessory: ReactNode
+  searchOpen: boolean
+  onSearchOpenChange: (open: boolean) => void
+}
+
 function MobileChat({
-  navigation, sessionView, project, chrome, searchOpen, onSearchOpenChange,
-}: MobileAppShellProps & { searchOpen: boolean; onSearchOpenChange: (open: boolean) => void }) {
+  navigation, sessionView, project, chrome, headerAccessory, searchOpen, onSearchOpenChange,
+}: MobileChatProps) {
   const { state, config } = useAppContext()
   const { session, isSubAgentView } = useSessionContext()
 
@@ -133,6 +169,7 @@ function MobileChat({
         <div className="flex flex-1 min-h-0 flex-col">
           {sessionView.teamMembersBar}
           <SessionInfoBar
+            headerAccessory={headerAccessory}
             creatingSession={navigation.creatingSession}
             onNewSession={navigation.onStartNewSession}
             onDuplicateSession={navigation.handlers.handleDuplicateSession}

@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { registerPluginRoutes } from "../../routes/plugins"
 import { pluginRuntimeDescriptor } from "../../plugins/runtime"
-import { requirementFor } from "../../team/policy"
 import type { Middleware } from "../../http"
 
 describe("selected-host runtime descriptor", () => {
@@ -12,8 +11,6 @@ describe("selected-host runtime descriptor", () => {
     expect(descriptor.appVersion).toMatch(/^\d+\.\d+\.\d+/)
     expect(descriptor.protocolVersions).toEqual([1])
     expect(descriptor).not.toHaveProperty("connections")
-    expect(requirementFor("/api/plugins/runtime", "GET")).toBe("admin")
-    expect(requirementFor("/api/plugins/packages/abc", "GET")).toBe("admin")
   })
 
   it("terminates unknown package routes instead of falling through to HTML", () => {

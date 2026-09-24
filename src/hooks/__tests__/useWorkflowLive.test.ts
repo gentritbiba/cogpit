@@ -5,7 +5,7 @@ vi.mock("@/lib/auth", () => ({ authUrl: vi.fn((url: string) => url) }))
 
 import { useWorkflowLive } from "../useWorkflowLive"
 
-class MockEventSource {
+class MockEventSource extends EventTarget {
   static instances: MockEventSource[] = []
   readonly url: string
   closed = false
@@ -13,6 +13,7 @@ class MockEventSource {
   onerror: (() => void) | null = null
 
   constructor(url: string) {
+    super()
     this.url = url
     MockEventSource.instances.push(this)
   }

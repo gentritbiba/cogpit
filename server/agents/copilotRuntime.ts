@@ -15,6 +15,8 @@ import { resolveSessionCwd } from "./sessionCwd"
 import { initialCopilotScanState, parseCopilotUsageMetrics, type UsageCostRecord } from "./usageScanners"
 import {
   AgentRuntimeError,
+  reportSessionId,
+  resolvedApproval,
   selectAvailableDecision,
   type AgentRuntime,
   type ApprovalDecision,
@@ -317,6 +319,7 @@ export const copilotRuntime: AgentRuntime = {
 
   async start(req: StartSessionRequest): Promise<StartedSession> {
     const sessionId = randomUUID()
+    reportSessionId(req, sessionId)
     let opened = false
     try {
       await transport.createSession({
@@ -443,6 +446,7 @@ export const copilotRuntime: AgentRuntime = {
     return transport.isSessionActive(sessionId)
       || transport.getPendingPermissions(sessionId).length > 0
       || transport.getPendingUserInputs(sessionId).length > 0
+      || transport.getPendingExitPlans(sessionId).length > 0
   },
 
   listActive() {
@@ -472,7 +476,7 @@ export const copilotRuntime: AgentRuntime = {
 
   async respondToAllApprovals(sessionId, decision) {
     const pending = transport.getPendingPermissions(sessionId)
-    if (pending.length === 0) return { count: 0, toolNames: [] }
+    if (pending.length === 0) return []
 
     const approvals = pending.map(normalizeCopilotPermission)
     // Validate the batch up front, the same way Codex does: a request that
@@ -512,10 +516,7 @@ export const copilotRuntime: AgentRuntime = {
       if (error instanceof AgentRuntimeError) throw error
       throw permissionFailure(error)
     }
-    return {
-      count: pending.length,
-      toolNames: [...new Set(approvals.map(({ toolName }) => toolName))],
-    }
+    return approvals.map(resolvedApproval)
   },
 
   listPendingQuestions(sessionId) {
@@ -529,7 +530,7 @@ export const copilotRuntime: AgentRuntime = {
       answers,
     )
     if (!pending) {
-      if (transport.isSessionActive(sessionId)) return false
+      if (transport.isSessionActive(sessionId)) return null
       throw new AgentRuntimeError(
         404,
         "SESSION_NOT_LIVE",
@@ -564,17 +565,18 @@ export const copilotRuntime: AgentRuntime = {
         error instanceof Error ? error.message : "Failed to answer Copilot question",
       )
     }
-    return true
+    return { message: null }
   },
 
   listModels: fetchCopilotModels,
 
-  async liveUsageRecords(alreadyCounted) {
+  async liveUsageRecords(alreadyCounted, sessionIds) {
     // Detailed token metrics reach the transcript only at shutdown. While a
     // session is still open, its cumulative snapshot is folded in after
     // subtracting every durable snapshot already counted.
     const records: UsageCostRecord[] = []
-    await Promise.all(transport.getActiveSessionIds().map(async (sessionId) => {
+    const open = transport.getActiveSessionIds().filter((sessionId) => !sessionIds || sessionIds.has(sessionId))
+    await Promise.all(open.map(async (sessionId) => {
       try {
         const metrics = await withTimeout(
           transport.getSessionUsage(sessionId),

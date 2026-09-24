@@ -74,6 +74,7 @@ vi.mock("../../agents/copilotTransport", () => ({
     isTurnActive: mockIsCopilotTurnActive,
     getPendingPermissions: vi.fn(() => []),
     getPendingUserInputs: vi.fn(() => []),
+    getPendingExitPlans: vi.fn(() => []),
     getActiveSessionIds: vi.fn(() => []),
   },
 }))

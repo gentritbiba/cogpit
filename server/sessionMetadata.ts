@@ -35,6 +35,11 @@ export async function getSessionMeta(filePath: string): Promise<SessionMeta> {
   return storeFor(format.kind).readSessionMeta(filePath, head)
 }
 
+/** A session's title as its transcript gives it: set by hand, else generated, else its first prompt or slug. */
+export function sessionMetaTitle(meta: SessionMeta): string {
+  return meta.customTitle || meta.aiTitle || meta.firstUserMessage || meta.slug || ""
+}
+
 const EFFORT_CHUNK = 65536
 const NEWLINE_BYTE = 0x0a
 

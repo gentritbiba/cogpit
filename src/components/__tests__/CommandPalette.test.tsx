@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { Users } from "lucide-react"
 import { CommandPalette } from "@/components/CommandPalette"
 import { createCommandPaletteProps as createProps } from "./commandPaletteProps"
 
@@ -127,6 +128,22 @@ describe("CommandPalette", () => {
 
     rerender(<CommandPalette {...props} showMission />)
     expect(screen.getByText("Exit Mission Control")).toBeInTheDocument()
+  })
+
+  it("lists the host's extra actions with navigation, searchable by their keywords", async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <CommandPalette
+        {...createProps()}
+        extraActions={[{ id: "main-view-reports", label: "Open Reports", keywords: "quarterly figures", icon: Users, onSelect }]}
+      />,
+    )
+
+    await user.type(screen.getByRole("combobox"), "quarterly")
+    await user.click(screen.getByText("Open Reports"))
+
+    expect(onSelect).toHaveBeenCalledOnce()
   })
 
   it("indexes the session actions that are otherwise only reachable from chrome", async () => {

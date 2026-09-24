@@ -1,9 +1,10 @@
 import { Fragment, useMemo } from "react"
-import { ChevronRight, FolderOpen, RefreshCw } from "lucide-react"
+import { ChevronRight, FolderOpen, FolderSearch, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -15,6 +16,7 @@ import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { cn } from "@/lib/utils"
+import { openFolderBrowser } from "@/lib/folders"
 import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
 import { agentKindForDirName } from "@/lib/agents"
 import { agentProjectBadge } from "@/lib/agents/presentation"
@@ -130,6 +132,14 @@ export function ProjectsView({
                     : "Start Claude Code, Codex, or Copilot and its project will appear here."}
                 </EmptyDescription>
               </EmptyHeader>
+              {!searchFilter && (
+                <EmptyContent>
+                  <Button variant="outline" size="sm" onClick={() => openFolderBrowser()}>
+                    <FolderSearch data-icon="inline-start" />
+                    Start in a folder
+                  </Button>
+                </EmptyContent>
+              )}
             </Empty>
           ) : (
             <div className="overflow-hidden rounded-lg border bg-card">

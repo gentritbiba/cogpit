@@ -73,10 +73,7 @@ function fakeRuntime(kind: AgentKind, pending: PendingApproval[] = []): FakeRunt
         : pending.filter((item) => item.sessionId === sessionId),
     ),
     respondToApproval: vi.fn(async () => true),
-    respondToAllApprovals: vi.fn(async () => ({
-      count: pending.length,
-      toolNames: [...new Set(pending.map(({ toolName }) => toolName))],
-    })),
+    respondToAllApprovals: vi.fn(async () => pending.map(({ requestId, toolUseId, toolName }) => ({ requestId, toolUseId, toolName }))),
   }
 }
 
@@ -302,10 +299,11 @@ describe("POST /api/permissions/:sessionId/respond", () => {
 })
 
 describe("POST /api/permissions/:sessionId/respond-all", () => {
-  it("delegates the whole batch to the owning runtime", async () => {
+  it("delegates the whole batch to the owning runtime, counting each request it answered", async () => {
     const runtime = fakeRuntime("codex", [
       pendingApproval({ sessionId: "thread-1" }),
       pendingApproval({ sessionId: "thread-1", requestId: "r2", toolName: "Write" }),
+      pendingApproval({ sessionId: "thread-1", requestId: "r3", toolName: "Write" }),
     ])
 
     const { response } = await invoke(register(registryOf([runtime])), {
@@ -318,7 +316,7 @@ describe("POST /api/permissions/:sessionId/respond-all", () => {
     expect(response.json()).toEqual({
       success: true,
       action: "denied",
-      count: 2,
+      count: 3,
       toolNames: ["Bash", "Write"],
       shouldRetry: false,
     })
@@ -388,11 +386,12 @@ describe("GET /api/permissions — cross-session listing", () => {
     expect(response.json()).toEqual({ bySession: {}, plansBySession: {} })
   })
 
-  it("answers the bare path even with a query string", async () => {
-    const { response } = await invoke(register(registryOf([fakeRuntime("claude")])), {
+  it.each(["?x=1", "/?x=1"])("answers the bare path even with a query string: %s", async (url) => {
+    const { response, next } = await invoke(register(registryOf([fakeRuntime("claude")])), {
       method: "GET",
-      url: "?x=1",
+      url,
     })
+    expect(next).not.toHaveBeenCalled()
     expect(response.statusCode).toBe(200)
   })
 
@@ -465,9 +464,17 @@ describe("POST /api/permissions/:sessionId/plan", () => {
     askedAt: 123,
   }
 
+  /** A registry whose runtime holds every session, as one holds a session waiting on its plan. */
+  function holding(runtime: FakeRuntime): PermissionRuntimes {
+    return {
+      allRuntimes: () => [runtime] as unknown as AgentRuntime[],
+      runtimeForSession: () => runtime as unknown as AgentRuntime,
+    }
+  }
+
   it("answers a pending exit plan", async () => {
     const copilot = planClient([plan])
-    const { response } = await invoke(register(registryOf([fakeRuntime("copilot")]), copilot), {
+    const { response } = await invoke(register(holding(fakeRuntime("copilot")), copilot), {
       method: "POST",
       url: "/copilot-1/plan",
       body: { requestId: "plan-1", approved: true, selectedAction: "autopilot" },
@@ -482,13 +489,25 @@ describe("POST /api/permissions/:sessionId/plan", () => {
   })
 
   it("returns 404 for a plan that is no longer pending", async () => {
-    const { response } = await invoke(register(registryOf([fakeRuntime("copilot")])), {
+    const { response } = await invoke(register(holding(fakeRuntime("copilot"))), {
       method: "POST",
       url: "/copilot-1/plan",
       body: { requestId: "plan-1", approved: true },
     })
 
     expect(response.statusCode).toBe(404)
+  })
+
+  it("returns 404 without answering when no runtime holds the session", async () => {
+    const copilot = planClient([plan])
+    const { response } = await invoke(register(registryOf([fakeRuntime("copilot")]), copilot), {
+      method: "POST",
+      url: "/copilot-1/plan",
+      body: { requestId: "plan-1", approved: true },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(copilot.answerExitPlan).not.toHaveBeenCalled()
   })
 
   it.each<[string, unknown]>([

@@ -27,6 +27,12 @@ export function isRemoteDeviceActive(): boolean {
   return getActiveDeviceId() !== LOCAL_DEVICE_ID
 }
 
+/** The app path prefix for the active device: "" for the local device, "/d/<id>" for a remote one. */
+export function devicePathPrefix(): string {
+  const id = getActiveDeviceId()
+  return id === LOCAL_DEVICE_ID ? "" : `/d/${id}`
+}
+
 /**
  * The server-side proxy prefix for the active device: "" for the local device,
  * "/hub/<id>" for a remote device.
@@ -52,16 +58,18 @@ export function withBase(url: string): string {
   return url
 }
 
-// ── Active identity (team edition) ───────────────────────────────────────
+// ── Active identity (account sign-in) ────────────────────────────────────
 
 let activeUserId: string | null = null
 
 /**
- * Record the signed-in team user (written by useMe). Personal edition and
- * logged-out states pass null, keeping every storage key byte-identical to
- * pre-team builds so existing localStorage survives. Actual transitions
- * dispatch `cogpit-identity-changed` so DeviceRoot can remount the App
- * subtree — mount-time storage reads must re-run through the new scope.
+ * Record the hub's signed-in account (written by useMe). It scopes storage;
+ * what the UI shows about the caller follows the active device (see
+ * capabilities.ts). Personal edition and logged-out states pass null, keeping
+ * every storage key byte-identical to builds without account sign-in so
+ * existing localStorage survives. Actual transitions dispatch `cogpit-identity-changed` so DeviceRoot
+ * can remount the App subtree — mount-time storage reads must re-run through
+ * the new scope.
  */
 export function setActiveIdentity(userId: string | null): void {
   if (userId === activeUserId) return
@@ -69,7 +77,7 @@ export function setActiveIdentity(userId: string | null): void {
   window.dispatchEvent(new Event("cogpit-identity-changed"))
 }
 
-/** The signed-in team user id, or null in personal/logged-out states. */
+/** The hub's signed-in account id, or null in personal/logged-out states. */
 export function getActiveIdentity(): string | null {
   return activeUserId
 }
@@ -114,8 +122,8 @@ export function __resetDeviceRevisionsForTest(): void {
 /**
  * Scope a cache/storage key to the active device so per-device state does not
  * collide. Local device keeps the bare key (warm switch-back for free). When a
- * team identity is active, keys are additionally scoped per user so two users
- * sharing a browser never read each other's state.
+ * signed-in account is active, keys are additionally scoped per account so two
+ * people sharing a browser never read each other's state.
  */
 export function deviceScopedKey(base: string): string {
   const id = getActiveDeviceId()

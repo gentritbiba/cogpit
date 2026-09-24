@@ -20,6 +20,7 @@ process-state.json
 /runtime-plugin-connections/
 packages/cogpit-memory/cogpit-memory
 .claude/deployments.md
+.claude/work_report/
 
 # Local QA scratch — screenshots and notes, regenerable
 /artifacts

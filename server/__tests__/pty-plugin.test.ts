@@ -15,7 +15,7 @@ import { ptyPlugin } from "../pty-plugin"
 import { profilesDir, sharedRunDir } from "../browser/paths"
 import { hashPassword, createSessionToken, revokeSessionToken, __resetSessionsForTest } from "../security"
 import { loadConfig, setConfigPath } from "../config"
-import { initEdition, __resetEditionForTest } from "../team/edition"
+import { __resetEditionForTest } from "../edition"
 
 let root: string
 let server: Server | null
@@ -42,7 +42,7 @@ beforeEach(async () => {
   }))
   setConfigPath(configPath)
   await loadConfig()
-  initEdition({ shell: "dev" })
+  __resetEditionForTest()
 })
 
 afterEach(async () => {

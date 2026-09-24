@@ -52,7 +52,7 @@ export function registerPortRoutes(use: UseFn) {
     res.end(JSON.stringify(results))
   })
 
-  // GET /api/background-tasks?cwd=<path> - scan Claude's task output directory
+  // GET /api/background-tasks?cwd=<path> - the project's background tasks serving a port, each with its session
   use("/api/background-tasks", handleBackgroundTasks)
 
   // POST /api/kill-port - kill process listening on a given port (unprivileged ports only)

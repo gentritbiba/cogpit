@@ -36,6 +36,7 @@ import {
   type ExecutableChoice,
 } from "../../../shared/contracts/agentExecutable"
 import { allDescriptors } from "../../../shared/session/agent-descriptors"
+import { PASSWORD_MIN_LENGTH } from "../../../shared/contracts/password"
 
 /** Agents with more than one binary on offer, so a picker is worth showing. */
 const EXECUTABLE_CHOICE_KINDS = allDescriptors()
@@ -92,7 +93,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   // Editing a remote device's network access through the proxy could rotate its
   // password or disable its network access — either one locks this hub out.
   const remoteDevice = isRemoteDeviceActive()
-  // Team members without configWrite get a read-only view (server 403s anyway).
+  // An account without configWrite gets a read-only view (the server refuses writes anyway).
   const canWriteConfig = can("configWrite")
 
   // Network access state
@@ -192,8 +193,6 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     setSaving(false)
   }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, agentExecutable, save, onSaved, remoteDevice, initialNetworkAccess])
 
-  const MIN_PASSWORD_LENGTH = 16
-
   function computeCanSave(): boolean {
     // Block save while path is being validated or is invalid
     if (status === "validating" || status === "invalid") return false
@@ -210,7 +209,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
     // Validate password requirements when network is enabled
     if (!remoteDevice && networkAccess) {
-      const passwordTooShort = networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
+      const passwordTooShort = networkPassword.length > 0 && networkPassword.length < PASSWORD_MIN_LENGTH
       const needsPassword = !hasExistingPassword && networkPassword.length === 0
       if (passwordTooShort || needsPassword) return false
     }
@@ -335,7 +334,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             hasExistingPassword={hasExistingPassword}
             initialNetworkAccess={initialNetworkAccess}
             connectedDevices={connectedDevices}
-            minPasswordLength={MIN_PASSWORD_LENGTH}
+            minPasswordLength={PASSWORD_MIN_LENGTH}
           />}
         </FieldGroup>
 

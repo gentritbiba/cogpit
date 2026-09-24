@@ -138,14 +138,14 @@ describe("DevicesDialog", () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it("detects a team device, requires its username, and sends named credentials", async () => {
+  it("detects an account device, requires its username, and sends named credentials", async () => {
     routeHub({
       probe: {
         ok: true,
         hello: {
           name: "Team Studio",
           version: "1.0.1",
-          edition: "team",
+          signIn: "account",
           networkAccess: false,
           configured: true,
         },
@@ -174,11 +174,11 @@ describe("DevicesDialog", () => {
     })
   })
 
-  it("keeps add disabled while a team device still needs its first admin", async () => {
+  it("keeps add disabled while an account device still needs its first-time setup", async () => {
     routeHub({
       probe: {
         ok: true,
-        hello: { name: "Fresh Team", edition: "team", needsBootstrap: true, configured: false },
+        hello: { name: "Fresh Team", signIn: "account", setupRequired: true, configured: false },
       },
     })
     const user = userEvent.setup()
@@ -186,7 +186,7 @@ describe("DevicesDialog", () => {
 
     await user.type(screen.getByLabelText("Host"), "10.0.0.10")
     await user.tab()
-    expect(await screen.findByText(/create its first admin account/i)).toBeInTheDocument()
+    expect(await screen.findByText(/finish its setup before adding it here/i)).toBeInTheDocument()
     await user.type(screen.getByLabelText("Username"), "founder")
     await user.type(screen.getByLabelText("Password"), "founder-password-1")
 
@@ -196,7 +196,7 @@ describe("DevicesDialog", () => {
     )).toBe(false)
   })
 
-  it("edits a stored team account without ever exposing its password", async () => {
+  it("edits a stored account without ever exposing its password", async () => {
     const device = {
       id: "dev_team",
       name: "Team Studio",
@@ -205,13 +205,13 @@ describe("DevicesDialog", () => {
       auth: "password",
       username: "alice",
       addedAt: 1,
-      runtime: { authState: "ok", lastHello: { edition: "team", version: "1.0.1" } },
+      runtime: { authState: "ok", lastHello: { signIn: "account", version: "1.0.1" } },
     }
     routeHub({ devices: [device], update: { body: { device: { ...device, username: "bob" } } } })
     const user = userEvent.setup()
     render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
 
-    expect(await screen.findByText("Team account: alice")).toBeInTheDocument()
+    expect(await screen.findByText("Account: alice")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Edit account for Team Studio" }))
     const passwordInput = screen.getByLabelText("New password for Team Studio")
     expect(passwordInput).toHaveValue("")
@@ -231,7 +231,7 @@ describe("DevicesDialog", () => {
     })
   })
 
-  it("sends null to clear a stored team username", async () => {
+  it("sends null to clear a stored account username", async () => {
     const device = {
       id: "dev_team",
       name: "Team Studio",
@@ -240,13 +240,13 @@ describe("DevicesDialog", () => {
       auth: "password",
       username: "alice",
       addedAt: 1,
-      runtime: { authState: "ok", lastHello: { edition: "team" } },
+      runtime: { authState: "ok", lastHello: { signIn: "account" } },
     }
     routeHub({ devices: [device], update: { body: { device: { ...device, username: undefined } } } })
     const user = userEvent.setup()
     render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
 
-    await screen.findByText("Team account: alice")
+    await screen.findByText("Account: alice")
     await user.click(screen.getByRole("button", { name: "Edit account for Team Studio" }))
     await user.clear(screen.getByLabelText("Username for Team Studio"))
     await user.click(screen.getByRole("button", { name: "Save account" }))
@@ -255,6 +255,20 @@ describe("DevicesDialog", () => {
       ([url, init]) => url === "/api/hub/devices/dev_team" && init?.method === "PATCH",
     )
     expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ username: null })
+  })
+
+  it("flags an account device the hub holds no account for, and not a password device", async () => {
+    const runtime = (signIn: string) => ({ authState: "ok", lastHello: { signIn } })
+    routeHub({
+      devices: [
+        { id: "dev_acct", name: "Studio", host: "10.0.0.8", port: 19384, auth: "password", addedAt: 1, runtime: runtime("account") },
+        { id: "dev_pw", name: "Laptop", host: "10.0.0.9", port: 19384, auth: "password", addedAt: 1, runtime: runtime("password") },
+      ],
+    })
+    render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
+
+    expect(await screen.findByText("Account not configured")).toBeInTheDocument()
+    expect(screen.getAllByText("Account not configured")).toHaveLength(1)
   })
 
   it("confirms device removal in an alert dialog and waits for the request", async () => {

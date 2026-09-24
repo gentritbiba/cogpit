@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
+import { SessionBadges } from "@/components/shared/SessionBadges"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
@@ -196,6 +197,7 @@ export function SessionCard({
               {headline !== s.agentName ? s.agentName : "Agent"}
             </Badge>
           )}
+          <SessionBadges access={s.access} />
           {worktreeName && (
             <Badge variant="outline">
               <GitBranch data-icon="inline-start" />

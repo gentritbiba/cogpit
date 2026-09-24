@@ -9,6 +9,12 @@ import { slugifyWorktreeName } from "@/lib/utils"
 import { agentKindForDirName, descriptorFor } from "@/lib/agents"
 import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 import { rename as renameSession } from "@/hooks/useSessionNames"
+import {
+  learnListedAccess,
+  rememberCreatedSession,
+  sessionAccessTicket,
+  type ListedSession,
+} from "@/lib/sessionAccess"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
@@ -34,9 +40,8 @@ interface CreateSessionResponse {
 }
 
 interface SessionsListResponse {
-  sessions?: Array<{
+  sessions?: Array<ListedSession & {
     fileName: string
-    sessionId: string
     firstUserMessage?: string
     lastUserMessage?: string
     lastModified?: string
@@ -189,12 +194,23 @@ async function finalizeDiscoveredSession(
   return response.sessionId
 }
 
+/**
+ * Whether a listed session can be the one this client just created. A server
+ * that signs accounts in annotates each session with the caller's access and
+ * also lists sessions shared with them, so only their own counts; a personal
+ * server annotates nothing and lists only its own.
+ */
+function isOwnSession(session: Pick<ListedSession, "access">): boolean {
+  return session.access ? session.access.mine : true
+}
+
 async function recoverCodexSession(
   dirName: string,
   message: string,
   startedAt: number,
   controller: AbortController
 ): Promise<CreateSessionResponse | null> {
+  const accessTicket = sessionAccessTicket()
   const listRes = await authFetch(
     `/api/sessions/${encodeURIComponent(dirName)}?page=1&limit=10`,
     { signal: controller.signal }
@@ -202,11 +218,12 @@ async function recoverCodexSession(
   if (!listRes.ok) return null
 
   const data = await listRes.json() as SessionsListResponse
+  learnListedAccess(data.sessions ?? [], accessTicket)
   const recentCutoff = startedAt - 30_000
   const normalizedMessage = message.trim()
   const candidates = (data.sessions ?? []).filter((session) => {
     const modified = session.lastModified ? new Date(session.lastModified).getTime() : 0
-    return Number.isFinite(modified) && modified >= recentCutoff
+    return Number.isFinite(modified) && modified >= recentCutoff && isOwnSession(session)
   })
 
   const preferred = candidates.find((session) =>
@@ -280,9 +297,20 @@ export function useNewSession({
       setCreateError(null)
       onCreateStarted?.(message)
       const startedAt = Date.now()
+      const sessionName = deriveSessionName(message)
+
+      /** Show a session this client created, as its creator's own. */
+      async function adoptCreatedSession(created: CreateSessionResponse): Promise<string> {
+        pendingDirNameRef.current = null
+        pendingCwdRef.current = null
+        rememberCreatedSession(created.sessionId)
+        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, onSessionFinalized)
+        // Auto-store the derived session name so it appears in sidebar/lists
+        if (sessionName && sessionId) renameSession(sessionId, sessionName)
+        return sessionId
+      }
 
       try {
-        const sessionName = deriveSessionName(message)
         const descriptor = descriptorFor(agentKind)
         const { capabilities } = descriptor
         const requestBody = {
@@ -302,7 +330,7 @@ export function useNewSession({
           mcpConfig: capabilities.mcp ? (mcpConfig || undefined) : undefined,
         }
 
-        const { res, errorMessage } = await fetchWithModelFallback(
+        const { res, errorMessage, errorCode } = await fetchWithModelFallback(
           (modelOverride) => authFetch("/api/create-and-send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -318,29 +346,17 @@ export function useNewSession({
         )
 
         if (!res.ok) {
-          if (agentKind === "codex") {
+          // An unconfirmed start is one the server refused to hand over, so a
+          // recent session of the caller's would be the wrong one.
+          if (agentKind === "codex" && errorCode !== "SESSION_UNCONFIRMED") {
             const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
-            if (recovered) {
-              pendingDirNameRef.current = null
-              pendingCwdRef.current = null
-              const recoveredId = await finalizeDiscoveredSession(recovered, controller, dispatch, isMobile, onSessionFinalized)
-              if (sessionName && recoveredId) renameSession(recoveredId, sessionName)
-              return recoveredId
-            }
+            if (recovered) return await adoptCreatedSession(recovered)
           }
           setCreateError(errorMessage || `Failed to create session (${res.status})`)
           return null
         }
 
-        const response = await res.json() as CreateSessionResponse
-        pendingDirNameRef.current = null
-        pendingCwdRef.current = null
-        const newSessionId = await finalizeDiscoveredSession(response, controller, dispatch, isMobile, onSessionFinalized)
-        // Auto-store the derived session name so it appears in sidebar/lists
-        if (sessionName && newSessionId) {
-          renameSession(newSessionId, sessionName)
-        }
-        return newSessionId
+        return await adoptCreatedSession(await res.json() as CreateSessionResponse)
       } catch (err) {
         if (controller.signal.aborted) return null
         setCreateError(err instanceof Error ? err.message : "Failed to create session")

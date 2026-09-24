@@ -20,14 +20,18 @@ import {
 } from "react"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey, getActiveDeviceScope } from "@/lib/device"
+import { useAppGate } from "@/hooks/useCurrentUser"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hasUnfinishedWork } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import {
+  activeSessionsCacheKey,
   readCachedList,
   sessionListCacheKeys,
   writeCachedList,
 } from "@/lib/sessionListCache"
+import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter"
+import { learnListedAccess, onListsStale, sessionAccessTicket } from "@/lib/sessionAccess"
 
 const LIVE_POLL_INTERVAL = 20_000
 
@@ -98,8 +102,12 @@ const SessionInventoryContext = createContext<SessionInventory | null>(null)
 
 export function SessionInventoryProvider({ children }: { children: ReactNode }) {
   const [mountedDeviceScope] = useState(getActiveDeviceScope)
+  const filter = useSessionListFilter()
+  // The server refuses the list while its gate shows; it is read again once the gate lifts.
+  const gated = useAppGate() !== null
+  const sessionsCacheKey = activeSessionsCacheKey(filter.key)
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>(
-    () => readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
+    () => readCachedList<ActiveSessionInfo>(sessionsCacheKey) ?? [],
   )
   const [processes, setProcesses] = useState<RunningProcess[]>(
     () => readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
@@ -125,9 +133,14 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const prevStatusRef = useRef<Map<string, string> | null>(null)
+  // Set when the list's membership changes for a reason other than activity
+  // (a filter switch, lists going stale): the next fetched list becomes
+  // the baseline, so what it brings in is not reported as just finished.
+  const awaitingBaselineRef = useRef(false)
   // Read by setArchived so back-to-back updates (an optimistic change and its
   // rollback) each see the other's result instead of a stale render.
   const sessionsRef = useRef(sessions)
+  const listedCacheKeyRef = useRef(sessionsCacheKey)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(false)
 
@@ -141,7 +154,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const fetchInventory = useCallback(async () => {
-    if (!mountedRef.current || getActiveDeviceScope() !== mountedDeviceScope) return
+    if (gated || !mountedRef.current || getActiveDeviceScope() !== mountedDeviceScope) return
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
@@ -153,9 +166,15 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     )
 
     setLoading(true)
+    const accessTicket = sessionAccessTicket()
     try {
       const [sessRes, procRes] = await Promise.all([
-        authFetch(includeArchived ? "/api/active-sessions?archived=include" : "/api/active-sessions", { signal: ac.signal }),
+        authFetch(
+          activeSessionsUrl(includeArchived ? { archived: "include" } : {}, filter),
+          { signal: ac.signal },
+        ),
+        // Unfiltered: the open session may be outside the list, and whether
+        // another process drives it is read from here.
         authFetch("/api/running-processes", { signal: ac.signal }),
       ])
       if (!isCurrentRequest()) return
@@ -166,12 +185,17 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (!isCurrentRequest()) return
       const nextSessions = Array.isArray(sessData) ? sessData as ActiveSessionInfo[] : []
       const nextProcesses = Array.isArray(procData) ? procData as RunningProcess[] : []
+      learnListedAccess(nextSessions, accessTicket)
+      if (awaitingBaselineRef.current) {
+        awaitingBaselineRef.current = false
+        prevStatusRef.current = null
+      }
       sessionsRef.current = nextSessions
       setSessions(nextSessions)
       setProcesses(nextProcesses)
       replaceArchivedIds(learnArchivedIds(archivedIdsRef.current, nextSessions))
       setArchivedCount(Number(sessRes.headers.get("X-Cogpit-Archived-Count")) || 0)
-      writeCachedList(sessionListCacheKeys.activeSessions, nextSessions)
+      writeCachedList(sessionsCacheKey, nextSessions)
       writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
       setError(null)
     } catch (err) {
@@ -181,13 +205,29 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (isCurrentRequest()) setLoading(false)
       if (abortRef.current === ac) abortRef.current = null
     }
-  }, [mountedDeviceScope, includeArchived, replaceArchivedIds])
+  }, [gated, mountedDeviceScope, includeArchived, filter, sessionsCacheKey, replaceArchivedIds])
 
   const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
+
+  // A new filter shows its own cached list while the refresh for it runs.
+  useEffect(() => {
+    if (listedCacheKeyRef.current === sessionsCacheKey) return
+    listedCacheKeyRef.current = sessionsCacheKey
+    awaitingBaselineRef.current = true
+    const cached = readCachedList<ActiveSessionInfo>(sessionsCacheKey) ?? []
+    sessionsRef.current = cached
+    setSessions(cached)
+  }, [sessionsCacheKey])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Which sessions the lists hold moved; list them again.
+  useEffect(() => onListsStale(() => {
+    awaitingBaselineRef.current = true
+    refresh()
+  }), [refresh])
 
   const procBySession = useMemo(() => buildProcMap(processes), [processes])
 
@@ -212,9 +252,10 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     return () => clearInterval(interval)
   }, [hasLiveWork, refresh])
 
-  // Highlight a session that just finished until the user looks at it.
+  // Highlight a session seen working that just finished, until the user looks
+  // at it. One the list brings in already finished was never seen working.
   useEffect(() => {
-    if (sessions.length === 0) return
+    if (sessions.length === 0 || awaitingBaselineRef.current) return
 
     const prev = prevStatusRef.current
     const currentStatuses = new Map<string, string>()
@@ -228,7 +269,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       setNewlyCompleted((nc) => {
         let next: Set<string> | null = null
         for (const [id, status] of currentStatuses) {
-          if (status === "completed" && prev.get(id) !== "completed") {
+          if (status === "completed" && prev.has(id) && prev.get(id) !== "completed") {
             next ??= new Set(nc)
             next.add(id)
           }
@@ -259,9 +300,9 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     sessionsRef.current = next
     setSessions(next)
     if (getActiveDeviceScope() === mountedDeviceScope) {
-      writeCachedList(sessionListCacheKeys.activeSessions, next)
+      writeCachedList(sessionsCacheKey, next)
     }
-  }, [mountedDeviceScope])
+  }, [mountedDeviceScope, sessionsCacheKey])
 
   const removeSession = useCallback((sessionId: string) => {
     replaceSessions(sessionsRef.current.filter((s) => s.sessionId !== sessionId))

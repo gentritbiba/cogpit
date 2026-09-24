@@ -29,6 +29,7 @@ const { codex, copilot } = vi.hoisted(() => ({
     getPendingPermissions: vi.fn(() => [] as unknown[]),
     respondToPermission: vi.fn(async (_sessionId: string, _requestId: string, _result?: unknown) => true),
     getPendingUserInputs: vi.fn(() => [] as unknown[]),
+    getPendingExitPlans: vi.fn(() => [] as unknown[]),
     answerUserInput: vi.fn(),
     isSessionActive: vi.fn(() => false),
     isTurnActive: vi.fn(() => false),
@@ -236,10 +237,10 @@ describe("Codex approvals", () => {
     })
     codex.listPendingApprovals.mockReturnValue([command, file])
 
-    await expect(codexRuntime.respondToAllApprovals("thread-1", "deny")).resolves.toEqual({
-      count: 2,
-      toolNames: ["Bash", "Write"],
-    })
+    await expect(codexRuntime.respondToAllApprovals("thread-1", "deny")).resolves.toEqual([
+      { requestId: "42", toolUseId: command.itemId, toolName: "Bash" },
+      { requestId: "file-1", toolUseId: "item-2", toolName: "Write" },
+    ])
     expect(codex.respondApproval).toHaveBeenCalledWith(command, "deny")
     expect(codex.respondApproval).toHaveBeenCalledWith(file, "deny")
   })
@@ -416,7 +417,10 @@ describe("Copilot permissions", () => {
     copilot.getPendingPermissions.mockReturnValue([command, write])
 
     await expect(copilotRuntime.respondToAllApprovals("copilot-1", "allow_always"))
-      .resolves.toEqual({ count: 2, toolNames: ["Bash", "Write"] })
+      .resolves.toEqual([
+        { requestId: "permission-1", toolUseId: normalizeCopilotPermission(command).toolUseId, toolName: "Bash" },
+        { requestId: "permission-2", toolUseId: normalizeCopilotPermission(write).toolUseId, toolName: "Write" },
+      ])
 
     expect(copilot.respondToPermission).toHaveBeenNthCalledWith(
       1, "copilot-1", "permission-1", { kind: "approve-for-session" },
@@ -439,13 +443,13 @@ describe("Copilot permissions", () => {
     ])
 
     await expect(copilotRuntime.respondToAllApprovals("copilot-1", "allow_always"))
-      .resolves.toMatchObject({ count: 2 })
+      .resolves.toHaveLength(2)
 
     copilot.getPendingPermissions.mockReturnValue([
       copilotPermission({ request: { kind: "read", path: "/a.ts" } }),
     ])
     await expect(copilotRuntime.respondToAllApprovals("copilot-1", "deny"))
-      .resolves.toMatchObject({ count: 1 })
+      .resolves.toHaveLength(1)
   })
 
   it("treats a sibling auto-resolved by a session approval as handled", async () => {
@@ -459,7 +463,7 @@ describe("Copilot permissions", () => {
     })
 
     await expect(copilotRuntime.respondToAllApprovals("copilot-1", "allow_always"))
-      .resolves.toMatchObject({ count: 2 })
+      .resolves.toHaveLength(2)
     expect(copilot.respondToPermission).toHaveBeenCalledOnce()
   })
 

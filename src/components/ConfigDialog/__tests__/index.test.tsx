@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 
 import { ConfigDialog } from "@/components/ConfigDialog"
+import { PASSWORD_MIN_LENGTH } from "../../../../shared/contracts/password"
 
 const SAVED_CONFIG = {
   claudeDir: "/Users/me/.claude",
@@ -114,6 +115,27 @@ describe("ConfigDialog editor routing", () => {
     expect(screen.getByRole("checkbox", { name: /Open files in Cogpit/ })).toBeChecked()
     // Nothing changed yet, so there is nothing to save.
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+})
+
+describe("ConfigDialog network password", () => {
+  beforeEach(() => {
+    mocks.authFetch.mockReset()
+  })
+
+  it("holds the network password to the server's password rule", async () => {
+    const user = userEvent.setup()
+    mockConfig()
+    renderDialog()
+
+    await waitFor(() => expect(editorInput()).toHaveValue("cursor"))
+    await user.click(screen.getByRole("switch", { name: "Network Access" }))
+    const password = screen.getByLabelText("Password")
+    await user.type(password, "a".repeat(PASSWORD_MIN_LENGTH - 1))
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    await user.type(password, "a")
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   })
 })
 

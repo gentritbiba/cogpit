@@ -1,6 +1,6 @@
 import type { ParsedSession, Turn } from "../../shared/session/types"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
-import type { AgentKind } from "@/lib/agents"
+import { rootSessionIdOf, type AgentKind } from "@/lib/agents"
 
 export interface CacheEntry {
   parsed: ParsedSession
@@ -27,11 +27,14 @@ const MAX_ENTRIES = 5
 // Device-scoped so cross-device dirName collisions are impossible and switching
 // back to a device keeps its entries warm. This module is a singleton that
 // survives the DeviceRoot remount, so the prefix is the only isolation.
-function makeKey(dirName: string, fileName: string): string {
+function activeScope(): string {
   const device = getActiveDeviceScope()
   const identity = getActiveIdentity()
-  const scope = identity === null ? device : `${device}:${identity}`
-  return `${scope}:${dirName}/${fileName}`
+  return identity === null ? device : `${device}:${identity}`
+}
+
+function makeKey(dirName: string, fileName: string): string {
+  return `${activeScope()}:${dirName}/${fileName}`
 }
 
 class SessionCache {
@@ -98,6 +101,14 @@ class SessionCache {
       this.cache.delete(makeKey(dirName, fileName))
     } else {
       this.evictLRU()
+    }
+  }
+
+  /** Drop every transcript of a session on the active device: its own, and those filed under it. */
+  evictSession(sessionId: string): void {
+    const prefix = `${activeScope()}:`
+    for (const [key, { source }] of this.cache) {
+      if (key.startsWith(prefix) && rootSessionIdOf(source.dirName, source.fileName) === sessionId) this.cache.delete(key)
     }
   }
 

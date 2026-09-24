@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
@@ -78,6 +78,28 @@ describe("useSessionTeam", () => {
     const calledUrl = mockedAuthFetch.mock.calls[0][0] as string
     expect(calledUrl).toContain("leadSessionId=lead-session-id")
     expect(calledUrl).toContain("subagentFile=worker.jsonl")
+  })
+
+  it("closes the team once its live stream is lost", async () => {
+    mockedAuthFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          teamName: "alpha-team",
+          config: { name: "alpha-team", members: [], leadAgentId: "a1", createdAt: 0 },
+          currentMemberName: "lead",
+        }),
+    } as Response)
+
+    const { result } = renderHook(() => useSessionTeam("abc123.jsonl"))
+    await waitFor(() => expect(result.current).not.toBeNull())
+    expect(mockedUseTeamLive).toHaveBeenLastCalledWith("alpha-team", expect.any(Function), expect.any(Function))
+
+    const onLost = mockedUseTeamLive.mock.lastCall![2]!
+    act(() => onLost())
+
+    expect(result.current).toBeNull()
+    expect(mockedUseTeamLive).toHaveBeenLastCalledWith(null, expect.any(Function), expect.any(Function))
   })
 
   it("sets ctx to null when API returns non-ok response", async () => {

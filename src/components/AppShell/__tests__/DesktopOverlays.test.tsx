@@ -1,12 +1,16 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Users } from "lucide-react"
 import { DesktopOverlays } from "../DesktopOverlays"
 import type { DesktopAppShellProps } from "../desktopTypes"
 import { FIND_IN_CONVERSATION_EVENT } from "@/components/ChatArea"
 import type { CommandPaletteProps } from "@/components/CommandPalette"
 import type { useAppContext } from "@/contexts/AppContext"
 import type { useSessionContext } from "@/contexts/SessionContext"
+import type { EditionMainView } from "@/edition/contract"
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
+import type { MainView } from "@/hooks/useSessionState"
 
 const mocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -62,6 +66,7 @@ vi.mock("@/components/CommandPaletteHost", () => ({
         {(props.devices ?? []).map((device) => device.name).join(",")}
       </span>
       <span data-testid="palette-kill-all">{props.onKillAll ? "yes" : "no"}</span>
+      {props.extraActions?.map((extra) => <button key={extra.id} onClick={extra.onSelect}>{extra.label}</button>)}
     </div>
   ),
 }))
@@ -75,10 +80,15 @@ vi.mock("@/lib/utils", async (importOriginal) => ({
   },
 }))
 
-function setContexts(session: { sessionId: string; cwd: string } | null = null): void {
+function setContexts(
+  session: { sessionId: string; cwd: string } | null = null,
+  mainView: MainView = "sessions",
+  extensionViewId: string | null = null,
+): void {
   mocks.useAppContext.mockReturnValue({
     state: {
-      mainView: "sessions",
+      mainView,
+      extensionViewId,
       pendingCwd: null,
       pendingDirName: null,
       dashboardProject: null,
@@ -107,6 +117,8 @@ function makeProps(): Pick<DesktopAppShellProps, "navigation" | "project" | "chr
         closeWorkspacePanel: vi.fn(),
         handleToggleConfig: vi.fn(),
         handleToggleMission: vi.fn(),
+        openMainView: vi.fn(),
+        closeMainView: vi.fn(),
         handleOpenProjectSwitcher: vi.fn(),
         handleCloseProjectSwitcher: vi.fn(),
         handleToggleThemeSelector: vi.fn(),
@@ -219,6 +231,44 @@ describe("DesktopOverlays", () => {
     await user.click(screen.getByText("palette copy resume"))
 
     expect(clipboardWrites).toEqual(["claude --resume abc-123"])
+  })
+
+  describe("edition main views", () => {
+    function view(id: string, label: string, available = true): EditionMainView {
+      return { id, label, icon: Users, keywords: id, isAvailable: () => available, Component: () => null }
+    }
+
+    afterEach(() => __resetEditionUiForTest())
+
+    it("adds nothing to the palette without an edition", () => {
+      render(<DesktopOverlays {...makeProps()} />)
+
+      expect(screen.queryByRole("button", { name: /^Open / })).not.toBeInTheDocument()
+    })
+
+    it("offers only the views the caller may open", () => {
+      __installEditionUiForTest({ mainViews: [view("reports", "Reports"), view("billing", "Billing", false)] })
+      render(<DesktopOverlays {...makeProps()} />)
+
+      expect(screen.getByRole("button", { name: "Open Reports" })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Open Billing" })).not.toBeInTheDocument()
+    })
+
+    it("opens a view from the palette, and closes it while it is open", async () => {
+      const user = userEvent.setup()
+      __installEditionUiForTest({ mainViews: [view("reports", "Reports")] })
+      const props = makeProps()
+      const { unmount } = render(<DesktopOverlays {...props} />)
+
+      await user.click(screen.getByRole("button", { name: "Open Reports" }))
+      expect(props.navigation.panels.openMainView).toHaveBeenCalledWith("reports")
+      unmount()
+
+      setContexts(null, "extension", "reports")
+      render(<DesktopOverlays {...props} />)
+      await user.click(screen.getByRole("button", { name: "Close Reports" }))
+      expect(props.navigation.panels.closeMainView).toHaveBeenCalledOnce()
+    })
   })
 
   it("asks the open conversation to show its find bar", async () => {

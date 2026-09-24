@@ -7,7 +7,8 @@ import {
   refreshServerHello,
   type ServerHello,
 } from "@/lib/auth"
-import type { CogpitEdition } from "../../shared/contracts/team"
+import { clearSessionListCache } from "@/lib/sessionListCache"
+import type { CogpitEdition } from "../../shared/contracts/identity"
 
 export interface NetworkAuth {
   isRemote: boolean
@@ -15,10 +16,10 @@ export interface NetworkAuth {
   edition: CogpitEdition | null
   authChecked: boolean
   authenticated: boolean
-  /** Team server with no accounts: the gate shows the first-admin screen. */
-  needsBootstrap: boolean
+  /** Account sign-in with no accounts yet: the gate shows the server's first-time setup. */
+  setupRequired: boolean
   handleAuthenticated: () => void
-  /** Re-read the public handshake after the bootstrap state changes. */
+  /** Re-read the public handshake after the setup state changes. */
   refreshServerState: () => Promise<void>
   logout: () => void
 }
@@ -27,8 +28,8 @@ export function useNetworkAuth(): NetworkAuth {
   const remote = isRemoteClient()
   // null until the public handshake resolves. It decides two things: whether
   // requests must carry a session (always for remote clients, and for local
-  // browsers on a team server) and whether the founding admin still has to be
-  // created before anyone can log in at all.
+  // browsers on a server with account sign-in) and whether the first account
+  // still has to be created before anyone can sign in at all.
   const [hello, setHello] = useState<ServerHello | null>(null)
   const [authenticated, setAuthenticated] = useState(false)
   const [sessionChecked, setSessionChecked] = useState(false)
@@ -42,9 +43,9 @@ export function useNetworkAuth(): NetworkAuth {
     return () => { cancelled = true }
   }, [])
 
-  // Remote clients are gated regardless of edition, so their session check
+  // Remote clients are gated regardless of sign-in, so their session check
   // starts immediately instead of waiting on the handshake.
-  const gated = remote ? true : hello === null ? null : hello.edition === "team"
+  const gated = remote ? true : hello === null ? null : hello.signIn === "account"
 
   useEffect(() => {
     if (gated === null) return
@@ -70,9 +71,10 @@ export function useNetworkAuth(): NetworkAuth {
 
   // Listen even while a local client is provisionally treated as personal.
   // A failed startup hello intentionally falls back to personal, but a later
-  // API 401 can successfully re-probe the same server as team edition and emit
-  // this event. Re-probing here upgrades the gate instead of leaving the app in
-  // an authenticated-looking state. A genuinely personal server stays open.
+  // API 401 can successfully re-probe the same server as one with account
+  // sign-in and emit this event. Re-probing here upgrades the gate instead of
+  // leaving the app in an authenticated-looking state. A server that signs in
+  // with the network password stays open to local browsers.
   useEffect(() => {
     let cancelled = false
     const handler = () => {
@@ -83,7 +85,7 @@ export function useNetworkAuth(): NetworkAuth {
         setSessionChecked(true)
       }
 
-      if (remote || hello?.edition === "team") {
+      if (remote || hello?.signIn === "account") {
         requireAuthentication()
         return
       }
@@ -91,7 +93,7 @@ export function useNetworkAuth(): NetworkAuth {
       void refreshServerHello().then((resolved) => {
         if (cancelled || authVersionRef.current !== version) return
         setHello(resolved)
-        if (resolved.edition === "team") requireAuthentication()
+        if (resolved.signIn === "account") requireAuthentication()
       })
     }
 
@@ -100,7 +102,7 @@ export function useNetworkAuth(): NetworkAuth {
       cancelled = true
       window.removeEventListener("cogpit-auth-required", handler)
     }
-  }, [hello?.edition, remote])
+  }, [hello?.signIn, remote])
 
   const handleAuthenticated = useCallback(() => {
     authVersionRef.current += 1
@@ -114,6 +116,8 @@ export function useNetworkAuth(): NetworkAuth {
   }, [])
 
   const logout = useCallback(() => {
+    // Clear while the signed-in identity still scopes the cache key.
+    clearSessionListCache()
     authVersionRef.current += 1
     setAuthenticated(false)
     setSessionChecked(true)
@@ -127,7 +131,7 @@ export function useNetworkAuth(): NetworkAuth {
     edition: hello?.edition ?? null,
     authChecked: sessionChecked && hello !== null,
     authenticated,
-    needsBootstrap: hello?.needsBootstrap === true,
+    setupRequired: hello?.setupRequired === true,
     handleAuthenticated,
     refreshServerState,
     logout,

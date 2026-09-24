@@ -27,7 +27,8 @@ interface QuestionPromptProps {
   responding: boolean
   /** True once the server said it no longer knows about this question. */
   gone: boolean
-  onAnswer: (toolUseId: string, answers: UserQuestionAnswerMap) => void
+  /** Omitted for a reader who cannot answer: the question and its options show, disabled. */
+  onAnswer?: (toolUseId: string, answers: UserQuestionAnswerMap) => void
   onOpenSession: () => void
 }
 
@@ -73,6 +74,7 @@ export function QuestionPrompt({
   }
 
   const current = questions[index]
+  const locked = responding || !onAnswer
 
   /** Record an answer, then advance or submit the completed set. */
   function commit(value: string) {
@@ -83,7 +85,7 @@ export function QuestionPrompt({
       setIndex(index + 1)
       return
     }
-    onAnswer(request.toolUseId, next)
+    onAnswer?.(request.toolUseId, next)
   }
 
   return (
@@ -122,12 +124,12 @@ export function QuestionPrompt({
         aria-label={current.question}
       >
         {current.options.map((option) => (
-          <OptionItem key={option.label} option={option} disabled={responding} />
+          <OptionItem key={option.label} option={option} disabled={locked} />
         ))}
       </ToggleGroup>
 
       <div className="mt-3 flex items-center gap-2">
-        {current.multiSelect && (
+        {current.multiSelect && onAnswer && (
           <Button
             size="sm"
             disabled={responding || selected.size === 0}

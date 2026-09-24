@@ -10,8 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const gate = vi.hoisted(() => ({ hook: undefined as undefined | ((step: string) => Promise<void> | void) }))
 vi.mock("../../config", () => ({ getConfig: () => ({ networkAccess: false }) }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
-vi.mock("../../team/sessionPersistence", () => ({ clearAllSessions: async () => {}, persistSession: async () => {}, removeSession: async () => {}, removeSessionsForUser: async () => {}, restoreSession: () => null, touchSession: async () => {} }))
 vi.mock("../../agents", () => ({ allStores: () => [] }))
 vi.mock("../../plugins/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../plugins/store")>()
@@ -19,7 +17,7 @@ vi.mock("../../plugins/store", async (importOriginal) => {
 })
 
 import { authMiddleware, revokeAllSessions } from "../../security"
-import { teamAuthzMiddleware } from "../../team/authz"
+import { editionAuthz } from "../../edition"
 import type { Middleware } from "../../http"
 import { registerPluginRoutes } from "../../routes/plugins"
 import { initializePluginManager, type PluginManager } from "../../plugins/manager"
@@ -96,7 +94,7 @@ beforeEach(async () => {
   server = createServer((req, res) => {
     const exchange = { path: req.url!, req, res, socket: req.socket, done: deferred<void>() }
     exchanges.push(exchange)
-    authMiddleware(req, res, () => teamAuthzMiddleware(req, res, () => {
+    authMiddleware(req, res, () => editionAuthz(req, res, () => {
       req.url = req.url!.slice("/api/plugins".length)
       void Promise.resolve(handler(req, res, () => {})).finally(() => exchange.done.resolve())
     }))

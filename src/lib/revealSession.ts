@@ -1,3 +1,8 @@
+import { authFetch } from "@/lib/auth"
+import { sessionUrlIdFromFileName } from "@/lib/agents"
+import { devicePathPrefix } from "@/lib/device"
+import { readJson } from "@/lib/httpJson"
+
 declare global {
   interface Window {
     /**
@@ -21,4 +26,23 @@ declare global {
 export function revealSessionPath(path: string): void {
   window.history.pushState({}, "", path)
   window.dispatchEvent(new PopStateEvent("popstate"))
+}
+
+/** The app path that opens a transcript on the active device. */
+export function sessionPath(dirName: string, fileName: string): string {
+  return `${devicePathPrefix()}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionUrlIdFromFileName(dirName, fileName))}`
+}
+
+/** Open a session known only by its id, wherever its transcript is. False when the server finds none the caller may see. */
+export async function revealSessionById(sessionId: string): Promise<boolean> {
+  let res: Response
+  try {
+    res = await authFetch(`/api/find-session/${encodeURIComponent(sessionId)}`)
+  } catch {
+    return false
+  }
+  const location = res.ok ? await readJson(res) : null
+  if (typeof location?.dirName !== "string" || typeof location.fileName !== "string") return false
+  revealSessionPath(sessionPath(location.dirName, location.fileName))
+  return true
 }

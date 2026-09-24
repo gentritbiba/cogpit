@@ -1,5 +1,7 @@
 import { stat } from "node:fs/promises"
-import type { ServerResponse } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { lineageFromMeta } from "../../agents/lineage"
+import { visibilityFor, type VisibilityCheck } from "../../edition"
 import {
   dirs,
   isWithinDir,
@@ -15,40 +17,43 @@ import {
   readFirstJsonLine,
 } from "./worktreeUtils"
 import type { WorktreeRaw } from "./worktreeUtils"
+import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import {
-  mapWithConcurrency,
   runWorktreeCommand,
   SESSION_HEADER_CONCURRENCY,
   WORKTREE_SCAN_CONCURRENCY,
 } from "./worktreeIo"
 
-async function loadSessionBranches(projectDir: string): Promise<Map<string, string[]>> {
+/** The sessions each branch ran in, as far as `visible` lets the caller see them. */
+async function loadSessionBranches(projectDir: string, visible: VisibilityCheck): Promise<Map<string, string[]>> {
   const sessionBranches = new Map<string, string[]>()
 
   try {
     const files = await readdir(projectDir)
     const sessionFiles = files.filter((file: string) => file.endsWith(".jsonl"))
-    const headers = await mapWithConcurrency(
+    const links = await mapWithConcurrency(
       sessionFiles,
       SESSION_HEADER_CONCURRENCY,
       async (file) => {
+        const filePath = join(projectDir, file)
+        let branch: unknown
         try {
-          return {
-            file,
-            header: await readFirstJsonLine(join(projectDir, file)),
-          }
+          branch = (await readFirstJsonLine(filePath))?.gitBranch
         } catch {
-          return { file, header: null }
+          return null
         }
+        if (typeof branch !== "string" || !branch) return null
+        const sessionId = file.slice(0, -".jsonl".length)
+        const session = await visible(sessionId, lineageFromMeta({ sessionId, parentSessionId: null }, filePath))
+        return session === "hidden" ? null : { branch, sessionId }
       },
     )
 
-    for (const { file, header } of headers) {
-      if (typeof header?.gitBranch !== "string" || !header.gitBranch) continue
-      const sessionId = file.slice(0, -".jsonl".length)
-      const existing = sessionBranches.get(header.gitBranch) ?? []
-      existing.push(sessionId)
-      sessionBranches.set(header.gitBranch, existing)
+    for (const link of links) {
+      if (!link) continue
+      const existing = sessionBranches.get(link.branch) ?? []
+      existing.push(link.sessionId)
+      sessionBranches.set(link.branch, existing)
     }
   } catch {
     // Project directory may not exist yet.
@@ -180,9 +185,11 @@ async function buildWorktreeInfo(
 }
 
 export async function handleWorktreeList(
-  dirName: string,
+  req: IncomingMessage,
   res: ServerResponse,
+  dirName: string,
 ): Promise<void> {
+  const visible = visibilityFor(req)
   const projectDir = join(dirs.PROJECTS_DIR, dirName)
 
   if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
@@ -208,7 +215,7 @@ export async function handleWorktreeList(
     const rawWorktrees = parseWorktreeList(rawOutput)
     const [defaultBranch, sessionBranches] = await Promise.all([
       getDefaultBranch(gitRoot),
-      loadSessionBranches(projectDir),
+      loadSessionBranches(projectDir, visible),
     ])
     const worktrees = await mapWithConcurrency(
       rawWorktrees,

@@ -2,9 +2,10 @@
  * Panel/sidebar toggle state for the App shell.
  */
 
-import { useState, useCallback, startTransition } from "react"
+import { useState, useCallback, useEffect, useRef, startTransition } from "react"
 import { useLocalStorage } from "./useLocalStorage"
-import type { SessionState, SessionAction } from "./useSessionState"
+import { useMainViews } from "@/edition/hooks"
+import type { MainView, SessionState, SessionAction } from "./useSessionState"
 import { canonicalPluginPanelId } from "@/plugins/panelAliases"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
@@ -44,6 +45,9 @@ interface PanelState {
   closeWorkspacePanel: () => void
   handleToggleConfig: () => void
   handleToggleMission: () => void
+  /** Opens the edition main view `id` names. */
+  openMainView: (id: string) => void
+  closeMainView: () => void
   handleEditConfig: (filePath: string) => void
   handleOpenProjectSwitcher: () => void
   handleCloseProjectSwitcher: () => void
@@ -52,6 +56,12 @@ interface PanelState {
 
   setShowWorkflows: React.Dispatch<React.SetStateAction<boolean>>
 }
+
+const CLOSE_MAIN_VIEW = {
+  config: { type: "CLOSE_CONFIG" },
+  mission: { type: "CLOSE_MISSION" },
+  extension: { type: "CLOSE_EXTENSION_VIEW" },
+} as const satisfies Record<Exclude<MainView, "sessions">, SessionAction>
 
 function initialWorkspacePanel(): string | null {
   if (typeof window === "undefined") return BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges
@@ -87,42 +97,65 @@ export function usePanelState(
   // Project switcher and theme selector are transient overlays, not layout.
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
+  const { mainView } = state
 
   const handleToggleSidebar = useCallback(() => {
     startTransition(() => setShowSidebar(!showSidebar))
   }, [setShowSidebar, showSidebar])
   const toggleWorkspacePanel = useCallback((panelId: string) => {
     startTransition(() => {
-      const returningToSessions = state.mainView === "config" || state.mainView === "mission"
-      if (state.mainView === "config") dispatch({ type: "CLOSE_CONFIG" })
-      if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
+      const returningToSessions = mainView !== "sessions"
+      if (returningToSessions) dispatch(CLOSE_MAIN_VIEW[mainView])
       setStoredWorkspacePanel((current) => (
         returningToSessions || canonicalPluginPanelId(current) !== canonicalPluginPanelId(panelId) ? panelId : null
       ))
     })
-  }, [dispatch, setStoredWorkspacePanel, state.mainView])
+  }, [dispatch, setStoredWorkspacePanel, mainView])
   const openWorkspacePanel = useCallback((panelId: string) => {
     startTransition(() => {
-      if (state.mainView === "config") dispatch({ type: "CLOSE_CONFIG" })
-      if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
+      if (mainView !== "sessions") dispatch(CLOSE_MAIN_VIEW[mainView])
       setStoredWorkspacePanel(panelId)
     })
-  }, [dispatch, setStoredWorkspacePanel, state.mainView])
+  }, [dispatch, setStoredWorkspacePanel, mainView])
   const closeWorkspacePanel = useCallback(() => {
     startTransition(() => setStoredWorkspacePanel(null))
   }, [setStoredWorkspacePanel])
   const handleToggleConfig = useCallback(() => {
-    const closing = state.mainView === "config"
+    const closing = mainView === "config"
     startTransition(() => {
       dispatch({ type: closing ? "CLOSE_CONFIG" : "OPEN_CONFIG" })
     })
-  }, [state.mainView, dispatch])
+  }, [mainView, dispatch])
   const handleToggleMission = useCallback(() => {
-    const closing = state.mainView === "mission"
+    const closing = mainView === "mission"
     startTransition(() => {
       dispatch({ type: closing ? "CLOSE_MISSION" : "OPEN_MISSION" })
     })
-  }, [state.mainView, dispatch])
+  }, [mainView, dispatch])
+  const openMainView = useCallback((id: string) => {
+    startTransition(() => dispatch({ type: "OPEN_EXTENSION_VIEW", id }))
+  }, [dispatch])
+  const closeMainView = useCallback(() => {
+    startTransition(() => dispatch({ type: "CLOSE_EXTENSION_VIEW" }))
+  }, [dispatch])
+  // Each main view is asked once, as soon as the caller may open it, whether
+  // the app should start in it, until one does.
+  const mainViews = useMainViews()
+  const askedToOpenOnStart = useRef(new Set<string>())
+  const openedOnStart = useRef(false)
+  useEffect(() => {
+    if (openedOnStart.current) return
+    const asked = askedToOpenOnStart.current
+    for (const view of mainViews) {
+      if (asked.has(view.id)) continue
+      asked.add(view.id)
+      if (view.openOnStart?.()) {
+        openedOnStart.current = true
+        openMainView(view.id)
+        return
+      }
+    }
+  }, [mainViews, openMainView])
   const handleEditConfig = useCallback((filePath: string) => {
     startTransition(() => {
       dispatch({ type: "OPEN_CONFIG", filePath })
@@ -145,6 +178,8 @@ export function usePanelState(
     closeWorkspacePanel,
     handleToggleConfig,
     handleToggleMission,
+    openMainView,
+    closeMainView,
     handleEditConfig,
     handleOpenProjectSwitcher,
     handleCloseProjectSwitcher,

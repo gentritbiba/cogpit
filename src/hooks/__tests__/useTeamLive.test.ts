@@ -1,21 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
+const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({
+  authFetch: mocks.authFetch,
   authUrl: vi.fn((url: string) => url),
 }))
 
 import { useTeamLive } from "../useTeamLive"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
+import { SESSION_ACCESS_HEADER } from "../../../shared/contracts/sessionAccess"
 
 // Mock EventSource
-class MockEventSource {
+class MockEventSource extends EventTarget {
+  static readonly CLOSED = 2
   static instances: MockEventSource[] = []
+  readyState = 1
   url: string
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror: (() => void) | null = null
   closed = false
 
   constructor(url: string) {
+    super()
     this.url = url
     MockEventSource.instances.push(this)
   }
@@ -35,6 +43,11 @@ class MockEventSource {
       this.onerror()
     }
   }
+
+  giveUp() {
+    this.readyState = MockEventSource.CLOSED
+    this.dispatchEvent(new Event("error"))
+  }
 }
 
 describe("useTeamLive", () => {
@@ -48,6 +61,7 @@ describe("useTeamLive", () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    __resetCapabilitiesForTest()
   })
 
   it("returns isLive=false when teamName is null", () => {
@@ -184,6 +198,25 @@ describe("useTeamLive", () => {
       vi.advanceTimersByTime(10000)
     })
     expect(result.current.isLive).toBe(false)
+  })
+
+  it("tells its caller the team is lost when its reconnect is refused", async () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_bob", username: "bob", displayName: "Bob" },
+      capabilities: NO_CAPABILITIES,
+      enforcesSessionAccess: true,
+    })
+    // A team route names no lead session in its refusal.
+    mocks.authFetch.mockResolvedValue(new Response("{}", { status: 404, headers: { [SESSION_ACCESS_HEADER]: "none" } }))
+    const onLost = vi.fn()
+    renderHook(() => useTeamLive("my-team", vi.fn(), onLost))
+
+    await act(async () => MockEventSource.instances[0].giveUp())
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/team-watch/my-team", expect.anything())
+    expect(onLost).toHaveBeenCalledOnce()
   })
 
   it("closes EventSource on unmount", () => {

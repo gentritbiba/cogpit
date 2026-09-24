@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, type ReactNode } from "react"
 import { MessageSquare, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -23,6 +23,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { projectName, shortPath } from "@/lib/format"
+import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
 import { SessionListRow } from "./SessionListRow"
 import { sessionRowTitle } from "./sessionPresentation"
@@ -30,6 +31,8 @@ import type { ProjectInfo, SessionInfo } from "./types"
 
 interface SessionsViewProps {
   selectedProject: ProjectInfo
+  /** Stands for a list the edition's session filter left empty; null while the list is unfiltered. */
+  filterEmpty: ReactNode
   sessions: SessionInfo[]
   sessionsTotal: number
   sessionsLoading: boolean
@@ -50,6 +53,7 @@ interface SessionsViewProps {
 
 export function SessionsView({
   selectedProject,
+  filterEmpty,
   sessions,
   sessionsTotal,
   sessionsLoading,
@@ -68,6 +72,7 @@ export function SessionsView({
   loadMoreSessions,
 }: SessionsViewProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
+  const permissionsOf = useListedPermissions()
   const selectedProjectName = projectName(selectedProject.path)
 
   return (
@@ -128,21 +133,7 @@ export function SessionsView({
           {(sessionsLoading || searchLoading) && filteredSessions.length === 0 ? (
             <SkeletonRows includeMessagePlaceholder />
           ) : filteredSessions.length === 0 ? (
-            <Empty className="min-h-72 border">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <MessageSquare />
-                </EmptyMedia>
-                <EmptyTitle>
-                  {searchFilter ? "No sessions match your search" : "No sessions yet"}
-                </EmptyTitle>
-                <EmptyDescription>
-                  {searchFilter
-                    ? "Try #157, honest-cms #157, or paste a PR URL."
-                    : "Start a session in this project and it will appear here."}
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <SessionsEmpty searchFilter={searchFilter} filterEmpty={filterEmpty} />
           ) : (
             <>
               <div className="overflow-hidden rounded-lg border bg-card">
@@ -156,7 +147,7 @@ export function SessionsView({
                       onDuplicate={onDuplicateSession
                         ? () => onDuplicateSession(selectedProject.dirName, session.fileName)
                         : undefined}
-                      onDelete={onDeleteSession
+                      onDelete={onDeleteSession && permissionsOf(session.access).delete
                         ? () => onDeleteSession(selectedProject.dirName, session.fileName)
                         : undefined}
                     >
@@ -188,5 +179,26 @@ export function SessionsView({
         </section>
       </main>
     </ScrollArea>
+  )
+}
+
+function SessionsEmpty({ searchFilter, filterEmpty }: { searchFilter: string; filterEmpty: ReactNode }) {
+  if (!searchFilter && filterEmpty) return filterEmpty
+  return (
+    <Empty className="min-h-72 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <MessageSquare />
+        </EmptyMedia>
+        <EmptyTitle>
+          {searchFilter ? "No sessions match your search" : "No sessions yet"}
+        </EmptyTitle>
+        <EmptyDescription>
+          {searchFilter
+            ? "Try #157, honest-cms #157, or paste a PR URL."
+            : "Start a session in this project and it will appear here."}
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   )
 }

@@ -16,7 +16,7 @@ import {
 } from "../../security"
 import { getConfig } from "../../config"
 import { initShareRegistry, createShare, removeShare } from "../../share/registry"
-import { __resetEditionForTest } from "../../team/edition"
+import { __resetEditionForTest } from "../../edition"
 
 vi.mock("../../config", () => ({ getConfig: vi.fn() }))
 

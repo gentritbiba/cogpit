@@ -19,18 +19,16 @@ import {
   securityHeaders,
   bodySizeLimit,
 } from "./helpers"
-import { prefixMatches } from "./http"
+import { apiNotFound } from "./http"
+import { answersUnconfigured } from "./lib/configGuard"
 import { cleanupProcesses } from "./processRegistry"
+import { openResponses } from "./lib/openResponses"
 import { initializeAppPlugins } from "./plugins/startup"
 import { captureLegacyPluginHost, type LegacyHostClassification } from "./plugins/legacyHost"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
 import { refreshDirs } from "./sessionPaths"
 import { rejectWebsocketUpgrade } from "./security"
-import { teamAuthzMiddleware } from "./team/authz"
-import { describeEditionSuppression, initEdition, isTeamEdition } from "./team/edition"
-import { flushSessionPersistence, initSessionPersistence } from "./team/sessionPersistence"
-import { initUsersStore, userCount } from "./team/users"
-import { initializeBootstrapToken } from "./team/bootstrapToken"
+import { describeEditionSuppression, editionAuthz, editionModule, loadEdition } from "./edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { handleHubUpgrade } from "./hub/proxy"
@@ -40,6 +38,40 @@ import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
 import type { HubMode } from "./routes/hello"
+
+/** How long shutdown still waits on its other steps once one has failed. */
+const FAILED_SHUTDOWN_GRACE_MS = 10_000
+/** How long shutdown lets open requests finish before ending them, event streams included. */
+const OPEN_RESPONSE_GRACE_MS = 1_000
+
+/**
+ * Wait for every shutdown step, flush the edition's durable state whether or
+ * not one failed, then report the first failure. Once a step fails, a step
+ * that never settles holds the flush and the failure back for
+ * FAILED_SHUTDOWN_GRACE_MS at most. The grace timer stays ref'd: a hung step
+ * with no handle of its own must not let the process exit before the flush.
+ */
+async function settleThenFlushEdition(steps: readonly Promise<unknown>[]): Promise<void> {
+  let failure: { reason: unknown } | undefined
+  let grace: ReturnType<typeof setTimeout> | undefined
+  const graceOver = new Promise<void>((resolve) => {
+    for (const step of steps) {
+      step.catch((reason: unknown) => {
+        if (failure) return
+        failure = { reason }
+        grace = setTimeout(resolve, FAILED_SHUTDOWN_GRACE_MS)
+      })
+    }
+  })
+  await Promise.race([Promise.allSettled(steps), graceOver])
+  clearTimeout(grace)
+  try {
+    await editionModule().flush()
+  } catch (error) {
+    failure ??= { reason: error }
+  }
+  if (failure) throw failure.reason
+}
 
 export interface AppServerEnvironment {
   mode: Extract<HubMode, "electron" | "standalone">
@@ -69,40 +101,34 @@ export async function createServerComposition(
 
   // Edition resolves before any route registers; only the standalone shell can
   // honor a team request, and a suppressed request is logged, never silent.
-  initEdition({ shell: environment.mode, configEdition })
+  await loadEdition({ shell: environment.mode, configEdition })
   const suppression = describeEditionSuppression(process.env, configEdition, environment.mode)
   if (suppression) console.warn(suppression)
-
-  if (isTeamEdition()) {
-    // Users must load before any request can authenticate, sessions before any
-    // login can persist. A corrupt users store rejects here on purpose: booting
-    // with an empty list would reopen the unauthenticated first-admin
-    // bootstrap, so the shell must die loudly instead.
-    const teamDir = join(getDataRoot(), "team")
-    await initUsersStore(teamDir)
-    await initSessionPersistence(teamDir)
-    initializeBootstrapToken(userCount())
-  }
+  // Loaded ahead of the edition, which may check the registry's file.
+  await initShareRegistry(userDataDir)
+  // Before any request can authenticate and before anything below can spawn a
+  // process: the edition's own stores must open first.
+  await editionModule().boot({ dataRoot: getDataRoot() })
 
   await initDeviceRegistry(userDataDir)
-  await initShareRegistry(userDataDir)
   refreshDirs()
   const pluginManager = await initializeAppPlugins(userDataDir, { legacyHost, legacyClickUpPath: environment.legacyClickUpPath })
 
   const app = express()
   const httpServer = createServer(app)
+  const responses = openResponses()
 
+  app.use(responses.track)
   // Security middleware must precede every route.
   app.use(securityHeaders)
   app.use(bodySizeLimit)
   app.use(authMiddleware)
-  app.use(teamAuthzMiddleware)
+  app.use(editionAuthz)
 
-  // Block data APIs until configuration exists, while leaving bootstrap and
-  // discovery endpoints available.
+  // Block data APIs until configuration exists, while leaving discovery,
+  // sign-in and the edition's first-time setup available.
   app.use("/api", (req, res, next) => {
-    const exempt = ["/config", "/hello", "/me", "/team/bootstrap", "/auth"]
-    if (exempt.some((prefix) => prefixMatches(req.path, prefix))) return next()
+    if (answersUnconfigured(`/api${req.path}`)) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
       return
@@ -112,6 +138,7 @@ export async function createServerComposition(
 
   const use = app.use.bind(app)
   registerApiRoutes(use, { mode: environment.mode })
+  app.use("/api", apiNotFound)
 
   const viteUrl = environment.viteDevUrl
     ? new URL(environment.viteDevUrl)
@@ -162,7 +189,7 @@ export async function createServerComposition(
     const url = new URL(req.url || "/", "http://localhost")
     if (handleHubUpgrade(req, socket, head)) {
       // Hub transport upgrades bypass the local WebSocketServers and splice raw
-      // sockets, so track the caller's outer team session here as well.
+      // sockets, so track the caller's outer sign-in session here as well.
       if (!socket.destroyed && /^\/hub\/[^/]+\/(__pty|__browser)$/.test(url.pathname)) {
         ptyAuthorization.trackHubUpgrade(req, url, socket)
       }
@@ -227,7 +254,7 @@ export async function createServerComposition(
       for (const socket of upgradedSockets) socket.destroy()
       upgradedSockets.clear()
 
-      await Promise.all([
+      await settleThenFlushEdition([
         pluginManager.close(),
         disposeHubPluginRelay(),
         new Promise<void>((resolve) => wss.close(() => resolve())),
@@ -235,7 +262,6 @@ export async function createServerComposition(
         cleanupProcesses(),
         browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
-        flushSessionPersistence(),
       ])
     })()
     return cleanupPromise
@@ -251,13 +277,18 @@ export async function createServerComposition(
           httpServer.close((error) => error ? reject(error) : resolve())
         })
       : Promise.resolve()
+    // close() waits on every open response; an event stream never finishes
+    // by itself. Node alone also drops keep-alive sockets this way.
+    const endOpenResponses = setTimeout(() => {
+      responses.endAll()
+      httpServer.closeAllConnections()
+    }, OPEN_RESPONSE_GRACE_MS)
+    void serverClosed.finally(() => clearTimeout(endOpenResponses)).catch(() => {})
 
-    await cleanupRuntime()
-    await serverClosed
     // httpServer.close() drains active requests. Flush once more afterwards so
     // a login/config mutation that completed during runtime cleanup cannot be
     // acknowledged without its durable session state reaching disk.
-    await flushSessionPersistence()
+    await settleThenFlushEdition([cleanupRuntime(), serverClosed])
   }
 
   return { httpServer, dispose }

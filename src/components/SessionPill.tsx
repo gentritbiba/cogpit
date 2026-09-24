@@ -218,9 +218,12 @@ function SessionBreadcrumb({
   const breadcrumb = session.cwd ? `${projectName(session.cwd)} / ${sessionLabel}` : sessionLabel
 
   const project = { path: session.cwd, dirName: sessionSource.dirName }
+  // Both reach the host's own files, which an edition may keep to some accounts.
+  const hostFiles = can("hostFiles")
   // The built-in workspace reads files over the device proxy, so it stays
   // available even when the session runs on another machine.
-  const canOpenEditor = !isRemote || isBuiltInEditorEnabled()
+  const canOpenEditor = hostFiles && (!isRemote || isBuiltInEditorEnabled())
+  const canReveal = hostFiles && !isRemote
 
   function handleViewProjectSessions(): void {
     startTransition(() => {
@@ -267,7 +270,7 @@ function SessionBreadcrumb({
             Duplicate this session
           </ContextMenuItem>
         )}
-        {hasProject && (canOpenEditor || !isRemote) && (
+        {hasProject && (canOpenEditor || canReveal) && (
           <>
             <ContextMenuSeparator />
             {canOpenEditor && (
@@ -276,7 +279,7 @@ function SessionBreadcrumb({
                 Open project in editor
               </ContextMenuItem>
             )}
-            {!isRemote && (
+            {canReveal && (
               <ContextMenuItem onClick={() => revealInFolder(project)}>
                 <FolderSearch className="size-3.5" />
                 Reveal in file manager

@@ -11,6 +11,7 @@ describe("resolveDesktopMainView", () => {
       mainView: "config",
       hasSession: true,
       pendingDirName: "pending",
+      extensionViewAvailable: false,
     })).toBe("config")
   })
 
@@ -21,6 +22,7 @@ describe("resolveDesktopMainView", () => {
       mainView: "mission",
       hasSession: true,
       pendingDirName: "pending",
+      extensionViewAvailable: false,
     })).toBe("mission")
   })
 
@@ -29,7 +31,32 @@ describe("resolveDesktopMainView", () => {
       mainView: "config",
       hasSession: false,
       pendingDirName: null,
+      extensionViewAvailable: false,
     })).toBe("config")
+  })
+
+  it("shows an edition's main view over an open session", () => {
+    expect(resolveDesktopMainView({
+      mainView: "extension",
+      hasSession: true,
+      pendingDirName: null,
+      extensionViewAvailable: true,
+    })).toBe("extension")
+  })
+
+  it("falls through an edition's main view the user may no longer open", () => {
+    expect(resolveDesktopMainView({
+      mainView: "extension",
+      hasSession: true,
+      pendingDirName: null,
+      extensionViewAvailable: false,
+    })).toBe("session")
+    expect(resolveDesktopMainView({
+      mainView: "extension",
+      hasSession: false,
+      pendingDirName: null,
+      extensionViewAvailable: false,
+    })).toBe("dashboard")
   })
 
   it("uses pending content before the dashboard", () => {
@@ -37,6 +64,7 @@ describe("resolveDesktopMainView", () => {
       mainView: "sessions",
       hasSession: false,
       pendingDirName: "pending",
+      extensionViewAvailable: false,
     })).toBe("pending")
   })
 
@@ -45,6 +73,7 @@ describe("resolveDesktopMainView", () => {
       mainView: "sessions",
       hasSession: false,
       pendingDirName: null,
+      extensionViewAvailable: false,
     })).toBe("dashboard")
   })
 })

@@ -13,6 +13,7 @@ import {
   renderNodeShim,
   SHIM_VERSION,
 } from "../../browser/shim"
+import { logged, runAtOnce, SLOW_START_BINARY, stopFakeDaemon } from "./singleFlightFixture"
 
 /**
  * The Node shim is what Windows runs, but it is plain Node: every routing test
@@ -23,6 +24,7 @@ const FAKE_BINARY = [
   'echo "SESSION_DIR=${AGENT_BROWSER_SOCKET_DIR:-}"',
   'echo "PROFILE=${AGENT_BROWSER_PROFILE:-}"',
   'echo "ARGS=${AGENT_BROWSER_ARGS:-}"',
+  'echo "NAME=${AGENT_BROWSER_SESSION:-}"',
   "printf '[%s]' \"$@\"",
   "",
 ].join("\n")
@@ -56,6 +58,8 @@ interface ShimRun {
   sessionDir: string
   profile: string
   args: string
+  /** AGENT_BROWSER_SESSION as the real binary sees it. */
+  name: string
   argv: string
 }
 
@@ -67,14 +71,81 @@ function runShim(args: string[], extraEnv: Record<string, string> = {}): ShimRun
   const env = { HOME: root, PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home, ...extraEnv }
   const result = spawnShim(shimFile, args, env)
   if (result.status !== 0) throw new Error(`shim exited ${result.status}: ${result.stderr}`)
-  const [sessionDir, profile, argLine, argv = ""] = result.stdout.split("\n")
+  const [sessionDir, profile, argLine, name, argv = ""] = result.stdout.split("\n")
   return {
     sessionDir: sessionDir.replace(/^SESSION_DIR=/, ""),
     profile: profile.replace(/^PROFILE=/, ""),
     args: argLine.replace(/^ARGS=/, ""),
+    name: name.replace(/^NAME=/, ""),
     argv,
   }
 }
+
+describe.skipIf(process.platform === "win32")("node shim starting a browser's daemon", () => {
+  it("dates every call to a throwaway, and none to a named browser, for the idle sweep", () => {
+    runShim(["--session", "tmp-1", "snapshot"], { COGPIT_SESSION_ID: "s1" })
+    runShim(["--session", "work", "snapshot"])
+    expect(existsSync(join(home, "run", "s1", "tmp-1.used"))).toBe(true)
+    expect(existsSync(join(home, "run", "shared", "work.used"))).toBe(false)
+  })
+
+  it("starts one daemon however many calls arrive at once, and leaves no lock", async () => {
+    const slow = join(root, "fake-bin", "slow-start")
+    writeFileSync(slow, SLOW_START_BINARY, { mode: 0o755 })
+    const flightShim = join(root, "flight-shim.mjs")
+    writeFileSync(flightShim, renderNodeShim(slow))
+    const log = join(root, "flight.log")
+    writeFileSync(log, "")
+    const env = { HOME: root, PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home, FLIGHT_LOG: log, FLIGHT_NAME: "work" }
+
+    const codes = await runAtOnce(process.execPath, [flightShim, "--session", "work", "open", "x"], env, 5)
+    try {
+      expect(codes).toEqual([0, 0, 0, 0, 0])
+      expect(logged(log, "started")).toBe(1)
+      expect(logged(log, "ran")).toBe(5)
+      expect(existsSync(join(home, "run", "shared", "work.starting"))).toBe(false)
+    } finally {
+      stopFakeDaemon(join(home, "run", "shared", "work.pid"))
+    }
+  })
+})
+
+/** Leave the notes `server/browser/owners.ts` writes: `notes[file]` is the profile it names. */
+function writeNotes(notes: Record<string, string>): void {
+  mkdirSync(join(home, "owners"), { recursive: true })
+  for (const [file, profile] of Object.entries(notes)) writeFileSync(join(home, "owners", file), `${profile}\n`)
+}
+
+describe.skipIf(process.platform === "win32")("node shim routing of an owned default", () => {
+  it("opens the session owner's profile as default, under that name everywhere", () => {
+    writeNotes({ s1: "user-u_alice", ".unowned": "user-unassigned" })
+    const run = runShim(["open", "x"], { COGPIT_SESSION_ID: "s1" })
+    expect(run.profile).toBe(join(home, "profiles", "user-u_alice"))
+    expect(run.name).toBe("user-u_alice")
+    expect(run.argv).toBe("[open][x]")
+    expect(readFileSync(join(home, "profiles", "user-u_alice", ".driver"), "utf8")).toBe("s1\n")
+  })
+
+  it("swaps a default the call spelled, in either form", () => {
+    writeNotes({ s1: "user-u_alice" })
+    expect(runShim(["--session", "default", "open", "default"], { COGPIT_SESSION_ID: "s1" }).argv)
+      .toBe("[--session][user-u_alice][open][default]")
+    expect(runShim(["--session=default"], { COGPIT_SESSION_ID: "s1" }).argv).toBe("[--session=user-u_alice]")
+  })
+
+  it("sends an agent no note names to the unowned profile, and leaves Cogpit's own calls alone", () => {
+    writeNotes({ ".unowned": "user-unassigned" })
+    expect(runShim([], { COGPIT_SESSION_ID: "" }).profile).toBe(join(home, "profiles", "user-unassigned"))
+    expect(runShim([]).profile).toBe(join(home, "profiles", "default"))
+  })
+
+  it("never lets a note send default into a throwaway, itself, or outside the tree", () => {
+    for (const note of ["tmp-x", "default", "../escape", ""]) {
+      writeNotes({ s1: note })
+      expect(runShim([], { COGPIT_SESSION_ID: "s1" }).profile, note).toBe(join(home, "profiles", "default"))
+    }
+  })
+})
 
 describe.skipIf(process.platform === "win32")("node shim routing", () => {
   it("carries the versioned marker line and the real binary", () => {
@@ -94,9 +165,17 @@ describe.skipIf(process.platform === "win32")("node shim routing", () => {
     expect(readFileSync(join(profile, ".driver"), "utf8")).toBe("s1\n")
   })
 
-  it("writes an empty .driver when no Cogpit session drives it", () => {
-    runShim([])
+  it("writes an empty .driver for an agent that serves no one session", () => {
+    runShim([], { COGPIT_SESSION_ID: "" })
     expect(readFileSync(join(home, "profiles", "default", ".driver"), "utf8")).toBe("\n")
+  })
+
+  it("keeps the last driver when Cogpit itself opens or closes the browser", () => {
+    runShim([])
+    expect(existsSync(join(home, "profiles", "default", ".driver"))).toBe(false)
+    runShim([], { COGPIT_SESSION_ID: "s1" })
+    runShim([])
+    expect(readFileSync(join(home, "profiles", "default", ".driver"), "utf8")).toBe("s1\n")
   })
 
   it("routes --session <name> into that profile and passes arguments through", () => {

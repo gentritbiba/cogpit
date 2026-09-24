@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const fixture = vi.hoisted(() => ({ paths: [] as string[], manager: null as unknown }))
 vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => fixture.paths.map(path => ({ path, dirName: "fixture", sessionCount: 1, lastModified: null })) }] }))
 vi.mock("../../plugins/manager", () => ({ getPluginManager: () => fixture.manager }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
 vi.mock("../../security", () => ({ onSessionRevoked: () => () => {}, isSessionTokenActive: () => true, getSessionPrincipal: () => null }))
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { PluginAuthorization, type PluginAuthorizationBinding } from "../../plugins/authorization"

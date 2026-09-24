@@ -13,6 +13,12 @@ export { BROWSER_NAME_RE, DEFAULT_BROWSER, isThrowawayName, isValidBrowserName, 
 export const SHARED_RUN_NAME = "shared"
 
 /**
+ * Beside a throwaway's pid file, touched by the shim on every call to it: the
+ * sweeper closes a throwaway nobody has used for a while.
+ */
+export const THROWAWAY_USED_SUFFIX = ".used"
+
+/**
  * What Cogpit passes for `COGPIT_SESSION_ID` when the process it is spawning
  * serves every session rather than one — a shared app-server, a headless CLI.
  * Deliberately not a valid id: the shim then files throwaways under
@@ -85,6 +91,21 @@ export function runRoot(): string {
 
 export function sharedRunDir(): string {
   return join(runRoot(), SHARED_RUN_NAME)
+}
+
+/** Also rendered into the shim; see `ownersDir`. */
+export const OWNERS_DIR_NAME = "owners"
+
+/** Not a session id (they never start with a dot), so it cannot collide with one. */
+export const UNOWNED_FILE = ".unowned"
+
+/**
+ * `owners/<session id>` names the profile that session's `default` opens, and
+ * `owners/.unowned` the one for an agent no note names. The shim reads both;
+ * see `server/browser/owners.ts`.
+ */
+export function ownersDir(): string {
+  return join(browserHome(), OWNERS_DIR_NAME)
 }
 
 export function registryFile(): string {

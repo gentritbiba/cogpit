@@ -17,12 +17,13 @@ import {
 import { removePortFile, writePortFile } from "./lib/portFile"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import {
+  defaultDataDir,
   hasUsableNetworkCredentials,
   resolveEnvPassword,
   shouldFailClosed,
 } from "./lib/standalone-bootstrap"
 import { validatePasswordStrength } from "./security"
-import { getEdition, initEdition, isTeamEdition } from "./team/edition"
+import { editionOwnsSignIn, loadEdition } from "./edition"
 
 export interface StartStandaloneServerOptions {
   staticDir: string
@@ -73,7 +74,7 @@ function listen(
  */
 export async function startStandaloneServer({
   staticDir,
-  dataDir = join(homedir(), ".config", "cogpit"),
+  dataDir = defaultDataDir(),
   host = "127.0.0.1",
   port = 19384,
   env = process.env,
@@ -99,10 +100,12 @@ export async function startStandaloneServer({
     }
   }
 
-  // Resolve the edition before applying network-password policy. Team edition
-  // authenticates named users and deliberately ignores the shared password.
+  // Resolve the edition before applying network-password policy. An edition
+  // that signs accounts in deliberately ignores the shared password, and a
+  // build without the edition it resolved to refuses to boot here, before
+  // anything binds.
   // Server composition resolves the same inputs again before registering routes.
-  initEdition({ shell: "standalone", configEdition: getConfiguredEditionValue() })
+  await loadEdition({ shell: "standalone", configEdition: getConfiguredEditionValue() })
 
   let envPassword: string | null
   try {
@@ -114,7 +117,7 @@ export async function startStandaloneServer({
   }
 
   clearEnvNetworkOverrides()
-  if (envPassword && !isTeamEdition()) {
+  if (envPassword && !editionOwnsSignIn()) {
     const strengthError = validatePasswordStrength(envPassword)
     if (strengthError) {
       throw new Error(`Network password is too weak — ${strengthError}.`)
@@ -125,7 +128,7 @@ export async function startStandaloneServer({
   if (shouldFailClosed(
     host,
     hasUsableNetworkCredentials(envPassword, getConfig()),
-    getEdition(),
+    editionOwnsSignIn(),
   )) {
     throw new Error(
       `Refusing to bind ${host}:${port} without a network password. Bind loopback or configure COGPIT_NETWORK_PASSWORD.`,

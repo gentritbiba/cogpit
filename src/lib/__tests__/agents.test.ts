@@ -14,8 +14,10 @@ import {
   getResumeSpawn,
   parseAgentKind,
   projectDirNameFor,
+  rootSessionIdOf,
   sessionIdFromFileName,
   sessionUrlIdFromFileName,
+  type AgentKind,
 } from "@/lib/agents"
 import {
   AGENT_OPTIONS,
@@ -51,6 +53,22 @@ describe("agent registry", () => {
     // Claude's encoding is lossy, so a known directory name wins over re-deriving it.
     expect(projectDirNameFor("claude", "/tmp/project", "known-dir")).toBe("known-dir")
     expect(projectDirNameFor("codex", "/tmp/project", "known-dir")).toBe(CODEX_DIR)
+  })
+
+  it("recognizes exactly the directory names an agent's encoding produces", () => {
+    for (const kind of AGENT_KINDS) {
+      const codec = descriptorFor(kind).dirName
+      for (const path of ["/tmp/project", "/", "C:\\Users\\x\\proj", "C:\\", "C:", "/tmp/my project/ü"]) {
+        expect(codec.recognizes(codec.encode(path)), `${kind} ${path}`).toBe(true)
+      }
+    }
+    for (const junk of ["garbage", "my project", "", "tmp-project", "-tmp_project", "C-Users", "CD-", "C-x"]) {
+      expect(descriptorFor("claude").dirName.recognizes(junk), junk).toBe(false)
+    }
+    // "QR" decodes to what only "QQ" encodes; padding and invalid characters are not the encoding either.
+    for (const junk of ["codex__", "codex__QR", "codex__QQ==", "codex__L3Rt!!", "codex__/w"]) {
+      expect(descriptorFor("codex").dirName.recognizes(junk), junk).toBe(false)
+    }
   })
 
   it("narrows an arbitrary server string to an agent kind", () => {
@@ -97,6 +115,81 @@ describe("session file and URL codecs", () => {
   it("shortens a Copilot URL to the bare session id", () => {
     expect(sessionUrlIdFromFileName(COPILOT_DIR, `${SESSION_UUID}/events.jsonl`))
       .toBe(SESSION_UUID)
+  })
+})
+
+describe("root session ids", () => {
+  const OTHER_UUID = "0d8b8488-dae1-4982-b519-cbde0f341e3e"
+  const rootOf = (kind: AgentKind, relativePath: string) =>
+    descriptorFor(kind).sessionFile.transcriptRoot(relativePath)?.rootSessionId ?? null
+  const isRootTranscript = (kind: AgentKind, relativePath: string) =>
+    descriptorFor(kind).sessionFile.transcriptRoot(relativePath)?.isRootTranscript
+
+  it("finds the session a transcript in a project is filed under", () => {
+    expect(rootSessionIdOf(CLAUDE_DIR, `${SESSION_UUID}/subagents/agent-a7264b922eed1be42.jsonl`)).toBe(SESSION_UUID)
+    expect(rootSessionIdOf(COPILOT_DIR, `${SESSION_UUID}/events.jsonl`)).toBe(SESSION_UUID)
+    expect(rootSessionIdOf(CLAUDE_DIR, "notes.txt")).toBeNull()
+  })
+
+  it("reads each agent's own top-level transcript as its root", () => {
+    expect(rootOf("claude", `${SESSION_UUID}.jsonl`)).toBe(SESSION_UUID)
+    expect(rootOf("codex", `2026/08/01/rollout-2026-08-01T10-00-00-${SESSION_UUID}.jsonl`))
+      .toBe(SESSION_UUID)
+    expect(rootOf("copilot", `${SESSION_UUID}/events.jsonl`)).toBe(SESSION_UUID)
+  })
+
+  it("tells a session's own transcript from the files filed under it", () => {
+    expect(isRootTranscript("claude", `${SESSION_UUID}.jsonl`)).toBe(true)
+    expect(isRootTranscript("claude", `${SESSION_UUID}/subagents/agent-a7264b922eed1be42.jsonl`)).toBe(false)
+    expect(isRootTranscript("claude", `${SESSION_UUID}/subagents/${SESSION_UUID}.jsonl`)).toBe(false)
+    expect(isRootTranscript("codex", `2026/08/01/rollout-2026-08-01T10-00-00-${SESSION_UUID}.jsonl`)).toBe(true)
+    expect(isRootTranscript("copilot", `${SESSION_UUID}/events.jsonl`)).toBe(true)
+  })
+
+  it("files a sub-agent or workflow transcript under the session that spawned it", () => {
+    expect(rootOf("claude", `${SESSION_UUID}/subagents/agent-a7264b922eed1be42.jsonl`))
+      .toBe(SESSION_UUID)
+    expect(rootOf(
+      "claude",
+      `${SESSION_UUID}/subagents/workflows/wf_9f75bb56-cf5/agent-a0448cee5b05d1e5d.jsonl`,
+    )).toBe(SESSION_UUID)
+    expect(rootOf("claude", `${SESSION_UUID}/workflows/wf_7bc65581-3eb.json`)).toBe(SESSION_UUID)
+  })
+
+  it("refuses a path that could name a transcript other than the one served", () => {
+    for (const kind of AGENT_KINDS) {
+      expect(rootOf(kind, `${SESSION_UUID}/subagents/../../${OTHER_UUID}.jsonl`)).toBeNull()
+      expect(rootOf(kind, `./${SESSION_UUID}.jsonl`)).toBeNull()
+      expect(rootOf(kind, `/${SESSION_UUID}.jsonl`)).toBeNull()
+      expect(rootOf(kind, `${SESSION_UUID}//events.jsonl`)).toBeNull()
+      expect(rootOf(kind, `${SESSION_UUID}\\subagents\\agent-a7264b922eed1be42.jsonl`)).toBeNull()
+      expect(rootOf(kind, "")).toBeNull()
+    }
+    expect(rootOf("codex", `2026/../../rollout-2026-08-01T10-00-00-${SESSION_UUID}.jsonl`))
+      .toBeNull()
+  })
+
+  it("refuses a root that is not a session id", () => {
+    expect(rootOf("claude", "sess.jsonl")).toBeNull()
+    expect(rootOf("claude", `copy-${SESSION_UUID}.jsonl`)).toBeNull()
+    expect(rootOf("claude", "not-a-session/subagents/agent-a7264b922eed1be42.jsonl")).toBeNull()
+    expect(rootOf("codex", "2026/08/01/rollout-2026-08-01T10-00-00-thread.jsonl")).toBeNull()
+    expect(rootOf("copilot", `${SESSION_UUID}.jsonl`)).toBeNull()
+    expect(rootOf("copilot", "not-a-session/events.jsonl")).toBeNull()
+  })
+
+  it("answers in lower case, since the ids key stores", () => {
+    const upper = SESSION_UUID.toUpperCase()
+    expect(rootOf("claude", `${upper}.jsonl`)).toBe(SESSION_UUID)
+    expect(rootOf("claude", `${upper}/subagents/agent-a7264b922eed1be42.jsonl`)).toBe(SESSION_UUID)
+    expect(rootOf("codex", `2026/08/01/rollout-2026-08-01T10-00-00-${upper}.jsonl`)).toBe(SESSION_UUID)
+    expect(rootOf("copilot", `${upper}/events.jsonl`)).toBe(SESSION_UUID)
+  })
+
+  it("only files what a session keeps for its sub-agents and workflows under it", () => {
+    expect(rootOf("claude", `${SESSION_UUID}/tool-results/toolu_01.txt`)).toBeNull()
+    expect(rootOf("claude", `${SESSION_UUID}/subagents`)).toBeNull()
+    expect(rootOf("claude", `${SESSION_UUID}/${OTHER_UUID}.jsonl`)).toBeNull()
   })
 })
 

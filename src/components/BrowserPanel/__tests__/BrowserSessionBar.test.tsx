@@ -48,6 +48,7 @@ function setup(props: Partial<Props> = {}) {
     <BrowserSessionBar
       sessions={[sessionOf(), WORK]}
       selected="default"
+      home="default"
       currentSessionId="cogpit-1"
       followAgent
       {...handlers}
@@ -189,6 +190,55 @@ describe("BrowserSessionBar", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete browser" }))
     expect(onRemove).toHaveBeenCalledWith("work")
+  })
+
+  describe("with an account's own browser", () => {
+    const MINE = sessionOf({ name: "user-u_bob", isDefault: false, mine: true, control: "own" })
+    const DRIVEN = sessionOf({ name: "user-u_alice", isDefault: false, account: "Alice", control: "drive" })
+    const WATCHED = sessionOf({ name: "shop", isDefault: false, control: "watch" })
+
+    async function openPicker(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole("button", { name: "Switch browser" }))
+      await screen.findByRole("button", { name: /New browser/ })
+    }
+
+    it("treats their own browser as their default, with the host's beside it", async () => {
+      const { user, bar } = setup({ sessions: [sessionOf(), MINE], selected: "user-u_bob", home: "user-u_bob" })
+
+      expect(screen.getByRole("button", { name: "Switch browser" })).toHaveTextContent("Your browser")
+      expect(bar).not.toHaveClass("bg-amber-500/10")
+      await openPicker(user)
+      expect(screen.getByRole("button", { name: "Switch to Your browser" })).toHaveTextContent("Your browser")
+      expect(screen.getByRole("button", { name: "Switch to default" })).toHaveTextContent("Host default")
+      expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Archive user-u_bob" })).not.toBeInTheDocument()
+    })
+
+    it("offers the way back to their own browser from another", () => {
+      setup({ sessions: [MINE, DRIVEN], selected: "user-u_alice", home: "user-u_bob" })
+
+      expect(screen.getByRole("status")).toHaveTextContent("Not your browser")
+      expect(screen.getByRole("button", { name: "Show yours" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Switch browser" })).toHaveTextContent("Alice's browser")
+    })
+
+    it("lets a driver stop a browser but not delete it", async () => {
+      const { user } = setup({ sessions: [MINE, { ...DRIVEN, running: true }], selected: "user-u_alice", home: "user-u_bob" })
+      await openPicker(user)
+
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled()
+      expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument()
+    })
+
+    it("offers a watcher neither, and says they only watch", async () => {
+      const { user } = setup({ sessions: [MINE, { ...WATCHED, running: false }], selected: "shop", home: "user-u_bob" })
+
+      expect(screen.getAllByText("View only").length).toBeGreaterThan(0)
+      await openPicker(user)
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Archive shop" })).not.toBeInTheDocument()
+    })
   })
 
   it("stops the selected named browser", async () => {

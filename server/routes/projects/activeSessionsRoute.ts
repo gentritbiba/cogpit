@@ -1,88 +1,56 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { sortSessionsByRecency } from "../../../shared/session-ordering"
-import {
-  matchesPullRequestTarget,
-  parsePullRequestSearch,
-} from "../../../shared/session/sessionSearch"
-import {
-  dirs,
-  getSessionMeta,
-  getSessionStatus,
-  isWithinDir,
-  join,
-  readFile,
-  readdir,
-  searchSessionMessages,
-  stat,
-} from "../../helpers"
-import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
-import { allStores } from "../../agents"
-import { runtimeFor } from "../../agents/runtimes"
+import { parsePullRequestSearch } from "../../../shared/session/sessionSearch"
+import { allTopLevelSessions } from "../../agents"
+import type { TopLevelSessionInfo } from "../../agents/types"
+import { allVisible, parseScope, takeVisible, visibilityFor, visibleInOrder, type VisibleItem } from "../../edition"
 import { sendJson, type NextFn } from "../../http"
-import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
-import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import { archiveReason, readArchive, setSessionsArchived, type ArchiveReason } from "../../lib/sessionArchive"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
-import { projectLabel } from "./projectLabel"
+import { readActiveSessionRow, type ActiveSessionQuery } from "./activeSessionRow"
+import { listedSession, listedSessionId } from "../../agents/listedSession"
+import { visibleLineage } from "./visibleLineage"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
+/** When searching, a wider pool is read and then filtered by the search. */
+const SEARCH_POOL = 100
 
-interface ActiveSessionCandidate {
-  dirName: string
-  fileName: string
-  filePath: string
-  mtimeMs: number
-  size: number
-  projectPath?: string
-  sessionId?: string
+type VisibleCandidate = VisibleItem<TopLevelSessionInfo>
+
+/** Which visible candidates, walked newest first, make the pool whose rows are read. */
+interface PoolRule {
+  limit: number
+  perProject?: number
+  matches?: (candidate: TopLevelSessionInfo) => boolean
 }
 
-/** The archive key for a candidate, before its metadata has been read. */
-function candidateId(c: ActiveSessionCandidate): string {
-  return c.sessionId || c.fileName.replace(/\.jsonl$/, "")
+/** Keeps candidates in the order given until the rule's limit, never reading past it. */
+function selectPool(
+  pool: AsyncIterable<VisibleCandidate> | Iterable<VisibleCandidate>,
+  rule: PoolRule,
+): Promise<VisibleCandidate[]> {
+  const { matches, perProject } = rule
+  // An unparseable per-project cap (NaN) selects nothing, as a slice to it would.
+  if (perProject !== undefined && !(perProject > 0)) return Promise.resolve([])
+  const taken = new Map<string, number>()
+  return takeVisible(pool, rule.limit, (candidate) => {
+    if (matches && !matches(candidate)) return false
+    if (perProject === undefined) return true
+    const count = taken.get(candidate.dirName) ?? 0
+    if (count >= perProject) return false
+    taken.set(candidate.dirName, count + 1)
+    return true
+  })
 }
 
 /**
- * Whether a session's background agents are demonstrably still writing their
- * own transcripts. The parent JSONL goes silent while background agents and
- * workflows run, so mtime-recency on the parent alone would triage the
- * session as finished. Checked only for sessions whose derived status is
- * awaiting_agents, and outside the mtime-keyed meta cache — freshness is
- * exactly what the cache cannot answer.
+ * GET /api/active-sessions — the sessions the caller may see in `scope`,
+ * newest first. Visibility is decided in recency order before any limit, so
+ * the list stops checking once it is full; searches read only the transcripts
+ * of visible sessions, and the archived count is the caller's own.
  */
-async function hasFreshAgentTranscripts(sessionFilePath: string, now = Date.now()): Promise<boolean> {
-  const FRESH_MS = 60_000
-  const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
-  const queue = [{ dir: sessionDir, depth: 0 }]
-  let statBudget = 200
-
-  while (queue.length > 0 && statBudget > 0) {
-    const { dir, depth } = queue.shift()!
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (statBudget-- <= 0) break
-      const fullPath = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (depth < 2) queue.push({ dir: fullPath, depth: depth + 1 })
-        continue
-      }
-      if (!entry.name.endsWith(".jsonl")) continue
-      try {
-        const s = await stat(fullPath)
-        if (now - s.mtimeMs < FRESH_MS) return true
-      } catch { /* skip */ }
-    }
-  }
-  return false
-}
-
 export async function handleActiveSessions(
   req: IncomingMessage,
   res: ServerResponse,
@@ -92,6 +60,13 @@ export async function handleActiveSessions(
   if (req.url && !req.url.startsWith("?") && !req.url.startsWith("/?") && req.url !== "/" && req.url !== "") return next()
 
   const url = new URL((req.url || "/").replace(/^\/?/, "/"), "http://localhost")
+  const scope = parseScope(req, url.searchParams.get("scope"))
+  const check = visibilityFor(req, scope)
+  if (check.nothing) {
+    res.setHeader("X-Cogpit-Archived-Count", "0")
+    sendJson(res, 200, [])
+    return
+  }
   const search = url.searchParams.get("search")?.trim() || ""
   const pullRequestSearch = parsePullRequestSearch(search)
   const perProject = Math.min(parseInt(url.searchParams.get("perProject") || String(DEFAULT_PER_PROJECT), 10), 100)
@@ -103,30 +78,16 @@ export async function handleActiveSessions(
   const includeArchived = Boolean(search) || url.searchParams.get("archived") === "include"
 
   try {
-    // First pass: collect all session files with their mtime (cheap stat only)
-    let candidates: ActiveSessionCandidate[] = []
-
-    for (const store of allStores()) {
-      for (const session of await store.listTopLevelSessions()) {
-        if (projectFilter && session.dirName !== projectFilter) continue
-        candidates.push({
-          dirName: session.dirName,
-          fileName: session.fileName,
-          filePath: session.filePath,
-          mtimeMs: session.mtimeMs,
-          size: session.size,
-          projectPath: session.projectPath,
-          sessionId: session.sessionId,
-        })
-      }
-    }
+    // First pass: every session file with its mtime (cheap stat only), newest first
+    const candidates = (await allTopLevelSessions())
+      .filter((session) => !projectFilter || session.dirName === projectFilter)
 
     const archive = await readArchive()
     const now = Date.now()
     const resumedSessionIds: string[] = []
     const archivedById = new Map<string, ArchiveReason>()
     for (const c of candidates) {
-      const id = candidateId(c)
+      const id = listedSessionId(c)
       const reason = archiveReason(archive, id, c.mtimeMs, now)
       if (reason) archivedById.set(id, reason)
       else if (archive.archived.has(id)) resumedSessionIds.push(id)
@@ -136,174 +97,54 @@ export async function handleActiveSessions(
     if (resumedSessionIds.length > 0) {
       setSessionsArchived(resumedSessionIds, false).catch(() => {})
     }
-    res.setHeader("X-Cogpit-Archived-Count", String(archivedById.size))
-    const isArchived = (c: ActiveSessionCandidate) => archivedById.has(candidateId(c))
+    const isArchived = (c: TopLevelSessionInfo) => archivedById.has(listedSessionId(c))
     // Archived rows are picked separately from the live list so they never
     // take a listed session's place under the per-project cap.
-    const archivedCandidates = includeArchived ? candidates.filter(isArchived) : []
-    candidates = candidates.filter((c) => !isArchived(c))
+    const live = candidates.filter((c) => !isArchived(c))
+    const archived = await allVisible(candidates.filter(isArchived), check, listedSession)
+    res.setHeader("X-Cogpit-Archived-Count", String(new Set(archived.map(({ item }) => listedSessionId(item))).size))
+    const archivedPool = includeArchived ? archived : []
 
-    // Sort by mtime descending within each project, then pick top N per project
-    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    archivedCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-
-    const pullRequestIndex = pullRequestSearch
-      ? await getSessionPrSearchSnapshot([...candidates, ...archivedCandidates])
+    // A pull-request search filters on the index, which covers every visible candidate.
+    const visibleLive = pullRequestSearch ? await allVisible(live, check, listedSession) : null
+    const pullRequestIndex = visibleLive
+      ? await getSessionPrSearchSnapshot([...visibleLive, ...archivedPool].map(({ item }) => item))
       : null
     if (pullRequestIndex) {
       res.setHeader("X-Cogpit-PR-Index-Pending", String(pullRequestIndex.pending))
       res.setHeader("X-Cogpit-PR-Index-Total", String(pullRequestIndex.total))
     }
 
-    const selectPool = (pool: ActiveSessionCandidate[]): ActiveSessionCandidate[] => {
-      if (pullRequestSearch && pullRequestIndex) {
-        return pool.filter((candidate) => (
-          pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
+    const rule: PoolRule = pullRequestSearch && pullRequestIndex
+      ? {
+          limit: Infinity,
+          matches: (candidate) => pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
             (reference) => reference.number === pullRequestSearch.number,
-          )
-        ))
-      }
-      // When searching, scan a wider pool then filter
-      if (search) return pool.slice(0, 100)
+          ) === true,
+        }
+      : search ? { limit: SEARCH_POOL }
       // Loading more for a specific project — use totalLimit directly
-      if (projectFilter) return pool.slice(0, totalLimit)
-      // Default: pick top `perProject` from each project, then cap at totalLimit
-      const byProject = new Map<string, ActiveSessionCandidate[]>()
-      for (const c of pool) {
-        const list = byProject.get(c.dirName)
-        if (list) list.push(c)
-        else byProject.set(c.dirName, [c])
-      }
-      const selected: ActiveSessionCandidate[] = []
-      for (const [, projectCandidates] of byProject) {
-        selected.push(...projectCandidates.slice(0, perProject))
-      }
-      // Re-sort combined list by mtime and cap
-      selected.sort((a, b) => b.mtimeMs - a.mtimeMs)
-      return selected.slice(0, totalLimit)
-    }
-    const scanPool = [...selectPool(candidates), ...selectPool(archivedCandidates)]
+      : projectFilter ? { limit: totalLimit }
+      : { limit: totalLimit, perProject }
+    const scanPool = [
+      ...await selectPool(visibleLive ?? visibleInOrder(live, check, listedSession), rule),
+      ...await selectPool(archivedPool, rule),
+    ]
 
     // Second pass: read metadata (+ search) in parallel for speed
-    const q = search ? search.toLowerCase() : ""
-
-    // Teammate sessions (agent teams) carry a teamName — resolve each team's
-    // lead session once per request so the client can group them together.
-    const teamLeadCache = new Map<string, Promise<string | null>>()
-    const resolveTeamLead = (teamName: string): Promise<string | null> => {
-      let cached = teamLeadCache.get(teamName)
-      if (!cached) {
-        const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
-        cached = isWithinDir(dirs.TEAMS_DIR, configPath)
-          ? readFile(configPath, "utf-8")
-              .then((raw) => {
-                const lead = JSON.parse(String(raw)).leadSessionId
-                return typeof lead === "string" && lead ? lead : null
-              })
-              .catch(() => null)
-          : Promise.resolve(null)
-        teamLeadCache.set(teamName, cached)
-      }
-      return cached
+    const query: ActiveSessionQuery = {
+      search,
+      pullRequestSearch,
+      pullRequestIndex,
+      archivedById,
+      teamConfigs: new Map(),
     }
-
-    const loadCandidate = async (c: (typeof scanPool)[number]) => {
-      try {
-        const indexedPullRequestData = pullRequestIndex?.byFile.get(c.filePath)
-        const [cached, pullRequests] = await Promise.all([
-          getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
-            const [meta, status] = await Promise.all([
-              getSessionMeta(c.filePath),
-              getSessionStatus(c.filePath),
-            ])
-            return { meta, status }
-          }),
-          indexedPullRequestData
-            ? Promise.resolve(indexedPullRequestData.pullRequests)
-            : getSessionPullRequests(c.filePath, c.size),
-        ])
-        const references = indexedPullRequestData?.references ?? pullRequests
-        const { meta, status: statusInfo } = cached
-        const shortName = projectLabel(c.dirName, meta.cwd)
-        const lastModified = new Date(c.mtimeMs).toISOString()
-
-        let matchedMessage: string | undefined
-        let matchedPullRequestNumber: number | undefined
-        if (pullRequestSearch) {
-          const repositoryContext = [meta.cwd, c.projectPath, shortName, c.dirName]
-          const matchedReference = references.find((reference) => (
-            matchesPullRequestTarget(reference, pullRequestSearch, repositoryContext)
-          ))
-          if (!matchedReference) return null
-          matchedPullRequestNumber = matchedReference.number
-        } else if (search) {
-          const metaMatch =
-            meta.aiTitle?.toLowerCase().includes(q) ||
-            meta.firstUserMessage?.toLowerCase().includes(q) ||
-            meta.lastUserMessage?.toLowerCase().includes(q) ||
-            meta.slug?.toLowerCase().includes(q) ||
-            meta.gitBranch?.toLowerCase().includes(q) ||
-            meta.cwd?.toLowerCase().includes(q)
-
-          if (metaMatch) {
-            matchedMessage = meta.lastUserMessage || meta.firstUserMessage || meta.slug || ""
-          } else {
-            const found = await searchSessionMessages(c.filePath, search)
-            if (!found) return null
-            matchedMessage = found
-          }
-        }
-
-        const teamLeadSessionId = meta.teamName
-          ? await resolveTeamLead(meta.teamName)
-          : null
-        const sessionId = c.sessionId || meta.sessionId || c.fileName.replace(".jsonl", "")
-        const descriptor = descriptorForDirName(c.dirName)
-        // The runtime's own turn state, for an agent whose transcript lags it.
-        const isRuntimeActive = descriptor.capabilities.turnLiveness === "runtime"
-          && runtimeFor(descriptor.kind).activity(sessionId).running
-        const hasRunningAgents = statusInfo.status === "awaiting_agents"
-          && await hasFreshAgentTranscripts(c.filePath)
-        const archivedReason = archivedById.get(sessionId)
-
-        return {
-          dirName: c.dirName,
-          projectShortName: shortName,
-          fileName: c.fileName,
-          sessionId,
-          slug: meta.slug,
-          name: meta.name,
-          aiTitle: meta.aiTitle,
-          model: meta.model,
-          firstUserMessage: meta.firstUserMessage,
-          lastUserMessage: meta.lastUserMessage,
-          gitBranch: meta.gitBranch,
-          cwd: meta.cwd,
-          lastModified,
-          lastActivityAt: meta.lastTimestamp || lastModified,
-          turnCount: meta.turnCount,
-          size: c.size,
-          isActive: isRuntimeActive || hasRunningAgents,
-          agentStatus: statusInfo.status,
-          agentToolName: statusInfo.toolName,
-          agentTerminalReason: statusInfo.terminalReason,
-          agentPendingAgents: statusInfo.pendingAgents,
-          ...(archivedReason && { archived: true, archivedReason }),
-          ...(pullRequests.length > 0 && { pullRequests }),
-          ...(matchedPullRequestNumber && { matchedPullRequestNumber }),
-          ...(meta.teamName && {
-            teamName: meta.teamName,
-            agentName: meta.agentName || undefined,
-            teamLeadSessionId: teamLeadSessionId || undefined,
-          }),
-          ...(matchedMessage !== undefined && { matchedMessage }),
-        }
-      } catch {
-        return null
-      }
-    }
-
-    const results = await Promise.all(scanPool.map(loadCandidate))
+    // A row may name a session the caller can open outside the scope listed.
+    const lineage = visibleLineage(scope === "all" ? check : visibilityFor(req))
+    const results = await Promise.all(scanPool.map(async ({ item, session }) => {
+      const row = await readActiveSessionRow(item, query)
+      return row && session.annotate(await lineage(row))
+    }))
 
     const loaded = results.flatMap((session) => session ? [session] : [])
     const activeSessions = [

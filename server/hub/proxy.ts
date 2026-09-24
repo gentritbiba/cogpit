@@ -1,4 +1,11 @@
-import { request as httpRequest, type IncomingMessage, type ServerResponse, type ClientRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders } from "node:http"
+import {
+  request as httpRequest,
+  type IncomingMessage,
+  type ServerResponse,
+  type ClientRequest,
+  type IncomingHttpHeaders,
+  type OutgoingHttpHeaders,
+} from "node:http"
 import { request as httpsRequest } from "node:https"
 import type { Duplex } from "node:stream"
 
@@ -6,15 +13,14 @@ import { getDevice, sameDeviceConnection, type HubDevice } from "./registry"
 import {
   getDeviceTokenLease,
   invalidateDeviceTokenGeneration,
-  DeviceAuthError,
+  mintFailureCode,
   type DeviceTokenLease,
 } from "./device-client"
 import { onDeviceConnectionsInvalidated } from "./connection-invalidation"
 import { rejectWebsocketUpgrade } from "../security"
 import type { NextFn } from "../http"
-import { isTeamEdition } from "../team/edition"
-import { requirementFor } from "../team/policy"
-import { getRequestPrincipal } from "../team/requestPrincipal"
+import type { MintFailureCode } from "../../shared/contracts/hub"
+import { editionModule } from "../edition"
 import { getHubPluginRelay, isPluginRelayHeader, isPluginRelayPath } from "./pluginRelay"
 
 /**
@@ -82,6 +88,12 @@ const RESPONSE_STRIP = new Set([
 ])
 
 // ── Small helpers ────────────────────────────────────────────────────
+
+const DEVICE_FAILURE_MESSAGES: Record<MintFailureCode, (name: string) => string> = {
+  DEVICE_AUTH_FAILED: (name) => `Device "${name}" rejected the hub credentials`,
+  DEVICE_UNREACHABLE: (name) => `Device "${name}" is unreachable`,
+  DEVICE_REFUSED: (name) => `Device "${name}" is not admitting this account right now`,
+}
 
 interface JsonError {
   error: string
@@ -185,24 +197,17 @@ export function isForbiddenHubDownstreamPath(downstreamPath: string): boolean {
 
 /**
  * The outer `/hub/:deviceId` policy only proves that the caller may use the
- * proxy. In team edition the downstream API path must still be authorized as
- * that caller before the hub replaces their credential with a device-admin
- * token. Personal edition intentionally keeps its existing proxy behaviour.
+ * proxy. An edition with per-user roles must still authorize the downstream
+ * API path as that caller before the hub replaces their credential with a
+ * device-admin token. Personal edition intentionally keeps its existing proxy
+ * behaviour.
  */
 export function hubProxyAuthorizationRejection(
   req: IncomingMessage,
   downstreamPath: string,
   method: string,
 ): 401 | 403 | null {
-  if (!isTeamEdition()) return null
-  const principal = getRequestPrincipal(req)
-  if (!principal) return 401
-  // Malformed paths fall through to the policy table's admin default.
-  const policyPath = normalizedDownstreamPath(downstreamPath) ?? "/api/__invalid-hub-path"
-  return requirementFor(policyPath, method.toUpperCase()) === "admin"
-    && principal.role !== "admin"
-    ? 403
-    : null
+  return editionModule().hubProxyRejection(req, normalizedDownstreamPath(downstreamPath), method)
 }
 
 // ── HTTP proxy handler ───────────────────────────────────────────────
@@ -252,7 +257,7 @@ export function createHubProxyHandler(): (req: IncomingMessage, res: ServerRespo
         authorizationRejection,
         authorizationRejection === 401
           ? { error: "Authentication required", code: "AUTH_REQUIRED" }
-          : { error: "Admin access required", code: "FORBIDDEN" },
+          : { error: "Not permitted", code: "FORBIDDEN" },
         device.id,
       )
     }
@@ -407,7 +412,7 @@ function dispatch(
         // Second 401 (or an auth:"none" device) — a 401 must never reach the
         // browser, so it becomes a typed 502 instead.
         proxyRes.resume()
-        failGateway("DEVICE_AUTH_FAILED", `Device "${device.name}" rejected the hub credentials`)
+        failGateway("DEVICE_AUTH_FAILED", DEVICE_FAILURE_MESSAGES.DEVICE_AUTH_FAILED(device.name))
         return
       }
 
@@ -435,7 +440,7 @@ function dispatch(
     proxyReq.on("error", (err: NodeJS.ErrnoException) => {
       clearWatchdog()
       void err
-      failGateway("DEVICE_UNREACHABLE", `Device "${device.name}" is unreachable`)
+      failGateway("DEVICE_UNREACHABLE", DEVICE_FAILURE_MESSAGES.DEVICE_UNREACHABLE(device.name))
     })
 
     proxyReq.end(body)
@@ -461,11 +466,8 @@ function dispatch(
       })
       .catch((err) => {
         if (invalidated) return
-        if (err instanceof DeviceAuthError) {
-          failGateway("DEVICE_AUTH_FAILED", `Device "${snapshot.name}" rejected the hub credentials`)
-        } else {
-          failGateway("DEVICE_UNREACHABLE", `Device "${snapshot.name}" is unreachable`)
-        }
+        const code = mintFailureCode(err)
+        failGateway(code, DEVICE_FAILURE_MESSAGES[code](snapshot.name))
       })
   }
 

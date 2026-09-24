@@ -4,6 +4,7 @@ import { History, Loader2 } from "lucide-react"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { sortSessionsByRecency } from "../../../shared/session-ordering"
 
 import { recencyBucket } from "./recencyBuckets"
@@ -66,6 +67,7 @@ export function SessionCardList({
   onPrefetchSession,
   onResumeSession,
 }: SessionCardListProps) {
+  const permissionsOf = useListedPermissions()
   // Shelf labels come out of the same memo as the ordering they describe.
   const { topLevelSessions, teammatesByLead, shelves } = useMemo(() => {
     const split = splitTeammates(sessions)
@@ -85,23 +87,26 @@ export function SessionCardList({
     })
   }
 
-  const rowProps = (session: ActiveSessionInfo): SessionRowProps => ({
-    session,
-    isActiveSession: activeSessionKey === sessionKey(session),
-    proc: procBySession.get(session.sessionId),
-    killingPids,
-    isNewlyCompleted: newlyCompleted.has(session.sessionId),
-    customName: sessionNames[session.sessionId],
-    onSelectSession,
-    onKill,
-    onDuplicateSession,
-    onDeleteSession,
-    onArchiveSession,
-    onUnarchiveSession,
-    onRenameSession,
-    onPrefetchSession,
-    onResumeSession,
-  })
+  const rowProps = (session: ActiveSessionInfo): SessionRowProps => {
+    const permissions = permissionsOf(session.access)
+    return {
+      session,
+      isActiveSession: activeSessionKey === sessionKey(session),
+      proc: procBySession.get(session.sessionId),
+      killingPids,
+      isNewlyCompleted: newlyCompleted.has(session.sessionId),
+      customName: sessionNames[session.sessionId],
+      onSelectSession,
+      onKill: permissions.stop ? onKill : undefined,
+      onDuplicateSession,
+      onDeleteSession: permissions.delete ? onDeleteSession : undefined,
+      onArchiveSession: permissions.archive ? onArchiveSession : undefined,
+      onUnarchiveSession: permissions.archive ? onUnarchiveSession : undefined,
+      onRenameSession,
+      onPrefetchSession,
+      onResumeSession: permissions.send ? onResumeSession : undefined,
+    }
+  }
 
   return (
     <div className="flex flex-col gap-1.5" data-session-card-list>

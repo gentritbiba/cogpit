@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import {
   ChevronLeft,
   ChevronsDownUp,
@@ -30,6 +31,8 @@ import { projectName } from "@/lib/format"
 import type { ParsedSession, RawMessage } from "../../shared/session/types"
 
 export interface SessionInfoBarProps {
+  /** What the shell's header carries on the right, kept in reach while the chat header replaces it. */
+  headerAccessory?: ReactNode
   creatingSession: boolean
   onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
@@ -48,6 +51,7 @@ interface MobileSessionInfoBarProps extends SessionInfoBarProps {
   sessionSource: SessionSource | null
   isSubAgentView: boolean
   isLive: boolean
+  canArchive: boolean
   claudeRawMessages: readonly RawMessage[]
 }
 
@@ -56,7 +60,9 @@ export function MobileSessionInfoBar({
   sessionSource,
   isSubAgentView,
   isLive,
+  canArchive,
   claudeRawMessages,
+  headerAccessory,
   creatingSession,
   onNewSession,
   onDuplicateSession,
@@ -69,7 +75,7 @@ export function MobileSessionInfoBar({
   expandAll,
   onToggleExpandAll,
 }: MobileSessionInfoBarProps) {
-  const archiveToggle = useSessionArchiveToggle(session.sessionId, isLive)
+  const archiveToggle = useSessionArchiveToggle(session.sessionId, isLive, canArchive)
 
   const handleNewSession = () => {
     if (!sessionSource) return
@@ -98,6 +104,7 @@ export function MobileSessionInfoBar({
         {session.cwd ? projectName(session.cwd) : "Session"}
       </span>
 
+      {headerAccessory}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={(

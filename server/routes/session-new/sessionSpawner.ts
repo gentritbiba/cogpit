@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path"
-import type { ServerResponse } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import {
   agentKindForDirName,
   descriptorFor,
@@ -7,12 +7,14 @@ import {
 import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import { runtimeFor } from "../../agents/runtimes"
 import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes"
-import { dirs, isWithinDir, join } from "../../helpers"
+import { dirs, isWithinDir, join, realpath } from "../../helpers"
 import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type UseFn } from "../../http"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
 import { sendAgentError } from "../agentErrors"
+import { imagesRefusal } from "../imageAttachments"
 import { getDataRoot } from "../../config"
-import { getRequestPrincipal } from "../../team/requestPrincipal"
+import { getRequestPrincipal, markDecided, startTurn } from "../../edition"
+import { sessionFolderProblem } from "../../lib/folders"
 import { resolveProjectCwd } from "../../lib/projectCwd"
 import { SessionCreationRequests } from "../../lib/sessionCreationRequests"
 
@@ -95,25 +97,47 @@ async function resolveSpawnCwd(
   return requestedCwd
 }
 
+/**
+ * The folder as the agent will record it. A POSIX process's cwd is always the
+ * physical path, so an agent started through a symlink files its transcript
+ * under the resolved folder; Windows keeps the path it was given.
+ */
+async function canonicalCwd(cwd: string): Promise<string> {
+  if (process.platform === "win32") return cwd
+  return await realpath(cwd).catch(() => cwd)
+}
+
 /** Run a spawn and answer with the created session. */
 async function respondWithSession(
+  req: IncomingMessage,
   res: ServerResponse,
+  receivedAt: number,
   dirName: string,
   requestedCwd: string | undefined,
   request: Omit<StartSessionRequest, "dirName" | "cwd">,
   retry?: { requestId: string; scope: string },
 ): Promise<void> {
   const kind = agentKindForDirName(dirName)
-  const cwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
-  if (cwd instanceof RouteError) {
-    sendError(res, cwd)
+  const spawnCwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
+  if (spawnCwd instanceof RouteError) {
+    sendError(res, spawnCwd)
     return
   }
+  const missing = await sessionFolderProblem(spawnCwd)
+  if (missing) {
+    sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, missing))
+    return
+  }
+  const cwd = await canonicalCwd(spawnCwd)
 
   const runtime = runtimeFor(kind)
   try {
-    const startRequest = { ...request, dirName, cwd }
-    const start = () => runtime.start(startRequest)
+    const startRequest = {
+      ...request,
+      dirName: cwd === spawnCwd ? dirName : descriptorFor(kind).dirName.encode(cwd),
+      cwd,
+    }
+    const start = () => startTurn(req, receivedAt, runtime, startRequest)
     const started = retry
       ? await creationRequests.run(retry.scope, retry.requestId, startRequest, start)
       : await start()
@@ -145,6 +169,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     if (req.method !== "POST") return next()
 
     withJsonBody<NewSessionBody>(req, res, async (body) => {
+      const receivedAt = Date.now()
       const {
         requestId, dirName, cwd, message, images, permissions,
         model, effort, contextWindowTokens, fastMode, ultracode, worktreeName, mcpConfig, name,
@@ -157,7 +182,14 @@ export function registerCreateAndSendRoute(use: UseFn) {
         ))
         return
       }
-      await respondWithSession(res, dirName, cwd, {
+      const refusal = imagesRefusal(images)
+      if (refusal) {
+        sendError(res, refusal)
+        return
+      }
+      // A new session names no session the caller could lack access to.
+      markDecided(req)
+      await respondWithSession(req, res, receivedAt, dirName, cwd, {
         message,
         images,
         permissions,

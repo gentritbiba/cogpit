@@ -1,7 +1,7 @@
 import { resolve, dirname } from "node:path"
 import { readdir, open, join } from "../../helpers"
+import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import {
-  mapWithConcurrency,
   runWorktreeCommand,
   SESSION_HEADER_CONCURRENCY,
 } from "./worktreeIo"

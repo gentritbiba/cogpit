@@ -4,7 +4,9 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { sessionApiPlugin } from './server/api-plugin'
 import { ptyPlugin } from './server/pty-plugin'
-import { manualChunks } from './build/manualChunks'
+import { bundleBoundary } from './build/bundleBoundary'
+import { editionAliases } from './build/editionAliases'
+import { chunkFileNames, editionUiBanner, manualChunks } from './build/manualChunks'
 import { themeBootstrap } from './build/themeBootstrap'
 
 export default defineConfig({
@@ -18,16 +20,19 @@ export default defineConfig({
     tailwindcss(),
     sessionApiPlugin(),
     ptyPlugin(),
+    bundleBoundary(),
+    editionUiBanner(),
   ],
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-    },
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      ...editionAliases(),
+    ],
   },
   build: {
     chunkSizeWarningLimit: 800,
     rollupOptions: {
-      output: { manualChunks },
+      output: { manualChunks, chunkFileNames },
     },
   },
   server: {

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ActiveSessionInfo } from "../types"
 import {
+  activeSessionsCacheKey,
   clearSessionListCache,
   readCachedList,
   sessionListCacheKeys,
@@ -12,11 +13,14 @@ import {
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { LiveSessions } from "../index"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../../shared/contracts/identity"
 import {
   __resetDeviceRevisionsForTest,
   recordDeviceConnectionRevision,
 } from "@/lib/device"
+import { __resetSessionAccessForTest, knownSessionAccess, publishListsStale } from "@/lib/sessionAccess"
+import { __resetEditionUiForTest } from "@/edition/registry"
+import { installStubListFilter } from "@/__tests__/listFilter"
 
 /**
  * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
@@ -97,7 +101,18 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 vi.mock("@/components/ProjectContextMenu", () => ({
-  ProjectContextMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ProjectContextMenu: ({ children, archivableCount, onArchiveIdle }: {
+    children: ReactNode
+    archivableCount?: number
+    onArchiveIdle?: () => void
+  }) => (
+    <>
+      {children}
+      {onArchiveIdle && (
+        <button type="button" onClick={onArchiveIdle}>Archive {archivableCount} idle</button>
+      )}
+    </>
+  ),
 }))
 vi.mock("sonner", () => ({ toast: mocks.toast }))
 vi.mock("@/components/ui/tooltip", () => ({
@@ -172,7 +187,11 @@ vi.mock("../SessionCard", async () => {
   const { SessionRow } = await import("../SessionRow")
   return {
     SessionCard: (props: Parameters<typeof SessionRow>[0]) => (
-      <div data-testid={`card-${props.session.sessionId}`}>
+      <div
+        data-testid={`card-${props.session.sessionId}`}
+        data-active={props.isActiveSession || undefined}
+        data-just-finished={props.isNewlyCompleted || undefined}
+      >
         <SessionRow {...props} />
       </div>
     ),
@@ -229,6 +248,7 @@ beforeEach(() => {
 afterEach(() => {
   __resetCapabilitiesForTest()
   __resetDeviceRevisionsForTest()
+  __resetSessionAccessForTest()
   cleanup()
   clearSessionListCache()
 })
@@ -238,10 +258,10 @@ describe("LiveSessions committed-state synchronization", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
-    writeCachedList(sessionListCacheKeys.activeSessions, [session("member-session")])
+    writeCachedList(activeSessionsCacheKey(null), [session("member-session")])
 
     renderLive(
       <LiveSessions
@@ -250,6 +270,7 @@ describe("LiveSessions committed-state synchronization", () => {
       />,
     )
 
+    expect(screen.getByTestId("card-member-session")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Resume member-session" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Kill member-session" })).not.toBeInTheDocument()
     expect(mocks.ptySend).not.toHaveBeenCalled()
@@ -286,8 +307,34 @@ describe("LiveSessions committed-state synchronization", () => {
     }))
   })
 
-  it("keeps consecutive delete events and the cached inventory in lockstep", () => {
+  it("highlights only the open session's card, and never as just finished", async () => {
+    let status: ActiveSessionInfo["agentStatus"] = "thinking"
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input === "/api/running-processes") {
+        return Promise.resolve(jsonResponse([{ pid: 1, sessionId: "open", memMB: 1 }, { pid: 2, sessionId: "other", memMB: 1 }]))
+      }
+      if (input.startsWith("/api/active-sessions")) {
+        return Promise.resolve(jsonResponse([{ ...session("open"), agentStatus: status }, { ...session("other"), agentStatus: status }]))
+      }
+      return new Promise<Response>(() => {})
+    })
+    const refreshRef: MutableRefObject<(() => void) | null> = { current: null }
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey="project-a/open.jsonl" onSelectSession={vi.fn()} refreshRef={refreshRef} />)
+    })
+
+    status = "completed"
+    await act(async () => refreshRef.current?.())
+
+    expect(screen.getByTestId("card-open")).toHaveAttribute("data-active")
+    expect(screen.getByTestId("card-open")).not.toHaveAttribute("data-just-finished")
+    expect(screen.getByTestId("card-other")).not.toHaveAttribute("data-active")
+    expect(screen.getByTestId("card-other")).toHaveAttribute("data-just-finished")
+  })
+
+  it("keeps consecutive delete events and the cached inventory in lockstep", async () => {
     writeCachedList(sessionListCacheKeys.activeSessions, [session("one"), session("two")])
+    mocks.onDeleteSession.mockResolvedValue(true)
 
     renderLive(
       <LiveSessions
@@ -300,7 +347,7 @@ describe("LiveSessions committed-state synchronization", () => {
     const firstDelete = screen.getByRole("button", { name: "Delete one" })
     const secondDelete = screen.getByRole("button", { name: "Delete two" })
 
-    act(() => {
+    await act(async () => {
       fireEvent.click(firstDelete)
       fireEvent.click(secondDelete)
     })
@@ -308,6 +355,26 @@ describe("LiveSessions committed-state synchronization", () => {
     expect(mocks.onDeleteSession).toHaveBeenCalledTimes(2)
     expect(readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions)).toEqual([])
     expect(screen.queryByRole("button", { name: /Delete (one|two)/ })).not.toBeInTheDocument()
+  })
+
+  it("keeps a session's row until the server has deleted it", async () => {
+    writeCachedList(sessionListCacheKeys.activeSessions, [session("one")])
+    let settle!: (deleted: boolean) => void
+    mocks.onDeleteSession.mockReturnValue(new Promise<boolean>((resolve) => { settle = resolve }))
+
+    renderLive(
+      <LiveSessions
+        activeSessionKey={null}
+        onSelectSession={vi.fn()}
+        onDeleteSession={mocks.onDeleteSession}
+      />,
+    )
+    act(() => fireEvent.click(screen.getByRole("button", { name: "Delete one" })))
+    expect(screen.getByRole("button", { name: "Delete one" })).toBeInTheDocument()
+
+    await act(async () => settle(false))
+    expect(screen.getByRole("button", { name: "Delete one" })).toBeInTheDocument()
+    expect(readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions)).toEqual([session("one")])
   })
 
   it("installs the imperative refresh after commit and releases only its own callback", () => {
@@ -720,5 +787,159 @@ describe("LiveSessions across every project", () => {
 
     expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?limit=200&perProject=100")
     expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute("data-testid"))).toEqual(["card-app-1", "card-lib-old"])
+  })
+})
+
+describe("LiveSessions list filter", () => {
+  function signInMember() {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_member", username: "member", displayName: "member" },
+      capabilities: NO_CAPABILITIES,
+      enforcesSessionAccess: true,
+    })
+  }
+
+  /** A filter whose control narrows the lists to the "narrow" key. */
+  function installFilter() {
+    const filter = installStubListFilter(null, {
+      Control: () => <button type="button" onClick={() => filter.setKey("narrow")}>Narrow the list</button>,
+    })
+    return filter
+  }
+
+  function answerInventory() {
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      if (input.startsWith("/api/active-sessions")) return Promise.resolve(jsonResponse([session("s1")]))
+      return new Promise<Response>(() => {})
+    })
+  }
+
+  function requestedUrls(): string[] {
+    return mocks.authFetch.mock.calls.map(([url]) => String(url))
+  }
+
+  afterEach(() => {
+    __resetEditionUiForTest()
+  })
+
+  it("shows no filter control and sends no filter without an edition", async () => {
+    answerInventory()
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+
+    expect(screen.queryByRole("button", { name: "Narrow the list" })).not.toBeInTheDocument()
+    expect(requestedUrls()).toContain("/api/active-sessions")
+    expect(requestedUrls().some((url) => url.includes("filter="))).toBe(false)
+  })
+
+  it("renders the edition's filter control and lists by the filter", async () => {
+    installFilter()
+    answerInventory()
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    expect(requestedUrls()).toContain("/api/active-sessions")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Narrow the list" }))
+    })
+    expect(requestedUrls()).toContain("/api/active-sessions?filter=narrow")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older sessions" }))
+    })
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?limit=200&perProject=100&filter=narrow")
+  })
+
+  it("shows the edition's empty state for a list the filter left empty", async () => {
+    installStubListFilter("narrow", { Empty: () => <p>Nothing under this filter</p> })
+    mocks.authFetch.mockImplementation((input: string) => (input === "/api/running-processes" || input.startsWith("/api/active-sessions")
+      ? Promise.resolve(jsonResponse([]))
+      : new Promise<Response>(() => {})))
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+
+    expect(screen.getByText("Nothing under this filter")).toBeInTheDocument()
+    expect(screen.queryByText("No sessions yet")).not.toBeInTheDocument()
+  })
+
+  it("learns the access of the older sessions it loads", async () => {
+    const shared = { level: "view" as const, mine: false }
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      if (input.includes("limit=200")) return Promise.resolve(jsonResponse([{ ...session("old"), access: shared }]))
+      if (input.startsWith("/api/active-sessions")) return Promise.resolve(jsonResponse([session("s1")]))
+      return new Promise<Response>(() => {})
+    })
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older sessions" }))
+    })
+
+    expect(knownSessionAccess("old")).toBe("view")
+  })
+
+  it("loads the older sessions again when the lists go stale", async () => {
+    answerInventory()
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older sessions" }))
+    })
+    const olderRequests = () => requestedUrls().filter((url) => url.includes("limit=200")).length
+    expect(olderRequests()).toBe(1)
+
+    await act(async () => publishListsStale())
+
+    expect(olderRequests()).toBe(2)
+  })
+
+  it("keeps each filter's list in its own cache", async () => {
+    installFilter()
+    writeCachedList(activeSessionsCacheKey("narrow"), [session("cached-narrow")])
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+    expect(screen.queryByTestId("card-cached-narrow")).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Narrow the list" }))
+    })
+    expect(screen.getByTestId("card-cached-narrow")).toBeInTheDocument()
+  })
+
+  it("archives only the idle sessions the caller may archive", async () => {
+    signInMember()
+    mocks.projectScope = "me/app"
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      if (input === "/api/archive-sessions") return Promise.resolve(jsonResponse({}))
+      if (input.startsWith("/api/active-sessions")) {
+        return Promise.resolve(jsonResponse([
+          { ...session("mine"), cwd: "/home/me/app", access: { level: "own", mine: true } },
+          { ...session("shared"), cwd: "/home/me/app", access: { level: "interact", mine: false } },
+        ]))
+      }
+      return new Promise<Response>(() => {})
+    })
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Archive 1 idle" }))
+    })
+
+    const archive = mocks.authFetch.mock.calls.find(([url]) => url === "/api/archive-sessions")
+    expect(JSON.parse(String(archive?.[1]?.body))).toEqual({ sessionIds: ["mine"], archived: true })
   })
 })

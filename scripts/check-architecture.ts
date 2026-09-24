@@ -1,7 +1,13 @@
 import { readFile } from "node:fs/promises"
-import { dirname, extname, join, resolve } from "node:path"
-import ts from "typescript"
-import { collectSourceRoots, relativePath, root } from "./lib/sourceFiles"
+import { extname, join } from "node:path"
+import { editionViolation, repoTarget } from "./lib/editionBoundary"
+import {
+  countEditionLines,
+  editionVocabularyViolations,
+  isEditionVocabularyExempt,
+} from "./lib/editionVocabulary"
+import { extractImports } from "./lib/importReferences"
+import { collectSourceRoots, hasTeamEdition, relativePath, root, TEAM_EDITION_ROOT } from "./lib/sourceFiles"
 
 const publicPackages: Record<string, string> = {
   "@cogpit/plugin-contracts": "packages/plugin-contracts",
@@ -28,13 +34,12 @@ for (const [name, directory] of Object.entries(publicPackages)) {
   }
   packageDependencies.set(directory, new Set(Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })))
 }
-const sourceRoots = ["shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src", ...Object.values(publicPackages).map((path) => `${path}/src`)]
+const sourceRoots = [
+  "shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src",
+  ...Object.values(publicPackages).map((path) => `${path}/src`),
+  ...(hasTeamEdition ? [TEAM_EDITION_ROOT] : []),
+]
 const emittedExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"])
-
-interface ImportReference {
-  specifier: string
-  line: number
-}
 
 interface Edge {
   source: string
@@ -42,53 +47,10 @@ interface Edge {
   line: number
 }
 
-function extractImports(source: string, fileName: string): ImportReference[] {
-  const references: ImportReference[] = []
-  const sourceFile = ts.createSourceFile(
-    fileName,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    fileName.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  )
-
-  const addReference = (specifier: ts.Expression, position: number) => {
-    if (ts.isStringLiteralLike(specifier)) {
-      references.push({
-        specifier: specifier.text,
-        line: sourceFile.getLineAndCharacterOfPosition(position).line + 1,
-      })
-    }
-  }
-
-  const visit = (node: ts.Node) => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      if (node.moduleSpecifier) addReference(node.moduleSpecifier, node.getStart(sourceFile))
-    } else if (
-      ts.isCallExpression(node)
-      && node.arguments.length === 1
-      && (node.expression.kind === ts.SyntaxKind.ImportKeyword
-        || (ts.isIdentifier(node.expression) && node.expression.text === "require"))
-    ) {
-      addReference(node.arguments[0], node.getStart(sourceFile))
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sourceFile)
-  return references
-}
-
 function resolveLocalImport(source: string, specifier: string, files: Set<string>): string | null {
-  let unresolved: string
-  if (publicExports.has(specifier)) {
-    unresolved = publicExports.get(specifier)!
-  } else if (specifier.startsWith("@/")) {
-    unresolved = join(root, "src", specifier.slice(2))
-  } else if (specifier.startsWith(".")) {
-    unresolved = resolve(dirname(source), specifier)
-  } else {
-    return null
-  }
+  const target = repoTarget(relativePath(source), specifier)
+  const unresolved = publicExports.get(specifier) ?? (target === null ? null : join(root, target))
+  if (unresolved === null) return null
 
   const unresolvedExtension = extname(unresolved)
   const sourceStem = emittedExtensions.has(unresolvedExtension)
@@ -107,7 +69,16 @@ function resolveLocalImport(source: string, specifier: string, files: Set<string
   return candidates.find((candidate) => files.has(candidate)) ?? null
 }
 
-function layer(path: string): "shared" | "src" | "plugin" | "server" | "electron" | "package" | null {
+type Layer = "shared" | "src" | "plugin" | "server" | "electron" | "package"
+
+/**
+ * The edition's parts sit in the core layer they extend: its UI with the
+ * renderer, its contracts with shared, everything else with the server.
+ */
+function layer(path: string): Layer | null {
+  if (path.startsWith(`${TEAM_EDITION_ROOT}/ui/`)) return "src"
+  if (path.startsWith(`${TEAM_EDITION_ROOT}/shared/`)) return "shared"
+  if (path.startsWith(`${TEAM_EDITION_ROOT}/`)) return "server"
   if (path.startsWith("shared/")) return "shared"
   if (path.startsWith("src/")) return "src"
   if (path.startsWith("plugins/")) return "plugin"
@@ -216,11 +187,36 @@ for (const source of absoluteFiles) {
       const dependency = reference.specifier.startsWith("@") ? reference.specifier.split("/").slice(0, 2).join("/") : reference.specifier.split("/")[0]
       if (!permitted.has(dependency)) violations.push(`${localSource}:${reference.line} imports an undeclared browser dependency: ${reference.specifier}`)
     }
+    const editionProblem = editionViolation(localSource, reference, false)
+    if (editionProblem) violations.push(editionProblem)
     const target = resolveLocalImport(source, reference.specifier, fileSet)
     if (!target) continue
     edges.push({ source: relativePath(source), target: relativePath(target), line: reference.line })
   }
 }
+
+// Tests fall under the edition rule too: a core test that reached into the
+// team edition would fail the moment a public checkout runs without it. So do
+// the tooling, the build config and the npm launcher, which run there without
+// joining the layers.
+const everyFile = await collectSourceRoots([...sourceRoots, "scripts", "build", "packages/cogpit-cli/src"], { tests: true })
+const editionVocabulary = new Map<string, number>()
+for (const source of everyFile) {
+  const localSource = relativePath(source)
+  const contents = await readFile(source, "utf8")
+  if (!fileSet.has(source)) {
+    for (const reference of extractImports(contents, source)) {
+      const editionProblem = editionViolation(localSource, reference, true)
+      if (editionProblem) violations.push(editionProblem)
+    }
+  }
+  if (localSource.startsWith(`${TEAM_EDITION_ROOT}/`) || isEditionVocabularyExempt(localSource)) continue
+  const editionLines = countEditionLines(contents)
+  if (editionLines > 0) editionVocabulary.set(localSource, editionLines)
+}
+
+// Core may not tell which edition it runs outside server/edition/.
+violations.push(...editionVocabularyViolations(editionVocabulary))
 
 for (const edge of edges) {
   if (isForbiddenCrossLayerEdge(edge)) {

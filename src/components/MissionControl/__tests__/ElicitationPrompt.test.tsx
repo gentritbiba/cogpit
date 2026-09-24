@@ -123,4 +123,17 @@ describe("ElicitationPrompt", () => {
       expect(screen.queryByRole("textbox")).toBeNull()
     })
   })
+
+  it("shows a reader what the server asks for without letting them send or decline", () => {
+    render(
+      <ElicitationPrompt
+        request={formRequest([{ name: "token", label: "Token", type: "string", required: true }])}
+        responding={false}
+      />,
+    )
+
+    expect(screen.getByText("Enter your access token")).toBeInTheDocument()
+    expect(screen.getByLabelText("Token")).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /Send|Decline/ })).not.toBeInTheDocument()
+  })
 })

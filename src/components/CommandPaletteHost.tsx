@@ -9,6 +9,8 @@ import { usePty } from "@/contexts/PtyContext"
 import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
+import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter"
+import { learnListedAccess, sessionAccessTicket } from "@/lib/sessionAccess"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
@@ -49,24 +51,31 @@ export function CommandPaletteHost({
   const [recentSessions, setRecentSessions] = useState<CommandPaletteSession[]>([])
   const [loadingNavigation, setLoadingNavigation] = useState(false)
   const handledTerminalRequestRef = useRef(0)
+  const filter = useSessionListFilter()
 
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
+    const accessTicket = sessionAccessTicket()
     setLoadingNavigation(true)
 
     Promise.allSettled([
       fetchArray<CommandPaletteProject>("/api/projects", controller.signal),
-      fetchArray<CommandPaletteSession>("/api/active-sessions?limit=12&perProject=3", controller.signal),
+      fetchArray<CommandPaletteSession>(
+        activeSessionsUrl({ limit: "12", perProject: "3" }, filter),
+        controller.signal,
+      ),
     ]).then(([projectResult, sessionResult]) => {
       if (controller.signal.aborted) return
+      const sessions = sessionResult.status === "fulfilled" ? sessionResult.value : []
+      learnListedAccess(sessions, accessTicket)
       setProjects(projectResult.status === "fulfilled" ? projectResult.value : [])
-      setRecentSessions(sessionResult.status === "fulfilled" ? sessionResult.value : [])
+      setRecentSessions(sessions)
       setLoadingNavigation(false)
     })
 
     return () => controller.abort()
-  }, [open])
+  }, [open, filter])
 
   const terminalCwd = useMemo(() => {
     if (projectCwd) return projectCwd

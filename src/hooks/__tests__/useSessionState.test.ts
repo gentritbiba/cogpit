@@ -245,6 +245,61 @@ describe("useSessionState", () => {
   })
 
 
+  describe("CLOSE_SESSION", () => {
+    it("leaves an open session the way GO_HOME does while the session is on screen", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: true })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 3 })
+      dispatch(hook, { type: "CLOSE_SESSION", isMobile: true })
+      expect(getState(hook)).toMatchObject({
+        session: null,
+        sessionSource: null,
+        activeTurnIndex: null,
+        mainView: "sessions",
+        mobileTab: "sessions",
+      })
+    })
+
+    it.each([
+      ["mission", { type: "OPEN_MISSION" }],
+      ["extension", { type: "OPEN_EXTENSION_VIEW", id: "reports" }],
+      ["config", { type: "OPEN_CONFIG" }],
+    ] as const)("keeps the %s view the session was open behind", (view, open) => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
+      dispatch(hook, open)
+      dispatch(hook, { type: "CLOSE_SESSION", isMobile: false })
+      expect(getState(hook).session).toBeNull()
+      expect(getState(hook).mainView).toBe(view)
+    })
+
+    it("keeps a mobile tab other than the session's chat", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: true })
+      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "workspace" })
+      dispatch(hook, { type: "CLOSE_SESSION", isMobile: true })
+      expect(getState(hook).session).toBeNull()
+      expect(getState(hook).mobileTab).toBe("workspace")
+    })
+  })
+
+  describe("OPEN_EXTENSION_VIEW / CLOSE_EXTENSION_VIEW", () => {
+    it("switches the main view to an edition's view by id and back", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "OPEN_EXTENSION_VIEW", id: "reports" })
+      expect(getState(hook)).toMatchObject({ mainView: "extension", extensionViewId: "reports" })
+      dispatch(hook, { type: "CLOSE_EXTENSION_VIEW" })
+      expect(getState(hook)).toMatchObject({ mainView: "sessions", extensionViewId: null })
+    })
+
+    it("leaves the view when a session opens", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "OPEN_EXTENSION_VIEW", id: "reports" })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: true })
+      expect(getState(hook).mainView).toBe("sessions")
+    })
+  })
+
   // ── SWITCH_TEAM_MEMBER ──────────────────────────────────────────────
 
   describe("SWITCH_TEAM_MEMBER", () => {

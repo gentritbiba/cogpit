@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { AlertCircle, Eye, EyeOff, Lock } from "lucide-react"
+import { AlertCircle, Eye, EyeOff, Info, Lock } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,40 +19,44 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/Spinner"
-import { clearToken, getServerEdition } from "@/lib/auth"
-import type { CogpitEdition } from "../../shared/contracts/team"
+import { useEditionUi } from "@/edition/hooks"
+import { clearToken, getServerSignIn } from "@/lib/auth"
+import type { SignInMode } from "../../shared/contracts/identity"
 
 interface LoginScreenProps {
   onAuthenticated: () => void
+  /** The server has no account yet, and this build has no screen to create one. */
+  setupRequired?: boolean
 }
 
-export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
-  const [edition, setEdition] = useState<CogpitEdition | null>(null)
+export function LoginScreen({ onAuthenticated, setupRequired = false }: LoginScreenProps) {
+  const [signIn, setSignIn] = useState<SignInMode | null>(null)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const isTeam = edition === "team"
+  const usesAccounts = signIn === "account"
+  const { LoginNotice } = useEditionUi()
 
   useEffect(() => {
     let cancelled = false
-    void getServerEdition().then((resolved) => {
-      if (!cancelled) setEdition(resolved)
+    void getServerSignIn().then((resolved) => {
+      if (!cancelled) setSignIn(resolved)
     })
     return () => { cancelled = true }
   }, [])
 
   const handleSubmit = useCallback(async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!password.trim() || (isTeam && !username.trim())) return
+    if (!password.trim() || (usesAccounts && !username.trim())) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch("/api/auth/verify", isTeam
+      const response = await fetch("/api/auth/verify", usesAccounts
         ? {
             method: "POST",
             credentials: "same-origin",
@@ -81,16 +85,16 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
         setUsername("")
         onAuthenticated()
       } else {
-        setError(data.error || (isTeam ? "Invalid credentials" : "Invalid password"))
+        setError(data.error || (usesAccounts ? "Invalid credentials" : "Invalid password"))
       }
     } catch {
       setError("Failed to connect to server")
     } finally {
       setLoading(false)
     }
-  }, [isTeam, onAuthenticated, password, username])
+  }, [usesAccounts, onAuthenticated, password, username])
 
-  const submitDisabled = loading || !password.trim() || (isTeam && !username.trim())
+  const submitDisabled = loading || !password.trim() || (usesAccounts && !username.trim())
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-8">
@@ -102,11 +106,11 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             </div>
             <CardTitle>Sign in to Cogpit</CardTitle>
             <CardDescription>
-              {isTeam ? "Use your team account to continue." : "Enter the server password to continue."}
+              {usesAccounts ? "Sign in with your account to continue." : "Enter the server password to continue."}
             </CardDescription>
           </CardHeader>
 
-          {edition === null ? (
+          {signIn === null ? (
             <CardContent>
               <div
                 className="flex min-h-24 items-center justify-center"
@@ -119,8 +123,15 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
           ) : (
             <>
               <CardContent className="flex flex-col gap-4">
+                {setupRequired && (
+                  <Alert>
+                    <Info aria-hidden="true" />
+                    <AlertDescription>This server has no accounts yet.</AlertDescription>
+                  </Alert>
+                )}
+
                 <FieldGroup>
-                  {isTeam && (
+                  {usesAccounts && (
                     <Field>
                       <FieldLabel htmlFor="login-username">Username</FieldLabel>
                       <Input
@@ -145,7 +156,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
                         onChange={(event) => setPassword(event.target.value)}
                         placeholder="Password"
                         autoComplete="current-password"
-                        autoFocus={!isTeam}
+                        autoFocus={!usesAccounts}
                       />
                       <InputGroupAddon align="inline-end">
                         <InputGroupButton
@@ -159,6 +170,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
                     </InputGroup>
                   </Field>
                 </FieldGroup>
+
+                {usesAccounts && LoginNotice && <LoginNotice />}
 
                 {error && (
                   <Alert variant="destructive">

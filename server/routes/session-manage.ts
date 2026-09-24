@@ -1,13 +1,12 @@
-import { agentKindForDirName } from "../../shared/session/agent-descriptors"
 import {
   allRuntimes,
   resolveSessionAgent,
   runtimeFor,
+  runtimeForSession,
+  type AgentRuntime,
 } from "../agents/runtimes"
-import { storeForPath } from "../agents"
-import { resolveSessionFilePath } from "../sessionPaths"
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../http"
+import { sendJson, type UseFn } from "../http"
 import {
   activeProcesses,
   killTrackedProcesses,
@@ -21,9 +20,15 @@ import {
   type SDKSessionUpdates,
 } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
-import { forgetSessions } from "../lib/sessionArchive"
-import { listShares, removeShare } from "../share/registry"
-import { revokeShareTokensForSession } from "../security"
+import { heldLiveUpdate, storeAppliedSettings } from "../lib/sessionSettings"
+import { parseSettingsChange } from "../../shared/contracts/sessionSettings"
+import {
+  authorizeSession,
+  reportSessionEvent,
+  type ActivitySessionRef,
+} from "../edition"
+import { registerDeleteSessionRoute } from "./session-manage/deleteSession"
+import { handleJsonBody } from "./session-manage/jsonBody"
 import { registerRunningProcessesRoute } from "./session-manage/processInventory"
 import { sendAgentError } from "./agentErrors"
 
@@ -37,34 +42,6 @@ import { sendAgentError } from "./agentErrors"
  * idle Codex session fell through to the Claude SDK, which silently did
  * nothing about a session it had never heard of.
  */
-
-function handleJsonBody<T>(
-  req: IncomingMessage,
-  res: ServerResponse,
-  handleBody: (body: T) => void | Promise<void>,
-  handleReadError: (error: unknown) => void,
-  options: { allowEmpty?: boolean } = {},
-): void {
-  void (async () => {
-    let body: T
-    try {
-      body = await readJsonBody<T>(req, options)
-    } catch (error) {
-      if (error instanceof HttpBodyError && error.statusCode === 413) {
-        sendJson(res, error.statusCode, { error: error.message })
-      } else {
-        handleReadError(error)
-      }
-      return
-    }
-
-    try {
-      await handleBody(body)
-    } catch (error) {
-      if (!res.headersSent) sendAgentError(res, error, "Request failed")
-    }
-  })()
-}
 
 function sendInvalidSettingsPayload(res: ServerResponse): void {
   sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid Claude settings payload"))
@@ -87,14 +64,25 @@ function sessionIdFrom(res: ServerResponse, body: unknown): string | null {
   return id
 }
 
-/** Matched on the file too: a Codex rollout file name is not the session id. */
-function sharedSessionIdsFor(sessionId: string, dirName: string, fileName: string): string[] {
-  return listShares()
-    .filter((share) => (
-      share.sessionId === sessionId
-      || (share.dirName === dirName && share.fileName === fileName)
-    ))
-    .map((share) => share.sessionId)
+interface InteractiveSession {
+  sessionId: string
+  runtime: AgentRuntime
+  /** The session as its audit events name it. */
+  audit: ActivitySessionRef
+}
+
+/** The session a body names and the runtime holding it, once the caller may interact with it; null after answering. */
+async function interactiveSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  body: unknown,
+): Promise<InteractiveSession | null> {
+  const sessionId = sessionIdFrom(res, body)
+  if (!sessionId) return null
+  const authorized = await authorizeSession(req, res, { sessionId }, "interact")
+  if (authorized === null) return null
+  const { kind } = await resolveSessionAgent(sessionId)
+  return { sessionId, runtime: runtimeFor(kind), audit: { sessionId: authorized.sessionId, agent: kind } }
 }
 
 export function registerSessionManageRoutes(use: UseFn) {
@@ -103,9 +91,30 @@ export function registerSessionManageRoutes(use: UseFn) {
     const match = (req.url ?? "").match(/^\/([^/?]+)$/)
     if (!match) return next()
     const sessionId = decodeURIComponent(match[1])
-    handleJsonBody<SDKSessionUpdates>(req, res, async (updates) => {
+    handleJsonBody<(SDKSessionUpdates & { settingsChange?: unknown }) | null>(req, res, async (body) => {
+      const { settingsChange, ...sent } = body ?? {}
+      const changes = body === null ? null : parseSettingsChange(settingsChange)
+      if (changes === null) return sendInvalidSettingsPayload(res)
+      const authorized = await authorizeSession(req, res, { sessionId }, "interact")
+      if (authorized === null) return
+      const updates = heldLiveUpdate(sent, changes)
+      // Read in the same tick as the update: whenever the update finds the session, its runtime holds it.
+      const holder = runtimeForSession(sessionId)
       try {
-        const result = await updateSDKSession(sessionId, updates)
+        const { permissionChange, ...result } = await updateSDKSession(sessionId, updates)
+        if (permissionChange && holder) {
+          reportSessionEvent(req, "session.permission", { sessionId: authorized.sessionId, agent: holder.kind }, permissionChange)
+        }
+        const { permissionMode, model, effort, fastMode, ultracode } = updates
+        await storeAppliedSettings(req, authorized.sessionId, holder?.kind ?? null, {
+          permissions: permissionMode === undefined ? undefined : { mode: permissionMode },
+          model,
+          effort,
+          fastMode,
+          ultracode,
+        }).catch((error: unknown) => {
+          console.error("[session-config] Storing settings applied to a running session failed:", error)
+        })
         sendJson(res, 200, { success: true, ...result })
       } catch {
         sendInvalidSettingsPayload(res)
@@ -118,10 +127,11 @@ export function registerSessionManageRoutes(use: UseFn) {
   use("/api/interrupt-session", (req, res, next) => {
     if (req.method !== "POST") return next()
     handleJsonBody<unknown>(req, res, async (body) => {
-      const sessionId = sessionIdFrom(res, body)
-      if (!sessionId) return
-      const { kind } = await resolveSessionAgent(sessionId)
-      sendJson(res, 200, { success: await runtimeFor(kind).interrupt(sessionId) })
+      const session = await interactiveSession(req, res, body)
+      if (!session) return
+      const interrupted = await session.runtime.interrupt(session.sessionId)
+      if (interrupted) reportSessionEvent(req, "session.interrupt", session.audit)
+      sendJson(res, 200, { success: interrupted })
     }, () => {
       sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
     })
@@ -154,12 +164,12 @@ export function registerSessionManageRoutes(use: UseFn) {
     const stopMatch = path.match(/^\/([^/?]+)\/([^/?]+)$/)
     const backgroundMatch = path.match(/^\/([^/?]+)\/background$/)
     if (req.method === "DELETE" && stopMatch) {
-      void stopSDKTask(
-        decodeURIComponent(stopMatch[1]),
-        decodeURIComponent(stopMatch[2]),
-      ).then((stopped) => {
-        sendJson(res, 200, { success: stopped })
-      }, (error) => {
+      const sessionId = decodeURIComponent(stopMatch[1])
+      const taskId = decodeURIComponent(stopMatch[2])
+      void (async () => {
+        if (await authorizeSession(req, res, { sessionId }, "interact") === null) return
+        sendJson(res, 200, { success: await stopSDKTask(sessionId, taskId) })
+      })().catch((error: unknown) => {
         sendError(res, new RouteError(502, ErrorCodes.INTERNAL_ERROR, String(error)))
       })
       return
@@ -174,7 +184,9 @@ export function registerSessionManageRoutes(use: UseFn) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
           return
         }
-        const backgrounded = await backgroundSDKTasks(decodeURIComponent(backgroundMatch[1]), toolUseId)
+        const sessionId = decodeURIComponent(backgroundMatch[1])
+        if (await authorizeSession(req, res, { sessionId }, "interact") === null) return
+        const backgrounded = await backgroundSDKTasks(sessionId, toolUseId)
         sendJson(res, 200, { success: backgrounded })
       }, () => {
         sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
@@ -188,11 +200,11 @@ export function registerSessionManageRoutes(use: UseFn) {
     if (req.method !== "POST") return next()
 
     handleJsonBody<unknown>(req, res, async (body) => {
-      const sessionId = sessionIdFrom(res, body)
-      if (!sessionId) return
+      const session = await interactiveSession(req, res, body)
+      if (!session) return
 
-      const { kind } = await resolveSessionAgent(sessionId)
-      const stopped = await runtimeFor(kind).stop(sessionId)
+      const stopped = await session.runtime.stop(session.sessionId)
+      if (stopped) reportSessionEvent(req, "session.stop", session.audit)
       sendJson(res, 200, stopped
         ? { success: true }
         : { success: false, error: "No active process for this session" })
@@ -280,51 +292,5 @@ export function registerSessionManageRoutes(use: UseFn) {
     })
   })
 
-  use("/api/delete-session", (req, res, next) => {
-    if (req.method !== "POST") return next()
-
-    handleJsonBody<unknown>(req, res, async (body) => {
-      try {
-        const parsed = body as Record<string, unknown>
-        const dirName = parsed.dirName as string
-        const fileName = parsed.fileName as string
-
-        if (!dirName || !fileName) {
-          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and fileName are required"))
-          return
-        }
-
-        const filePath = await resolveSessionFilePath(dirName, fileName)
-        const agentKind = agentKindForDirName(dirName)
-        if (!filePath || storeForPath(filePath)?.kind !== agentKind) {
-          sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied"))
-          return
-        }
-
-        const runtime = runtimeFor(agentKind)
-        // The id a URL carries for this transcript: the bare uuid for agents
-        // whose file name rebuilds from it, the relative path for the rest.
-        const sessionId = runtime.descriptor.sessionFile.urlId(fileName)
-        await runtime.deleteSession(sessionId, filePath)
-        forgetSessions([sessionId]).catch(() => {})
-
-        // A share left behind would hand its guest whatever session next
-        // claims this id.
-        for (const sharedId of sharedSessionIdsFor(sessionId, dirName, fileName)) {
-          await removeShare(sharedId)
-          revokeShareTokensForSession(sharedId)
-        }
-
-        sendJson(res, 200, { success: true })
-      } catch (err) {
-        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, err instanceof Error ? err.message : "Failed to delete session"))
-      }
-    }, (error) => {
-      sendError(res, new RouteError(
-        400,
-        ErrorCodes.INVALID_REQUEST,
-        error instanceof Error ? error.message : "Failed to delete session",
-      ))
-    })
-  })
+  registerDeleteSessionRoute(use)
 }

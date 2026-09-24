@@ -6,6 +6,10 @@ import { ProjectSwitcherModal } from "@/components/ProjectSwitcherModal"
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 vi.mock("@/hooks/useProjectNames", () => ({ useProjectNames: () => ({ names: {} }) }))
+vi.mock("@/hooks/useFolderHostName", () => ({ useFolderHostName: () => null }))
+
+// cmdk scrolls the highlighted item into view, which jsdom does not implement.
+Element.prototype.scrollIntoView = vi.fn()
 
 describe("ProjectSwitcherModal", () => {
   beforeEach(() => {
@@ -30,7 +34,7 @@ describe("ProjectSwitcherModal", () => {
     )
 
     await user.type(
-      screen.getByPlaceholderText("Search projects or paste an absolute path..."),
+      screen.getByPlaceholderText("Search projects, paste a folder path, or browse"),
       "/workspace/new-project",
     )
     await user.click(screen.getByRole("option", { name: /Start in this folder/ }))
@@ -54,7 +58,7 @@ describe("ProjectSwitcherModal", () => {
     )
 
     await user.type(
-      screen.getByPlaceholderText("Search projects or paste an absolute path..."),
+      screen.getByPlaceholderText("Search projects, paste a folder path, or browse"),
       "/workspace/copilot-project",
     )
 

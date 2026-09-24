@@ -6,9 +6,11 @@
     { "path": "./tsconfig.electron.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@cogpit/core/*": ["./*"],
+      "@cogpit/team": ["./editions/team/index.ts"],
+      "@cogpit/edition-ui": ["./editions/team/ui/index.ts", "./src/edition/absent.ts"]
     }
   }
 }

@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { dirs } from "../sessionPaths"
+import { PR_SEARCH_INDEX_FILE } from "./sessionConfigDir"
 import {
   getCompleteSessionPullRequestData,
   type SessionPullRequestData,
@@ -33,7 +34,6 @@ export interface SessionPrSearchSnapshot {
   total: number
 }
 
-const INDEX_FILE = "pr-search-index.json"
 const PERSIST_EVERY = 50
 
 let activeIndexPath = ""
@@ -54,7 +54,7 @@ function isIndexEntry(value: unknown): value is IndexEntry {
 }
 
 function currentIndexPath(): string {
-  return join(dirs.SESSION_CONFIG_DIR, INDEX_FILE)
+  return join(dirs.SESSION_CONFIG_DIR, PR_SEARCH_INDEX_FILE)
 }
 
 function resetForPath(indexPath: string) {

@@ -14,8 +14,8 @@ import {
 } from "./worktreeUtils"
 import type { WorktreeRaw } from "./worktreeUtils"
 import { handleWorktreeList } from "./worktreeListRoute"
+import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import {
-  mapWithConcurrency,
   runWorktreeCommand,
   WORKTREE_NETWORK_TIMEOUT_MS,
   WORKTREE_SCAN_CONCURRENCY,
@@ -80,7 +80,7 @@ export function registerWorktreeRoutes(use: UseFn) {
     // GET /api/worktrees/:dirName — list worktrees for a project
     if (req.method === "GET" && pathParts.length === 1) {
       const dirName = decodeURIComponent(pathParts[0])
-      await handleWorktreeList(dirName, res)
+      await handleWorktreeList(req, res, dirName)
       return
     }
 

@@ -113,16 +113,27 @@ describe("sessionMetaCache", () => {
     expect(getCachedSessionMeta("/test/file.jsonl", 1000)).not.toBeNull()
   })
 
-  it("evicts the oldest entry once the cache exceeds 1000 entries", async () => {
+  it("keeps past 1000 entries the rows some poll still reads", async () => {
     const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
-    setCachedSessionMeta("/test/oldest.jsonl", makeCachedMeta({ cachedAt: Date.now() }))
-    vi.advanceTimersByTime(10)
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i <= 1000; i++) {
       setCachedSessionMeta(`/test/file-${i}.jsonl`, makeCachedMeta({ cachedAt: Date.now() }))
     }
 
-    expect(getCachedSessionMeta("/test/oldest.jsonl", 1000)).toBeNull()
-    expect(getCachedSessionMeta("/test/file-999.jsonl", 1000)).not.toBeNull()
+    expect(getCachedSessionMeta("/test/file-0.jsonl", 1000)).not.toBeNull()
+  })
+
+  it("evicts the least recently read entry past 1000 once no poll has read it for a minute", async () => {
+    const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
+    for (let i = 0; i < 1000; i++) {
+      setCachedSessionMeta(`/test/file-${i}.jsonl`, makeCachedMeta({ cachedAt: Date.now() }))
+    }
+    vi.advanceTimersByTime(60_000)
+    expect(getCachedSessionMeta("/test/file-0.jsonl", 1000)).not.toBeNull()
+    setCachedSessionMeta("/test/newest.jsonl", makeCachedMeta({ cachedAt: Date.now() }))
+
+    expect(getCachedSessionMeta("/test/file-1.jsonl", 1000)).toBeNull()
+    expect(getCachedSessionMeta("/test/file-0.jsonl", 1000)).not.toBeNull()
+    expect(getCachedSessionMeta("/test/newest.jsonl", 1000)).not.toBeNull()
   })
 
   it("setCachedSessionMeta overwrites an existing entry", async () => {

@@ -451,6 +451,24 @@ describe("sdk-session turn completion", () => {
     expect(sdkSessions.get("no-result")?.running).toBe(false)
     expect(sdkSessions.get("no-result")?.onResult).toBeNull()
   })
+
+  it.each([
+    ["running", "a send is still queued to run as the next turn", 1, true],
+    ["idle", "no send is queued", 0, false],
+  ])("leaves the session %s after a result when %s", async (_, __, queuedTurns, running) => {
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      { type: "assistant", message: { content: [] } },
+      { type: "result", is_error: false, queued_turn_count: queuedTurns },
+    ]
+    holdQueryAfterMessages = true
+
+    const state = createSDKSession({ sessionId: "queued-turns", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => releaseQueryAfterMessages !== null)
+
+    expect(state.running).toBe(running)
+    releaseQueryAfterMessages!()
+  })
 })
 
 describe("sdk-session send resilience", () => {
@@ -945,6 +963,47 @@ describe("sdk-session effort propagation", () => {
     expect(setModelSpy).toHaveBeenCalledWith("claude-opus-4-7")
   })
 
+  it("keeps the session's model and effort when a send after an interrupt carries empty ones", async () => {
+    // Regression: a team-edition send takes the stored config's Default ("")
+    // for model and effort. Read as a pick, the empty model became
+    // setModel(undefined) — the CLI's "/model default" — and the turn after an
+    // Interrupt ran on the provider default while the composer showed Haiku.
+    holdQueryAfterMessages = true
+    const { createSDKSession, interruptSDKTurn, sendSDKMessage, sdkSessions } = await loadModule()
+    const state = createSDKSession({
+      sessionId: "empty-send-settings",
+      cwd: "/tmp",
+      message: "first",
+      model: "haiku",
+      effort: "high",
+    })
+    await waitUntil(() => captured.length === 1)
+    state.running = true
+    expect(await interruptSDKTurn("empty-send-settings")).toBe(true)
+
+    sendSDKMessage("empty-send-settings", "again", undefined, { model: "", effort: "" })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setModelSpy).not.toHaveBeenCalled()
+    expect(applyFlagSettingsSpy).not.toHaveBeenCalled()
+    expect(sdkSessions.get("empty-send-settings")).toMatchObject({ model: "haiku", effort: "high" })
+    expect(captured).toHaveLength(1)
+
+    state.messageStream?.close()
+    releaseQueryAfterMessages?.()
+  })
+
+  it("still resets the model live when a settings change picks the provider default", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "live-default-model", cwd: "/tmp", message: "first", model: "haiku" })
+    await waitUntil(() => captured.length === 1)
+
+    await updateSDKSession("live-default-model", { model: "" })
+
+    expect(setModelSpy).toHaveBeenCalledWith(undefined)
+  })
+
   it("ultracode at creation forces xhigh effort and injects the ultracode setting", async () => {
     const { createSDKSession } = await loadModule()
 
@@ -1290,6 +1349,26 @@ describe("sdk-session mid-turn permission mode change", () => {
     releaseHeldQuery?.()
   })
 
+  it("answers every pending approval at once and names each one it answered", async () => {
+    const { createSDKSession, resolveAllPermissions, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-all", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+
+    const state = sdkSessions.get("perm-live-all")!
+    const first = addPending(state, "req-1", "Bash")
+    const second = addPending(state, "req-2", "Bash")
+
+    expect(resolveAllPermissions("perm-live-all", "deny")).toEqual([
+      expect.objectContaining({ requestId: "req-1", toolUseId: "req-1", toolName: "Bash" }),
+      expect.objectContaining({ requestId: "req-2", toolUseId: "req-2", toolName: "Bash" }),
+    ])
+    expect(first).toHaveBeenCalledWith(expect.objectContaining({ behavior: "deny" }))
+    expect(second).toHaveBeenCalledWith(expect.objectContaining({ behavior: "deny" }))
+    expect(state.pendingPermissions.size).toBe(0)
+    releaseHeldQuery?.()
+  })
+
   it("switching to acceptEdits auto-allows only pending edit approvals", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     holdQueryOpen = true
@@ -1306,6 +1385,72 @@ describe("sdk-session mid-turn permission mode change", () => {
     expect(bashResolve).not.toHaveBeenCalled()
     expect(state.pendingPermissions.size).toBe(1)
     expect(state.pendingPermissions.has("req-bash")).toBe(true)
+    releaseHeldQuery?.()
+  })
+
+  it("reports the permission settings it changed and the requests the new mode approved", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-report", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+    const state = sdkSessions.get("perm-live-report")!
+    addPending(state, "req-bash", "Bash")
+    addPending(state, "req-edit", "Edit")
+
+    const result = await updateSDKSession("perm-live-report", {
+      permissionMode: "bypassPermissions",
+      disallowedTools: ["Bash(rm *)"],
+    })
+
+    expect(result.permissionChange).toEqual({
+      permissionMode: "bypassPermissions",
+      allowedTools: [],
+      disallowedTools: ["Bash(rm *)"],
+      autoApproved: [
+        { requestId: "req-bash", toolName: "Bash" },
+        { requestId: "req-edit", toolName: "Edit" },
+      ],
+    })
+    releaseHeldQuery?.()
+  })
+
+  it("reports a tool rule change that approved nothing", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-rules", cwd: "/tmp", message: "first", permissionMode: "plan" })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("perm-live-rules", { allowedTools: ["Bash(git status)"] })
+
+    expect(result.permissionChange).toEqual({
+      permissionMode: "plan",
+      allowedTools: ["Bash(git status)"],
+      disallowedTools: [],
+      autoApproved: [],
+    })
+    releaseHeldQuery?.()
+  })
+
+  it("reports no permission change when the update restates the current settings", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({
+      sessionId: "perm-live-same",
+      cwd: "/tmp",
+      message: "first",
+      permissionMode: "acceptEdits",
+      allowedTools: ["Read"],
+    })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("perm-live-same", {
+      model: "model-x",
+      permissionMode: "acceptEdits",
+      allowedTools: ["Read"],
+      disallowedTools: [],
+    })
+
+    expect(result.permissionChange).toBeNull()
     releaseHeldQuery?.()
   })
 

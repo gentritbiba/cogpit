@@ -32,16 +32,19 @@ function copilotQuestion(
   }
 }
 
-type FakeRuntime = Pick<AgentRuntime, "kind" | "listPendingQuestions" | "answerQuestion">
+type FakeRuntime = Pick<AgentRuntime, "kind" | "listPendingQuestions" | "answerQuestion" | "send">
 
 function fakeRuntime(kind: AgentKind, overrides: Partial<FakeRuntime> = {}): FakeRuntime {
   return {
     kind,
     listPendingQuestions: vi.fn(() => []),
-    answerQuestion: vi.fn(async () => false),
+    answerQuestion: vi.fn(async () => null),
+    send: vi.fn(async () => ({ delivery: "started" as const })),
     ...overrides,
   }
 }
+
+const TAKEN_BY_TURN = { message: null }
 
 function registryOf(
   runtimes: Partial<Record<AgentKind, FakeRuntime>>,
@@ -131,7 +134,7 @@ describe("POST /api/ask-user-answer", () => {
   it.each<AgentKind>(["claude", "codex", "copilot"])(
     "answers through the %s runtime that owns the session",
     async (kind) => {
-      const runtime = fakeRuntime(kind, { answerQuestion: vi.fn(async () => true) })
+      const runtime = fakeRuntime(kind, { answerQuestion: vi.fn(async () => TAKEN_BY_TURN) })
       const others = (["claude", "codex", "copilot"] as const)
         .filter((other) => other !== kind)
         .map((other) => fakeRuntime(other))
@@ -154,7 +157,7 @@ describe("POST /api/ask-user-answer", () => {
   )
 
   it("forwards a Record<string, string> payload unchanged", async () => {
-    const runtime = fakeRuntime("claude", { answerQuestion: vi.fn(async () => true) })
+    const runtime = fakeRuntime("claude", { answerQuestion: vi.fn(async () => TAKEN_BY_TURN) })
     const { res } = await post(registryOf({ claude: runtime }), {
       sessionId: "session-abc",
       toolUseId: "tu-2",
@@ -167,6 +170,30 @@ describe("POST /api/ask-user-answer", () => {
       "tu-2",
       { q1: "blue", q2: "fast" },
     )
+  })
+
+  it("delivers an answer the agent reads as its next message, with the transcript it resolved", async () => {
+    const runtime = fakeRuntime("codex", {
+      answerQuestion: vi.fn(async () => ({ message: { message: "staging", model: "model-x" } })),
+    })
+    const runtimes = { ...registryOf({ codex: runtime }), resolveSessionAgent: async () => ({ kind: "codex" as const, filePath: "/t/thread-1.jsonl" }) }
+
+    const { res } = await post(runtimes, { sessionId: "thread-1", toolUseId: "call-q", answers: "staging" })
+
+    expect(res._getStatus()).toBe(200)
+    expect(runtime.send).toHaveBeenCalledWith("thread-1", { message: "staging", model: "model-x", filePath: "/t/thread-1.jsonl" })
+  })
+
+  it("returns 409 when the agent is too busy to take an answer sent as a message", async () => {
+    const runtime = fakeRuntime("codex", {
+      answerQuestion: vi.fn(async () => ({ message: { message: "staging" } })),
+      send: vi.fn(async () => ({ delivery: "busy" as const })),
+    })
+
+    const { res } = await post(registryOf({ codex: runtime }, "codex"), { sessionId: "thread-1", toolUseId: "call-q", answers: "staging" })
+
+    expect(res._getStatus()).toBe(409)
+    expect(res._getData().code).toBe("CONFLICT")
   })
 
   it("returns 404 when the runtime has no such question", async () => {
@@ -210,6 +237,19 @@ describe("POST /api/ask-user-answer", () => {
     expect(res._getData().error).toContain(field)
   })
 
+  it.each([
+    ["a number", 42],
+    ["a list holding more than strings", ["Yes", [["hidden"]]]],
+    ["an object holding more than strings", { q1: "blue", q2: { nested: "hidden" } }],
+  ])("refuses answers that are %s, which no agent reads whole", async (_label, answers) => {
+    const runtime = fakeRuntime("claude", { answerQuestion: vi.fn(async () => TAKEN_BY_TURN) })
+    const { res } = await post(registryOf({ claude: runtime }), { sessionId: "s1", toolUseId: "tu-1", answers })
+
+    expect(res._getStatus()).toBe(400)
+    expect(res._getData().error).toBe("answers must be a string, a list of strings or an object of strings")
+    expect(runtime.answerQuestion).not.toHaveBeenCalled()
+  })
+
   it("returns 400 for malformed JSON body", async () => {
     const { res } = await post(registryOf({}), "{invalid json")
     expect(res._getStatus()).toBe(400)
@@ -233,7 +273,7 @@ describe("POST /api/ask-user-answer", () => {
 })
 
 describe("GET /api/user-questions", () => {
-  function invokeGet(runtimes: QuestionRuntimes): { status: number; body: unknown } {
+  async function invokeGet(runtimes: QuestionRuntimes): Promise<{ status: number; body: unknown }> {
     const handler = buildHandler("/api/user-questions", runtimes)
     let status = 0
     let payload = ""
@@ -246,7 +286,7 @@ describe("GET /api/user-questions", () => {
       set: (v: number) => { status = v },
     })
     const next = vi.fn()
-    handler(
+    await handler(
       { method: "GET", url: "" } as unknown as Parameters<Middleware>[0],
       res as unknown as Parameters<Middleware>[1],
       next,
@@ -254,13 +294,13 @@ describe("GET /api/user-questions", () => {
     return { status, body: payload ? JSON.parse(payload) : null }
   }
 
-  it("groups every runtime's blocked questions by session", () => {
+  it("groups every runtime's blocked questions by session", async () => {
     // Mission Control renders cards for sessions that are not open, so it needs
     // one call covering all of them.
     const claudeQuestion = { sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }
     const copilotPending = normalizeCopilotQuestion(copilotQuestion())
 
-    const { status, body } = invokeGet(registryOf({
+    const { status, body } = await invokeGet(registryOf({
       claude: fakeRuntime("claude", { listPendingQuestions: vi.fn(() => [claudeQuestion]) }),
       copilot: fakeRuntime("copilot", { listPendingQuestions: vi.fn(() => [copilotPending]) }),
     }))
@@ -287,7 +327,7 @@ describe("GET /api/user-questions", () => {
     })
   })
 
-  it("returns an empty map when no session is blocked", () => {
-    expect(invokeGet(registryOf({})).body).toEqual({ bySession: {} })
+  it("returns an empty map when no session is blocked", async () => {
+    expect((await invokeGet(registryOf({}))).body).toEqual({ bySession: {} })
   })
 })

@@ -36,6 +36,7 @@ const {
   mockFindNewestCodexSession,
   mockCodexAppServer,
   mockCopilotRuntime,
+  mockSessionFolderProblem,
 } = vi.hoisted(() => {
   const mockSpawn = vi.fn()
   const mockStat = vi.fn()
@@ -66,6 +67,9 @@ const {
     destroySession: vi.fn().mockResolvedValue(undefined),
     deleteSession: vi.fn().mockResolvedValue({ success: true }),
   }
+  // The made-up project folders exist unless a test says otherwise; the real
+  // check runs against real folders in session-creation-retry.test.ts.
+  const mockSessionFolderProblem = vi.fn(async (_cwd: string): Promise<string | null> => null)
   return {
     mockSpawn,
     mockStat,
@@ -79,8 +83,11 @@ const {
     mockFindNewestCodexSession,
     mockCodexAppServer,
     mockCopilotRuntime,
+    mockSessionFolderProblem,
   }
 })
+
+vi.mock("../../lib/folders", () => ({ sessionFolderProblem: mockSessionFolderProblem }))
 
 // ---------------------------------------------------------------------------
 // Mock ../../helpers
@@ -108,6 +115,7 @@ vi.mock("../../helpers", async () => {
   spawn: mockSpawn,
   stat: mockStat,
   readFile: mockReadFile,
+  realpath: vi.fn(async (path: string) => path),
   open: vi.fn(),
   readdir: mockReaddir,
   join: (...parts: string[]) => parts.join("/"),
@@ -369,6 +377,21 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     expect(mockedCreateSDKSession).not.toHaveBeenCalled()
   })
 
+  it("refuses a folder that does not exist before starting anything", async () => {
+    mockSessionFolderProblem.mockResolvedValueOnce("The folder /tmp/my-project does not exist")
+    const body = JSON.stringify({ dirName: "-tmp-my-project", cwd: "/tmp/my-project", message: "hello" })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(res._getStatus()).toBe(400)
+    expect(res._getData()).toEqual({ error: "The folder /tmp/my-project does not exist", code: "INVALID_REQUEST" })
+    expect(mockSessionFolderProblem).toHaveBeenCalledWith("/tmp/my-project")
+    expect(mockedCreateSDKSession).not.toHaveBeenCalled()
+  })
+
   it("rejects a cwd whose Claude encoding does not match dirName", async () => {
     const body = JSON.stringify({
       dirName: "-tmp-my-project",
@@ -558,6 +581,18 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
     expect(data.code).toBe("INVALID_REQUEST")
+  })
+
+  it("refuses an image without a mediaType before starting anything", async () => {
+    const body = JSON.stringify({ dirName: CODEX_DIR_NAME, images: [{ data: "ZmFrZQ==" }] })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+    handler(req as never, res as never, next)
+    await sendBody()
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(res._getStatus()).toBe(400)
+    expect(res._getData()).toMatchObject({ code: "INVALID_REQUEST", error: "images must each hold base64 data and a mediaType" })
+    expect(mockCodexAppServer.start).not.toHaveBeenCalled()
   })
 
   it("shares the app-server startup path while preserving image input", async () => {

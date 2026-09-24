@@ -3,17 +3,17 @@ import { fileURLToPath } from "node:url"
 import { registerApiRoutes } from "./api-routes"
 import { getConfiguredEditionValue, loadConfig, getConfig } from "./config"
 import { authMiddleware, devSecurityHeaders, bodySizeLimit } from "./helpers"
-import { prefixMatches, requestTargetPath } from "./http"
+import { apiNotFound, requestTargetPath } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
-import { teamAuthzMiddleware } from "./team/authz"
-import { describeEditionSuppression, initEdition } from "./team/edition"
+import { describeEditionSuppression, editionAuthz, loadEdition } from "./edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { allRuntimes } from "./agents/runtimes"
 import { initializeAppPlugins } from "./plugins/startup"
 import { captureLegacyPluginHost } from "./plugins/legacyHost"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
+import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
 
 export function sessionApiPlugin(): Plugin {
@@ -43,7 +43,7 @@ export function sessionApiPlugin(): Plugin {
 
       // The dev shell always resolves personal (team is standalone-only), but
       // a team request must still be visibly suppressed, never silently eaten.
-      initEdition({ shell: "dev", configEdition })
+      await loadEdition({ shell: "dev", configEdition })
       const suppression = describeEditionSuppression(process.env, configEdition, "dev")
       if (suppression) console.warn(suppression)
       const pluginManager = await initializeAppPlugins(dataDir, { legacyHost, legacyClickUpPath: CLICKUP_CONFIG_FILE })
@@ -57,22 +57,14 @@ export function sessionApiPlugin(): Plugin {
       server.middlewares.use(authMiddleware)
       // Parity with app-server: a no-op here since the dev shell is always
       // personal edition, but the middleware order stays identical.
-      server.middlewares.use(teamAuthzMiddleware)
+      server.middlewares.use(editionAuthz)
 
       // Guard middleware: block data APIs when not configured
       server.middlewares.use((req, res, next) => {
         // A target with no path never reaches an API handler, but it must not
         // be read as one either: keep it on the guarded side.
         const path = requestTargetPath(req.url || "/") ?? "/api/unroutable"
-        // Allow config/identity/bootstrap endpoints through without guard
-        const exempt = [
-          "/api/config",
-          "/api/hello",
-          "/api/me",
-          "/api/team/bootstrap",
-          "/api/auth",
-        ]
-        if (exempt.some((prefix) => prefixMatches(path, prefix))) return next()
+        if (answersUnconfigured(path)) return next()
         // Allow non-API requests through (HTML, JS, CSS)
         if (!path.toLowerCase().startsWith("/api/")) return next()
         // Block data APIs when not configured
@@ -87,6 +79,7 @@ export function sessionApiPlugin(): Plugin {
 
       const use = server.middlewares.use.bind(server.middlewares)
       registerApiRoutes(use, { mode: "dev" })
+      use("/api", apiNotFound)
     },
   }
 }

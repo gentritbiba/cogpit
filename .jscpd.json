@@ -1,8 +1,9 @@
 {
-  "path": ["shared", "src", "server", "electron"],
+  "path": ["shared", "src", "server", "electron", "editions"],
   "ignore": [
     "**/__tests__/**",
     "**/*.test.*",
+    "**/*.md",
     "**/dist/**",
     "**/out/**"
   ],

@@ -17,7 +17,8 @@ import type {
 interface UserDialogPromptProps {
   request: MissionControlUserDialog
   responding: boolean
-  onChoose: (requestId: string, choice: UserDialogChoice) => void
+  /** Omitted for a reader who cannot answer: the dialog shows without choices. */
+  onChoose?: (requestId: string, choice: UserDialogChoice) => void
 }
 
 export function UserDialogPrompt({ request, responding, onChoose }: UserDialogPromptProps) {
@@ -35,34 +36,36 @@ export function UserDialogPrompt({ request, responding, onChoose }: UserDialogPr
           </p>
         )}
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={responding}
-            onClick={() => onChoose(request.requestId, "retry_fallback")}
-          >
-            Retry on {request.fallbackModel}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={responding}
-            onClick={() => onChoose(request.requestId, "edit_prompt")}
-          >
-            Edit prompt
-          </Button>
-          {/* Dismissing is a real answer: it tells the CLI to apply the
-              dialog's default rather than wait out its park deadline. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={responding}
-            className="ml-auto text-muted-foreground"
-            onClick={() => onChoose(request.requestId, "cancelled")}
-          >
-            Dismiss
-          </Button>
-        </div>
+        {onChoose && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              disabled={responding}
+              onClick={() => onChoose(request.requestId, "retry_fallback")}
+            >
+              Retry on {request.fallbackModel}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={responding}
+              onClick={() => onChoose(request.requestId, "edit_prompt")}
+            >
+              Edit prompt
+            </Button>
+            {/* Dismissing is a real answer: it tells the CLI to apply the
+                dialog's default rather than wait out its park deadline. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={responding}
+              className="ml-auto text-muted-foreground"
+              onClick={() => onChoose(request.requestId, "cancelled")}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
       </div>
     </Alert>
   )

@@ -2,10 +2,11 @@ import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
 import type { ParsedSession } from "../../shared/session/types"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
-import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
+import { devicePathPrefix, getActiveDeviceId, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import { fileNameFromUrlId, sessionUrlIdFromFileName } from "@/lib/agents"
+import { fileNameFromUrlId } from "@/lib/agents"
+import { sessionPath } from "@/lib/revealSession"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -38,12 +39,6 @@ interface ParsedUrl {
   normalizeHome?: boolean
 }
 
-/** "" for the local device, "/d/<id>" for a remote device. */
-function devicePathPrefix(): string {
-  const id = getActiveDeviceId()
-  return id === LOCAL_DEVICE_ID ? "" : `/d/${id}`
-}
-
 /** The home path for the active device: "/" local, "/d/<id>/" remote. */
 function deviceHomePath(): string {
   const prefix = devicePathPrefix()
@@ -65,11 +60,7 @@ function fileNameFromSessionId(dirName: string, sessionId: string): string {
 
 function stateToPath(state: SessionState): string {
   const prefix = devicePathPrefix()
-  if (state.sessionSource) {
-    const { dirName, fileName } = state.sessionSource
-    const sessionId = sessionUrlIdFromFileName(dirName, fileName)
-    return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`
-  }
+  if (state.sessionSource) return sessionPath(state.sessionSource.dirName, state.sessionSource.fileName)
   if (state.pendingDirName) {
     return `${prefix}/${encodeURIComponent(state.pendingDirName)}`
   }

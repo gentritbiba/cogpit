@@ -121,6 +121,19 @@ describe("useBrowserSessions", () => {
     expect(result.current.error).toBe("Network error")
   })
 
+  it("reads the list again on request, without waiting for the poll", async () => {
+    mockedAuthFetch.mockRejectedValueOnce(new Error("Network error"))
+    const { result } = renderHook(() => useBrowserSessions(true))
+    await settle()
+    expect(result.current.error).toBe("Network error")
+
+    await act(() => result.current.refresh())
+
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+    expect(result.current.status).toEqual(STATUS)
+    expect(result.current.error).toBeNull()
+  })
+
   it("creates a browser and refreshes the list", async () => {
     const { result } = renderHook(() => useBrowserSessions(true))
     await settle()
@@ -136,6 +149,21 @@ describe("useBrowserSessions", () => {
       body: JSON.stringify({ name: "github", note: "work login" }),
     }))
     expect(mockedAuthFetch).toHaveBeenNthCalledWith(3, "/api/browser")
+  })
+
+  it("lists a browser it created before the refresh answers", async () => {
+    const { result } = renderHook(() => useBrowserSessions(true))
+    await settle()
+    const created = { ...STATUS.sessions[0], name: "github", isDefault: false, control: "own" as const }
+    mockedAuthFetch.mockImplementation(async (url) => url === "/api/browser"
+      ? new Promise<Response>(() => {})
+      : response(created, { status: 201 }))
+
+    await act(async () => {
+      await result.current.create("github")
+    })
+
+    expect(result.current.status?.sessions.map((session) => session.name)).toEqual(["default", "github"])
   })
 
   it("returns a name conflict as a result instead of throwing", async () => {

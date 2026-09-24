@@ -23,13 +23,14 @@ import type { AgentRuntime } from "./runtimeTypes"
  */
 
 export type {
+  AcceptedAnswer,
   AgentPermissions,
   AgentRuntime,
-  ApprovalBatchResult,
   ApprovalDecision,
   ImageAttachment,
   PendingApproval,
   PendingQuestion,
+  ResolvedApproval,
   SendOutcome,
   SendRequest,
   StartSessionRequest,

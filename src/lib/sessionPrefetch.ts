@@ -38,7 +38,7 @@ export async function prefetchSession(
   inflight.add(key)
   try {
     // loadSessionTailCached owns the device-switch guard and cache population.
-    await loadSessionTailCached(dirName, fileName, workerParse, "session prefetch")
+    await loadSessionTailCached(dirName, fileName, workerParse, "session prefetch", { background: true })
   } catch {
     // Best-effort: ignore network or parse failures. The real fetch on click
     // will surface any persistent error to the user.

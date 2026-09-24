@@ -102,6 +102,8 @@ interface AgentsPanelProps {
   session: ParsedSession
   sessionSource?: { dirName: string; fileName: string } | null
   bgAgents: BgAgent[]
+  /** Whether the user may stop the session's background agents. */
+  canStop: boolean
   onLoadSession?: (dirName: string, fileName: string) => void
 }
 
@@ -111,6 +113,7 @@ export function AgentsPanel({
   session,
   sessionSource,
   bgAgents,
+  canStop,
   onLoadSession,
 }: AgentsPanelProps): React.JSX.Element | null {
   const streamingOverlay = useStreamingOverlay()
@@ -229,7 +232,7 @@ export function AgentsPanel({
               durationMs={meta?.durationMs}
               toolUseCount={meta?.toolUseCount}
               disabled={!onLoadSession}
-              onStop={agent.isActive ? () => stopBackgroundAgent(agent.agentId) : undefined}
+              onStop={canStop && agent.isActive ? () => stopBackgroundAgent(agent.agentId) : undefined}
               onClick={() => onLoadSession?.(agent.dirName, agent.fileName)}
             />
           )

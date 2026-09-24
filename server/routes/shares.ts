@@ -11,7 +11,7 @@ import { findJsonlPath, resolveSessionFilePath } from "../sessionPaths"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import { getConfig } from "../config"
 import { getDummyHash, verifyRemotePassword } from "../password-verify"
-import { isTeamEdition } from "../team/edition"
+import { editionOwnsSignIn, reportShareEvent, reportShareLogin, type ShareLoginFailure } from "../edition"
 import {
   countShareGuests,
   createShareToken,
@@ -43,13 +43,13 @@ interface HostShare extends PublicShare {
 }
 
 /**
- * Team edition replaces the network password with per-user credentials, so its
- * remote surface is always on. Personal edition gates remote access on
- * networkAccess, and a share is remote access — issuing one while that switch
- * is off would quietly reopen the door it closed.
+ * An edition that signs accounts in replaces the network password with their
+ * credentials, so its remote surface is always on. Personal edition gates
+ * remote access on networkAccess, and a share is remote access — issuing one
+ * while that switch is off would quietly reopen the door it closed.
  */
 function remoteAccessEnabled(): boolean {
-  return isTeamEdition() || getConfig()?.networkAccess === true
+  return editionOwnsSignIn() || getConfig()?.networkAccess === true
 }
 
 function stringField(body: unknown, key: string): string {
@@ -142,6 +142,7 @@ async function handleCreate(req: IncomingMessage, res: ServerResponse): Promise<
     // The old passphrase is already dead; tokens minted from it must die with
     // it, or re-sharing would leave the previous guest list intact.
     revokeShareTokensForSession(sessionId)
+    reportShareEvent(req, "access.share", { sessionId, dirName: target.dirName })
 
     sendJson(res, 200, {
       url: `/shared/${encodeURIComponent(sessionId)}`,
@@ -155,31 +156,36 @@ async function handleList(res: ServerResponse): Promise<void> {
   sendJson(res, 200, await Promise.all(listShares().map(toHostShare)))
 }
 
-async function handleRegenerate(res: ServerResponse, sessionId: string): Promise<void> {
+async function handleRegenerate(req: IncomingMessage, res: ServerResponse, sessionId: string): Promise<void> {
   const issued = await rotateSharePassword(sessionId)
   if (!issued) {
     sendJson(res, 404, { error: "Session is not shared" })
     return
   }
   revokeShareTokensForSession(sessionId)
+  reportShareEvent(req, "access.share_rotate", { sessionId, dirName: issued.share.dirName })
   sendJson(res, 200, { passphrase: issued.passphrase })
 }
 
-async function handleRemove(res: ServerResponse, sessionId: string): Promise<void> {
-  if (!await removeShare(sessionId)) {
+async function handleRemove(req: IncomingMessage, res: ServerResponse, sessionId: string): Promise<void> {
+  const shared = getShareWithHash(sessionId)
+  if (!shared || !await removeShare(sessionId)) {
     sendJson(res, 404, { error: "Session is not shared" })
     return
   }
   revokeShareTokensForSession(sessionId)
+  reportShareEvent(req, "access.share_remove", { sessionId, dirName: shared.dirName })
   sendJson(res, 200, { ok: true })
 }
 
 /**
  * One answer for every failed login. Which session is shared, whether the
  * passphrase was close, and whether the share was revoked mid-flight are all
- * the same sentence, so the endpoint cannot be used to enumerate shares.
+ * the same sentence, so the endpoint cannot be used to enumerate shares; only
+ * the audit log tells them apart.
  */
-function rejectLogin(res: ServerResponse): void {
+function rejectLogin(req: IncomingMessage, res: ServerResponse, sessionId: string, failure: ShareLoginFailure): void {
+  reportShareLogin(req, { sessionId, failure })
   sendJson(res, 401, { error: "Invalid link or passphrase" })
 }
 
@@ -224,12 +230,17 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse): Promise<v
       sendJson(res, 429, { error: "Authentication is busy. Try again shortly." })
       return
     }
-    if (verification !== "valid" || expectedHash === undefined) {
-      rejectLogin(res)
+    if (expectedHash === undefined) {
+      rejectLogin(req, res, sessionId, "not_shared")
       return
     }
-    if (getShareWithHash(sessionId)?.passwordHash !== expectedHash) {
-      rejectLogin(res)
+    if (verification !== "valid") {
+      rejectLogin(req, res, sessionId, "bad_passphrase")
+      return
+    }
+    const share = getShareWithHash(sessionId)
+    if (share?.passwordHash !== expectedHash) {
+      rejectLogin(req, res, sessionId, "share_changed")
       return
     }
 
@@ -241,6 +252,7 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse): Promise<v
         req.headers["user-agent"] ?? "",
       ),
     )
+    reportShareLogin(req, { session: { sessionId, dirName: share.dirName } })
     // Cookie only. A guest is always a browser, and a token in the body would
     // be readable by any script on the page.
     sendJson(res, 200, { valid: true })
@@ -266,12 +278,12 @@ export function registerShareRoutes(use: UseFn) {
 
     const regenerate = path.match(/^\/([^/]+)\/regenerate$/)
     if (method === "POST" && regenerate) {
-      return handleRegenerate(res, decodeURIComponent(regenerate[1]))
+      return handleRegenerate(req, res, decodeURIComponent(regenerate[1]))
     }
 
     const single = path.match(/^\/([^/]+)$/)
     if (method === "DELETE" && single) {
-      return handleRemove(res, decodeURIComponent(single[1]))
+      return handleRemove(req, res, decodeURIComponent(single[1]))
     }
 
     return next()

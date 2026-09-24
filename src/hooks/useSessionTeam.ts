@@ -78,8 +78,11 @@ export function useSessionTeam(
     fetchTeam()
   }, [sessionFileName, fetchTeam])
 
-  // Subscribe to live team updates so the bar refreshes automatically
-  useTeamLive(ctx?.teamName ?? null, fetchTeam)
+  const closeTeam = useCallback(() => setCtx(null), [])
+
+  // Subscribe to live team updates so the bar refreshes automatically, and
+  // close it once the team is out of the caller's reach.
+  useTeamLive(ctx?.teamName ?? null, fetchTeam, closeTeam)
 
   return ctx
 }

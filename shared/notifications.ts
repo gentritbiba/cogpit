@@ -16,6 +16,21 @@ export interface NotificationNav {
   dirName: string | null
 }
 
+/** What raised a notification: a turn ending, a prompt waiting, the host itself, or its reader given access to a session. */
+export type NotificationKind = "turnComplete" | "permission" | "system" | "access"
+
+/** A notification in the active device's inbox, as `/api/notifications` lists it. */
+export interface CogpitNotification {
+  id: string
+  at: string
+  title: string
+  body: string
+  kind: NotificationKind
+  sessionId: string | null
+  dirName: string | null
+  readAt: string | null
+}
+
 /** A notification to raise, before any sink decides how to present it. */
 export interface NotificationContent {
   title: string

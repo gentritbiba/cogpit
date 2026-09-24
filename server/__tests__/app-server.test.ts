@@ -1,41 +1,28 @@
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createServer, request, type Server } from "node:http"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { createServer, request } from "node:http"
 import { connect } from "node:net"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { createServerComposition } from "../app-server"
-import { WebSocket, WebSocketServer } from "ws"
-import { hashPassword, __resetSessionsForTest } from "../security"
-import { __resetEditionForTest } from "../team/edition"
-import { __resetUsersForTest } from "../team/users"
-import { __resetBootstrapTokenForTest } from "../team/bootstrapToken"
+import { WebSocket } from "ws"
+import { hashPassword } from "../security"
+import { __resetEditionForTest } from "../edition"
 import {
-  __flushForTest as flushSessionPersistence,
-  __resetForTest as __resetSessionPersistenceForTest,
-} from "../team/sessionPersistence"
+  close,
+  createAppServer,
+  createDevAppServer,
+  createStandaloneAppServer,
+  fixtureRoot,
+  listen,
+  openServers,
+  staticDir,
+  useAppServerFixture,
+  userDataDir,
+} from "./appServerFixture"
 
-type AppServerFactory = (
-  staticDir: string,
-  userDataDir: string,
-) => ReturnType<typeof createServerComposition>
-
-const compositions = new Map<Server, () => Promise<void>>()
-async function createComposition(staticDir: string, userDataDir: string, mode: "electron" | "standalone") {
-  const composition = await createServerComposition(staticDir, userDataDir, { mode, viteDevUrl: process.env.ELECTRON_RENDERER_URL })
-  const dispose = async () => {
-    await composition.dispose()
-    compositions.delete(composition.httpServer)
-    openServers.delete(composition.httpServer)
-  }
-  compositions.set(composition.httpServer, dispose)
-  return { ...composition, dispose }
-}
-const createAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "electron")
-const createStandaloneAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "standalone")
+type AppServerFactory = typeof createAppServer
 
 const adapterCases: ReadonlyArray<readonly [
   name: string,
@@ -46,71 +33,28 @@ const adapterCases: ReadonlyArray<readonly [
   ["standalone", "standalone", createStandaloneAppServer],
 ]
 
-const openServers = new Set<Server>()
-let fixtureRoot: string
-let staticDir: string
-let userDataDir: string
-let previousBrowserHome: string | undefined
-let previousSkillHome: string | undefined
+const shellCases: ReadonlyArray<readonly [name: string, factory: AppServerFactory]> = [
+  ...adapterCases.map(([name, , factory]) => [name, factory] as const),
+  ["Vite dev", createDevAppServer],
+]
 
-async function listen(server: Server): Promise<string> {
-  openServers.add(server)
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject)
-      resolve()
-    })
+useAppServerFixture()
+
+describe.each(shellCases)("%s shell", (_name, factory) => {
+  it("answers an API path no handler serves with a JSON 404, never the app shell", async () => {
+    await writeFile(join(userDataDir, "config.local.json"), JSON.stringify({ claudeDir: fixtureRoot }))
+    const { httpServer } = await factory(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+
+    for (const [method, path] of [["GET", "/api/active-sessions/unserved"], ["HEAD", "/api/find-session/a/b"], ["POST", "/api/unserved"]]) {
+      const response = await fetch(`${baseUrl}${path}`, { method })
+      expect({ status: response.status, type: response.headers.get("content-type") }, `${method} ${path}`)
+        .toEqual({ status: 404, type: expect.stringMatching(/^application\/json/) })
+      if (method !== "HEAD") await expect(response.json()).resolves.toEqual({ error: "Not found", code: "NOT_FOUND" })
+    }
+
+    await close(httpServer)
   })
-  const address = server.address()
-  if (!address || typeof address === "string") {
-    throw new Error("Expected a TCP server address")
-  }
-  return `http://127.0.0.1:${address.port}`
-}
-
-async function close(server: Server): Promise<void> {
-  const dispose = compositions.get(server)
-  if (dispose) {
-    await dispose()
-    return
-  }
-  if (!server.listening) {
-    openServers.delete(server)
-    return
-  }
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve())
-  })
-  openServers.delete(server)
-}
-
-beforeEach(async () => {
-  fixtureRoot = await mkdtemp(join(tmpdir(), "cogpit-app-server-"))
-  staticDir = join(fixtureRoot, "static")
-  userDataDir = join(fixtureRoot, "user-data")
-  await Promise.all([
-    mkdir(staticDir, { recursive: true }),
-    mkdir(userDataDir, { recursive: true }),
-  ])
-  await writeFile(join(staticDir, "index.html"), "<main>composition-fixture</main>")
-  delete process.env.ELECTRON_RENDERER_URL
-  // Composition installs the browser shim, the plugin and the per-CLI skill;
-  // keep all of that inside the fixture rather than the developer's home.
-  previousBrowserHome = process.env.COGPIT_BROWSER_HOME
-  previousSkillHome = process.env.COGPIT_SKILL_HOME
-  process.env.COGPIT_BROWSER_HOME = join(fixtureRoot, "browser")
-  process.env.COGPIT_SKILL_HOME = join(fixtureRoot, "home")
-})
-
-afterEach(async () => {
-  await Promise.all([...new Set([...openServers, ...compositions.keys()])].map(close))
-  delete process.env.ELECTRON_RENDERER_URL
-  if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
-  else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
-  if (previousSkillHome === undefined) delete process.env.COGPIT_SKILL_HOME
-  else process.env.COGPIT_SKILL_HOME = previousSkillHome
-  await rm(fixtureRoot, { recursive: true, force: true })
 })
 
 describe.each(adapterCases)("%s app-server adapter", (_name, expectedMode, factory) => {
@@ -193,6 +137,30 @@ describe.each(adapterCases)("%s app-server adapter", (_name, expectedMode, facto
     })
 
     await Promise.all([close(httpServer), close(upstream)])
+  })
+})
+
+describe("app-server shutdown", () => {
+  const SESSION = "5d000000-0000-4000-8000-00000000d15c"
+
+  it.each(adapterCases)("%s: ends an open event stream so shutdown does not wait on it", async (_name, _mode, factory) => {
+    const project = join(fixtureRoot, "projects", "-tmp-shutdown")
+    await mkdir(project, { recursive: true })
+    await writeFile(join(project, `${SESSION}.jsonl`), `${JSON.stringify({ type: "user", sessionId: SESSION, message: { role: "user", content: "hi" } })}\n`)
+    await writeFile(join(userDataDir, "config.local.json"), JSON.stringify({ claudeDir: fixtureRoot }))
+    const { httpServer, dispose } = await factory(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+    const stream = await fetch(`${baseUrl}/api/watch/-tmp-shutdown/${SESSION}.jsonl`)
+    expect(stream.status).toBe(200)
+    const reader = stream.body!.getReader()
+    await reader.read()
+    const ended = reader.read().then(({ done }) => done, () => true)
+
+    await dispose()
+
+    await expect(ended).resolves.toBe(true)
+    expect(httpServer.listening).toBe(false)
+    openServers.delete(httpServer)
   })
 })
 
@@ -365,7 +333,7 @@ describe("app-server initialization and proxy failures", () => {
     }
   })
 
-  it("leaves /api/me and the team bootstrap reachable before configuration", async () => {
+  it("leaves /api/me reachable before configuration, and no path an edition would open", async () => {
     const previousCodexHome = process.env.CODEX_HOME
     const previousCopilotHome = process.env.COPILOT_HOME
     const previousPath = process.env.PATH
@@ -388,14 +356,14 @@ describe("app-server initialization and proxy failures", () => {
         edition: "personal",
       })
 
-      // Personal edition has no bootstrap (404 from the route itself); the
-      // point is that the NOT_CONFIGURED guard did not answer 503.
-      const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
+      // Personal edition has no first-time setup, so nothing past core's own
+      // discovery and sign-in paths answers before configuration.
+      const setup = await fetch(`${baseUrl}/api/setup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: "alice", password: "irrelevant" }),
       })
-      expect(bootstrap.status).toBe(404)
+      expect(setup.status).toBe(503)
 
       await appServer.dispose()
       openServers.delete(appServer.httpServer)
@@ -458,387 +426,13 @@ describe("app-server initialization and proxy failures", () => {
   })
 })
 
-describe("app-server team edition composition", () => {
+describe("app-server edition resolution", () => {
   const originalEdition = process.env.COGPIT_EDITION
-  const originalBootstrapToken = process.env.COGPIT_BOOTSTRAP_TOKEN
 
-  afterEach(async () => {
+  afterEach(() => {
     if (originalEdition === undefined) delete process.env.COGPIT_EDITION
     else process.env.COGPIT_EDITION = originalEdition
-    if (originalBootstrapToken === undefined) delete process.env.COGPIT_BOOTSTRAP_TOKEN
-    else process.env.COGPIT_BOOTSTRAP_TOKEN = originalBootstrapToken
-    await flushSessionPersistence()
     __resetEditionForTest()
-    __resetUsersForTest()
-    __resetSessionsForTest()
-    __resetSessionPersistenceForTest()
-    __resetBootstrapTokenForTest()
-  })
-
-  it("boots the standalone shell in team edition with the first-admin bootstrap open", async () => {
-    process.env.COGPIT_EDITION = "team"
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "app-server-bootstrap-token-at-least-32-chars"
-    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
-    const baseUrl = await listen(httpServer)
-
-    // The trust model flipped: a local unauthenticated data request is refused…
-    const projects = await fetch(`${baseUrl}/api/projects`)
-    expect(projects.status).toBe(401)
-
-    // …the public handshake advertises the edition…
-    const hello = await fetch(`${baseUrl}/api/hello`)
-    const helloBody = await hello.text()
-    expect(JSON.parse(helloBody)).toMatchObject({ app: "cogpit", edition: "team" })
-    expect(helloBody).not.toContain(process.env.COGPIT_BOOTSTRAP_TOKEN!)
-
-    const uncredentialedBootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "attacker", password: "attacker-passphrase-1" }),
-    })
-    expect(uncredentialedBootstrap.status).toBe(403)
-
-    // …and the zero-user bootstrap works, proving the users store initialized
-    // before requests were served.
-    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    expect(bootstrap.status).toBe(200)
-    const issued = await bootstrap.json() as { valid: boolean; token?: string }
-    expect(issued.valid).toBe(true)
-    expect(issued.token).toMatch(/^[0-9a-f]{64}$/)
-
-    const pty = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/__pty?token=${issued.token}`)
-    await new Promise<void>((resolve, reject) => {
-      pty.once("open", resolve)
-      pty.once("error", reject)
-    })
-
-    // A configless team server must still allow reload/login after the one-time
-    // bootstrap; the NOT_CONFIGURED data gate begins after auth endpoints.
-    const login = await fetch(`${baseUrl}/api/auth/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    expect(login.status).toBe(200)
-    await expect(login.json()).resolves.toMatchObject({ valid: true })
-
-    const socketClosed = new Promise<number>((resolve) => pty.once("close", resolve))
-    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${issued.token}` },
-    })
-    expect(logout.status).toBe(200)
-    await expect(socketClosed).resolves.toBe(1008)
-
-    await dispose()
-    openServers.delete(httpServer)
-  })
-
-  it("preserves edition-only team mode through first configuration and restart", async () => {
-    delete process.env.COGPIT_EDITION
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "edition-only-bootstrap-token-at-least-32-chars"
-    const claudeDir = join(fixtureRoot, "configured-claude")
-    await Promise.all([
-      mkdir(join(claudeDir, "projects"), { recursive: true }),
-      writeFile(join(userDataDir, "config.local.json"), JSON.stringify({ edition: "team" })),
-    ])
-
-    const first = await createStandaloneAppServer(staticDir, userDataDir)
-    const firstUrl = await listen(first.httpServer)
-    const bootstrap = await fetch(`${firstUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    expect(bootstrap.status).toBe(200)
-    const { token } = await bootstrap.json() as { token: string }
-
-    const configured = await fetch(`${firstUrl}/api/config`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ claudeDir }),
-    })
-    expect(configured.status).toBe(200)
-    await first.dispose()
-    openServers.delete(first.httpServer)
-
-    await expect(readFile(join(userDataDir, "config.local.json"), "utf-8"))
-      .resolves.toContain('"edition": "team"')
-
-    // Simulate a fresh process: only disk state may select the edition or
-    // restore the account/session stores now.
-    __resetEditionForTest()
-    __resetUsersForTest()
-    __resetSessionsForTest()
-    __resetSessionPersistenceForTest()
-    __resetBootstrapTokenForTest()
-    delete process.env.COGPIT_BOOTSTRAP_TOKEN
-
-    const restarted = await createStandaloneAppServer(staticDir, userDataDir)
-    const restartedUrl = await listen(restarted.httpServer)
-    const hello = await fetch(`${restartedUrl}/api/hello`)
-    await expect(hello.json()).resolves.toMatchObject({
-      edition: "team",
-      needsBootstrap: false,
-      configured: true,
-    })
-    const login = await fetch(`${restartedUrl}/api/auth/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    expect(login.status).toBe(200)
-
-    await restarted.dispose()
-    openServers.delete(restarted.httpServer)
-  })
-
-  it("closes an established hub PTY tunnel when its outer session is revoked", async () => {
-    process.env.COGPIT_EDITION = "team"
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "hub-pty-bootstrap-token-at-least-32-chars"
-
-    const targetWss = new WebSocketServer({ noServer: true })
-    targetWss.on("connection", (ws) => ws.on("message", (data) => ws.send(data)))
-    const targetServer = createServer()
-    targetServer.on("upgrade", (req, socket, head) => {
-      if (new URL(req.url || "/", "http://localhost").pathname !== "/__pty") {
-        socket.destroy()
-        return
-      }
-      targetWss.handleUpgrade(req, socket, head, (ws) => targetWss.emit("connection", ws, req))
-    })
-    const targetUrl = new URL(await listen(targetServer))
-    await writeFile(join(userDataDir, "devices.local.json"), JSON.stringify([{
-      id: "dev_echo",
-      name: "Echo",
-      host: targetUrl.hostname,
-      port: Number(targetUrl.port),
-      auth: "none",
-      addedAt: Date.now(),
-    }]))
-
-    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
-    const baseUrl = await listen(httpServer)
-    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    const { token } = await bootstrap.json() as { token: string }
-
-    const tunnel = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/hub/dev_echo/__pty?token=${token}`)
-    await new Promise<void>((resolve, reject) => {
-      tunnel.once("open", resolve)
-      tunnel.once("error", reject)
-    })
-    const echo = new Promise<string>((resolve) => tunnel.once("message", (data) => resolve(data.toString())))
-    tunnel.send("ping")
-    await expect(echo).resolves.toBe("ping")
-
-    const tunnelClosed = new Promise<void>((resolve) => tunnel.once("close", () => resolve()))
-    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(logout.status).toBe(200)
-    await tunnelClosed
-
-    await dispose()
-    openServers.delete(httpServer)
-    targetWss.close()
-    await close(targetServer)
-  })
-
-  it("closes an established hub browser tunnel when its outer session is revoked", async () => {
-    process.env.COGPIT_EDITION = "team"
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "hub-browser-bootstrap-token-at-least-32-chars"
-
-    const targetWss = new WebSocketServer({ noServer: true })
-    targetWss.on("connection", (ws) => ws.on("message", (data) => ws.send(data)))
-    const targetServer = createServer()
-    let deviceUrl: string | null = null
-    targetServer.on("upgrade", (req, socket, head) => {
-      deviceUrl = req.url || ""
-      if (new URL(req.url || "/", "http://localhost").pathname !== "/__browser") {
-        socket.destroy()
-        return
-      }
-      targetWss.handleUpgrade(req, socket, head, (ws) => targetWss.emit("connection", ws, req))
-    })
-    const targetUrl = new URL(await listen(targetServer))
-    await writeFile(join(userDataDir, "devices.local.json"), JSON.stringify([{
-      id: "dev_view",
-      name: "Viewer",
-      host: targetUrl.hostname,
-      port: Number(targetUrl.port),
-      auth: "none",
-      addedAt: Date.now(),
-    }]))
-
-    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
-    const baseUrl = await listen(httpServer)
-    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    const { token } = await bootstrap.json() as { token: string }
-
-    const tunnel = new WebSocket(
-      `${baseUrl.replace(/^http/, "ws")}/hub/dev_view/__browser?session=work&token=${token}`,
-    )
-    await new Promise<void>((resolve, reject) => {
-      tunnel.once("open", resolve)
-      tunnel.once("error", reject)
-    })
-    // The device sees the browser it was asked for, never the hub's own token.
-    expect(deviceUrl).toBe("/__browser?session=work")
-    const echo = new Promise<string>((resolve) => tunnel.once("message", (data) => resolve(data.toString())))
-    tunnel.send("ping")
-    await expect(echo).resolves.toBe("ping")
-
-    const tunnelClosed = new Promise<void>((resolve) => tunnel.once("close", () => resolve()))
-    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(logout.status).toBe(200)
-    await tunnelClosed
-
-    await dispose()
-    openServers.delete(httpServer)
-    targetWss.close()
-    await close(targetServer)
-  })
-
-  it("closes an established direct task-output SSE stream on logout", async () => {
-    process.env.COGPIT_EDITION = "team"
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "direct-sse-bootstrap-token-at-least-32-chars"
-    await writeFile(join(userDataDir, "config.local.json"), JSON.stringify({
-      edition: "team",
-      claudeDir: fixtureRoot,
-    }))
-    const outputBase = process.platform === "win32" ? tmpdir() : "/tmp"
-    const outputDir = await mkdtemp(join(outputBase, "claude-cogpit-sse-"))
-    const outputPath = join(outputDir, "output.txt")
-    await writeFile(outputPath, "initial output")
-
-    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
-    const baseUrl = await listen(httpServer)
-    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    const { token } = await bootstrap.json() as { token: string }
-
-    const stream = await fetch(`${baseUrl}/api/task-output?path=${encodeURIComponent(outputPath)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const reader = stream.body!.getReader()
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("initial output")
-
-    const closed = reader.read().then(({ done }) => done, () => true)
-    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(logout.status).toBe(200)
-    await expect(closed).resolves.toBe(true)
-
-    await dispose()
-    openServers.delete(httpServer)
-    await rm(outputDir, { recursive: true, force: true })
-  })
-
-  it("closes an established hub SSE stream when its outer session is revoked", async () => {
-    process.env.COGPIT_EDITION = "team"
-    process.env.COGPIT_BOOTSTRAP_TOKEN = "hub-sse-bootstrap-token-at-least-32-chars"
-    await writeFile(join(userDataDir, "config.local.json"), JSON.stringify({
-      edition: "team",
-      claudeDir: fixtureRoot,
-    }))
-
-    const targetServer = createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
-      res.write("data: initial\n\n")
-    })
-    const targetUrl = new URL(await listen(targetServer))
-    await writeFile(join(userDataDir, "devices.local.json"), JSON.stringify([{
-      id: "dev_stream",
-      name: "Stream",
-      host: targetUrl.hostname,
-      port: Number(targetUrl.port),
-      auth: "none",
-      connectionRevision: 0,
-      addedAt: Date.now(),
-    }]))
-
-    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
-    const baseUrl = await listen(httpServer)
-    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cogpit-Bootstrap-Token": process.env.COGPIT_BOOTSTRAP_TOKEN,
-      },
-      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
-    })
-    const { token } = await bootstrap.json() as { token: string }
-
-    const stream = await fetch(`${baseUrl}/hub/dev_stream/api/task-output?path=ignored`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const reader = stream.body!.getReader()
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("initial")
-
-    const closed = reader.read().then(({ done }) => done, () => true)
-    const logout = await fetch(`${baseUrl}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(logout.status).toBe(200)
-    await expect(closed).resolves.toBe(true)
-
-    await dispose()
-    openServers.delete(httpServer)
-    await close(targetServer)
-  })
-
-  it("fails the team boot loudly when the users store is corrupt", async () => {
-    process.env.COGPIT_EDITION = "team"
-    await mkdir(join(userDataDir, "team"), { recursive: true })
-
-    // A corrupt store must abort composition (fail closed), never boot with an
-    // empty user list that would reopen the unauthenticated bootstrap.
-    await writeFile(join(userDataDir, "team", "users.json"), '{"users":42}')
-    await expect(createStandaloneAppServer(staticDir, userDataDir))
-      .rejects.toThrow("Malformed team users store")
-
-    await writeFile(join(userDataDir, "team", "users.json"), "not-json{{{")
-    await expect(createStandaloneAppServer(staticDir, userDataDir)).rejects.toThrow()
   })
 
   it("warns when composition loads an unrecognized persisted edition", async () => {

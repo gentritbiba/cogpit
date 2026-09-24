@@ -47,10 +47,14 @@ The agent's PATH includes `~/.cogpit/bin/agent-browser`, a bash script that rout
   - Opens a real browser window when one can be shown (see "Window or headless" below)
   - Writes `$COGPIT_SESSION_ID` to `<profile>/.driver` (used to show "driven by another session" in the panel)
 
+- **`default` of an agent Cogpit spawned** (`$COGPIT_SESSION_ID` set, even to the empty string): when the server left a note in `~/.cogpit/browser/owners/` — `owners/<session id>`, else `owners/.unowned` — the shim swaps `default` for the profile the note names, in the `--session` argument when the call spelled one and in `AGENT_BROWSER_SESSION`, then routes it like any named browser. Only an edition with accounts writes notes (see "Accounts" below); without one, `default` is the host's own profile. Cogpit's own launch and stop calls unset the variable, so they always reach the browser they name.
+
 - **Throwaway browser** (`agent-browser --session tmp-abc123 open …`):
   - Socket dir: `~/.cogpit/browser/run/<cogpit-session-id>`, or `run/shared` when `$COGPIT_SESSION_ID` is not a valid id
   - No profile (no persistent data)
   - No debugging port override (invisible to the panel)
+
+**One daemon per browser.** agent-browser's daemon clears the socket it starts on, so two calls that both find no daemon for a browser would each start one and orphan the first, Chromium and all. When a managed browser's daemon is not up, the shim takes a lock beside its socket (`<socket dir>/<name>.starting`, holding the shim's pid) and runs that first call to completion before releasing it; a call that meets the lock waits and then joins the daemon the first one started. A lock whose holder died is broken at once, and one held for more than 30 seconds is broken too. The sweeper backs this up: it reads each running agent-browser daemon's `AGENT_BROWSER_SESSION` and `AGENT_BROWSER_SOCKET_DIR` from the process table and kills any daemon of this tree, older than a minute, that its browser's pid file does not name. It uses SIGKILL, because a stray that shut down cleanly would delete the socket and pid file it shares with the daemon that owns them. Windows is exempt: there a daemon binds a port hashed from its browser's name, so a second one cannot start.
 
 **Two fall-through paths** run the real binary unmanaged, leaving the environment alone:
 - Neither `$COGPIT_BROWSER_HOME` nor `$HOME` is set, so there is no tree to route into.
@@ -93,7 +97,18 @@ Subagents must use `--session tmp-<short-id>` and close when done. In sessions C
 
 ### When a throwaway is reaped
 
-A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Codex threads resumed from disk also receive their id through thread configuration. Their throwaways land in `run/<session-id>`, which the sweeper reaps within 60 seconds of the session ending. Shared processes without a per-thread override use an invalid id; their throwaways land in `run/shared` and are reaped when Cogpit exits instead.
+A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Codex threads resumed from disk also receive their id through thread configuration. Their throwaways land in `run/<session-id>`, which the sweeper reaps within 60 seconds of the session ending. Shared processes without a per-thread override use an invalid id; their throwaways land in `run/shared` and are reaped when Cogpit exits.
+
+Neither waits on those alone. The shim touches `<name>.used` beside a throwaway's pid file on every call, and the sweeper closes any throwaway not called for 30 minutes (falling back to its pid file's age when it has no `.used`), in `run/shared` and in a live session's directory alike: a session can stay live for days, and a Cogpit that crashed never reached its exit. The files outlive a restart, so the first sweep after one closes whatever went idle while Cogpit was down, and it reaps the directories of sessions that are no longer live. A daemon whose directory went with it, or that its pid file stopped naming, is a stray and is stopped too (see "One daemon per browser").
+
+### Accounts
+
+In personal edition every agent's `default` is the host's own profile. An edition with accounts gives each account a profile of its own instead, through the `browsers` member of the edition seam, and core turns that into notes for the shim (`server/browser/owners.ts`):
+
+- As Cogpit spawns an agent it writes `owners/<session id>` naming the session owner's profile, whoever sent the prompt, and `owners/.unowned` naming the profile for an agent it cannot tie to an owner: a shared Codex app-server thread before it is resumed from disk, Copilot, or a session nobody owns. The edition names these profiles and reserves their names, so nobody can create one first. A note is refreshed at every spawn, so a session that changes owner browses as the new owner from its next start; the sweeper drops the note of a session that is neither live nor started within the hour.
+- Who sees and uses which browser is decided per browser (`server/browser/access.ts`). Whoever administers the server owns every browser, including the host's `default`, which keeps the machine account's logins. Anyone else owns their own profile and the browsers they create from the panel (the registry records the creator), may drive a browser that a session they can interact with last drove, and may only watch one that a session they can only view last drove. The host's `default` is never theirs, whichever session drove it. Changing a note, archiving and deleting stay with owners: a grant on a session reaches no further than driving its browser.
+
+Every agent still runs as the same OS user. Separate profiles keep browser state (cookies, logins, history) and what the panel shows apart; they do not separate the OS, so an agent can still read another profile's files under `~/.cogpit/browser/profiles/`.
 
 ### One Cogpit reaps, the rest do not
 
@@ -119,7 +134,10 @@ A process that owns one Cogpit session receives a real `COGPIT_SESSION_ID`. Code
     <session-id>/       # Throwaway browsers for one Cogpit session
       tmp-abc123.pid
       ...
-  sessions.json         # Metadata: notes, createdAt, last URLs, archive/restore timestamps
+  owners/               # Only with accounts: the profile each session's `default` opens
+    <session-id>        #   one line, a profile name
+    .unowned            #   the profile for agents no note names
+  sessions.json         # Metadata: notes, creator, createdAt, last URLs, archive/restore timestamps
   sweeper.owner         # pid + start time of the Cogpit allowed to reap this tree
   plugin/
     .claude-plugin/
@@ -229,7 +247,7 @@ The standard `agent-browser` skill still applies for all commands.
 
 ## REST API
 
-All routes require admin trust (same as PTY). Failures send JSON errors with status codes.
+Every route checks the caller against the browser it names (see "Accounts"); in personal edition the one trusted owner owns every browser. The list holds only what the caller may see, each entry with `control` (`watch`, `drive` or `own`), `mine` on the caller's own profile and `account` on an account's own; a driver session the caller may not see is left out, and so is `binaryPath` for anyone who does not administer the server. `launch`, `stop` and `request` need `drive`; `PATCH` and `DELETE` need `own`. A browser the caller may not see answers like a session they may not see (404), one they may only watch answers 403 at their level, and changing or deleting a browser they do not own answers 403. Creating a browser records the caller as its owner; a name the edition hands out cannot be created, and nobody removes or archives their own profile. The skill routes stay with whoever administers the server. Failures send JSON errors with status codes.
 There is no host gate: when `agent-browser` is not on the machine, status still answers 200 with `installed: false` and `binaryPath: null`, and the panel offers the install path from its empty state.
 
 | Method | Route | Body | Response | Notes |
@@ -251,8 +269,8 @@ URL length is capped at 2048 characters. Names are validated; `default` cannot b
 
 ## Security
 
-- The `/__browser` transport inherits the PTY authorization gate; only sessions with terminal access can connect.
-- The policy for all REST routes is `admin` (same as terminal/PTY).
+- The `/__browser` transport inherits the PTY authorization gate, but tells the edition it is a browser viewer, so an account without terminal access can connect. The socket then asks what its caller may do with the browser it names: one they may not see is closed with 1008, one they may only watch streams frames and lets them pick the tab they watch while every input, navigation, resize and launch is dropped. It asks again at every 5-second recheck, so a revoked or lowered grant takes effect there.
+- With accounts, the REST routes are open to every signed-in account and each handler checks the browser it names; the skill routes stay with whoever administers the server.
 - CDP listens only on `127.0.0.1` without auth — the same local-user boundary as the agent-browser process itself.
 - Browser names and session ids are validated before touching the file system.
 - Nothing here writes into the user's global agent configuration on its own; the skill install is the one path that does, and only when it is called.

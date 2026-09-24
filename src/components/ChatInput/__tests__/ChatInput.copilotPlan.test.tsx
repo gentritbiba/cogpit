@@ -54,6 +54,7 @@ vi.mock("../useImageUpload", () => ({
     dismissImageError: vi.fn(),
     removeImage: vi.fn(),
     clearImages: vi.fn(),
+    restoreImages: vi.fn(),
     handleDragOver: vi.fn(),
     handleDragLeave: vi.fn(),
     handleDrop: vi.fn(),

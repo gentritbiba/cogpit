@@ -96,7 +96,7 @@ describe("GET /api/agent-prompts", () => {
     mockListAgentPromptSessionIds.mockReset().mockReturnValue([])
   })
 
-  function invokeGet(): { status: number; body: unknown } {
+  async function invokeGet(): Promise<{ status: number; body: unknown }> {
     const handler = buildHandler("/api/agent-prompts")
     let status = 0
     let payload = ""
@@ -109,7 +109,7 @@ describe("GET /api/agent-prompts", () => {
       set: (v: number) => { status = v },
     })
     const next = vi.fn()
-    handler(
+    await handler(
       { method: "GET", url: "" } as unknown as Parameters<Middleware>[0],
       res as unknown as Parameters<Middleware>[1],
       next,
@@ -117,7 +117,7 @@ describe("GET /api/agent-prompts", () => {
     return { status, body: payload ? JSON.parse(payload) : null }
   }
 
-  it("groups parked elicitations and dialogs by session", () => {
+  it("groups parked elicitations and dialogs by session", async () => {
     mockListAgentPromptSessionIds.mockReturnValue(["s1", "s2"])
     mockGetSDKElicitations.mockImplementation((sessionId: unknown) =>
       sessionId === "s1"
@@ -130,7 +130,7 @@ describe("GET /api/agent-prompts", () => {
         : [],
     )
 
-    const { status, body } = invokeGet()
+    const { status, body } = await invokeGet()
 
     expect(status).toBe(200)
     expect(body).toEqual({
@@ -143,8 +143,8 @@ describe("GET /api/agent-prompts", () => {
     })
   })
 
-  it("returns empty maps when nothing is parked", () => {
-    expect(invokeGet().body).toEqual({ elicitationsBySession: {}, dialogsBySession: {} })
+  it("returns empty maps when nothing is parked", async () => {
+    expect((await invokeGet()).body).toEqual({ elicitationsBySession: {}, dialogsBySession: {} })
   })
 })
 

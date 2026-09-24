@@ -16,7 +16,8 @@ interface PermissionPromptProps {
   /** Extra requests queued behind this one. */
   queued: number
   responding: boolean
-  onRespond: (requestId: string, behavior: PermissionDecision) => void
+  /** Omitted for a reader who cannot answer: the request shows without decisions. */
+  onRespond?: (requestId: string, behavior: PermissionDecision) => void
 }
 
 const DEFAULT_DECISIONS: PermissionDecision[] = ["allow", "allow_always", "deny"]
@@ -70,7 +71,7 @@ export function PermissionPrompt({
         )}
       </div>
 
-      {answerable ? (
+      {onRespond && (answerable ? (
         <div className="col-start-2 mt-3 flex items-center gap-2">
           {available.map(({ decision, label, variant }) => (
             <Button
@@ -89,7 +90,7 @@ export function PermissionPrompt({
         <p className="col-start-2 mt-2 text-xs text-warning">
           Resolve this approval in its own provider
         </p>
-      )}
+      ))}
     </Alert>
   )
 }

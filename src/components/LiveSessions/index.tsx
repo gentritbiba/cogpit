@@ -9,14 +9,17 @@ import type { ActiveSessionInfo } from "./types"
 import { usePty } from "@/contexts/PtyContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
-import type { PendingSessionInfo } from "@/components/session-browser/types"
+import type { DeleteSession, PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
+import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
+import { useEditionUi } from "@/edition/hooks"
+import { useSessionListFilter } from "@/lib/sessionListFilter"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
 import { useSessionArchive } from "@/hooks/useSessionArchive"
@@ -37,7 +40,7 @@ interface LiveSessionsProps {
   activeSessionKey: string | null
   onSelectSession: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
-  onDeleteSession?: (dirName: string, fileName: string) => void
+  onDeleteSession?: DeleteSession
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   /** Info about a session being created — shows a placeholder row */
@@ -56,6 +59,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const pty = usePty()
   const canUseTerminal = useCapability("terminal")
   const canKillAny = useCapability("killAny")
+  const permissionsOf = useListedPermissions()
+  const listFilter = useSessionListFilter()
+  const { Control: FilterControl, Empty: FilterEmpty } = useEditionUi().sessionListFilter ?? {}
   const {
     sessions,
     procBySession,
@@ -98,7 +104,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     setSearchActive(searching)
     return () => setSearchActive(false)
   }, [searching, setSearchActive])
-  const sessionsRef = useRef(sessions)
   const timeoutHandlesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const mountedRef = useRef(false)
 
@@ -121,12 +126,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     }
   }, [])
 
-  // Event handlers read the latest committed inventory. Keeping this write in
-  // an effect avoids leaking values from a render that React later discards.
-  useEffect(() => {
-    sessionsRef.current = sessions
-  }, [sessions])
-
   // Expose imperative refresh so a parent can force a data fetch (for example,
   // after session finalization). The callback is installed only after commit.
   useEffect(() => {
@@ -138,7 +137,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [fetchData, refreshRef])
 
   const isMobile = useIsMobile()
-  const pullRequestResults = usePullRequestSessionSearch<ActiveSessionInfo>(searchQuery)
+  const pullRequestResults = usePullRequestSessionSearch<ActiveSessionInfo>(searchQuery, listFilter)
 
   const visibleSessions = useMemo(
     () => listedSessions(sessions, listArchived),
@@ -156,6 +155,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       awaitingQuestion,
       awaitingPrompt,
       awaitingPlan,
+      (session) => permissionsOf(session.access).canInteract,
     ),
     [
       visibleSessions,
@@ -165,6 +165,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       awaitingQuestion,
       awaitingPrompt,
       awaitingPlan,
+      permissionsOf,
     ],
   )
   const needsYouIds = useMemo(
@@ -179,7 +180,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     ? null
     : scopeOptions.find((option) => option.key === projectScope) ?? null
   const focusedProjectLabel = focusedProject?.customName ?? projectScope
-  const older = useOlderSessions(projectScope === null ? ALL_PROJECTS : focusedProject, listArchived)
+  const older = useOlderSessions(projectScope === null ? ALL_PROJECTS : focusedProject, listArchived, listFilter)
   const scopedSessions = useMemo(
     () => mergeSessions(scopeSessions(visibleSessions, projectScope), older.sessions),
     [visibleSessions, projectScope, older.sessions],
@@ -206,8 +207,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const focusedArchivable = useMemo(
     () => (projectScope === null
       ? []
-      : scopedSessions.filter((session) => !session.archived && !isSessionLive(session, procBySession.get(session.sessionId)))),
-    [projectScope, scopedSessions, procBySession],
+      : scopedSessions.filter((session) => !session.archived
+        && permissionsOf(session.access).archive
+        && !isSessionLive(session, procBySession.get(session.sessionId)))),
+    [projectScope, scopedSessions, procBySession, permissionsOf],
   )
 
   // Focus refresh and live polling are owned by SessionInventoryProvider so the
@@ -275,15 +278,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     }, 2000)
   }, [fetchData, scheduleTimeout])
 
-  const handleSelectSession = useCallback((dirName: string, fileName: string) => {
-    const match = sessionsRef.current.find((s) => s.dirName === dirName && s.fileName === fileName)
-    if (match) acknowledgeCompleted(match.sessionId)
-    onSelectSession(dirName, fileName)
-  }, [onSelectSession, acknowledgeCompleted])
+  // The open session is being looked at, so its card never reads as just finished.
+  useEffect(() => {
+    const open = sessions.find((s) => `${s.dirName}/${s.fileName}` === activeSessionKey)
+    if (open && newlyCompleted.has(open.sessionId)) acknowledgeCompleted(open.sessionId)
+  }, [activeSessionKey, sessions, newlyCompleted, acknowledgeCompleted])
 
-  const handleDeleteSession = useCallback((s: ActiveSessionInfo) => {
-    onDeleteSession?.(s.dirName, s.fileName)
-    removeSession(s.sessionId)
+  const handleDeleteSession = useCallback(async (s: ActiveSessionInfo) => {
+    if (await onDeleteSession?.(s.dirName, s.fileName)) removeSession(s.sessionId)
   }, [onDeleteSession, removeSession])
 
   const applyArchive = useSessionArchive()
@@ -325,7 +327,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     newlyCompleted,
     sessionNames,
     projectNames,
-    onSelectSession: handleSelectSession,
+    onSelectSession,
     onKill: canKillAny ? handleKill : undefined,
     onDuplicateSession,
     onDeleteSession: onDeleteSession ? handleDeleteSession : undefined,
@@ -349,6 +351,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         onToggleShowArchived={() => setShowArchived(!showArchived)}
         onRefresh={() => { hapticMedium(); fetchData() }}
       />
+
+      {FilterControl && <FilterControl />}
 
       <ProjectScopePicker
         options={scopeOptions}
@@ -375,6 +379,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             hiddenArchivedCount={hiddenArchivedCount}
             focusedProject={focusedProjectLabel}
             onShowAllProjects={() => setProjectScope(null)}
+            filterEmpty={listFilter.key !== null && FilterEmpty ? <FilterEmpty className="min-h-56 px-4 py-8" /> : null}
             onShowArchived={() => setShowArchived(true)}
             onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
@@ -387,7 +392,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               killingPids={killingPids}
               sessionNames={sessionNames}
               projectNames={projectNames}
-              onSelectSession={handleSelectSession}
+              onSelectSession={onSelectSession}
               onKill={canKillAny ? handleKill : undefined}
               onResumeSession={canUseTerminal ? handleResumeSession : undefined}
               onPrefetchSession={onPrefetchSession}

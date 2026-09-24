@@ -1,6 +1,9 @@
 import type { ChildProcess } from "node:child_process"
+import type { IncomingMessage } from "node:http"
 import type { UseFn } from "../../http"
 import { sendJson } from "../../http"
+import { mayActHostWide, filterVisible, type WithAccess } from "../../edition"
+import { requestScope } from "../requestScope"
 import { activeProcesses, persistentSessions, spawn } from "../../helpers"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
 import {
@@ -148,6 +151,31 @@ export function parseAgentProcessOutput(
   return processes.sort((left, right) => right.memMB - left.memMB)
 }
 
+function claimsSession(agentProcess: AgentProcessInfo): agentProcess is AgentProcessInfo & { sessionId: string } {
+  return agentProcess.sessionId !== null
+}
+
+/**
+ * The processes of sessions the caller may see in the scope the request asks
+ * for, each with its `access` where the edition checks access, in the order
+ * given. A process no session claims is a host resource, which only whoever
+ * may act host-wide sees, and only unscoped.
+ */
+async function visibleProcesses(
+  req: IncomingMessage,
+  processes: readonly AgentProcessInfo[],
+): Promise<Array<WithAccess<AgentProcessInfo>>> {
+  const scope = requestScope(req)
+  const seesHost = scope === "all" && mayActHostWide(req)
+  const visible = await filterVisible(req, processes.filter(claimsSession), ({ sessionId }) => ({ sessionId }), scope)
+  const visibleByPid = new Map(visible.map((agentProcess) => [agentProcess.pid, agentProcess]))
+  return processes.flatMap((agentProcess) => {
+    if (!claimsSession(agentProcess)) return seesHost ? [agentProcess] : []
+    const shown = visibleByPid.get(agentProcess.pid)
+    return shown ? [shown] : []
+  })
+}
+
 export function registerRunningProcessesRoute(use: UseFn): void {
   use("/api/running-processes", (req, res, next) => {
     if (req.method !== "GET") return next()
@@ -168,19 +196,17 @@ export function registerRunningProcessesRoute(use: UseFn): void {
     let responded = false
 
     child.stdout?.on("data", (data: Buffer) => { stdout += data.toString() })
+    const fail = () => sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Failed to list processes"))
     child.on("close", () => {
       if (responded) return
       responded = true
-      sendJson(res, 200, parseAgentProcessOutput(
-        stdout,
-        process.platform,
-        createTrackedSessionMap(),
-      ))
+      const processes = parseAgentProcessOutput(stdout, process.platform, createTrackedSessionMap())
+      void visibleProcesses(req, processes).then((visible) => sendJson(res, 200, visible), fail)
     })
     child.on("error", () => {
       if (responded) return
       responded = true
-      sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Failed to list processes"))
+      fail()
     })
   })
 }

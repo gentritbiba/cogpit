@@ -1,9 +1,12 @@
 import { isValidContextWindowTokens } from "../../shared/session/contextWindowSettings"
-import type { IncomingMessage } from "node:http"
-import { dirs, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../helpers"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { mayActHostWide, authorizeSession, markDecided } from "../edition"
+import { readTranscriptEffort, sendJson } from "../helpers"
 import { findJsonlPath } from "../sessionPaths"
-import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
+import { isStoreFile } from "../lib/sessionConfigDir"
+import { readSessionConfig } from "../lib/sessionConfigStore"
+import { writeSessionConfig } from "../lib/sessionSettings"
 import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 
 // Per-session UI configuration (model, effort, permission mode, MCP selection …)
@@ -11,33 +14,48 @@ import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 // remote — sees the same session controls state. Keys are the session fileName
 // (session-specific) or the project dirName (project-level fallback for new
 // sessions). PUT merges shallowly so independent writers (composer settings,
-// MCP selection) never clobber each other's fields.
+// MCP selection) never clobber each other's fields. A session's config follows
+// its access; project defaults are for everyone to read and for whoever may act
+// host-wide to change.
 
 // No leading dot (rejects "." / ".."), no path separators.
 const KEY_PATTERN = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,255}$/
 
+/** A key that names a config file, and no other store's file beside it. */
 export function isValidSessionConfigKey(key: string): boolean {
-  return KEY_PATTERN.test(key)
-}
-
-function configFilePath(key: string): string {
-  return join(dirs.SESSION_CONFIG_DIR, `${key}.json`)
-}
-
-async function readStoredConfig(key: string): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(configFilePath(key), "utf-8")
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-  } catch {
-    // Missing or corrupted file — treat as empty config.
-  }
-  return {}
+  return KEY_PATTERN.test(key) && !isStoreFile(`${key}.json`)
 }
 
 const SESSION_KEY_SUFFIX = ".jsonl"
+
+/**
+ * The session a key holds the config of; null for a project dirName key. The
+ * suffix is matched in any case: on a case-insensitive filesystem every
+ * spelling names the same file.
+ */
+function sessionOfKey(key: string): string | null {
+  return key.toLowerCase().endsWith(SESSION_KEY_SUFFIX) ? key.slice(0, -SESSION_KEY_SUFFIX.length) : null
+}
+
+/**
+ * Whether the caller may read, or with `writing` change, a key's config: the
+ * session it holds the config of, `project` for a project's defaults, or null
+ * after answering.
+ */
+async function authorizeKey(
+  req: IncomingMessage,
+  res: ServerResponse,
+  key: string,
+  writing: boolean,
+): Promise<{ sessionId: string } | "project" | null> {
+  const sessionId = sessionOfKey(key)
+  if (sessionId !== null) return authorizeSession(req, res, { sessionId }, writing ? "interact" : "view")
+  if (writing && !mayActHostWide(req)) {
+    throw new RouteError(403, ErrorCodes.FORBIDDEN, "Admin access required")
+  }
+  markDecided(req)
+  return "project"
+}
 
 /**
  * Fall back to the effort the session last ran at when no client has chosen one.
@@ -61,11 +79,12 @@ async function withTranscriptEffort(
   stored: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   // Keys are session fileNames or project dirNames; only the former have a transcript.
-  if (!key.endsWith(SESSION_KEY_SUFFIX) || stored.ultracode === true) return stored
+  const sessionId = sessionOfKey(key)
+  if (sessionId === null || stored.ultracode === true) return stored
   if (typeof stored.effort === "string" && stored.effort) return stored
 
   try {
-    const filePath = await findJsonlPath(key.slice(0, -SESSION_KEY_SUFFIX.length))
+    const filePath = await findJsonlPath(sessionId)
     if (!filePath) return stored
     const effort = await readTranscriptEffort(filePath)
     return effort ? { ...stored, effort } : stored
@@ -110,19 +129,16 @@ export function registerSessionConfigRoutes(use: UseFn) {
       }
 
       if (req.method === "GET") {
-        return sendJson(res, 200, await withTranscriptEffort(key, await readStoredConfig(key)))
+        if (!(await authorizeKey(req, res, key, false))) return
+        return sendJson(res, 200, await withTranscriptEffort(key, await readSessionConfig(key)))
       }
 
       if (req.method === "PUT" || req.method === "POST") {
         const patch = await readPatch(req)
-        await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
+        const target = await authorizeKey(req, res, key, true)
+        if (target === null) return
         // Shallow merge; a field explicitly set to null is removed.
-        const merged = { ...(await readStoredConfig(key)), ...patch }
-        for (const [field, value] of Object.entries(merged)) {
-          if (value === null) delete merged[field]
-        }
-        await writeOwnerOnlyJson(configFilePath(key), merged)
-        return sendJson(res, 200, merged)
+        return sendJson(res, 200, await writeSessionConfig(req, key, target === "project" ? null : target.sessionId, patch))
       }
 
       next()

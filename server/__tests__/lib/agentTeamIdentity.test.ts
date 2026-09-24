@@ -1,6 +1,10 @@
 // @vitest-environment node
-import { describe, it, expect, afterEach } from "vitest"
-import { readSessionTeamTags } from "../../lib/agentTeamIdentity"
+import { describe, it, expect, afterEach, beforeEach } from "vitest"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { dirs } from "../../dirs"
+import { matchSubagentToMember, readSessionTeamTags } from "../../lib/agentTeamIdentity"
 
 // ── readSessionTeamTags ─────────────────────────────────────────────────
 
@@ -64,5 +68,43 @@ describe("readSessionTeamTags", () => {
   it("returns nulls for a missing file", async () => {
     const tags = await readSessionTeamTags("/nonexistent/path/file.jsonl")
     expect(tags).toEqual({ teamName: null, agentName: null })
+  })
+})
+
+// ── matchSubagentToMember ───────────────────────────────────────────────
+
+describe("matchSubagentToMember", () => {
+  const LEAD = "lead-session"
+  const MEMBERS = [
+    { name: "lead", agentType: "team-lead" },
+    { name: "reviewer", agentType: "general-purpose", prompt: "Review the release notes" },
+  ]
+  let root: string
+  let previousProjectsDir: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "cogpit-team-member-"))
+    previousProjectsDir = dirs.PROJECTS_DIR
+    dirs.PROJECTS_DIR = root
+    const subagents = join(root, "-work-project", LEAD, "subagents")
+    await mkdir(subagents, { recursive: true })
+    const firstLine = `${JSON.stringify({ message: { content: "You are reviewer. Review the release notes" } })}\n`
+    await writeFile(join(subagents, "agent-a1.jsonl"), firstLine)
+    await writeFile(join(root, "-work-project", "someone-else.jsonl"), firstLine)
+  })
+
+  afterEach(async () => {
+    dirs.PROJECTS_DIR = previousProjectsDir
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it("names the member whose name or prompt opens the sub-agent's transcript", async () => {
+    expect(await matchSubagentToMember(LEAD, "agent-a1.jsonl", MEMBERS)).toBe("reviewer")
+  })
+
+  it("reads nothing but a sub-agent file of the lead's own", async () => {
+    for (const name of ["../../someone-else.jsonl", "..%2F..%2Fsomeone-else.jsonl", "someone-else.jsonl", "agent-a1.json"]) {
+      expect(await matchSubagentToMember(LEAD, name, MEMBERS), name).toBeNull()
+    }
   })
 })

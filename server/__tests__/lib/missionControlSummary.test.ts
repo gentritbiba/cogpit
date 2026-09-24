@@ -546,6 +546,17 @@ describe("summarizeSession — corruption and rewrite guards", () => {
     expect(s!.tokens.output).toBe(15)
   })
 
+  it("keeps every card some grid still polls warm, however many sessions the grids show", async () => {
+    write([assistant([{ type: "text", text: "first" }], { output_tokens: 4 })])
+    const first = await summarizeSession("s", file)
+    for (let index = 0; index < 300; index += 1) {
+      const other = join(dir, `other-${index}.jsonl`)
+      writeFileSync(other, assistant([{ type: "text", text: "other" }]) + "\n")
+      await summarizeSession(`other-${index}`, other)
+    }
+    expect(await summarizeSession("s", file)).toBe(first)
+  })
+
   it("still folds a plain append without re-reading from the start", async () => {
     write([assistant([{ type: "text", text: "one" }], { output_tokens: 4 })])
     await summarizeSession("s", file)

@@ -6,9 +6,10 @@ import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissio
 
 interface PermissionRequestBarProps {
   requests: PermissionRequest[]
-  responding: Set<string>
-  onRespond: (requestId: string, behavior: PermissionDecision) => void
-  onRespondAll: (behavior: PermissionDecision) => void
+  responding?: Set<string>
+  /** Omitted together with onRespondAll for a reader who cannot answer: the request shows without decisions. */
+  onRespond?: (requestId: string, behavior: PermissionDecision) => void
+  onRespondAll?: (behavior: PermissionDecision) => void
 }
 
 interface ToolMeta {
@@ -66,13 +67,12 @@ function getToolDetail(toolName: string, input: Record<string, unknown>): string
 export function PermissionRequestBar({ requests, responding, onRespond, onRespondAll }: PermissionRequestBarProps) {
   const current = requests[0]
   const remaining = requests.length
-  const canAllow = current ? supportsDecision(current, "allow") : false
-  const canAllowAlways = current
-    ? supportsDecision(current, "allow_always")
-    : false
-  const canDeny = current ? supportsDecision(current, "deny") : false
-  const canAllowAll =
-    remaining > 1 && requests.every((request) => !request.defaultToNo && supportsDecision(request, "allow"))
+  const answerable = current !== undefined && onRespond !== undefined
+  const canAllow = answerable && supportsDecision(current, "allow")
+  const canAllowAlways = answerable && supportsDecision(current, "allow_always")
+  const canDeny = answerable && supportsDecision(current, "deny")
+  const canAllowAll = Boolean(onRespondAll) && remaining > 1
+    && requests.every((request) => !request.defaultToNo && supportsDecision(request, "allow"))
   const approvalShortcuts = !current?.defaultToNo
 
   // Keyboard shortcuts:
@@ -85,16 +85,16 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
     const key = e.key.toLowerCase()
     if (key === "a" && e.shiftKey && canAllowAll) {
       e.preventDefault()
-      onRespondAll("allow")
+      onRespondAll?.("allow")
     } else if (key === "a" && canAllow && approvalShortcuts) {
       e.preventDefault()
-      onRespond(current.requestId, "allow")
+      onRespond?.(current.requestId, "allow")
     } else if (key === "s" && canAllowAlways && approvalShortcuts) {
       e.preventDefault()
-      onRespond(current.requestId, "allow_always")
+      onRespond?.(current.requestId, "allow_always")
     } else if (key === "d" && canDeny) {
       e.preventDefault()
-      onRespond(current.requestId, "deny")
+      onRespond?.(current.requestId, "deny")
     }
   })
 
@@ -113,7 +113,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
 
   if (!current || !meta) return null
   const Icon = meta.icon
-  const isLoading = responding.has(current.requestId)
+  const isLoading = responding?.has(current.requestId) ?? false
   const isMulti = remaining > 1
 
   return (
@@ -158,7 +158,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
               size="sm"
               className="text-destructive"
               disabled={isLoading}
-              onClick={() => onRespond(current.requestId, "deny")}
+              onClick={() => onRespond?.(current.requestId, "deny")}
               title="Deny (D)"
             >
               <X data-icon="inline-start" />
@@ -172,7 +172,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
               variant="outline"
               size="sm"
               disabled={isLoading}
-              onClick={() => onRespond(current.requestId, "allow_always")}
+              onClick={() => onRespond?.(current.requestId, "allow_always")}
               title={hasScopedSuggestion
                 ? `Apply the suggested scoped permission rule${approvalShortcuts ? " (S)" : ""}`
                 : `Allow ${current.toolName} for this session${approvalShortcuts ? " (S)" : ""}`}
@@ -188,7 +188,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
               variant="secondary"
               size="sm"
               disabled={isLoading}
-              onClick={() => onRespondAll("allow")}
+              onClick={() => onRespondAll?.("allow")}
               title="Allow all pending (⇧A)"
             >
               Allow all
@@ -200,7 +200,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
             <Button
               size="sm"
               disabled={isLoading}
-              onClick={() => onRespond(current.requestId, "allow")}
+              onClick={() => onRespond?.(current.requestId, "allow")}
               title={approvalShortcuts ? "Allow once (A)" : "Allow once"}
             >
               <Check data-icon="inline-start" />
@@ -209,7 +209,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
             </Button>
           )}
 
-          {!canAllow && !canAllowAlways && !canDeny && (
+          {answerable && !canAllow && !canAllowAlways && !canDeny && (
             <span className="text-xs text-muted-foreground">
               Resolve this approval in Codex
             </span>

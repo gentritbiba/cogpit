@@ -7,6 +7,10 @@
  * Every name arrives as a URL segment, so it is decoded once here and then
  * validated by the same asserts the registry and the daemons use — the route
  * never builds a path from one itself.
+ *
+ * Each request is checked against the browser it names (`browser/access.ts`):
+ * the list holds only what the caller may see, and an action needs driving
+ * or, to change or delete a browser, owning it.
  */
 import type { IncomingMessage, ServerResponse } from "node:http"
 
@@ -14,6 +18,7 @@ import { MAX_URL_LENGTH } from "../../shared/browser/protocol"
 import { resolveNavigationUrl } from "../../shared/browser/url"
 import type { BrowserRequest, BrowserRequestResult, BrowserSessionInfo, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import { AGENT_KINDS, descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
+import { authorizeBrowser, creatorFor, isCallersOwnBrowser, visibleBrowsers } from "../browser/access"
 import { isRunning, launch, stop } from "../browser/daemons"
 import { BrowserRequestError, parseBrowserRequest, requestInBrowser } from "../browser/request"
 import { assertNamedBrowser, BrowserNameError, DEFAULT_BROWSER } from "../browser/paths"
@@ -29,6 +34,7 @@ import {
 } from "../browser/registry"
 import { findRealAgentBrowser } from "../browser/shim"
 import { installSkill, installSkillEverywhere, skillTargets } from "../browser/skill"
+import { mayActHostWide, markDecided, reservesBrowserName } from "../edition"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn, type NextFn } from "../http"
 
 type RunningProbe = (name: string) => Promise<boolean>
@@ -37,7 +43,7 @@ export interface BrowserRouteDeps {
   binaryPath: () => string | null
   listBrowsers: (isRunning: RunningProbe) => Promise<BrowserSessionInfo[]>
   readBrowser: (name: string, isRunning: RunningProbe) => Promise<BrowserSessionInfo>
-  createBrowser: (name: string, note?: string) => BrowserSessionInfo
+  createBrowser: (name: string, note?: string, createdBy?: string) => BrowserSessionInfo
   updateBrowser: (name: string, patch: BrowserPatch) => void
   removeBrowser: (name: string) => void
   isRunning: RunningProbe
@@ -53,7 +59,7 @@ export const defaultBrowserRouteDeps: BrowserRouteDeps = {
   binaryPath: () => findRealAgentBrowser(),
   listBrowsers: (running) => listBrowsers(running),
   readBrowser: (name, running) => readBrowser(name, running),
-  createBrowser: (name, note) => createBrowser(name, note),
+  createBrowser: (name, note, createdBy) => createBrowser(name, note, createdBy),
   updateBrowser: (name, patch) => {
     updateBrowser(name, patch)
   },
@@ -76,6 +82,9 @@ const SKILL_TARGETS: readonly AgentKind[] = AGENT_KINDS.filter(
 
 /** Asks for every CLI at once instead of naming one. */
 const ALL_TARGETS = "all"
+
+/** What a browser's driver may ask of it by name. */
+const BROWSER_ACTIONS: ReadonlySet<string> = new Set(["launch", "stop", "request"])
 
 function subPath(rawUrl: string): string {
   const path = rawUrl.split("?")[0] || "/"
@@ -105,26 +114,40 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function sendStatus(res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
+async function sendStatus(req: IncomingMessage, res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
   const binaryPath = deps.binaryPath()
+  const sessions = await visibleBrowsers(
+    req,
+    await deps.listBrowsers(deps.isRunning),
+    (name) => deps.readBrowser(name, deps.isRunning),
+  )
   const status: BrowserStatus = {
     installed: binaryPath !== null,
-    binaryPath,
-    sessions: await deps.listBrowsers(deps.isRunning),
+    // Where the binary lives is the host's business.
+    binaryPath: mayActHostWide(req) ? binaryPath : null,
+    sessions,
   }
   sendJson(res, 200, status)
 }
 
-function createSession(body: Record<string, unknown>, res: ServerResponse, deps: BrowserRouteDeps): void {
+/** Whoever creates a browser owns it; no session is involved. */
+function createSession(req: IncomingMessage, body: Record<string, unknown>, res: ServerResponse, deps: BrowserRouteDeps): void {
+  markDecided(req)
   const { name, note } = body
   if (typeof name !== "string") {
     sendJson(res, 400, { error: "name is required" })
     return
   }
-  sendJson(res, 201, deps.createBrowser(name, typeof note === "string" ? note : undefined))
+  if (reservesBrowserName(name)) {
+    sendJson(res, 400, { error: `Browser name ${JSON.stringify(name)} is reserved` })
+    return
+  }
+  const created = deps.createBrowser(name, typeof note === "string" ? note : undefined, creatorFor(req))
+  sendJson(res, 201, { ...created, control: "own" } satisfies BrowserSessionInfo)
 }
 
 async function patchSession(
+  req: IncomingMessage,
   name: string,
   body: Record<string, unknown>,
   res: ServerResponse,
@@ -142,6 +165,10 @@ async function patchSession(
       sendJson(res, 400, { error: `The ${DEFAULT_BROWSER} browser cannot be archived` })
       return
     }
+    if (body.archived && isCallersOwnBrowser(req, name)) {
+      sendJson(res, 400, { error: "Your own browser cannot be archived" })
+      return
+    }
     if (body.archived && await deps.isRunning(name)) {
       sendJson(res, 409, { error: "Stop the browser before archiving it" })
       return
@@ -152,9 +179,13 @@ async function patchSession(
   sendJson(res, 200, await deps.readBrowser(name, deps.isRunning))
 }
 
-async function deleteSession(name: string, res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
+async function deleteSession(req: IncomingMessage, name: string, res: ServerResponse, deps: BrowserRouteDeps): Promise<void> {
   if (name === DEFAULT_BROWSER) {
     sendJson(res, 400, { error: `The ${DEFAULT_BROWSER} browser cannot be removed` })
+    return
+  }
+  if (isCallersOwnBrowser(req, name)) {
+    sendJson(res, 400, { error: "Your own browser cannot be removed" })
     return
   }
   // Stop first: removeBrowser deletes the profile directory, and a live
@@ -247,11 +278,11 @@ async function dispatch(
 
   if (path === "/") {
     if (method !== "GET") return next()
-    return sendStatus(res, deps)
+    return sendStatus(req, res, deps)
   }
   if (path === "/sessions") {
     if (method !== "POST") return next()
-    return createSession(await readBody(req), res, deps)
+    return createSession(req, await readBody(req), res, deps)
   }
   if (path === "/skill") {
     if (method !== "GET") return next()
@@ -267,15 +298,21 @@ async function dispatch(
   const name = browserName(segment)
 
   if (action === undefined) {
-    if (method === "PATCH") return patchSession(name, await readBody(req), res, deps)
-    if (method === "DELETE") return deleteSession(name, res, deps)
-    return next()
+    if (method === "PATCH") {
+      const body = await readBody(req)
+      if (await authorizeBrowser(req, res, name, "own")) await patchSession(req, name, body, res, deps)
+      return
+    }
+    if (method !== "DELETE") return next()
+    if (await authorizeBrowser(req, res, name, "own")) await deleteSession(req, name, res, deps)
+    return
   }
-  if (method !== "POST") return next()
-  if (action === "launch") return launchSession(name, await readBody(req), res, deps)
+  if (method !== "POST" || !BROWSER_ACTIONS.has(action)) return next()
+  const body = action === "stop" ? {} : await readBody(req)
+  if (!await authorizeBrowser(req, res, name, "drive")) return
+  if (action === "launch") return launchSession(name, body, res, deps)
   if (action === "stop") return stopSession(name, res, deps)
-  if (action === "request") return requestSession(name, await readBody(req), res, deps)
-  return next()
+  return requestSession(name, body, res, deps)
 }
 
 function sendError(res: ServerResponse, error: unknown): void {

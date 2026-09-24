@@ -40,7 +40,7 @@ import { createServerComposition } from "../../app-server"
 import { sessionApiPlugin } from "../../api-plugin"
 import { createShare } from "../../share/registry"
 import { setConfigPath } from "../../config"
-import { __resetEditionForTest } from "../../team/edition"
+import { __resetEditionForTest } from "../../edition"
 import { cleanupProcesses } from "../../processRegistry"
 import { codexAppServer } from "../../agents/codexAppServer"
 

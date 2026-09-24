@@ -6,6 +6,7 @@ import { getToolSummary, getToolTier } from "../../../../shared/session/toolSumm
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
+import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 
 // Mock jsonFetch — needed when "Open SKILL.md" button is clicked / answer submission
 const mockJsonFetchFn = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
@@ -20,11 +21,13 @@ vi.mock("@/lib/auth", () => ({
 // pending-interaction lookup that decides whether a question is answerable.
 const mockSession = { sessionId: "test-session-id", cwd: "/repo" }
 let mockPendingInteraction: unknown = null
+let mockPermissions = permissionsForAccess("own")
 const mockSendMessage = vi.fn()
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: vi.fn(() => ({
     session: mockSession,
     pendingInteraction: mockPendingInteraction,
+    permissions: mockPermissions,
   })),
   useSessionChatContext: vi.fn(() => ({ chat: { sendMessage: mockSendMessage } })),
 }))
@@ -925,6 +928,17 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
 
   afterEach(() => {
     mockPendingInteraction = null
+    mockPermissions = permissionsForAccess("own")
+  })
+
+  it("shows a viewer the open question without the form to answer it", () => {
+    mockPermissions = permissionsForAccess("view")
+    render(<ToolCallCard toolCall={makeAskUserQuestionCall(null)} isAgentActive={true} />)
+
+    expect(screen.getByText("Waiting for answer")).toBeTruthy()
+    expect(screen.getByText("What is your name?")).toBeTruthy()
+    expect(screen.queryByText("Send answer")).toBeNull()
+    expect(screen.queryByPlaceholderText("Type your answer...")).toBeNull()
   })
 
   it("renders the answer form while live traffic is stale", () => {

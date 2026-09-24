@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { authFetch } from "@/lib/auth"
+import { activeSessionsUrl, type ListFilter } from "@/lib/sessionListFilter"
+import {
+  learnListedAccess,
+  onListsStale,
+  sessionAccessTicket,
+  type ListedSession,
+} from "@/lib/sessionAccess"
 import { parsePullRequestSearch } from "../../shared/session/sessionSearch"
 
 const SEARCH_DELAY_MS = 250
@@ -14,7 +21,11 @@ interface SearchState<T> {
 
 const IDLE_STATE = { results: null, loading: false, error: null }
 
-export function usePullRequestSessionSearch<T>(query: string, project?: string) {
+export function usePullRequestSessionSearch<T extends ListedSession>(
+  query: string,
+  filter: ListFilter,
+  project?: string,
+) {
   const pullRequestSearch = useMemo(() => parsePullRequestSearch(query), [query])
   const [retry, setRetry] = useState(0)
   const [state, setState] = useState<SearchState<T>>(IDLE_STATE)
@@ -32,8 +43,9 @@ export function usePullRequestSessionSearch<T>(query: string, project?: string) 
     const search = async () => {
       const params = new URLSearchParams({ search: query.trim(), limit: "200" })
       if (project) params.set("project", project)
+      const accessTicket = sessionAccessTicket()
       try {
-        const response = await authFetch(`/api/active-sessions?${params}`, {
+        const response = await authFetch(activeSessionsUrl(params, filter), {
           signal: controller.signal,
         })
         if (!response.ok) throw new Error(`Search failed (${response.status})`)
@@ -45,11 +57,9 @@ export function usePullRequestSessionSearch<T>(query: string, project?: string) 
           pollTimeout = setTimeout(() => { void search() }, INDEX_POLL_MS)
           return
         }
-        setState({
-          results: Array.isArray(body) ? body as T[] : [],
-          loading: false,
-          error: null,
-        })
+        const results = Array.isArray(body) ? body as T[] : []
+        learnListedAccess(results, accessTicket)
+        setState({ results, loading: false, error: null })
       } catch (error: unknown) {
         if (controller.signal.aborted) return
         setState({
@@ -67,8 +77,15 @@ export function usePullRequestSessionSearch<T>(query: string, project?: string) 
       if (pollTimeout) clearTimeout(pollTimeout)
       controller.abort()
     }
-  }, [project, pullRequestSearch, query, retry])
+  }, [filter, project, pullRequestSearch, query, retry])
 
   const refresh = useCallback(() => setRetry((value) => value + 1), [])
-  return { ...state, active: pullRequestSearch !== null, refresh }
+  const active = pullRequestSearch !== null
+
+  useEffect(() => {
+    if (!active) return
+    return onListsStale(refresh)
+  }, [active, refresh])
+
+  return { ...state, active, refresh }
 }

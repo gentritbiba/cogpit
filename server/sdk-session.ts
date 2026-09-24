@@ -538,8 +538,9 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "result") {
     // A result is a turn boundary, not necessarily the end of the SDK query.
     // Background agents/workflows can outlive it, and the persistent input
-    // stream remains available for queued follow-up turns.
-    state.running = false
+    // stream remains available for queued follow-up turns. A send the CLI
+    // still holds queued runs as the next turn straight away.
+    state.running = (msg.queued_turn_count ?? 0) > 0
     streamBus.clear(state.sessionId)
     const result = msg as unknown as Record<string, unknown>
     if (state.onResult) {
@@ -905,12 +906,12 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
 // mid-turn. Otherwise start a new resume query.
 //
 // `updates` carries the latest UI-side settings for effort/model/mcpConfig.
-// We record them on `state` unconditionally so that any subsequent query
-// restart picks up the newest values. When the query is still live we also
-// push model/effort changes into the running SDK Query via setModel() and
-// applyFlagSettings() — the SDK has no setEffort, but effortLevel in the
-// settings layer is the documented way to change reasoning effort
-// mid-session.
+// We record them on `state` so that any subsequent query restart picks up the
+// newest values; an empty model or effort is no override (see sendOverrides).
+// When the query is still live we also push model/effort changes into the
+// running SDK Query via setModel() and applyFlagSettings() — the SDK has no
+// setEffort, but effortLevel in the settings layer is the documented way to
+// change reasoning effort mid-session.
 
 export interface SDKSessionUpdates {
   model?: string
@@ -1038,26 +1039,61 @@ async function pushSessionUpdates(
 // everything pending; acceptEdits allows pending file edits.
 const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
 
-function autoResolvePendingForMode(state: SDKSessionState, changes: AppliedSessionUpdates): void {
-  if (!changes.permissionModeChanged) return
+/** A pending tool request that a permission mode change approved without asking. */
+export interface AutoApprovedRequest {
+  requestId: string
+  toolName: string
+}
+
+function autoResolvePendingForMode(state: SDKSessionState, changes: AppliedSessionUpdates): AutoApprovedRequest[] {
+  if (!changes.permissionModeChanged) return []
   const allowAll = state.permissionMode === "bypassPermissions"
   const allowEdits = state.permissionMode === "acceptEdits"
-  if (!allowAll && !allowEdits) return
+  if (!allowAll && !allowEdits) return []
+  const approved: AutoApprovedRequest[] = []
   for (const [requestId, pending] of [...state.pendingPermissions]) {
     if (!allowAll && !EDIT_TOOL_NAMES.has(pending.toolName)) continue
     state.pendingPermissions.delete(requestId)
     applyDecision(state, pending, "allow")
+    approved.push({ requestId, toolName: pending.toolName })
+  }
+  return approved
+}
+
+/** A session's permission settings after an update changed them, and the requests the new mode approved on the spot. */
+export type PermissionSettingsChange = {
+  permissionMode: string
+  allowedTools: string[]
+  disallowedTools: string[]
+  autoApproved: AutoApprovedRequest[]
+}
+
+export interface SDKSessionUpdateResult {
+  found: boolean
+  appliedLive: string[]
+  staged: string[]
+  /** Null when the update left the permission mode and tool rules as they were. */
+  permissionChange: PermissionSettingsChange | null
+}
+
+function permissionSettingsOf(state: SDKSessionState): Omit<PermissionSettingsChange, "autoApproved"> {
+  return {
+    permissionMode: state.permissionMode,
+    allowedTools: [...state.allowedTools],
+    disallowedTools: [...state.disallowedTools],
   }
 }
 
 export async function updateSDKSession(
   sessionId: string,
   updates: SDKSessionUpdates,
-): Promise<{ found: boolean; appliedLive: string[]; staged: string[] }> {
+): Promise<SDKSessionUpdateResult> {
   const state = sdkSessions.get(sessionId)
-  if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates) }
+  if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates), permissionChange: null }
+  const permissionsBefore = JSON.stringify(permissionSettingsOf(state))
   const changes = applySessionUpdates(state, updates)
-  autoResolvePendingForMode(state, changes)
+  const autoApproved = autoResolvePendingForMode(state, changes)
+  const permissionsAfter = permissionSettingsOf(state)
   let appliedLive: string[] = []
   try {
     appliedLive = await pushSessionUpdates(state, changes)
@@ -1069,6 +1105,9 @@ export async function updateSDKSession(
     found: true,
     appliedLive,
     staged: Object.keys(updates).filter((key) => !appliedLive.includes(key)),
+    permissionChange: JSON.stringify(permissionsAfter) === permissionsBefore
+      ? null
+      : { ...permissionsAfter, autoApproved },
   }
 }
 
@@ -1092,6 +1131,17 @@ export function isSDKQueryLive(
   return Boolean(state?.activeQuery && state.messageStream && !state.abort?.signal.aborted)
 }
 
+/**
+ * A send's empty model or effort asks for no override, as it does when a
+ * resume omits the flag: the session keeps what it runs. Only a settings
+ * change (`updateSDKSession`) picks the provider default with an empty value.
+ */
+function sendOverrides(updates?: SDKSessionUpdates): SDKSessionUpdates | undefined {
+  if (!updates) return undefined
+  const { model, effort, ...rest } = updates
+  return { ...rest, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+}
+
 export function sendSDKMessage(
   sessionId: string,
   message: string,
@@ -1101,7 +1151,7 @@ export function sendSDKMessage(
   const state = sdkSessions.get(sessionId)
   if (!state) return null
 
-  const changes = applySessionUpdates(state, updates)
+  const changes = applySessionUpdates(state, sendOverrides(updates))
   autoResolvePendingForMode(state, changes)
 
   if (isSDKQueryLive(state)) {
@@ -1337,21 +1387,18 @@ export function listAgentPromptSessionIds(): string[] {
 
 // ── Resolve all pending permission requests ──────────────────────────
 
+/** Answer every pending request of a session alike, returning the requests it answered. */
 export function resolveAllPermissions(
   sessionId: string,
   behavior: PermissionDecision,
-): string[] {
+): PermissionRequestData[] {
   const state = sdkSessions.get(sessionId)
   if (!state) return []
 
-  const toolNames: string[] = []
-  for (const pending of state.pendingPermissions.values()) {
-    toolNames.push(pending.toolName)
-    applyDecision(state, pending, behavior)
-  }
+  const resolved = Array.from(state.pendingPermissions.values(), ({ resolve: _, ...request }) => request)
+  for (const pending of state.pendingPermissions.values()) applyDecision(state, pending, behavior)
   state.pendingPermissions.clear()
-
-  return [...new Set(toolNames)]
+  return resolved
 }
 
 // ── Get pending permission requests ──────────────────────────────────

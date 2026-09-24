@@ -12,6 +12,7 @@ import {
 } from "../../browser/viewerSocket"
 import { decodeFrame, type FrameHeader } from "../../../shared/browser/frames"
 import type { BrowserClientMessage, BrowserServerMessage } from "../../../shared/browser/protocol"
+import type { BrowserControl } from "../../../shared/browser/types"
 
 const OPEN = 1
 const CLOSED = 3
@@ -91,6 +92,10 @@ class FakeViewer implements BrowserViewerLike {
     return this.record("setViewport", width, height, dpr)
   }
 
+  setStreamSize(width: number, height: number, dpr: number): Promise<void> {
+    return this.record("setStreamSize", width, height, dpr)
+  }
+
   follow(targetId: string): Promise<void> {
     return this.record("follow", targetId)
   }
@@ -162,6 +167,8 @@ const managers: BrowserViewerManager[] = []
 function makeHarness(overrides: Partial<ViewerSocketDeps> = {}) {
   const opened: OpenedViewer[] = []
   const controls = {
+    /** What the caller may do with the browser; the manager asks again at every recheck. */
+    control: "own" as BrowserControl | null,
     installed: true,
     running: false,
     endpoint: (name: string): { browserWsUrl: string } | null => ({
@@ -174,6 +181,7 @@ function makeHarness(overrides: Partial<ViewerSocketDeps> = {}) {
     recorded: [] as [string, string][],
   }
   const deps: ViewerSocketDeps = {
+    control: async () => controls.control,
     installed: () => controls.installed,
     isRunning: async () => {
       calls.isRunning += 1
@@ -679,6 +687,123 @@ describe("BrowserViewerManager", () => {
 
       expect(ws.errors()).toEqual(["Unknown tab t9"])
       expect(ws.statuses()).toEqual(["connecting", "live"])
+    })
+  })
+
+  describe("the caller's control of the browser", () => {
+    const INPUT: BrowserClientMessage[] = [
+      { type: "mouse", event: "down", x: 4, y: 8, button: "left", clickCount: 1, modifiers: 0 },
+      { type: "wheel", x: 1, y: 2, deltaX: 0, deltaY: 120, modifiers: 0 },
+      { type: "key", event: "down", key: "a", code: "KeyA", text: "a", modifiers: 0 },
+      { type: "paste", text: "secret" },
+      { type: "navigate", url: "example.com" },
+      { type: "back" },
+      { type: "forward" },
+      { type: "reload" },
+      { type: "close-tab", targetId: "t1" },
+    ]
+
+    it("closes a browser the caller may not see with 1008, before looking at it", async () => {
+      harness.controls.control = null
+      harness.controls.running = true
+      const ws = harness.connect()
+      await settle()
+
+      expect(ws.errors()).toEqual(["This browser is not available to you"])
+      expect(ws.closes).toEqual([{ code: 1008, reason: expect.any(String) }])
+      expect(harness.calls.isRunning).toBe(0)
+      expect(harness.opened).toEqual([])
+    })
+
+    it("closes when the check itself fails", async () => {
+      const ws = new FakeSocket()
+      const failing = makeHarness({ control: async () => { throw new Error("store down") } })
+      failing.controls.running = true
+      failing.manager.handleConnection(ws.asWebSocket(), request())
+      await settle()
+
+      expect(ws.closes).toEqual([{ code: 1008, reason: expect.any(String) }])
+      expect(failing.opened).toEqual([])
+    })
+
+    it("streams to a watcher at its panel's size and drops all of its input but which tab it follows", async () => {
+      harness.controls.control = "watch"
+      const ws = await connectLive(harness)
+      const { viewer, events } = harness.last()
+
+      ws.receive({ type: "viewport", width: 900, height: 600, dpr: 2 })
+      for (const message of INPUT) ws.receive(message)
+      ws.receive({ type: "launch", url: "https://example.com" })
+      ws.receive({ type: "follow", targetId: "t2" })
+      await settle()
+      void events.frame(HEADER, JPEG)
+
+      expect(ws.statuses()).toEqual(["connecting", "live"])
+      expect(viewer.calls).toEqual([
+        { method: "setStreamSize", args: [900, 600, 2] },
+        { method: "follow", args: ["t2"] },
+      ])
+      expect(harness.calls.launched).toEqual([])
+      expect(ws.frames()).toHaveLength(1)
+      // Said once, however much it sent.
+      expect(ws.errors()).toEqual(["You can watch this browser but not use it"])
+    })
+
+    it("stops a driver's input at the recheck that finds they may only watch now", async () => {
+      const ws = new FakeSocket()
+      harness.controls.running = true
+      harness.controls.control = "drive"
+      harness.manager.handleConnection(ws.asWebSocket(), request(), () => true)
+      await settle()
+      const viewer = harness.last().viewer
+
+      ws.receive({ type: "reload" })
+      await settle()
+      harness.controls.control = "watch"
+      await vi.advanceTimersByTimeAsync(5_000)
+      ws.receive({ type: "reload" })
+      await settle()
+
+      expect(viewer.names()).toEqual(["reload"])
+      expect(ws.closes).toEqual([])
+    })
+
+    it("closes at the recheck that finds the browser out of sight", async () => {
+      const ws = new FakeSocket()
+      harness.controls.running = true
+      harness.manager.handleConnection(ws.asWebSocket(), request(), () => true)
+      await settle()
+      const viewer = harness.last().viewer
+
+      harness.controls.control = null
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      expect(ws.closes).toEqual([{ code: 1008, reason: expect.any(String) }])
+      expect(viewer.closeCount).toBe(1)
+    })
+
+    it("applies a watcher's panel size once they may drive", async () => {
+      const ws = new FakeSocket()
+      harness.controls.running = true
+      harness.controls.control = "watch"
+      harness.manager.handleConnection(ws.asWebSocket(), request(), () => true)
+      await settle()
+      const viewer = harness.last().viewer
+      ws.receive({ type: "viewport", width: 900, height: 600, dpr: 2 })
+      await settle()
+      expect(viewer.names()).toEqual(["setStreamSize"])
+
+      harness.controls.control = "drive"
+      await vi.advanceTimersByTimeAsync(5_000)
+      harness.controls.control = "watch"
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      // Driving sizes the page to the panel; watching again hands the page its own size back.
+      expect(viewer.calls.map(({ method, args }) => [method, ...args])).toEqual([
+        ["setStreamSize", 900, 600, 2],
+        ["setViewport", 900, 600, 2],
+        ["setStreamSize", 900, 600, 2],
+      ])
     })
   })
 

@@ -19,6 +19,8 @@ export interface WorkspacePanelContext {
   projectPath: string | null
   hasFileChanges: boolean
   canAccessHostFiles: boolean
+  /** The caller may open the Browser panel, which shows them only the browsers they may see. */
+  canUseBrowser: boolean
   supportsWorktrees?: boolean
   /** Navigate to a session by its storage address; absent where the host cannot switch sessions. */
   openSession?: (dirName: string, fileName: string) => void

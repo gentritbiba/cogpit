@@ -18,6 +18,7 @@ import {
   type SessionAccumulator,
 } from "../agents/summaryAccumulator"
 import { foldSummaryEntry } from "../agents/summaryFolds"
+import { recencyCache } from "./recencyCache"
 import type {
   MissionControlCurrentTool,
   MissionControlFileChange,
@@ -26,8 +27,6 @@ import type {
 
 /** Changed files listed per card before collapsing into "+N more". */
 const MAX_FILES_LISTED = 4
-/** Memory backstop — the grid only ever asks about a couple dozen sessions. */
-const MAX_CACHE_ENTRIES = 200
 
 interface CacheEntry {
   /** Bytes of the file already folded into `acc`. */
@@ -61,7 +60,13 @@ interface CacheEntry {
  */
 const ANCHOR_BYTES = 64
 
-const cache = new Map<string, CacheEntry>()
+/**
+ * One accumulator per transcript, shared by every caller: the route picks the
+ * sessions a caller may see and annotates their cards. A grid polls a couple
+ * dozen sessions every few seconds, so every open grid stays warm, up to the
+ * ceiling.
+ */
+const cache = recencyCache<CacheEntry>({ capacity: 200, inUseMs: 60_000, ceiling: 1_000 })
 
 function foldLine(acc: SessionAccumulator, line: string): void {
   const trimmed = line.trim()
@@ -191,10 +196,6 @@ export async function summarizeSession(
   if (!entry) {
     entry = { parsedBytes: 0, pending: EMPTY, anchor: EMPTY, acc: createAccumulator(), summary: null }
     cache.set(filePath, entry)
-    if (cache.size > MAX_CACHE_ENTRIES) {
-      const oldest = cache.keys().next().value
-      if (oldest !== undefined) cache.delete(oldest)
-    }
     // The read above resumed from a now-discarded offset; take the file whole.
     if (resumable) read = await readSince(filePath, 0, size)
   }

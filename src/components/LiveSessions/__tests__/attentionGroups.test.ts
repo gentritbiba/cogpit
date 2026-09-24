@@ -21,6 +21,29 @@ function procs(...ids: string[]): Map<string, RunningProcess> {
 }
 
 describe("classifyAttention", () => {
+  it("leaves out of needsYou every session the user cannot act on, and keeps their running work", () => {
+    const blocked = makeSession({ sessionId: "blocked", agentStatus: "tool_use" })
+    const idle = makeSession({ sessionId: "idle", agentStatus: "idle" })
+    const finished = makeSession({ sessionId: "finished", agentStatus: "completed" })
+    const running = makeSession({ sessionId: "running", agentStatus: "thinking" })
+    const mine = makeSession({ sessionId: "mine", agentStatus: "deferred" })
+    const canAct = (session: ActiveSessionInfo) => session.sessionId === "mine"
+
+    const { needsYou, working } = classifyAttention(
+      [blocked, idle, finished, running, mine],
+      procs("blocked", "idle", "running"),
+      new Set(["finished"]),
+      new Set(["blocked"]),
+      undefined,
+      undefined,
+      undefined,
+      canAct,
+    )
+
+    expect(needsYou).toEqual([{ session: mine, reason: "deferred" }])
+    expect(working).toEqual([running])
+  })
+
   it("puts deferred sessions in needsYou with a deferred reason", () => {
     // Distinct from "permission": a deferred hook is cleared by resuming the
     // session, a live request by answering it. The strip only offers Resume

@@ -12,6 +12,8 @@ import { DesktopWorkspacePanels } from "@/components/workspace-panels/DesktopWor
 import { availableWorkspacePanels } from "@/components/workspace-panels/WorkspaceActivityBar"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import type { EditionMainView } from "@/edition/contract"
+import { useMainView } from "@/edition/hooks"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
@@ -24,6 +26,7 @@ import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
 import { SessionInputFooter } from "./SessionInputFooter"
 import { NewSessionHeadline } from "./NewSessionHero"
 import {
+  ExtensionMainView,
   PrimarySessionBrowser,
   LazyViewFallback,
   MissionControlView,
@@ -87,8 +90,9 @@ function DesktopMainView({
   sessionView,
   project,
   view,
+  extensionView,
   floatingChrome,
-}: DesktopViewProps & { view: DesktopMainView; floatingChrome: ReactNode }) {
+}: DesktopViewProps & { view: DesktopMainView; extensionView: EditionMainView | null; floatingChrome: ReactNode }) {
   const { state, config } = useAppContext()
   const { session, sessionSource } = useSessionContext()
   const pendingPath = state.pendingCwd
@@ -116,6 +120,14 @@ function DesktopMainView({
     return (
       <div className="flex min-h-0 flex-1 flex-col pt-10">
         <MissionControlView navigation={navigation} />
+      </div>
+    )
+  }
+
+  if (view === "extension" && extensionView) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col pt-10">
+        <ExtensionMainView view={extensionView} onClose={navigation.panels.closeMainView} />
       </div>
     )
   }
@@ -228,6 +240,7 @@ export function DesktopWorkspace({
   const openPluginSettings = useCallback((pluginId: string) => { setPluginSettingsId(pluginId); setPluginsOpen(true) }, [])
   const runtimePlugins = useRuntimePlugins(can("configWrite"))
   const workspacePanels = useRuntimeWorkspacePanels({ ...runtimePlugins, projectPath: project.currentCwd ?? null, openSettings: openPluginSettings })
+  const extensionView = useMainView(state.mainView === "extension" ? state.extensionViewId : null)
 
   function composePrompt(text: string): void {
     const current = sessionView.chatInputRef.current?.getText().trimEnd() ?? ""
@@ -249,6 +262,7 @@ export function DesktopWorkspace({
     mainView: state.mainView,
     hasSession: Boolean(session),
     pendingDirName: state.pendingDirName,
+    extensionViewAvailable: extensionView !== null,
   })
 
   const sidebarHeader = (
@@ -270,6 +284,7 @@ export function DesktopWorkspace({
     projectPath: project.currentCwd ?? null,
     hasFileChanges: project.hasFileChanges,
     canAccessHostFiles: can("hostFiles"),
+    canUseBrowser: can("browser"),
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,
@@ -310,6 +325,8 @@ export function DesktopWorkspace({
       onToggleSidebar={navigation.panels.handleToggleSidebar}
       onKillAll={chrome.onKillAll}
       onOpenSettings={config.openConfigDialog}
+      onLogout={chrome.onLogout}
+      onOpenMainView={navigation.panels.openMainView}
     />
   )
 
@@ -371,6 +388,7 @@ export function DesktopWorkspace({
             sessionView={sessionView}
             project={project}
             view={view}
+            extensionView={extensionView}
             floatingChrome={floatingChrome}
           />
         </main>

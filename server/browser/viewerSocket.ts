@@ -7,6 +7,11 @@
  * Each connection is a small state machine. `not-installed` is terminal; the
  * rest cycle `stopped` ⇄ `connecting` → `live`, with a 2 s poll while stopped
  * so a browser the agent opens on its own shows up without user action.
+ *
+ * A connection first learns what its caller may do with the browser
+ * (`browser/access.ts`): one who may not see it is closed, one who may only
+ * watch gets the page and never reaches it, and the answer is asked again at
+ * every authorization recheck.
  */
 import type { IncomingMessage } from "node:http"
 import { WebSocket } from "ws"
@@ -17,7 +22,9 @@ import {
   type BrowserClientMessage,
   type BrowserServerMessage,
 } from "../../shared/browser/protocol"
+import type { BrowserControl } from "../../shared/browser/types"
 import type { AuthorizableSocketManager, SocketAuthorizer } from "../pty-authorization"
+import { browserControlFor } from "./access"
 import { BrowserViewer, type ViewerEvents } from "./cdp"
 import { isRunning, launch, readDevToolsEndpoint } from "./daemons"
 import { assertNamedBrowser } from "./paths"
@@ -27,10 +34,12 @@ import { findRealAgentBrowser } from "./shim"
 /** The slice of `BrowserViewer` a connection drives, so tests can stand in for it. */
 export type BrowserViewerLike = Pick<
   BrowserViewer,
-  "setViewport" | "follow" | "closeTab" | "mouse" | "wheel" | "key" | "paste" | "navigate" | "back" | "forward" | "reload" | "close"
+  "setViewport" | "setStreamSize" | "follow" | "closeTab" | "mouse" | "wheel" | "key" | "paste" | "navigate" | "back" | "forward" | "reload" | "close"
 >
 
 export interface ViewerSocketDeps {
+  /** What the upgrade's caller may do with the browser; null when they may not see it. */
+  control: (req: IncomingMessage, name: string) => Promise<BrowserControl | null>
   installed: () => boolean
   isRunning: (name: string) => Promise<boolean>
   endpoint: (name: string) => { browserWsUrl: string } | null
@@ -46,8 +55,16 @@ type ViewportMessage = Extract<BrowserClientMessage, { type: "viewport" }>
 const POLL_INTERVAL_MS = 2_000
 const AUTHORIZATION_RECHECK_MS = 5_000
 const ATTACH_TIMEOUT_MS = 10_000
+const WATCH_ONLY = "You can watch this browser but not use it"
+const NOT_AVAILABLE = "This browser is not available to you"
+/**
+ * What a watcher may still send, which changes nothing in the page: which tab
+ * its own stream follows, and its panel's size, which sizes only the stream.
+ */
+const WATCHER_MESSAGES: ReadonlySet<BrowserClientMessage["type"]> = new Set(["follow", "viewport"])
 
 export const defaultViewerSocketDeps: ViewerSocketDeps = {
+  control: (req, name) => browserControlFor(req, name),
   installed: () => findRealAgentBrowser() !== null,
   isRunning: (name) => isRunning(name),
   endpoint: (name) => readDevToolsEndpoint(name),
@@ -58,7 +75,10 @@ export const defaultViewerSocketDeps: ViewerSocketDeps = {
 
 interface ViewerConnection {
   readonly ws: WebSocket
+  readonly req: IncomingMessage
   readonly session: string
+  /** What the caller may do with the browser; `pending` until first asked. */
+  control: BrowserControl | "pending"
   /** `touch=true` only for client activity; the periodic recheck must not keep a session alive. */
   readonly authorize?: SocketAuthorizer
   status: StatusState | null
@@ -78,6 +98,11 @@ function messageOf(error: unknown): string {
 
 function sessionName(req: IncomingMessage): string {
   return new URL(req.url || "/", "http://localhost").searchParams.get("session") ?? ""
+}
+
+/** Input, navigation and the page's size are a driver's, which an owner is too. */
+function drives(connection: ViewerConnection): boolean {
+  return connection.control === "drive" || connection.control === "own"
 }
 
 function closeQuietly(viewer: BrowserViewerLike): void {
@@ -103,7 +128,9 @@ export class BrowserViewerManager {
 
     const connection: ViewerConnection = {
       ws,
+      req,
       session,
+      control: "pending",
       authorize,
       status: null,
       lastError: null,
@@ -118,7 +145,9 @@ export class BrowserViewerManager {
     this.connections.add(connection)
 
     if (authorize) {
-      connection.authTimer = this.interval(() => this.ensureAuthorized(connection, false), AUTHORIZATION_RECHECK_MS)
+      connection.authTimer = this.interval(() => {
+        if (this.ensureAuthorized(connection, false)) void this.checkControl(connection)
+      }, AUTHORIZATION_RECHECK_MS)
     }
     ws.on("message", (raw) => {
       if (!this.ensureAuthorized(connection, true)) return
@@ -127,12 +156,12 @@ export class BrowserViewerManager {
     ws.on("close", () => this.teardown(connection))
     ws.on("error", () => this.teardown(connection))
 
-    if (!this.deps.installed()) {
+    void this.checkControl(connection).then(() => {
+      if (connection.torn) return
+      if (this.deps.installed()) return this.sync(connection)
       connection.terminal = true
       this.setStatus(connection, "not-installed")
-      return
-    }
-    void this.sync(connection)
+    })
   }
 
   /**
@@ -174,6 +203,33 @@ export class BrowserViewerManager {
     return false
   }
 
+  /**
+   * Ask again what the caller may do with the browser. Losing sight of it
+   * closes the socket; gaining or losing the right to drive re-applies the
+   * panel's size, which sizes the page itself only for a driver.
+   */
+  private async checkControl(connection: ViewerConnection): Promise<void> {
+    let control: BrowserControl | null
+    try {
+      control = await this.deps.control(connection.req, connection.session)
+    } catch {
+      // Fail closed: a check that cannot answer grants nothing.
+      control = null
+    }
+    if (connection.torn) return
+    if (control === null) {
+      const { ws } = connection
+      this.sendTo(ws, { type: "error", message: NOT_AVAILABLE })
+      if (ws.readyState === WebSocket.OPEN) ws.close(1008, NOT_AVAILABLE)
+      this.teardown(connection)
+      return
+    }
+    const wasDriving = drives(connection)
+    connection.control = control
+    const { viewer, viewport } = connection
+    if (wasDriving !== drives(connection) && viewer && viewport) await this.deliver(connection, viewer, viewport)
+  }
+
   private teardown(connection: ViewerConnection): void {
     if (connection.torn) return
     connection.torn = true
@@ -188,6 +244,7 @@ export class BrowserViewerManager {
 
   private canAttach(connection: ViewerConnection): boolean {
     return !connection.torn && !connection.terminal && !connection.attaching && connection.viewer === null
+      && connection.control !== "pending"
   }
 
   private async sync(connection: ViewerConnection): Promise<void> {
@@ -286,13 +343,19 @@ export class BrowserViewerManager {
     if (connection.terminal || connection.torn) return
     const message = parseClientMessage(raw)
     if (message === null) return
+    // Remembered even with no viewer: an attach replays it, so a reattach does
+    // not depend on the client noticing and sending its size again.
+    if (message.type === "viewport") connection.viewport = message
+    if (!drives(connection) && !WATCHER_MESSAGES.has(message.type)) {
+      // Nothing is said while the first check is out: a click before the page
+      // is on screen has nothing to land on.
+      if (connection.control === "watch") this.sendError(connection, WATCH_ONLY)
+      return
+    }
     if (message.type === "launch") {
       void this.handleLaunch(connection, message.url)
       return
     }
-    // Remembered even with no viewer: an attach replays it, so a reattach does
-    // not depend on the client noticing and sending its size again.
-    if (message.type === "viewport") connection.viewport = message
     const { viewer } = connection
     if (viewer) void this.deliver(connection, viewer, message)
   }
@@ -315,7 +378,8 @@ export class BrowserViewerManager {
     try {
       switch (message.type) {
         case "viewport":
-          await viewer.setViewport(message.width, message.height, message.dpr)
+          if (drives(connection)) await viewer.setViewport(message.width, message.height, message.dpr)
+          else await viewer.setStreamSize(message.width, message.height, message.dpr)
           break
         case "mouse":
           await viewer.mouse(message)

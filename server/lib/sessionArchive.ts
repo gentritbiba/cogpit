@@ -1,5 +1,6 @@
 import { dirs, join, mkdir, readFile } from "../helpers"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { SESSION_ARCHIVE_FILE } from "./sessionConfigDir"
 
 /**
  * Which sessions the sidebar hides. Stored on the Cogpit server so every
@@ -11,8 +12,6 @@ import { writeOwnerOnlyJson } from "../atomicJsonFile"
  * exempts it from the idle rule. New activity overrides a manual archive: see
  * {@link isStillArchived}.
  */
-
-const ARCHIVE_FILE = "archived-sessions.json"
 
 /**
  * Transcript writes this soon after archiving are trailing writes of the turn
@@ -45,7 +44,7 @@ let loading: Promise<void> | null = null
 let writeChain: Promise<void> = Promise.resolve()
 
 function currentPath(): string {
-  return join(dirs.SESSION_CONFIG_DIR, ARCHIVE_FILE)
+  return join(dirs.SESSION_CONFIG_DIR, SESSION_ARCHIVE_FILE)
 }
 
 function applyPersisted(parsed: unknown): void {

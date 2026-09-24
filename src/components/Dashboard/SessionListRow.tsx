@@ -2,6 +2,7 @@ import { Bot, ChevronRight, Clock, GitBranch, GitFork, MessagesSquare, Trees } f
 import type { LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { PullRequestChips } from "@/components/PullRequestChips"
+import { SessionBadges } from "@/components/shared/SessionBadges"
 import { getStatusColor, isIdleStatus } from "@/components/LiveSessions/sessionStatusPresentation"
 import { STATUS_DOT } from "@/components/LiveSessions/statusDot"
 import { getStatusLabel, getTerminalReasonLabel } from "../../../shared/session/sessionStatus"
@@ -179,6 +180,7 @@ export function SessionListRow({ session, customName, onSelect }: SessionListRow
           )}
 
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <SessionBadges access={session.access} />
             {session.model && <Badge variant="outline">{shortenModel(session.model)}</Badge>}
             {turnCount > 0 && (
               <MetaItem icon={MessagesSquare}>

@@ -2,10 +2,10 @@ import type { Dirent } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative, resolve, sep } from "node:path"
-import { descriptorFor } from "../../shared/session/agent-descriptors"
+import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 import { readCodexSessionIdentity, readCodexSessionMeta } from "./codexMetadata"
-import { resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
+import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
 import { inventoryFor } from "./sessionInventory"
 import {
   addressFromTranscript,
@@ -64,10 +64,12 @@ async function walk(dir: string, depth: number): Promise<SessionFileInfo[]> {
 }
 
 async function findSessionFile(sessionId: string): Promise<string | null> {
-  // The rollout name prefixes the id with a timestamp, so the id is only ever
-  // a suffix of the file name — there is no path to compute up front.
+  // The rollout name prefixes the id with a timestamp, so there is no path to
+  // compute up front. Only a whole id may match: a fragment of one would pick
+  // whichever rollout the walk met first.
+  if (!isSessionUuid(sessionId)) return null
   const files = await walk(SESSIONS_DIR, 0)
-  return files.find((file) => file.fileName.endsWith(`${sessionId}.jsonl`))?.filePath ?? null
+  return files.find((file) => descriptor.sessionFile.sessionId(file.fileName) === sessionId)?.filePath ?? null
 }
 
 export const codexStore: AgentStore = {
@@ -99,6 +101,8 @@ export const codexStore: AgentStore = {
   },
 
   findSessionFile,
+
+  transcriptRoot: (filePath) => transcriptRootWithin(SESSIONS_DIR, filePath, descriptor.sessionFile),
 
   readIdentity: readCodexSessionIdentity,
 

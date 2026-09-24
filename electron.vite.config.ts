@@ -2,7 +2,9 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath, URL } from "node:url"
-import { manualChunks } from "./build/manualChunks"
+import { bundleBoundary } from "./build/bundleBoundary"
+import { editionAliases } from "./build/editionAliases"
+import { chunkFileNames, editionUiBanner, manualChunks } from "./build/manualChunks"
 import { themeBootstrap } from "./build/themeBootstrap"
 
 export default defineConfig({
@@ -41,7 +43,7 @@ export default defineConfig({
       sourcemap: false,
       rollupOptions: {
         input: "index.html",
-        output: { manualChunks },
+        output: { manualChunks, chunkFileNames },
       },
     },
     plugins: [
@@ -60,11 +62,14 @@ export default defineConfig({
         enforce: "post",
         config: () => ({ base: "/" }),
       },
+      bundleBoundary(),
+      editionUiBanner(),
     ],
     resolve: {
-      alias: {
-        "@": fileURLToPath(new URL("./src", import.meta.url)),
-      },
+      alias: [
+        { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+        ...editionAliases(),
+      ],
     },
   },
 })

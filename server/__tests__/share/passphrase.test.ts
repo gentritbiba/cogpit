@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest"
 import { generatePassphrase, PASSPHRASE_WORDS } from "../../share/passphrase"
-import { MIN_PASSWORD_LENGTH } from "../../password-utils"
+import { PASSWORD_MIN_LENGTH } from "../../../shared/contracts/password"
 
 /**
  * True when `a` and `b` differ by exactly one insertion, deletion, substitution
@@ -39,7 +39,7 @@ describe("generatePassphrase", () => {
 
   it("always clears the password-strength minimum", () => {
     const shortest = Math.min(...PASSPHRASE_WORDS.map((w) => w.length))
-    expect(shortest * 4 + 6).toBeGreaterThanOrEqual(MIN_PASSWORD_LENGTH)
+    expect(shortest * 4 + 6).toBeGreaterThanOrEqual(PASSWORD_MIN_LENGTH)
   })
 
   it("does not repeat within a reasonable sample", () => {

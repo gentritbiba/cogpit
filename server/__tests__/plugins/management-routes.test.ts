@@ -7,13 +7,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-const environment = vi.hoisted(() => ({ team: false, paths: [] as string[] }))
+const environment = vi.hoisted(() => ({ paths: [] as string[] }))
 vi.mock("../../config", () => ({ getConfig: () => ({ networkAccess: true, networkPassword: "fixture-network-hash" }) }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => environment.team }))
-vi.mock("../../team/sessionPersistence", () => ({ clearAllSessions: async () => {}, persistSession: async () => {}, removeSession: async () => {}, removeSessionsForUser: async () => {}, restoreSession: () => null, touchSession: async () => {} }))
 vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => environment.paths.map((path) => ({ dirName: "fixture", path, sessionCount: 1, lastModified: null })) }] }))
 import { authMiddleware, createSessionToken, revokeAllSessions, revokeSessionToken } from "../../security"
-import { teamAuthzMiddleware } from "../../team/authz"
+import { __resetEditionForTest, editionAuthz } from "../../edition"
+import { signInByToken, useAccountSignIn } from "../edition/fakeEdition"
 import type { Middleware } from "../../http"
 import { registerPluginRoutes } from "../../routes/plugins"
 import { initializePluginManager, type PluginManager } from "../../plugins/manager"
@@ -49,7 +48,7 @@ async function call(method: string, path: string, options: Options = {}) {
   })
   const response = Object.assign(new EventEmitter(), { statusCode: 200, setHeader: vi.fn(), end: vi.fn(), destroy: vi.fn() })
   let admitted = false
-  authMiddleware(req, response as unknown as ServerResponse, () => teamAuthzMiddleware(req, response as unknown as ServerResponse, () => { admitted = true }))
+  authMiddleware(req, response as unknown as ServerResponse, () => editionAuthz(req, response as unknown as ServerResponse, () => { admitted = true }))
   if (admitted) {
     req.url = path
     await (options.handler ?? handler)(req, response as unknown as ServerResponse, vi.fn())
@@ -79,7 +78,7 @@ async function lease(projectId: string | null = null) {
 }
 
 beforeEach(async () => {
-  environment.team = false
+  __resetEditionForTest()
   environment.paths = []
   vi.stubEnv("COGPIT_DISABLE_PLUGINS", "0")
   directory = await mkdtemp(join(tmpdir(), "cogpit-plugin-manager-"))
@@ -126,7 +125,7 @@ describe("plugin management routes with the real manager and store", () => {
     expect((await call("GET", "/status", { session: null })).status).toBe(409)
     expect((await call("GET", "/status", { session: "a".repeat(64) })).status).toBe(409)
     expect((await call("GET", "/status", { token: "not-a-valid-token" })).status).toBe(401)
-    environment.team = true
+    useAccountSignIn({ middleware: signInByToken })
     const member = createSessionToken("192.0.2.1", undefined, { userId: "member", username: "member", role: "member" })
     expect((await call("POST", "/session", { token: member, session: null })).status).toBe(403)
     const admin = createSessionToken("192.0.2.1", undefined, { userId: "admin", username: "admin", role: "admin" })

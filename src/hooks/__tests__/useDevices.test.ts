@@ -52,6 +52,49 @@ describe("useDevices", () => {
     expect(result.current.activeDevice).toBeUndefined()
   })
 
+  it("settles on an empty list when the hub refuses the device list, as it does a team member", async () => {
+    mocks.hubFetch.mockResolvedValue(json({ error: "Admin access required", code: "FORBIDDEN" }, { status: 403, ok: false }))
+    const { result } = renderHook(() => useDevices())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.devices).toEqual([])
+    expect(result.current.activeDevice).toBeUndefined()
+  })
+
+  it("reads nothing while disabled, for an account that may not use the hub", async () => {
+    const { result } = renderHook(() => useDevices({ enabled: false }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(mocks.hubFetch).not.toHaveBeenCalled()
+    expect(result.current.devices).toEqual([])
+  })
+
+  it("leaves a device the hub will not list for this machine, as a team member's stale link needs", async () => {
+    window.history.replaceState(null, "", "/d/dev_abc/")
+    mocks.hubFetch.mockResolvedValue(json({ error: "Admin access required", code: "FORBIDDEN" }, { status: 403, ok: false }))
+    const { result } = renderHook(() => useDevices())
+
+    await waitFor(() => expect(result.current.activeDeviceId).toBe(LOCAL_DEVICE_ID))
+    expect(getActiveDeviceId()).toBe(LOCAL_DEVICE_ID)
+  })
+
+  it("leaves an active device the loaded list no longer has", async () => {
+    window.history.replaceState(null, "", "/d/dev_gone/")
+    const { result } = renderHook(() => useDevices())
+
+    await waitFor(() => expect(result.current.activeDeviceId).toBe(LOCAL_DEVICE_ID))
+    expect(result.current.devices).toHaveLength(1)
+  })
+
+  it("stays on a listed device", async () => {
+    window.history.replaceState(null, "", "/d/dev_abc/")
+    const { result } = renderHook(() => useDevices())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.activeDeviceId).toBe("dev_abc")
+    expect(result.current.activeDevice?.name).toBe("Studio")
+  })
+
   it("maps a failed probe to its typed code", async () => {
     mocks.hubFetch.mockImplementation((url: string) => {
       if (url === "/api/hub/devices") return Promise.resolve(json({ devices: [] }))

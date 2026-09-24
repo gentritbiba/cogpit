@@ -20,6 +20,10 @@ export const ErrorCodes = {
   CONFLICT: "CONFLICT",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   NOT_CONFIGURED: "NOT_CONFIGURED",
+  /** The caller can see the session but holds too low a level for this request. */
+  SESSION_ACCESS_DENIED: "SESSION_ACCESS_DENIED",
+  /** The agent started a session without reporting its id, so the edition would not hand it to the caller. */
+  SESSION_UNCONFIRMED: "SESSION_UNCONFIRMED",
 } as const
 
 /**

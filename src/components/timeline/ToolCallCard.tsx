@@ -84,7 +84,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   isAgentActive,
   skillMetadata,
 }: ToolCallCardProps) {
-  const { session, pendingInteraction } = useSessionContext()
+  const { session, pendingInteraction, permissions } = useSessionContext()
   const [panelOpen, setPanelOpen] = useState(false)
   const [inputOpen, setInputOpen] = useState(false)
   const panelId = useId()
@@ -147,6 +147,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           pendingInteraction.toolUseId === toolCall.id
         }
         sessionId={session?.sessionId}
+        canAnswer={permissions.answer}
       />
     )
   }

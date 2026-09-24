@@ -6,6 +6,7 @@ import { dirs } from "../dirs"
 import { isWithinDir } from "../pathSafety"
 import { readClaudeSessionMeta } from "./claudeMetadata"
 import {
+  canonicalPathWithin,
   isSinglePathSegment,
   resolveCanonicalFileWithinRoot,
   statContainedFile,
@@ -199,6 +200,16 @@ export const claudeStore: AgentStore = {
       }
     }
     return null
+  },
+
+  async transcriptRoot(filePath) {
+    const root = sessionsRoot()
+    const pathInRoot = root ? await canonicalPathWithin(root, filePath) : null
+    if (!pathInRoot) return null
+    // The codec reads a path relative to its project directory, the first segment here.
+    const projectEnd = pathInRoot.indexOf("/")
+    if (projectEnd <= 0) return null
+    return descriptor.sessionFile.transcriptRoot(pathInRoot.slice(projectEnd + 1))
   },
 
   // No head-only fast path: the full read is what the listings need anyway.

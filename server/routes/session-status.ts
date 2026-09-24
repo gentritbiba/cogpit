@@ -1,6 +1,7 @@
 import { getSessionStatus } from "../helpers"
 import { storeForPath } from "../agents"
 import { runtimeFor } from "../agents/runtimes"
+import { authorizeSession } from "../edition"
 import { findJsonlPath } from "../sessionPaths"
 import { sendJson, type UseFn } from "../http"
 
@@ -19,7 +20,9 @@ export function registerSessionStatusRoutes(use: UseFn) {
     const parts = url.pathname.split("/").filter(Boolean)
     if (parts.length !== 1) return next()
 
-    const sessionId = decodeURIComponent(parts[0])
+    const session = await authorizeSession(req, res, { sessionId: decodeURIComponent(parts[0]) }, "view")
+    if (session === null) return
+    const { sessionId } = session
     try {
       const filePath = await findJsonlPath(sessionId)
       if (!filePath) {

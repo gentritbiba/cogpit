@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto"
+import { PASSWORD_MIN_LENGTH } from "../shared/contracts/password"
 
 // New passwords use a versioned, memory-hard format. The previous salted
 // SHA-256 formats remain readable so existing config files keep working.
@@ -142,11 +143,9 @@ export async function verifyPasswordAsync(password: string, stored: string): Pro
 
 // ── Password validation ─────────────────────────────────────────────
 
-export const MIN_PASSWORD_LENGTH = 16
-
 export function validatePasswordStrength(password: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`
   }
   return null
 }

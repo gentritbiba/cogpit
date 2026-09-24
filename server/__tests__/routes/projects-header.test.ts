@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { writeFile, rm, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { readSessionHeader } from "../../routes/projects/index"
+import { readSessionHeader } from "../../routes/projects/transcriptPages"
 
 const cleanups: string[] = []
 

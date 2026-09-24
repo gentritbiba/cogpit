@@ -31,7 +31,7 @@ export interface HubDevice {
   auth: "password" | "none"
   /** only present for auth === "password"; never serialized by listDevices */
   password?: string
-  /** team-edition device login: authenticate as this user (Bearer user:pass) */
+  /** account sign-in on the device: authenticate as this user (Bearer user:pass) */
   username?: string
   /** Monotonic scope version; advances only when the connection/account tuple changes. */
   connectionRevision?: number
@@ -164,7 +164,7 @@ function commitDeviceMutation<T>(
 export async function initDeviceRegistry(dir: string): Promise<void> {
   await queue.run(async () => {
     const nextRegistryPath = join(dir, "devices.local.json")
-    const loadedDevices = await readOwnerOnlyJsonArray(
+    const { records: loadedDevices } = await readOwnerOnlyJsonArray(
       nextRegistryPath,
       normalizeDevice,
       (device) => device.id,

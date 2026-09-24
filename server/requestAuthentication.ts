@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http"
-import type { SessionPrincipal } from "./team/constants"
+import type { SessionPrincipal } from "./sessionConstants"
 
 export type RequestAuthentication =
   | Readonly<{ kind: "local" }>

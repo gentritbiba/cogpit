@@ -102,4 +102,34 @@ describe("AttentionStrip working list", () => {
     expect(screen.queryByRole("button", { name: /resume to evaluate/i })).toBeNull()
     expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
   })
+
+  it.each([
+    ["view", false],
+    ["interact", true],
+  ] as const)("gives a %s session its lifecycle controls only when it can interact", (level, shown) => {
+    const session = makeSession({
+      agentStatus: "deferred",
+      access: { level, mine: false },
+    })
+    const process: RunningProcess = {
+      pid: 4242, memMB: 100, cpu: 1, sessionId: session.sessionId, tty: "ttys001", startTime: "10:00",
+    }
+
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [{ session, reason: "deferred" }], working: [] }}
+        activeSessionKey={null}
+        procBySession={new Map([[session.sessionId, process]])}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: /resume to evaluate/i }) !== null).toBe(shown)
+    expect(screen.queryByRole("button", { name: /kill process/i }) !== null).toBe(shown)
+  })
 })

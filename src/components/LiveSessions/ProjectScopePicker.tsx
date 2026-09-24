@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronsUpDown, Folder, Layers, Loader2, Plus } from "lucide-react"
+import { ChevronsUpDown, Folder, FolderSearch, Layers, Loader2, Plus } from "lucide-react"
 
 import { LiveIndicator } from "@/components/header-shared"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
@@ -14,6 +14,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { openFolderBrowser } from "@/lib/folders"
 import { cn } from "@/lib/utils"
 
 import type { ProjectScopeOption } from "./projectScope"
@@ -221,6 +222,20 @@ export function ProjectScopePicker({
           ) : (
             <Plus data-icon="inline-start" />
           )}
+        </Button>
+      )}
+      {onNewSession && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          disabled={creatingSession}
+          onClick={() => openFolderBrowser()}
+          aria-label="Start a session in a folder"
+          title="Start a session in a folder"
+        >
+          <FolderSearch data-icon="inline-start" />
         </Button>
       )}
     </div>

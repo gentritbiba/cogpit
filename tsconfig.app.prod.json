@@ -6,6 +6,7 @@
     "src/**/*.test.tsx",
     "plugins/**/__tests__/**",
     "plugins/**/*.test.ts",
-    "plugins/**/*.test.tsx"
+    "plugins/**/*.test.tsx",
+    "editions/team/tests/**"
   ]
 }

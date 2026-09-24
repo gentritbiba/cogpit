@@ -118,6 +118,12 @@ export function useSessionActions({
     })
   }, [dispatch, isMobile])
 
+  const handleCloseSession = useCallback(() => {
+    startTransition(() => {
+      dispatch({ type: "CLOSE_SESSION", isMobile })
+    })
+  }, [dispatch, isMobile])
+
   const handleJumpToTurn = useCallback(
     (index: number, toolCallId?: string) => {
       dispatch({ type: "JUMP_TO_TURN", index, toolCallId })
@@ -140,6 +146,7 @@ export function useSessionActions({
     handleDashboardSelect,
     handleTeamMemberSwitch,
     handleGoHome,
+    handleCloseSession,
     handleJumpToTurn,
     handleMobileTabChange,
   }

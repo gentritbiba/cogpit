@@ -23,6 +23,7 @@ import {
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { parseRateTable, type RateTable } from "../../../shared/usageCost/pricing"
 import { storeForDirName } from "../../agents"
+import type { ChildTranscriptFilter } from "../../edition/transcript"
 import { allRuntimes, runtimeFor } from "../../agents/runtimes"
 import type { UsageCostRecord } from "../../agents/usageScanners"
 import { getDataRoot } from "../../config"
@@ -44,12 +45,16 @@ export const LITELLM_RATES_URL =
 
 /** Rates move rarely; a day-old table keeps the page working offline. */
 const RATES_TTL_MS = 24 * 60 * 60 * 1000
+/** A fetch that failed can take its whole timeout, so the next one waits this long rather than delaying every read. */
+const RATES_RETRY_MS = 5 * 60 * 1000
 
 /**
- * Files are filtered by mtime before opening. The slack covers a session whose
- * last write lands just before local midnight on the window's first day.
+ * Transcripts are filtered by mtime before opening: one last written this long
+ * before a window's start is skipped. The slack covers a window that starts at
+ * local rather than UTC midnight, and a child agent that writes on after its
+ * session's own transcript last changed.
  */
-const MTIME_SLACK_MS = 36 * 60 * 60 * 1000
+export const TRANSCRIPT_MTIME_SLACK_MS = 36 * 60 * 60 * 1000
 
 interface CachedFile {
   size: number
@@ -60,8 +65,26 @@ interface CachedFile {
 
 const fileCache = new Map<string, CachedFile>()
 
+/** A cached transcript last written longer ago than this has aged out of every window read often. */
+const FILE_CACHE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
+/** The aged entries are swept out at most this often, as new ones come in. */
+const FILE_CACHE_SWEEP_INTERVAL_MS = 60 * 60 * 1000
+let fileCacheSweptAtMs = 0
+
+function cacheFileRecords(path: string, entry: CachedFile): void {
+  const now = Date.now()
+  if (now - fileCacheSweptAtMs >= FILE_CACHE_SWEEP_INTERVAL_MS) {
+    fileCacheSweptAtMs = now
+    for (const [cachedPath, cached] of fileCache) {
+      if (cached.mtimeMs < now - FILE_CACHE_RETENTION_MS) fileCache.delete(cachedPath)
+    }
+  }
+  fileCache.set(path, entry)
+}
+
 let rates: RateTable = new Map()
 let ratesFetchedAtMs: number | null = null
+let ratesFailedAtMs: number | null = null
 let ratesStatus: UsageCostPricingStatus = "unavailable"
 let ratesLoad: Promise<void> | null = null
 
@@ -102,6 +125,8 @@ async function ensureRatesInner(): Promise<void> {
     }
   }
 
+  if (ratesFailedAtMs !== null && now - ratesFailedAtMs < RATES_RETRY_MS) return
+
   let document: unknown = null
   try {
     const response = await fetch(LITELLM_RATES_URL, { signal: AbortSignal.timeout(10_000) })
@@ -109,15 +134,15 @@ async function ensureRatesInner(): Promise<void> {
   } catch {
     // Offline; whatever we already serve stays, honestly marked as cached.
   }
-  if (document === null) {
+  const parsed = document === null ? null : parseRateTable(document)
+  if (parsed === null || parsed.size === 0) {
+    ratesFailedAtMs = now
     if (rates.size > 0) ratesStatus = "cached"
     return
   }
 
-  const parsed = parseRateTable(document)
-  if (parsed.size === 0) return
-
   rates = parsed
+  ratesFailedAtMs = null
   ratesFetchedAtMs = now
   ratesStatus = "fresh"
 
@@ -171,7 +196,7 @@ async function readFileRecords(
   // Stored already de-duplicated within the file, which is 99% of all
   // duplicates. The aggregator still runs the cross-file dedupe pass.
   const records = dedupeWithinFile(parsed)
-  fileCache.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, provider, records })
+  cacheFileRecords(file.path, { size: file.size, mtimeMs: file.mtimeMs, provider, records })
   return records
 }
 
@@ -207,7 +232,7 @@ export async function readUsageCostSummary(input: {
   const startedAtMs = Date.now()
   await ensureRates()
 
-  const windowStartMs = Date.parse(`${input.sinceDay}T00:00:00Z`) - MTIME_SLACK_MS
+  const windowStartMs = Date.parse(`${input.sinceDay}T00:00:00Z`) - TRANSCRIPT_MTIME_SLACK_MS
 
   const aggregator = new UsageCostAggregator({
     timeZone: input.timeZone,
@@ -245,12 +270,6 @@ export async function readUsageCostSummary(input: {
     for (const record of await runtime.liveUsageRecords(durableTotals)) aggregator.add(record)
   }
 
-  // Entries whose files aged out of every plausible window stop paying rent.
-  const retentionCutoffMs = startedAtMs - 90 * 24 * 60 * 60 * 1000
-  for (const [path, entry] of fileCache) {
-    if (entry.mtimeMs < retentionCutoffMs) fileCache.delete(path)
-  }
-
   const { buckets, distinctSessions } = aggregator.finish()
 
   return {
@@ -282,11 +301,12 @@ function isSubagentAddress(fileName: string): boolean {
   return fileName.split("/").includes("subagents")
 }
 
-/** Resolves every child transcript that belongs to the selected top-level session. */
+/** Resolves every child transcript that belongs to the selected top-level session and that `visibleChildren` keeps. */
 async function childTranscripts(
   dirName: string,
   rootSessionId: string,
   provider: UsageCostProvider,
+  visibleChildren: ChildTranscriptFilter,
 ): Promise<TranscriptFile[]> {
   const store = storeForDirName(dirName)
   // When descendants carry their own session ids the tree has to be walked;
@@ -304,7 +324,7 @@ async function childTranscripts(
 
     const children = await store.listSubagentFiles(dirName, parentSessionId)
     if (!children) continue
-    const resolvedChildren = await Promise.all(children.map(async (child) => {
+    const resolvedChildren = await Promise.all((await visibleChildren(children)).map(async (child) => {
       const fileName = child.fileName
         ?? `${rootSessionId}/subagents/agent-${child.agentId}.jsonl`
       const filePath = await resolveSessionFilePath(dirName, fileName)
@@ -334,36 +354,57 @@ function countedUsageBySession(
   return counted
 }
 
-/**
- * Reads one selected session at transcript fidelity. A top-level session also
- * includes every child-agent transcript the provider can relate to it.
- */
-export async function readSessionUsageCostSummary(input: {
+/** A session's transcript to read usage from, as its caller found or checked it. */
+export interface UsageTranscript {
   dirName: string
   fileName: string
-}): Promise<SessionUsageCostSummary | null> {
-  const startedAtMs = Date.now()
-  await ensureRates()
+  filePath: string
+  /** The session it is the transcript of; null for one filed under its session, read alone. */
+  sessionId: string | null
+  /** Which of the session's child transcripts to read with it: those its caller may see. */
+  visibleChildren: ChildTranscriptFilter
+}
 
-  const filePath = await resolveSessionFilePath(input.dirName, input.fileName)
-  if (!filePath) return null
-  const directFile = await transcriptFile(filePath)
+/** When each session's latest record on disk was stamped. */
+function latestRecordBySession(scopedRecords: readonly ScopedUsageCostRecord[]): Map<string, number> {
+  const latest = new Map<string, number>()
+  for (const { record } of scopedRecords) {
+    latest.set(record.sessionId, Math.max(latest.get(record.sessionId) ?? Number.NEGATIVE_INFINITY, record.timestampMs))
+  }
+  return latest
+}
+
+/** One selected session's usage, unpriced and not yet de-duplicated across its files. */
+export interface SessionUsageRecords {
+  provider: UsageCostProvider
+  sessionId: string
+  /** Transcripts read: the session's own, then each child agent's. */
+  files: number
+  records: ScopedUsageCostRecord[]
+}
+
+/**
+ * Reads one selected session's usage records at transcript fidelity. A
+ * top-level session also includes every child-agent transcript the provider
+ * can relate to it that `visibleChildren` keeps, and the usage a runtime
+ * holding it open has not written.
+ */
+export async function readSessionUsageRecords(input: UsageTranscript): Promise<SessionUsageRecords | null> {
+  const directFile = await transcriptFile(input.filePath)
   if (!directFile) return null
 
-  const store = storeForDirName(input.dirName)
-  const provider = store.kind
+  const provider = storeForDirName(input.dirName).kind
   const directRecords = await readFileRecords(directFile, provider)
   const sessionId =
-    store.descriptor.sessionFile.sessionId(input.fileName)
+    input.sessionId
     ?? directRecords.find((record) => record.sessionId.length > 0)?.sessionId
     ?? ""
 
-  const files: Array<{ file: TranscriptFile; isSubagent: boolean }> = [
-    { file: directFile, isSubagent: isSubagentAddress(input.fileName) },
-  ]
-  if (sessionId && !isSubagentAddress(input.fileName)) {
-    for (const file of await childTranscripts(input.dirName, sessionId, provider)) {
-      if (file.path !== filePath) files.push({ file, isSubagent: true })
+  const isSubagent = isSubagentAddress(input.fileName)
+  const files: Array<{ file: TranscriptFile; isSubagent: boolean }> = [{ file: directFile, isSubagent }]
+  if (input.sessionId && !isSubagent) {
+    for (const file of await childTranscripts(input.dirName, input.sessionId, provider, input.visibleChildren)) {
+      if (file.path !== input.filePath) files.push({ file, isSubagent: true })
     }
   }
 
@@ -377,7 +418,7 @@ export async function readSessionUsageCostSummary(input: {
 
   // A CLI whose detailed snapshot is durable only at shutdown leaves the
   // transcript behind while the session is open; its runtime supplies the
-  // growth since the latest snapshot.
+  // growth since the latest snapshot, which is what accrued after it.
   const sessionIds = new Set<string>()
   for (const { record } of scopedRecords) {
     if (record.sessionId) sessionIds.add(record.sessionId)
@@ -385,20 +426,30 @@ export async function readSessionUsageCostSummary(input: {
   if (sessionId) sessionIds.add(sessionId)
   const runtime = runtimeFor(provider)
   if ([...sessionIds].some((id) => runtime.hasSession(id))) {
-    const liveRecords = await runtime.liveUsageRecords(countedUsageBySession(scopedRecords))
-    for (const record of liveRecords) {
+    const durableThrough = latestRecordBySession(scopedRecords)
+    for (const record of await runtime.liveUsageRecords(countedUsageBySession(scopedRecords), sessionIds)) {
       if (!sessionIds.has(record.sessionId)) continue
-      scopedRecords.push({ record, isSubagent: record.sessionId !== sessionId })
+      const accruedSinceMs = durableThrough.get(record.sessionId) ?? Number.NEGATIVE_INFINITY
+      scopedRecords.push({ record: { ...record, accruedSinceMs }, isSubagent: record.sessionId !== sessionId })
     }
   }
 
-  const aggregated = aggregateSessionUsage(scopedRecords, rates)
+  return { provider, sessionId, files: files.length, records: scopedRecords }
+}
+
+/** Prices one selected session's usage records for the Cost tab. */
+export async function readSessionUsageCostSummary(input: UsageTranscript): Promise<SessionUsageCostSummary | null> {
+  const startedAtMs = Date.now()
+  await ensureRates()
+
+  const usage = await readSessionUsageRecords(input)
+  if (!usage) return null
   return {
-    provider,
-    sessionId,
-    ...aggregated,
-    includedFiles: files.length,
-    includedSubagents: files.length - 1,
+    provider: usage.provider,
+    sessionId: usage.sessionId,
+    ...aggregateSessionUsage(usage.records, rates),
+    includedFiles: usage.files,
+    includedSubagents: usage.files - 1,
     pricing: {
       status: ratesStatus,
       knownModels: rates.size,

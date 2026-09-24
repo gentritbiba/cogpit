@@ -10,7 +10,10 @@
  */
 
 import { EventEmitter } from "node:events"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../browser/agentEnv", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
@@ -28,6 +31,7 @@ const {
   mockSpawn,
   mockCodexAppServer,
   mockCopilotRuntime,
+  mockSessionFolderProblem,
 } = vi.hoisted(() => ({
   mockActiveProcesses: new Map<string, unknown>(),
   mockPersistentSessions: new Map<string, unknown>(),
@@ -54,12 +58,15 @@ const {
     isTurnActive: vi.fn(),
     getPendingPermissions: vi.fn(() => []),
     getPendingUserInputs: vi.fn(() => []),
+    getPendingExitPlans: vi.fn(() => []),
     resumeSession: vi.fn(),
     setModel: vi.fn(),
     setReasoningEffort: vi.fn(),
     setPermissionMode: vi.fn(),
     send: vi.fn().mockResolvedValue("message-1"),
   },
+  // The made-up folders these sessions ran in exist unless a test says otherwise.
+  mockSessionFolderProblem: vi.fn(async (_cwd: string): Promise<string | null> => null),
 }))
 
 vi.mock("../../processRegistry", () => ({
@@ -76,6 +83,7 @@ vi.mock("../../agents/tempImages", () => ({
   writeTempImageFiles: vi.fn().mockResolvedValue([]),
   cleanupTempFiles: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock("../../lib/folders", () => ({ sessionFolderProblem: mockSessionFolderProblem }))
 vi.mock("../../lib/sessionArchive", () => ({
   setSessionsArchived: vi.fn().mockResolvedValue([]),
 }))
@@ -137,6 +145,8 @@ vi.mock("../../agents/codexAppServer", async (importOriginal) => {
 vi.mock("../../agents/copilotTransport", () => ({ copilotRuntime: mockCopilotRuntime }))
 
 import type { UseFn, Middleware } from "../../helpers"
+import { dirs } from "../../dirs"
+import { readSessionConfig, sessionConfigKey, updateSessionConfig } from "../../lib/sessionConfigStore"
 import { registerSessionSendRoutes } from "../../routes/session-send"
 import { codexRuntime } from "../../agents/codexRuntime"
 
@@ -253,6 +263,25 @@ beforeEach(async () => {
     sessionId: "sess-1",
     jsonlPath: null,
     onResult: null,
+  })
+})
+
+describe("/api/send-message images", () => {
+  it.each([
+    ["no mediaType", [{ data: "aW1hZ2U=" }]],
+    ["data already a data URL", [{ data: "data:image/png;base64,aW1hZ2U=", mediaType: "image/png" }]],
+    ["no data", [{ mediaType: "image/png" }]],
+    ["not a list", { data: "aW1hZ2U=", mediaType: "image/png" }],
+  ])("refuses an image with %s, whose delivered bytes the prompt log would not describe", async (_label, images) => {
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({ sessionId: "sess-1", images }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(res.statusCode).toBe(400)
+    expect(res._getData()).toMatchObject({ code: "INVALID_REQUEST", error: "images must each hold base64 data and a mediaType" })
+    expect(mockFindJsonlPath).not.toHaveBeenCalled()
   })
 })
 
@@ -482,6 +511,26 @@ describe("/api/send-message SDK resume cwd", () => {
     )
   })
 
+  it("refuses to resume in a folder that no longer exists", async () => {
+    mockFindJsonlPath.mockResolvedValue("/Users/me/.claude/projects/-Users-me-proj/sess-1.jsonl")
+    mockGetSessionMeta.mockResolvedValue({ cwd: "/Users/me/proj" })
+    mockSessionFolderProblem.mockResolvedValueOnce("The folder /Users/me/proj does not exist")
+
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes(
+      "POST",
+      JSON.stringify({ sessionId: "sess-1", message: "hi" }),
+    )
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(res.statusCode).toBe(400)
+    expect(res._getData()).toEqual({ error: "The folder /Users/me/proj does not exist", code: "INVALID_REQUEST" })
+    expect(mockSessionFolderProblem).toHaveBeenCalledWith("/Users/me/proj")
+    expect(mockResumeSDKSession).not.toHaveBeenCalled()
+  })
+
   it("falls back to homedir when there is no session metadata", async () => {
     mockFindJsonlPath.mockResolvedValue(null)
     mockGetSessionMeta.mockResolvedValue(null)
@@ -491,6 +540,40 @@ describe("/api/send-message SDK resume cwd", () => {
     expect(mockResumeSDKSession).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: "/Users/me" }),
     )
+  })
+})
+
+describe("/api/send-message permission mode", () => {
+  let configRoot: string
+  let previousConfigDir: string
+
+  beforeEach(async () => {
+    configRoot = await mkdtemp(join(tmpdir(), "cogpit-send-mode-"))
+    previousConfigDir = dirs.SESSION_CONFIG_DIR
+    dirs.SESSION_CONFIG_DIR = configRoot
+    mockFindJsonlPath.mockResolvedValue("/Users/me/.claude/projects/-Users-me-proj/sess-1.jsonl")
+    mockGetSessionMeta.mockResolvedValue({ cwd: "/Users/me/proj" })
+    await updateSessionConfig(sessionConfigKey("sess-1"), () => ({ permissionMode: "acceptEdits" }))
+  })
+
+  afterEach(async () => {
+    dirs.SESSION_CONFIG_DIR = previousConfigDir
+    await rm(configRoot, { recursive: true, force: true })
+  })
+
+  it("resumes a send that leaves out the permission mode in the session's stored one", async () => {
+    await postSendMessage({ sessionId: "sess-1", message: "hi", permissions: { allowedTools: ["Read"] } })
+
+    expect(mockResumeSDKSession).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "acceptEdits", allowedTools: ["Read"] }),
+    )
+  })
+
+  it("resumes in the mode a send carries, as before", async () => {
+    await postSendMessage({ sessionId: "sess-1", message: "hi", permissions: { mode: "plan" } })
+
+    expect(mockResumeSDKSession).toHaveBeenCalledWith(expect.objectContaining({ permissionMode: "plan" }))
+    expect(await readSessionConfig(sessionConfigKey("sess-1"))).toEqual({ permissionMode: "acceptEdits" })
   })
 })
 

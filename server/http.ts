@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { StringDecoder } from "node:string_decoder"
+import { ErrorCodes } from "./lib/routeError"
 
 export type NextFn = (err?: unknown) => void
 export type Middleware = (
@@ -144,6 +145,14 @@ export function sendJson(res: ServerResponse, status: number, data: unknown): vo
   res.statusCode = status
   res.setHeader("Content-Type", "application/json")
   res.end(JSON.stringify(data))
+}
+
+/**
+ * Mounted at `/api` after every route in each shell: an API path no route
+ * served gets a JSON 404, never the app shell a fallback would send.
+ */
+export const apiNotFound: Middleware = (_req, res) => {
+  sendJson(res, 404, { error: "Not found", code: ErrorCodes.NOT_FOUND })
 }
 
 /**

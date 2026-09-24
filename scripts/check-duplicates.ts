@@ -16,8 +16,8 @@ interface DuplicateReport {
 // codebase can no longer hide newly copied blocks behind a stable percentage.
 // Both numbers sit exactly at the last measured total, so they are a floor with
 // no slack: any new clone fails. Lower them again after a de-duplication pass.
-const MAX_CLONES = 63
-const MAX_DUPLICATED_LINES = 555
+const MAX_CLONES = 52
+const MAX_DUPLICATED_LINES = 446
 
 const outputDir = await mkdtemp(join(tmpdir(), "cogpit-jscpd-"))
 try {

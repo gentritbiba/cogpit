@@ -10,7 +10,8 @@ import { useGoalControls } from "./context"
 interface GoalProviderProps {
   agentKind: AgentKind
   session: ParsedSession
-  onSendCommand: (command: string) => void
+  /** Resolves false when the session refused the command. */
+  onSendCommand: (command: string) => Promise<boolean>
   children: ReactNode
 }
 

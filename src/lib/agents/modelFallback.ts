@@ -11,14 +11,20 @@ function isCodexSelectedModelError(message: string | null | undefined): boolean 
   )
 }
 
-async function readErrorMessage(
+interface ResponseError {
+  message: string
+  code: string | null
+}
+
+async function readError(
   res: Response,
   fallback: string
-): Promise<string> {
-  const payload = await res.json().catch(() => ({ error: fallback })) as { error?: unknown }
-  return typeof payload.error === "string" && payload.error
-    ? payload.error
-    : fallback
+): Promise<ResponseError> {
+  const payload = await res.json().catch(() => ({})) as { error?: unknown; code?: unknown }
+  return {
+    message: typeof payload.error === "string" && payload.error ? payload.error : fallback,
+    code: typeof payload.code === "string" ? payload.code : null,
+  }
 }
 
 interface ModelFallbackOpts {
@@ -38,6 +44,8 @@ interface ModelFallbackOpts {
 interface ModelFallbackResult {
   res: Response
   errorMessage: string | null
+  /** The server's machine-readable `code` for a failed response, when it sent one. */
+  errorCode: string | null
 }
 
 /**
@@ -59,22 +67,18 @@ export async function fetchWithModelFallback(
   // existing session can switch back from a concrete model.
   const requestedModel = agentKind === "copilot" ? model || "auto" : model || undefined
   let res = await sendRequest(requestedModel)
-  let errorMessage = res.ok
-    ? null
-    : await readErrorMessage(res, fallback(res))
+  let error = res.ok ? null : await readError(res, fallback(res))
 
   if (
     !res.ok &&
     agentKind === "codex" &&
     model &&
-    isCodexSelectedModelError(errorMessage)
+    isCodexSelectedModelError(error?.message)
   ) {
     onModelRejected?.(model)
     res = await sendRequest(undefined)
-    errorMessage = res.ok
-      ? null
-      : await readErrorMessage(res, fallback(res))
+    error = res.ok ? null : await readError(res, fallback(res))
   }
 
-  return { res, errorMessage }
+  return { res, errorMessage: error?.message ?? null, errorCode: error?.code ?? null }
 }

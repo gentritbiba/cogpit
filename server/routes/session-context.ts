@@ -1,5 +1,7 @@
+import type { ServerResponse } from "node:http"
 import { sendJson, type UseFn } from "../http"
 import { readFile, readdir, join, dirs } from "../helpers"
+import { authorizeSession } from "../edition"
 import { findJsonlPath } from "../sessionPaths"
 import { matchSubagentToMember } from "../lib/agentTeamIdentity"
 import { parseSession } from "../../shared/session/parser"
@@ -335,6 +337,30 @@ function findAgentMetadata(
 
 // ── Route Registration ───────────────────────────────────────────────────────
 
+/**
+ * The paths under a session id this route serves: the session, one of its
+ * turns, a sub-agent, or one of the sub-agent's turns.
+ */
+function isContextPath(parts: readonly string[]): boolean {
+  switch (parts.length) {
+    case 1: return true
+    case 3: return parts[1] === "turn" || parts[1] === "agent"
+    case 5: return parts[1] === "agent" && parts[3] === "turn"
+    default: return false
+  }
+}
+
+function sendTurnDetail(res: ServerResponse, session: ParsedSession, rawTurnIndex: string) {
+  const turnIndex = parseInt(decodeURIComponent(rawTurnIndex), 10)
+  if (isNaN(turnIndex)) {
+    return sendJson(res, 400, { error: "Invalid turn index" })
+  }
+  if (turnIndex < 0 || turnIndex >= session.turns.length) {
+    return sendJson(res, 404, { error: "Turn not found" })
+  }
+  return sendJson(res, 200, mapTurnToDetail(session, turnIndex))
+}
+
 export function registerSessionContextRoutes(use: UseFn) {
   use("/api/session-context/", async (req, res, next) => {
     if (req.method !== "GET") return next()
@@ -342,9 +368,11 @@ export function registerSessionContextRoutes(use: UseFn) {
     const url = new URL(req.url || "/", "http://localhost")
     const parts = url.pathname.split("/").filter(Boolean)
 
-    if (parts.length === 0) return next()
+    if (!isContextPath(parts)) return sendJson(res, 404, { error: "Not found" })
 
-    const sessionId = decodeURIComponent(parts[0])
+    const session = await authorizeSession(req, res, { sessionId: decodeURIComponent(parts[0]) }, "view")
+    if (session === null) return
+    const { sessionId } = session
 
     try {
       const jsonlPath = await findJsonlPath(sessionId)
@@ -352,71 +380,44 @@ export function registerSessionContextRoutes(use: UseFn) {
         return sendJson(res, 404, { error: "Session not found" })
       }
 
-      const jsonlContent = await readFile(jsonlPath, "utf-8")
-      const session = parseSession(jsonlContent)
+      const parsed = parseSession(await readFile(jsonlPath, "utf-8"))
 
       // L1: GET /api/session-context/:sessionId
       if (parts.length === 1) {
-        return sendJson(res, 200, mapSessionToOverview(session))
+        return sendJson(res, 200, mapSessionToOverview(parsed))
       }
 
       // L2: GET /api/session-context/:sessionId/turn/:turnIndex
-      if (parts.length === 3 && parts[1] === "turn") {
-        const turnIndex = parseInt(decodeURIComponent(parts[2]), 10)
-        if (isNaN(turnIndex)) {
-          return sendJson(res, 400, { error: "Invalid turn index" })
-        }
-        if (turnIndex < 0 || turnIndex >= session.turns.length) {
-          return sendJson(res, 404, { error: "Turn not found" })
-        }
-        return sendJson(res, 200, mapTurnToDetail(session, turnIndex))
+      if (parts[1] === "turn") {
+        return sendTurnDetail(res, parsed, parts[2])
       }
 
       // L3: GET /api/session-context/:sessionId/agent/:agentId
       // L3+L2: GET /api/session-context/:sessionId/agent/:agentId/turn/:turnIndex
-      if (parts.length >= 3 && parts[1] === "agent") {
-        const agentId = decodeURIComponent(parts[2])
+      const agentId = decodeURIComponent(parts[2])
 
-        const subagentFile = await findSubagentFile(jsonlPath, agentId)
-        if (!subagentFile) {
-          return sendJson(res, 404, { error: "Agent not found" })
-        }
-
-        const subagentContent = await readFile(subagentFile.filePath, "utf-8")
-        const subagentSession = parseSession(subagentContent)
-
-        const metadata = findAgentMetadata(session, agentId)
-        const parentToolCallId = findParentToolCallId(session, agentId)
-        const teamContext = await findTeamContext(sessionId, subagentFile.fileName)
-
-        // L3: Overview
-        if (parts.length === 3) {
-          return sendJson(res, 200, {
-            sessionId,
-            agentId,
-            name: metadata.name,
-            type: metadata.type,
-            parentToolCallId,
-            isBackground: metadata.isBackground,
-            teamContext,
-            overview: mapSessionToOverview(subagentSession),
-          })
-        }
-
-        // L3+L2: Turn detail
-        if (parts.length === 5 && parts[3] === "turn") {
-          const turnIndex = parseInt(decodeURIComponent(parts[4]), 10)
-          if (isNaN(turnIndex)) {
-            return sendJson(res, 400, { error: "Invalid turn index" })
-          }
-          if (turnIndex < 0 || turnIndex >= subagentSession.turns.length) {
-            return sendJson(res, 404, { error: "Turn not found" })
-          }
-          return sendJson(res, 200, mapTurnToDetail(subagentSession, turnIndex))
-        }
+      const subagentFile = await findSubagentFile(jsonlPath, agentId)
+      if (!subagentFile) {
+        return sendJson(res, 404, { error: "Agent not found" })
       }
 
-      next()
+      const subagentSession = parseSession(await readFile(subagentFile.filePath, "utf-8"))
+
+      if (parts.length === 5) {
+        return sendTurnDetail(res, subagentSession, parts[4])
+      }
+
+      const metadata = findAgentMetadata(parsed, agentId)
+      return sendJson(res, 200, {
+        sessionId,
+        agentId,
+        name: metadata.name,
+        type: metadata.type,
+        parentToolCallId: findParentToolCallId(parsed, agentId),
+        isBackground: metadata.isBackground,
+        teamContext: await findTeamContext(sessionId, subagentFile.fileName),
+        overview: mapSessionToOverview(subagentSession),
+      })
     } catch (err) {
       sendJson(res, 500, { error: String(err) })
     }

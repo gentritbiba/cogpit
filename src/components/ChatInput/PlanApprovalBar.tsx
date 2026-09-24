@@ -14,6 +14,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
 
 interface PlanApprovalBarProps {
   allowedPrompts?: Array<{ tool: string; prompt: string }>
@@ -23,8 +24,9 @@ interface PlanApprovalBarProps {
   recommendedAction?: string
   responding?: boolean
   responseError?: string | null
-  onApprove: (action?: string) => void
-  onReject: () => void
+  /** Omitted together with onReject for a reader who cannot answer: the plan shows without actions. */
+  onApprove?: (action?: string) => void
+  onReject?: () => void
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -52,13 +54,14 @@ export function PlanApprovalBar({
   const primaryAction = recommendedAction ?? actions[0]
   const alternatives = actions.filter((action) => action !== primaryAction)
   return (
-    <Alert className="mb-3 pr-44">
+    <Alert className={cn("mb-3", onApprove && "pr-44")}>
       <CheckCircle />
       <AlertTitle>Plan ready for review</AlertTitle>
       <AlertDescription>
-        {summary || "Approve the plan or ask the agent to revise it."}
+        {summary || (onApprove ? "Approve the plan or ask the agent to revise it." : "The agent is waiting for this plan to be reviewed.")}
       </AlertDescription>
-      <AlertAction className="flex gap-2">
+      {onApprove && onReject && (
+        <AlertAction className="flex gap-2">
           <Button
             size="sm"
             disabled={responding}
@@ -93,7 +96,8 @@ export function PlanApprovalBar({
           >
             Reject
           </Button>
-      </AlertAction>
+        </AlertAction>
+      )}
       {responseError && (
         <div role="alert" className="col-span-full mt-2 text-xs text-destructive">
           {responseError}

@@ -14,10 +14,14 @@
  *
  * Mirrors the team-watch SSE pattern (debounced fs.watch → {type:"update"}).
  */
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { soleDescriptorWhere } from "../../shared/session/agent-descriptors"
+import { authorizeSession, reportSessionEvent } from "../edition"
 import { watch, activeProcesses, persistentSessions } from "../helpers"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import { sdkSessions, stopSDKSession } from "../sdk-session"
 import {
+  isSafeRunId,
   listSessionWorkflows,
   readWorkflowAgentResult,
   readWorkflowDetail,
@@ -25,6 +29,31 @@ import {
   workflowsDirFor,
   sessionDirFor,
 } from "../lib/workflows"
+
+const WORKFLOW_AGENT = soleDescriptorWhere((descriptor) => descriptor.capabilities.workflows, "workflows").kind
+
+/** The decoded path segments after the mount, or null when there are not `counts` of them. */
+function pathSegments(req: IncomingMessage, ...counts: number[]): string[] | null {
+  const parts = new URL(req.url || "/", "http://localhost").pathname.split("/").filter(Boolean)
+  return counts.includes(parts.length) ? parts.map(decodeURIComponent) : null
+}
+
+/**
+ * The session whose workflows a request reads, once its journals lie inside
+ * PROJECTS_DIR and the caller may view it; null after answering.
+ */
+async function authorizeWorkflows(
+  req: IncomingMessage,
+  res: ServerResponse,
+  dirName: string,
+  sessionId: string,
+): Promise<string | null> {
+  if (!workflowsDirFor(dirName, sessionId)) {
+    sendJson(res, 403, { error: "Access denied" })
+    return null
+  }
+  return (await authorizeSession(req, res, { sessionId }, "view"))?.sessionId ?? null
+}
 
 /** Is the owning session a live, Cogpit-managed process we can stop? */
 function isControllable(sessionId: string): boolean {
@@ -70,18 +99,11 @@ export function registerWorkflowRoutes(use: UseFn) {
   // GET /api/workflows/:dirName/:sessionId — list workflows for a session
   use("/api/workflows/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
-    if (parts.length !== 2) return next()
-
-    const dirName = decodeURIComponent(parts[0])
-    const sessionId = decodeURIComponent(parts[1])
-
-    if (!workflowsDirFor(dirName, sessionId)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    const parts = pathSegments(req, 2)
+    if (!parts) return next()
+    const [dirName] = parts
+    const sessionId = await authorizeWorkflows(req, res, dirName, parts[1])
+    if (!sessionId) return
 
     try {
       const workflows = await listSessionWorkflows(dirName, sessionId)
@@ -94,19 +116,11 @@ export function registerWorkflowRoutes(use: UseFn) {
   // GET /api/workflow-detail/:dirName/:sessionId/:runId — full run detail
   use("/api/workflow-detail/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
-    if (parts.length !== 3) return next()
-
-    const dirName = decodeURIComponent(parts[0])
-    const sessionId = decodeURIComponent(parts[1])
-    const runId = decodeURIComponent(parts[2])
-
-    if (!workflowsDirFor(dirName, sessionId)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    const parts = pathSegments(req, 3)
+    if (!parts) return next()
+    const [dirName, , runId] = parts
+    const sessionId = await authorizeWorkflows(req, res, dirName, parts[1])
+    if (!sessionId) return
 
     try {
       const detail = await readWorkflowDetail(dirName, sessionId, runId)
@@ -123,19 +137,11 @@ export function registerWorkflowRoutes(use: UseFn) {
   // GET /api/workflow-result/:dirName/:sessionId/:runId
   use("/api/workflow-result/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
-    if (parts.length !== 3) return next()
-
-    const dirName = decodeURIComponent(parts[0])
-    const sessionId = decodeURIComponent(parts[1])
-    const runId = decodeURIComponent(parts[2])
-
-    if (!workflowsDirFor(dirName, sessionId)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    const parts = pathSegments(req, 3)
+    if (!parts) return next()
+    const [dirName, , runId] = parts
+    const sessionId = await authorizeWorkflows(req, res, dirName, parts[1])
+    if (!sessionId) return
 
     try {
       const result = await readWorkflowResult(dirName, sessionId, runId)
@@ -152,20 +158,11 @@ export function registerWorkflowRoutes(use: UseFn) {
   // GET /api/workflow-agent-result/:dirName/:sessionId/:runId/:agentId
   use("/api/workflow-agent-result/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
-    if (parts.length !== 4) return next()
-
-    const dirName = decodeURIComponent(parts[0])
-    const sessionId = decodeURIComponent(parts[1])
-    const runId = decodeURIComponent(parts[2])
-    const agentId = decodeURIComponent(parts[3])
-
-    if (!workflowsDirFor(dirName, sessionId)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    const parts = pathSegments(req, 4)
+    if (!parts) return next()
+    const [dirName, , runId, agentId] = parts
+    const sessionId = await authorizeWorkflows(req, res, dirName, parts[1])
+    if (!sessionId) return
 
     try {
       const agentResult = await readWorkflowAgentResult(dirName, sessionId, runId, agentId)
@@ -180,23 +177,17 @@ export function registerWorkflowRoutes(use: UseFn) {
   })
 
   // GET /api/workflow-watch/:dirName/:sessionId[/:runId] — SSE live updates
-  use("/api/workflow-watch/", (req, res, next) => {
+  use("/api/workflow-watch/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
-    if (parts.length !== 2 && parts.length !== 3) return next()
-
-    const dirName = decodeURIComponent(parts[0])
-    const sessionId = decodeURIComponent(parts[1])
-    const runId = parts.length === 3 ? decodeURIComponent(parts[2]) : null
-
-    const sessionDir = sessionDirFor(dirName, sessionId)
-    const workflowsDir = workflowsDirFor(dirName, sessionId)
-    if (!sessionDir || !workflowsDir) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    const parts = pathSegments(req, 2, 3)
+    if (!parts) return next()
+    const [dirName, , runId = null] = parts
+    const sessionId = await authorizeWorkflows(req, res, dirName, parts[1])
+    if (!sessionId) return
+    // authorizeWorkflows found the session's workflows inside PROJECTS_DIR, so its directory is too.
+    const sessionDir = sessionDirFor(dirName, sessionId)!
+    // The caller may have gone, or lost its login, while access was checked.
+    if (res.destroyed || res.writableEnded) return
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -253,12 +244,14 @@ export function registerWorkflowRoutes(use: UseFn) {
   use("/api/workflow-stop", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    withJsonBody<{ sessionId?: string; runId?: string }>(req, res, (parsed) => {
-      const sessionId = parsed.sessionId
-      if (!sessionId || typeof sessionId !== "string") {
+    withJsonBody<{ sessionId?: string; runId?: string }>(req, res, async (parsed) => {
+      if (!parsed.sessionId || typeof parsed.sessionId !== "string") {
         sendJson(res, 400, { error: "sessionId is required" })
         return
       }
+      const session = await authorizeSession(req, res, { sessionId: parsed.sessionId }, "interact")
+      if (!session) return
+      const { sessionId } = session
 
       if (!isControllable(sessionId)) {
         sendJson(res, 200, {
@@ -270,6 +263,10 @@ export function registerWorkflowRoutes(use: UseFn) {
       }
 
       const stopped = stopOwningSession(sessionId)
+      if (stopped) {
+        const runId = typeof parsed.runId === "string" && isSafeRunId(parsed.runId) ? { runId: parsed.runId } : undefined
+        reportSessionEvent(req, "session.stop", { sessionId, agent: WORKFLOW_AGENT }, runId)
+      }
       sendJson(res, 200, { success: stopped, controllable: true })
     })
   })

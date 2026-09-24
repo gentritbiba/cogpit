@@ -3,10 +3,14 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { PlanModeBlock } from "../PlanModeBlock"
 import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
+import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 
 // Mock useSessionContext — required by ToolCallCard
 vi.mock("@/contexts/SessionContext", () => ({
-  useSessionContext: vi.fn(() => ({ session: { sessionId: "test-session" } })),
+  useSessionContext: vi.fn(() => ({
+    session: { sessionId: "test-session" },
+    permissions: permissionsForAccess("own"),
+  })),
 }))
 
 // Mock authFetch — required by ToolCallCard (Skill tool)

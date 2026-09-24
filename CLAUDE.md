@@ -6,9 +6,16 @@ Any code change MUST account for its impact on existing tests. Before considerin
 
 1. Run **both** suites and ensure all tests pass — the repo has two, and neither
    command runs the other's tests:
-   - `bun run test` — Vitest, covering `src/`, `server/` and `electron/` only.
-     Test files follow the pattern `src/**/__tests__/*.test.ts`,
-     `server/__tests__/**/*.test.ts` and `electron/__tests__/*.test.ts`.
+   - `bun run test` — Vitest, covering `src/`, `server/`, `electron/` and,
+     when its submodule is checked out, the edition package in
+     `editions/team/`. Test files follow the pattern `src/**/__tests__/*.test.ts`,
+     `server/__tests__/**/*.test.ts`, `electron/__tests__/*.test.ts`,
+     `editions/team/tests/**/*.test.ts` and `editions/team/tests/**/*.test.tsx`.
+     `bun run test:public` runs the same suite as a public clone (empty
+     `editions/team/`) would; a change to core must pass both.
+     `bun run check:public-clone` goes further: it checks the committed HEAD
+     out into a temporary worktree without the submodule and runs lint, the
+     checks, both typechecks, the suite and both builds there.
    - `cd packages/cogpit-memory && bun test` — the cogpit-memory package's own
      `bun:test` suite, under `packages/cogpit-memory/src/**/__tests__/`. It has
      a separate CI step. `bun run test` at the root does **not** include it, so
@@ -36,13 +43,46 @@ or a descriptor field — add it there.
 
 `bun run check:agents` prevents agent names from spreading while older call
 sites are migrated. Files outside the agent layer carry a per-file line budget
-in `scripts/agent-vocabulary.json` that may only shrink. Going over fails, and
+in `scripts/agent-vocabulary.json` (an edition package keeps its own files'
+budgets in its `agent-vocabulary.json`) that may only shrink. Going over fails, and
 coming in under also fails with the new number, so a cleanup lowers its budget
 in the same commit. The check measures vocabulary, not control flow. After
 removing agent names from a file, re-seed with
 `bun scripts/check-agents.ts --write` and commit the result.
 
 `ARCHITECTURE.md` has the full picture, including how to add a fourth CLI.
+
+## Editions
+
+The edition package `@cogpit/team` is closed source, checked out as the git
+submodule `editions/team/`. A public clone leaves that directory empty and must
+build, test and boot without it, so "is the package here?" means
+`editions/team/index.ts` exists, never the directory. Commit edition changes in
+the submodule and push them there first, then commit the new submodule pointer
+here; never copy edition code or docs into this repository. Core reaches edition
+behavior only through `server/edition/`, whose defaults are personal-edition
+behavior, and the package reaches core only through the `@cogpit/core/*` alias.
+`bun run check:architecture` enforces both directions.
+
+Edition UI lives in `editions/team/ui` and mounts only through the slots in
+`src/edition/contract.ts`; a public clone renders their personal defaults.
+Nothing in `src/` outside `src/edition/load.ts` names the package, and edition
+UI imports core only through `@cogpit/core/src/edition/*`,
+`@cogpit/core/src/components/ui/*` and `@cogpit/core/shared/*`.
+
+`.gitmodules` sets `update = none` so a public `git clone --recurse-submodules`
+does not stop at an auth prompt. With access to the package, run this once per
+clone so `git submodule update` keeps checking it out:
+
+```bash
+git config submodule.editions/team.update checkout
+```
+
+`check:architecture` also refuses edition vocabulary outside the modules that
+resolve and install an edition (`server/edition/{registry,resolve,load}.ts`)
+and `shared/contracts/identity.ts`: no other file may compare an edition with
+`"team"` or name a `/api/team/` path. Core asks the `EditionModule` hooks or
+the renderer's UI slots instead.
 
 ## Adding New API Routes
 
@@ -116,7 +156,7 @@ The `ios/` directory is a separate, private Git repository that is intentionally
 
 ## Browser Panel
 
-Live agent-browser streaming inside the workspace (see `docs/browser.md`). The bash shim at `~/.cogpit/bin/agent-browser` owns `--profile`, `--args`, and socket directories — never set them elsewhere or in `server/browser/daemons.ts`. Shared types live in `shared/browser/types.ts`; keep the client and server in sync there only. Cogpit prepends the shim to agent PATHs. Single-session processes receive `COGPIT_SESSION_ID`; shared processes start without an owner, with thread configuration supplying an id where supported. The shim routes to persistent profiles (`default`, named) or throwaway trees (`tmp-*`). The panel attaches via CDP over a second WebSocket and supports remote devices through the hub.
+Live agent-browser streaming inside the workspace (see `docs/browser.md`). The bash shim at `~/.cogpit/bin/agent-browser` owns `--profile`, `--args`, and socket directories — never set them elsewhere or in `server/browser/daemons.ts`. Shared types live in `shared/browser/types.ts`; keep the client and server in sync there only. Cogpit prepends the shim to agent PATHs. Single-session processes receive `COGPIT_SESSION_ID`; shared processes start without an owner, with thread configuration supplying an id where supported. The shim routes to persistent profiles (`default`, named) or throwaway trees (`tmp-*`). With accounts the server leaves it notes under `~/.cogpit/browser/owners/` (`server/browser/owners.ts`) so an agent's `default` opens its session owner's own profile, and `server/browser/access.ts` decides per browser who may watch, drive or own it. The panel attaches via CDP over a second WebSocket and supports remote devices through the hub.
 
 ## Showing Images and Videos
 

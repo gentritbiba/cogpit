@@ -1,5 +1,5 @@
 import { readFile, stat, readdir, chmod } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { isAbsolute, join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import {
@@ -17,6 +17,7 @@ import {
   parseExecutableChoice,
   type ExecutableChoice,
 } from "../shared/contracts/agentExecutable"
+import { isCogpitEdition, type CogpitEdition } from "../shared/contracts/identity"
 
 // config.local.json may hold a hashed network password; keep it owner-only.
 const CONFIG_FILE_MODE = 0o600
@@ -79,8 +80,8 @@ export interface AppConfig {
    * settings may reuse that exact path; any other path must still validate.
    */
   claudeDirIsPlaceholder?: boolean
-  /** Team-edition opt-in; only the standalone shell honors it. */
-  edition?: "team"
+  /** An edition package to run instead of personal edition; only the standalone shell honors it. */
+  edition?: ConfiguredEdition
   networkAccess?: boolean
   networkPassword?: string
   terminalApp?: string
@@ -89,6 +90,16 @@ export interface AppConfig {
   useBuiltInEditor?: boolean
   /** Which binary the configured-home agent is spawned from; absent means auto. */
   agentExecutable?: ExecutableChoice
+  /** Absolute folder the folder browser starts in; see getProjectsRoot. File-only, like `edition`. */
+  projectsRoot?: string
+}
+
+/** An edition the config file may select: any but personal edition, which runs when it selects none. */
+export type ConfiguredEdition = Exclude<CogpitEdition, "personal">
+
+/** `value` when it names an edition the config file may select. */
+export function configuredEdition(value: unknown): ConfiguredEdition | undefined {
+  return isCogpitEdition(value) && value !== "personal" ? value : undefined
 }
 
 let cachedConfig: AppConfig | null = null
@@ -172,6 +183,31 @@ export function agentHomeDir(kind: AgentKind): string {
   if (!cli.homeIsDiscoverable) return resolve(cachedConfig?.claudeDir || fallback)
   const override = cli.homeEnvVar ? process.env[cli.homeEnvVar] : undefined
   return resolve(override || fallback)
+}
+
+const warnedPaths = new Set<string>()
+
+/** An absolute path, normalized; anything else is ignored with one warning per value. */
+function absolutePathOrUndefined(value: unknown, source: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined
+  if (typeof value === "string" && !value.includes("\0") && isAbsolute(value)) return resolve(value)
+  const warning = `[config] Ignoring ${source}: ${JSON.stringify(value)} is not an absolute path`
+  if (!warnedPaths.has(warning)) {
+    warnedPaths.add(warning)
+    console.warn(warning)
+  }
+  return undefined
+}
+
+/**
+ * Where the folder browser starts: `COGPIT_PROJECTS_ROOT`, else `projectsRoot`
+ * in the config file, else the home directory of the account the server runs
+ * as. A server given its own HOME points this at the folders people work in.
+ */
+export function getProjectsRoot(): string {
+  return absolutePathOrUndefined(process.env.COGPIT_PROJECTS_ROOT, "COGPIT_PROJECTS_ROOT")
+    ?? cachedConfig?.projectsRoot
+    ?? homedir()
 }
 
 /**
@@ -271,13 +307,14 @@ export async function loadConfig(): Promise<AppConfig | null> {
         claudeDirIsPlaceholder: parsed.claudeDirIsPlaceholder === true
           || legacyExternalOnly !== undefined
           || undefined,
-        edition: parsed.edition === "team" ? "team" : undefined,
+        edition: configuredEdition(parsed.edition),
         networkAccess: !!parsed.networkAccess,
         networkPassword,
         terminalApp: parsed.terminalApp || undefined,
         editorApp: parsed.editorApp || undefined,
         useBuiltInEditor: !!parsed.useBuiltInEditor,
         agentExecutable: parseExecutableChoice(parsed.agentExecutable),
+        projectsRoot: absolutePathOrUndefined(parsed.projectsRoot, "projectsRoot in the config file"),
       }
       return cachedConfig
     }

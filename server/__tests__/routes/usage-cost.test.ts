@@ -1,6 +1,10 @@
 // @vitest-environment node
 
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { dirs } from "../../dirs"
 import type { Middleware, UseFn } from "../../helpers"
 
 const service = vi.hoisted(() => ({
@@ -13,6 +17,12 @@ const service = vi.hoisted(() => ({
 vi.mock("../../lib/usageCost/service", () => service)
 
 import { registerUsageCostRoutes } from "../../routes/usage-cost"
+
+const SESSION = "0f8fad5b-d9cb-469f-a165-70867728950e"
+const SUBAGENT = `${SESSION}/subagents/agent-a1.jsonl`
+
+let projectsDir: string
+let previousProjectsDir: string
 
 function sessionHandler(): Middleware {
   let handler: Middleware | undefined
@@ -47,25 +57,48 @@ async function request(method: string, url: string): Promise<{
 }
 
 describe("session usage cost route", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    projectsDir = await mkdtemp(join(tmpdir(), "cogpit-usage-cost-route-"))
+    previousProjectsDir = dirs.PROJECTS_DIR
+    dirs.PROJECTS_DIR = projectsDir
+    for (const fileName of [`${SESSION}.jsonl`, SUBAGENT]) {
+      await mkdir(dirname(join(projectsDir, "project", fileName)), { recursive: true })
+      await writeFile(join(projectsDir, "project", fileName), "{}\n")
+    }
+  })
+
+  afterEach(async () => {
+    dirs.PROJECTS_DIR = previousProjectsDir
+    await rm(projectsDir, { recursive: true, force: true })
   })
 
   it("returns the selected transcript's detailed cost summary", async () => {
-    const summary = { sessionId: "session-1", provider: "claude", costUsd: 1.25 }
+    const summary = { sessionId: SESSION, provider: "claude", costUsd: 1.25 }
     service.readSessionUsageCostSummary.mockResolvedValue(summary)
 
     const response = await request(
       "GET",
-      "/?dirName=project&fileName=session-1.jsonl",
+      `/?dirName=project&fileName=${SESSION}.jsonl`,
     )
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual(summary)
     expect(service.readSessionUsageCostSummary).toHaveBeenCalledWith({
       dirName: "project",
-      fileName: "session-1.jsonl",
+      fileName: `${SESSION}.jsonl`,
+      filePath: join(projectsDir, "project", `${SESSION}.jsonl`),
+      sessionId: SESSION,
+      visibleChildren: expect.any(Function),
     })
+  })
+
+  it("prices a sub-agent's transcript as no session of its own", async () => {
+    service.readSessionUsageCostSummary.mockResolvedValue({})
+
+    await request("GET", `/?dirName=project&fileName=${encodeURIComponent(SUBAGENT)}`)
+
+    expect(service.readSessionUsageCostSummary).toHaveBeenCalledWith(expect.objectContaining({ fileName: SUBAGENT, sessionId: null }))
   })
 
   it("requires both transcript address fields", async () => {
@@ -76,16 +109,15 @@ describe("session usage cost route", () => {
     expect(service.readSessionUsageCostSummary).not.toHaveBeenCalled()
   })
 
-  it("returns 404 when the transcript cannot be resolved", async () => {
+  it("returns 404 when the transcript cannot be resolved or read", async () => {
     service.readSessionUsageCostSummary.mockResolvedValue(null)
 
-    const response = await request(
-      "GET",
-      "/?dirName=project&fileName=missing.jsonl",
-    )
-
-    expect(response.status).toBe(404)
-    expect(response.body).toEqual({ error: "Session transcript not found" })
+    for (const fileName of ["missing.jsonl", `${SESSION}.jsonl`]) {
+      const response = await request("GET", `/?dirName=project&fileName=${fileName}`)
+      expect(response.status).toBe(404)
+      expect(response.body).toEqual({ error: "Session transcript not found" })
+    }
+    expect(service.readSessionUsageCostSummary).toHaveBeenCalledOnce()
   })
 
   it("passes non-GET requests and nested paths to the next handler", async () => {

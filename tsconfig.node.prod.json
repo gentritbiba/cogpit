@@ -2,6 +2,7 @@
   "extends": "./tsconfig.node.json",
   "exclude": [
     "server/**/__tests__/**",
-    "server/**/*.test.ts"
+    "server/**/*.test.ts",
+    "editions/team/tests/**"
   ]
 }

@@ -6,121 +6,21 @@ import {
 import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import { storeForPath } from "../agents"
 import { runtimeForDirName } from "../agents/runtimes"
-import { resolveSessionFilePath } from "../sessionPaths"
-import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { resolveTaskOutput } from "../agents/taskOutput"
+import { authorizeStreamSession, visibilityFor } from "../edition"
+import { authorizeTranscript } from "../edition/transcript"
+import { readdir } from "node:fs/promises"
 import { StringDecoder } from "node:string_decoder"
 import { sendJson, type UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
-// Allowlist of roots that background task output may be read from. Windows has
-// no /tmp, so nothing would ever pass containment there without %TEMP%.
-const TASK_OUTPUT_BASES: readonly string[] = process.platform === "win32"
-  ? [tmpdir()]
-  : ["/private/tmp", "/tmp"]
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
-let canonicalTaskOutputBases: Promise<string[]> | null = null
-
-/**
- * The id the stream bus and the runtime know a transcript by: its session id,
- * which a rollout name buries behind a timestamp and date directories. A
- * transcript no agent claims by name keeps the bare file stem.
- */
-function streamSessionId(dirName: string, fileName: string): string {
-  return descriptorForDirName(dirName).sessionFile.sessionId(fileName)
-    ?? fileName.replace(/\.jsonl$/, "")
-}
-
-async function getCanonicalTaskOutputBases(): Promise<string[]> {
-  canonicalTaskOutputBases ??= Promise.all(
-    TASK_OUTPUT_BASES.map(async (base) => {
-      try {
-        return await realpath(base)
-      } catch {
-        return resolve(base)
-      }
-    }),
-  ).then((bases) => [...new Set(bases)])
-  return canonicalTaskOutputBases
-}
-
-async function canonicalizeIncludingMissing(path: string): Promise<string | null> {
-  const missingSegments: string[] = []
-  let cursor = path
-
-  while (true) {
-    let cursorInfo
-    try {
-      cursorInfo = await lstat(cursor)
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code !== "ENOENT") return null
-      const parent = dirname(cursor)
-      if (parent === cursor) return null
-      missingSegments.unshift(basename(cursor))
-      cursor = parent
-      continue
-    }
-
-    let canonicalCursor: string
-    try {
-      canonicalCursor = await realpath(cursor)
-    } catch {
-      // A broken symlink has an lstat result but no canonical destination.
-      return null
-    }
-
-    if (missingSegments.length > 0) {
-      try {
-        const canonicalInfo = cursorInfo.isSymbolicLink()
-          ? await fsStat(canonicalCursor)
-          : cursorInfo
-        if (!canonicalInfo.isDirectory()) return null
-      } catch {
-        return null
-      }
-    }
-
-    return resolve(canonicalCursor, ...missingSegments)
-  }
-}
-
-function isTaskOutputDescendant(base: string, candidate: string): boolean {
-  const child = relative(base, candidate)
-  if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
-    return false
-  }
-  const [namespace, ...rest] = child.split(sep)
-  return namespace.startsWith("claude-")
-    && namespace.length > "claude-".length
-    && rest.length > 0
-}
-
-/** Resolve a task-output path without allowing symlink escapes from a claude-* temp tree. */
-export async function resolveTaskOutputPath(outputPath: string): Promise<string | null> {
-  const lexicalPath = resolve(outputPath)
-  const canonicalBases = await getCanonicalTaskOutputBases()
-  // The lexical pre-check accepts either spelling of a base, since a root can
-  // reach the caller in a form os.tmpdir() does not use — /tmp vs /private/tmp
-  // on macOS, an 8.3 short path vs its long form on Windows. Containment is
-  // still decided by the canonical check below.
-  const lexicalBases = [...new Set([...TASK_OUTPUT_BASES.map((base) => resolve(base)), ...canonicalBases])]
-  if (!lexicalBases.some((base) => isTaskOutputDescendant(base, lexicalPath))) {
-    return null
-  }
-
-  const canonicalPath = await canonicalizeIncludingMissing(lexicalPath)
-  if (!canonicalPath) return null
-  return canonicalBases.some((base) => isTaskOutputDescendant(base, canonicalPath))
-    ? canonicalPath
-    : null
-}
 
 export function registerFileWatchRoutes(use: UseFn) {
-  // GET /api/task-output?path=<outputFile> - SSE stream of background task output
+  // GET /api/task-output?path=<outputFile>[&sessionId=<id>] - SSE stream of a
+  // background task's output, as the session whose task directory holds it
   use("/api/task-output", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
@@ -128,23 +28,37 @@ export function registerFileWatchRoutes(use: UseFn) {
     const pathParts = url.pathname.split("/").filter(Boolean)
     if (pathParts.length > 0) return next()
 
-    const outputPath = url.searchParams.get("path")
-    if (!outputPath) {
+    const requestedOutputPath = url.searchParams.get("path")
+    if (!requestedOutputPath) {
       sendJson(res, 400, { error: "path query param required" })
       return
     }
-    const requestedOutputPath = outputPath
-
-    // Security: only allow canonical descendants of /private/tmp/claude-* or
-    // /tmp/claude-*. Revalidate before every read because the output file may
-    // not exist yet when the stream is opened.
-    const resolved = await resolveTaskOutputPath(requestedOutputPath)
-    // Session revocation may destroy the response while canonicalization is in
-    // flight. Do not resurrect a closed request by installing SSE resources.
-    if (res.destroyed || res.writableEnded) return
-    if (!resolved) {
+    const requestedSessionId = url.searchParams.get("sessionId")
+    const output = await resolveTaskOutput(requestedOutputPath)
+    if (!output) {
       sendJson(res, 403, { error: "Access denied - only task output files allowed" })
       return
+    }
+    if (requestedSessionId !== null && requestedSessionId.toLowerCase() !== output.sessionId) {
+      sendJson(res, 403, { error: "Access denied - the output belongs to another session" })
+      return
+    }
+    if (output.sessionId !== null) {
+      if (await authorizeStreamSession(req, res, { sessionId: output.sessionId }) === null) return
+    } else if (!visibilityFor(req).everything) {
+      // Output filed under no session is the host's, for a caller who sees every session.
+      sendJson(res, 403, { error: "Access denied" })
+      return
+    }
+    // Session revocation may destroy the response while authorization is in
+    // flight. Do not resurrect a closed request by installing SSE resources.
+    if (res.destroyed || res.writableEnded) return
+
+    // Revalidated before every read, because the output file may not exist yet
+    // when the stream opens.
+    const resolveOutput = async () => {
+      const current = await resolveTaskOutput(requestedOutputPath)
+      return current !== null && current.sessionId === output.sessionId ? current.path : null
     }
 
     // SSE headers
@@ -171,7 +85,7 @@ export function registerFileWatchRoutes(use: UseFn) {
         while (!closed) {
           recordActivity("Task output checks")
           try {
-            const currentPath = await resolveTaskOutputPath(requestedOutputPath)
+            const currentPath = await resolveOutput()
             if (!currentPath) return
             const s = await stat(currentPath)
             if (s.size < offset) {
@@ -214,7 +128,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // Watch for new content (file may not exist yet)
     let watcher: ReturnType<typeof watch> | null = null
     try {
-      watcher = watch(resolved, () => {
+      watcher = watch(output.path, () => {
         if (!watcherReady) return
         if (debounceTimer) clearTimeout(debounceTimer)
         debounceTimer = setTimeout(readAndSend, 100)
@@ -258,8 +172,9 @@ export function registerFileWatchRoutes(use: UseFn) {
       return
     }
 
-    const filePath = await resolveSessionFilePath(dirName, fileName)
-    if (res.destroyed || res.writableEnded) return
+    const transcript = await authorizeTranscript(req, res, { dirName, fileName }, "view")
+    if (transcript === null || res.destroyed || res.writableEnded) return
+    const { filePath } = transcript
     if (!filePath || storeForPath(filePath)?.kind !== descriptorForDirName(dirName).kind) {
       sendJson(res, 403, { error: "Access denied" })
       return
@@ -366,9 +281,12 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     // ── Token-level streaming ──────────────────────────────────────────
     // The stream bus carries partial messages from the runtimes that publish
-    // them. External/fallback sessions never publish, so subscribing is inert
-    // for them and they continue to rely on JSONL file updates.
-    const sessionId = streamSessionId(dirName, fileName)
+    // them under the session id, which a rollout name buries behind a timestamp
+    // and date directories. External/fallback sessions never publish, so
+    // subscribing is inert for them and they continue to rely on JSONL file
+    // updates. A transcript filed under its session keeps its file stem, which
+    // nothing publishes under.
+    const sessionId = transcript.transcriptSessionId ?? fileName.replace(/\.jsonl$/, "")
     const descriptor = descriptorForDirName(dirName)
     // An agent that publishes no tokens gives the client nothing to keep a
     // turn "live" by, so its runtime's own turn state is reported instead.

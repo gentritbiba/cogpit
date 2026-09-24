@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { SessionsView } from "../SessionsView"
 
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}))
+
+vi.mock("@/components/SessionContextMenu", () => ({
+  SessionContextMenu: ({ children, onDelete }: { children: React.ReactNode; onDelete?: () => void }) => (
+    <div data-deletable={Boolean(onDelete)}>{children}</div>
+  ),
 }))
 
 const project = {
@@ -30,6 +37,7 @@ const session = {
 function renderView(overrides: Partial<React.ComponentProps<typeof SessionsView>> = {}) {
   const props: React.ComponentProps<typeof SessionsView> = {
     selectedProject: project,
+    filterEmpty: null,
     sessions: [session],
     sessionsTotal: 1,
     sessionsLoading: false,
@@ -75,6 +83,32 @@ const richSession = {
 }
 
 describe("SessionsView", () => {
+  afterEach(() => __resetEditionUiForTest())
+
+  it.each([
+    [undefined, true],
+    ["own", true],
+    ["interact", false],
+    ["view", false],
+  ] as const)("offers delete on a %s session only to its owner", (level, deletable) => {
+    const owned = level
+      ? { ...session, access: { level, mine: level === "own" } }
+      : session
+    renderView({ sessions: [owned], filteredSessions: [owned], onDeleteSession: vi.fn() })
+
+    expect(document.querySelector("[data-deletable]")).toHaveAttribute("data-deletable", String(deletable))
+  })
+
+  it("carries the edition's badges on each row, like the sidebar", () => {
+    __installEditionUiForTest({ SessionBadges: ({ access }) => (access?.mine ? null : <span data-badge>{access?.level}</span>) })
+    const theirs = { ...session, access: { level: "view" as const, mine: false } }
+    const mine = { ...richSession, access: { level: "own" as const, mine: true } }
+    renderView({ sessions: [theirs, mine], filteredSessions: [theirs, mine] })
+
+    const badges = document.querySelectorAll("[data-badge]")
+    expect([...badges].map((badge) => badge.textContent)).toEqual(["view"])
+  })
+
   it("opens a session from the compact project list", async () => {
     const user = userEvent.setup()
     const props = renderView()
@@ -99,6 +133,27 @@ describe("SessionsView", () => {
       "-workspace-cogpit",
       "/workspace/cogpit",
     )
+  })
+
+  describe("left empty by the session list filter", () => {
+    const filterEmpty = <p>Nothing under this filter</p>
+
+    it("shows what the filter stands in with", () => {
+      renderView({ filterEmpty, sessions: [], sessionsTotal: 0, filteredSessions: [] })
+
+      expect(screen.getByText("Nothing under this filter")).toBeInTheDocument()
+      expect(screen.queryByText("No sessions yet")).not.toBeInTheDocument()
+    })
+
+    it.each([
+      ["an unfiltered list", null, "", "No sessions yet"],
+      ["a search", filterEmpty, "missing", "No sessions match your search"],
+    ] as const)("keeps the plain empty state for %s", (_case, empty, searchFilter, title) => {
+      renderView({ filterEmpty: empty, searchFilter, sessions: [], sessionsTotal: 0, filteredSessions: [] })
+
+      expect(screen.getByText(title)).toBeInTheDocument()
+      expect(screen.queryByText("Nothing under this filter")).not.toBeInTheDocument()
+    })
   })
 
   it("shows the standard empty state for a search with no matches", () => {

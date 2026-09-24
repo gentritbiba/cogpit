@@ -7,7 +7,7 @@ import {
   switchDevice,
 } from "@/lib/device"
 import { readJson } from "@/lib/httpJson"
-import type { CogpitEdition } from "../../shared/contracts/team"
+import type { SignInMode } from "../../shared/contracts/identity"
 
 // ── Types (mirror server/hub/registry.ts + server/routes/devices.ts) ─────────
 
@@ -17,9 +17,9 @@ export interface DeviceHello {
   version?: string
   hubApi?: number
   mode?: string
-  edition?: CogpitEdition
-  /** Team device with no accounts yet — nothing can authenticate to it. */
-  needsBootstrap?: boolean
+  signIn?: SignInMode
+  /** Account sign-in with no accounts yet — nothing can authenticate to it. */
+  setupRequired?: boolean
   name?: string
   instanceId?: string
   networkAccess?: boolean
@@ -42,7 +42,7 @@ export interface PublicDevice {
   /** device is reached over https; absent for plain-http devices */
   tls?: boolean
   auth: "password" | "none"
-  /** Non-secret account name used when the remote device is team edition. */
+  /** Non-secret account name used when the remote device signs in with accounts. */
   username?: string
   /** Server-backed scope revision; changes only with host/account credentials. */
   connectionRevision?: number
@@ -85,7 +85,7 @@ export interface UpdateDeviceInput {
   port?: number
   tls?: boolean
   password?: string
-  /** Empty/null detaches a team account and returns to password-only auth. */
+  /** Empty/null detaches the account and returns to password-only auth. */
   username?: string | null
 }
 
@@ -151,6 +151,12 @@ function announceDevicesChanged(device: DeviceSummary): void {
   emitDevicesChanged(device.id, device.connectionRevision)
 }
 
+/** A device the hub does not list — gone, or not the caller's to reach — cannot stay the active one. */
+function leaveUnlistedDevice(listed: readonly PublicDevice[]): void {
+  const active = getActiveDeviceId()
+  if (active !== LOCAL_DEVICE_ID && !listed.some((device) => device.id === active)) switchDevice(LOCAL_DEVICE_ID)
+}
+
 function devicePath(id: string, suffix = ""): string {
   return `/api/hub/devices/${encodeURIComponent(id)}${suffix}`
 }
@@ -165,12 +171,12 @@ export function deviceVersion(device: PublicDevice): string | undefined {
   return undefined
 }
 
-/** Read a device edition only from a validated hello payload. */
-export function deviceEdition(device: PublicDevice): CogpitEdition | undefined {
+/** Read a device's sign-in only from a validated hello payload. */
+export function deviceSignIn(device: PublicDevice): SignInMode | undefined {
   const hello = device.runtime.lastHello
   if (hello && typeof hello === "object") {
-    const edition = (hello as { edition?: unknown }).edition
-    if (edition === "team" || edition === "personal") return edition
+    const signIn = (hello as { signIn?: unknown }).signIn
+    if (signIn === "account" || signIn === "password") return signIn
   }
   return undefined
 }
@@ -181,9 +187,10 @@ export function deviceEdition(device: PublicDevice): CogpitEdition | undefined {
  * Fetches and mutates the hub device registry. Fetches once on mount and
  * re-fetches on demand via {@link UseDevices.refresh} or after any mutation —
  * there is no background polling. All requests use {@link hubFetch} so they
- * always target the hub itself, never the active remote device.
+ * always target the hub itself, never the active remote device. With
+ * `enabled` false it reads nothing, for a caller who may not use the hub.
  */
-export function useDevices(): UseDevices {
+export function useDevices({ enabled = true }: { enabled?: boolean } = {}): UseDevices {
   const [devices, setDevices] = useState<PublicDevice[]>([])
   const [loading, setLoading] = useState(true)
   const [activeDeviceId, setActiveDeviceId] = useState<string>(() => getActiveDeviceId())
@@ -191,20 +198,28 @@ export function useDevices(): UseDevices {
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current
+    if (!enabled) {
+      setDevices([])
+      setLoading(false)
+      return
+    }
     try {
       const res = await hubFetch("/api/hub/devices")
+      // An account without device management may not use the hub at all.
+      if (res.status === 403 && sequence === refreshSequence.current) leaveUnlistedDevice([])
       if (!res.ok) return
       const data = await readJson(res)
       if (sequence !== refreshSequence.current) return
       const list = Array.isArray(data?.devices) ? (data.devices as PublicDevice[]) : []
       for (const device of list) rememberDeviceRevision(device)
       setDevices(list)
+      leaveUnlistedDevice(list)
     } catch {
       // Best-effort: keep the previously loaded list on transient failures.
     } finally {
       if (sequence === refreshSequence.current) setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
     void refresh()

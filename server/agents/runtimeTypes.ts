@@ -1,4 +1,5 @@
 import type { PermissionRequest } from "../../shared/contracts/permissions"
+import { isRecord } from "../../shared/objects"
 import type { MissionControlQuestion } from "../../shared/contracts/missionControl"
 import type { UsageCostTokenTotals } from "../../shared/contracts/usageCost"
 import type {
@@ -53,6 +54,17 @@ export interface StartSessionRequest extends AgentTurnSettings {
   /** Session title, applied however the agent supports it. */
   name?: string
   worktreeName?: string
+  /**
+   * Told the new session's id once, as soon as the runtime knows it and before
+   * anything that can still fail, so a start that fails after the agent has
+   * created the session still leaves its id known. Only an id the agent itself
+   * reported is passed; a session recognised by elimination never is.
+   *
+   * Must not throw. Runtimes call it through `reportSessionId`, which logs a
+   * throw and carries on, since it can run inside a transport callback that has
+   * no way to fail the start.
+   */
+  onSessionId?: (sessionId: string) => void
 }
 
 export interface StartedSession {
@@ -115,13 +127,30 @@ export interface StopAllResult {
   failed: number
 }
 
-/** What a batch approval achieved, for the response the permission bar reads. */
-export interface ApprovalBatchResult {
-  count: number
-  toolNames: string[]
+/** A request a batch approval answered, named the way a transcript can be searched for it. */
+export type ResolvedApproval = Pick<PermissionRequest, "requestId" | "toolUseId" | "toolName">
+
+export function resolvedApproval({ requestId, toolUseId, toolName }: ResolvedApproval): ResolvedApproval {
+  return { requestId, toolUseId, toolName }
 }
 
 export type UserQuestionAnswers = Record<string, string> | string[] | string
+
+/** Answers every runtime reads whole: anything else would be delivered in part and logged in full. */
+export function isUserQuestionAnswers(value: unknown): value is UserQuestionAnswers {
+  if (typeof value === "string") return true
+  const values = Array.isArray(value) ? value : isRecord(value) ? Object.values(value) : null
+  return values !== null && values.every((answer) => typeof answer === "string")
+}
+
+/**
+ * An answer a runtime accepted. `message` is null when the turn that asked took
+ * it. An agent that reads its next message as the answer returns that message
+ * instead, unsent: the caller delivers it with `send`, like any other prompt.
+ */
+export interface AcceptedAnswer {
+  message: SendRequest | null
+}
 
 /** Where to fork a session: the transcript as loaded, and the turn to keep through. */
 export interface ForkPoint {
@@ -196,14 +225,15 @@ export interface AgentRuntime {
   respondToAllApprovals(
     sessionId: string,
     decision: ApprovalDecision,
-  ): Promise<ApprovalBatchResult>
+  ): Promise<ResolvedApproval[]>
   /** Questions blocking a session, or every one this runtime holds. */
   listPendingQuestions(sessionId?: string): PendingQuestion[]
+  /** Null when the question is not pending. */
   answerQuestion(
     sessionId: string,
     questionId: string,
     answers: UserQuestionAnswers,
-  ): Promise<boolean>
+  ): Promise<AcceptedAnswer | null>
   /** Account, usage and capability snapshot, in this agent's own wire shape. */
   describeRuntime(force?: boolean): Promise<unknown>
   /**
@@ -213,11 +243,12 @@ export interface AgentRuntime {
   listModels(): Promise<ModelOption[] | null>
   /**
    * Usage from sessions this runtime holds open that has not reached their
-   * transcripts yet. A runtime that reports cumulative totals returns only the
-   * growth over `alreadyCounted`; one whose CLI appends usage as it goes has
-   * nothing to add.
+   * transcripts yet, from those in `sessionIds` alone when it is given. A
+   * runtime that reports cumulative totals returns only the growth over
+   * `alreadyCounted`; one whose CLI appends usage as it goes has nothing to
+   * add.
    */
-  liveUsageRecords(alreadyCounted: CountedUsage): Promise<UsageCostRecord[]>
+  liveUsageRecords(alreadyCounted: CountedUsage, sessionIds?: ReadonlySet<string>): Promise<UsageCostRecord[]>
   /**
    * Fork a session through the CLI's own API, keeping the turns through the
    * fork point. Only offered by a runtime whose `capabilities.nativeFork`
@@ -226,6 +257,15 @@ export interface AgentRuntime {
   fork(sessionId: string, at: ForkPoint): Promise<ForkedSession>
   /** Tear down the transport itself. */
   shutdown(): Promise<void>
+}
+
+/** Hand a start's new session id to its caller, which only observes the start and so cannot break it. */
+export function reportSessionId(req: StartSessionRequest, sessionId: string): void {
+  try {
+    req.onSessionId?.(sessionId)
+  } catch (error) {
+    console.error(`[agents] onSessionId failed for session ${sessionId}:`, error)
+  }
 }
 
 /**

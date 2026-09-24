@@ -1,10 +1,10 @@
 {
   "$comment": [
     "Per-file budget of lines naming an agent CLI, outside the agent layer.",
-    "These numbers may only go DOWN. check-agents.ts fails if a file exceeds",
-    "its budget, and also if it comes in under — so a cleanup must lower the",
-    "number in the same commit. Delete the entry once a file reaches zero.",
-    "Seeded at 133 files / 446 lines."
+    "These numbers may only go DOWN. Cogpit's scripts/check-agents.ts fails if a",
+    "file exceeds its budget, and also if it comes in under — so a cleanup must",
+    "lower the number in the same commit. Delete the entry once a file reaches zero.",
+    "Seeded at 129 files / 426 lines."
   ],
   "files": {
     "electron/main.ts": 2,
@@ -43,15 +43,12 @@
     "server/routes/config-browser/configValidation.ts": 7,
     "server/routes/config.ts": 17,
     "server/routes/editor.ts": 2,
-    "server/routes/files-watch.ts": 7,
+    "server/routes/files-watch.ts": 2,
     "server/routes/mcp.ts": 10,
     "server/routes/permissions.ts": 11,
-    "server/routes/ports/backgroundOutputs.ts": 3,
-    "server/routes/ports/index.ts": 1,
-    "server/routes/projects/index.ts": 1,
     "server/routes/projects/projectLabel.ts": 3,
     "server/routes/session-file-changes.ts": 14,
-    "server/routes/session-manage.ts": 12,
+    "server/routes/session-manage.ts": 11,
     "server/routes/session-new/sessionSpawner.ts": 1,
     "server/routes/session-status.ts": 1,
     "server/routes/shares.ts": 8,
@@ -65,7 +62,6 @@
     "server/share/passphrase.ts": 1,
     "server/standalone-runtime.ts": 6,
     "server/subagentWatcher.ts": 3,
-    "server/team/policy.ts": 8,
     "shared/contracts/agentPrompts.ts": 1,
     "shared/contracts/configBrowser.ts": 1,
     "shared/contracts/performance.ts": 3,

@@ -78,4 +78,20 @@ describe("QuestionPrompt", () => {
       await screen.findByText("Recommended — the agent stages and writes the message."),
     ).toBeInTheDocument()
   })
+
+  it("shows a reader the question and its options without letting them answer", () => {
+    render(
+      <QuestionPrompt
+        request={makeRequest([{ label: "Commit" }, { label: "Open the diff" }])}
+        responding={false}
+        gone={false}
+        onOpenSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/what should happen/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Commit" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Open the diff" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /Open session/ })).toBeEnabled()
+  })
 })

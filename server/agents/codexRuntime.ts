@@ -42,6 +42,8 @@ import { resolveSessionCwd } from "./sessionCwd"
 import { storeFor } from "./index"
 import {
   AgentRuntimeError,
+  reportSessionId,
+  resolvedApproval,
   selectAvailableDecision,
   type AgentRuntime,
   type ApprovalDecision,
@@ -74,6 +76,12 @@ export const CODEX_IMAGE_ONLY_PROMPT = "Please use the attached image or images 
 /** How long to wait for the CLI to write a rollout we can recognise as ours. */
 const SESSION_DISCOVERY_TIMEOUT_MS = 60_000
 const SESSION_DISCOVERY_INTERVAL_MS = 100
+/**
+ * How long a rollout recognised only by elimination waits for the CLI to
+ * announce an id. The CLI writes its rollout a moment before printing the id,
+ * and only an announced id can be reported as the caller's session.
+ */
+const ANNOUNCEMENT_GRACE_MS = 1_000
 /** Enough of the CLI's stdout to seed the transcript view before it flushes. */
 const MAX_INITIAL_STDOUT_LINES = 128
 
@@ -119,29 +127,38 @@ function rememberThreadSettings(sessionId: string, options: CodexExecutionOption
   rememberedSettings.set(sessionId, settings)
 }
 
+async function rolloutFor(sessionId: string): Promise<CodexIdentity | null> {
+  const filePath = await storeFor("codex").findSessionFile(sessionId)
+  return filePath ? getCodexThreadIdentity({ id: sessionId, path: filePath }) : null
+}
+
 /**
- * Watch the sessions tree for the rollout this spawn just created.
- *
- * Codex is the only agent that neither takes a session id nor reports the path
- * it wrote, so its session has to be recognised by elimination: newer than the
- * spawn, unseen before it, and carrying the right cwd.
+ * Wait for the rollout a start created. Codex takes no session id and does not
+ * always report the path it wrote, so once it has announced its id only that
+ * id's rollout will do. Until then, `scan` may recognise the rollout by
+ * elimination instead — newer than the spawn, unseen before it, and carrying
+ * the right cwd — for a CLI that never announces one, once the CLI has had
+ * `ANNOUNCEMENT_GRACE_MS` to announce it.
  */
-async function waitForNewSession(
-  cwd: string,
-  knownPaths: Set<string>,
-  startedAt: number,
-  timeoutMs = SESSION_DISCOVERY_TIMEOUT_MS,
-  readStartedId?: () => string | null,
+async function waitForRollout(
+  announcedId: () => string | null,
+  scan: (() => Promise<CodexIdentity | null>) | null,
   shouldStop?: () => boolean,
 ): Promise<CodexIdentity | null> {
-  const deadline = Date.now() + timeoutMs
+  const deadline = Date.now() + SESSION_DISCOVERY_TIMEOUT_MS
+  let eliminatedAt: number | null = null
   while (!shouldStop?.() && Date.now() < deadline) {
-    const startedId = readStartedId?.()
-    const filePath = startedId ? await storeFor("codex").findSessionFile(startedId) : null
-    const match = readStartedId
-      ? (filePath && startedId ? getCodexThreadIdentity({ id: startedId, path: filePath }) : null)
-      : await findNewestCodexSessionForCwd(cwd, knownPaths, startedAt)
-    if (match) return match
+    const sessionId = announcedId()
+    if (sessionId) {
+      const match = await rolloutFor(sessionId)
+      if (match) return match
+    } else if (scan) {
+      const match = await scan()
+      if (match) {
+        eliminatedAt ??= Date.now()
+        if (Date.now() - eliminatedAt >= ANNOUNCEMENT_GRACE_MS) return match
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, SESSION_DISCOVERY_INTERVAL_MS))
   }
   return null
@@ -208,17 +225,12 @@ function newLegacySession(proc: ChildProcess, jsonlPath: string | null): Persist
   return { agentKind: "codex", proc, onResult: null, dead: false, jsonlPath }
 }
 
-/** Prefer the path the app-server reported; fall back to recognising the file. */
-async function resolveStartedIdentity(
-  thread: CodexThread,
-  cwd: string,
-  knownPaths: Set<string>,
-  startedAt: number,
-): Promise<CodexIdentity> {
+/** Prefer the path the app-server reported; fall back to finding the thread's own rollout. */
+async function resolveStartedIdentity(thread: CodexThread): Promise<CodexIdentity> {
   const direct = getCodexThreadIdentity(thread)
   if (direct) return direct
 
-  const discovered = await waitForNewSession(cwd, knownPaths, startedAt)
+  const discovered = await waitForRollout(() => thread.id, null)
   if (discovered) return discovered
   throw new Error(`Codex created thread ${thread.id} but did not provide a rollout path`)
 }
@@ -228,7 +240,7 @@ async function resolveStartedIdentity(
  *
  * Two things race to identify it: the `session_meta` line on stdout, and the
  * filesystem scan. Whichever lands first wins, because older CLIs emit only one
- * of them.
+ * of them — though a scan defers to an id the CLI announces in time.
  */
 async function startLegacy(
   req: StartSessionRequest,
@@ -264,9 +276,21 @@ async function startLegacy(
   return new Promise<StartedSession>((resolve, reject) => {
     let settled = false
     let sessionId: string | null = null
-    let startedThreadId: string | null = null
-    const discovery = waitForNewSession(req.cwd, knownPaths, startedAt, SESSION_DISCOVERY_TIMEOUT_MS,
-      req.worktreeName ? () => startedThreadId : undefined, () => settled)
+    let announcedId: string | null = null
+    // Reported as soon as the CLI prints it, so a start that fails afterwards
+    // still names its session. A rollout recognised only by elimination could
+    // be another start's in the same cwd, so it never is.
+    const announce = (id: string) => {
+      if (id === announcedId) return
+      announcedId = id
+      reportSessionId(req, id)
+    }
+    const discovery = waitForRollout(
+      () => announcedId,
+      // A worktree session records its checkout as its cwd, so the requested one cannot recognise it.
+      req.worktreeName ? null : () => findNewestCodexSessionForCwd(req.cwd, knownPaths, startedAt),
+      () => settled,
+    )
     const stdoutLines: string[] = []
 
     const succeed = async (identity: CodexIdentity, initialContent?: string) => {
@@ -307,10 +331,12 @@ async function startLegacy(
       if (settled) return
       try {
         const event = JSON.parse(line)
-        if (event.type === "thread.started" && typeof event.thread_id === "string") startedThreadId = event.thread_id
+        if (event.type === "thread.started" && typeof event.thread_id === "string") announce(event.thread_id)
       } catch { /* ignore non-JSON diagnostics */ }
       const identity = identityFromMetaLine(line)
-      if (identity) void succeed(identity, stdoutLines.join("\n"))
+      if (!identity) return
+      announce(identity.sessionId)
+      void succeed(identity, stdoutLines.join("\n"))
     })
 
     void discovery.then((match) => {
@@ -654,17 +680,15 @@ export const codexRuntime: AgentRuntime = {
     const knownPaths = new Set(
       (await storeFor("codex").listSessionFiles()).map((file) => file.filePath),
     )
-    const startedAt = Date.now()
     if (req.worktreeName) return startLegacy(req, knownPaths)
+    let threadStarted = false
     try {
       const options = executionOptions(req)
-      const started = await startCodexExecution(codexAppServer, options)
-      const identity = await resolveStartedIdentity(
-        started.thread,
-        req.cwd,
-        knownPaths,
-        startedAt,
-      )
+      const started = await startCodexExecution(codexAppServer, options, (threadId) => {
+        threadStarted = true
+        reportSessionId(req, threadId)
+      })
+      const identity = await resolveStartedIdentity(started.thread)
       rememberThreadSettings(identity.sessionId, options)
       let initialContent: string | undefined
       try {
@@ -680,7 +704,9 @@ export const codexRuntime: AgentRuntime = {
         initialContent,
       }
     } catch (error) {
-      if (!isCodexAppServerUnavailable(error)) {
+      // Once the app-server has created the thread, that thread is the session;
+      // falling back to the CLI would start a second one.
+      if (threadStarted || !isCodexAppServerUnavailable(error)) {
         throw new AgentRuntimeError(
           500,
           "INTERNAL_ERROR",
@@ -813,7 +839,7 @@ export const codexRuntime: AgentRuntime = {
 
   async respondToAllApprovals(sessionId, decision) {
     const pending = codexAppServer.listPendingApprovals(sessionId)
-    if (pending.length === 0) return { count: 0, toolNames: [] }
+    if (pending.length === 0) return []
 
     // Validate the whole batch before answering any of it, so a request that
     // cannot take this decision fails the call instead of quietly getting a
@@ -832,10 +858,7 @@ export const codexRuntime: AgentRuntime = {
     } catch (error) {
       throw approvalFailure(error)
     }
-    return {
-      count: pending.length,
-      toolNames: [...new Set(pending.map((approval) => normalizeCodexApproval(approval).toolName))],
-    }
+    return pending.map((approval) => resolvedApproval(normalizeCodexApproval(approval)))
   },
 
   listPendingQuestions(sessionId) {
@@ -848,16 +871,17 @@ export const codexRuntime: AgentRuntime = {
   },
 
   /**
-   * Answering is sending a message: Codex's async questions carry no reply
-   * channel of their own, and the thread reads the next message as the answer.
-   * `send` steers a turn that is still running and starts one otherwise, which
-   * is exactly the two cases a question can be answered in.
+   * The answer is a message: Codex's async questions carry no reply channel of
+   * their own, and the thread reads the next message as the answer. Sent with
+   * the thread's remembered settings, `send` steers a turn that is still
+   * running and starts one otherwise, which is exactly the two cases a
+   * question can be answered in.
    */
   async answerQuestion(sessionId, questionId, answers) {
     const pending = codexQuestions
       .list(sessionId)
       .find((question) => question.itemId === questionId)
-    if (!pending) return false
+    if (!pending) return null
 
     const message = formatQuestionAnswer(pending, answers)
     if (!message) {
@@ -868,8 +892,7 @@ export const codexRuntime: AgentRuntime = {
       )
     }
 
-    await codexRuntime.send(sessionId, { ...rememberedSettings.get(sessionId), message })
-    return true
+    return { message: { ...rememberedSettings.get(sessionId), message } }
   },
 
   listModels: fetchCodexModels,

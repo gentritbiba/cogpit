@@ -8,42 +8,15 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { sendJson, type NextFn, type UseFn } from "../http"
-import { allStores } from "../agents"
+import { allTopLevelSessions } from "../agents"
+import { listedSession, listedSessionId } from "../agents/listedSession"
+import { takeVisible, visibilityFor, visibleInOrder } from "../edition"
+import { requestScope } from "./requestScope"
 import { summarizeSession } from "../lib/missionControlSummary"
 import type { MissionControlResponse } from "../../shared/contracts/missionControl"
 
 const DEFAULT_LIMIT = 24
 const MAX_LIMIT = 60
-
-interface Candidate {
-  sessionId: string
-  filePath: string
-  mtimeMs: number
-}
-
-/** Most recently modified session files across every agent. */
-async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
-  const candidates: Candidate[] = []
-
-  for (const store of allStores()) {
-    try {
-      for (const session of await store.listTopLevelSessions()) {
-        candidates.push({
-          // A listing that had to open the file already knows the id; one that
-          // did not names the file after the session.
-          sessionId: session.sessionId ?? session.fileName.replace(/\.jsonl$/, ""),
-          filePath: session.filePath,
-          mtimeMs: session.mtimeMs,
-        })
-      }
-    } catch {
-      /* An agent with no local history simply contributes nothing. */
-    }
-  }
-
-  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  return candidates.slice(0, limit)
-}
 
 export async function handleMissionControl(
   req: IncomingMessage,
@@ -52,6 +25,7 @@ export async function handleMissionControl(
 ): Promise<void> {
   if (req.method !== "GET") return next()
 
+  const check = visibilityFor(req, requestScope(req))
   const url = new URL(req.url || "/", "http://localhost")
   const requested = Number.parseInt(url.searchParams.get("limit") ?? "", 10)
   const limit = Number.isFinite(requested)
@@ -59,10 +33,14 @@ export async function handleMissionControl(
     : DEFAULT_LIMIT
 
   try {
-    const candidates = await collectRecentSessionFiles(limit)
-    const settled = await Promise.all(
-      candidates.map((c) => summarizeSession(c.sessionId, c.filePath).catch(() => null)),
-    )
+    // An agent whose history cannot be read contributes nothing; the others still show.
+    const recent = check.nothing
+      ? []
+      : await takeVisible(visibleInOrder(await allTopLevelSessions({ skipUnreadable: true }), check, listedSession), limit)
+    const settled = await Promise.all(recent.map(async ({ item, session }) => {
+      const summary = await summarizeSession(listedSessionId(item), item.filePath).catch(() => null)
+      return summary && session.annotate(summary)
+    }))
     const body: MissionControlResponse = {
       summaries: settled.filter((summary) => summary !== null),
       generatedAt: new Date().toISOString(),

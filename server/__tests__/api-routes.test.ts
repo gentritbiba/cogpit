@@ -11,7 +11,6 @@ vi.mock("../lib/leakReaper", () => ({
 }))
 
 import { API_ROUTE_REGISTRY, registerApiRoutes } from "../api-routes"
-import { ROUTE_POLICIES } from "../team/policy"
 import type { HubMode } from "../routes/hello"
 
 const CANONICAL_ROUTE_IDS = [
@@ -20,10 +19,11 @@ const CANONICAL_ROUTE_IDS = [
   "hub",
   "performance",
   "config",
-  "team-admin",
+  "edition",
   "projects",
   "session-send",
   "session-new",
+  "folders",
   "session-manage",
   "ports",
   "teams",
@@ -33,6 +33,7 @@ const CANONICAL_ROUTE_IDS = [
   "files",
   "files-watch",
   "session-file-changes",
+  "session-access",
   "session-archive",
   "session-config",
   "session-context",
@@ -217,24 +218,5 @@ describe("API route registry", () => {
 
     await vi.waitFor(() => expect(next).toHaveBeenCalledOnce())
     expect(next.mock.calls[0][0]).toBeInstanceOf(URIError)
-  })
-})
-
-describe("team route policies", () => {
-  const registryIds = API_ROUTE_REGISTRY.map(({ id }) => id)
-
-  it("covers every registry id with at least one policy rule", () => {
-    for (const id of registryIds) {
-      const rules = ROUTE_POLICIES[id]
-      expect(rules, `route id "${id}" has no policy entry`).toBeDefined()
-      expect(rules?.length, `route id "${id}" has an empty policy entry`).toBeGreaterThan(0)
-    }
-  })
-
-  it("has no policy entries for ids missing from the registry", () => {
-    const known = new Set<string>(registryIds)
-    for (const id of Object.keys(ROUTE_POLICIES)) {
-      expect(known.has(id), `policy entry "${id}" is not a registry id`).toBe(true)
-    }
   })
 })

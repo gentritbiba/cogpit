@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { authUrl } from "@/lib/auth"
+import { openSessionStream } from "@/lib/sessionStream"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { AgentKind } from "@/lib/agents"
@@ -123,7 +123,8 @@ export function useLiveSession(
     setSseState("connecting")
 
     const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?offset=${watchOffset}`
-    const es = new EventSource(authUrl(url))
+    const stream = openSessionStream(url)
+    const es = stream.source
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
     const resetStaleTimer = (ms = 30_000) => {
@@ -361,7 +362,7 @@ export function useLiveSession(
       // Drop any in-flight worker result so a stale parse from this source
       // can't stomp sessionRef.current after the next source is mounted.
       closed = true
-      es.close()
+      stream.close()
       setIsLive(false)
       sseStateRef.current = "disconnected"
       setSseState("disconnected")

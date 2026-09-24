@@ -43,6 +43,16 @@ beforeEach(() => {
   mockIdentity.mockReturnValue(null)
 })
 
+describe("prefetchSession", () => {
+  it("loads the tail as a request the user did not make", async () => {
+    mockAuthFetch.mockResolvedValue(tailResponse())
+
+    await prefetchSession("-dir", "sess.jsonl", vi.fn(async () => parsed))
+
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?tail=30", { background: true })
+  })
+})
+
 describe("prefetchSession device scoping", () => {
   it("caches the parsed session when the active device is unchanged", async () => {
     mockAuthFetch.mockResolvedValue(tailResponse())

@@ -10,11 +10,15 @@ import { dirs } from "../dirs"
  * ids — the tags on the transcript lines are the only link back.
  */
 
+/** A sub-agent transcript as its lead's `subagents/` directory names it; nothing that leaves the directory. */
+const SUBAGENT_FILE_NAME = /^agent-[^/\\]+\.jsonl$/
+
 export async function matchSubagentToMember(
   leadSessionId: string,
   subagentFileName: string,
-  members: Array<{ name: string; agentType: string; prompt?: string }>
+  members: ReadonlyArray<{ name?: string; agentType?: string; prompt?: string }>
 ): Promise<string | null> {
+  if (!SUBAGENT_FILE_NAME.test(subagentFileName)) return null
   const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
 
   for (const entry of entries) {
@@ -39,7 +43,7 @@ export async function matchSubagentToMember(
             .split("\n")[0] || ""
 
         for (const member of members) {
-          if (member.agentType === "team-lead") continue
+          if (!member.name || member.agentType === "team-lead") continue
           const prompt = member.prompt || ""
           const snippet = prompt.slice(0, 120)
           const terms = [

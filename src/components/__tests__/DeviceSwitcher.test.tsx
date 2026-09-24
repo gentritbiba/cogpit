@@ -3,12 +3,12 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
 const mocks = vi.hoisted(() => ({ switchDevice: vi.fn(), useDevices: vi.fn() }))
 
-vi.mock("@/lib/device", () => ({
-  LOCAL_DEVICE_ID: "local",
+vi.mock("@/lib/device", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/device")>()),
   switchDevice: mocks.switchDevice,
 }))
 vi.mock("@/hooks/useDevices", () => ({
@@ -121,8 +121,8 @@ describe("DeviceSwitcher", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_1", username: "alice", displayName: "Alice" },
+      capabilities: NO_CAPABILITIES,
     })
     const user = userEvent.setup()
     render(<DeviceSwitcher />)

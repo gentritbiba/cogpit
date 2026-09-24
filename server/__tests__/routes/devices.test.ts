@@ -41,11 +41,17 @@ vi.mock("../../hub/registry", () => ({
 
 vi.mock("../../hub/device-client", () => {
   class DeviceAuthError extends Error {}
+  class DeviceRefusedError extends Error {
+    constructor(_deviceId: string, message: string) {
+      super(message)
+    }
+  }
   class DeviceUnreachableError extends Error {}
   return {
     getDeviceToken: vi.fn(),
     invalidateDeviceToken: vi.fn(),
     DeviceAuthError,
+    DeviceRefusedError,
     DeviceUnreachableError,
   }
 })
@@ -68,6 +74,7 @@ import {
   getDeviceToken,
   invalidateDeviceToken,
   DeviceAuthError,
+  DeviceRefusedError,
   DeviceUnreachableError,
 } from "../../hub/device-client"
 import { invalidateDeviceConnections } from "../../hub/connection-invalidation"
@@ -484,34 +491,72 @@ describe("device usernames", () => {
     expect(body.device.password).toBeUndefined()
   })
 
-  it("surfaces ACCOUNT_DISABLED from the machine-readable code on a device 403", async () => {
+  it("surfaces a refusal that stands as ACCOUNT_REFUSED with the device's own text", async () => {
     const fetchFn = mockFetch()
     fetchFn
       .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
-      // The error text is free-form; the code alone must be enough.
       .mockResolvedValueOnce(fakeResponse({
         status: 403,
-        json: { valid: false, error: "Your account was disabled by an admin", code: "ACCOUNT_DISABLED" },
+        json: { valid: false, error: "Your account was disabled by an admin", code: "ACCOUNT_OFF" },
       }))
 
     const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
 
     expect(res._getStatus()).toBe(400)
-    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(JSON.parse(res._getData())).toEqual({ code: "ACCOUNT_REFUSED", error: "remote-mac: Your account was disabled by an admin" })
     expect(mockedAddDevice).not.toHaveBeenCalled()
   })
 
-  it("surfaces ACCOUNT_DISABLED via the error-string fallback (older team devices)", async () => {
+  it("surfaces a retryable refusal as DEVICE_REFUSED with the device's own text", async () => {
     const fetchFn = mockFetch()
     fetchFn
       .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
-      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: "Account disabled" } }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: "Only admins can sign in.", code: "PAUSED", retryable: true } }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "bob" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData())).toEqual({ code: "DEVICE_REFUSED", error: "remote-mac: Only admins can sign in." })
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("names the device by the name the caller gave it and bounds the device's text", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: `  ${"x".repeat(1000)}`, code: "PAUSED", retryable: true } }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "bob", name: "Studio" })
+
+    const { error } = JSON.parse(res._getData()) as { error: string }
+    expect(error).toBe(`Studio: ${"x".repeat(299)}…`)
+  })
+
+  it("names the device by its stored name when a PATCH re-verify is refused", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: "Only admins can sign in.", code: "PAUSED", retryable: true } }))
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { password: "new-pw" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData())).toEqual({ code: "DEVICE_REFUSED", error: "mac: Only admins can sign in." })
+  })
+
+  it("falls back to its own text when a refusal carries none", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, code: "ACCOUNT_OFF" } }))
 
     const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
 
-    expect(res._getStatus()).toBe(400)
-    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
-    expect(mockedAddDevice).not.toHaveBeenCalled()
+    expect(JSON.parse(res._getData())).toEqual({ code: "ACCOUNT_REFUSED", error: "The device refused that account." })
   })
 
   it("re-verifies with the stored password and invalidates only after committing a username change", async () => {
@@ -934,6 +979,28 @@ describe("POST /api/hub/devices/:id/test", () => {
 
     expect(JSON.parse(res._getData())).toMatchObject({ ok: false, authState: "bad-password", code: "BAD_PASSWORD" })
     expect(mockedSetDeviceRuntime).toHaveBeenCalledWith("dev_1", expect.objectContaining({ authState: "bad-password" }))
+  })
+
+  it("reports a retryable refusal as reachable, with the device's text, without blaming the stored password", async () => {
+    const fetchFn = mockFetch()
+    fetchFn.mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "bob", addedAt: 1,
+    } as never)
+    mockedGetDeviceToken.mockRejectedValue(new DeviceRefusedError("dev_1", "Only admins can sign in."))
+
+    const { res } = await drive("POST", "/dev_1/test")
+
+    expect(JSON.parse(res._getData())).toEqual({
+      ok: false,
+      reachable: true,
+      authState: "unknown",
+      code: "DEVICE_REFUSED",
+      error: "Only admins can sign in.",
+    })
+    expect(mockedSetDeviceRuntime).toHaveBeenCalledWith("dev_1", expect.objectContaining({ authState: "unknown" }))
+    expect(mockedSetDeviceRuntime).not.toHaveBeenCalledWith("dev_1", expect.objectContaining({ authState: "bad-password" }))
   })
 
   it("reports unreachable when the probe fails", async () => {

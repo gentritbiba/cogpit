@@ -5,20 +5,14 @@ vi.mock("../../config", () => ({
   getConfig: vi.fn(),
 }))
 
-vi.mock("../../team/users", () => ({
-  isUsersStoreInitialized: vi.fn(() => false),
-  userCount: vi.fn(() => 0),
-}))
-
 import { getConfig } from "../../config"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerHelloRoutes, getInstanceId } from "../../routes/hello"
-import { initEdition, __resetEditionForTest } from "../../team/edition"
-import { isUsersStoreInitialized, userCount } from "../../team/users"
+import { __resetEditionForTest } from "../../edition"
+import { fakeEditionAuth } from "../edition/fakeAuth"
+import { installFakeEdition } from "../edition/fakeEdition"
 
 const mockedGetConfig = vi.mocked(getConfig)
-const mockedIsUsersStoreInitialized = vi.mocked(isUsersStoreInitialized)
-const mockedUserCount = vi.mocked(userCount)
 
 function register(mode: "electron" | "standalone" | "dev" = "electron") {
   return getRouteHandler(collectRoutes((use) => registerHelloRoutes(use, { mode })), "/api/hello")
@@ -27,8 +21,6 @@ function register(mode: "electron" | "standalone" | "dev" = "electron") {
 describe("GET /api/hello", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockedIsUsersStoreInitialized.mockReturnValue(false)
-    mockedUserCount.mockReturnValue(0)
     delete process.env.COGPIT_DEVICE_NAME
     delete process.env.COGPIT_EDITION
   })
@@ -63,7 +55,7 @@ describe("GET /api/hello", () => {
     expect(res._getHeaders()["Content-Type"]).toBe("application/json")
   })
 
-  it("reports the personal edition before any initEdition runs", () => {
+  it("reports the personal edition before any loadEdition runs", () => {
     const handler = register()
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
@@ -73,8 +65,8 @@ describe("GET /api/hello", () => {
     expect(JSON.parse(res._getData()).edition).toBe("personal")
   })
 
-  it("reports the team edition once resolved for the standalone shell", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
+  it("reports the installed edition by name", () => {
+    installFakeEdition({})
     const handler = register("standalone")
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
@@ -84,48 +76,7 @@ describe("GET /api/hello", () => {
     expect(JSON.parse(res._getData()).edition).toBe("team")
   })
 
-  it("advertises the open first-admin bootstrap for a team server with no users", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    mockedIsUsersStoreInitialized.mockReturnValue(true)
-    mockedUserCount.mockReturnValue(0)
-    const handler = register("standalone")
-    const { req, res, next } = createMockReqRes("GET")
-    mockedGetConfig.mockReturnValueOnce(null)
-
-    handler(req, res, next)
-
-    expect(JSON.parse(res._getData()).needsBootstrap).toBe(true)
-  })
-
-  it("closes the bootstrap signal once a user exists", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    mockedIsUsersStoreInitialized.mockReturnValue(true)
-    mockedUserCount.mockReturnValue(1)
-    const handler = register("standalone")
-    const { req, res, next } = createMockReqRes("GET")
-    mockedGetConfig.mockReturnValueOnce(null)
-
-    handler(req, res, next)
-
-    expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
-  })
-
-  it("keeps the bootstrap signal closed before the users store initializes", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    mockedIsUsersStoreInitialized.mockReturnValue(false)
-    mockedUserCount.mockReturnValue(0)
-    const handler = register("standalone")
-    const { req, res, next } = createMockReqRes("GET")
-    mockedGetConfig.mockReturnValueOnce(null)
-
-    handler(req, res, next)
-
-    expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
-  })
-
-  it("never advertises a bootstrap in personal edition", () => {
-    mockedIsUsersStoreInitialized.mockReturnValue(true)
-    mockedUserCount.mockReturnValue(0)
+  it("signs in with the network password and never asks for setup in personal edition", () => {
     const handler = register()
     const { req, res, next } = createMockReqRes("GET")
     mockedGetConfig.mockReturnValueOnce(null)
@@ -134,7 +85,24 @@ describe("GET /api/hello", () => {
 
     const body = JSON.parse(res._getData())
     expect(body.edition).toBe("personal")
-    expect(body.needsBootstrap).toBe(false)
+    expect(body.signIn).toBe("password")
+    expect(body.setupRequired).toBe(false)
+  })
+
+  it("signs in with an account, and reports its setup, when the edition owns sign-in", () => {
+    let setupRequired = true
+    installFakeEdition({ auth: fakeEditionAuth(), setupRequired: () => setupRequired })
+    const handler = register("standalone")
+    const read = () => {
+      const { req, res, next } = createMockReqRes("GET")
+      mockedGetConfig.mockReturnValueOnce(null)
+      handler(req, res, next)
+      return JSON.parse(res._getData())
+    }
+
+    expect(read()).toMatchObject({ signIn: "account", setupRequired: true })
+    setupRequired = false
+    expect(read()).toMatchObject({ signIn: "account", setupRequired: false })
   })
 
   it("reports networkAccess:false and configured:false when unconfigured", () => {

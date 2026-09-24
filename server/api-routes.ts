@@ -14,10 +14,12 @@ import { registerCodexThreadRoutes } from "./routes/codex-threads"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerConfigRoutes } from "./routes/config"
 import { registerDeviceRoutes } from "./routes/devices"
+import { registerEditionRoutes } from "./routes/edition"
 import { registerEditorRoutes } from "./routes/editor"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerFileRoutes } from "./routes/files"
+import { registerFolderRoutes } from "./routes/folders"
 import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerGitHubRoutes } from "./routes/github"
@@ -40,6 +42,7 @@ import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerAgentExecutableRoutes } from "./routes/agent-executable"
 import { registerAgentAccountRoutes } from "./routes/agent-accounts"
 import { registerScriptRoutes } from "./routes/scripts"
+import { registerSessionAccessRoutes } from "./routes/session-access"
 import { registerSessionArchiveRoutes } from "./routes/session-archive"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
@@ -48,7 +51,6 @@ import { registerSessionStatusRoutes } from "./routes/session-status"
 import { registerShareGuestRoutes } from "./routes/share-guest"
 import { registerShareRoutes } from "./routes/shares"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
-import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
 import { registerTeamRoutes } from "./routes/teams"
 import { registerUndoRoutes } from "./routes/undo"
@@ -88,8 +90,9 @@ function apiRoute(
  * Ids name the concern, not an agent: `session-send`, `session-new` and
  * `session-manage` serve all three CLIs, and only a genuinely single-agent
  * capability (`codex-threads`, `copilot-history`) may carry an agent's name.
- * Every id also has to exist in `team/policy.ts` — an unlisted path falls
- * through to the admin default and silently locks members out.
+ * An edition that authorizes by route may key its policy on these ids, so a
+ * new one belongs in that policy too. `edition` is where the running edition
+ * registers its own routes.
  */
 export const API_ROUTE_REGISTRY = [
   { id: "hello", register: registerHelloRoutes },
@@ -97,10 +100,11 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("hub", (use) => use("/hub", createHubProxyHandler())),
   apiRoute("performance", registerPerformanceRoutes),
   apiRoute("config", registerConfigRoutes),
-  apiRoute("team-admin", registerTeamAdminRoutes),
+  apiRoute("edition", registerEditionRoutes),
   apiRoute("projects", registerProjectRoutes),
   apiRoute("session-send", registerSessionSendRoutes),
   apiRoute("session-new", registerSessionNewRoutes),
+  apiRoute("folders", registerFolderRoutes),
   apiRoute("session-manage", registerSessionManageRoutes),
   apiRoute("ports", registerPortRoutes),
   apiRoute("teams", registerTeamRoutes),
@@ -110,6 +114,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("files", registerFileRoutes),
   apiRoute("files-watch", registerFileWatchRoutes),
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
+  apiRoute("session-access", registerSessionAccessRoutes),
   apiRoute("session-archive", registerSessionArchiveRoutes),
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),

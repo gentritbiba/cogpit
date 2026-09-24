@@ -1,5 +1,6 @@
 import { lstat, realpath, stat } from "node:fs/promises"
-import { resolve } from "node:path"
+import { relative, resolve, sep } from "node:path"
+import type { AgentSessionFileCodec, TranscriptRoot } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 
 /**
@@ -55,6 +56,34 @@ export async function resolveCanonicalFileWithinRoot(
   } catch {
     return null
   }
+}
+
+/**
+ * Where `filePath` really lives, as a `/`-separated path relative to `root`,
+ * both with symlinks resolved. Null when either cannot be resolved or the file
+ * is not strictly inside the root.
+ */
+export async function canonicalPathWithin(root: string, filePath: string): Promise<string | null> {
+  try {
+    const [canonicalRoot, canonicalFile] = await Promise.all([realpath(root), realpath(filePath)])
+    if (canonicalFile === canonicalRoot || !isWithinDir(canonicalRoot, canonicalFile)) return null
+    return relative(canonicalRoot, canonicalFile).split(sep).join("/")
+  } catch {
+    return null
+  }
+}
+
+/**
+ * `AgentStore.transcriptRoot` for a store whose codec reads paths relative to
+ * its sessions root, from where the file really lives under `root`.
+ */
+export async function transcriptRootWithin(
+  root: string,
+  filePath: string,
+  codec: AgentSessionFileCodec,
+): Promise<TranscriptRoot | null> {
+  const pathInRoot = await canonicalPathWithin(root, filePath)
+  return pathInRoot ? codec.transcriptRoot(pathInRoot) : null
 }
 
 /** Size and mtime of a listed transcript, once it is known to be contained. */

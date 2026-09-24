@@ -142,6 +142,18 @@ describe("Codex execution mappings", () => {
     }))
   })
 
+  it("reports the new thread before asking it for a first turn that can still fail", async () => {
+    const onThreadStarted = vi.fn()
+    const runtime = client({ startTurn: vi.fn().mockRejectedValue(new Error("turn refused")) })
+
+    await expect(startCodexExecution(runtime, { cwd: "/work", message: "Build" }, onThreadStarted))
+      .rejects.toThrow("turn refused")
+
+    expect(onThreadStarted.mock.calls).toEqual([["thread-1"]])
+    expect(onThreadStarted.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(runtime.startTurn).mock.invocationCallOrder[0])
+  })
+
   it("resumes an idle thread by id and starts a new turn", async () => {
     const runtime = client()
     const result = await continueCodexExecution(

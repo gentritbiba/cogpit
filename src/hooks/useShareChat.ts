@@ -24,7 +24,7 @@ export function useShareChat(): ChatState {
     setStatus("connected")
     setError(undefined)
 
-    void sendShareMessage(text, images)
+    return sendShareMessage(text, images)
       .then((res) => {
         if (res.ok) {
           setStatus("idle")
@@ -39,6 +39,7 @@ export function useShareChat(): ChatState {
         setStatus("error")
         setPendingMessages((prev) => prev.slice(0, -1))
       })
+      .then(() => true)
   }, [])
 
   const interrupt = useCallback(() => {

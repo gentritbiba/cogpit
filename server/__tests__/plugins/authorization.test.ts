@@ -1,14 +1,10 @@
 // @vitest-environment node
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-const environment = vi.hoisted(() => ({ team: false }))
 vi.mock("../../config", () => ({ getConfig: () => ({ networkAccess: true, networkPassword: "fixture-network-hash" }) }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => environment.team }))
-vi.mock("../../team/sessionPersistence", () => ({
-  clearAllSessions: async () => {}, persistSession: async () => {}, removeSession: async () => {},
-  removeSessionsForUser: async () => {}, restoreSession: () => null, touchSession: async () => {},
-}))
-import { authMiddleware, createSessionToken, revokeAllSessions, revokeSessionToken, revokeSessionsForUser } from "../../security"
+import { __resetEditionForTest } from "../../edition"
+import { signInByToken, useAccountSignIn } from "../edition/fakeEdition"
+import { authMiddleware, createSessionToken, revokeAllSessions, revokeSessionToken, revokeSessionsForPrincipal } from "../../security"
 import { getRequestAuthentication, setRequestAuthentication } from "../../requestAuthentication"
 import { PluginAuthorization, PLUGIN_SESSION_HEADER, requirePluginAuthentication } from "../../plugins/authorization"
 import { PluginLeaseManager, type PluginLeaseScope } from "../../plugins/leases"
@@ -41,7 +37,7 @@ const scope: PluginLeaseScope = {
   pluginId: "fixture.sample", digest: "a".repeat(64), projectKey: "project-a", contextEpoch: "epoch-a", grantsRevision: 2, connectionRevision: 3,
 }
 
-beforeEach(async () => { environment.team = false; now = 1000; await revokeAllSessions() })
+beforeEach(async () => { __resetEditionForTest(); now = 1000; await revokeAllSessions() })
 afterEach(async () => { for (const entry of managers.splice(0)) entry.dispose(); await revokeAllSessions(); vi.useRealTimers() })
 
 describe("accepted request authentication", () => {
@@ -84,8 +80,8 @@ describe("accepted request authentication", () => {
     expect(getRequestAuthentication(req)).toBeNull()
   })
 
-  it("uses principal identity from validated team sessions and refuses member access", () => {
-    environment.team = true
+  it("uses principal identity from validated account sessions and refuses one the edition does not let administer", () => {
+    useAccountSignIn({ middleware: signInByToken })
     const admin = createSessionToken("192.0.2.10", undefined, { userId: "user-a", username: "admin", role: "admin" })
     const member = createSessionToken("192.0.2.10", undefined, { userId: "user-b", username: "member", role: "member" })
     expect(requirePluginAuthentication(authenticate(request(admin))).kind).toBe("session")
@@ -119,7 +115,7 @@ describe("plugin client sessions and activation leases", () => {
   })
 
   it("isolates two authentication sessions even when both represent the same administrator", () => {
-    environment.team = true
+    useAccountSignIn({ middleware: signInByToken })
     const principal = { userId: "user-a", username: "admin", role: "admin" as const }
     const tokenA = createSessionToken("192.0.2.1", undefined, principal)
     const tokenB = createSessionToken("192.0.2.2", undefined, principal)
@@ -153,13 +149,13 @@ describe("plugin client sessions and activation leases", () => {
   })
 
   it("uses the existing user demotion/reset revocation source", async () => {
-    environment.team = true
+    useAccountSignIn({ middleware: signInByToken })
     const token = createSessionToken("192.0.2.1", undefined, { userId: "user-a", username: "admin", role: "admin" })
     const { authorization, leases } = manager()
     const session = authorization.createOrRenewSession(authenticate(request(token)))
     const binding = authorization.resolve(authenticate(request(token, session.sessionId)))
     const lease = leases.create(binding, scope)
-    await revokeSessionsForUser("user-a")
+    await revokeSessionsForPrincipal("user-a")
     expect(lease.signal.aborted).toBe(true)
     expect(() => authorization.assertBinding(binding)).toThrow()
   })
@@ -272,7 +268,7 @@ describe("connected plugin client descriptors", () => {
   })
 
   it("removes descriptors on logout and user demotion revocation", async () => {
-    environment.team = true
+    useAccountSignIn({ middleware: signInByToken })
     const { authorization } = manager()
     const tokenA = createSessionToken("192.0.2.1", undefined, { userId: "user-a", username: "admin-a", role: "admin" })
     const tokenB = createSessionToken("192.0.2.2", undefined, { userId: "user-b", username: "admin-b", role: "admin" })
@@ -280,12 +276,12 @@ describe("connected plugin client descriptors", () => {
     authorization.createOrRenewSession(authenticate(request(tokenB)), client)
     await revokeSessionToken(tokenA)
     expect(authorization.activeClients()).toEqual([client])
-    await revokeSessionsForUser("user-b")
+    await revokeSessionsForPrincipal("user-b")
     expect(authorization.activeClients()).toEqual([])
   })
 
   it("rechecks a demoted principal even before the revocation notification arrives", () => {
-    environment.team = true
+    useAccountSignIn({ middleware: signInByToken })
     const { authorization } = manager()
     const principal = { userId: "user-a", username: "admin", role: "admin" as const }
     const token = createSessionToken("192.0.2.1", undefined, principal)

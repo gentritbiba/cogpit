@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react"
-import { FolderOpen, FolderPlus } from "lucide-react"
+import { FolderOpen, FolderPlus, FolderSearch } from "lucide-react"
 import {
   Empty,
   EmptyDescription,
@@ -9,19 +9,22 @@ import {
 } from "@/components/ui/empty"
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { FolderBrowser } from "@/components/FolderBrowser"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
+import { useFolderHostName } from "@/hooks/useFolderHostName"
 import { authFetch } from "@/lib/auth"
 import { shortPath } from "@/lib/format"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import type { AgentKind } from "@/lib/agents"
 import { agentSwitcherName } from "@/lib/agents/presentation"
 import type { ProjectInfo } from "@/components/Dashboard/types"
+
+const BROWSE_FOLDERS = "browse-folders"
 
 function normalizePath(path: string): string {
   return path.replace(/[\\/]+$/, "") || path
@@ -44,14 +47,20 @@ export function useProjectList(enabled: boolean): ProjectInfo[] {
   return projects
 }
 
+/** The project list, or the folder browser in its place. */
+export type ProjectSwitcherView = "projects" | "folders"
+
 interface ProjectSwitcherListProps {
   projects: ProjectInfo[]
   onNewSession: (dirName: string, cwd?: string) => void
-  /** Starts a session in a pasted absolute path nobody has opened yet. */
+  /** Starts a session in a folder nobody has opened yet: pasted, or picked in the folder browser. */
   onNewFolder: (cwd: string) => void
   defaultAgentKind: AgentKind
   /** The project already selected, ticked in the list. */
   currentPath?: string | null
+  /** Which view it opens on; the project list by default. */
+  initialView?: ProjectSwitcherView
+  /** Shown under the project list, not under the folder browser. */
   children?: ReactNode
 }
 
@@ -66,10 +75,14 @@ export function ProjectSwitcherList({
   onNewFolder,
   defaultAgentKind,
   currentPath,
+  initialView = "projects",
   children,
 }: ProjectSwitcherListProps) {
+  const [view, setView] = useState(initialView)
   const [filter, setFilter] = useState("")
+  const [highlighted, setHighlighted] = useState<string | null>(null)
   const { names: projectNames } = useProjectNames()
+  const hostName = useFolderHostName()
 
   const filtered = useMemo(() => {
     if (!filter) return projects
@@ -90,25 +103,50 @@ export function ProjectSwitcherList({
   const canAddFolder = isAbsoluteFolderPath
     && !projects.some((project) => normalizePath(project.path) === normalizePath(folderPath))
   const current = currentPath ? normalizePath(currentPath) : null
+  // The projects arrive after the list opens, so until the user moves it the
+  // highlight stays on the first entry rather than on "Browse folders", which
+  // is alone in the list before they do.
+  const values = [
+    ...(canAddFolder ? [`folder:${folderPath}`] : []),
+    ...filtered.map((project) => `project:${project.dirName}`),
+    BROWSE_FOLDERS,
+  ]
+  const highlight = highlighted !== null && values.includes(highlighted) ? highlighted : values[0]
+
+  if (view === "folders") {
+    return (
+      <FolderBrowser
+        hostName={hostName}
+        projectPaths={new Set(projects.map((project) => normalizePath(project.path)))}
+        onStart={onNewFolder}
+        onBack={() => setView("projects")}
+      />
+    )
+  }
 
   return (
-    <Command shouldFilter={false} className="rounded-none p-0">
+    <Command
+      shouldFilter={false}
+      value={highlight}
+      onValueChange={setHighlighted}
+      className="rounded-none p-0"
+    >
       <CommandInput
         autoFocus
-        placeholder="Search projects or paste an absolute path..."
+        placeholder="Search projects, paste a folder path, or browse"
         value={filter}
         onValueChange={setFilter}
       />
-      <CommandList className="max-h-80 p-1">
-        <CommandEmpty className="py-0">
+      <CommandList className="box-content max-h-80 p-1">
+        {filtered.length === 0 && !canAddFolder && (
           <Empty className="border-0 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
               <EmptyTitle>No projects found</EmptyTitle>
-              <EmptyDescription>Try another name or paste an absolute path.</EmptyDescription>
+              <EmptyDescription>Try another name, paste an absolute path, or browse the folders.</EmptyDescription>
             </EmptyHeader>
           </Empty>
-        </CommandEmpty>
+        )}
         <CommandGroup className="p-0">
           {canAddFolder && (
             <CommandItem
@@ -154,6 +192,19 @@ export function ProjectSwitcherList({
               </CommandItem>
             )
           })}
+        </CommandGroup>
+        {/* Sticky at the foot of the scrolling list, over its padding, so it shows however many projects there are. */}
+        <CommandGroup className="sticky -bottom-1 border-t bg-popover p-0 py-1">
+          <CommandItem
+            value={BROWSE_FOLDERS}
+            className="h-auto gap-3 px-3 py-2.5"
+            onSelect={() => setView("folders")}
+          >
+            <FolderSearch data-icon="inline-start" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+              {hostName ? `Browse folders on ${hostName}…` : "Browse folders…"}
+            </span>
+          </CommandItem>
         </CommandGroup>
       </CommandList>
       {children}

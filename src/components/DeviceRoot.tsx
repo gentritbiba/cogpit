@@ -3,6 +3,7 @@ import { WifiOff, Loader2 } from "lucide-react"
 import App from "@/App"
 import {
   getActiveDeviceId,
+  getActiveDeviceScope,
   getActiveIdentity,
   getDeviceConnectionRevision,
   switchDevice,
@@ -10,7 +11,8 @@ import {
 } from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
 import { revealSessionPath } from "@/lib/revealSession"
-import { useDevices } from "@/hooks/useDevices"
+import { useDevices, type TestResult } from "@/hooks/useDevices"
+import type { MintFailureCode } from "../../shared/contracts/hub"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
 import { Button } from "@/components/ui/button"
@@ -19,6 +21,51 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert"
+
+/**
+ * Why the hub cannot use the active remote device. Only a bad password cannot
+ * heal by itself; a refusal carries the device's own text once a test read it.
+ */
+type DeviceProblem =
+  | { kind: "unreachable" | "bad-password" }
+  | { kind: "refused"; detail?: string }
+
+const BANNER: Record<DeviceProblem["kind"], { title: string; description: (device: string) => string }> = {
+  unreachable: {
+    title: "Remote device unavailable",
+    description: (device) => `Can’t reach ${device}. Cogpit will keep retrying.`,
+  },
+  "bad-password": {
+    title: "Device credentials need attention",
+    description: (device) => `${device} rejected the stored password. Update it in Devices.`,
+  },
+  refused: {
+    title: "Device not admitting this account",
+    description: (device) => `${device} is not admitting this account right now. Cogpit will keep retrying.`,
+  },
+}
+
+function bannerDescription(problem: DeviceProblem, device: string): string {
+  if (problem.kind === "refused" && problem.detail) return `${problem.detail} Cogpit will keep retrying.`
+  return BANNER[problem.kind].description(device)
+}
+
+/** The hub's own verdicts (`X-Cogpit-Hub-Error`) that name a problem other than an outage. */
+const HUB_ERROR_PROBLEMS = new Map<string, DeviceProblem["kind"]>(Object.entries({
+  DEVICE_AUTH_FAILED: "bad-password",
+  DEVICE_REFUSED: "refused",
+} satisfies Record<Exclude<MintFailureCode, "DEVICE_UNREACHABLE">, DeviceProblem["kind"]>))
+
+function problemFromHubError(reason: string | undefined): DeviceProblem {
+  return { kind: HUB_ERROR_PROBLEMS.get(reason ?? "") ?? "unreachable" }
+}
+
+function problemFromTest(result: TestResult): DeviceProblem | null {
+  if (result.ok) return null
+  if (result.reachable && result.authState === "bad-password") return { kind: "bad-password" }
+  if (result.code === "DEVICE_REFUSED") return { kind: "refused", detail: result.error }
+  return { kind: "unreachable" }
+}
 
 /**
  * Owns the active device identity and remounts the whole {@link App} subtree
@@ -36,16 +83,16 @@ import {
  * (back/forward across a device boundary), updating state only when the id
  * actually changes so intra-device navigation never forces a remount.
  *
- * The key also carries the signed-in team identity (`cogpit-identity-changed`,
+ * The key also carries the signed-in account (`cogpit-identity-changed`,
  * dispatched by setActiveIdentity when useMe settles /api/me): login, logout,
  * and user switches remount App so every mount-time storage read (usePermissions,
  * useSessionHistory, useLocalStorage consumers) re-runs through the
  * identity-scoped deviceScopedKey. Personal edition never dispatches — no
- * remount, no hold, boot behavior is byte-identical to pre-team builds.
+ * remount, no hold, boot behavior is byte-identical to builds without sign-in.
  *
  * Also hosted here because they must survive the remount:
  * - device keyboard shortcuts (platform chord 1..9 jump, platform chord 0 cycle)
- * - the offline banner for an unreachable active remote device
+ * - the banner for an active remote device the hub cannot use
  *
  * The session inventory provider is keyed here rather than inside App so the
  * sidebar and Mission Control share one poll, scoped to the active device.
@@ -57,8 +104,7 @@ export function DeviceRoot() {
   )
   const [identityKey, setIdentityKey] = useState(getActiveIdentity)
   const [retryNonce, setRetryNonce] = useState(0)
-  const [unreachable, setUnreachable] = useState(false)
-  const [badPassword, setBadPassword] = useState(false)
+  const [problem, setProblem] = useState<DeviceProblem | null>(null)
   const [retrying, setRetrying] = useState(false)
   const { devices, testDevice } = useDevices()
 
@@ -126,76 +172,70 @@ export function DeviceRoot() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [devices])
 
-  // Connectivity banner: authFetch dispatches this only for the hub's own
-  // proxy failures, never for an error the device itself reported.
-  useEffect(() => {
-    const onUnreachable = (event: Event) => {
-      const detail = (event as CustomEvent<{ deviceId?: string; reason?: string }>).detail
-      if (!detail?.deviceId || detail.deviceId !== getActiveDeviceId()) return
-      setUnreachable(true)
-      // A rejected credential cannot self-heal, so skip straight to the
-      // credentials message instead of polling until a probe rediscovers it.
-      if (detail.reason === "DEVICE_AUTH_FAILED") setBadPassword(true)
-    }
-    window.addEventListener("cogpit-device-unreachable", onUnreachable)
-    return () => window.removeEventListener("cogpit-device-unreachable", onUnreachable)
-  }, [])
-
   // Reset banner state whenever the active device changes.
   useEffect(() => {
-    setUnreachable(false)
-    setBadPassword(false)
+    setProblem(null)
     setRetrying(false)
   }, [activeDeviceId, connectionRevision])
 
   const retry = useCallback(async () => {
+    // Switching devices or changing credentials resets the banner while a
+    // probe can still be in flight; its answer is about the old target.
+    const scope = getActiveDeviceScope()
+    const stillCurrent = () => getActiveDeviceScope() === scope
     setRetrying(true)
     try {
-      const result = await testDevice(activeDeviceId)
-      // A reachable device that rejects the stored password (ok:false,
-      // authState:"bad-password") is NOT recovered — auto-retry can't fix a
-      // stale credential, so surface it and stop the remount loop.
-      if (result.reachable && result.authState === "bad-password") {
-        setBadPassword(true)
-      } else if (result.ok) {
-        setUnreachable(false)
-        setBadPassword(false)
-        // Remount App so every data hook refetches from the recovered device.
-        setRetryNonce((n) => n + 1)
-      }
+      const next = problemFromTest(await testDevice(activeDeviceId))
+      if (!stillCurrent()) return
+      setProblem(next)
+      // Remount App so every data hook refetches from the recovered device.
+      if (next === null) setRetryNonce((n) => n + 1)
     } finally {
-      setRetrying(false)
+      if (stillCurrent()) setRetrying(false)
     }
   }, [activeDeviceId, testDevice])
 
-  // Auto-retry every 10s while the connectivity banner is visible. A bad
-  // password won't self-heal, so we stop polling once that's detected.
+  // Connectivity banner: authFetch dispatches this only for the hub's own
+  // proxy failures, never for an error the device itself reported. A repeat of
+  // the current verdict keeps the banner, and any text a test already read.
+  const problemKind = problem?.kind
   useEffect(() => {
-    if (!unreachable || badPassword) return
+    const onUnreachable = (event: Event) => {
+      const detail = (event as CustomEvent<{ deviceId?: string; reason?: string }>).detail
+      if (!detail?.deviceId || detail.deviceId !== getActiveDeviceId()) return
+      const next = problemFromHubError(detail.reason)
+      if (next.kind === problemKind) return
+      setProblem(next)
+      // The hub's verdict carries no reason; ask the device for its own now.
+      if (next.kind === "refused") void retry()
+    }
+    window.addEventListener("cogpit-device-unreachable", onUnreachable)
+    return () => window.removeEventListener("cogpit-device-unreachable", onUnreachable)
+  }, [problemKind, retry])
+
+  // Auto-retry every 10s while the banner is visible. A bad password won't
+  // self-heal, so we stop polling once that's detected.
+  const selfHealing = problem !== null && problem.kind !== "bad-password"
+  useEffect(() => {
+    if (!selfHealing) return
     const timer = setInterval(() => void retry(), 10_000)
     return () => clearInterval(timer)
-  }, [unreachable, badPassword, retry])
+  }, [selfHealing, retry])
 
   const deviceName = devices.find((d) => d.id === activeDeviceId)?.name ?? activeDeviceId
 
   return (
     <>
-      {unreachable && activeDeviceId !== LOCAL_DEVICE_ID && (
+      {problem && activeDeviceId !== LOCAL_DEVICE_ID && (
         <Alert
           role="status"
           className="fixed inset-x-3 top-3 z-40 mx-auto max-w-2xl border-warning/40 bg-popover shadow-md"
         >
           <WifiOff data-icon="inline-start" className="text-warning" />
-          <AlertTitle>
-            {badPassword ? "Device credentials need attention" : "Remote device unavailable"}
-          </AlertTitle>
-          <AlertDescription>
-            {badPassword
-              ? `${deviceName} rejected the stored password. Update it in Devices.`
-              : `Can’t reach ${deviceName}. Cogpit will keep retrying.`}
-          </AlertDescription>
+          <AlertTitle>{BANNER[problem.kind].title}</AlertTitle>
+          <AlertDescription>{bannerDescription(problem, deviceName)}</AlertDescription>
           <div className="col-start-2 mt-2 flex flex-wrap gap-2">
-            {!badPassword && (
+            {selfHealing && (
               <Button
                 variant="outline"
                 size="xs"

@@ -1,5 +1,6 @@
 import type { SessionStatus } from "../../../shared/session/sessionStatus"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
+import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
 
 export interface ProjectInfo {
   dirName: string
@@ -42,4 +43,6 @@ export interface SessionInfo {
   agentPendingAgents?: number
   pullRequests?: SessionPullRequest[]
   matchedPullRequestNumber?: number
+  /** The caller's access, where the server enforces session access. */
+  access?: ListedAccess
 }

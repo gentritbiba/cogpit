@@ -1,8 +1,8 @@
-import type { NotificationContent } from "../../shared/notifications"
+import type { NotificationContent, NotificationKind } from "../../shared/notifications"
 import { showNotification } from "./desktopNotify"
 import { isDesktopAttended } from "./desktopAttention"
 import { sendPushNotification } from "./pushNotify"
-import { recordNotification, type NotificationKind } from "./notificationHistory"
+import { recordNotification } from "./notificationHistory"
 
 /**
  * Fan a notification out to every sink, recording it in history first.

@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises"
 import type { GitHubPullSession } from "../../shared/contracts/github"
 import { allStores } from "../agents"
 import { getSessionMeta, getSessionStatus } from "../helpers"
+import { sessionMetaTitle } from "../sessionMetadata"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
 import { getSessionPrSearchSnapshot } from "./sessionPrSearchIndex"
 
@@ -67,7 +68,7 @@ export async function listProjectPullRequestSessions(
       dirName: candidate.dirName,
       fileName: candidate.fileName,
       sessionId: candidate.sessionId || meta.sessionId || candidate.fileName.replace(/\.jsonl$/, ""),
-      title: meta.customTitle || meta.aiTitle || meta.firstUserMessage || meta.slug || "",
+      title: sessionMetaTitle(meta),
       numbers,
     }
   }))

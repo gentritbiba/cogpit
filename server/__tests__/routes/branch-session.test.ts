@@ -89,12 +89,14 @@ import {
   isWithinDir,
   mkdir,
   readFile,
+  stat,
   writeFile,
 } from "../../helpers"
 import { resolveSessionFilePath } from "../../sessionPaths"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { copilotRuntime } from "../../agents/copilotTransport"
 import { registerSessionNewRoutes } from "../../routes/session-new"
+import { __resetEditionForTest, installEdition, PERSONAL_EDITION } from "../../edition"
 
 const CODEX_DIR_NAME = descriptorFor("codex").dirName
   .encode("/Users/gentritbiba/.claude/agent-window")
@@ -105,6 +107,7 @@ const mockedMkdir = vi.mocked(mkdir)
 const mockedReadFile = vi.mocked(readFile)
 const mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
 const mockedWriteFile = vi.mocked(writeFile)
+const mockedStat = vi.mocked(stat)
 
 // Helper to simulate Express-like routing
 function createMockReqRes(method: string, url: string, body?: string) {
@@ -153,6 +156,7 @@ beforeEach(() => {
   )
   mockedIsWithinDir.mockReturnValue(true)
   mockedMkdir.mockResolvedValue(undefined as never)
+  mockedStat.mockResolvedValue({ mode: 0o100600 } as never)
 
   handlers = new Map()
   const use: UseFn = (path: string, handler: Middleware) => {
@@ -297,6 +301,8 @@ describe("POST /api/branch-session", () => {
 
     // Verify the written content has the new sessionId and branchedFrom
     expect(mockedWriteFile).toHaveBeenCalledTimes(1)
+    expect(mockedStat).toHaveBeenCalledWith("/tmp/test-projects/my-project/original-session-id.jsonl")
+    expect(mockedWriteFile.mock.calls[0][2]).toEqual({ mode: 0o600 })
     const writtenContent = mockedWriteFile.mock.calls[0][1] as string
     const firstLine = JSON.parse(writtenContent.split("\n")[0])
     expect(firstLine.sessionId).toBe("new-uuid-1234")
@@ -508,6 +514,7 @@ describe("POST /api/branch-session", () => {
     )
     mockedReadFile.mockResolvedValue(buildCodexJsonl(2) as never)
     mockedWriteFile.mockResolvedValue(undefined as never)
+    const requestedAt = Date.now()
 
     const { res } = callHandler(
       "/api/branch-session",
@@ -523,6 +530,7 @@ describe("POST /api/branch-session", () => {
       expect(res.body).toBeTruthy()
       expect(res.statusCode).toBe(200)
     })
+    const answeredAt = Date.now()
 
     // The rollout name is stamped with the moment the branch was written, so
     // it is pinned by shape rather than by re-deriving it from a second clock read.
@@ -540,10 +548,11 @@ describe("POST /api/branch-session", () => {
 
     const sessionMeta = JSON.parse(writtenLines[0])
     expect(sessionMeta.payload.id).toBe("new-uuid-1234")
-    expect(sessionMeta.payload.branchedFrom).toEqual({
-      sessionId: "original-codex-session",
-      turnIndex: 0,
-    })
+    // The copy keeps the parent's timestamps; when the branch was cut marks where its own lines begin.
+    const { at, ...origin } = sessionMeta.payload.branchedFrom
+    expect(origin).toEqual({ sessionId: "original-codex-session", turnIndex: 0 })
+    expect(Date.parse(at)).toBeGreaterThanOrEqual(requestedAt)
+    expect(Date.parse(at)).toBeLessThanOrEqual(answeredAt)
 
     const data = JSON.parse(res.body)
     expect(data.fileName).toBe(
@@ -641,5 +650,26 @@ describe("POST /api/branch-session", () => {
       "11111111-1111-4111-8111-111111111111",
       { toEventId: "user-event-3" },
     )
+  })
+
+  it("forks only the session the access check allowed, whatever the path spells", async () => {
+    const filePath = "/tmp/copilot/session-state/22222222-2222-4222-8222-222222222222/events.jsonl"
+    const authorizeSession = vi.fn(async () => ({ sessionId: "22222222-2222-4222-8222-222222222222", filePath, isRootTranscript: true }))
+    installEdition({ ...PERSONAL_EDITION, edition: "team", access: { ...PERSONAL_EDITION.access, authorizeSession } })
+    mockedReadFile.mockResolvedValue(JSON.stringify({ type: "session.start", id: "start-event", data: {} }) as never)
+
+    try {
+      const { res } = callHandler(
+        "/api/branch-session",
+        "POST",
+        JSON.stringify({ dirName: COPILOT_DIR_NAME, fileName: "11111111-1111-4111-8111-111111111111/events.jsonl" }),
+      )
+
+      await vi.waitFor(() => expect(res.body).toBeTruthy())
+      expect(res.statusCode).toBe(400)
+      expect(mockedForkCopilotSession).not.toHaveBeenCalled()
+    } finally {
+      __resetEditionForTest()
+    }
   })
 })

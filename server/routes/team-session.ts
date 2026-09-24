@@ -2,13 +2,22 @@ import {
   dirs,
   isWithinDir,
   readdir,
-  readFile,
   open,
   join,
   stat,
 } from "../helpers"
+import { lineageFromMeta, teamLeadIn } from "../agents/lineage"
+import { authorizeSession, observeAgentTeam, visibilityFor, type VisibilityCheck } from "../edition"
 import { matchSubagentToMember, readSessionTeamTags } from "../lib/agentTeamIdentity"
 import { sendJson, type UseFn } from "../http"
+import {
+  authorizeTeam,
+  decodeTeamPathSegment,
+  readTeamConfig,
+  sendInvalidTeamName,
+  teamVisibilityFor,
+  type TeamConfig,
+} from "./agentTeamAccess"
 
 /** List project dir names under PROJECTS_DIR (excluding the memory dir). */
 async function listProjectDirNames(): Promise<string[]> {
@@ -26,7 +35,7 @@ async function listProjectDirNames(): Promise<string[]> {
 async function detectTeamFromSessionFile(
   sessionId: string,
   dirNameHint: string | null
-): Promise<{ teamName: string; config: unknown; currentMemberName: string | null } | null> {
+): Promise<{ teamName: string; config: TeamConfig; currentMemberName: string | null } | null> {
   const fileName = `${sessionId}.jsonl`
 
   let candidateDirs: string[]
@@ -44,18 +53,8 @@ async function detectTeamFromSessionFile(
     const tags = await readSessionTeamTags(filePath)
     if (!tags.teamName) continue
 
-    const configPath = join(dirs.TEAMS_DIR, tags.teamName, "config.json")
-    if (!isWithinDir(dirs.TEAMS_DIR, configPath)) continue
-    try {
-      const config = JSON.parse(await readFile(configPath, "utf-8"))
-      return {
-        teamName: tags.teamName,
-        config,
-        currentMemberName: tags.agentName,
-      }
-    } catch {
-      return null
-    }
+    const config = await readTeamConfig(tags.teamName)
+    return config && { teamName: tags.teamName, config, currentMemberName: tags.agentName }
   }
 
   return null
@@ -66,13 +65,15 @@ async function detectTeamFromSessionFile(
  * scanning project dirs for `<uuid>.jsonl` files tagged with the given
  * teamName/agentName. Dirs containing the lead session are checked first,
  * and only files modified after the team was created are considered —
- * teammate sessions are always newer than their team.
+ * teammate sessions are always newer than their team. A team's name is
+ * reused once it is deleted, so only a session the caller may see is taken.
  */
 async function findMemberTopLevelSession(
   teamName: string,
   memberName: string,
   leadSessionId: string,
-  teamCreatedAt: number
+  teamCreatedAt: number,
+  visible: VisibilityCheck,
 ): Promise<{ dirName: string; fileName: string } | null> {
   let projectDirNames: string[]
   try {
@@ -110,10 +111,12 @@ async function findMemberTopLevelSession(
 
   for (const { dirName, files } of dirFiles) {
     for (const f of files) {
-      const tags = await readSessionTeamTags(join(dirs.PROJECTS_DIR, dirName, f))
-      if (tags.teamName === teamName && tags.agentName === memberName) {
-        return { dirName, fileName: f }
-      }
+      const filePath = join(dirs.PROJECTS_DIR, dirName, f)
+      const tags = await readSessionTeamTags(filePath)
+      if (tags.teamName !== teamName || tags.agentName !== memberName) continue
+      const sessionId = f.slice(0, -".jsonl".length)
+      const lineage = lineageFromMeta({ sessionId, parentSessionId: null }, filePath)
+      if ((await visible(sessionId, lineage)) !== "hidden") return { dirName, fileName: f }
     }
   }
 
@@ -129,13 +132,17 @@ export function registerTeamSessionRoutes(use: UseFn) {
     const pathParts = url.pathname.split("/").filter(Boolean)
     if (pathParts.length > 0) return next()
 
-    const leadSessionId = url.searchParams.get("leadSessionId")
+    const requestedSessionId = url.searchParams.get("leadSessionId")
     const subagentFile = url.searchParams.get("subagentFile")
 
-    if (!leadSessionId) {
+    if (!requestedSessionId) {
       sendJson(res, 400, { error: "leadSessionId required" })
       return
     }
+    // The viewed session: a lead, or a teammate reached through its lead.
+    const viewed = await authorizeSession(req, res, { sessionId: requestedSessionId }, "view")
+    if (!viewed) return
+    const leadSessionId = viewed.sessionId
 
     try {
       let teamDirs: string[]
@@ -150,22 +157,15 @@ export function registerTeamSessionRoutes(use: UseFn) {
       }
 
       // Collect ALL matching teams, then pick the most recently created
-      let bestMatch: { teamName: string; config: Record<string, unknown>; createdAt: number } | null = null
+      let bestMatch: { teamName: string; config: TeamConfig; createdAt: number } | null = null
 
       for (const teamName of teamDirs) {
-        try {
-          const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
-          const configRaw = await readFile(configPath, "utf-8")
-          const config = JSON.parse(configRaw)
+        const config = await readTeamConfig(teamName)
+        if (!config || teamLeadIn(config)?.sessionId !== leadSessionId) continue
 
-          if (config.leadSessionId !== leadSessionId) continue
-
-          const createdAt = config.createdAt ?? 0
-          if (!bestMatch || createdAt > bestMatch.createdAt) {
-            bestMatch = { teamName, config, createdAt }
-          }
-        } catch {
-          continue
+        const createdAt = config.createdAt ?? 0
+        if (!bestMatch || createdAt > bestMatch.createdAt) {
+          bestMatch = { teamName, config, createdAt }
         }
       }
 
@@ -173,9 +173,12 @@ export function registerTeamSessionRoutes(use: UseFn) {
         // New format (Claude Code 2.1.19x+): the viewed session may itself be
         // a team member's own top-level session, tagged per-line with
         // teamName/agentName. Read its tags and resolve the team from them.
+        // The tags are the agent's to write, so they speak for a team only
+        // when the caller may see the lead its config names.
         const dirNameHint = url.searchParams.get("dirName")
         const memberCtx = await detectTeamFromSessionFile(leadSessionId, dirNameHint)
-        if (memberCtx) {
+        if (memberCtx && (await teamVisibilityFor(req)(memberCtx.config)) !== "hidden") {
+          observeAgentTeam(memberCtx.teamName)
           sendJson(res, 200, memberCtx)
           return
         }
@@ -184,24 +187,20 @@ export function registerTeamSessionRoutes(use: UseFn) {
       }
 
       const { teamName: matchedTeamName, config: matchedConfig } = bestMatch
+      observeAgentTeam(matchedTeamName)
       let currentMemberName: string | null = null
 
       if (!subagentFile) {
-        const lead = (matchedConfig.members as { agentType?: string; name?: string }[])?.find(
-          (m) => m.agentType === "team-lead"
-        )
+        const lead = matchedConfig.members?.find((m) => m.agentType === "team-lead")
         currentMemberName = lead?.name || null
       } else {
-        currentMemberName = await matchSubagentToMember(
-          leadSessionId,
-          subagentFile,
-          (matchedConfig.members as Array<{ name: string; agentType: string; prompt?: string }>) || []
-        )
+        currentMemberName = await matchSubagentToMember(leadSessionId, subagentFile, matchedConfig.members ?? [])
       }
 
       sendJson(res, 200, { teamName: matchedTeamName, config: matchedConfig, currentMemberName })
     } catch (err) {
-      sendJson(res, 500, { error: String(err) })
+      console.error("[session-team] Resolving a session's team failed:", err)
+      sendJson(res, 500, { error: "Could not resolve the session's team" })
     }
   })
 
@@ -213,23 +212,24 @@ export function registerTeamSessionRoutes(use: UseFn) {
     const parts = url.pathname.split("/").filter(Boolean)
     if (parts.length !== 2) return next()
 
-    const teamName = decodeURIComponent(parts[0])
-    const memberName = decodeURIComponent(parts[1])
+    const teamName = decodeTeamPathSegment(parts[0])
+    const memberName = decodeTeamPathSegment(parts[1])
+    if (!teamName || !memberName) return sendInvalidTeamName(res)
+    const team = await authorizeTeam(req, res, teamName, (lead) => authorizeSession(req, res, lead, "view"))
+    if (!team) return
+    const { config } = team
+    if (!config) {
+      sendJson(res, 404, { error: "Team not found" })
+      return
+    }
+    if (!team.lead) {
+      sendJson(res, 404, { error: "No lead session ID" })
+      return
+    }
+    const leadSessionId = team.lead.sessionId
 
     try {
-      const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
-      const configRaw = await readFile(configPath, "utf-8")
-      const config = JSON.parse(configRaw)
-
-      const leadSessionId = config.leadSessionId
-      if (!leadSessionId) {
-        sendJson(res, 404, { error: "No lead session ID" })
-        return
-      }
-
-      const member = config.members?.find(
-        (m: { name: string }) => m.name === memberName
-      )
+      const member = config.members?.find((m) => m.name === memberName)
 
       if (member?.agentType === "team-lead") {
         const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
@@ -255,7 +255,8 @@ export function registerTeamSessionRoutes(use: UseFn) {
         teamName,
         memberName,
         leadSessionId,
-        typeof config.createdAt === "number" ? config.createdAt : 0
+        typeof config.createdAt === "number" ? config.createdAt : 0,
+        visibilityFor(req),
       )
       if (topLevel) {
         sendJson(res, 200, topLevel)
@@ -323,7 +324,8 @@ export function registerTeamSessionRoutes(use: UseFn) {
 
       sendJson(res, 404, { error: "Member session not found" })
     } catch (err) {
-      sendJson(res, 500, { error: String(err) })
+      console.error("[team-member-session] Looking up a member's session failed:", err)
+      sendJson(res, 500, { error: "Could not look up the member's session" })
     }
   })
 }

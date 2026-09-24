@@ -119,7 +119,7 @@ Cogpit stores the user's executable preference in `AppConfig.agentExecutable` (o
 - `"bundled"` — use the SDK's vendored copy, or undefined if the platform package is not present
 - `"custom"` — use a user-supplied path, or undefined if it is empty
 
-The descriptor's `AgentCli.bundledBySdk` boolean (set to `true` only for Claude) indicates whether the SDK vendors a copy, which is what enables the executable picker. The live binary path is queried via `GET /api/agent-executable/:kind`, which is a read-only endpoint (registered in `server/team/policy.ts` as authed-only).
+The descriptor's `AgentCli.bundledBySdk` boolean (set to `true` only for Claude) indicates whether the SDK vendors a copy, which is what enables the executable picker. The live binary path is queried via `GET /api/agent-executable/:kind`, which is read-only, so an edition's route policy may treat it as authed-only.
 
 ## Enforcement
 
@@ -132,7 +132,8 @@ attempt to interpret whether a line contains a branch:
   and their generated cogpit-memory copies, plus the two endpoints that exist
   only to expose one CLI's own protocol.
 - **Everywhere else** carries a per-file budget in
-  `scripts/agent-vocabulary.json`. Exceeding it fails. Coming in *under* it also
+  `scripts/agent-vocabulary.json`, or in an edition package's own
+  `agent-vocabulary.json` for its files. Exceeding it fails. Coming in *under* it also
   fails, naming the new number — that ratchet is what stops the vocabulary
   leaking back once a domain is clean. Delete the entry when a file reaches zero.
 
@@ -201,3 +202,14 @@ they block the new CLI.
 - The shared `HighlightedEditor` serves project files and configuration files. Shiki follows the root mode. `readTerminalTheme` adapts the same tokens to xterm; its canvas and viewport remain transparent, and theme changes preserve the terminal instance and output.
 
 Provider status colors, syntax highlighting and external webpage/media content retain their own meaning. New application surfaces use the shared tokens instead of literal neutral colors or per-theme overrides.
+
+## Editions
+
+Cogpit can include an optional edition package from `editions/team/`, a git submodule that a
+public clone leaves empty. Anything that asks whether the package is present looks for
+`editions/team/index.ts`. Without it Cogpit builds, tests and runs as the complete personal
+app. The server reaches an edition only through `server/edition/` (the `EditionModule` hooks,
+whose defaults are personal), and the renderer only through `src/edition/` (typed UI slots
+that default to nothing, loaded lazily when a server reports another edition).
+`bun run check:architecture` keeps every other file from naming the package. Edition packages
+document themselves.

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { useScriptDiscovery } from "@/hooks/useScriptDiscovery"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
@@ -12,8 +12,8 @@ function becomeMember(): void {
   act(() => setMe({
     authenticated: true,
     edition: "team",
-    user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-    capabilities: MEMBER_CAPABILITIES,
+    user: { id: "u_member", username: "member", displayName: "Member" },
+    capabilities: NO_CAPABILITIES,
   }))
 }
 

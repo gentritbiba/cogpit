@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 
 import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { ALL_CAPABILITIES } from "../../../shared/contracts/team"
+import { ALL_CAPABILITIES } from "../../../shared/contracts/identity"
 import { makeProviderUpdateInfo } from "@/__tests__/fixtures"
 import type { ProviderUpdateInfo } from "@/lib/providerUpdates"
 
@@ -79,7 +79,7 @@ describe("ProviderUpdateBanner", () => {
     expect(screen.getByText(/could not tell/i)).toBeInTheDocument()
   })
 
-  it("hides the run button from members who cannot write config", () => {
+  it("stays hidden from members, who cannot update the host's CLIs", () => {
     setMe({
       authenticated: true,
       edition: "team",
@@ -88,9 +88,8 @@ describe("ProviderUpdateBanner", () => {
     })
     mocks.useProviderUpdates.mockReturnValue(hookValue({ pending: [makeProviderUpdateInfo()] }))
 
-    render(<ProviderUpdateBanner />)
-    expect(screen.queryByRole("button", { name: /^update$/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/npm install -g/)).toBeInTheDocument()
+    const { container } = render(<ProviderUpdateBanner />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it("dismisses every pending offer at once", async () => {

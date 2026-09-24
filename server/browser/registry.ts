@@ -21,6 +21,8 @@ export const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000
 export interface RegistryEntry {
   note?: string
   createdAt: string
+  /** The account that created it from the panel, which owns it from then on. */
+  createdBy?: string
   lastUrl?: string
   archivedAt?: string
   restoredAt?: string
@@ -65,6 +67,7 @@ function parseEntry(value: unknown): RegistryEntry | null {
   if (!isRecord(value) || typeof value.createdAt !== "string") return null
   const entry: RegistryEntry = { createdAt: value.createdAt }
   if (typeof value.note === "string") entry.note = value.note
+  if (typeof value.createdBy === "string") entry.createdBy = value.createdBy
   if (typeof value.lastUrl === "string") entry.lastUrl = value.lastUrl
   if (typeof value.archivedAt === "string") entry.archivedAt = value.archivedAt
   if (typeof value.restoredAt === "string") entry.restoredAt = value.restoredAt
@@ -124,6 +127,16 @@ function profileNames(): string[] {
     return []
   }
   return entries.filter((entry) => entry.isDirectory() && isNamedBrowser(entry.name)).map((entry) => entry.name)
+}
+
+/** The account that created `name` from the panel; null for any other browser. */
+export function creatorOf(name: string, registry = readRegistry()): string | null {
+  return entryOf(registry, name)?.createdBy ?? null
+}
+
+/** The Cogpit session that last drove `name`, from its `.driver`. */
+export function driverOf(name: string): string | null {
+  return readDriver(name).driverSessionId
 }
 
 function readDriver(name: string): Pick<BrowserSessionInfo, "lastUsedAt" | "driverSessionId"> {
@@ -197,12 +210,14 @@ export async function readBrowser(
   return describeBrowser(name, entryOf(readRegistry(), name), running)
 }
 
-export function createBrowser(name: string, note?: string): BrowserSessionInfo {
+/** `createdBy` is the account creating it, when the caller has one. */
+export function createBrowser(name: string, note?: string, createdBy?: string): BrowserSessionInfo {
   assertNamedBrowser(name)
   const registry = readRegistry()
   if (browserExists(registry, name)) throw new BrowserExistsError(name)
   mkdirSync(profileDir(name), { recursive: true })
   const entry = applyPatch(registry, name, { note })
+  if (createdBy !== undefined) entry.createdBy = createdBy
   writeRegistry(registry)
   return describeBrowser(name, entry, false)
 }

@@ -8,7 +8,7 @@
 import { execFileSync, spawn as spawnProcess } from "node:child_process"
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { request } from "node:http"
-import { basename, join } from "node:path"
+import { basename, isAbsolute, join, relative, resolve } from "node:path"
 
 import { resolveNavigationUrl } from "../../shared/browser/url"
 import { resolveAgentCommand } from "../lib/binaryResolver"
@@ -25,14 +25,18 @@ import {
   sharedRunDir,
   shimPath,
   sweepOwnerFile,
+  THROWAWAY_USED_SUFFIX,
 } from "./paths"
-import { processCommandLine, terminateProcess } from "./processControl"
+import { reapBrowserProfileNotes } from "./owners"
+import { listDaemonProcesses, processCommandLine, terminateProcess, type DaemonProcess } from "./processControl"
 
 export interface DaemonDeps {
   spawn: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<{ code: number; stderr: string }>
   probe: (port: number) => Promise<boolean>
   kill: (pid: number, signal: NodeJS.Signals) => boolean
   isPidAlive: (pid: number) => boolean
+  /** Every agent-browser daemon running, whichever tree it serves. */
+  listDaemons: () => DaemonProcess[]
 }
 
 export interface DevToolsEndpoint {
@@ -47,6 +51,16 @@ const MAX_PORT = 65535
 /** An unparsable pid file younger than this may still be mid-write by a starting daemon. */
 const STALE_PID_FILE_MS = 60_000
 const DAEMON_COMMAND_MARKER = "agent-browser"
+/**
+ * A daemon this young may still be between clearing its socket and writing
+ * its pid file, so the stray check leaves it for the next sweep.
+ */
+export const STRAY_GRACE_MS = 60_000
+/**
+ * A throwaway no call has touched for this long is closed, whether its
+ * session is still live, gone, or was never known (one in run/shared).
+ */
+export const THROWAWAY_IDLE_MS = 30 * 60_000
 /** A shim call that has not returned by now is wedged; nothing here waits on a user. */
 const SHIM_TIMEOUT_MS = 30_000
 /** Matches `processRegistry`: SIGTERM, this long to exit, then SIGKILL. */
@@ -154,6 +168,7 @@ export const defaultDaemonDeps: DaemonDeps = {
   probe: probeDevTools,
   kill: killPid,
   isPidAlive,
+  listDaemons: () => listDaemonProcesses(process.platform, runQuietly),
 }
 
 function parsePositiveInt(raw: string): number | null {
@@ -214,10 +229,14 @@ function listRunSubdirs(): string[] {
 }
 
 function removeRunFiles(dir: string, name: string): void {
-  for (const suffix of [PID_SUFFIX, ".sock", ".port"]) rmSync(join(dir, `${name}${suffix}`), { force: true })
+  for (const suffix of [PID_SUFFIX, ".sock", ".port", THROWAWAY_USED_SUFFIX]) rmSync(join(dir, `${name}${suffix}`), { force: true })
 }
 
-/** The shim stamps `.driver` from COGPIT_SESSION_ID, so the server's own value must never leak through. */
+/**
+ * The shim stamps `.driver` from COGPIT_SESSION_ID whenever it is set, so the
+ * server's own value must never leak through; without one, Cogpit's own open
+ * and close leave the last driver in place.
+ */
 function shimEnv(cogpitSessionId?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
   delete env.COGPIT_SESSION_ID
@@ -357,6 +376,53 @@ export function reapRunDir(dir: string, deps = defaultDaemonDeps): void {
   rmSync(dir, { recursive: true, force: true })
 }
 
+/** When a throwaway was last called: its `.used`, else its pid file, which a daemon writes as it starts. */
+function lastUsedAt(dir: string, name: string): number {
+  for (const suffix of [THROWAWAY_USED_SUFFIX, PID_SUFFIX]) {
+    try {
+      return statSync(join(dir, `${name}${suffix}`)).mtimeMs
+    } catch {
+      // Not there; try the next.
+    }
+  }
+  return 0
+}
+
+/**
+ * Close every throwaway idle past THROWAWAY_IDLE_MS. A live session keeps its
+ * directory, and one in run/shared has no session to end with, so idleness is
+ * what reaps them; the files outlive a restart, so the clock does too.
+ */
+export function reapIdleThrowaways(deps = defaultDaemonDeps, now = Date.now()): void {
+  const dirs = [sharedRunDir(), ...listRunSubdirs().map((dir) => join(runRoot(), dir))]
+  for (const dir of dirs) {
+    for (const { name, pid } of listPidFiles(dir)) {
+      if (!isThrowawayName(name) || now - lastUsedAt(dir, name) < THROWAWAY_IDLE_MS) continue
+      if (pid !== null && deps.isPidAlive(pid)) deps.kill(pid, "SIGTERM")
+      removeRunFiles(dir, name)
+    }
+  }
+}
+
+function insideTree(dir: string): boolean {
+  const path = relative(resolve(runRoot()), resolve(dir))
+  return path !== "" && !path.startsWith("..") && !isAbsolute(path)
+}
+
+/**
+ * Kill every daemon of this tree that its browser's pid file does not name:
+ * one a racing start orphaned, or one whose throwaway directory was reaped
+ * under it. SIGKILL, because a stray that shut down cleanly would delete the
+ * socket and pid file it shares with the daemon that owns them.
+ */
+export function reapStrayDaemons(deps = defaultDaemonDeps): void {
+  for (const daemon of deps.listDaemons()) {
+    if (daemon.ageMs < STRAY_GRACE_MS || !insideTree(daemon.socketDir)) continue
+    if (readPidFile(join(daemon.socketDir, `${daemon.name}${PID_SUFFIX}`)) === daemon.pid) continue
+    deps.kill(daemon.pid, "SIGKILL")
+  }
+}
+
 export function sweep(isCogpitSessionLive: (id: string) => boolean, deps = defaultDaemonDeps): void {
   for (const { name, path, pid } of listPidFiles(sharedRunDir())) {
     const dead = pid === null ? isStaleFile(path) : !deps.isPidAlive(pid)
@@ -365,6 +431,9 @@ export function sweep(isCogpitSessionLive: (id: string) => boolean, deps = defau
   for (const dir of listRunSubdirs()) {
     if (!isValidCogpitSessionId(dir) || !isCogpitSessionLive(dir)) reapRunDir(join(runRoot(), dir), deps)
   }
+  reapIdleThrowaways(deps)
+  reapStrayDaemons(deps)
+  reapBrowserProfileNotes(isCogpitSessionLive)
 }
 
 async function shutdownAll(deps: DaemonDeps): Promise<void> {

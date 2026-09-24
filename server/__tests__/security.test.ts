@@ -18,6 +18,7 @@ import {
   isAuthenticatedHttpStreamRequest,
 } from "../security"
 import { getConfig } from "../config"
+import { getRequestPrincipal } from "../requestPrincipal"
 
 vi.mock("../config", () => ({ getConfig: vi.fn() }))
 
@@ -227,7 +228,7 @@ describe("authMiddleware path protection", () => {
     const mock = mockRes()
     const next = vi.fn()
     authMiddleware(req, mock.res, next)
-    return { next, get statusCode() { return mock.statusCode }, get body() { return mock.body } }
+    return { req, next, get statusCode() { return mock.statusCode }, get body() { return mock.body } }
   }
 
   // ── /hub/* is protected (new) ──
@@ -307,9 +308,10 @@ describe("authMiddleware path protection", () => {
 
   // ── existing behaviour, unchanged ──
 
-  it("allows local requests without auth", () => {
+  it("allows local requests without auth, and names no user", () => {
     const r = run("/api/projects", { ip: "127.0.0.1" })
     expect(r.next).toHaveBeenCalledOnce()
+    expect(getRequestPrincipal(r.req)).toBeNull()
   })
 
   it("allows local /hub/* requests without auth", () => {

@@ -25,6 +25,7 @@ import {
   priceUsage,
   usageCostBreakdown,
 } from "../../shared/usageCost/pricing"
+import { descriptorFor } from "../../shared/session/agent-descriptors"
 
 const RATES = parseRateTable({
   "claude-opus-4-6": {
@@ -527,6 +528,48 @@ describe("parseCodexUsageLine", () => {
       ),
     ).not.toBeNull()
   })
+
+  function branchMeta(branchedFrom: Record<string, unknown>): string {
+    return JSON.stringify({ type: "session_meta", timestamp: "2026-08-19T10:00:00.000Z", payload: { id: "branch", branchedFrom } })
+  }
+
+  it("counts the history a Cogpit branch copied from its parent as before, marked as a copy", () => {
+    const state = initialCodexScanState()
+    parseCodexUsageLine(branchMeta({ sessionId: "parent", turnIndex: 1, at: "2026-08-19T12:00:00.000Z" }), state)
+    parseCodexUsageLine(turnContext, state)
+
+    const copies = [["2026-08-19T10:00:30.000Z", 1], ["2026-08-19T12:00:00.000Z", 2]] as const
+    expect(copies.map(([at, output]) => parseCodexUsageLine(tokenCount(at, { input_tokens: 10, output_tokens: output }), state))).toEqual([
+      expect.objectContaining({ sessionId: "branch", branchCopy: true, totals: expect.objectContaining({ outputTokens: 1 }) }),
+      expect.objectContaining({ sessionId: "branch", branchCopy: true, totals: expect.objectContaining({ outputTokens: 2 }) }),
+    ])
+    const own = parseCodexUsageLine(tokenCount("2026-08-19T12:05:00.000Z", { input_tokens: 20, output_tokens: 3 }), state)
+    expect(own).toMatchObject({ sessionId: "branch", totals: { outputTokens: 3 } })
+    expect(own).not.toHaveProperty("branchCopy")
+  })
+
+  it("dates the copy in a branch cut before branches recorded when by its rollout's name, to the end of the second", () => {
+    const cutAt = new Date(2026, 7, 19, 12, 0, 0)
+    const at = (offsetMs: number) => new Date(cutAt.getTime() + offsetMs).toISOString()
+    const scanner = createUsageScanner("codex", `/codex/sessions/${descriptorFor("codex").sessionFile.name("branch", cutAt)}`)
+    scanner.accept(branchMeta({ sessionId: "parent", turnIndex: 1 }))
+    scanner.accept(turnContext)
+
+    const [copied] = scanner.accept(tokenCount(at(999), { input_tokens: 10, output_tokens: 1 }))
+    const [own] = scanner.accept(tokenCount(at(1000), { input_tokens: 20, output_tokens: 2 }))
+    expect(copied).toMatchObject({ branchCopy: true })
+    expect(own).not.toHaveProperty("branchCopy")
+  })
+
+  it("marks nothing in a rollout that is no Cogpit branch, whatever its name says", () => {
+    const scanner = createUsageScanner("codex", `/codex/sessions/${descriptorFor("codex").sessionFile.name("codex-session", new Date(2030, 0, 1))}`)
+    scanner.accept(meta)
+    scanner.accept(turnContext)
+
+    expect(scanner.accept(tokenCount("2026-08-19T10:00:30.000Z", { input_tokens: 10, output_tokens: 1 }))).toEqual([
+      expect.not.objectContaining({ branchCopy: true }),
+    ])
+  })
 })
 
 describe("parseCopilotUsageLine", () => {
@@ -599,6 +642,18 @@ describe("parseCopilotUsageLine", () => {
       shutdown("2026-08-20T10:02:00.000Z", metric(160, 25)),
       state,
     )[0].totals).toMatchObject({ uncachedInputTokens: 60, cachedInputTokens: 0, outputTokens: 15 })
+  })
+
+  it("dates a snapshot's usage from the snapshot before it, and the first from the session's beginning", () => {
+    const state = initialCopilotScanState("copilot-session")
+    const metric = (outputTokens: number) => ({ "gpt-5.4": { usage: { inputTokens: 100, outputTokens } } })
+
+    const [first] = parseCopilotUsageLine(shutdown("2026-08-19T10:01:00.000Z", metric(10)), state)
+    expect(parseCopilotUsageLine(shutdown("2026-08-19T10:02:00.000Z", metric(10)), state)).toEqual([])
+    const [third] = parseCopilotUsageLine(shutdown("2026-08-19T10:05:00.000Z", metric(25)), state)
+
+    expect(first.accruedSinceMs).toBe(Number.NEGATIVE_INFINITY)
+    expect(third).toMatchObject({ accruedSinceMs: Date.parse("2026-08-19T10:02:00.000Z"), totals: { outputTokens: 15 } })
   })
 
   it("uses the same cumulative delta for active runtime metrics", () => {

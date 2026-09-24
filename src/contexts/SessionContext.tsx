@@ -7,6 +7,7 @@ import type { PtyChatStatus } from "@/hooks/usePtyChat"
 import type { PendingInteraction } from "../../shared/session/parser"
 import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
+import type { SessionActionPermissions } from "@/lib/sessionAccessPermissions"
 
 // ── Chat (pty) ──────────────────────────────────────────────────────────────
 
@@ -15,10 +16,11 @@ export interface ChatState {
   error: string | undefined
   pendingMessages: string[]
   isConnected: boolean
+  /** Resolves false when the message was not sent because the session may not be driven here. */
   sendMessage: (
     text: string,
     images?: Array<{ data: string; mediaType: string }>
-  ) => void
+  ) => Promise<boolean>
   interrupt: () => void
   stopAgent: () => void
   consumePending: (count?: number) => void
@@ -67,6 +69,8 @@ export interface SessionContextValue {
   respondAllPermissions: (behavior: PermissionDecision) => void
   /** Whether the current view is a sub-agent (read-only) */
   isSubAgentView: boolean
+  /** What the signed-in user may do in this session; everything in personal edition. */
+  permissions: SessionActionPermissions
   /** Slash command suggestions */
   slashSuggestions: SlashSuggestion[]
   slashSuggestionsLoading: boolean

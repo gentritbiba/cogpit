@@ -40,6 +40,7 @@ import { FLOATING_PILL } from "@/components/header-shared"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
+import { useEditionUi } from "@/edition/hooks"
 import { useCapability } from "@/hooks/useCapability"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
@@ -70,6 +71,9 @@ interface FloatingChromeProps {
   onToggleSidebar: () => void
   onKillAll: () => void
   onOpenSettings: () => void
+  onLogout: () => void
+  /** Opens an edition main view, from the account control. */
+  onOpenMainView: (id: string) => void
 }
 
 const PILL_ROW = "flex h-8 items-center px-0.5"
@@ -94,10 +98,13 @@ export const FloatingChrome = memo(function FloatingChrome({
   onToggleSidebar,
   onKillAll,
   onOpenSettings,
+  onLogout,
+  onOpenMainView,
 }: FloatingChromeProps) {
   const { config: { networkUrl, defaultAgentKind } } = useAppContext()
-  const { session, sessionSource, isLive } = useSessionContext()
+  const { session, sessionSource, isLive, permissions } = useSessionContext()
   const inventory = useSessionInventoryOptional()
+  const { AccountControl, SessionHeaderActions } = useEditionUi()
   const canViewUsage = useCapability("viewUsage")
   const [usageOpen, setUsageOpen] = useState(false)
   const [monitorOpen, setMonitorOpen] = useState(false)
@@ -111,7 +118,7 @@ export const FloatingChrome = memo(function FloatingChrome({
     () => mergePullRequests(extractPullRequests(sessionTurns ?? []), scanned),
     [sessionTurns, scanned],
   )
-  const archiveToggle = useSessionArchiveToggle(session?.sessionId ?? "", isLive)
+  const archiveToggle = useSessionArchiveToggle(session?.sessionId ?? "", isLive, permissions.archive)
   const activeAgentKind = sessionSource
     ? sessionSource.agentKind ?? agentKindForDirName(sessionSource.dirName)
     : defaultAgentKind
@@ -223,6 +230,11 @@ export const FloatingChrome = memo(function FloatingChrome({
               <ShareButton sessionId={session.sessionId} />
             </div>
           )}
+          {session && !isSubAgent && SessionHeaderActions && (
+            <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
+              <SessionHeaderActions sessionId={session.sessionId} />
+            </div>
+          )}
           {session && !isSubAgent && archiveToggle && (
             <PillIconButton
               icon={archiveToggle.icon}
@@ -286,6 +298,11 @@ export const FloatingChrome = memo(function FloatingChrome({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          {AccountControl && (
+            <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
+              <AccountControl onLogout={onLogout} onOpenMainView={onOpenMainView} />
+            </div>
+          )}
         </div>
       </div>
 

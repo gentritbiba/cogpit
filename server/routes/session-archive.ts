@@ -1,4 +1,5 @@
-import type { IncomingMessage } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { authorizeSession, reportSessionEvent } from "../edition"
 import { sendJson } from "../helpers"
 import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
@@ -44,17 +45,39 @@ async function readArchiveRequest(req: IncomingMessage): Promise<ArchiveRequest>
 }
 
 /**
+ * The sessions as the caller owns them, or null after answering for the first
+ * one they do not: a batch is archived whole or not at all.
+ */
+async function authorizeAll(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sessionIds: readonly string[],
+): Promise<string[] | null> {
+  const owned: string[] = []
+  for (const sessionId of sessionIds) {
+    const session = await authorizeSession(req, res, { sessionId }, "own")
+    if (!session) return null
+    owned.push(session.sessionId)
+  }
+  return owned
+}
+
+/**
  * POST /api/archive-sessions — hide sessions from the sidebar or bring them
  * back. Archiving is a sidebar concern only: transcripts are untouched, and
- * the session list reports `archived` on rows the user chose to hide.
+ * the session list reports `archived` on rows the user chose to hide. The
+ * archive is the same for everyone, so changing it needs ownership.
  */
 export function registerSessionArchiveRoutes(use: UseFn) {
   use("/api/archive-sessions", async (req, res, next) => {
     if (req.method !== "POST") return next()
     try {
-      const request = await readArchiveRequest(req)
-      const changed = await setSessionsArchived(request.sessionIds, request.archived)
-      sendJson(res, 200, { sessionIds: request.sessionIds, archived: request.archived, changed })
+      const { sessionIds: requested, archived } = await readArchiveRequest(req)
+      const sessionIds = await authorizeAll(req, res, requested)
+      if (!sessionIds) return
+      const changed = await setSessionsArchived(sessionIds, archived)
+      reportSessionEvent(req, "session.archive", null, { sessionIds, archived })
+      sendJson(res, 200, { sessionIds, archived, changed })
     } catch (err) {
       if (err instanceof RouteError) return sendError(res, err)
       sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))

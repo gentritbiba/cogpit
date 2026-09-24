@@ -59,4 +59,11 @@ describe("UserDialogPrompt", () => {
     renderPrompt({ ...REFUSAL, guidanceText: undefined })
     expect(screen.getByRole("button", { name: "Edit prompt" })).toBeInTheDocument()
   })
+
+  it("shows a reader what was refused without the choices", () => {
+    render(<UserDialogPrompt request={REFUSAL} responding={false} />)
+
+    expect(screen.getByText(/would not answer/)).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
 })

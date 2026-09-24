@@ -24,7 +24,7 @@ vi.mock("../../sdk-session", () => ({
   stopSDKSession: vi.fn(() => false),
 }))
 
-import { isWithinDir, readdir, readFile, stat } from "../../helpers"
+import { isWithinDir, readdir, readFile, stat, watch } from "../../helpers"
 import { stopSDKSession } from "../../sdk-session"
 import type { Middleware } from "../../helpers"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
@@ -209,6 +209,33 @@ describe("workflow routes", () => {
       expect(JSON.parse(res._getData())).toEqual({
         result: { recommendation: "Keep the useful parts" },
       })
+    })
+  })
+
+  describe("GET /api/workflow-watch/:dirName/:sessionId", () => {
+    it("opens an event stream on the session's directory", async () => {
+      const { req, res, next } = createMockReqRes("GET", "/proj/sess")
+      await getRouteHandler(handlers, "/api/workflow-watch/")(req, res, next)
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({ "Content-Type": "text/event-stream" }))
+      expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ type: "init" })}\n\n`)
+      expect(watch).toHaveBeenCalledWith("/projects/proj/sess", { recursive: true }, expect.any(Function))
+      req.on.mock.calls.find(([event]) => event === "close")?.[1]()
+    })
+
+    it("returns 403 and opens nothing when the path escapes PROJECTS_DIR", async () => {
+      mockedIsWithinDir.mockReturnValue(false)
+      const { req, res, next } = createMockReqRes("GET", "/proj/sess")
+      await getRouteHandler(handlers, "/api/workflow-watch/")(req, res, next)
+      expect(res._getStatus()).toBe(403)
+      expect(watch).not.toHaveBeenCalled()
+    })
+
+    it("opens nothing for a caller who went away while access was checked", async () => {
+      const { req, res, next } = createMockReqRes("GET", "/proj/sess")
+      Object.assign(res, { destroyed: true })
+      await getRouteHandler(handlers, "/api/workflow-watch/")(req, res, next)
+      expect(res.writeHead).not.toHaveBeenCalled()
+      expect(res.write).not.toHaveBeenCalled()
     })
   })
 

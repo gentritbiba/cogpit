@@ -10,6 +10,10 @@ import { usePtyChat } from "../usePtyChat"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 
+function reply(body: unknown, status = 200, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(body), { status, headers })
+}
+
 describe("usePtyChat", () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -58,10 +62,7 @@ describe("usePtyChat", () => {
   })
 
   it("sends message and transitions through connected->idle on success", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -87,11 +88,7 @@ describe("usePtyChat", () => {
   })
 
   it("sets error status on failed response", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: "Server error" }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ error: "Server error" }, 500))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -107,20 +104,33 @@ describe("usePtyChat", () => {
     expect(result.current.error).toBe("Server error")
   })
 
+  it("tells the composer a message the server refused on access was not sent", async () => {
+    const refused = reply(
+      { error: "Your access to this session does not allow this", code: "SESSION_ACCESS_DENIED" },
+      403,
+      { "X-Cogpit-Session-Access": "view" },
+    )
+    mockedAuthFetch.mockResolvedValueOnce(refused).mockResolvedValueOnce(reply({ error: "Server error" }, 500))
+    const { result } = renderHook(() =>
+      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" } }),
+    )
+
+    let sent: boolean[] = []
+    await act(async () => {
+      sent = [await result.current.sendMessage("hello"), await result.current.sendMessage("again")]
+    })
+
+    expect(sent).toEqual([false, true])
+    expect(result.current.pendingMessages).toEqual([])
+  })
+
   it("retries Codex send-message without a rejected model override", async () => {
     const onModelRejected = vi.fn()
     mockedAuthFetch
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        json: async () => ({
-          error: "There's an issue with the selected model (gpt-5.4-mini). It may not exist or you may not have access to it. Run --model to pick a different model.",
-        }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true }),
-      } as Response)
+      .mockResolvedValueOnce(reply({
+        error: "There's an issue with the selected model (gpt-5.4-mini). It may not exist or you may not have access to it. Run --model to pick a different model.",
+      }, 500))
+      .mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -144,10 +154,7 @@ describe("usePtyChat", () => {
   })
 
   it("resolves Copilot's Default selection back to auto", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -169,10 +176,7 @@ describe("usePtyChat", () => {
   })
 
   it("sends the rollout thread UUID (not the nested file path) for Codex sessions without a parsed id", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -372,10 +376,7 @@ describe("usePtyChat", () => {
   })
 
   it("uses parsedSessionId over fileName-based id when available", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -412,11 +413,7 @@ describe("usePtyChat", () => {
   })
 
   it("uses default error message when response has no error field", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({}, 500))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -436,11 +433,7 @@ describe("usePtyChat", () => {
     const source2 = { dirName: "proj", fileName: "sess2.jsonl", rawText: "" }
 
     // First session has an error
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: "Server error" }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ error: "Server error" }, 500))
 
     const { result, rerender } = renderHook(
       (props) => usePtyChat({ sessionSource: props.source }),
@@ -482,10 +475,7 @@ describe("usePtyChat", () => {
 
   it("calls onPermissionsApplied during sendMessage", async () => {
     const onPermissionsApplied = vi.fn()
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -501,11 +491,94 @@ describe("usePtyChat", () => {
     expect(onPermissionsApplied).toHaveBeenCalledTimes(1)
   })
 
+  it("sends a permission mode only when one is given, leaving the session's own otherwise", async () => {
+    mockedAuthFetch.mockResolvedValue(reply({ success: true }))
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+    const picked = { mode: "plan" as const, allowedTools: [], disallowedTools: [] }
+
+    const { result, rerender } = renderHook(
+      ({ permissions }) => usePtyChat({ sessionSource, permissions }),
+      { initialProps: { permissions: undefined as typeof picked | undefined } },
+    )
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    rerender({ permissions: picked })
+    await act(async () => {
+      await result.current.sendMessage("again")
+    })
+
+    const bodies = mockedAuthFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string))
+    expect(bodies[0]).not.toHaveProperty("permissions")
+    expect(bodies[1].permissions).toEqual(picked)
+  })
+
+  it("names the settings the user picked in settingsChange, and none when nothing was picked", async () => {
+    mockedAuthFetch.mockResolvedValue(reply({ success: true }))
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+
+    const { result, rerender } = renderHook(
+      ({ settingsChange }) => usePtyChat({ sessionSource, model: "sonnet", effort: "high", settingsChange }),
+      { initialProps: { settingsChange: [] as Array<"model" | "effort"> } },
+    )
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    rerender({ settingsChange: ["model"] })
+    await act(async () => {
+      await result.current.sendMessage("again")
+    })
+
+    const bodies = mockedAuthFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string))
+    expect(bodies[0]).not.toHaveProperty("settingsChange")
+    expect(bodies[1]).toMatchObject({ model: "sonnet", effort: "high", settingsChange: ["model"] })
+  })
+
+  it("carries fast mode and ultracode turned off only when the user picked them", async () => {
+    mockedAuthFetch.mockResolvedValue(reply({ success: true }))
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+
+    const { result, rerender } = renderHook(
+      ({ settingsChange }) => usePtyChat({ sessionSource, fastMode: false, ultracode: false, settingsChange }),
+      { initialProps: { settingsChange: [] as Array<"fastMode" | "ultracode"> } },
+    )
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    rerender({ settingsChange: ["fastMode", "ultracode"] })
+    await act(async () => {
+      await result.current.sendMessage("again")
+    })
+
+    const bodies = mockedAuthFetch.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string))
+    expect(bodies[0]).not.toHaveProperty("fastMode")
+    expect(bodies[0]).not.toHaveProperty("ultracode")
+    expect(bodies[1]).toMatchObject({ fastMode: false, ultracode: false, settingsChange: ["fastMode", "ultracode"] })
+  })
+
+  it("reports a settings change sent only once the send went through", async () => {
+    mockedAuthFetch.mockResolvedValueOnce(reply({ error: "Server error" }, 500)).mockResolvedValueOnce(reply({ success: true }))
+    const onSettingsChangeSent = vi.fn()
+
+    const { result } = renderHook(() => usePtyChat({
+      sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+      model: "sonnet",
+      settingsChange: ["model"],
+      onSettingsChangeSent,
+    }))
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    expect(onSettingsChangeSent).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await result.current.sendMessage("again")
+    })
+    expect(onSettingsChangeSent).toHaveBeenCalledOnce()
+  })
+
   it("sends images in the request body", async () => {
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true }),
-    } as Response)
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true }))
 
     const { result } = renderHook(() =>
       usePtyChat({

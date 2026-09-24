@@ -1,5 +1,6 @@
 import { readlink } from "node:fs/promises"
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { visibleTranscript } from "../../edition/transcript"
 import { dirs } from "../../helpers"
 import type { NextFn } from "../../http"
 import {
@@ -12,7 +13,7 @@ export async function handleBackgroundAgents(
   res: ServerResponse,
   next: NextFn,
 ): Promise<void> {
-  return handleBackgroundOutputCollection(req, res, next, async (files) => {
+  return handleBackgroundOutputCollection(req, res, next, async (files, check) => {
     const agents: Array<{
       agentId: string
       dirName: string
@@ -47,7 +48,15 @@ export async function handleBackgroundAgents(
       const parentSessionId = parts[1]
       const fileName = `${parentSessionId}/subagents/${parts[3]}`
 
-      const output = await readBackgroundOutputPrefix(targetPath, 4096)
+      let transcriptPath = targetPath
+      if (!check.everything) {
+        const transcript = await visibleTranscript(check, { dirName, fileName })
+        // The row names the parent it parsed, so that must be the session checked.
+        if (transcript?.sessionId !== parentSessionId.toLowerCase()) continue
+        transcriptPath = transcript.filePath
+      }
+
+      const output = await readBackgroundOutputPrefix(transcriptPath, 4096)
       if (!output) continue
 
       const { modifiedAt } = output

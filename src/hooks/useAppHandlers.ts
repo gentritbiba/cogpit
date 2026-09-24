@@ -7,11 +7,17 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "./useLiveSession"
 import type { SessionAction } from "./useSessionState"
-import { authFetch } from "@/lib/auth"
+import { toast } from "sonner"
+import { authFetch, jsonFetch } from "@/lib/auth"
+import { readError } from "@/lib/httpJson"
+import type { DeleteSession } from "@/components/session-browser/types"
 import { loadSessionTailCached, loadSessionTailFresh } from "@/lib/sessionLoader"
+import { rememberCreatedSession } from "@/lib/sessionAccess"
+import { trackDeletion } from "@/lib/sessionAccessEvents"
 import { parseSubAgentPath } from "@/lib/format"
-import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
+import { agentKindForDirName, capabilitiesFor, ownSessionIdOf } from "@/lib/agents"
 import type { PermissionsConfig } from "@/lib/permissions"
+import type { SessionSettingField } from "../../shared/contracts/sessionSettings"
 
 interface AppHandlersDeps {
   state: {
@@ -23,7 +29,12 @@ interface AppHandlersDeps {
   handleJumpToTurn: (index: number, toolCallId?: string) => void
   markPermissionsApplied: () => void
   hasPermsPendingChanges: boolean
-  permissionsConfig: PermissionsConfig
+  /** The permissions the user picked for this session, if any; applying leaves the session's own mode alone otherwise. */
+  permissionsConfig: PermissionsConfig | undefined
+  /** The settings the user picked, which applying names so that they, not the session's stored ones, take effect. */
+  settingsChange: readonly SessionSettingField[]
+  /** Called once an apply naming a settings change went through. */
+  onSettingsChangeSent: () => void
   selectedModel: string
   selectedEffort: string
   fastMode: boolean
@@ -33,6 +44,26 @@ interface AppHandlersDeps {
   handleDashboardSelect: (dirName: string, fileName: string) => void
   /** Off-main-thread session parser from App's `useParserWorker`. */
   workerParse: (text: string) => Promise<ParsedSession>
+  /** Whether the user may stop the session and change its settings. */
+  canInteract: boolean
+}
+
+/**
+ * Resolves whether the transcript is gone. A 404 is a session already out of
+ * the caller's reach, deleted elsewhere (with its access records, where an edition keeps them) or
+ * no longer theirs to see, so its row goes as quietly as a delete's.
+ */
+async function deleteTranscript(dirName: string, fileName: string): Promise<boolean> {
+  let res: Response
+  try {
+    res = await jsonFetch("/api/delete-session", { dirName, fileName })
+  } catch {
+    toast.error("Could not delete session")
+    return false
+  }
+  if (res.ok || res.status === 404) return true
+  toast.error(await readError(res, "Could not delete session"))
+  return false
 }
 
 interface AppliedSettings {
@@ -56,7 +87,7 @@ interface AppHandlersResult {
   // Session operations
   handleDuplicateSessionByPath: (dirName: string, fileName: string) => Promise<void>
   handleDuplicateSession: () => void
-  handleDeleteSession: (dirName: string, fileName: string) => Promise<void>
+  handleDeleteSession: DeleteSession
   handleBranchFromHere: (turnIndex: number) => Promise<void>
 
   // Mobile jump
@@ -77,6 +108,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
     state, dispatch, isMobile, handleJumpToTurn,
     markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
+    settingsChange, onSettingsChangeSent,
     selectedModel,
     selectedEffort,
     fastMode,
@@ -84,6 +116,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
     workerParse,
+    canInteract,
   } = deps
 
   // ── Session reload ─────────────────────────────────────────────────────────
@@ -107,18 +140,19 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const handleOpenBranches = useCallback((turnIndex: number) => setBranchModalTurn(turnIndex), [])
   const handleCloseBranchModal = useCallback(() => setBranchModalTurn(null), [])
 
-  // ── Duplicate session by path ──────────────────────────────────────────────
-  const handleDuplicateSessionByPath = useCallback(async (dirName: string, fileName: string) => {
+  // ── Copies (duplicate, branch) ─────────────────────────────────────────────
+  // The copy belongs to whoever made it. Open it bottom-first like any other
+  // path instead of reading the whole file back.
+  const openCopy = useCallback(async (request: Record<string, unknown>) => {
     try {
       const res = await authFetch("/api/branch-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName }),
+        body: JSON.stringify(request),
       })
       if (!res.ok) return
       const data = await res.json()
-      // The server owns the copy — open the new session bottom-first like any
-      // other path instead of reading the whole file back.
+      rememberCreatedSession(data.sessionId)
       const { parsed, source } = await loadSessionTailCached(
         data.dirName, data.fileName, workerParse, "session",
       )
@@ -128,6 +162,11 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     }
   }, [dispatch, isMobile, workerParse])
 
+  const handleDuplicateSessionByPath = useCallback(
+    (dirName: string, fileName: string) => openCopy({ dirName, fileName }),
+    [openCopy],
+  )
+
   // ── Duplicate the current session ──────────────────────────────────────────
   const handleDuplicateSession = useCallback(() => {
     if (!state.sessionSource) return
@@ -135,16 +174,12 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   }, [state.sessionSource, handleDuplicateSessionByPath])
 
   // ── Delete session ─────────────────────────────────────────────────────────
-  const handleDeleteSession = useCallback(async (dirName: string, fileName: string) => {
-    try {
-      await authFetch("/api/delete-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName }),
-      })
-    } catch {
-      // silently fail
-    }
+  // Deleting a session's own transcript deletes the session, which closes
+  // quietly; the access that takes away is no loss to report.
+  const handleDeleteSession = useCallback<DeleteSession>((dirName, fileName) => {
+    const deleting = deleteTranscript(dirName, fileName)
+    const sessionId = ownSessionIdOf(dirName, fileName)
+    return sessionId ? trackDeletion(sessionId, deleting) : deleting
   }, [])
 
   // ── Branch from here ───────────────────────────────────────────────────────
@@ -157,22 +192,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     // Synthetic ids (queued turns, uuid-less messages) won't match any line —
     // the server falls back to turnIndex for those.
     const turnUuid = state.session?.turns[turnIndex]?.id
-    try {
-      const res = await authFetch("/api/branch-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName, turnIndex, turnUuid }),
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      const { parsed, source } = await loadSessionTailCached(
-        data.dirName, data.fileName, workerParse, "session",
-      )
-      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
-    } catch {
-      // silently fail
-    }
-  }, [state.sessionSource, state.session, dispatch, isMobile, workerParse])
+    await openCopy({ dirName, fileName, turnIndex, turnUuid })
+  }, [state.sessionSource, state.session, openCopy])
 
   // ── Mobile jump to turn ────────────────────────────────────────────────────
   const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
@@ -195,6 +216,10 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   ultracodeRef.current = ultracode
   const permissionsConfigRef = useRef(permissionsConfig)
   permissionsConfigRef.current = permissionsConfig
+  const settingsChangeRef = useRef(settingsChange)
+  settingsChangeRef.current = settingsChange
+  const onSettingsChangeSentRef = useRef(onSettingsChangeSent)
+  onSettingsChangeSentRef.current = onSettingsChangeSent
 
   const currentSessionId = state.session?.sessionId ?? null
   const prevSessionIdRef = useRef<string | null>(null)
@@ -232,7 +257,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
 
   // ── Apply settings ─────────────────────────────────────────────────────────
   const handleApplySettings = useCallback(async () => {
-    if (!currentSessionId) return
+    if (!currentSessionId || !canInteract) return
     // Settings controls update React state immediately and schedule this action
     // for the next tick. Read refs here so the native Claude update always gets
     // the value the user just selected, rather than the previous render's value.
@@ -242,10 +267,12 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     const nextUltracode = ultracodeRef.current
     const nextMcpConfig = mcpConfigRef.current
     const nextPermissions = permissionsConfigRef.current
+    const settingsChange = settingsChangeRef.current
+    const settingsChangeSent = onSettingsChangeSentRef.current
     const agentKind = state.sessionSource?.agentKind
       ?? agentKindForDirName(state.sessionSource?.dirName ?? null)
     if (capabilitiesFor(agentKind).settingsApply === "live") {
-      await authFetch(`/api/claude/settings/${encodeURIComponent(currentSessionId)}`, {
+      const res = await authFetch(`/api/claude/settings/${encodeURIComponent(currentSessionId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -254,11 +281,15 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
           fastMode: nextFastMode,
           ultracode: nextUltracode,
           mcpConfig: nextMcpConfig,
-          permissionMode: nextPermissions.mode,
-          allowedTools: nextPermissions.allowedTools,
-          disallowedTools: nextPermissions.disallowedTools,
+          ...(nextPermissions && {
+            permissionMode: nextPermissions.mode,
+            allowedTools: nextPermissions.allowedTools,
+            disallowedTools: nextPermissions.disallowedTools,
+          }),
+          ...(settingsChange.length > 0 && { settingsChange }),
         }),
       })
+      if (res.ok && settingsChange.length > 0) settingsChangeSent()
     }
     setAppliedSettings(prev => ({
       ...prev,
@@ -271,11 +302,11 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
       },
     }))
     markPermissionsApplied()
-  }, [currentSessionId, state.sessionSource, markPermissionsApplied])
+  }, [currentSessionId, canInteract, state.sessionSource, markPermissionsApplied])
 
   // ── Stop session ───────────────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {
-    if (!currentSessionId) return
+    if (!currentSessionId || !canInteract) return
     try {
       await authFetch("/api/stop-session", {
         method: "POST",
@@ -283,7 +314,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         body: JSON.stringify({ sessionId: currentSessionId }),
       })
     } catch { /* ignore — session may already be dead */ }
-  }, [currentSessionId])
+  }, [currentSessionId, canInteract])
 
   // ── Load session scroll-aware ──────────────────────────────────────────────
   const handleLoadSessionScrollAware = useCallback((dirName: string, fileName: string) => {

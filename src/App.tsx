@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
-import { Loader2, AlertTriangle, RefreshCw, Bot } from "lucide-react"
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -36,6 +36,7 @@ import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useTheme } from "@/hooks/useTheme"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
+import { useSessionAccessLoss } from "@/hooks/useSessionAccessLoss"
 import { usePermissions } from "@/hooks/usePermissions"
 import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
@@ -70,32 +71,43 @@ import { can } from "@/lib/capabilities"
 import {
   agentKindForDirName,
   capabilitiesFor,
+  rootSessionIdOf,
   sessionIdFromFileName,
 } from "@/lib/agents"
-import { readOnlySessionNotice } from "@/lib/agents/presentation"
 import { LoginScreen } from "@/components/LoginScreen"
-import { BootstrapScreen } from "@/components/BootstrapScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
+import { DefaultGateScreen } from "@/edition/DefaultGateScreen"
+import { EditionUiFailedScreen } from "@/edition/EditionUiFailedScreen"
+import { useEditionUi } from "@/edition/hooks"
+import { useEditionUiReadiness } from "@/edition/load"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
+import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
+import { useSessionAccess } from "@/hooks/useSessionAccess"
+import { accessReadOnlyReason, SessionReadOnlyNotice, type ReadOnlyReason } from "@/components/SessionReadOnlyNotice"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
 const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
 
+/** A fresh load brings back everything the server refused while its gate kept the caller out. */
+function reloadApp(): void {
+  window.location.reload()
+}
+
 export default function App() {
   const previewSessionId = previewSessionIdFromPath(window.location.pathname)
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()
   const me = useMe(networkAuth.edition)
-  const identityReady = me.checked
-    && (networkAuth.edition !== "team"
-      || (me.authenticated && me.edition === "team" && me.user !== null))
+  const editionLoad = useEditionUiReadiness(networkAuth.edition, me.edition)
+  const editionUi = useEditionUi()
+  const identityReady = me.checked && (me.edition === "personal" || me.user !== null)
   const configAdminEnabled = identityReady && me.capabilities.configWrite
   const hostFilesEnabled = identityReady && me.capabilities.hostFiles
   const terminalEnabled = identityReady && me.capabilities.terminal
@@ -174,8 +186,10 @@ export default function App() {
     : undefined
   const agentCapabilities = capabilitiesFor(currentAgentKind)
   const isReadOnlySession = isExternallyDrivenSession(currentAgentKind, currentProcess)
+  const sessionAccess = useSessionAccess(state.session?.sessionId ?? null)
+  const sessionPermissions = permissionsForAccess(sessionAccess.level)
   const supportsWorktrees = agentCapabilities.worktrees
-  const supportsMcp = agentCapabilities.mcp
+  const mcpEnabled = agentCapabilities.mcp && configAdminEnabled && sessionPermissions.mcp
   const slashSuggestions = useSlashSuggestions(
     configAdminEnabled ? state.session?.cwd ?? pendingPath ?? undefined : undefined,
     configAdminEnabled && agentCapabilities.slashCommands,
@@ -393,14 +407,17 @@ export default function App() {
   })
 
   // Session-specific config shared across all Cogpit clients: hydrate the
-  // composer controls from the server-side store when a session opens, and
-  // persist every change back so other devices/browsers see the same state.
+  // composer controls from the server-side store, read it again whenever it may
+  // have changed elsewhere, and persist the user's changes back so other
+  // devices/browsers see the same state.
   const sessionConfigKey = getSessionConfigKey(
     state.session?.sessionId,
     state.sessionSource?.fileName,
   )
-  useSessionConfigSync({
+  const sessionConfig = useSessionConfigSync({
     sessionKey: sessionConfigKey,
+    sessionId: state.session?.sessionId ?? null,
+    access: sessionAccess.level,
     values: {
       model: selectedModel,
       effort: selectedEffort,
@@ -418,13 +435,15 @@ export default function App() {
       if (config.permissionMode) permsSetMode(config.permissionMode)
     }, [setContextWindowTokens, setSelectedModel, setSelectedEffort, setFastModeEnabled, setUltracodeEnabled, permsSetMode]),
   })
+  // A session keeps its own permission mode unless the user picked one here.
+  const pickedPermissions = sessionConfig.picked.includes("permissionMode") ? perms.config : undefined
 
   // MCP server selection
   const mcpData = useMcpServers(
-    supportsMcp && configAdminEnabled ? currentCwd : undefined,
-    supportsMcp && configAdminEnabled ? (currentDirName ?? undefined) : undefined,
-    supportsMcp && configAdminEnabled ? sessionConfigKey ?? undefined : undefined,
-    configAdminEnabled,
+    mcpEnabled ? currentCwd : undefined,
+    mcpEnabled ? (currentDirName ?? undefined) : undefined,
+    mcpEnabled ? sessionConfigKey ?? undefined : undefined,
+    mcpEnabled,
   )
   useEffect(() => {
     if (
@@ -470,7 +489,7 @@ export default function App() {
     contextWindowTokens: contextWindowAvailable ? contextWindowTokens : undefined,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
+    mcpConfig: mcpEnabled ? mcpData.mcpConfigJson : null,
   })
 
   // Active agent chat
@@ -478,16 +497,18 @@ export default function App() {
     sessionSource: state.sessionSource,
     parsedSessionId: state.session?.sessionId ?? null,
     cwd: state.session?.cwd,
-    permissions: perms.config,
+    permissions: pickedPermissions,
     onPermissionsApplied: perms.markApplied,
+    settingsChange: sessionConfig.picked,
+    onSettingsChangeSent: sessionConfig.settlePicked,
     model: selectedModel,
     effort: effectiveEffort,
     contextWindowTokens: contextWindowAvailable ? contextWindowTokens : undefined,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
+    mcpConfig: mcpEnabled ? mcpData.mcpConfigJson : null,
     onModelRejected: handleModelRejected,
-    readOnly: isReadOnlySession,
+    readOnly: isReadOnlySession || !sessionPermissions.send,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -597,6 +618,14 @@ export default function App() {
   // MRU session history for Ctrl+Tab switching
   const sessionHistory = useSessionHistory()
 
+  useSessionAccessLoss({
+    openSessionId: (state.sessionSource && rootSessionIdOf(state.sessionSource.dirName, state.sessionSource.fileName))
+      ?? state.session?.sessionId
+      ?? null,
+    leave: actions.handleCloseSession,
+    forgetVisits: sessionHistory.forget,
+  })
+
   // Track session visits for history
   const pushHistory = sessionHistory.push
   useEffect(() => {
@@ -613,15 +642,18 @@ export default function App() {
     handleJumpToTurn: actions.handleJumpToTurn,
     markPermissionsApplied: perms.markApplied,
     hasPermsPendingChanges: perms.hasPendingChanges,
-    permissionsConfig: perms.config,
+    permissionsConfig: pickedPermissions,
+    settingsChange: sessionConfig.picked,
+    onSettingsChangeSent: sessionConfig.settlePicked,
     selectedModel,
     selectedEffort: effectiveEffort,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
+    mcpConfig: mcpEnabled ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
     workerParse,
+    canInteract: sessionPermissions.canInteract,
   })
 
   // Auto-apply MCP settings ONLY when data first loads (loaded: false→true).
@@ -630,7 +662,7 @@ export default function App() {
   // We intentionally do NOT auto-apply when switching between sessions or when
   // the user changes MCP selection — those require explicit "Apply Settings".
   const { hasSettingsChanges, handleApplySettings } = handlers
-  const mcpHasRestrictions = supportsMcp && configAdminEnabled && mcpData.mcpConfigJson !== null
+  const mcpHasRestrictions = mcpEnabled && mcpData.mcpConfigJson !== null
   const mcpPrevLoadedRef = useRef(false)
   useEffect(() => {
     const justLoaded = mcpData.loaded && !mcpPrevLoadedRef.current
@@ -658,7 +690,7 @@ export default function App() {
     state.session,
     state.sessionSource,
     handlers.reloadSession,
-    hostFilesEnabled,
+    hostFilesEnabled && sessionPermissions.undo,
   )
 
   // Wire up branch switch now that undoRedo is available
@@ -742,25 +774,12 @@ export default function App() {
     ? undoRedo.branchesAtTurn(renderedBranchModalTurn)
     : []
 
-  // Read-only banner shown when viewing a sub-agent session (replaces chat input)
-  const subAgentReadOnlyNode = isSubAgentView ? (
-    <div className="flex shrink-0 items-center justify-center gap-2 border-t bg-card px-4 py-2.5">
-      <Bot data-icon="inline-start" className="size-3.5 text-muted-foreground" />
-      <span className="text-xs text-muted-foreground">Viewing sub-agent session (read-only)</span>
-    </div>
-  ) : null
-  const externallyDrivenReadOnlyNode = isReadOnlySession ? (
-    <div
-      role="status"
-      className="flex shrink-0 items-center justify-center gap-2 border-t bg-card px-4 py-2.5"
-    >
-      <Bot data-icon="inline-start" className="size-3.5 text-muted-foreground" />
-      <span className="text-xs text-muted-foreground">
-        {readOnlySessionNotice(currentAgentKind)}
-      </span>
-    </div>
-  ) : null
-  const activeReadOnlyNode = subAgentReadOnlyNode || externallyDrivenReadOnlyNode
+  // Replaces the composer when the session can be read but not driven.
+  let readOnlyReason: ReadOnlyReason | null = null
+  if (isSubAgentView) readOnlyReason = { kind: "subagent" }
+  else if (isReadOnlySession) readOnlyReason = { kind: "external", agentKind: currentAgentKind }
+  else readOnlyReason = accessReadOnlyReason(sessionAccess)
+  const activeReadOnlyNode = readOnlyReason && <SessionReadOnlyNotice reason={readOnlyReason} />
 
   // Collect all error messages for toast display — first non-null wins
   const activeError = actions.loadError || createError || null
@@ -792,7 +811,7 @@ export default function App() {
   }), [
     state.activeTurnIndex, state.activeToolCallId,
     state.searchQuery, state.expandAll, state.expandToolPayloads,
-    state.mainView, state.mobileTab,
+    state.mainView, state.extensionViewId, state.mobileTab,
     state.dashboardProject, state.pendingDirName, state.pendingCwd,
     state.currentMemberName, state.loadingMember,
     state.configFilePath, state.sessionChangeKey,
@@ -817,6 +836,7 @@ export default function App() {
     respondPermission: permReqs.respond,
     respondAllPermissions: permReqs.respondAll,
     isSubAgentView,
+    permissions: sessionPermissions,
     slashSuggestions: slashSuggestions.suggestions,
     slashSuggestionsLoading: slashSuggestions.loading,
     actions: {
@@ -832,7 +852,7 @@ export default function App() {
   }), [
     state.session, state.sessionSource,
     isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit,
-    undoRedo, pendingInteraction, isSubAgentView,
+    undoRedo, pendingInteraction, isSubAgentView, sessionPermissions,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, configAdminEnabled, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
@@ -870,8 +890,13 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [isNewSession, isMobile, state.pendingDirName])
 
-  // ─── AUTH GATE (remote clients + team-edition local browsers) ───────────────
-  if (!networkAuth.authChecked) {
+  // The server's own edition UI did not download, and its screens need it.
+  if (editionLoad.failed) return <EditionUiFailedScreen onRetry={editionLoad.retry} />
+
+  // ─── AUTH GATE (remote clients + local browsers on account sign-in) ─────────
+  // A server of another edition also waits for its UI, so its sign-in and
+  // setup screens are the edition's own.
+  if (!networkAuth.authChecked || !editionLoad.serverReady) {
     return (
       <div
         className="dark flex h-dvh items-center justify-center bg-canvas"
@@ -884,22 +909,24 @@ export default function App() {
   }
 
   if (!networkAuth.authenticated) {
-    // A team server with no accounts has nobody to log in as yet, so the
-    // founding admin is created first. Personal edition never reports this.
-    if (networkAuth.needsBootstrap) {
+    // A server with account sign-in but no accounts has nobody to sign in as
+    // yet, so its first-time setup comes first. Password sign-in never asks.
+    const EditionSetupScreen = editionUi.SetupScreen
+    if (networkAuth.setupRequired && EditionSetupScreen) {
       return (
-        <BootstrapScreen
+        <EditionSetupScreen
           onAuthenticated={networkAuth.handleAuthenticated}
-          onBootstrapClosed={networkAuth.refreshServerState}
+          onSetupClosed={networkAuth.refreshServerState}
         />
       )
     }
-    return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
+    return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} setupRequired={networkAuth.setupRequired} />
   }
 
   // Do not mount privileged providers or child fetch effects under the
-  // optimistic personal defaults while a team member's capabilities load.
-  if (!identityReady) {
+  // optimistic personal defaults while the signed-in account's capabilities
+  // load, or while a device of another edition loads that edition's UI.
+  if (!identityReady || !editionLoad.ready) {
     return (
       <div
         className="dark flex h-dvh items-center justify-center bg-canvas"
@@ -908,6 +935,26 @@ export default function App() {
       >
         <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
+    )
+  }
+
+  // ─── SERVER GATE ────────────────────────────────────────────────────────────
+  // The server serves only what can let the caller back in until the gate
+  // lifts. The app's status toasts would only report those refusals, so they
+  // are cleared and the gate screen's own toasts show alone.
+  if (me.gate) {
+    const GateScreen = editionUi.GateScreen ?? DefaultGateScreen
+    return (
+      <>
+        <GateScreen gate={me.gate} onRestored={reloadApp} onLogout={networkAuth.logout} />
+        <AppStatusToasts
+          activeError={null}
+          modelFallbackNotice={null}
+          dismissModelFallbackNotice={dismissModelFallbackNotice}
+          connectionLost={false}
+          theme={themeCtx.activeTheme}
+        />
+      </>
     )
   }
 
@@ -1039,6 +1086,7 @@ export default function App() {
         sessionId={workflowSource.sessionId}
         workflows={sessionWorkflows.workflows}
         isLive={sessionWorkflows.isLive}
+        canStop={sessionPermissions.stop}
         onRefetchList={sessionWorkflows.refetch}
       />
     </Suspense>
@@ -1066,13 +1114,13 @@ export default function App() {
       onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
       onApplySettings={handlers.handleApplySettings}
       activeModelId={state.session?.model}
-      mcpServers={supportsMcp && configAdminEnabled ? mcpData.servers : undefined}
-      selectedMcpServers={supportsMcp && configAdminEnabled ? mcpData.selectedServers : undefined}
-      onToggleMcpServer={supportsMcp && configAdminEnabled ? mcpData.toggleServer : undefined}
-      onSetMcpServers={supportsMcp && configAdminEnabled ? mcpData.setSelection : undefined}
-      onRefreshMcpServers={supportsMcp && configAdminEnabled ? mcpData.refresh : undefined}
-      mcpLoading={supportsMcp && configAdminEnabled ? mcpData.loading : undefined}
-      onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}
+      mcpServers={mcpEnabled ? mcpData.servers : undefined}
+      selectedMcpServers={mcpEnabled ? mcpData.selectedServers : undefined}
+      onToggleMcpServer={mcpEnabled ? mcpData.toggleServer : undefined}
+      onSetMcpServers={mcpEnabled ? mcpData.setSelection : undefined}
+      onRefreshMcpServers={mcpEnabled ? mcpData.refresh : undefined}
+      mcpLoading={mcpEnabled ? mcpData.loading : undefined}
+      onMcpAuth={mcpEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
       mobileExtra={includeGoal && goalSession ? <GoalTrigger /> : undefined}
@@ -1221,6 +1269,7 @@ export default function App() {
             branchModal,
             fileChangesOpen: showMobileFileChanges,
             onFileChangesOpenChange: setShowMobileFileChanges,
+            onLogout: networkAuth.logout,
           }}
         />
       </StreamingOverlayProvider>
@@ -1303,6 +1352,7 @@ export default function App() {
             onCollapseAll: handleCollapseAll,
             keyboardShortcutsOpen: showKeyboardShortcuts,
             onKeyboardShortcutsOpenChange: setShowKeyboardShortcuts,
+            onLogout: networkAuth.logout,
           }}
         />
       </StreamingOverlayProvider>

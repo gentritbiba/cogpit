@@ -6,10 +6,19 @@
     "lib": ["ES2023"],
 
     /* Path aliases */
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@cogpit/core/*": ["./*"]
     }
   },
-  "include": ["vite.config.ts", "server/**/*.ts"]
+  "include": [
+    "vite.config.ts",
+    "server/**/*.ts",
+    "editions/team/index.ts",
+    "editions/team/server/**/*.ts",
+    "editions/team/shared/**/*.ts",
+    "editions/team/tools/**/*.ts",
+    "editions/team/tests/**/*.ts"
+  ],
+  "exclude": ["editions/team/tests/ui/**"]
 }

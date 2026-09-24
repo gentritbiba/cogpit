@@ -21,17 +21,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -41,10 +30,12 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
+import { ConfirmActionDialog } from "@/components/shared/ConfirmActionDialog"
+import { InlineEditPanel } from "@/components/shared/InlineEditPanel"
 import { cn } from "@/lib/utils"
 import { switchDevice } from "@/lib/device"
 import {
-  deviceEdition,
+  deviceSignIn,
   deviceVersion,
   useDevices,
   type DeviceHello,
@@ -65,7 +56,7 @@ const SWITCH_TIP = `${IS_MAC ? "⌘⇧" : "Ctrl+Shift+"}1–9`
 
 // Which field an add-error code belongs under.
 const PASSWORD_CODES = new Set(["BAD_PASSWORD", "PASSWORD_REQUIRED", "USERNAME_REQUIRES_PASSWORD"])
-const USERNAME_CODES = new Set(["ACCOUNT_DISABLED"])
+const USERNAME_CODES = new Set(["ACCOUNT_REFUSED"])
 
 interface DevicesDialogProps {
   open: boolean
@@ -102,13 +93,13 @@ export function probeMessage(
   port: number,
 ): { tone: ProbeTone; text: string } {
   if (result.ok) {
-    if (result.hello.edition === "team" && result.hello.needsBootstrap === true) {
+    if (result.hello.signIn === "account" && result.hello.setupRequired === true) {
       return {
         tone: "info",
-        text: "Reachable team server — create its first admin account before adding it here.",
+        text: "Reachable server — finish its setup before adding it here.",
       }
     }
-    if (result.hello.edition !== "team" && result.hello.networkAccess === false) {
+    if (result.hello.signIn !== "account" && result.hello.networkAccess === false) {
       return {
         tone: "warn",
         text: "Cogpit is running but network access is disabled — enable it in that device's settings.",
@@ -180,7 +171,7 @@ function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: Device
   const [credentialPassword, setCredentialPassword] = useState("")
   const [credentialError, setCredentialError] = useState<string | null>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
-  const [busy, setBusy] = useState<null | "rename" | "credentials" | "remove" | "test">(null)
+  const [busy, setBusy] = useState<null | "rename" | "credentials" | "test">(null)
 
   useEffect(() => {
     setName(device.name)
@@ -192,7 +183,7 @@ function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: Device
 
   const version = deviceVersion(device)
   const skewed = version !== undefined && version !== HUB_VERSION
-  const teamDevice = deviceEdition(device) === "team"
+  const accountDevice = deviceSignIn(device) === "account"
 
   async function saveName() {
     const trimmed = name.trim()
@@ -285,10 +276,10 @@ function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: Device
           </span>
           {device.username ? (
             <span className="truncate text-xs text-muted-foreground" title={device.username}>
-              Team account: {device.username}
+              Account: {device.username}
             </span>
-          ) : teamDevice ? (
-            <span className="text-xs text-warning">Team account not configured</span>
+          ) : accountDevice ? (
+            <span className="text-xs text-warning">Account not configured</span>
           ) : null}
         </div>
 
@@ -327,60 +318,48 @@ function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: Device
           >
             <Pencil data-icon="inline-start" />
           </Button>
-          <AlertDialog
+          <ConfirmActionDialog
             open={removeOpen}
-            onOpenChange={(nextOpen) => {
-              if (busy !== "remove") setRemoveOpen(nextOpen)
+            onOpenChange={setRemoveOpen}
+            trigger={(
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove ${device.name}`}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 data-icon="inline-start" />
+              </Button>
+            )}
+            title={<>Remove {device.name}?</>}
+            description="This device will disappear from Cogpit. You can add it again later."
+            confirmLabel="Remove device"
+            destructive
+            onConfirm={async () => {
+              await onRemove(device.id)
+              return null
             }}
-          >
-            <AlertDialogTrigger
-              render={(
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Remove ${device.name}`}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                />
-              )}
-            >
-              <Trash2 data-icon="inline-start" />
-            </AlertDialogTrigger>
-            <AlertDialogContent size="sm">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Remove {device.name}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This device will disappear from Cogpit. You can add it again later.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={busy === "remove"}>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  variant="destructive"
-                  disabled={busy === "remove"}
-                  onClick={async () => {
-                    setBusy("remove")
-                    try {
-                      await onRemove(device.id)
-                    } finally {
-                      setBusy(null)
-                    }
-                  }}
-                >
-                  {busy === "remove" && <Loader2 data-icon="inline-start" className="animate-spin" />}
-                  Remove device
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          />
         </div>
       </div>
 
       {editingCredentials && (
-        <div className="flex flex-col gap-3 border-t px-3 py-3">
+        <InlineEditPanel
+          error={credentialError}
+          busy={busy === "credentials"}
+          saveLabel="Save account"
+          onCancel={() => {
+            setEditingCredentials(false)
+            setCredentialUsername(device.username ?? "")
+            setCredentialPassword("")
+            setCredentialError(null)
+          }}
+          onSave={() => void saveCredentials()}
+        >
           <div className="grid gap-2 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor={`device-username-${device.id}`}>
-                Username <span className="text-muted-foreground/60">(team devices)</span>
+                Username <span className="text-muted-foreground/60">(account sign-in)</span>
               </FieldLabel>
               <Input
                 id={`device-username-${device.id}`}
@@ -412,25 +391,7 @@ function DeviceRow({ device, onRename, onCredentials, onRemove, onTest }: Device
               Clearing the username switches this device back to password-only authentication.
             </p>
           )}
-          {credentialError && <FieldError>{credentialError}</FieldError>}
-          <div className="flex justify-end gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditingCredentials(false)
-                setCredentialUsername(device.username ?? "")
-                setCredentialPassword("")
-                setCredentialError(null)
-              }}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" disabled={busy === "credentials"} onClick={() => void saveCredentials()}>
-              {busy === "credentials" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : "Save account"}
-            </Button>
-          </div>
-        </div>
+        </InlineEditPanel>
       )}
     </div>
   )
@@ -500,20 +461,20 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
     return () => window.clearTimeout(timer)
   }, [open, hostInput, runProbe])
 
-  const targetIsTeam = probeState?.hello?.edition === "team"
-  const targetNeedsBootstrap = targetIsTeam && probeState?.hello?.needsBootstrap === true
-  const credentialsRequired = targetIsTeam || !allowLocalTunnel
+  const targetUsesAccounts = probeState?.hello?.signIn === "account"
+  const targetNeedsSetup = targetUsesAccounts && probeState?.hello?.setupRequired === true
+  const credentialsRequired = targetUsesAccounts || !allowLocalTunnel
 
   const canSubmit = useMemo(() => {
     if (submitting) return false
     if (!parseHostPort(hostInput).host) return false
     if (probing || !probeState) return false
-    if (targetNeedsBootstrap) return false
+    if (targetNeedsSetup) return false
     if (credentialsRequired && !password) return false
-    if (targetIsTeam && !username.trim()) return false
+    if (targetUsesAccounts && !username.trim()) return false
     if (probeState?.tone === "error") return false
     return true
-  }, [submitting, hostInput, probing, probeState, targetNeedsBootstrap, credentialsRequired, targetIsTeam, username, password])
+  }, [submitting, hostInput, probing, probeState, targetNeedsSetup, credentialsRequired, targetUsesAccounts, username, password])
 
   async function handleSubmit() {
     const { host, port, tls } = parseHostPort(hostInput)
@@ -525,7 +486,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
       host,
       port,
       tls,
-      username: targetIsTeam ? username.trim() : undefined,
+      username: targetUsesAccounts ? username.trim() : undefined,
       password: credentialsRequired ? password || undefined : undefined,
       allowLocalTunnel,
     })
@@ -646,19 +607,19 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
               />
             </Field>
 
-            {targetIsTeam && (
+            {targetUsesAccounts && (
               <Field data-invalid={submitError?.field === "username"}>
                 <FieldLabel htmlFor="device-username">Username</FieldLabel>
                 <Input
                   id="device-username"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Team account username"
+                  placeholder="Account username"
                   autoComplete="username"
                   spellCheck={false}
                 />
                 <FieldDescription>
-                  Requests through this hub will act as this account on the team server.
+                  Requests through this hub act as this account on that server.
                 </FieldDescription>
                 {submitError?.field === "username" && (
                   <FieldError>{submitError.message}</FieldError>
@@ -674,8 +635,8 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder={targetIsTeam ? "Password for that team account" : "Network access password for that device"}
-                  autoComplete={targetIsTeam ? "current-password" : "off"}
+                  placeholder={targetUsesAccounts ? "Password for that account" : "Network access password for that device"}
+                  autoComplete={targetUsesAccounts ? "current-password" : "off"}
                 />
                 {submitError?.field === "password" && (
                   <FieldError>{submitError.message}</FieldError>
@@ -697,15 +658,15 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
               }}
             />
             <FieldLabel htmlFor="device-local-tunnel">
-              This is a local tunnel{targetIsTeam ? "" : " — no password"}
+              This is a local tunnel{targetUsesAccounts ? "" : " — no password"}
             </FieldLabel>
           </Field>
           {allowLocalTunnel && (
             <Alert className="border-warning/40 bg-warning/10 text-warning">
               <ShieldAlert />
               <AlertDescription className="text-warning">
-                {targetIsTeam ? (
-                  <>The loopback address is allowed because the tunnel is local; team account authentication still applies.</>
+                {targetUsesAccounts ? (
+                  <>The loopback address is allowed because the tunnel is local; account sign-in still applies.</>
                 ) : (
                   <>Traffic to this device is forwarded <strong>unauthenticated</strong>. Only use this for an SSH tunnel or another already-secured local channel.</>
                 )}

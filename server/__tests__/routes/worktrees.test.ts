@@ -23,7 +23,6 @@ import type { UseFn, Middleware } from "../../helpers"
 import { registerWorktreeRoutes } from "../../routes/worktrees"
 import { readFirstJsonLine, SESSION_HEADER_BYTES } from "../../routes/worktrees/worktreeUtils"
 import {
-  mapWithConcurrency,
   runWorktreeCommand,
   WORKTREE_COMMAND_MAX_BUFFER,
   WORKTREE_COMMAND_TIMEOUT_MS,
@@ -661,31 +660,5 @@ describe("worktree I/O bounds", () => {
       0,
     )
     expect(close).toHaveBeenCalledOnce()
-  })
-
-  it("caps concurrent work without changing output ordering", async () => {
-    let active = 0
-    let maxActive = 0
-    let started = 0
-    let releaseFirstWave: (() => void) | undefined
-    const firstWave = new Promise<void>((resolve) => {
-      releaseFirstWave = resolve
-    })
-
-    const pending = mapWithConcurrency([0, 1, 2, 3, 4, 5], 3, async (value) => {
-      active += 1
-      started += 1
-      maxActive = Math.max(maxActive, active)
-      if (started <= 3) await firstWave
-      active -= 1
-      return value * 2
-    })
-
-    await vi.waitFor(() => expect(started).toBe(3))
-    expect(maxActive).toBe(3)
-    releaseFirstWave?.()
-
-    await expect(pending).resolves.toEqual([0, 2, 4, 6, 8, 10])
-    expect(maxActive).toBe(3)
   })
 })

@@ -125,6 +125,8 @@ export interface AgentDirNameCodec {
   readonly lossy: boolean
   /** True when `dirName` belongs to this agent. */
   owns(dirName: string | null | undefined): boolean
+  /** True when `dirName` is a name `encode` produces, rather than one this agent merely owns. */
+  recognizes(dirName: string): boolean
   /** Encode a project path as this agent's dirName. */
   encode(cwd: string): string
   /** Decode one of this agent's dirNames back to a project path. */
@@ -144,6 +146,23 @@ export interface AgentSessionFileCodec {
   urlId(fileName: string): string
   /** Exact inverse of `urlId`. */
   fileNameFromUrlId(urlId: string): string
+  /**
+   * The top-level session a transcript belongs to, so a sub-agent or workflow
+   * transcript answers with the session that spawned it. Takes the file's
+   * canonical path — symlinks resolved, `/`-separated — relative to the
+   * project directory where the agent has one on disk, to the sessions root
+   * otherwise; `AgentStore.transcriptRoot` produces exactly that. Null for a
+   * path that could step outside it or names no session.
+   */
+  transcriptRoot(relativePath: string): TranscriptRoot | null
+}
+
+/** The top-level session a transcript belongs to. */
+export interface TranscriptRoot {
+  /** Lowercased. */
+  rootSessionId: string
+  /** False for a sub-agent's or workflow's transcript filed under that session. */
+  isRootTranscript: boolean
 }
 
 export interface AgentResumeCodec {
@@ -418,6 +437,10 @@ function base64DirNameCodec(prefix: string): AgentDirNameCodec {
   return {
     lossy: false,
     owns: (dirName) => typeof dirName === "string" && dirName.startsWith(prefix),
+    recognizes: (dirName) => {
+      const cwd = decodeBase64DirName(prefix, dirName)
+      return cwd !== null && cwd !== "" && encodeBase64DirName(prefix, cwd) === dirName
+    },
     encode: (cwd) => encodeBase64DirName(prefix, cwd),
     decode: (dirName) => decodeBase64DirName(prefix, dirName),
   }
@@ -427,6 +450,19 @@ function base64DirNameCodec(prefix: string): AgentDirNameCodec {
 function sessionIdFromJsonlName(fileName: string): string | null {
   const match = new RegExp(`(${SESSION_UUID})\\.jsonl$`, "i").exec(fileName)
   return match ? match[1] : null
+}
+
+/** The root of a transcript that is a session of its own. */
+function ownTranscriptRoot(sessionId: string | null | undefined): TranscriptRoot | null {
+  return sessionId ? { rootSessionId: sessionId.toLowerCase(), isRootTranscript: true } : null
+}
+
+/** The segments of a relative transcript path, or null when one could climb or re-root it. */
+function plainPathSegments(relativePath: string): string[] | null {
+  const segments = relativePath.split("/")
+  const plain = segments.every((segment) =>
+    segment !== "" && segment !== "." && segment !== ".." && !segment.includes("\\"))
+  return plain ? segments : null
 }
 
 /**
@@ -488,6 +524,22 @@ export const COPILOT_DIR_PREFIX = "copilot__"
 /** Modes the Claude CLI accepts after `--permission-mode`. */
 const CLAUDE_PERMISSION_MODES = new Set(["default", "plan", "acceptEdits", "dontAsk", "auto"])
 
+/** Directories beside `<session>.jsonl`, under `<session>/`, holding its sub-agents' and workflows' files. */
+const CLAUDE_SESSION_CHILD_DIRS = new Set(["subagents", "workflows"])
+
+function claudeTranscriptRoot(relativePath: string): TranscriptRoot | null {
+  const segments = plainPathSegments(relativePath)
+  if (!segments) return null
+  const [root, childDir] = segments
+  if (segments.length === 1) {
+    const sessionId = root.replace(/\.jsonl$/, "")
+    return sessionId !== root && isSessionUuid(sessionId) ? ownTranscriptRoot(sessionId) : null
+  }
+  return segments.length > 2 && CLAUDE_SESSION_CHILD_DIRS.has(childDir) && isSessionUuid(root)
+    ? { rootSessionId: root.toLowerCase(), isRootTranscript: false }
+    : null
+}
+
 const claude: AgentDescriptor = {
   kind: "claude",
   displayName: "Claude Code",
@@ -501,6 +553,8 @@ const claude: AgentDescriptor = {
       typeof dirName === "string"
       && !dirName.startsWith(CODEX_DIR_PREFIX)
       && !dirName.startsWith(COPILOT_DIR_PREFIX),
+    // An absolute path starts with `/` or `\` (`-`) or a drive (`C:\` → `C--`); a drive root alone is `C-`.
+    recognizes: (dirName) => /^(?:(?:-|[A-Za-z]--)[A-Za-z0-9-]*|[A-Za-z]-)$/.test(dirName),
     /**
      * Claude Code's own convention: every character outside `[A-Za-z0-9]`
      * becomes `-`, so `/Users/x/proj` and `C:\Users\x\proj` both collapse into a
@@ -522,6 +576,7 @@ const claude: AgentDescriptor = {
     name: (sessionId) => `${sessionId}.jsonl`,
     sessionId: sessionIdFromJsonlName,
     ...jsonlPathUrlCodec,
+    transcriptRoot: claudeTranscriptRoot,
   },
   metadataFromHead: true,
   resume: {
@@ -679,6 +734,9 @@ const codex: AgentDescriptor = {
     sessionId: sessionIdFromJsonlName,
     // The date nesting is unrecoverable from the id, so the URL keeps the path.
     ...jsonlPathUrlCodec,
+    // A sub-agent is a rollout of its own, linked to its parent only in its header.
+    transcriptRoot: (relativePath) =>
+      plainPathSegments(relativePath) ? ownTranscriptRoot(sessionIdFromJsonlName(relativePath)) : null,
   },
   // A rollout's header carries no turn count and no last user message; both
   // only settle at the end of the file.
@@ -797,6 +855,11 @@ const codex: AgentDescriptor = {
 
 // ── Copilot ─────────────────────────────────────────────────────────────────
 
+function copilotSessionId(fileName: string): string | null {
+  const match = new RegExp(`^(${SESSION_UUID})/events\\.jsonl$`, "i").exec(fileName)
+  return match ? match[1] : null
+}
+
 const copilot: AgentDescriptor = {
   kind: "copilot",
   displayName: "GitHub Copilot CLI",
@@ -805,17 +868,13 @@ const copilot: AgentDescriptor = {
   sessionFile: {
     /** Copilot keeps one directory per session: `<uuid>/events.jsonl`. */
     name: (sessionId) => `${sessionId}/events.jsonl`,
-    sessionId: (fileName) => {
-      const match = new RegExp(`^(${SESSION_UUID})/events\\.jsonl$`, "i").exec(fileName)
-      return match ? match[1] : null
-    },
+    sessionId: copilotSessionId,
     // `<id>/events.jsonl` rebuilds from the id, so URLs stay short.
-    urlId: (fileName) => {
-      const match = new RegExp(`^(${SESSION_UUID})/events\\.jsonl$`, "i").exec(fileName)
-      return match ? match[1] : fileName.replace(/\.jsonl$/, "")
-    },
+    urlId: (fileName) => copilotSessionId(fileName) ?? fileName.replace(/\.jsonl$/, ""),
     fileNameFromUrlId: (urlId) =>
       urlId.endsWith(".jsonl") ? urlId : `${urlId}/events.jsonl`,
+    // Sub-agents are events inside the parent transcript, so every file is a root.
+    transcriptRoot: (relativePath) => ownTranscriptRoot(copilotSessionId(relativePath)),
   },
   metadataFromHead: true,
   resume: {

@@ -21,15 +21,18 @@ import {
   BROWSER_NAME_RE,
   COGPIT_SESSION_ID_RE,
   DEFAULT_BROWSER,
+  OWNERS_DIR_NAME,
   SHARED_RUN_NAME,
   THROWAWAY_PREFIX,
+  THROWAWAY_USED_SUFFIX,
+  UNOWNED_FILE,
   binDir,
   nodeShimPath,
   shimPath,
 } from "./paths"
 import { writeIfChanged } from "./files"
 
-export const SHIM_VERSION = 3
+export const SHIM_VERSION = 4
 
 const BINARY_NAME = "agent-browser"
 const NODE_SHIM_NAME = "agent-browser-shim.mjs"
@@ -75,6 +78,94 @@ fi
 `
 }
 
+/**
+ * agent-browser's daemon clears the socket it starts on, so two calls that
+ * both find no daemon for a browser each start one, and the first is orphaned
+ * with its Chromium. The call that starts a browser's daemon runs under a lock
+ * beside its socket and waits for its command to finish; any call that meets
+ * the lock waits, then joins the daemon it started. A lock whose holder died
+ * is broken at once, and one held past its wait is broken too.
+ */
+const START_LOCK_SUFFIX = ".starting"
+const START_WAIT_TICKS = 300
+const START_TICK_S = 0.1
+
+function renderSingleFlight(): string {
+  return `daemon_up() {
+  local pid
+  pid="$(cat "$AGENT_BROWSER_SOCKET_DIR/$name.pid" 2>/dev/null)" || return 1
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+run_browser() {
+  daemon_up && exec "$real" "$@"
+  lock="$AGENT_BROWSER_SOCKET_DIR/$name${START_LOCK_SUFFIX}"
+  waited=0
+  until mkdir "$lock" 2>/dev/null; do
+    holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || [ "$waited" -ge ${START_WAIT_TICKS} ]; then
+      rm -rf "$lock"
+      waited=0
+      continue
+    fi
+    sleep ${START_TICK_S}
+    waited=$((waited + 1))
+  done
+  trap 'rm -rf "$lock"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  echo "$$" > "$lock/pid"
+  if daemon_up; then
+    rm -rf "$lock"
+    trap - EXIT HUP INT TERM
+    exec "$real" "$@"
+  fi
+  status=0
+  "$real" "$@" || status=$?
+  exit "$status"
+}
+`
+}
+
+/**
+ * An agent Cogpit spawned (it always sets `COGPIT_SESSION_ID`, if only to the
+ * empty string) opens its session's own profile as `default` when the server
+ * left a note naming one; see `server/browser/owners.ts`. The name is swapped
+ * where the call spelled it and in the environment, so the daemon, its socket
+ * and the profile all carry it. Cogpit's own launch and stop calls unset the
+ * variable and reach the host's `default` itself, as does anything with no note.
+ */
+function renderOwnedDefault(): string {
+  return `if [ "$name" = "${DEFAULT_BROWSER}" ] && [ -n "\${COGPIT_SESSION_ID+set}" ]; then
+  note="$home/${OWNERS_DIR_NAME}/${UNOWNED_FILE}"
+  if valid_sid "$COGPIT_SESSION_ID" && [ -f "$home/${OWNERS_DIR_NAME}/$COGPIT_SESSION_ID" ]; then
+    note="$home/${OWNERS_DIR_NAME}/$COGPIT_SESSION_ID"
+  fi
+  owned=""
+  if [ -f "$note" ]; then IFS= read -r owned < "$note" || true; fi
+  if [ -n "$owned" ] && [ "$owned" != "${DEFAULT_BROWSER}" ] && [[ "$owned" != ${THROWAWAY_PREFIX}* ]] && valid_name "$owned"; then
+    args=()
+    swapped=""
+    prev=""
+    for arg in "$@"; do
+      if [ -z "$swapped" ]; then
+        if [ "$prev" = "--session" ]; then
+          arg="$owned"; swapped=1
+        else
+          case "$arg" in --session=*) arg="--session=$owned"; swapped=1;; esac
+        fi
+      fi
+      args+=("$arg")
+      prev="$arg"
+    done
+    set -- \${args[@]+"\${args[@]}"}
+    name="$owned"
+    export AGENT_BROWSER_SESSION="$owned"
+  fi
+fi
+`
+}
+
 export function renderShim(realBinary: string, options: ShimOptions = {}): string {
   const { visibleBrowser = null, platform = process.platform } = options
   return `#!/usr/bin/env bash
@@ -88,7 +179,7 @@ if [ ! -x "$real" ] || [ "$real" -ef "$0" ]; then
 fi
 valid_name() { local LC_ALL=C; [[ "$1" =~ ${BROWSER_NAME_RE.source} ]]; }
 valid_sid()  { local LC_ALL=C; [[ "$1" =~ ${COGPIT_SESSION_ID_RE.source} ]]; }
-[ -n "\${COGPIT_BROWSER_HOME:-}" ] || [ -n "\${HOME:-}" ] || exec "$real" "$@"
+${renderSingleFlight()}[ -n "\${COGPIT_BROWSER_HOME:-}" ] || [ -n "\${HOME:-}" ] || exec "$real" "$@"
 home="\${COGPIT_BROWSER_HOME:-$HOME/.cogpit/browser}"
 name="\${AGENT_BROWSER_SESSION:-${DEFAULT_BROWSER}}"
 prev=""
@@ -103,15 +194,16 @@ if [[ "$name" == ${THROWAWAY_PREFIX}* ]]; then
   valid_sid "$sid" || sid="${SHARED_RUN_NAME}"
   export AGENT_BROWSER_SOCKET_DIR="$home/run/$sid"
   mkdir -p "$AGENT_BROWSER_SOCKET_DIR"
-  exec "$real" "$@"
+  touch "$AGENT_BROWSER_SOCKET_DIR/$name${THROWAWAY_USED_SUFFIX}" 2>/dev/null || true
+  run_browser "$@"
 fi
-profile="$home/profiles/$name"
+${renderOwnedDefault()}profile="$home/profiles/$name"
 mkdir -p "$profile" "$home/run/${SHARED_RUN_NAME}"
-printf '%s\\n' "\${COGPIT_SESSION_ID:-}" > "$profile/.driver"
+if [ -n "\${COGPIT_SESSION_ID+set}" ]; then printf '%s\\n' "$COGPIT_SESSION_ID" > "$profile/.driver"; fi
 export AGENT_BROWSER_SOCKET_DIR="$home/run/${SHARED_RUN_NAME}"
 export AGENT_BROWSER_PROFILE="$profile"
 export AGENT_BROWSER_ARGS="--remote-debugging-port=0"
-${renderVisibleBrowser(visibleBrowser, platform)}exec "$real" "$@"
+${renderVisibleBrowser(visibleBrowser, platform)}run_browser "$@"
 `
 }
 
@@ -124,7 +216,7 @@ export function renderNodeShim(realBinary: string): string {
   return `// ${MARKER}
 // Regenerated by Cogpit on start; edits are lost.
 import { spawnSync } from "node:child_process"
-import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -151,16 +243,57 @@ function quoteArgument(arg) {
 function escapeForCmd(text) {
   return text.replace(/([()[\\]%!^"\`<>&|;, *?])/g, "^$1")
 }
-function run() {
+function runReal() {
   const batch = process.platform === "win32" && /\\.(cmd|bat)$/i.test(real)
   const result = batch
     ? spawnSync(env.COMSPEC || "cmd.exe", ["/d", "/s", "/c", \`"\${[escapeForCmd(real), ...args.map((arg) => escapeForCmd(quoteArgument(arg)))].join(" ")}"\`], { env, stdio: "inherit", windowsVerbatimArguments: true })
     : spawnSync(real, args, { env, stdio: "inherit" })
   if (result.error) {
     console.error(\`cogpit-shim: \${result.error.message}\`)
-    process.exit(127)
+    return 127
   }
-  process.exit(result.status ?? 1)
+  return result.status ?? 1
+}
+function run() {
+  process.exit(runReal())
+}
+function readText(path) {
+  try { return readFileSync(path, "utf8").trim() } catch { return "" }
+}
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true } catch (error) { return error.code === "EPERM" }
+}
+function daemonUp() {
+  const pid = Number(readText(join(env.AGENT_BROWSER_SOCKET_DIR, \`\${name}.pid\`)))
+  return pid > 0 && isAlive(pid)
+}
+// The bash shim's single-flight start, with the same lock beside the socket.
+function runBrowser() {
+  if (daemonUp()) run()
+  const lock = join(env.AGENT_BROWSER_SOCKET_DIR, \`\${name}${START_LOCK_SUFFIX}\`)
+  const tick = new Int32Array(new SharedArrayBuffer(4))
+  for (let waited = 0; ; waited++) {
+    try {
+      mkdirSync(lock)
+      break
+    } catch {}
+    const holder = Number(readText(join(lock, "pid")))
+    if ((holder > 0 && !isAlive(holder)) || waited >= ${START_WAIT_TICKS}) {
+      rmSync(lock, { recursive: true, force: true })
+      waited = 0
+      continue
+    }
+    Atomics.wait(tick, 0, 0, ${START_TICK_S * 1000})
+  }
+  let status
+  try {
+    writeFileSync(join(lock, "pid"), String(process.pid))
+    status = daemonUp() ? null : runReal()
+  } finally {
+    rmSync(lock, { recursive: true, force: true })
+  }
+  if (status === null) run()
+  process.exit(status)
 }
 
 const homeDir = process.platform === "win32" ? env.USERPROFILE || env.HOME : env.HOME
@@ -168,13 +301,19 @@ const home = env.COGPIT_BROWSER_HOME || (homeDir ? join(homeDir, ".cogpit", "bro
 if (home === null) run()
 
 let name = env.AGENT_BROWSER_SESSION || ${JSON.stringify(DEFAULT_BROWSER)}
+// Where the call spelled the name, if it did.
+let spelledAt = -1
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--session") {
-    if (i + 1 < args.length) name = args[i + 1]
+    if (i + 1 < args.length) {
+      name = args[i + 1]
+      spelledAt = i + 1
+    }
     break
   }
   if (args[i].startsWith("--session=")) {
     name = args[i].slice("--session=".length)
+    spelledAt = i
     break
   }
 }
@@ -184,18 +323,32 @@ if (name.startsWith(${JSON.stringify(THROWAWAY_PREFIX)})) {
   const sid = SID_RE.test(env.COGPIT_SESSION_ID ?? "") ? env.COGPIT_SESSION_ID : ${JSON.stringify(SHARED_RUN_NAME)}
   env.AGENT_BROWSER_SOCKET_DIR = join(home, "run", sid)
   mkdirSync(env.AGENT_BROWSER_SOCKET_DIR, { recursive: true })
-  run()
+  try { writeFileSync(join(env.AGENT_BROWSER_SOCKET_DIR, \`\${name}${THROWAWAY_USED_SUFFIX}\`), "") } catch {}
+  runBrowser()
+}
+
+if (name === ${JSON.stringify(DEFAULT_BROWSER)} && env.COGPIT_SESSION_ID !== undefined) {
+  const owners = join(home, ${JSON.stringify(OWNERS_DIR_NAME)})
+  const own = SID_RE.test(env.COGPIT_SESSION_ID) ? join(owners, env.COGPIT_SESSION_ID) : null
+  const note = own !== null && isFile(own) ? own : join(owners, ${JSON.stringify(UNOWNED_FILE)})
+  let owned = ""
+  try { owned = readFileSync(note, "utf8").split(/\\r?\\n/)[0] } catch {}
+  if (NAME_RE.test(owned) && owned !== ${JSON.stringify(DEFAULT_BROWSER)} && !owned.startsWith(${JSON.stringify(THROWAWAY_PREFIX)})) {
+    if (spelledAt >= 0) args[spelledAt] = args[spelledAt].startsWith("--session=") ? \`--session=\${owned}\` : owned
+    env.AGENT_BROWSER_SESSION = owned
+    name = owned
+  }
 }
 
 const profile = join(home, "profiles", name)
 const sharedRun = join(home, "run", ${JSON.stringify(SHARED_RUN_NAME)})
 mkdirSync(profile, { recursive: true })
 mkdirSync(sharedRun, { recursive: true })
-writeFileSync(join(profile, ".driver"), \`\${env.COGPIT_SESSION_ID ?? ""}\\n\`)
+if (env.COGPIT_SESSION_ID !== undefined) writeFileSync(join(profile, ".driver"), \`\${env.COGPIT_SESSION_ID}\\n\`)
 env.AGENT_BROWSER_SOCKET_DIR = sharedRun
 env.AGENT_BROWSER_PROFILE = profile
 env.AGENT_BROWSER_ARGS = "--remote-debugging-port=0"
-run()
+runBrowser()
 `
 }
 

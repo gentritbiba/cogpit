@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ProjectScopePicker } from "../ProjectScopePicker"
+import { onFolderBrowserRequest } from "@/lib/folders"
 import type { ProjectScopeOption } from "../projectScope"
 
 vi.mock("@/components/ui/popover", () => ({
@@ -84,6 +85,22 @@ describe("ProjectScopePicker", () => {
 
     render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} />)
     expect(screen.queryByLabelText(/in another project/)).not.toBeInTheDocument()
+  })
+
+  it("opens the folder browser in one click, with or without a focused project", () => {
+    const requested = vi.fn()
+    const stop = onFolderBrowserRequest(requested)
+    render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} onNewSession={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Start a session in a folder" }))
+
+    expect(requested).toHaveBeenCalledOnce()
+    stop()
+  })
+
+  it("offers no folder browser where sessions cannot be started", () => {
+    render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "Start a session in a folder" })).not.toBeInTheDocument()
   })
 
   it("keeps a focused project that has no listed sessions selectable", () => {
