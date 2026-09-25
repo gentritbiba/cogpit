@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws"
-import { spawn as ptySpawn, type IPty } from "node-pty"
+import { spawnPty, type PtyProcess } from "./pty-backend"
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
@@ -13,7 +13,7 @@ function defaultShell(): string {
  * node-pty ignores the signal on Windows and calls TerminateProcess on the
  * shell alone, which orphans everything the shell started.
  */
-function killPty(pty: IPty): void {
+function killPty(pty: PtyProcess): void {
   if (process.platform === "win32" && pty.pid) {
     try {
       execFileSync("taskkill", ["/pid", String(pty.pid), "/T", "/F"], {
@@ -37,7 +37,7 @@ interface PtySessionMetadata {
 
 interface PtySession {
   id: string
-  pty: IPty
+  pty: PtyProcess
   name: string
   status: "running" | "exited"
   exitCode: number | null
@@ -173,10 +173,9 @@ export class PtySessionManager {
     const args = (msg.args as string[]) || []
     const metadata = (msg.metadata as PtySessionMetadata | undefined)
 
-    let pty: IPty
+    let pty: PtyProcess
     try {
-      pty = ptySpawn(command, args, {
-        name: "xterm-256color",
+      pty = spawnPty(command, args, {
         cols,
         rows,
         cwd,
