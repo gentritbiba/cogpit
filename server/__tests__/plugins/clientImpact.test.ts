@@ -6,7 +6,7 @@ import type { PluginInstallPreview } from "../../../shared/contracts/plugins"
 import { client, host } from "./fixtures/storeSigning"
 
 function preview(overrides: Partial<PluginManifest> = {}): PluginInstallPreview {
-  const manifest = parseManifest({ manifestVersion: 1, id: "example.probe", publisher: "example", name: "Probe", version: "1.0.0", runtime: "browser-iife-v1", entry: "plugin.js", engines: { client: "^2.0.0", host: "^2.0.0", pluginApi: "^1.0.0" }, requires: { client: {}, host: {} }, contributes: { panels: [{ id: "probe", title: "Probe", icon: "icon.png" }] }, permissions: {}, stateVersion: 1, ...overrides })
+  const manifest = parseManifest({ manifestVersion: 1, id: "example.probe", publisher: "example", name: "Probe", version: "1.0.0", runtime: "browser-iife-v1", entry: "plugin.js", engines: { client: ">=2.0.0", host: ">=2.0.0", pluginApi: "^1.0.0" }, requires: { client: {}, host: {} }, contributes: { panels: [{ id: "probe", title: "Probe", icon: "icon.png" }] }, permissions: {}, stateVersion: 1, ...overrides })
   return { transactionId: "00000000-0000-4000-8000-000000000000", manifest, digest: "a".repeat(64), compatibility: evaluateCompatibility(manifest, client, host), oldVersion: "0.9.0", registryRevision: 1, publisherKind: "official", scope: { type: "all" }, connectionDefinitions: [] }
 }
 
@@ -36,7 +36,7 @@ describe("connected client impact", () => {
   })
 
   it("detects disjoint API majors even when both satisfy the package's broad range", () => {
-    const candidate = preview({ engines: { client: "^2.0.0", host: "^2.0.0", pluginApi: ">=1.0.0" } })
+    const candidate = preview({ engines: { client: ">=2.0.0", host: ">=2.0.0", pluginApi: ">=1.0.0" } })
     expect(clientImpact(candidate, [client], { ...host, apiVersions: ["2.0.0"] }).incompatibleClients).toEqual(["Cogpit 2.6 · API 1.0"])
   })
 
