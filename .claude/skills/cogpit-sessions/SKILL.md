@@ -18,7 +18,7 @@ BASE="http://localhost:$PORT"
 
 ## CRITICAL: permissions
 
-The server defaults to permission mode `default`, which gates tool calls behind interactive approval. A headless caller has no one to click Approve, so the session stalls on its first gated tool call. **Always pass:**
+The server defaults to permission mode `default`, which gates tool calls behind interactive approval. A headless caller has no one to click Approve, so the session stalls on its first gated tool call. **For autonomous editing sessions, pass:**
 
 ```json
 "permissions": { "mode": "bypassPermissions" }
@@ -34,8 +34,9 @@ Full shape:
 }
 ```
 
-- `bypassPermissions` runs every tool without prompting (`claude --dangerously-skip-permissions`). Use this from agents.
-- Any other mode gates tool calls. Only use when a human is watching the Cogpit UI.
+- `bypassPermissions` runs tools without prompting and without the Codex sandbox. Use it only for authorized editing sessions.
+- **Codex read-only sessions:** pass `{"mode":"plan"}`. Cogpit maps this to Codex `sandbox: read-only` and `approvalPolicy: never`, so reads do not wait for interactive approval. Use it for code review, including follow-ups. This mapping is Codex-specific.
+- Other modes may gate tool calls. Only use them when a human is watching the Cogpit UI.
 - `allowedTools` / `disallowedTools` are CLI tool names, applied as allow/deny lists in the gated modes.
 - The old `{ "allow": [...], "deny": [...] }` shape is **silently ignored**. Sending it leaves the session in `default` mode and it hangs. Do not use it.
 
@@ -123,7 +124,9 @@ curl -s "$BASE/api/projects"
 # → [{ dirName, path, shortName, sessionCount, lastModified }]
 ```
 
-Codex projects appear with `codex__<base64url-of-cwd>` dirNames and a `(Codex)` suffix on `shortName`. The same endpoints drive Codex sessions.
+Codex projects appear with `codex__<base64url-of-cwd>` dirNames and a `(Codex)` suffix on `shortName`. The same endpoints drive Codex sessions. For a new project, resolve symlinks to the physical absolute cwd first (for example `/tmp` becomes `/private/tmp` on macOS), use that canonical path consistently, and encode its UTF-8 cwd with unpadded base64url and prepend `codex__`.
+
+**Provider routing:** `dirName` selects the agent. A Codex `model` on a Claude `dirName` does not select Codex. Current servers also accept `agent: "codex"` plus an absolute `cwd` without `dirName`; supplying the encoded `dirName` works with older servers too. Confirm the returned identifier and `/api/find-session/:sessionId` match the requested provider and cwd. Include `parentSessionId` when known to preserve session lineage.
 
 ## API reference
 
@@ -306,4 +309,4 @@ curl -s "$BASE/api/session-context/$SESSION_ID"
 - The server must be running (Cogpit app, or `bun run dev` in the agent-window project).
 - Claude sessions persist as JSONL in `~/.claude/projects/<dirName>/`; Codex rollouts live in Codex's own sessions tree but are served through the same endpoints.
 - The SDK session stays alive between messages, so follow-ups have no cold start and skip permission re-negotiation.
-- Always pass `{"mode": "bypassPermissions"}`; the legacy `{allow, deny}` permissions shape is ignored and leaves the session hanging in `default` mode.
+- Explicitly select permissions: `{"mode":"plan"}` for Codex read-only work; `{"mode":"bypassPermissions"}` for authorized autonomous editing. The legacy `{allow, deny}` shape is ignored.
