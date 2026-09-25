@@ -39,6 +39,7 @@ import {
 } from "./desktopView"
 import type { DesktopMainView } from "./desktopView"
 import type { DesktopAppShellProps } from "./desktopTypes"
+import type { WorktreeSessionRef } from "../../../shared/contracts/worktrees"
 
 const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((module) => ({ default: module.ConfigBrowser })))
 const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then((module) => ({ default: module.PreviewPanel })))
@@ -303,9 +304,8 @@ export function DesktopWorkspace({
     navigation.panels.toggleWorkspacePanel(panelId)
   }
 
-  function openWorktreeSession(sessionId: string): void {
-    if (!worktreeDirName) return
-    navigation.actions.handleDashboardSelect(worktreeDirName, `${sessionId}.jsonl`)
+  function openWorktreeSession(session: WorktreeSessionRef): void {
+    navigation.actions.handleDashboardSelect(session.dirName, `${session.sessionId}.jsonl`)
     navigation.panels.closeWorkspacePanel()
   }
 

@@ -9,6 +9,11 @@ vi.mock("../../helpers", () => ({
   join: (...parts: string[]) => parts.join("/"),
 }))
 
+const listProjectSessionFiles = vi.fn(async (_dirName: string): Promise<unknown[] | null> => null)
+vi.mock("../../agents", () => ({
+  storeForDirName: () => ({ listProjectSessionFiles }),
+}))
+
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
 }))
@@ -47,6 +52,13 @@ function mockCommandResults(getResult: CommandResult): void {
     }
     return {} as ReturnType<typeof execFile>
   }) as unknown as typeof execFile)
+}
+
+/** `git worktree list --porcelain` for a checkout at /repo and the given worktrees. */
+function worktreeList(...worktrees: Array<{ path: string; branch?: string }>): string {
+  return ["worktree /repo\nHEAD 0000000\nbranch refs/heads/main\n", ...worktrees.map(({ path, branch }) =>
+    `worktree ${path}\nHEAD abc1234\n${branch ? `branch refs/heads/${branch}` : "detached"}\n`,
+  )].join("\n") + "\n"
 }
 
 /**
@@ -152,6 +164,46 @@ describe("GET /api/worktrees/:dirName", () => {
     ])
   })
 
+  it("lists every worktree in the worktree folder, whatever its branch, with the sessions run inside it", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+    listProjectSessionFiles.mockImplementation(async (dirName) =>
+      dirName === "-repo--claude-worktrees-inventory-admin"
+        ? [
+          { fileName: "old.jsonl", mtimeMs: 1 },
+          { fileName: "new.jsonl", sessionId: "new", mtimeMs: 2 },
+        ]
+        : null)
+
+    mockCommandResults((cmd: unknown, args: unknown) => {
+      const a = args as string[]
+      if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
+      if (cmd === "git" && a.includes("symbolic-ref")) throw new Error("no remote")
+      if (cmd === "git" && a.includes("--porcelain") && a.includes("worktree")) {
+        return worktreeList(
+          { path: "/repo/.claude/worktrees/inventory-admin", branch: "feat/inventory-alert" },
+          { path: "/repo/.worktrees/spike" },
+          { path: "/Users/me/elsewhere", branch: "fix/other" },
+        )
+      }
+      return ""
+    })
+
+    const { req, res } = createMockReqRes("GET", "/-repo")
+    await handler(req as any, res as any, vi.fn())
+
+    const data = JSON.parse(res._getData())
+    expect(data.map((wt: { name: string; branch: string }) => [wt.name, wt.branch])).toEqual([
+      ["inventory-admin", "feat/inventory-alert"],
+      ["spike", ""],
+    ])
+    expect(data[0].linkedSessions).toEqual([
+      { dirName: "-repo--claude-worktrees-inventory-admin", sessionId: "new" },
+      { dirName: "-repo--claude-worktrees-inventory-admin", sessionId: "old" },
+    ])
+    listProjectSessionFiles.mockResolvedValue(null)
+  })
+
   it("returns empty array when project is not a git repo", async () => {
     mockedIsWithinDir.mockReturnValue(true)
 
@@ -195,7 +247,7 @@ describe("GET /api/worktrees/:dirName", () => {
   it("normalizes worktree cwd to main repo root via --git-common-dir", async () => {
     mockedIsWithinDir.mockReturnValue(true)
 
-    // resolveProjectPath will read a session JSONL whose cwd is a worktree dir
+    // resolveProjectCwd will read a session JSONL whose cwd is a worktree dir
     const mockFh = { read: vi.fn().mockResolvedValue({ bytesRead: 100 }), close: vi.fn() }
     const cwdJson = JSON.stringify({ cwd: "/repo/.claude/worktrees/fix-auth" })
     mockFh.read.mockImplementation((_buf: Buffer) => {
@@ -234,9 +286,10 @@ describe("GET /api/worktrees/:dirName", () => {
     expect(data).toHaveLength(1)
     expect(data[0].name).toBe("fix-auth")
 
+    // Only bounded headers are read: the project path's, then each session's branch.
     for (const [buffer, offset, length, position] of mockFh.read.mock.calls) {
-      expect(buffer).toHaveLength(4096)
-      expect([offset, length, position]).toEqual([0, 4096, 0])
+      expect([4096, 8192]).toContain(buffer.length)
+      expect([offset, length, position]).toEqual([0, buffer.length, 0])
     }
 
     // Verify --git-common-dir was called (not --show-toplevel)
@@ -273,15 +326,25 @@ describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
     expect(data.error).toBe("Invalid worktree name")
   })
 
-  it("removes a worktree successfully", async () => {
-    mockedIsWithinDir.mockReturnValue(true)
-    mockedReaddir.mockResolvedValue([] as any)
-
+  function mockRepoWith(...worktrees: Array<{ path: string; branch?: string }>) {
     mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
+      if (cmd === "git" && a.includes("--porcelain")) return worktreeList(...worktrees)
       return "" as any
     })
+  }
+
+  function gitCalls(): string[][] {
+    return mockedExecFile.mock.calls
+      .filter(([command]) => command === "git")
+      .map(([, args]) => args as string[])
+  }
+
+  it("removes a worktree and its generated branch", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+    mockRepoWith({ path: "/repo/.claude/worktrees/fix-auth", branch: "worktree-fix-auth" })
 
     const { req, res } = createMockReqRes("DELETE", "/my-project/fix-auth", JSON.stringify({ force: false }))
     const next = vi.fn()
@@ -290,6 +353,33 @@ describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
     expect(res.statusCode).toBe(200)
     const data = JSON.parse(res._getData())
     expect(data.ok).toBe(true)
+    expect(gitCalls()).toContainEqual(["worktree", "remove", "/repo/.claude/worktrees/fix-auth"])
+    expect(gitCalls()).toContainEqual(["branch", "-d", "worktree-fix-auth"])
+  })
+
+  it("keeps a branch someone named when removing its worktree", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+    mockRepoWith({ path: "/repo/.claude/worktrees/fix-auth", branch: "feat/auth" })
+
+    const { req, res } = createMockReqRes("DELETE", "/my-project/fix-auth", JSON.stringify({ force: true }))
+    await handler(req as any, res as any, vi.fn())
+
+    expect(res.statusCode).toBe(200)
+    expect(gitCalls()).toContainEqual(["worktree", "remove", "--force", "/repo/.claude/worktrees/fix-auth"])
+    expect(gitCalls().some((args) => args[0] === "branch")).toBe(false)
+  })
+
+  it("returns 404 for a worktree the project does not have", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+    mockRepoWith()
+
+    const { req, res } = createMockReqRes("DELETE", "/my-project/fix-auth", JSON.stringify({ force: false }))
+    await handler(req as any, res as any, vi.fn())
+
+    expect(res.statusCode).toBe(404)
+    expect(gitCalls().some((args) => args[0] === "worktree" && args[1] === "remove")).toBe(false)
   })
 })
 
@@ -353,6 +443,9 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
+      if (cmd === "git" && a.includes("--porcelain")) {
+        return worktreeList({ path: "/repo/.claude/worktrees/fix-auth", branch: "worktree-fix-auth" })
+      }
       if (cmd === "git" && a.includes("push")) return ""
       if (cmd === "gh" && a.includes("pr")) return "https://github.com/owner/repo/pull/1\n"
       return "" as any

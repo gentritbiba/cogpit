@@ -4,7 +4,7 @@
     "These numbers may only go DOWN. Cogpit's scripts/check-agents.ts fails if a",
     "file exceeds its budget, and also if it comes in under — so a cleanup must",
     "lower the number in the same commit. Delete the entry once a file reaches zero.",
-    "Seeded at 129 files / 426 lines."
+    "Seeded at 128 files / 424 lines."
   ],
   "files": {
     "electron/main.ts": 2,
@@ -56,7 +56,6 @@
     "server/routes/team-session.ts": 2,
     "server/routes/undo/transaction.ts": 4,
     "server/routes/usage.ts": 8,
-    "server/routes/worktrees/index.ts": 2,
     "server/sdk-session.ts": 10,
     "server/sessionPaths.ts": 6,
     "server/share/passphrase.ts": 1,

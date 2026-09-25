@@ -79,8 +79,8 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
       loadSession: navigation.handlers.handleLoadSessionScrollAware,
       worktrees: project.worktrees,
       worktreeDirName,
-      openWorktreeSession: (sessionId) => {
-        if (worktreeDirName) navigation.actions.handleDashboardSelect(worktreeDirName, `${sessionId}.jsonl`)
+      openWorktreeSession: (session) => {
+        navigation.actions.handleDashboardSelect(session.dirName, `${session.sessionId}.jsonl`)
       },
     }}>
       <MobileWorkspacePanels

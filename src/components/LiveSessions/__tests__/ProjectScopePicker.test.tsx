@@ -19,8 +19,8 @@ vi.mock("@/components/ProjectFavicon", () => ({
 }))
 
 const options: ProjectScopeOption[] = [
-  { key: "work/app", customName: "App", dirName: "-work-app", cwd: "/work/app", dirNames: ["-work-app"], total: 12, live: 2, needsYou: 1 },
-  { key: "work/lib", dirName: "-work-lib", cwd: "/work/lib", dirNames: ["-work-lib"], total: 3, live: 0, needsYou: 0 },
+  { key: "work/app", customName: "App", dirName: "-work-app", cwd: "/work/app", dirNames: ["-work-app"], total: 12, live: 2, needsYou: 1, worktrees: 0 },
+  { key: "work/lib", dirName: "-work-lib", cwd: "/work/lib", dirNames: ["-work-lib"], total: 3, live: 0, needsYou: 0, worktrees: 0 },
 ]
 
 Element.prototype.scrollIntoView = vi.fn()

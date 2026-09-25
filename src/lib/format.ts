@@ -3,6 +3,7 @@ import { computeContextUsage, type ContextUsage } from "../../shared/session/con
 import { descriptorForDirName } from "@/lib/agents"
 
 export { shortenModel } from "../../shared/session/model-names"
+export { parseWorktreePath } from "../../shared/worktreePath"
 
 export function formatCost(usd: number): string {
   if (!Number.isFinite(usd)) return "—"
@@ -128,16 +129,6 @@ export function shortPath(fullPath: string, segments = 2): string {
   const parts = fullPath.replace(/\/+$/, "").split("/").filter(Boolean)
   if (parts.length <= segments) return fullPath
   return parts.slice(-segments).join("/")
-}
-
-/** If a path is inside a .worktrees directory, return the parent project path and worktree name. */
-export function parseWorktreePath(fullPath: string): { parentPath: string; worktreeName: string } | null {
-  const marker = "/.worktrees/"
-  const idx = fullPath.indexOf(marker)
-  if (idx === -1) return null
-  const worktreeName = fullPath.slice(idx + marker.length).split("/")[0]
-  if (!worktreeName) return null
-  return { parentPath: fullPath.slice(0, idx), worktreeName }
 }
 
 /** Return just the final folder name from a filesystem path. */

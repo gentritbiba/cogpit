@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
-import type { ServerResponse } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { resolveProjectCwd } from "../../lib/projectCwd"
 import {
   dirs,
   isWithinDir,
@@ -7,12 +8,13 @@ import {
 } from "../../helpers"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../../http"
 import {
+  findWorktree,
   isValidWorktreeName,
   parseWorktreeList,
-  resolveProjectPath,
   getMainWorktreeRoot,
 } from "./worktreeUtils"
 import type { WorktreeRaw } from "./worktreeUtils"
+import { isGeneratedWorktreeBranch } from "../../../shared/worktreePath"
 import { handleWorktreeList } from "./worktreeListRoute"
 import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import {
@@ -20,6 +22,21 @@ import {
   WORKTREE_NETWORK_TIMEOUT_MS,
   WORKTREE_SCAN_CONCURRENCY,
 } from "./worktreeIo"
+
+/** The request's JSON body, or null after answering a malformed one. */
+async function readBody<T>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {
+  try {
+    const body = await readJsonBody<T | null>(req, { allowEmpty: true })
+    if (body !== null && typeof body === "object") return body
+    sendJson(res, 400, { error: "Invalid request body" })
+    return null
+  } catch (error) {
+    sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
+      error: error instanceof HttpBodyError ? error.message : "Invalid request body",
+    })
+    return null
+  }
+}
 
 function requireProjectDir(dirName: string, res: ServerResponse): string | null {
   const projectDir = join(dirs.PROJECTS_DIR, dirName)
@@ -37,8 +54,8 @@ async function requireGitRoot(
   dirName: string,
   res: ServerResponse,
 ): Promise<string | null> {
-  const projectPath = await resolveProjectPath(projectDir, dirName)
-  const gitRoot = await getMainWorktreeRoot(projectPath)
+  const projectPath = await resolveProjectCwd(projectDir, dirName)
+  const gitRoot = projectPath ? await getMainWorktreeRoot(projectPath) : null
   if (!gitRoot) {
     res.statusCode = 400
     res.end(JSON.stringify({ error: "Not a git repository" }))
@@ -100,29 +117,27 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let force = false
+      const body = await readBody<{ force?: boolean }>(req, res)
+      if (!body) return
+      const { force = false } = body
       try {
-        ({ force = false } = await readJsonBody<{ force?: boolean }>(req, { allowEmpty: true }))
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
-      const worktreePath = join(gitRoot, ".claude", "worktrees", worktreeName)
-      const branchName = `worktree-${worktreeName}`
-
-      try {
-        await runWorktreeCommand("git", ["worktree", "remove", ...(force ? ["--force"] : []), worktreePath], {
+        const worktree = await findWorktree(gitRoot, worktreeName)
+        if (!worktree) {
+          sendJson(res, 404, { error: "Worktree not found" })
+          return
+        }
+        await runWorktreeCommand("git", ["worktree", "remove", ...(force ? ["--force"] : []), worktree.path], {
           cwd: gitRoot,
         })
 
-        try {
-          const deleteFlag = force ? "-D" : "-d"
-          await runWorktreeCommand("git", ["branch", deleteFlag, branchName], {
-            cwd: gitRoot,
-          })
-        } catch { /* branch may already be gone */ }
+        if (isGeneratedWorktreeBranch(worktree.name, worktree.branch)) {
+          try {
+            const deleteFlag = force ? "-D" : "-d"
+            await runWorktreeCommand("git", ["branch", deleteFlag, worktree.branch], {
+              cwd: gitRoot,
+            })
+          } catch { /* branch may already be gone */ }
+        }
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ ok: true }))
@@ -144,15 +159,8 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let parsed: { worktreeName?: string; title?: string; body?: string } = {}
-      try {
-        parsed = await readJsonBody<typeof parsed>(req, { allowEmpty: true })
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
+      const parsed = await readBody<{ worktreeName?: string; title?: string; body?: string }>(req, res)
+      if (!parsed) return
       const { worktreeName, title, body: prBody } = parsed
       if (!worktreeName) {
         res.statusCode = 400
@@ -166,10 +174,14 @@ export function registerWorktreeRoutes(use: UseFn) {
         return
       }
 
-      const worktreePath = join(gitRoot, ".claude", "worktrees", worktreeName)
-      const branchName = `worktree-${worktreeName}`
-
       try {
+        const worktree = await findWorktree(gitRoot, worktreeName)
+        if (!worktree?.branch) {
+          sendJson(res, worktree ? 400 : 404, { error: worktree ? "Worktree has no branch to push" : "Worktree not found" })
+          return
+        }
+        const { path: worktreePath, branch: branchName } = worktree
+
         // Push branch
         await runWorktreeCommand("git", ["push", "-u", "origin", branchName], {
           cwd: worktreePath,
@@ -213,21 +225,9 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let confirm: boolean | undefined
-      let names: string[] | undefined
-      let maxAgeDays = 7
-      try {
-        ({ confirm, names, maxAgeDays = 7 } = await readJsonBody<{
-          confirm?: boolean
-          names?: string[]
-          maxAgeDays?: number
-        }>(req, { allowEmpty: true }))
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
+      const body = await readBody<{ confirm?: boolean; names?: string[]; maxAgeDays?: number }>(req, res)
+      if (!body) return
+      const { confirm, names, maxAgeDays = 7 } = body
 
       try {
         const rawOutput = await runWorktreeCommand("git", ["worktree", "list", "--porcelain"], {
@@ -241,7 +241,7 @@ export function registerWorktreeRoutes(use: UseFn) {
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({
             stale: stale.map((wt) => ({
-              name: wt.branch.replace("worktree-", ""),
+              name: wt.name,
               path: wt.path,
               branch: wt.branch,
             })),
@@ -250,21 +250,22 @@ export function registerWorktreeRoutes(use: UseFn) {
         }
 
         // Perform cleanup on confirmed names
-        const namesToRemove = new Set(names || stale.map((wt) => wt.branch.replace("worktree-", "")))
+        const namesToRemove = new Set(names || stale.map((wt) => wt.name))
         const removed: string[] = []
         const errors: string[] = []
 
         for (const wt of stale) {
-          const name = wt.branch.replace("worktree-", "")
-          if (!namesToRemove.has(name)) continue
+          if (!namesToRemove.has(wt.name)) continue
           try {
             await runWorktreeCommand("git", ["worktree", "remove", wt.path], { cwd: gitRoot })
-            try {
-              await runWorktreeCommand("git", ["branch", "-d", wt.branch], { cwd: gitRoot })
-            } catch { /* */ }
-            removed.push(name)
+            if (isGeneratedWorktreeBranch(wt.name, wt.branch)) {
+              try {
+                await runWorktreeCommand("git", ["branch", "-d", wt.branch], { cwd: gitRoot })
+              } catch { /* */ }
+            }
+            removed.push(wt.name)
           } catch (err) {
-            errors.push(`${name}: ${err instanceof Error ? err.message : "unknown"}`)
+            errors.push(`${wt.name}: ${err instanceof Error ? err.message : "unknown"}`)
           }
         }
 

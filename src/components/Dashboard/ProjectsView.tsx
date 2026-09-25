@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from "react"
-import { ChevronRight, FolderOpen, FolderSearch, RefreshCw } from "lucide-react"
+import { ChevronRight, FolderOpen, FolderSearch, GitBranch, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,7 +17,8 @@ import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { cn } from "@/lib/utils"
 import { openFolderBrowser } from "@/lib/folders"
-import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
+import { formatRelativeTime, parseWorktreePath, projectName, shortPath } from "@/lib/format"
+import { nestWorktreeProjects } from "@/lib/projectWorktrees"
 import { agentKindForDirName } from "@/lib/agents"
 import { agentProjectBadge } from "@/lib/agents/presentation"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
@@ -66,15 +67,17 @@ export function ProjectsView({
 
   const { names: projectNames, rename: renameProject } = useProjectNames()
 
+  const repositories = useMemo(() => nestWorktreeProjects(projects), [projects])
+
   const filteredProjects = useMemo(() => {
-    if (!searchFilter) return projects
+    if (!searchFilter) return repositories
     const query = searchFilter.toLowerCase()
-    return projects.filter((project) =>
+    const matches = (project: ProjectInfo) =>
       project.path.toLowerCase().includes(query)
       || project.shortName.toLowerCase().includes(query)
-      || projectNames[project.dirName]?.toLowerCase().includes(query),
-    )
-  }, [projects, projectNames, searchFilter])
+      || projectNames[project.dirName]?.toLowerCase().includes(query)
+    return repositories.filter((project) => matches(project) || project.worktrees.some(matches))
+  }, [repositories, projectNames, searchFilter])
 
   return (
     <ScrollArea className="h-full">
@@ -82,7 +85,7 @@ export function ProjectsView({
         <header className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-            <Badge variant="secondary">{projects.length}</Badge>
+            <Badge variant="secondary">{repositories.length}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             Open a project to browse and resume its sessions.
@@ -182,6 +185,9 @@ export function ProjectsView({
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
                               {shortPath(project.path)}
+                              {project.worktrees.length > 0 && (
+                                <> · {project.worktrees.length} {project.worktrees.length === 1 ? "worktree" : "worktrees"}</>
+                              )}
                             </span>
                           </span>
                         </span>
@@ -209,6 +215,15 @@ export function ProjectsView({
                         </span>
                       </button>
                     </ProjectContextMenu>
+                    {project.worktrees.map((worktree) => (
+                      <WorktreeRow
+                        key={worktree.dirName}
+                        worktree={worktree}
+                        customName={projectNames[worktree.dirName]}
+                        activeCount={activeCountByProject[worktree.dirName] || 0}
+                        onSelect={() => onSelectProject?.(worktree.dirName)}
+                      />
+                    ))}
                   </Fragment>
                 )
               })}
@@ -217,5 +232,48 @@ export function ProjectsView({
         </section>
       </main>
     </ScrollArea>
+  )
+}
+
+/** A worktree nested beneath its repository: indented, compact, opening its own sessions. */
+function WorktreeRow({
+  worktree,
+  customName,
+  activeCount,
+  onSelect,
+}: {
+  worktree: ProjectInfo
+  customName?: string
+  activeCount: number
+  onSelect: () => void
+}) {
+  const name = customName || parseWorktreePath(worktree.path)?.worktreeName || projectName(worktree.path)
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={worktree.path}
+      className="motion-list-item group flex w-full items-center gap-3 py-2 pl-15 pr-4 text-left text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+    >
+      <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-muted-foreground group-hover:text-foreground">{name}</span>
+      <span className="flex items-center gap-4 text-xs text-muted-foreground">
+        {activeCount > 0 && (
+          <Badge variant="secondary">
+            <span aria-hidden="true" data-icon="inline-start" className="size-1.5 rounded-full bg-success" />
+            {activeCount} active
+          </Badge>
+        )}
+        <span className="whitespace-nowrap">
+          {worktree.sessionCount} {worktree.sessionCount === 1 ? "session" : "sessions"}
+        </span>
+        {worktree.lastModified && (
+          <span className="hidden w-24 whitespace-nowrap text-right md:inline">
+            {formatRelativeTime(worktree.lastModified)}
+          </span>
+        )}
+        <ChevronRight className="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </button>
   )
 }

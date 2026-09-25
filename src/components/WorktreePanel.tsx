@@ -42,15 +42,21 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible"
-import type { WorktreeInfo } from "../../shared/contracts/worktrees"
+import type { WorktreeInfo, WorktreeSessionRef } from "../../shared/contracts/worktrees"
+import { isGeneratedWorktreeBranch } from "../../shared/worktreePath"
 
 interface WorktreePanelProps {
   worktrees: WorktreeInfo[]
   loading: boolean
   dirName: string | null
   onRefetch: () => void
-  onOpenSession: (sessionId: string) => void
+  onOpenSession: (session: WorktreeSessionRef) => void
   onClose: () => void
+}
+
+/** Commits only go with the worktree when its branch is the generated one; a named branch outlives it. */
+function losesCommits(wt: WorktreeInfo): boolean {
+  return wt.commitsAhead > 0 && isGeneratedWorktreeBranch(wt.name, wt.branch)
 }
 
 const statusColors: Record<string, string> = {
@@ -84,11 +90,15 @@ export function WorktreePanel({
     if (!canManageHostFiles || !dirName) return
     setDeleting(wt.name)
     try {
-      await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/${encodeURIComponent(wt.name)}`, {
+      const res = await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/${encodeURIComponent(wt.name)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force: wt.isDirty }),
       })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: undefined })) as { error?: string }
+        throw new Error(error ?? `HTTP ${res.status}`)
+      }
       onRefetch()
     } catch (err) {
       toast.error(`Failed to delete worktree: ${err instanceof Error ? err.message : "Unknown error"}`)
@@ -103,7 +113,7 @@ export function WorktreePanel({
       setDeleteConfirmation({ worktree: wt, reason: "dirty" })
       return
     }
-    if (wt.commitsAhead > 0) {
+    if (losesCommits(wt)) {
       setDeleteConfirmation({ worktree: wt, reason: "unpushed" })
       return
     }
@@ -113,7 +123,7 @@ export function WorktreePanel({
   const confirmDelete = () => {
     if (!deleteConfirmation) return
     const { worktree, reason } = deleteConfirmation
-    if (reason === "dirty" && worktree.commitsAhead > 0) {
+    if (reason === "dirty" && losesCommits(worktree)) {
       setDeleteConfirmation({ worktree, reason: "unpushed" })
       return
     }
@@ -311,9 +321,15 @@ export function WorktreePanel({
                   <span className="truncate">{wt.headMessage}</span>
                 </div>
 
-                {wt.createdAt && (
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {formatRelativeTime(wt.createdAt)}
+                {(wt.createdAt || !isGeneratedWorktreeBranch(wt.name, wt.branch)) && (
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    {!isGeneratedWorktreeBranch(wt.name, wt.branch) && (
+                      <span className="flex min-w-0 items-center gap-1">
+                        <GitBranch className="size-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">{wt.branch || "detached"}</span>
+                      </span>
+                    )}
+                    {wt.createdAt && <span className="shrink-0">{formatRelativeTime(wt.createdAt)}</span>}
                   </div>
                 )}
 
@@ -374,7 +390,7 @@ export function WorktreePanel({
           <AlertDialogFooter>
             <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" size="sm" onClick={confirmDelete}>
-              {deleteConfirmation?.reason === "dirty" && deleteConfirmation.worktree.commitsAhead > 0
+              {deleteConfirmation?.reason === "dirty" && losesCommits(deleteConfirmation.worktree)
                 ? "Continue"
                 : "Delete worktree"}
             </AlertDialogAction>

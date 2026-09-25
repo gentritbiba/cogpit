@@ -43,7 +43,8 @@ function plural(count: number, noun: string): string {
 function focusedSummary(focused: ProjectScopeOption | null): string {
   if (!focused) return "No sessions listed"
   const sessions = plural(focused.total, "session")
-  return focused.live > 0 ? `${sessions}, ${focused.live} live` : sessions
+  const activity = focused.live > 0 ? `${sessions}, ${focused.live} live` : sessions
+  return focused.worktrees > 0 ? `${activity} · ${plural(focused.worktrees, "worktree")}` : activity
 }
 
 /** Sessions blocked on the user, as a warning dot and a count. */

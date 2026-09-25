@@ -18,7 +18,8 @@ import { FolderBrowser } from "@/components/FolderBrowser"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { useFolderHostName } from "@/hooks/useFolderHostName"
 import { authFetch } from "@/lib/auth"
-import { shortPath } from "@/lib/format"
+import { parseWorktreePath, shortPath } from "@/lib/format"
+import { nestWorktreeProjects } from "@/lib/projectWorktrees"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import type { AgentKind } from "@/lib/agents"
 import { agentSwitcherName } from "@/lib/agents/presentation"
@@ -68,6 +69,7 @@ interface ProjectSwitcherListProps {
  * The searchable project list behind every "start a session somewhere else"
  * surface. The shortcut modal and the headline popover both render this, so a
  * project looks and filters the same wherever the user reaches for it.
+ * Worktrees are left out: a new session starts in the checkout itself.
  */
 export function ProjectSwitcherList({
   projects,
@@ -85,9 +87,10 @@ export function ProjectSwitcherList({
   const hostName = useFolderHostName()
 
   const filtered = useMemo(() => {
-    if (!filter) return projects
+    const repositories = nestWorktreeProjects(projects)
+    if (!filter) return repositories
     const q = filter.toLowerCase()
-    return projects.filter(
+    return repositories.filter(
       (p) =>
         p.path.toLowerCase().includes(q) ||
         p.shortName.toLowerCase().includes(q) ||
@@ -102,7 +105,9 @@ export function ProjectSwitcherList({
     || folderPath.startsWith("\\\\")
   const canAddFolder = isAbsoluteFolderPath
     && !projects.some((project) => normalizePath(project.path) === normalizePath(folderPath))
-  const current = currentPath ? normalizePath(currentPath) : null
+  const current = currentPath
+    ? normalizePath(parseWorktreePath(currentPath)?.parentPath ?? currentPath)
+    : null
   // The projects arrive after the list opens, so until the user moves it the
   // highlight stays on the first entry rather than on "Browse folders", which
   // is alone in the list before they do.

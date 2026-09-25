@@ -12,6 +12,7 @@ import { isRemoteDeviceActive } from "@/lib/device"
 import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import { learnListedAccess, sessionAccessTicket } from "@/lib/sessionAccess"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
+import { nestWorktreeProjects } from "@/lib/projectWorktrees"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
@@ -77,6 +78,8 @@ export function CommandPaletteHost({
     return () => controller.abort()
   }, [open, filter])
 
+  const repositories = useMemo(() => nestWorktreeProjects(projects), [projects])
+
   const terminalCwd = useMemo(() => {
     if (projectCwd) return projectCwd
     if (!currentProjectDirName) return null
@@ -128,7 +131,7 @@ export function CommandPaletteHost({
     <CommandPalette
       {...paletteProps}
       open={open}
-      projects={projects}
+      projects={repositories}
       recentSessions={recentSessions}
       loadingNavigation={loadingNavigation}
       onOpenIntegratedTerminal={

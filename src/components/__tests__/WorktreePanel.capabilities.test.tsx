@@ -38,7 +38,7 @@ describe("WorktreePanel capability gating", () => {
         headMessage: "Feature work",
         isDirty: false,
         commitsAhead: 1,
-        linkedSessions: ["session-1"],
+        linkedSessions: [{ dirName: "project", sessionId: "session-1" }],
         createdAt: "2026-08-10T00:00:00.000Z",
         changedFiles: [],
       }]}

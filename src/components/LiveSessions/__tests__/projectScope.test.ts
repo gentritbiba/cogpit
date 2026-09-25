@@ -21,6 +21,26 @@ function proc(sessionId: string): RunningProcess {
 }
 
 describe("projectScopeOptions", () => {
+  it("folds Claude Code worktrees into their project and counts them", () => {
+    const sessions = [
+      session("wt-a", { dirName: "-home-me-app--claude-worktrees-a", cwd: "/home/me/app/.claude/worktrees/a" }),
+      session("wt-a-2", { dirName: "-home-me-app--claude-worktrees-a", cwd: "/home/me/app/.claude/worktrees/a" }),
+      session("wt-b", { dirName: "-home-me-app--claude-worktrees-b", cwd: "/home/me/app/.claude/worktrees/b" }),
+    ]
+
+    const [option, ...rest] = projectScopeOptions(sessions, new Map(), { "-home-me-app": "App" }, new Set())
+
+    expect(rest).toEqual([])
+    expect(option).toMatchObject({
+      key: "me/app",
+      customName: "App",
+      dirName: "-home-me-app",
+      cwd: "/home/me/app",
+      total: 3,
+      worktrees: 2,
+    })
+  })
+
   it("lists one option per project, newest project first, with counts", () => {
     const sessions = [
       session("old-lib", { dirName: "-home-me-lib", cwd: "/home/me/lib", lastModified: "2026-09-01T10:00:00Z" }),

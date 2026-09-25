@@ -1,16 +1,16 @@
 import { resolve, dirname } from "node:path"
-import { readdir, open, join } from "../../helpers"
-import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
-import {
-  runWorktreeCommand,
-  SESSION_HEADER_CONCURRENCY,
-} from "./worktreeIo"
+import { parseWorktreePath } from "../../../shared/worktreePath"
+import { open } from "../../helpers"
+import { runWorktreeCommand } from "./worktreeIo"
 
 export const SESSION_HEADER_BYTES = 4096
 
 export interface WorktreeRaw {
+  /** The worktree's folder name, which is how routes address it. */
+  name: string
   path: string
   head: string
+  /** Empty for a detached HEAD. */
   branch: string
 }
 
@@ -18,25 +18,44 @@ export function isValidWorktreeName(name: string): boolean {
   return /^[a-zA-Z0-9._-]+$/.test(name) && name.length <= 40
 }
 
+/**
+ * The worktrees inside the project's own worktree folder, whatever their
+ * branch is called: agents often rename the generated `worktree-<name>`
+ * branch to a feature branch. Worktrees checked out elsewhere are not ours.
+ */
 export function parseWorktreeList(output: string): WorktreeRaw[] {
   const worktrees: WorktreeRaw[] = []
   let current: Partial<WorktreeRaw> = {}
+  const flush = () => {
+    const location = current.path ? parseWorktreePath(current.path) : null
+    if (location) {
+      worktrees.push({
+        name: location.worktreeName,
+        path: current.path!,
+        head: current.head ?? "",
+        branch: current.branch ?? "",
+      })
+    }
+    current = {}
+  }
 
   for (const line of output.split("\n")) {
     if (line.startsWith("worktree ")) {
+      flush()
       current = { path: line.slice("worktree ".length) }
     } else if (line.startsWith("HEAD ")) {
       current.head = line.slice("HEAD ".length)
     } else if (line.startsWith("branch ")) {
       current.branch = line.slice("branch ".length).replace("refs/heads/", "")
-    } else if (line === "" && current.path) {
-      if (current.branch?.startsWith("worktree-")) {
-        worktrees.push(current as WorktreeRaw)
-      }
-      current = {}
     }
   }
+  flush()
   return worktrees
+}
+
+export async function findWorktree(gitRoot: string, name: string): Promise<WorktreeRaw | null> {
+  const output = await runWorktreeCommand("git", ["worktree", "list", "--porcelain"], { cwd: gitRoot })
+  return parseWorktreeList(output).find((worktree) => worktree.name === name) ?? null
 }
 
 /** Read only the bounded JSONL header needed by worktree discovery. */
@@ -54,31 +73,6 @@ export async function readFirstJsonLine(filePath: string): Promise<Record<string
   } finally {
     await fileHandle.close()
   }
-}
-
-export async function resolveProjectPath(projectDir: string, dirName: string): Promise<string> {
-  try {
-    const files = await readdir(projectDir)
-    const sessionFiles = files.filter((file: string) => file.endsWith(".jsonl"))
-    const headers = await mapWithConcurrency(
-      sessionFiles,
-      SESSION_HEADER_CONCURRENCY,
-      async (file) => {
-        try {
-          return await readFirstJsonLine(join(projectDir, file))
-        } catch {
-          return null
-        }
-      },
-    )
-
-    for (const header of headers) {
-      if (typeof header?.cwd === "string" && header.cwd) return header.cwd
-    }
-  } catch {
-    // projectDir might not exist yet
-  }
-  return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
 export async function getMainWorktreeRoot(projectPath: string): Promise<string | null> {
