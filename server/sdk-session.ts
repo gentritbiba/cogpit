@@ -23,7 +23,7 @@ import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
 import { readSdkRateLimit } from "./agents/rateLimit"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
-import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
+import { cogpitAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
 import { asRecord } from "../shared/objects"
 import type {
@@ -490,7 +490,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     }
   }
 
-  queryOpts.env = browserAgentEnv({ ...process.env }, state.sessionId)
+  queryOpts.env = cogpitAgentEnv({ ...process.env }, state.sessionId)
   delete queryOpts.env.CLAUDECODE
 
   // The browser skill reaches the CLI as a local plugin, so an agent knows the

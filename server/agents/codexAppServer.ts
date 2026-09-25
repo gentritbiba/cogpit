@@ -38,7 +38,7 @@ import {
   wireApprovalDecision,
 } from "./codexApprovalCodec"
 import { resolveAgentCommand } from "../lib/binaryResolver"
-import { browserAgentEnv } from "../browser/agentEnv"
+import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
 import { codexQuestions } from "./codexQuestions"
@@ -245,7 +245,7 @@ export class CodexAppServer {
       child = this.spawn(cli.command, cli.args, {
         stdio: ["pipe", "pipe", "pipe"],
         // One process serves every thread, so no single session owns it.
-        env: browserAgentEnv(process.env, NO_COGPIT_SESSION),
+        env: cogpitAgentEnv(process.env, NO_COGPIT_SESSION),
         ...cli.spawnOptions,
       })
     } catch (error) {

@@ -44,6 +44,7 @@ import { registerSessionArchiveRoutes } from "./routes/session-archive"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
+import { registerSessionOrchestrationRoutes } from "./routes/session-orchestration"
 import { registerSessionStatusRoutes } from "./routes/session-status"
 import { registerShareGuestRoutes } from "./routes/share-guest"
 import { registerShareRoutes } from "./routes/shares"
@@ -114,6 +115,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("session-status", registerSessionStatusRoutes),
+  apiRoute("session-orchestration", registerSessionOrchestrationRoutes),
   apiRoute("shares", registerShareRoutes),
   apiRoute("share-guest", registerShareGuestRoutes),
   apiRoute("editor", registerEditorRoutes),

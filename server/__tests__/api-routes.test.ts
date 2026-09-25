@@ -37,6 +37,7 @@ const CANONICAL_ROUTE_IDS = [
   "session-config",
   "session-context",
   "session-status",
+  "session-orchestration",
   "shares",
   "share-guest",
   "editor",

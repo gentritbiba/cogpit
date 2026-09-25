@@ -1,5 +1,5 @@
 import { BROWSER_CONTEXT_APPEND } from "../browser/agentContext"
-import { browserAgentEnv, browserShimInstalled } from "../browser/agentEnv"
+import { agentBinInstalled, cogpitAgentEnv, browserShimInstalled } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 
 interface BrowserConfigClient {
@@ -16,9 +16,9 @@ export async function codexBrowserConfig(
   cwd: string,
   sessionId = NO_COGPIT_SESSION,
 ): Promise<Record<string, string>> {
-  if (!browserShimInstalled()) return {}
+  if (!agentBinInstalled()) return {}
   const { config } = await client.call<{ config: EffectiveConfig }>("config/read", { cwd })
-  const env = browserAgentEnv({
+  const env = cogpitAgentEnv({
     ...process.env,
     PATH: config.shell_environment_policy?.set?.PATH ?? process.env.PATH,
   }, sessionId)
@@ -26,6 +26,13 @@ export async function codexBrowserConfig(
     // Explicit shell overrides are reapplied after Codex loads its shell snapshot.
     "shell_environment_policy.set.PATH": env.PATH!,
     "shell_environment_policy.set.COGPIT_SESSION_ID": sessionId,
-    developer_instructions: [config.developer_instructions, BROWSER_CONTEXT_APPEND].filter(Boolean).join("\n\n"),
+    ...(env.COGPIT_PORT ? { "shell_environment_policy.set.COGPIT_PORT": env.COGPIT_PORT } : {}),
+    ...(browserShimInstalled()
+      ? {
+          developer_instructions: [config.developer_instructions, BROWSER_CONTEXT_APPEND]
+            .filter(Boolean)
+            .join("\n\n"),
+        }
+      : {}),
   }
 }

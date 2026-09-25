@@ -9,7 +9,27 @@ import {
   sendJson,
   type UseFn,
 } from "../http"
-import type { SendRequest } from "../agents/runtimes"
+import type { AgentRuntime, SendOutcome, SendRequest } from "../agents/runtimes"
+
+/**
+ * Deliver a message to an existing session, for this route and the session CLI.
+ * Throws a 409 `RouteError` when the agent refuses it as busy.
+ */
+export async function sendToSession(
+  sessionId: string,
+  request: SendRequest,
+): Promise<{ runtime: AgentRuntime; outcome: SendOutcome }> {
+  const { kind, filePath } = await resolveSessionAgent(sessionId)
+  const runtime = runtimeFor(kind)
+  const outcome = await runtime.send(sessionId, { ...request, filePath })
+  if (outcome.delivery === "busy") {
+    throw new RouteError(409, ErrorCodes.CONFLICT, "Session is already active")
+  }
+  // A message to an archived session resumes it, and a resumed session
+  // belongs back in the sidebar right away.
+  setSessionsArchived([sessionId], false).catch(() => {})
+  return { runtime, outcome }
+}
 
 /**
  * POST /api/send-message — deliver a message to an existing session.
@@ -61,17 +81,8 @@ export function registerSessionSendRoutes(use: UseFn) {
         return
       }
 
-      const { kind, filePath } = await resolveSessionAgent(sessionId)
-      const runtime = runtimeFor(kind)
       try {
-        const outcome = await runtime.send(sessionId, { ...request, filePath })
-        if (outcome.delivery === "busy") {
-          sendError(res, new RouteError(409, ErrorCodes.CONFLICT, "Session is already active"))
-          return
-        }
-        // A message to an archived session resumes it, and a resumed session
-        // belongs back in the sidebar right away.
-        setSessionsArchived([sessionId], false).catch(() => {})
+        const { runtime, outcome } = await sendToSession(sessionId, request)
 
         // A resume reports the turn's outcome on this request and nowhere else,
         // so the response stays open until it settles and carries the agent's
@@ -92,11 +103,11 @@ export function registerSessionSendRoutes(use: UseFn) {
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ success: true }))
       } catch (error) {
-        sendAgentError(
-          res,
-          error,
-          `${runtime.descriptor.displayName} failed to accept the message`,
-        )
+        if (error instanceof RouteError) {
+          sendError(res, error)
+          return
+        }
+        sendAgentError(res, error, "The agent failed to accept the message")
       }
     })().catch((error: unknown) => {
       if (!res.headersSent) sendAgentError(res, error, "Request failed")

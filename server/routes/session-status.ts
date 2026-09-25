@@ -1,15 +1,12 @@
-import { getSessionStatus } from "../helpers"
-import { storeForPath } from "../agents"
-import { runtimeFor } from "../agents/runtimes"
-import { findJsonlPath } from "../sessionPaths"
+import { readSessionState } from "../lib/sessionWait"
 import { sendJson, type UseFn } from "../http"
 
 /**
  * GET /api/session-status/:sessionId — cheap per-session poll for external
  * callers. send-message returns immediately when the SDK query is live, so
- * agents need a way to tell when the turn actually finished: `running` covers
- * sessions this server manages, and the JSONL-tail-derived `status` covers
- * sessions it doesn't (started in a terminal, or before a restart).
+ * agents need a way to tell when the turn actually finished; `outcome` folds
+ * the runtime's `running` flag, the transcript tail and any pending approval or
+ * question into one answer (see `readSessionState`).
  */
 export function registerSessionStatusRoutes(use: UseFn) {
   use("/api/session-status/", async (req, res, next) => {
@@ -19,20 +16,13 @@ export function registerSessionStatusRoutes(use: UseFn) {
     const parts = url.pathname.split("/").filter(Boolean)
     if (parts.length !== 1) return next()
 
-    const sessionId = decodeURIComponent(parts[0])
     try {
-      const filePath = await findJsonlPath(sessionId)
-      if (!filePath) {
+      const state = await readSessionState(decodeURIComponent(parts[0]))
+      if (state.outcome === "not_found") {
         sendJson(res, 404, { error: "Session not found" })
         return
       }
-
-      // The transcript already told us whose it is, so activity comes from the
-      // one runtime that owns the session rather than from an OR across all
-      // three — `live` and `running` mean different things to each of them.
-      const runtime = runtimeFor(storeForPath(filePath)?.kind ?? "claude")
-      const statusInfo = await getSessionStatus(filePath)
-      sendJson(res, 200, { sessionId, ...runtime.activity(sessionId), ...statusInfo })
+      sendJson(res, 200, state)
     } catch (err) {
       sendJson(res, 500, { error: String(err) })
     }

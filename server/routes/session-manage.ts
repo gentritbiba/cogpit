@@ -22,6 +22,7 @@ import {
 } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 import { forgetSessions } from "../lib/sessionArchive"
+import { forgetSessionLineage } from "../lib/sessionLineage"
 import { listShares, removeShare } from "../share/registry"
 import { revokeShareTokensForSession } from "../security"
 import { registerRunningProcessesRoute } from "./session-manage/processInventory"
@@ -307,6 +308,7 @@ export function registerSessionManageRoutes(use: UseFn) {
         const sessionId = runtime.descriptor.sessionFile.urlId(fileName)
         await runtime.deleteSession(sessionId, filePath)
         forgetSessions([sessionId]).catch(() => {})
+        forgetSessionLineage([sessionId]).catch(() => {})
 
         // A share left behind would hand its guest whatever session next
         // claims this id.

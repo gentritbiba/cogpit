@@ -10,6 +10,7 @@ const mockIsSDKQueryLive = vi.hoisted(() => vi.fn())
 const mockGetActiveTurnId = vi.hoisted(() => vi.fn())
 const mockIsCopilotSessionActive = vi.hoisted(() => vi.fn())
 const mockIsCopilotTurnActive = vi.hoisted(() => vi.fn())
+const mockListPendingInput = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
   getSessionStatus: mockGetSessionStatus,
@@ -78,6 +79,10 @@ vi.mock("../../agents/copilotTransport", () => ({
   },
 }))
 
+vi.mock("../../agents/pendingInput", () => ({
+  listPendingInput: mockListPendingInput,
+}))
+
 import type { UseFn, Middleware } from "../../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerSessionStatusRoutes } from "../../routes/session-status"
@@ -115,6 +120,7 @@ describe("GET /api/session-status/:sessionId", () => {
     mockGetActiveTurnId.mockReturnValue(undefined)
     mockIsCopilotSessionActive.mockReturnValue(false)
     mockIsCopilotTurnActive.mockReturnValue(false)
+    mockListPendingInput.mockReturnValue([])
   })
 
   it("delegates non-GET requests and nested paths to next()", async () => {
@@ -135,7 +141,14 @@ describe("GET /api/session-status/:sessionId", () => {
   it("reports tail-derived status with live=false running=false when nothing is tracked", async () => {
     const { res, json } = await request("GET", "/abc")
     expect(res.statusCode).toBe(200)
-    expect(json()).toEqual({ sessionId: "abc", live: false, running: false, status: "completed" })
+    expect(json()).toEqual({
+      sessionId: "abc",
+      outcome: "completed",
+      live: false,
+      running: false,
+      status: "completed",
+      waiting: [],
+    })
   })
 
   it("passes toolName and terminalReason through from the status scan", async () => {
@@ -146,10 +159,13 @@ describe("GET /api/session-status/:sessionId", () => {
     const { json } = await request("GET", "/abc")
     expect(json()).toEqual({
       sessionId: "abc",
+      outcome: "error",
       live: false,
       running: false,
       status: "completed",
       terminalReason: "max_turns",
+      waiting: [],
+      error: "max_turns",
     })
   })
 
@@ -160,7 +176,7 @@ describe("GET /api/session-status/:sessionId", () => {
     mockIsSDKQueryLive.mockReturnValue(true)
 
     const { json } = await request("GET", "/abc")
-    expect(json()).toEqual({ sessionId: "abc", live: true, running: false, status: "completed" })
+    expect(json()).toMatchObject({ outcome: "completed", live: true, running: false, status: "completed" })
     expect(mockIsSDKQueryLive).toHaveBeenCalledWith(mockSdkSessions.get("abc"))
   })
 
@@ -170,8 +186,8 @@ describe("GET /api/session-status/:sessionId", () => {
     mockGetSessionStatus.mockResolvedValue({ status: "tool_use", toolName: "Bash" })
 
     const { json } = await request("GET", "/abc")
-    expect(json()).toEqual({
-      sessionId: "abc",
+    expect(json()).toMatchObject({
+      outcome: "running",
       live: true,
       running: true,
       status: "tool_use",
@@ -230,6 +246,25 @@ describe("GET /api/session-status/:sessionId", () => {
       live: true,
       running: true,
     })
+  })
+
+  it("reports a pending approval as needs_input even though the turn is running", async () => {
+    mockSdkSessions.set("abc", { running: true })
+    mockIsSDKQueryLive.mockReturnValue(true)
+    const waiting = [{
+      kind: "permission",
+      requestId: "req-1",
+      toolName: "Bash",
+      summary: "rm -rf build",
+      availableDecisions: ["allow", "deny"],
+    }]
+    mockListPendingInput.mockReturnValue(waiting)
+    expect((await request("GET", "/abc")).json()).toMatchObject({ outcome: "needs_input", running: true, waiting })
+  })
+
+  it("keeps a session awaiting background agents running between turns", async () => {
+    mockGetSessionStatus.mockResolvedValue({ status: "awaiting_agents", pendingAgents: 1 })
+    expect((await request("GET", "/abc")).json()).toMatchObject({ outcome: "running", running: false })
   })
 
   it("returns 500 when the status scan fails", async () => {

@@ -1,309 +1,237 @@
 <!-- Generated from .claude/skills/cogpit-sessions/SKILL.md by scripts/sync-cogpit-skill.ts. Edit the source, then run `bun run sync-cogpit-skill`. -->
 
-# Cogpit sessions API
+# Driving other sessions with Cogpit
 
-## Base URL and port
+Use the `cogpit-session` CLI. It resolves the server, retries safely, blocks
+until a session is done, and prints JSON with the final reply. You rarely need
+the HTTP API below.
 
-The packaged app binds an ephemeral port unless network access pins 19384. Resolve the port in this order:
+## Where the CLI is
+
+- **Inside a session Cogpit started:** `cogpit-session` is on your PATH, and
+  `COGPIT_PORT` and `COGPIT_SESSION_ID` are set. Sessions you create are
+  recorded as your children.
+- **Anywhere else on the same machine:** run `~/.cogpit/bin/cogpit-session`.
+  Cogpit rewrites it on every start. It finds the server through
+  `$COGPIT_PORT`, then `~/.cogpit/port`, then `19384`.
+- Run `cogpit-session help` for the full usage.
+
+## Delegate and wait
+
+```bash
+cogpit-session new "Fix the failing tests in src/parser and summarize the cause" --wait --timeout 300
+```
+
+```json
+{ "sessionId": "…", "outcome": "completed", "reply": "Fixed: …", "filesChanged": [{ "path": "…", "type": "edit", "additions": 4, "deletions": 1 }] }
+```
+
+- The session runs in your working directory. Use `--cwd DIR` for another
+  project and `--worktree NAME` to isolate its edits in a git worktree.
+- `--agent claude|codex|copilot`, `--model`, `--effort` and `--name` pick how
+  it runs.
+- A long message can come from stdin: `cogpit-session new - --wait < task.md`.
+- **Permissions:** new sessions run with `--mode bypassPermissions` so nothing
+  stalls. Pass `--mode default` (or `acceptEdits`, `plan`) to supervise it
+  yourself instead (see "Answering a blocked session").
+
+Follow up in the same session, which keeps its context:
+
+```bash
+cogpit-session send "$ID" "Now add a regression test" --wait
+cogpit-session send "$ID" "Stop, use the other approach" --interrupt   # cut the current turn first
+```
+
+## Outcomes and exit codes
+
+Every report carries an `outcome`:
+
+| outcome | meaning | exit code |
+| --- | --- | --- |
+| `completed` | turn finished; `reply` and `filesChanged` are included | 0 |
+| `needs_input` | blocked on a permission prompt, question or plan; see `waiting` and `next` | 2 |
+| `running` | still working when `--timeout` ran out; run the `next` command to keep waiting | 3 |
+| `error` | the turn failed; see `error` | 1 |
+| `not_found` | no such session | 1 |
+
+`wait` defaults to a 90-second timeout, below the two-minute limit of most
+shell tools. For longer work, pass a larger `--timeout` (and raise your shell
+tool's timeout to match), or wait in a loop:
+
+```bash
+until cogpit-session wait "$ID" --timeout 90 > /tmp/report.json; [ $? -ne 3 ]; do :; done
+cat /tmp/report.json
+```
+
+A session whose turn ended while background agents still run stays `running`
+until it finishes for real.
+
+## Fan out, then collect
+
+```bash
+A=$(cogpit-session new "Audit the API routes for missing auth" --worktree audit-api | jq -r .sessionId)
+B=$(cogpit-session new "Audit the React forms for XSS" --worktree audit-ui | jq -r .sessionId)
+cogpit-session wait "$A" "$B" --timeout 600      # all of them; add --any to return on the first
+cogpit-session children                          # everything you started, with its outcome
+```
+
+`new` returns as soon as the session exists (5–15 s) unless you pass `--wait`.
+
+## Answering a blocked session
+
+When `outcome` is `needs_input`, `waiting` lists each request, and `next`
+lists the command that answers it:
+
+```json
+{
+  "outcome": "needs_input",
+  "waiting": [{ "kind": "permission", "requestId": "toolu_…", "toolName": "Bash", "summary": "rm -rf build", "availableDecisions": ["allow", "allow_always", "deny"] }],
+  "next": ["cogpit-session approve ID --request toolu_…  |  cogpit-session deny ID --request toolu_…"]
+}
+```
+
+```bash
+cogpit-session approve "$ID"                    # the only pending permission or plan
+cogpit-session approve "$ID" --always           # also allow it for the rest of the session
+cogpit-session deny "$ID" --request REQ         # pick one when several are pending
+cogpit-session deny "$ID" --feedback "Smaller steps please"   # reject a plan with feedback
+cogpit-session answer "$ID" "Blue"              # a question: one answer per question, in order
+cogpit-session answer "$ID" --json '{"Which color?":"Blue"}'
+```
+
+Then `wait` again. `--request` is optional when exactly one matching request is
+pending.
+
+## Reading and cleaning up
+
+```bash
+cogpit-session status "$ID"          # outcome, current tool, anything blocking it
+cogpit-session result "$ID"          # reply of the last turn, files changed, tokens
+cogpit-session result "$ID" --turn 0 --text   # just the reply text of turn 0
+cogpit-session interrupt "$ID"       # stop the turn, keep the session
+cogpit-session stop "$ID"            # end it
+cogpit-session stop --children       # end every session you started
+```
+
+For full turns, tool calls and subagents, read the transcript with
+`GET /api/session-context/:sessionId` (below) or the cogpit-memory CLI.
+
+## HTTP API
+
+Use the API when you cannot run a shell command. All endpoints take and return
+JSON. Requests from 127.0.0.1/::1 skip authentication.
 
 ```bash
 PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"
 BASE="http://localhost:$PORT"
 ```
-
-`~/.cogpit/port` is written on server start and removed on exit. All endpoints accept and return JSON. Local requests (127.0.0.1/::1) bypass authentication.
-
-## CRITICAL: permissions
-
-The server defaults to permission mode `default`, which gates tool calls behind interactive approval. A headless caller has no one to click Approve, so the session stalls on its first gated tool call. **For autonomous editing sessions, pass:**
-
-```json
-"permissions": { "mode": "bypassPermissions" }
-```
-
-Full shape:
-
-```json
-{
-  "mode": "bypassPermissions" | "default" | "plan" | "acceptEdits" | "dontAsk" | "auto",
-  "allowedTools": ["Bash", "Read", "Write"],
-  "disallowedTools": []
-}
-```
-
-- `bypassPermissions` runs tools without prompting and without the Codex sandbox. Use it only for authorized editing sessions.
-- **Codex read-only sessions:** pass `{"mode":"plan"}`. Cogpit maps this to Codex `sandbox: read-only` and `approvalPolicy: never`, so reads do not wait for interactive approval. Use it for code review, including follow-ups. This mapping is Codex-specific.
-- Other modes may gate tool calls. Only use them when a human is watching the Cogpit UI.
-- `allowedTools` / `disallowedTools` are CLI tool names, applied as allow/deny lists in the gated modes.
-- The old `{ "allow": [...], "deny": [...] }` shape is **silently ignored**. Sending it leaves the session in `default` mode and it hangs. Do not use it.
-
-## Response timing
-
-| Endpoint | Response time | Notes |
-|----------|--------------|-------|
-| `create-and-send` | 5–15 s | waits for the JSONL file to appear on disk |
-| `send-message` | instant OR full turn | instant when the session's SDK query is live (the normal case after `create-and-send`); waits for the whole turn only when it must resume a cold session |
-| everything else | instant | |
-
-Use `--max-time 30` for `create-and-send`. For `send-message` use `--max-time 600` and run it in the background, since the resume path can take minutes.
-
-**A 200 from `send-message` does NOT mean the turn finished.** Poll `/api/session-status/:sessionId` to detect completion (next section).
-
-## Detecting turn completion
-
-```bash
-curl -s "$BASE/api/session-status/$SESSION_ID"
-# → { "sessionId": "...", "live": true, "running": false, "status": "completed", "pendingQueue": 0 }
-```
-
-- `running`: a turn is in flight right now. This is the primary completion signal for sessions Cogpit manages: it flips true as soon as the server accepts a message (before `send-message` even responds) and false exactly at the turn boundary, so it does not suffer the JSONL flush lag that `status` does. Poll until it is `false`.
-- `status`: one of `idle` | `thinking` | `tool_use` | `processing` | `completed` | `compacting` | `deferred` | `awaiting_agents`, derived from the session JSONL tail. Terminal statuses: `completed`, `idle`, `deferred`, or any `terminalReason`. **Non-terminal:** `awaiting_agents` means the turn ended but background agents/workflows are still running; the session will resume by itself when they notify. For sessions the server does not manage (started in a terminal, or before a server restart), treat terminal statuses as the end of turn. It can briefly report the previous turn's `completed` right after a send, so prefer `running` when it is available.
-- `live`: the server holds an open SDK query or process that can take follow-ups without a resume. Stays `true` between turns for SDK and legacy sessions; native Codex sessions only report `live` during a turn.
-- `pendingQueue`: user messages queued but not yet processed. Wait for it to hit 0 as well if you sent several messages back to back.
-- `terminalReason`: set when the session ended abnormally.
-- `pendingAgents`: (only when `status === "awaiting_agents"`) number of background agents/workflows still running.
-- `pendingAgentDescriptions`: (only when `status === "awaiting_agents"`) short descriptions of pending agents, oldest first.
-
-Poll loop:
-
-```bash
-sleep 2   # let the server accept the message you just sent
-while [ "$(curl -s "$BASE/api/session-status/$SESSION_ID" | jq -r .running)" = "true" ]; do
-  sleep 5
-done
-```
-
-## Create once, retry safely
-
-Use one `requestId` per intended new session. Save the full JSON request before sending it; all retries must reuse the same file and ID. A parse failure or timeout does not prove the agent failed to start.
-
-```bash
-# Choose a task-specific directory and retain it until the result is confirmed.
-REQUEST_DIR=$(mktemp -d)
-jq -n --arg id "$(uuidgen)" \
-  --arg dir "-Users-gentritbiba-my-project" \
-  --arg message "What files are in this project?" \
-  '{requestId:$id, dirName:$dir, message:$message, permissions:{mode:"bypassPermissions"}}' \
-  > "$REQUEST_DIR/request.json"
-
-curl -sS --max-time 30 -X POST "$BASE/api/create-and-send" \
-  -H 'Content-Type: application/json' \
-  --data-binary @"$REQUEST_DIR/request.json" \
-  -o "$REQUEST_DIR/response.json" -w '%{http_code}\n'
-jq '{success, sessionId, error}' "$REQUEST_DIR/response.json"
-```
-
-On timeout, invalid response JSON, or a lost connection, repeat only the `curl` and `jq` commands with the saved request. Do not generate another ID or recreate the payload. Keep stderr separate from JSON. Do not pipe `echo "$RESULT"` into a JSON parser; some shells interpret the response's backslash escapes. Use the response file, or `printf '%s\n' "$RESULT"`.
-
-- Success echoes `requestId` in the JSON response and returns the original session for the same ID and payload, including across server restarts. Same-process concurrent retries await the same creation.
-- `409 CONFLICT` with a different-payload message means the ID was reused for different work. Restore the original payload to retrieve its result.
-- `409 CONFLICT` with a pending/unknown-outcome message means another server is creating it, or the server stopped before recording the outcome. Retry the same ID later and inspect `/api/active-sessions`; do not launch another copy blindly. Stop retrying and report uncertainty if the result cannot be determined.
-- IDs are scoped to the authenticated user, contain 8–128 letters, digits, hyphens or underscores, and have no automatic expiry. A fresh ID means an intentional new session.
-- Older servers may ignore `requestId` and will not echo it in the response. On those, inspect active sessions after a failed response before any retry. Upgrade the server to get retry protection.
-
-After confirmation, record the session ID and remove the temporary request directory. Request and response files may contain private prompt/transcript data.
-
-The shorter examples below omit request persistence for readability. Use this pattern for every actual `create-and-send` call.
-
-## Finding the dirName
-
-The `dirName` is the project's absolute path with every non-alphanumeric character replaced by `-`:
-
-```bash
-# /Users/x/my.app → -Users-x-my-app
-DIR_NAME=$(echo "/Users/x/my.app" | sed 's|[^a-zA-Z0-9]|-|g')
-```
-
-Discover existing projects instead of guessing:
-
-```bash
-curl -s "$BASE/api/projects"
-# → [{ dirName, path, shortName, sessionCount, lastModified }]
-```
-
-Codex projects appear with `codex__<base64url-of-cwd>` dirNames and a `(Codex)` suffix on `shortName`. The same endpoints drive Codex sessions. For a new project, resolve symlinks to the physical absolute cwd first (for example `/tmp` becomes `/private/tmp` on macOS), use that canonical path consistently, and encode its UTF-8 cwd with unpadded base64url and prepend `codex__`.
-
-**Provider routing:** `dirName` selects the agent. A Codex `model` on a Claude `dirName` does not select Codex. Current servers also accept `agent: "codex"` plus an absolute `cwd` without `dirName`; supplying the encoded `dirName` works with older servers too. Confirm the returned identifier and `/api/find-session/:sessionId` match the requested provider and cwd. Include `parentSessionId` when known to preserve session lineage.
-
-## API reference
 
 ### POST /api/create-and-send
 
-Create a session and send the first message. Spawns a persistent SDK session that stays alive for follow-ups.
-
-Body:
+Creates a session and sends the first message. Responds in 5–15 s, once the
+transcript exists; use `--max-time 30`.
 
 ```json
 {
-  "dirName": "string (required)",
-  "message": "string (required unless images provided)",
+  "cwd": "/abs/project (or dirName)",
+  "dirName": "project dirName from /api/projects (or cwd)",
+  "agent": "claude | codex | copilot (only with cwd; default claude)",
+  "message": "string (required unless images)",
   "images": [{ "data": "base64", "mediaType": "image/png" }],
   "permissions": { "mode": "bypassPermissions" },
-  "model": "string (e.g. 'sonnet', '' for provider default, or a full model id; GET /api/models lists options)",
-  "effort": "'low' | 'medium' | 'high' | 'xhigh' | 'max'",
-  "fastMode": "boolean (fast/priority service tier)",
-  "ultracode": "boolean (Claude ultracode; needs xhigh-capable model)",
-  "requestId": "string (reuse with the same payload for safe retries)",
-  "worktreeName": "string (runs the session in a git worktree with this name)",
-  "mcpConfig": "string (JSON-encoded mcpServers config, passed to the SDK)",
-  "name": "string (session name)",
-  "cwd": "string (optional absolute path; must encode to dirName)"
+  "model": "string ('' = provider default; GET /api/models lists options)",
+  "effort": "low | medium | high | xhigh | max",
+  "fastMode": false,
+  "ultracode": false,
+  "worktreeName": "run in a git worktree with this name",
+  "mcpConfig": "JSON-encoded mcpServers config",
+  "name": "session title",
+  "parentSessionId": "your own session id, to list it later as your child",
+  "requestId": "8–128 of [A-Za-z0-9_-]; reuse on retries"
 }
 ```
 
-Response 200: `{ success, dirName, fileName, sessionId, initialContent }`. Error 400/500: `{ error }`.
+Response: `{ success, requestId?, dirName, fileName, sessionId, initialContent? }`.
+
+- **Always pass `permissions.mode`.** The server default, `default`, gates each
+  tool call on an approval. Nothing answers it unless you do (see
+  `/api/session-respond`). `bypassPermissions` runs everything. The old
+  `{ "allow", "deny" }` shape is silently ignored.
+- **Retries:** keep one `requestId` per intended session and resend the same
+  payload after a timeout or dropped connection. The server returns the
+  original session instead of starting another. `409 CONFLICT` means the ID
+  was reused with a different payload, or the outcome is still unknown. Do not
+  start a new copy blindly. The CLI does this for you.
+- A Claude `dirName` is the path with every non-alphanumeric character replaced
+  by `-`; Codex and Copilot use their own prefixes. Prefer `cwd`.
 
 ### POST /api/send-message
 
-Send a follow-up. Enqueues on the live SDK query if the session is still running, otherwise resumes it.
+`{ sessionId, message, images?, permissions?, model?, effort?, fastMode?, ultracode?, mcpConfig?, cwd? }`
 
-Body: `{ "sessionId": "...", "message": "...", "images": [...], "cwd": "...", "permissions": {...}, "model": "...", "effort": "...", "fastMode": ..., "ultracode": ..., "mcpConfig": "..." }`
+Returns `{ success: true }` right away when the session is live. When the
+session has to be resumed, the response waits for the whole turn. Either way,
+wait with `/api/session-wait` afterwards.
 
-`sessionId` plus `message` or `images` are required. `permissions` and `cwd` only apply on the resume path. Response: `{ success: true }`. See the timing section: poll `session-status` for completion.
+### GET /api/session-wait/:sessionId?timeout=90 · POST /api/session-wait
 
-### POST /api/interrupt-session
-
-`{ "sessionId": "..." }`. Interrupts the current turn but keeps the session alive for the next message. Response: `{ success: boolean }`.
-
-### POST /api/stop-session
-
-`{ "sessionId": "..." }`. Kills the session's process/query. Response: `{ success: true }`, or `{ success: false, error }` when nothing was running.
-
-### POST /api/kill-all
-
-Kill every agent process Cogpit manages. Response: `{ success, killed }`.
-
-### POST /api/delete-session
-
-`{ "dirName": "...", "fileName": "..." }`. Kills the session and permanently deletes its JSONL file.
-
-### POST /api/archive-sessions
-
-Archive or restore sessions on the server. Archiving only hides a session from the sidebar; the transcript is untouched.
-
-Body: `{ "sessionIds": ["...", "..."], "archived": true }`
-
-- `sessionIds` — array of 1–500 session IDs to archive or restore (duplicates are silently deduplicated)
-- `archived` — true to archive, false to restore and mark the session kept (exempt from auto-archive)
-
-Response: `{ sessionIds, archived, changed }` where `changed` is the list of session IDs whose archive state actually changed (empty array if all were already in the target state).
-
-#### Archive behavior
-
-- **Manual archive**: user archives a session via the sidebar. The server records `archived: true` with the archive timestamp.
-- **Auto-archive**: after 14 days of transcript inactivity, the session is archived unless the user restored it (it is in `kept`).
-- **Auto-unarchive**: when a transcript is written after archiving (e.g., resuming a session or sending a message from Cogpit), the session comes back on its own if the write is well after the archive action (more than 2 minutes).
-- **Restore**: user unarchives a session. It is added to `kept`, which prevents the auto-archive rule from archiving it again until the user manually archives it.
-
-### GET /api/projects
-
-All projects with sessions: `[{ dirName, path, shortName, sessionCount, lastModified }]`.
-
-### GET /api/sessions/:dirName?page=1&limit=20
-
-Paginated session list for a project, newest first: `{ sessions, total, page, pageSize }`. Each session shares the shape of `/api/active-sessions` (see below): `sessionId`, `fileName`, `size`, `lastModified`, `lastActivityAt`, `model`, `gitBranch`, `turnCount`, `agentStatus`, `agentToolName`, `agentTerminalReason`, `agentPendingAgents`, and optional `pullRequests` (when the index has scanned the transcript). Plus session metadata (`cwd`, `firstUserMessage`, `lastUserMessage`, `timestamp`, `aiTitle`, `customTitle`, `version`, ...).
-
-### GET /api/sessions/:dirName/:fileName
-
-Raw session JSONL as `text/plain`. For large sessions page it:
-
-- `?tail=N` returns the last N turns' worth of lines as JSON: `{ headerLines, tailLines, byteOffset, totalSize, hasMore }`
-- `?before=<byteOffset>&count=N` pages backward from a previous response's `byteOffset`: `{ headerLines, lines, byteOffset, hasMore }`
-
-### GET /api/session-context/:sessionId
-
-Parsed session overview: turn summaries, tool call counts, token totals. Much easier to consume than raw JSONL. Drill down with `/turn/:turnIndex` (full turn detail) and `/agent/:agentId` (subagent transcripts, plus `/agent/:agentId/turn/:i`). Prefer this for reading what a session did.
+Long-polls until the session settles (`outcome` other than `running`) or the
+timeout (seconds, default 90, max 3600) passes. The GET form returns
+`{ timedOut, ...state }`. The POST form waits on several sessions:
+`{ "sessionIds": [...], "mode": "all" | "any", "timeout": 600 }` →
+`{ timedOut, sessions: [state...] }`.
 
 ### GET /api/session-status/:sessionId
 
-`{ sessionId, live, running, status, toolName?, pendingQueue?, terminalReason?, pendingAgents?, pendingAgentDescriptions? }`. See "Detecting turn completion". 404 if the session doesn't exist. `pendingAgents` and `pendingAgentDescriptions` are only present when `status === "awaiting_agents"`.
+The same `state` without waiting:
 
-### GET /api/find-session/:sessionId
-
-Resolve a bare sessionId to `{ dirName, fileName }`.
-
-### GET /api/active-sessions
-
-Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. It also accepts exact pull request searches such as `#157`, `honest-cms #157`, `honest-cms#157`, `PR 157`, and a pasted GitHub pull request URL. PR searches cover sessions that created the pull request or used an explicit `gh pr` action for it. The first search may build the durable transcript index in the background. Poll the same request until `X-Cogpit-PR-Index-Pending` is `0`; `X-Cogpit-PR-Index-Total` reports the number of candidate transcripts. A matching row includes `matchedPullRequestNumber`.
-
-Query parameters:
-- `?project=<dirName>` — Only that project's sessions, up to `?limit=` (default 50, max 200) instead of the per-project cap
-- `?archived=include` — Include archived sessions in the results (dimmed; auto-filtered out by default)
-
-Response headers:
-- `X-Cogpit-Archived-Count` — Number of archived sessions that matched the query
-
-Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, `archived` (boolean, present when true), `archivedReason` (string: `"manual"` when user archived it, `"inactive"` when auto-archived), and for team members `teamName`, `agentName`, `teamLeadSessionId`.
-
-### GET /api/running-processes
-
-System-wide agent processes with PID, memory, CPU, and sessionId.
-
-### GET /api/agent-executable/:kind
-
-Cogpit's choice of which Claude Code binary to spawn, and all available options. Only Claude has a choice (the Agent SDK vendors a copy); Codex and Copilot run whatever `PATH` offers, so this endpoint returns 404 for them.
-
-Response 200: `{ choice, candidates, active }` where:
-- `choice` — the user's stored preference: `{ source: "auto" | "path" | "npm" | "bundled" | "custom", path?: string }`
-- `candidates` — each detected binary: `[{ source, path, version }]`
-- `active` — the one Cogpit will spawn: `{ source, path, version }` or `null` if nothing is launchable given the choice
-
-Response 404: agent has no choice to make (e.g., `GET /api/agent-executable/codex`).
-
-## Typical agent workflow
-
-```bash
-PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"
-BASE="http://localhost:$PORT"
-
-# 1. Discover the project
-DIR_NAME=$(curl -s "$BASE/api/projects" | jq -r '.[0].dirName')
-
-# 2. Start a session (--max-time 30 required; response takes 5-15s)
-RESULT=$(curl -s --max-time 30 -X POST "$BASE/api/create-and-send" \
-  -H "Content-Type: application/json" \
-  -d "{\"dirName\": \"$DIR_NAME\", \"message\": \"List the main source files\", \"permissions\": {\"mode\": \"bypassPermissions\"}}")
-SESSION_ID=$(printf '%s\n' "$RESULT" | jq -r '.sessionId')
-
-# 3. Send a follow-up in the background
-curl -s --max-time 600 -X POST "$BASE/api/send-message" \
-  -H "Content-Type: application/json" \
-  -d "{\"sessionId\": \"$SESSION_ID\", \"message\": \"Now fix the failing tests\"}" \
-  > /tmp/send-result.txt 2>&1 &
-
-# 4. Poll until the turn completes
-sleep 2
-while [ "$(curl -s "$BASE/api/session-status/$SESSION_ID" | jq -r .running)" = "true" ]; do
-  sleep 5
-done
-
-# 5. Read what happened (parsed, no JSONL wrangling)
-curl -s "$BASE/api/session-context/$SESSION_ID"
-
-# 6. Stop when done
-curl -s -X POST "$BASE/api/stop-session" \
-  -H "Content-Type: application/json" \
-  -d "{\"sessionId\": \"$SESSION_ID\"}"
+```json
+{ "sessionId": "…", "outcome": "running", "live": true, "running": true, "status": "tool_use", "toolName": "Bash", "waiting": [], "pendingQueue": 0 }
 ```
 
-## Fire-and-forget
+- `outcome`: `running | needs_input | completed | error | not_found` (404).
+- `waiting`: pending requests: `{ kind: "permission", requestId, toolName, summary, availableDecisions }`,
+  `{ kind: "question", requestId, questions: [{ question, multiSelect, options }] }`,
+  `{ kind: "plan", requestId, summary, actions, recommendedAction }`.
+- `running`: a turn is in flight. `live`: a connection is held that takes follow-ups without a resume.
+- `status`: the transcript tail (`idle | thinking | tool_use | processing | completed | compacting | deferred | awaiting_agents`), plus `terminalReason`, `pendingAgents` and `pendingAgentDescriptions` when they apply.
+- `error`: why the last turn failed.
 
-Start a task and check on it later. The server-side process persists; no connection needs to stay open.
+### POST /api/session-respond
 
-```bash
-RESULT=$(curl -s --max-time 30 -X POST "$BASE/api/create-and-send" \
-  -H "Content-Type: application/json" \
-  -d '{"dirName":"...","message":"Do the task","permissions":{"mode":"bypassPermissions"}}')
-SESSION_ID=$(printf '%s\n' "$RESULT" | jq -r '.sessionId')
+Answers one entry of `waiting`:
+`{ sessionId, requestId, decision: "allow" | "allow_always" | "deny" }` for a permission,
+`{ sessionId, requestId, answers: "Blue" | ["Blue", "Large"] | { "Which color?": "Blue" } }` for a question,
+`{ sessionId, requestId, approved: true | false, action?, feedback? }` for a plan.
+Returns `{ success, answered }`; 404 when it was already answered.
 
-# Later:
-curl -s "$BASE/api/session-status/$SESSION_ID"
-curl -s "$BASE/api/session-context/$SESSION_ID"
-```
+### GET /api/session-result/:sessionId?turn=N
+
+`{ sessionId, cwd, model, turnCount, turn: { index, userMessage, reply, toolCalls, toolErrors, durationMs }, filesChanged: [{ path, type, additions, deletions }], tokens: { input, output } }`.
+`turn` defaults to the last one; `reply` is the last text the agent wrote in it.
+
+### GET /api/session-children/:sessionId
+
+`{ sessionId, children: [state...] }` for the sessions created with this `parentSessionId`, oldest first.
+
+### Other endpoints
+
+- `POST /api/interrupt-session` `{ sessionId }`: stop the turn, keep the session.
+- `POST /api/stop-session` `{ sessionId }`: end it. `POST /api/kill-all` ends every one.
+- `POST /api/delete-session` `{ dirName, fileName }`: end it and delete its transcript.
+- `POST /api/archive-sessions` `{ sessionIds: [...], archived: true | false }`: hide from or restore to the sidebar; the transcript is untouched. Idle sessions auto-archive after 14 days unless restored, and new activity unarchives them.
+- `GET /api/projects`: `[{ dirName, path, shortName, sessionCount, lastModified }]`.
+- `GET /api/sessions/:dirName?page=1&limit=20`: a project's sessions, newest first.
+- `GET /api/active-sessions?search=&project=&limit=&archived=include`: recent sessions across projects. `search` also matches pull requests (`#157`, `repo#157`, a PR URL); while the PR index builds, poll until `X-Cogpit-PR-Index-Pending` is `0`.
+- `GET /api/session-context/:sessionId`: parsed overview of every turn; drill into `/turn/:i` and `/agent/:agentId`.
+- `GET /api/sessions/:dirName/:fileName`: raw transcript JSONL (`?tail=N`, `?before=<byteOffset>&count=N` to page).
+- `GET /api/find-session/:sessionId`: `{ dirName, fileName }`.
+- `GET /api/running-processes`: agent processes with PID, memory and CPU.
+- `GET /api/agent-executable/claude`: which Claude Code binary Cogpit spawns.
 
 ## Notes
 
-- The server must be running (Cogpit app, or `bun run dev` in the agent-window project).
-- Claude sessions persist as JSONL in `~/.claude/projects/<dirName>/`; Codex rollouts live in Codex's own sessions tree but are served through the same endpoints.
-- The SDK session stays alive between messages, so follow-ups have no cold start and skip permission re-negotiation.
-- Explicitly select permissions: `{"mode":"plan"}` for Codex read-only work; `{"mode":"bypassPermissions"}` for authorized autonomous editing. The legacy `{allow, deny}` shape is ignored.
+- The Cogpit app (or `bun run dev` in the agent-window repo) must be running.
+- Sessions stay alive between messages, so follow-ups have no cold start.
+- Claude transcripts live in `~/.claude/projects/<dirName>/`; Codex and Copilot
+  transcripts stay in their own trees but go through the same endpoints.

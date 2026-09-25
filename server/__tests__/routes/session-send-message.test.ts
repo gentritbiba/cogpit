@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../browser/agentEnv", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
+  agentBinInstalled: () => false,
   browserShimInstalled: () => false,
 }))
 

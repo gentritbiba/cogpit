@@ -92,17 +92,26 @@ app version. The tag is the source of truth for the published launcher.
 
 ## External Session API (cogpit-sessions skill)
 
-Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. The packaged app binds an ephemeral port unless network access pins 19384, so resolve the port from `$COGPIT_PORT`, then `~/.cogpit/port` (written on start, removed on exit), then `19384`. Key endpoints:
+Agents drive other sessions with the `cogpit-session` CLI. The server writes it
+to `~/.cogpit/bin` on start (`server/sessionCli/install.ts`) and runs it with its
+own runtime, so no Node is needed. Every agent Cogpit spawns gets that
+directory first on PATH, plus `COGPIT_PORT` and `COGPIT_SESSION_ID`, through
+`cogpitAgentEnv`. The script only forwards argv to `POST /api/session-cli`. The
+commands live in `server/sessionCli/commands.ts`, so they change with the
+server and the script never goes stale.
 
-- `POST /api/create-and-send` — Start a new session with a message (responds in 5–15s)
-- `POST /api/send-message` — Send follow-up (returns immediately when the session is live; poll session-status for completion)
-- `GET /api/session-status/:sessionId` — Poll turn status (`running: false` = turn done)
-- `POST /api/stop-session` — Stop a running session
-- `GET /api/projects` — List available projects and their `dirName`s
-- `GET /api/session-context/:sessionId` — Read session output as parsed turns
-- `GET /api/sessions/:dirName/:fileName` — Read raw session JSONL
+The HTTP surface it wraps, all on the local server (port from `$COGPIT_PORT`,
+then `~/.cogpit/port`, then `19384`):
 
-See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for full usage, timeouts, and permissions.
+- `POST /api/create-and-send`: start a session (`cwd` or `dirName`, `parentSessionId` records lineage)
+- `POST /api/send-message`: send a follow-up
+- `GET /api/session-status/:id`: `outcome` (`running | needs_input | completed | error | not_found`) plus `waiting` requests
+- `GET|POST /api/session-wait`: long-poll one or many sessions until they settle
+- `POST /api/session-respond`: answer a pending permission, question or plan
+- `GET /api/session-result/:id`: final reply, changed files, tokens
+- `GET /api/session-children/:id`: sessions started by a session
+
+See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for usage.
 
 `.claude/skills/cogpit/` is the installable bundle for agents outside this repo
 (`npx skills add gentritbiba/agent-window --skill cogpit`). Its `references/`

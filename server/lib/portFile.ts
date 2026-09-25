@@ -11,6 +11,21 @@ import { dirname, join } from "node:path"
  */
 export const PORT_FILE = join(homedir(), ".cogpit", "port")
 
+let boundPort: number | null = null
+
+/** The port this process serves on, which agents it starts receive as `COGPIT_PORT`. */
+export function setServerPort(port: number): void {
+  boundPort = port
+}
+
+export function serverPort(): number | null {
+  return boundPort
+}
+
+export function resetServerPortForTest(): void {
+  boundPort = null
+}
+
 export function writePortFile(port: number): void {
   try {
     mkdirSync(dirname(PORT_FILE), { recursive: true })

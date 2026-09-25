@@ -6,7 +6,7 @@
 import { CLICKUP_CONFIG_FILE } from "../server/lib/clickupConfig"
 import { createServerComposition } from "../server/app-server"
 import { getConfig } from "../server/config"
-import { removePortFile, writePortFile } from "../server/lib/portFile"
+import { removePortFile, setServerPort, writePortFile } from "../server/lib/portFile"
 import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
 import { markNotificationsRead } from "../server/lib/notificationHistory"
@@ -48,6 +48,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     // Published so agent hooks can find us even on an ephemeral port. Removed on
     // exit so a hook can never POST session text to whatever process inherits
     // that port after Cogpit quits.
+    setServerPort(port)
     writePortFile(port)
     process.on("exit", removePortFile)
 

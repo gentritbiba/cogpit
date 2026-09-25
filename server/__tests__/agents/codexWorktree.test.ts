@@ -44,7 +44,7 @@ vi.mock("../../agents/codexExecution", () => ({
 vi.mock("../../sessionPaths", () => ({ findNewestCodexSessionForCwd: mocks.findNewest }))
 vi.mock("../../agents/tempImages", () => ({ writeTempImageFiles: async () => [], cleanupTempFiles: async () => {} }))
 vi.mock("../../lib/binaryResolver", () => ({ resolveAgentCommand: (command: string, args: string[]) => ({ command, args }) }))
-vi.mock("../../browser/agentEnv", () => ({ browserAgentEnv: (env: NodeJS.ProcessEnv) => env }))
+vi.mock("../../browser/agentEnv", () => ({ cogpitAgentEnv: (env: NodeJS.ProcessEnv) => env }))
 
 import { codexRuntime } from "../../agents/codexRuntime"
 import { activeProcesses, persistentSessions } from "../../processRegistry"

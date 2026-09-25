@@ -198,9 +198,9 @@ This hook prevents mistakes in recognizable shell calls, not arbitrary program e
 
 Hooks were chosen over `canUseTool` because the CLI skips `canUseTool` entirely under `bypassPermissions`, which is Cogpit's common mode; hooks fire in every permission mode.
 
-Both are registered only when `agent-browser` is installed — the gate is the shim's presence, the same signal `browserAgentEnv` uses — so a machine without it pays nothing.
+Both are registered only when `agent-browser` is installed — the gate is the shim's presence (`browserShimInstalled`) — so a machine without it pays nothing. `cogpitAgentEnv` still puts `~/.cogpit/bin` first on PATH there, because the `cogpit-session` CLI lives beside the shim.
 
-Codex app-server sessions receive the same browser guide through `developer_instructions`, on new threads and threads resumed from disk. Cogpit reads the effective project configuration first, appends the guide to existing developer instructions, and preserves configured tool paths after prepending the shim. These overrides are set only when the shim exists. This does not install the SDK's subagent hook in Codex: its `tmp-` rule remains an instruction, not an enforced redirect. New threads served by a shared process have no browser driver identity until resumed from disk, because their id is not known at launch.
+Codex app-server sessions receive the same browser guide through `developer_instructions`, on new threads and threads resumed from disk. Cogpit reads the effective project configuration first, appends the guide to existing developer instructions, and preserves configured tool paths after prepending the shim. The guide is appended only when the shim exists; the PATH, `COGPIT_SESSION_ID` and `COGPIT_PORT` overrides are set whenever `~/.cogpit/bin` exists, for the `cogpit-session` CLI. This does not install the SDK's subagent hook in Codex: its `tmp-` rule remains an instruction, not an enforced redirect. New threads served by a shared process have no browser driver identity until resumed from disk, because their id is not known at launch.
 
 An already-loaded Codex thread retains its original configuration when rejoined. Restart Cogpit after upgrading to apply the browser configuration to existing threads; a follow-up message alone does not retrofit a loaded thread.
 

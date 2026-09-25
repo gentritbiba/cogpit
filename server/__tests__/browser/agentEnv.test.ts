@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { browserAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
+import { cogpitAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
 import { binDir, NO_COGPIT_SESSION, pluginDir, shimPath } from "../../browser/paths"
+import { resetServerPortForTest, setServerPort } from "../../lib/portFile"
 import { ensurePlugin } from "../../browser/skill"
 
 let root = ""
@@ -27,10 +28,10 @@ function writeShim(): void {
   writeFileSync(shimPath(), "#!/usr/bin/env bash\n", { mode: 0o755 })
 }
 
-describe("browserAgentEnv", () => {
+describe("cogpitAgentEnv", () => {
   it("prepends the shim directory to PATH and sets the session id", () => {
     writeShim()
-    const env = browserAgentEnv({ PATH: "/usr/bin", FOO: "bar" }, "session-1")
+    const env = cogpitAgentEnv({ PATH: "/usr/bin", FOO: "bar" }, "session-1")
     expect(env.PATH).toBe(`${binDir()}${delimiter}/usr/bin`)
     expect(env.COGPIT_SESSION_ID).toBe("session-1")
     expect(env.FOO).toBe("bar")
@@ -39,42 +40,57 @@ describe("browserAgentEnv", () => {
   it("does not prepend twice when the shim directory already leads PATH", () => {
     writeShim()
     const path = `${binDir()}${delimiter}/usr/bin`
-    expect(browserAgentEnv({ PATH: path }, "session-1").PATH).toBe(path)
+    expect(cogpitAgentEnv({ PATH: path }, "session-1").PATH).toBe(path)
   })
 
   it("prepends again when the shim directory is present but not first", () => {
     writeShim()
     const path = `/usr/bin${delimiter}${binDir()}`
-    expect(browserAgentEnv({ PATH: path }, "session-1").PATH).toBe(`${binDir()}${delimiter}${path}`)
+    expect(cogpitAgentEnv({ PATH: path }, "session-1").PATH).toBe(`${binDir()}${delimiter}${path}`)
   })
 
   it("becomes the whole PATH when the base has none", () => {
     writeShim()
-    expect(browserAgentEnv({}, "session-1").PATH).toBe(binDir())
+    expect(cogpitAgentEnv({}, "session-1").PATH).toBe(binDir())
   })
 
-  it("leaves PATH alone but still sets the session id when no shim exists", () => {
-    const env = browserAgentEnv({ PATH: "/usr/bin" }, "session-1")
+  it("prepends the bin directory for the session CLI even without the browser shim", () => {
+    mkdirSync(binDir(), { recursive: true })
+    expect(cogpitAgentEnv({ PATH: "/usr/bin" }, "session-1").PATH).toBe(`${binDir()}${delimiter}/usr/bin`)
+  })
+
+  it("passes the server port once it is known", () => {
+    expect(cogpitAgentEnv({}, "session-1")).not.toHaveProperty("COGPIT_PORT")
+    setServerPort(19385)
+    try {
+      expect(cogpitAgentEnv({ COGPIT_PORT: "1" }, "session-1").COGPIT_PORT).toBe("19385")
+    } finally {
+      resetServerPortForTest()
+    }
+  })
+
+  it("leaves PATH alone but still sets the session id when no bin directory exists", () => {
+    const env = cogpitAgentEnv({ PATH: "/usr/bin" }, "session-1")
     expect(env.PATH).toBe("/usr/bin")
     expect(env.COGPIT_SESSION_ID).toBe("session-1")
   })
 
   it("overrides an inherited session id with the sentinel for a shared spawn", () => {
     writeShim()
-    const env = browserAgentEnv({ PATH: "/usr/bin", COGPIT_SESSION_ID: "inherited" }, NO_COGPIT_SESSION)
+    const env = cogpitAgentEnv({ PATH: "/usr/bin", COGPIT_SESSION_ID: "inherited" }, NO_COGPIT_SESSION)
     expect(env.COGPIT_SESSION_ID).toBe(NO_COGPIT_SESSION)
   })
 
   it("prepends under the spelling the base uses, as Windows spells it Path", () => {
     writeShim()
-    const env = browserAgentEnv({ Path: "C:\\Windows" }, "session-1")
+    const env = cogpitAgentEnv({ Path: "C:\\Windows" }, "session-1")
     expect(env.Path).toBe(`${binDir()}${delimiter}C:\\Windows`)
     expect("PATH" in env).toBe(false)
   })
 
   it("prefers an explicit PATH over a copied Path, which spawn would drop", () => {
     writeShim()
-    const env = browserAgentEnv({ Path: "C:\\Windows", PATH: "C:\\codex" }, "session-1")
+    const env = cogpitAgentEnv({ Path: "C:\\Windows", PATH: "C:\\codex" }, "session-1")
     expect(env.PATH).toBe(`${binDir()}${delimiter}C:\\codex`)
     expect(env.Path).toBe("C:\\Windows")
   })
@@ -82,7 +98,7 @@ describe("browserAgentEnv", () => {
   it("does not mutate the base environment", () => {
     writeShim()
     const base = { PATH: "/usr/bin" }
-    browserAgentEnv(base, "session-1")
+    cogpitAgentEnv(base, "session-1")
     expect(base).toEqual({ PATH: "/usr/bin" })
   })
 })

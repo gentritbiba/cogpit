@@ -114,6 +114,13 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
   "session-status": authed("/api/session-status"),
+  "session-orchestration": authed(
+    "/api/session-wait",
+    "/api/session-result",
+    "/api/session-respond",
+    "/api/session-children",
+    "/api/session-cli",
+  ),
   // Guest login is public because it is where a guest whose token expired gets
   // a new one; the share registry's own passphrase check is what gates it.
   // requirementFor resolves longest-prefix-first, so the longer /api/shares

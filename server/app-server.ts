@@ -36,6 +36,7 @@ import { initShareRegistry } from "./share/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { allRuntimes, isSessionActive } from "./agents/runtimes"
 import { initBrowserSupport } from "./browser"
+import { installSessionCli } from "./sessionCli/install"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
@@ -152,6 +153,7 @@ export async function createServerComposition(
   const browserWss = new WebSocketServer({ noServer: true })
   const browserManager = new BrowserViewerManager()
   const browserSupport = initBrowserSupport(isSessionActive)
+  installSessionCli()
   const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()
 

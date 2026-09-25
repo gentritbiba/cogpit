@@ -22,7 +22,7 @@ import { codexQuestions, type CodexAsyncQuestion } from "./codexQuestions"
 import { friendlySpawnError } from "./spawnError"
 import { cleanupTempFiles, writeTempImageFiles } from "./tempImages"
 import { resolveAgentCommand } from "../lib/binaryResolver"
-import { browserAgentEnv } from "../browser/agentEnv"
+import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import {
   getCodexThreadIdentity,
@@ -252,7 +252,7 @@ async function startLegacy(
     cwd: req.cwd,
     // The session id only arrives once the CLI reports it, which is after the
     // env is fixed; the resume path below spawns with the real one.
-    env: browserAgentEnv(process.env, NO_COGPIT_SESSION),
+    env: cogpitAgentEnv(process.env, NO_COGPIT_SESSION),
     stdio: ["ignore", "pipe", "pipe"],
     ...cli.spawnOptions,
   })
@@ -370,7 +370,7 @@ async function sendLegacy(
   ])
   const child = spawn(cli.command, cli.args, {
     cwd: req.cwd,
-    env: browserAgentEnv(process.env, sessionId),
+    env: cogpitAgentEnv(process.env, sessionId),
     stdio: ["ignore", "pipe", "pipe"],
     ...cli.spawnOptions,
   })

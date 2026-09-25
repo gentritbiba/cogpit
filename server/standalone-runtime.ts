@@ -14,7 +14,7 @@ import {
   saveConfig,
   setConfigPath,
 } from "./config"
-import { removePortFile, writePortFile } from "./lib/portFile"
+import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import {
   hasUsableNetworkCredentials,
@@ -146,6 +146,7 @@ export async function startStandaloneServer({
     throw error
   }
 
+  setServerPort(boundPort)
   if (publishPort) writePortFile(boundPort)
   startSessionActivityMonitor()
 

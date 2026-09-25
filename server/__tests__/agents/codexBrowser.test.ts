@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { codexBrowserConfig } from "../../agents/codexBrowser"
 import { BROWSER_CONTEXT_APPEND } from "../../browser/agentContext"
 import { binDir, shimPath } from "../../browser/paths"
+import { resetServerPortForTest, setServerPort } from "../../lib/portFile"
 
 let root: string
 beforeEach(() => {
@@ -61,6 +62,24 @@ describe("Codex browser configuration", () => {
     expect(config.developer_instructions).toBe(`Keep the user's custom instructions.\n\n${BROWSER_CONTEXT_APPEND}`)
     expect(config["shell_environment_policy.set.PATH"]).toBe(`${binDir()}${delimiter}/custom/tools:/usr/bin`)
     expect(config).not.toHaveProperty("shell_environment_policy.set")
+  })
+
+  it("still puts the session CLI on PATH when agent-browser is not installed", async () => {
+    mkdirSync(binDir(), { recursive: true })
+    expect(await codexBrowserConfig(client, root, "thread-1")).toEqual({
+      "shell_environment_policy.set.PATH": `${binDir()}${delimiter}/ordinary/bin`,
+      "shell_environment_policy.set.COGPIT_SESSION_ID": "thread-1",
+    })
+  })
+
+  it("tells the thread which port this server listens on", async () => {
+    installShim()
+    setServerPort(19999)
+    try {
+      expect((await codexBrowserConfig(client, root))["shell_environment_policy.set.COGPIT_PORT"]).toBe("19999")
+    } finally {
+      resetServerPortForTest()
+    }
   })
 
   it("does not silently replace instructions if effective config cannot be read", async () => {

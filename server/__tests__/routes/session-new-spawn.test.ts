@@ -17,6 +17,7 @@ import { descriptorFor } from "../../../shared/session/agent-descriptors"
 
 vi.mock("../../browser/agentEnv", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
+  agentBinInstalled: () => false,
   browserShimInstalled: () => false,
 }))
 

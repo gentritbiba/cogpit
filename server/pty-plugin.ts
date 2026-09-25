@@ -8,6 +8,7 @@ import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
 import { initBrowserSupport } from "./browser"
+import { installSessionCli } from "./sessionCli/install"
 import { isSessionActive } from "./agents/runtimes"
 
 export function ptyPlugin(): Plugin {
@@ -19,6 +20,7 @@ export function ptyPlugin(): Plugin {
       const browserWss = new WebSocketServer({ noServer: true })
       const browserManager = new BrowserViewerManager()
       const browserSupport = initBrowserSupport(isSessionActive)
+      installSessionCli()
       const authorization = new PtyAuthorizationController()
 
       server.httpServer!.on(
