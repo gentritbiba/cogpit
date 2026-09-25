@@ -17,6 +17,8 @@ export default defineConfig({
     ],
   },
   test: {
+    // Hosted Windows runners are several times slower than the other platforms.
+    ...(process.platform === "win32" ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}),
     css: { include: [/theme\.css\?raw$/] },
     globals: true,
     environment: "jsdom",
