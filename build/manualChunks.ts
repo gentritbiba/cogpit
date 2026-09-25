@@ -67,7 +67,7 @@ export function manualChunks(id: string): string | undefined {
  * every core module the UI imports into it and so into every entry's imports.
  */
 export function isEditionUiChunk(chunk: Pick<Rollup.PreRenderedChunk, "facadeModuleId">): boolean {
-  return chunk.facadeModuleId?.endsWith(`/${TEAM_EDITION_UI_ENTRY}`) ?? false
+  return chunk.facadeModuleId?.replaceAll("\\", "/").endsWith(`/${TEAM_EDITION_UI_ENTRY}`) ?? false
 }
 
 /** Vite's own chunk names, with the edition UI's under a name its checks and banner can find. */

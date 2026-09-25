@@ -3,7 +3,7 @@ import { join } from "node:path"
 import type { Rollup } from "vite"
 import { describe, expect, it } from "vitest"
 import { bundleViolations } from "../../../build/bundleBoundary"
-import { chunkFileNames, EDITION_UI_BANNER, editionUiBanner } from "../../../build/manualChunks"
+import { chunkFileNames, EDITION_UI_BANNER, editionUiBanner, isEditionUiChunk } from "../../../build/manualChunks"
 import { root, TEAM_EDITION_UI_ENTRY } from "../../../scripts/lib/sourceFiles"
 
 const UI_ENTRY = join(root, TEAM_EDITION_UI_ENTRY)
@@ -35,6 +35,14 @@ const TEAM_BUILD = {
   "assets/vendor-react.js": { modules: ["node_modules/react/index.js"] },
   "assets/edition-ui.js": { modules: [TEAM_EDITION_UI_ENTRY, "editions/team/ui/panel/index.tsx"], facade: UI_ENTRY },
 }
+
+describe("isEditionUiChunk", () => {
+  it("recognises the edition UI entry whichever path separator the id uses", () => {
+    expect(isEditionUiChunk({ facadeModuleId: `C:\\repo\\${TEAM_EDITION_UI_ENTRY.replaceAll("/", "\\")}` })).toBe(true)
+    expect(isEditionUiChunk({ facadeModuleId: `/repo/${TEAM_EDITION_UI_ENTRY}` })).toBe(true)
+    expect(isEditionUiChunk({ facadeModuleId: "/repo/src/main.tsx" })).toBe(false)
+  })
+})
 
 describe("bundleViolations", () => {
   it("passes a team build with its UI in one lazy chunk", () => {
