@@ -387,6 +387,8 @@ export interface AgentDescriptor {
   readonly binName: string
   readonly dirName: AgentDirNameCodec
   readonly sessionFile: AgentSessionFileCodec
+  /** Folder inside a project where the CLI cuts its worktrees; null when they live elsewhere. */
+  readonly projectWorktreeDir: string | null
   /**
    * Whether header metadata is complete after reading only the first bytes of a
    * transcript. False when an exact line count or the last user message matters
@@ -572,6 +574,7 @@ const claude: AgentDescriptor = {
       return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
     },
   },
+  projectWorktreeDir: ".claude/worktrees",
   sessionFile: {
     name: (sessionId) => `${sessionId}.jsonl`,
     sessionId: sessionIdFromJsonlName,
@@ -717,6 +720,7 @@ const codex: AgentDescriptor = {
   displayName: "Codex",
   binName: "codex",
   dirName: base64DirNameCodec(CODEX_DIR_PREFIX),
+  projectWorktreeDir: null,
   sessionFile: {
     /**
      * Codex nests rollouts by local date:
@@ -865,6 +869,7 @@ const copilot: AgentDescriptor = {
   displayName: "GitHub Copilot CLI",
   binName: "copilot",
   dirName: base64DirNameCodec(COPILOT_DIR_PREFIX),
+  projectWorktreeDir: null,
   sessionFile: {
     /** Copilot keeps one directory per session: `<uuid>/events.jsonl`. */
     name: (sessionId) => `${sessionId}/events.jsonl`,
