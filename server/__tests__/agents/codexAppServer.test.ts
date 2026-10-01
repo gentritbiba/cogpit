@@ -61,6 +61,7 @@ interface Harness {
   children: FakeCodexProcess[]
   spawn: ReturnType<typeof vi.fn<CodexAppServerSpawn>>
   clock: { now: number }
+  reportError: ReturnType<typeof vi.fn<(threadId: string, message: string) => void>>
 }
 
 const servers: CodexAppServer[] = []
@@ -87,7 +88,9 @@ function createHarness(
     },
   )
   const clock = { now: 123_456 }
+  const reportError = vi.fn<(threadId: string, message: string) => void>()
   const server = new CodexAppServer({
+    reportError,
     spawn,
     requestTimeoutMs: options.requestTimeoutMs,
     clientVersion: "9.8.7",
@@ -96,7 +99,7 @@ function createHarness(
     readInstalledVersion: options.readInstalledVersion,
   })
   servers.push(server)
-  return { server, children, spawn, clock }
+  return { server, children, spawn, clock, reportError }
 }
 
 async function initialize(
@@ -688,6 +691,53 @@ describe("CodexAppServer approvals", () => {
     expect(harness.server.listPendingApprovals("root-thread")).toEqual([])
   })
 
+  it("carries a terminal-input approval as its own kind and denies it by cancelling", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send({
+      method: "item/commandExecution/requestApproval",
+      id: "stdin-approval",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        startedAtMs: 1,
+        kind: "writeStdin",
+        approvalId: "callback-1",
+        command: "write_stdin --session-id 12 'y\n'",
+        availableDecisions: ["accept", "cancel"],
+      },
+    })
+
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([
+      expect.objectContaining({
+        requestId: "stdin-approval",
+        kind: "writeStdin",
+        approvalId: "callback-1",
+        command: "write_stdin --session-id 12 'y\n'",
+        availableDecisions: ["allow", "deny"],
+      }),
+    ])
+
+    await harness.server.respondApproval("stdin-approval", "deny")
+    expect(child.messages.at(-1)).toEqual({
+      id: "stdin-approval",
+      result: { decision: "cancel" },
+    })
+  })
+
+  it("treats a command approval without a kind as a command", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send({
+      method: "item/commandExecution/requestApproval",
+      id: "plain-approval",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", kind: "command" },
+    })
+
+    expect(harness.server.listPendingApprovals("thread-1")[0].kind).toBe("commandExecution")
+  })
+
   it("clears approvals when the server resolves them", async () => {
     const harness = createHarness()
     const child = await initialize(harness)
@@ -711,6 +761,441 @@ describe("CodexAppServer approvals", () => {
     await expect(harness.server.respondApproval(77, "allow")).rejects.toThrow(
       "no longer pending",
     )
+  })
+})
+
+describe("CodexAppServer MCP tool-call approvals", () => {
+  function toolCallRequest(id: string | number, meta: JsonObject = {}, params: JsonObject = {}): JsonObject {
+    return {
+      method: "mcpServer/elicitation/request",
+      id,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "github",
+        mode: "form",
+        message: 'Allow the github MCP server to run tool "create_issue"?',
+        requestedSchema: { type: "object", properties: {} },
+        _meta: { codex_approval_kind: "mcp_tool_call", ...meta },
+        ...params,
+      },
+    }
+  }
+
+  it("surfaces a tool-call approval that has neither an item nor a turn", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(toolCallRequest(7, {
+      persist: "session",
+      tool_title: "Create issue",
+      tool_description: "Opens an issue",
+      tool_params: { title: "Bug", repo: "acme/app" },
+      tool_params_display: [
+        { name: "repo", value: "acme/app", display_name: "Repository" },
+        { name: "title", value: "Bug", display_name: "Title" },
+      ],
+    }, { turnId: null }))
+
+    const [approval] = harness.server.listPendingApprovals("thread-1")
+    expect(approval).toMatchObject({
+      requestId: 7,
+      kind: "mcpToolCall",
+      method: "mcpServer/elicitation/request",
+      threadId: "thread-1",
+      turnId: null,
+      requestedAt: 123_456,
+      availableDecisions: ["allow", "allow_always", "deny"],
+      mcpToolCall: {
+        serverName: "github",
+        message: 'Allow the github MCP server to run tool "create_issue"?',
+        toolTitle: "Create issue",
+        toolDescription: "Opens an issue",
+        toolParams: { Repository: "acme/app", Title: "Bug" },
+      },
+    })
+    expect(approval.itemId).toBeUndefined()
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    expect(child.messages.some((message) => message.id === 7)).toBe(false)
+  })
+
+  it.each([
+    ["allow", { action: "accept", content: null }],
+    ["allow_always", { action: "accept", content: null, _meta: { persist: "session" } }],
+    ["deny", { action: "decline" }],
+  ] as const)("answers %s with the elicitation response Codex parses", async (decision, result) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(toolCallRequest("tool-approval", { persist: ["session", "always"] }))
+
+    await harness.server.respondApproval("tool-approval", decision)
+
+    expect(child.messages.at(-1)).toEqual({ id: "tool-approval", result })
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+  })
+
+  it.each([
+    ["no remember option", {}],
+    ["only a persistent grant", { persist: "always" }],
+    ["a list without a session grant", { persist: ["always"] }],
+  ])("does not offer a session grant with %s", async (_label, meta) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(toolCallRequest("tool-approval", meta))
+
+    expect(harness.server.listPendingApprovals("thread-1")[0].availableDecisions)
+      .toEqual(["allow", "deny"])
+    const sent = child.messages.length
+    await expect(harness.server.respondApproval("tool-approval", "allow_always"))
+      .rejects.toThrow("allow_always is not available")
+    expect(child.messages).toHaveLength(sent)
+  })
+
+  it("falls back to the raw arguments when Codex sends no display list", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(toolCallRequest("tool-approval", {
+      connector_name: "Gmail",
+      tool_params: { to: "a@example.com" },
+    }))
+
+    expect(harness.server.listPendingApprovals("thread-1")[0].mcpToolCall).toEqual({
+      serverName: "github",
+      message: 'Allow the github MCP server to run tool "create_issue"?',
+      connectorName: "Gmail",
+      toolParams: { to: "a@example.com" },
+    })
+  })
+
+  it("drops a tool-call approval with its turn, its thread, or the server's own resolution", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+
+    child.send(toolCallRequest("by-turn"))
+    child.send(toolCallRequest("no-turn", {}, { turnId: null }))
+    child.send(toolCallRequest("other-turn", {}, { turnId: "turn-2" }))
+    child.send({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    })
+    expect(harness.server.listPendingApprovals("thread-1").map((a) => a.requestId))
+      .toEqual(["other-turn"])
+
+    child.send({
+      method: "serverRequest/resolved",
+      params: { threadId: "thread-1", requestId: "other-turn" },
+    })
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+
+    child.send(toolCallRequest("by-thread"))
+    child.send({ method: "thread/closed", params: { threadId: "thread-1" } })
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+    expect(harness.server.listApprovalThreadIds()).toEqual([])
+  })
+
+  it.each([
+    [
+      "a browser_auth approval",
+      { codex_approval_kind: "browser_auth" },
+      {},
+      'Cogpit has no prompt for "browser_auth" approvals',
+    ],
+    [
+      "a tool_suggestion approval",
+      { codex_approval_kind: "tool_suggestion" },
+      {},
+      'Cogpit has no prompt for "tool_suggestion" approvals',
+    ],
+    [
+      "a tool-call approval with fields to fill in",
+      {},
+      { requestedSchema: { type: "object", properties: { note: { type: "string" } } } },
+      "Cogpit cannot show a tool-call approval that also asks for input",
+    ],
+    [
+      "a tool-call approval sent as a link",
+      {},
+      { mode: "url", url: "https://example.com", elicitationId: "e-1" },
+      "Cogpit cannot show a tool-call approval that also asks for input",
+    ],
+  ])("declines %s rather than approving something it cannot show", async (_label, meta, params, reason) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(toolCallRequest("odd-approval", meta, params))
+
+    await vi.waitFor(() => {
+      expect(child.messages).toContainEqual({
+        id: "odd-approval",
+        result: { action: "decline" },
+      })
+    })
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    expect(harness.reportError).toHaveBeenCalledWith(
+      "thread-1",
+      `Declined a request from MCP server "github": ${reason}.`,
+    )
+  })
+})
+
+describe("CodexAppServer MCP elicitations", () => {
+  function formRequest(id: string | number, params: JsonObject = {}): JsonObject {
+    return {
+      method: "mcpServer/elicitation/request",
+      id,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "tracker",
+        mode: "form",
+        message: "Which project?",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string", title: "Project" },
+            priority: {
+              type: "string",
+              oneOf: [
+                { const: "p1", title: "Urgent" },
+                { const: "p2", title: "Normal" },
+              ],
+            },
+            notify: { type: "boolean", default: true },
+          },
+          required: ["project"],
+        },
+        ...params,
+      },
+    }
+  }
+
+  function urlRequest(id: string, url: string): JsonObject {
+    return {
+      method: "mcpServer/elicitation/request",
+      id,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "tracker",
+        mode: "url",
+        message: "Sign in to continue",
+        url,
+        elicitationId: "sign-in-1",
+      },
+    }
+  }
+
+  it("parks a form elicitation as fields the prompt can draw", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest(11))
+
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([{
+      requestId: 11,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestedAt: 123_456,
+      serverName: "tracker",
+      mode: "form",
+      message: "Which project?",
+      fields: [
+        { name: "project", label: "Project", type: "string", required: true },
+        {
+          name: "priority",
+          label: "priority",
+          type: "enum",
+          required: false,
+          options: [
+            { value: "p1", label: "Urgent" },
+            { value: "p2", label: "Normal" },
+          ],
+        },
+        { name: "notify", label: "notify", type: "boolean", required: false, defaultValue: true },
+      ],
+    }])
+    expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+    expect(harness.server.listElicitationThreadIds()).toEqual(["thread-1"])
+    expect(child.messages.some((message) => message.id === 11)).toBe(false)
+  })
+
+  it("accepts a form with the submitted content", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest("form-1"))
+
+    await harness.server.respondElicitation("form-1", {
+      action: "accept",
+      content: { project: "cogpit", notify: false },
+    })
+
+    expect(child.messages.at(-1)).toEqual({
+      id: "form-1",
+      result: { action: "accept", content: { project: "cogpit", notify: false } },
+    })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    await expect(harness.server.respondElicitation("form-1", { action: "decline" }))
+      .rejects.toThrow("no longer pending")
+  })
+
+  it.each(["decline", "cancel"] as const)("answers %s without content", async (action) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest("form-1"))
+
+    await harness.server.respondElicitation("form-1", { action })
+
+    expect(child.messages.at(-1)).toEqual({ id: "form-1", result: { action } })
+    expect(harness.server.listElicitationThreadIds()).toEqual([])
+  })
+
+  it("parks a link elicitation and accepts it with no content", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(urlRequest("url-1", "https://tracker.example/sign-in"))
+
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([{
+      requestId: "url-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestedAt: 123_456,
+      serverName: "tracker",
+      mode: "url",
+      message: "Sign in to continue",
+      url: "https://tracker.example/sign-in",
+      fields: [],
+    }])
+
+    await harness.server.respondElicitation("url-1", { action: "accept" })
+    expect(child.messages.at(-1)).toEqual({
+      id: "url-1",
+      result: { action: "accept", content: null },
+    })
+  })
+
+  it.each([
+    [
+      "device verification",
+      { mode: "openai/userVerification", title: "Confirm", description: "Touch ID", challenge: "abc" },
+      "Cogpit cannot verify the user on this device",
+    ],
+    [
+      "an experimental form",
+      { mode: "openai/form", requestedSchema: { anything: true } },
+      'Cogpit has no prompt for "openai/form" requests',
+    ],
+    [
+      "the renamed experimental form",
+      { mode: "openaiForm", requestedSchema: { anything: true } },
+      'Cogpit has no prompt for "openaiForm" requests',
+    ],
+    [
+      "a field it cannot draw",
+      {
+        requestedSchema: {
+          type: "object",
+          properties: { tags: { type: "array", items: { type: "string", enum: ["a"] } } },
+        },
+      },
+      'Cogpit renders text, number, checkbox and choice fields only, and "tags" is an array, which Cogpit cannot render',
+    ],
+  ])("declines %s instead of parking it", async (_label, params, reason) => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest("unanswerable", params))
+
+    await vi.waitFor(() => {
+      expect(child.messages).toContainEqual({
+        id: "unanswerable",
+        result: { action: "decline" },
+      })
+    })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    expect(harness.reportError).toHaveBeenCalledWith(
+      "thread-1",
+      `Declined a request from MCP server "tracker": ${reason}.`,
+    )
+  })
+
+  it("declines a link that is not a web address", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(urlRequest("url-1", "file:///etc/passwd"))
+
+    await vi.waitFor(() => {
+      expect(child.messages).toContainEqual({ id: "url-1", result: { action: "decline" } })
+    })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+  })
+
+  it("rejects an elicitation that names no thread or server", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest("nameless", { serverName: undefined }))
+
+    await vi.waitFor(() => {
+      expect(child.messages).toContainEqual({
+        id: "nameless",
+        error: {
+          code: -32602,
+          message: "Invalid params for Codex server request mcpServer/elicitation/request",
+        },
+      })
+    })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+  })
+
+  it("drops an elicitation with its turn, its thread, or the server's own resolution", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+
+    child.send(formRequest("by-turn"))
+    child.send(formRequest("no-turn", { turnId: null }))
+    child.send(formRequest("other-turn", { turnId: "turn-2" }))
+    child.send({
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    })
+    expect(harness.server.listPendingElicitations("thread-1").map((e) => e.requestId))
+      .toEqual(["other-turn"])
+
+    child.send({
+      method: "serverRequest/resolved",
+      params: { threadId: "thread-1", requestId: "other-turn" },
+    })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+
+    child.send(formRequest("by-thread"))
+    child.send({ method: "thread/closed", params: { threadId: "thread-1" } })
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    expect(harness.server.listElicitationThreadIds()).toEqual([])
+  })
+
+  it("drops parked elicitations when the connection dies", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send(formRequest("form-1"))
+    expect(harness.server.listPendingElicitations("thread-1")).toHaveLength(1)
+
+    child.close()
+
+    expect(harness.server.listPendingElicitations("thread-1")).toEqual([])
+    await expect(harness.server.respondElicitation("form-1", { action: "decline" }))
+      .rejects.toThrow("no longer pending")
+  })
+
+  it("lists a subagent's elicitation under every ancestor thread", async () => {
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.send({
+      method: "thread/started",
+      params: { thread: { id: "child-thread", parentThreadId: "root-thread" } },
+    })
+    child.send(formRequest("child-form", { threadId: "child-thread" }))
+
+    expect(harness.server.listElicitationThreadIds()).toEqual(["child-thread", "root-thread"])
+    expect(harness.server.listPendingElicitations("root-thread")).toEqual([
+      expect.objectContaining({ requestId: "child-form", threadId: "child-thread" }),
+    ])
+    expect(harness.server.listPendingElicitations("unrelated-thread")).toEqual([])
   })
 })
 

@@ -182,6 +182,100 @@ describe("Codex approvals", () => {
     })
   })
 
+  it("presents terminal input as input to a running terminal, not as a new command", () => {
+    expect(normalizeCodexApproval(codexApproval({
+      kind: "writeStdin",
+      reason: undefined,
+      command: "write_stdin --session-id 12 'y\n'",
+      approvalId: "callback-1",
+      availableDecisions: ["allow", "deny"],
+    }))).toEqual({
+      sessionId: "thread-1",
+      requestId: "42",
+      toolName: "write_stdin",
+      input: { chars: "y⏎", session_id: "12" },
+      toolUseId: "item-1",
+      title: "Send input to a running terminal",
+      displayName: "Terminal input",
+      description: "Terminal session 12",
+      decisionReason: undefined,
+      blockedPath: "/project",
+      timestamp: 123,
+      availableDecisions: ["allow", "deny"],
+    })
+  })
+
+  it("draws control keys in terminal input", () => {
+    expect(normalizeCodexApproval(codexApproval({
+      kind: "writeStdin",
+      command: "write_stdin --session-id 12 '\u0003'",
+    })).input).toEqual({ chars: "^C", session_id: "12" })
+  })
+
+  it("shows the raw request when terminal input is not in the expected shape", () => {
+    expect(normalizeCodexApproval(codexApproval({
+      kind: "writeStdin",
+      command: "write_stdin 12",
+    }))).toMatchObject({
+      toolName: "write_stdin",
+      title: "Send input to a running terminal",
+      input: { command: "write_stdin 12" },
+    })
+  })
+
+  it("presents an MCP tool-call approval with Codex's question and the arguments", () => {
+    const approval = codexApproval({
+      requestId: 9,
+      kind: "mcpToolCall",
+      method: "mcpServer/elicitation/request",
+      turnId: null,
+      itemId: undefined,
+      reason: undefined,
+      command: undefined,
+      cwd: undefined,
+      availableDecisions: ["allow", "allow_always", "deny"],
+      mcpToolCall: {
+        serverName: "github",
+        message: 'Allow the github MCP server to run tool "create_issue"?',
+        toolTitle: "Create issue",
+        toolDescription: "Opens an issue",
+        toolParams: { Title: "Bug" },
+      },
+    })
+
+    expect(normalizeCodexApproval(approval)).toEqual({
+      sessionId: "thread-1",
+      requestId: "9",
+      toolName: "github: Create issue",
+      input: {
+        message: 'Allow the github MCP server to run tool "create_issue"?',
+        arguments: { Title: "Bug" },
+      },
+      summary: 'Allow the github MCP server to run tool "create_issue"? · {"Title":"Bug"}',
+      toolUseId: "9",
+      title: "Run MCP tool",
+      displayName: "MCP tool call",
+      description: "Opens an issue",
+      timestamp: 123,
+      availableDecisions: ["allow", "allow_always", "deny"],
+    })
+  })
+
+  it("names an MCP tool call by its connector, or by the server alone", () => {
+    const toolCall = { serverName: "codex_apps", message: "Allow Gmail to send an email?" }
+    expect(normalizeCodexApproval(codexApproval({
+      kind: "mcpToolCall",
+      mcpToolCall: { ...toolCall, connectorName: "Gmail", toolTitle: "Send email" },
+    })).toolName).toBe("Gmail: Send email")
+    expect(normalizeCodexApproval(codexApproval({
+      kind: "mcpToolCall",
+      mcpToolCall: toolCall,
+    }))).toMatchObject({
+      toolName: "codex_apps",
+      input: { message: "Allow Gmail to send an email?" },
+    })
+  })
+
   it("lists a descendant approval while polling the open parent thread", () => {
     const child = codexApproval({ requestId: "child-approval", threadId: "child-thread" })
     codex.listPendingApprovals.mockReturnValue([child])

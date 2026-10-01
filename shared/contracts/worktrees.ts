@@ -6,6 +6,12 @@ export interface FileChange {
   deletions: number
 }
 
+/** A session addressed the way the session routes take it. */
+export interface WorktreeSessionRef {
+  dirName: string
+  sessionId: string
+}
+
 /** Browser-safe wire contract returned by GET /api/worktrees/:dirName. */
 export interface WorktreeInfo {
   name: string
@@ -15,7 +21,8 @@ export interface WorktreeInfo {
   headMessage: string
   isDirty: boolean
   commitsAhead: number
-  linkedSessions: string[]
+  /** Sessions that ran in the worktree or on its branch, newest first. */
+  linkedSessions: WorktreeSessionRef[]
   createdAt: string
   changedFiles: FileChange[]
 }

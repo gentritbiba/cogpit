@@ -51,17 +51,13 @@ const SESSION_KEY_SUFFIX = ".jsonl"
  * recorded one would revert the user's choice on the next hydration. An empty
  * string is not a choice — it means "use the provider default" — so it still
  * takes the transcript value.
- *
- * Skipped under ultracode, which pins effectiveEffort to xhigh — that is what
- * the transcript records, so overlaying it would overwrite the underlying
- * preference the composer restores when ultracode is switched back off.
  */
 async function withTranscriptEffort(
   key: string,
   stored: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   // Keys are session fileNames or project dirNames; only the former have a transcript.
-  if (!key.endsWith(SESSION_KEY_SUFFIX) || stored.ultracode === true) return stored
+  if (!key.endsWith(SESSION_KEY_SUFFIX)) return stored
   if (typeof stored.effort === "string" && stored.effort) return stored
 
   try {

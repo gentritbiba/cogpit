@@ -1,6 +1,5 @@
 import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
-import { setSessionsArchived } from "../lib/sessionArchive"
-import { resolveSessionAgent, runtimeFor } from "../agents/runtimes"
+import { sendToSession } from "../lib/sessionSend"
 import { sendAgentError } from "./agentErrors"
 import {
   HttpBodyError,
@@ -9,27 +8,7 @@ import {
   sendJson,
   type UseFn,
 } from "../http"
-import type { AgentRuntime, SendOutcome, SendRequest } from "../agents/runtimes"
-
-/**
- * Deliver a message to an existing session, for this route and the session CLI.
- * Throws a 409 `RouteError` when the agent refuses it as busy.
- */
-export async function sendToSession(
-  sessionId: string,
-  request: SendRequest,
-): Promise<{ runtime: AgentRuntime; outcome: SendOutcome }> {
-  const { kind, filePath } = await resolveSessionAgent(sessionId)
-  const runtime = runtimeFor(kind)
-  const outcome = await runtime.send(sessionId, { ...request, filePath })
-  if (outcome.delivery === "busy") {
-    throw new RouteError(409, ErrorCodes.CONFLICT, "Session is already active")
-  }
-  // A message to an archived session resumes it, and a resumed session
-  // belongs back in the sidebar right away.
-  setSessionsArchived([sessionId], false).catch(() => {})
-  return { runtime, outcome }
-}
+import type { SendRequest } from "../agents/runtimes"
 
 /**
  * POST /api/send-message — deliver a message to an existing session.

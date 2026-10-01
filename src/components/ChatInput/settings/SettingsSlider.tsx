@@ -6,11 +6,10 @@ interface SettingsSliderProps {
   options: readonly SettingOption[]
   value: string
   onChange: (value: string) => void
-  disabled?: boolean
   labelId: string
 }
 
-export function SettingsSlider({ options, value, onChange, disabled, labelId }: SettingsSliderProps) {
+export function SettingsSlider({ options, value, onChange, labelId }: SettingsSliderProps) {
   const last = options.length - 1
   const index = Math.max(0, options.findIndex((option) => option.value === value))
 
@@ -20,12 +19,11 @@ export function SettingsSlider({ options, value, onChange, disabled, labelId }: 
       min={0}
       max={last}
       step={1}
-      disabled={disabled}
       onValueChange={(next) => {
         const option = options[next]
         if (option && option.value !== value) onChange(option.value)
       }}
-      className={cn("w-full", disabled && "opacity-50")}
+      className="w-full"
     >
       <Slider.Control className="flex h-6 w-full touch-none select-none items-center px-1.5">
         <Slider.Track className="relative h-1 w-full rounded-full bg-muted-foreground/20">

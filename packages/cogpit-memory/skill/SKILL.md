@@ -153,7 +153,7 @@ Response shape:
 ```
 
 Key details:
-- `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`, `queued_prompt`, `hook_event`, `plan_mode`, `recap`, `agent_message`
+- `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`, `queued_prompt`, `hook_event`, `plan_mode`, `recap`, `agent_message`, `task_notification`, `local_command`
 - Tool call `result` is truncated at 10,000 chars -- check `resultTruncated: true`
 - Tool call `result` may be `null` if the tool hasn't returned yet
 - Sub-agent blocks show prompt + result text. When the provider writes a separate sub-agent transcript, use Layer 3 for the full conversation

@@ -81,6 +81,16 @@ describe("planTurnFold", () => {
     expect(plan.foldedIndices).toEqual([0])
   })
 
+  it("never folds away a local command's output", () => {
+    const blocks: TurnContentBlock[] = [
+      tools("Read"),
+      { kind: "local_command", content: "<local-command-stdout>41% used</local-command-stdout>" },
+      text("Done."),
+    ]
+
+    expect(planTurnFold(blocks).foldedIndices).toEqual([0])
+  })
+
   it("never folds away the task notification that resumed the turn", () => {
     const blocks: TurnContentBlock[] = [
       tools("Read"),

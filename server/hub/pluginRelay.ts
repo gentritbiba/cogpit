@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto"
-import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http"
-import { request as httpsRequest } from "node:https"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import { getDevice, sameDeviceConnection, type HubDevice } from "./registry"
 import { DeviceAuthError, getDeviceTokenLease, invalidateDeviceTokenGeneration, type DeviceTokenLease } from "./device-client"
 import { onDeviceConnectionsInvalidated } from "./connection-invalidation"
+import { sendDeviceRequest } from "./deviceRequest"
 import { onSessionRevoked } from "../security"
 import type { RequestAuthentication } from "../requestAuthentication"
 import {
@@ -54,45 +54,29 @@ export function isPluginRelayHeader(name: string): boolean {
   return lower.startsWith("x-cogpit-plugin-") || lower.startsWith("x-cogpit-relay-")
 }
 
-export const sendPluginRelayRequest: PluginRelayTransport = (input) => new Promise((resolve, reject) => {
-  const request = (input.device.tls ? httpsRequest : httpRequest)({
-    hostname: input.device.host, port: input.device.port, method: input.method, path: input.path,
+export const sendPluginRelayRequest: PluginRelayTransport = async (input) => {
+  const response = await sendDeviceRequest({
+    device: input.device,
+    token: input.token,
+    method: input.method,
+    path: input.path,
     signal: input.signal,
+    body: input.body,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    maxResponseBytes: MAX_RELAY_RESPONSE_BYTES,
     headers: {
-      "X-Cogpit-Client": "1", "Content-Length": String(input.body.length),
       ...(input.contentType ? { "Content-Type": input.contentType } : {}),
       ...(input.stageHeaders?.client ? { "X-Cogpit-Plugin-Client": input.stageHeaders.client } : {}),
       ...(input.stageHeaders?.scope ? { "X-Cogpit-Plugin-Scope": input.stageHeaders.scope } : {}),
       ...(input.sessionId ? { [PLUGIN_SESSION_HEADER]: input.sessionId } : {}),
-      ...(input.device.auth === "password" && input.token.token ? { Authorization: `Bearer ${input.token.token}` } : {}),
     },
   })
-  const timeout = setTimeout(() => request.destroy(new Error("Plugin relay timed out")), REQUEST_TIMEOUT_MS)
-  timeout.unref?.()
-  request.once("close", () => clearTimeout(timeout))
-  request.once("error", reject)
-  request.once("response", (response) => {
-    const chunks: Buffer[] = []
-    let length = 0
-    response.on("data", (chunk: Buffer) => {
-      length += chunk.length
-      if (length > MAX_RELAY_RESPONSE_BYTES) {
-        response.destroy(new Error("Plugin relay response exceeds its limit"))
-        request.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    response.once("error", reject)
-    response.once("aborted", () => reject(new Error("Plugin relay response aborted")))
-    response.once("end", () => resolve({
-      status: response.statusCode ?? 502,
-      contentType: response.headers["content-type"] ?? "application/octet-stream",
-      body: Buffer.concat(chunks),
-    }))
-  })
-  request.end(input.body)
-})
+  return {
+    status: response.status,
+    contentType: response.headers["content-type"] ?? "application/octet-stream",
+    body: response.body,
+  }
+}
 
 export class HubPluginRelay {
   private readonly sessions = new Map<string, RelaySession>()

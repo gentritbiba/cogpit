@@ -75,7 +75,7 @@ function summarizeRequest(
     sessionId,
     requestId: request.requestId,
     toolName: request.toolName,
-    summary: getToolSummary({ name: request.toolName, input: request.input }),
+    summary: request.summary ?? getToolSummary({ name: request.toolName, input: request.input }),
     ...(request.title && { title: request.title }),
     ...(request.description && { description: request.description }),
     ...(request.availableDecisions && { availableDecisions: request.availableDecisions }),

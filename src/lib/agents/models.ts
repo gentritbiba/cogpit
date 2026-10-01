@@ -6,16 +6,13 @@ import { descriptorFor, type AgentKind, type EffortOption, type ModelOption, typ
  * or offline. Kept roughly current by hand.
  */
 
-// Aliases accepted by the Claude Code CLI (v2.1.172):
-// sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan
+// Aliases accepted by the Claude Code CLI (v2.1.287). Each resolves to a model
+// with a 1M window, so the catalog no longer lists separate "[1m]" rows.
 const CLAUDE_MODELS: readonly ModelOption[] = [
   { value: "", label: "Default" },
-  { value: "fable", label: "Fable" },
-  { value: "fable[1m]", label: "Fable 1M" },
   { value: "opus", label: "Opus" },
-  { value: "opus[1m]", label: "Opus 1M" },
+  { value: "fable", label: "Fable" },
   { value: "sonnet", label: "Sonnet" },
-  { value: "sonnet[1m]", label: "Sonnet 1M" },
   { value: "haiku", label: "Haiku" },
 ]
 
@@ -31,15 +28,15 @@ const CODEX_ULTRA_EFFORTS: EffortOption[] = [
   { value: "ultra", label: "Ultra", description: "Maximum reasoning with automatic task delegation" },
 ]
 const CODEX_XHIGH_EFFORTS: EffortOption[] = CODEX_STANDARD_EFFORTS.slice(0, 4)
+const CODEX_FAST_TIER_VALUE = descriptorFor("codex").serviceTier?.appServerValue ?? "priority"
 const CODEX_FAST_TIER: ServiceTierOption[] = [
-  {
-    value: descriptorFor("codex").serviceTier?.appServerValue ?? "priority",
-    label: "Fast",
-    description: "1.5× speed with increased usage",
-  },
+  { value: CODEX_FAST_TIER_VALUE, label: "Fast", description: "1.5× speed with increased usage" },
+]
+const CODEX_FASTER_TIER: ServiceTierOption[] = [
+  { value: CODEX_FAST_TIER_VALUE, label: "Fast", description: "2× speed with increased usage" },
 ]
 
-const SOL_CAPABILITIES: Partial<ModelOption> = {
+const CODEX_CAPABILITIES: Partial<ModelOption> = {
   defaultReasoningEffort: "medium",
   supportedReasoningEfforts: CODEX_ULTRA_EFFORTS,
   inputModalities: ["text", "image"],
@@ -47,16 +44,17 @@ const SOL_CAPABILITIES: Partial<ModelOption> = {
   serviceTiers: CODEX_FAST_TIER,
 }
 
+// Mirrors `model/list` from Codex CLI 0.159.3.
 const CODEX_MODELS: readonly ModelOption[] = [
   { value: "", label: "Default", description: "Use the model configured in Codex" },
-  { value: "gpt-6-astra", label: "GPT-6 Astra", description: "For complex, demanding work", ...SOL_CAPABILITIES, serviceTiers: [{ value: "priority", label: "Fast", description: "2× speed with increased usage" }] },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Flagship model for the most ambitious work", ...SOL_CAPABILITIES },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra", description: "Balanced model for everyday work", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_ULTRA_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna", description: "Fastest, most cost-efficient model", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_STANDARD_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
-  { value: "gpt-5.5", label: "GPT-5.5", description: "Frontier model for complex real-world work", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: true, serviceTiers: CODEX_FAST_TIER },
-  { value: "gpt-5.4", label: "GPT-5.4", description: "Strong model for everyday coding", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: true, serviceTiers: CODEX_FAST_TIER },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini", description: "Small, fast model for simpler tasks", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: true },
-  { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", description: "Ultra-fast text-only coding model", defaultReasoningEffort: "high", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text"], supportsPersonality: true },
+  { value: "gpt-6.1-sol", label: "GPT-6.1 Sol", description: "Latest workhorse model for coding and everyday work", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low", serviceTiers: CODEX_FASTER_TIER },
+  { value: "gpt-6-astra", label: "GPT-6 Astra", description: "Frontier intelligence for the most demanding work", ...CODEX_CAPABILITIES, serviceTiers: CODEX_FASTER_TIER },
+  { value: "gpt-6-sol", label: "GPT-6 Sol", description: "Previous generation workhorse model", ...CODEX_CAPABILITIES },
+  { value: "gpt-6-luna", label: "GPT-6 Luna", description: "Fast and affordable model for easier tasks", ...CODEX_CAPABILITIES, supportedReasoningEfforts: CODEX_STANDARD_EFFORTS },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Older generation workhorse model", ...CODEX_CAPABILITIES, defaultReasoningEffort: "low" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra", description: "Older balanced model for straightforward work", ...CODEX_CAPABILITIES },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna", description: "Older fast and efficient model", ...CODEX_CAPABILITIES, supportedReasoningEfforts: CODEX_STANDARD_EFFORTS },
+  { value: "gpt-5.5", label: "GPT-5.5", description: "Legacy coding model", ...CODEX_CAPABILITIES, supportedReasoningEfforts: CODEX_XHIGH_EFFORTS },
 ]
 
 const COPILOT_MODELS: readonly ModelOption[] = [

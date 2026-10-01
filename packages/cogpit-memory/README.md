@@ -7,8 +7,8 @@ indexes Claude Code, Codex, and GitHub Copilot CLI history.
 
 All output is JSON to stdout — designed for programmatic consumption by AI agents.
 
-Session compatibility is validated against Claude Code 2.1.217 and Codex CLI
-0.145.0. The parser also retains backward compatibility with older rollout
+Session compatibility is validated against Claude Code 2.1.287 and Codex CLI
+0.159.3. The parser also retains backward compatibility with older rollout
 formats covered by the test suite. Copilot support follows the documented SDK
 event schema and `~/.copilot/session-state/` layout.
 

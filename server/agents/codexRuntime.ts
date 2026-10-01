@@ -8,6 +8,7 @@ import {
   type InitializeResult,
   type JsonObject,
   type CodexThread,
+  type McpToolCallRequest,
   type PendingApproval as CodexApproval,
 } from "./codexAppServer"
 import {
@@ -17,6 +18,7 @@ import {
   spawn,
   unlink,
 } from "../helpers"
+import { readTerminalInput } from "./codexApprovalCodec"
 import { fetchCodexModels } from "./codexModels"
 import { codexQuestions, type CodexAsyncQuestion } from "./codexQuestions"
 import { friendlySpawnError } from "./spawnError"
@@ -429,17 +431,93 @@ async function sendLegacy(
 
 // ── Approvals ───────────────────────────────────────────────────────────────
 
+/** Keystrokes with the control characters drawn, so Enter and Ctrl-C can be seen before they are approved. */
+function visibleKeystrokes(chars: string): string {
+  return Array.from(chars, (char) => {
+    const code = char.charCodeAt(0)
+    if (char === "\n" || char === "\r") return "⏎"
+    if (code === 127) return "^?"
+    return code < 32 ? `^${String.fromCharCode(code + 64)}` : char
+  }).join("")
+}
+
+/**
+ * Typing into a terminal that is already running. Codex phrases it as a
+ * `write_stdin` command, which read as a new command about to be launched.
+ */
+function terminalInputApproval(approval: CodexApproval, sessionId: string): PendingApproval {
+  const terminal = readTerminalInput(approval.command)
+  return {
+    sessionId,
+    requestId: String(approval.requestId),
+    toolName: "write_stdin",
+    input: terminal
+      ? { chars: visibleKeystrokes(terminal.input), session_id: terminal.processId }
+      : { ...(approval.command && { command: approval.command }) },
+    toolUseId: approval.itemId ?? String(approval.requestId),
+    title: "Send input to a running terminal",
+    displayName: "Terminal input",
+    description: terminal ? `Terminal session ${terminal.processId}` : undefined,
+    decisionReason: approval.reason,
+    blockedPath: approval.cwd,
+    timestamp: approval.requestedAt,
+    availableDecisions: [...approval.availableDecisions],
+  }
+}
+
+const MAX_SHOWN_ARGUMENTS = 300
+
+/**
+ * The elicitation names the server and, at best, a display title for the tool;
+ * only Codex's own question is sure to say which tool it is, so it leads.
+ */
+function mcpToolCallApproval(
+  approval: CodexApproval,
+  toolCall: McpToolCallRequest,
+  sessionId: string,
+): PendingApproval {
+  const shownArguments = toolCall.toolParams && JSON.stringify(toolCall.toolParams)
+  return {
+    sessionId,
+    requestId: String(approval.requestId),
+    toolName: [toolCall.connectorName ?? toolCall.serverName, toolCall.toolTitle]
+      .filter(Boolean)
+      .join(": "),
+    input: {
+      message: toolCall.message,
+      ...(toolCall.toolParams && { arguments: toolCall.toolParams }),
+    },
+    // The tool summary of this input is the question alone; a list must also
+    // show what the call would be sent with.
+    summary: [
+      toolCall.message,
+      shownArguments && (shownArguments.length > MAX_SHOWN_ARGUMENTS
+        ? `${shownArguments.slice(0, MAX_SHOWN_ARGUMENTS - 1)}…`
+        : shownArguments),
+    ].filter(Boolean).join(" · "),
+    toolUseId: String(approval.requestId),
+    title: "Run MCP tool",
+    displayName: "MCP tool call",
+    description: toolCall.toolDescription,
+    timestamp: approval.requestedAt,
+    availableDecisions: [...approval.availableDecisions],
+  }
+}
+
 /**
  * Present a Codex approval as a tool call.
  *
  * The permission bar renders tool calls, and Codex asks about commands and file
- * writes rather than tools, so a plausible tool name is synthesised for each of
- * its two request kinds.
+ * writes rather than tools, so a plausible tool name is synthesised for each
+ * request kind.
  */
 export function normalizeCodexApproval(
   approval: CodexApproval,
   sessionId = approval.threadId,
 ): PendingApproval {
+  if (approval.mcpToolCall) return mcpToolCallApproval(approval, approval.mcpToolCall, sessionId)
+  if (approval.kind === "writeStdin") return terminalInputApproval(approval, sessionId)
+
   const command = approval.kind === "commandExecution"
   const network = asRecord(approval.networkApprovalContext)
   const networkHost = network && typeof network.host === "string" ? network.host : null
@@ -476,7 +554,7 @@ export function normalizeCodexApproval(
     requestId: String(approval.requestId),
     toolName: networkRequest ? "WebFetch" : command ? "Bash" : "Write",
     input,
-    toolUseId: approval.itemId,
+    toolUseId: approval.itemId ?? String(approval.requestId),
     title: networkRequest
       ? "Allow network access"
       : command

@@ -1,6 +1,6 @@
 ---
 name: cogpit-sessions
-description: Start, message, wait on, answer and stop Claude Code, Codex and Copilot sessions through Cogpit with the cogpit-session CLI (or its HTTP API on localhost). Use when an agent needs to delegate work to another session, fan work out to several sessions and collect the results, approve or answer what a session is blocked on, read what a session did, or stop the sessions it started.
+description: Start, message, wait on, answer and stop Claude Code, Codex and Copilot sessions through Cogpit with the cogpit-session CLI (or its HTTP API on localhost), on this machine or on other machines connected to Cogpit. Use when an agent needs to delegate work to another session, hand a task to another machine and get the result back, fan work out to several sessions and collect the results, approve or answer what a session is blocked on, read what a session did, or stop the sessions it started.
 ---
 
 # Driving other sessions with Cogpit
@@ -56,6 +56,7 @@ Every report carries an `outcome`:
 | `running` | still working when `--timeout` ran out; run the `next` command to keep waiting | 3 |
 | `error` | the turn failed; see `error` | 1 |
 | `not_found` | no such session | 1 |
+| `unreachable` | its machine did not answer; it may still be working | 1 (3 in `wait`) |
 
 `wait` defaults to a 90-second timeout, below the two-minute limit of most
 shell tools. For longer work, pass a larger `--timeout` (and raise your shell
@@ -79,6 +80,37 @@ cogpit-session children                          # everything you started, with 
 ```
 
 `new` returns as soon as the session exists (5–15 s) unless you pass `--wait`.
+
+## Hand a task to another machine
+
+When Cogpit has other machines registered as devices (Settings → Devices),
+run the task on one of them:
+
+```bash
+cogpit-session devices                     # which machines, and whether they are online
+cogpit-session new "Run the GPU benchmarks and fix the slow kernel" --device agentbox --wait --timeout 900
+```
+
+- Your repository goes with it: HEAD plus your uncommitted changes, including
+  new files git does not ignore, become a fresh worktree on that machine.
+  Ignored files (`.env`, dependencies, build output) stay here; the session is
+  told to recreate what it needs.
+- When the session finishes, `wait` brings its work back as a local branch
+  (`returned.branch`) and prints the commands to review or apply it. Your
+  working tree is never touched, and a branch you checked out or committed to
+  is left alone (the work is then at `returned.ref`, as the note says).
+  `cogpit-session fetch ID` brings it back at any other time.
+- `cogpit-session discard ID` ends it: it stops the session, brings the work
+  back one last time and deletes the worktree on that machine.
+- `--worktree` does not combine with sending your repository, which already
+  gets its own worktree.
+- Questions and approvals from that session go to the user in Cogpit, shown on
+  your own session, and `wait` keeps waiting while the user has them
+  (`askedUser: true`). Pass `--questions agent` to answer them yourself.
+- `--cwd /path/on/that/machine` uses a folder already there instead of sending
+  your repository; `cogpit-session projects --device agentbox` lists them.
+- Session ids work everywhere: `wait`, `send`, `status`, `approve`, `stop` and
+  `children` find the machine each session runs on.
 
 ## Answering a blocked session
 
@@ -200,6 +232,12 @@ The same `state` without waiting:
 - `status`: the transcript tail (`idle | thinking | tool_use | processing | completed | compacting | deferred | awaiting_agents`), plus `terminalReason`, `pendingAgents` and `pendingAgentDescriptions` when they apply.
 - `error`: why the last turn failed.
 
+### POST /api/session-send
+
+`{ sessionId, message, interrupt? }` → `{ delivery }`. Delivers a follow-up and
+answers at once, even when the session has to be resumed; wait with
+`/api/session-wait`.
+
 ### POST /api/session-respond
 
 Answers one entry of `waiting`:
@@ -215,7 +253,13 @@ Returns `{ success, answered }`; 404 when it was already answered.
 
 ### GET /api/session-children/:sessionId
 
-`{ sessionId, children: [state...] }` for the sessions created with this `parentSessionId`, oldest first.
+`{ sessionId, children: [state...] }` for the sessions created with this `parentSessionId`, oldest first; a child on another machine carries `device: { id, name }`.
+
+### Sessions on other machines
+
+The session endpoints above accept ids of sessions on registered devices and
+answer from that device. Starting a session on a device, with the repository
+handoff, is CLI-only (`cogpit-session new --device`).
 
 ### Other endpoints
 

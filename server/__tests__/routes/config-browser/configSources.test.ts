@@ -27,14 +27,22 @@ describe("config layouts", () => {
   it("covers every agent's instruction and settings files per scope", () => {
     const project = projectLayout("/tmp/demo")
 
-    // AGENTS.md appears once per CLI that reads it; the two collapse into one
-    // row carrying both badges once the paths are canonicalised.
+    // AGENTS.md appears once per CLI that reads it; they collapse into one
+    // row carrying every badge once the paths are canonicalised.
     expect(project.instructions.map((source) => [source.name, source.cli])).toEqual([
       ["CLAUDE.md", ["claude"]],
       [".claude/CLAUDE.md", ["claude"]],
+      ["AGENTS.md", ["claude"]],
       ["AGENTS.md", ["codex"]],
       ["AGENTS.md", ["copilot"]],
     ])
+    // Claude reads AGENTS.md only in a project with no CLAUDE.md of either kind.
+    expect(project.instructions[2].supersededBy).toEqual([
+      join("/tmp/demo", "CLAUDE.md"),
+      join("/tmp/demo", ".claude", "CLAUDE.md"),
+    ])
+    expect(project.instructions[3].supersededBy).toBeUndefined()
+    expect(globalLayout().instructions.some((source) => source.supersededBy)).toBe(false)
     expect(project.settings.map((source) => source.name)).toEqual([
       "settings.local.json",
       "config.toml",

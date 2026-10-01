@@ -67,19 +67,20 @@ describe("normalizeEffortForAgent", () => {
   })
 
   it("uses the model-recommended effort when no override is selected", () => {
-    expect(normalizeEffortForAgent("codex", codex, "", "gpt-5.6-sol")).toBe("medium")
+    expect(normalizeEffortForAgent("codex", codex, "", "gpt-6.1-sol")).toBe("low")
+    expect(normalizeEffortForAgent("codex", codex, "", "gpt-6-astra")).toBe("medium")
   })
 
   it("drops Ultra when the selected model does not support it", () => {
     expect(normalizeEffortForAgent("codex", codex, "ultra", "gpt-5.6-luna")).toBe("medium")
   })
 
-  it("uses the live-catalog fallback limits for Spark", () => {
-    expect(getEffortOptions("codex", codex, "gpt-5.3-codex-spark").map((option) => option.value)).toEqual([
+  it("uses the live-catalog fallback limits for GPT-5.5", () => {
+    expect(getEffortOptions("codex", codex, "gpt-5.5").map((option) => option.value)).toEqual([
       "low", "medium", "high", "xhigh",
     ])
-    expect(normalizeEffortForAgent("codex", codex, "", "gpt-5.3-codex-spark")).toBe("high")
-    expect(supportsImageInput("codex", codex, "gpt-5.3-codex-spark")).toBe(false)
+    expect(normalizeEffortForAgent("codex", codex, "max", "gpt-5.5")).toBe("medium")
+    expect(supportsImageInput("codex", codex, "gpt-5.5")).toBe(true)
   })
 })
 

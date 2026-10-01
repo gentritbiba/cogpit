@@ -9,6 +9,7 @@ import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
 import { TaskNotificationBlock } from "./TaskNotificationCard"
+import { LocalCommandBlock } from "./LocalCommandOutput"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
@@ -664,6 +665,14 @@ function ContentBlocks({
     if (block.kind === "task_notification") {
       elements.push(
         <TaskNotificationBlock key={keyFor(block, i)} content={block.content} />
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "local_command") {
+      elements.push(
+        <LocalCommandBlock key={keyFor(block, i)} content={block.content} />
       )
       i++
       continue

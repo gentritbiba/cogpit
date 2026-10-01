@@ -57,6 +57,7 @@ import { registerUsageCostRoutes } from "./routes/usage-cost"
 import { registerUsageRoutes } from "./routes/usage"
 import { registerWorkflowRoutes } from "./routes/workflows"
 import { registerWorktreeRoutes } from "./routes/worktrees"
+import { registerWorkspaceRoutes } from "./routes/workspaces"
 
 export interface ApiRouteContext {
   mode: HubMode
@@ -120,6 +121,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("share-guest", registerShareGuestRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
+  apiRoute("workspaces", registerWorkspaceRoutes),
   apiRoute("usage", registerUsageRoutes),
   apiRoute("usage-cost", registerUsageCostRoutes),
   apiRoute("slash-suggestions", registerSlashSuggestionRoutes),

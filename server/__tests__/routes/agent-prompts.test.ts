@@ -20,6 +20,14 @@ vi.mock("../../sdk-session", async (importOriginal) => ({
   listAgentPromptSessionIds: () => mockListAgentPromptSessionIds(),
 }))
 
+const codex = vi.hoisted(() => ({
+  listElicitationThreadIds: vi.fn((): string[] => []),
+  listPendingElicitations: vi.fn((_threadId: string): unknown[] => []),
+  respondElicitation: vi.fn(async (_requestId: unknown, _response: unknown) => {}),
+}))
+
+vi.mock("../../agents/codexAppServer", () => ({ codexAppServer: codex }))
+
 import { registerAgentPromptRoutes } from "../../routes/agent-prompts"
 import type { UseFn, Middleware } from "../../helpers"
 
@@ -94,6 +102,8 @@ describe("GET /api/agent-prompts", () => {
     mockGetSDKElicitations.mockReset().mockReturnValue([])
     mockGetSDKUserDialogs.mockReset().mockReturnValue([])
     mockListAgentPromptSessionIds.mockReset().mockReturnValue([])
+    codex.listElicitationThreadIds.mockReset().mockReturnValue([])
+    codex.listPendingElicitations.mockReset().mockReturnValue([])
   })
 
   function invokeGet(): { status: number; body: unknown } {
@@ -143,6 +153,39 @@ describe("GET /api/agent-prompts", () => {
     })
   })
 
+  it("lists an app-server elicitation under the thread that asked and its ancestors", () => {
+    const pending = {
+      requestId: 7,
+      threadId: "child-thread",
+      turnId: "turn-1",
+      requestedAt: 5,
+      serverName: "tracker",
+      message: "Sign in to continue",
+      mode: "url",
+      url: "https://tracker.example/sign-in",
+      fields: [],
+    }
+    codex.listElicitationThreadIds.mockReturnValue(["child-thread", "root-thread"])
+    codex.listPendingElicitations.mockReturnValue([pending])
+
+    const listed = {
+      requestId: "7",
+      serverName: "tracker",
+      message: "Sign in to continue",
+      mode: "url",
+      url: "https://tracker.example/sign-in",
+      askedAt: 5,
+      fields: [],
+    }
+    expect(invokeGet().body).toEqual({
+      elicitationsBySession: {
+        "child-thread": [{ sessionId: "child-thread", ...listed }],
+        "root-thread": [{ sessionId: "root-thread", ...listed }],
+      },
+      dialogsBySession: {},
+    })
+  })
+
   it("returns empty maps when nothing is parked", () => {
     expect(invokeGet().body).toEqual({ elicitationsBySession: {}, dialogsBySession: {} })
   })
@@ -153,7 +196,64 @@ describe("GET /api/agent-prompts", () => {
 describe("POST /api/elicitation-answer", () => {
   beforeEach(() => {
     mockSdkSessions.clear()
-    mockResolveElicitation.mockReset()
+    mockResolveElicitation.mockReset().mockReturnValue({ found: false })
+    codex.listPendingElicitations.mockReset().mockReturnValue([])
+    codex.respondElicitation.mockReset().mockResolvedValue(undefined)
+  })
+
+  it("answers an app-server elicitation by its request id", async () => {
+    codex.listPendingElicitations.mockReturnValue([{ requestId: 7 }, { requestId: 8 }])
+
+    const { status, body } = await post("/api/elicitation-answer", {
+      sessionId: "thread-1",
+      requestId: "8",
+      action: "accept",
+      content: { project: "cogpit" },
+    })
+
+    expect(status).toBe(200)
+    expect(body).toEqual({ ok: true })
+    expect(codex.listPendingElicitations).toHaveBeenCalledWith("thread-1")
+    expect(codex.respondElicitation).toHaveBeenCalledWith(8, {
+      action: "accept",
+      content: { project: "cogpit" },
+    })
+  })
+
+  it.each(["decline", "cancel"])("passes %s through to the app-server", async (action) => {
+    codex.listPendingElicitations.mockReturnValue([{ requestId: "form-1" }])
+
+    const { status } = await post("/api/elicitation-answer", {
+      sessionId: "thread-1",
+      requestId: "form-1",
+      action,
+    })
+
+    expect(status).toBe(200)
+    expect(codex.respondElicitation).toHaveBeenCalledWith("form-1", { action })
+  })
+
+  it("does not ask the app-server about an elicitation the SDK session answered", async () => {
+    mockResolveElicitation.mockReturnValue({ found: true })
+    codex.listPendingElicitations.mockReturnValue([{ requestId: "req-1" }])
+
+    await post("/api/elicitation-answer", { sessionId: "s1", requestId: "req-1", action: "decline" })
+
+    expect(codex.respondElicitation).not.toHaveBeenCalled()
+  })
+
+  it("reports a transport that dropped the answer as a bad gateway", async () => {
+    codex.listPendingElicitations.mockReturnValue([{ requestId: "form-1" }])
+    codex.respondElicitation.mockRejectedValue(new Error("stdin is not writable"))
+
+    const { status, body } = await post("/api/elicitation-answer", {
+      sessionId: "thread-1",
+      requestId: "form-1",
+      action: "decline",
+    })
+
+    expect(status).toBe(502)
+    expect(body).toMatchObject({ error: "stdin is not writable", code: "CODEX_ELICITATION_FAILED" })
   })
 
   it("resolves an accepted form answer", async () => {
@@ -217,13 +317,14 @@ describe("POST /api/elicitation-answer", () => {
     expect(body.error).toContain("content")
   })
 
-  it("returns 404 for a session that is not live", async () => {
+  it("returns 404 for a session no agent holds", async () => {
     const { status } = await post("/api/elicitation-answer", {
       sessionId: "gone",
       requestId: "req-1",
       action: "decline",
     })
     expect(status).toBe(404)
+    expect(codex.respondElicitation).not.toHaveBeenCalled()
   })
 
   it("returns 404 when the elicitation is already answered", async () => {

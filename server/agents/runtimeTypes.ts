@@ -22,7 +22,9 @@ import type { UsageCostRecord } from "./usageScanners"
  * naming one.
  */
 
-export type ApprovalDecision = "allow" | "allow_always" | "deny"
+import type { ApprovalDecision, UserQuestionAnswers } from "../../shared/contracts/pendingInput"
+
+export type { ApprovalDecision, UserQuestionAnswers }
 
 export interface ImageAttachment {
   data: string
@@ -100,6 +102,8 @@ export interface SendOutcome {
 export interface PendingApproval extends PermissionRequest {
   sessionId: string
   availableDecisions: ApprovalDecision[]
+  /** One-line gist for lists, when the tool summary of `input` would leave out what is being approved. */
+  summary?: string
 }
 
 export type PendingQuestion = MissionControlQuestion
@@ -120,8 +124,6 @@ export interface ApprovalBatchResult {
   count: number
   toolNames: string[]
 }
-
-export type UserQuestionAnswers = Record<string, string> | string[] | string
 
 /** Where to fork a session: the transcript as loaded, and the turn to keep through. */
 export interface ForkPoint {

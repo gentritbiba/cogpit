@@ -1,11 +1,17 @@
 import type { SpawnOptionsWithoutStdio } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
+import type {
+  ElicitationAction,
+  ElicitationContent,
+  MissionControlElicitationField,
+} from "../../shared/contracts/agentPrompts"
 
 export type JsonRpcId = string | number
 export type JsonObject = Record<string, unknown>
 
 export const COMMAND_APPROVAL_METHOD = "item/commandExecution/requestApproval"
 export const FILE_APPROVAL_METHOD = "item/fileChange/requestApproval"
+export const MCP_ELICITATION_METHOD = "mcpServer/elicitation/request"
 export const CURRENT_TIME_METHOD = "currentTime/read"
 
 export interface CodexAppServerProcess {
@@ -39,6 +45,8 @@ export interface CodexAppServerOptions {
   versionCheckIntervalMs?: number
   /** Codex version currently on disk; null when it cannot be determined. */
   readInstalledVersion?: () => Promise<string | null>
+  /** Tells a thread's viewers about a server request that was refused for them. */
+  reportError?: (threadId: string, message: string) => void
 }
 
 export interface CodexNotification<T = unknown> {
@@ -50,16 +58,38 @@ export type CodexNotificationListener = (
   notification: CodexNotification,
 ) => void
 
-export type PendingApprovalKind = "commandExecution" | "fileChange"
+/** `writeStdin` is a command approval for typing into a terminal that is already running. */
+export type PendingApprovalKind =
+  | "commandExecution"
+  | "writeStdin"
+  | "fileChange"
+  | "mcpToolCall"
 export type ApprovalDecision = "allow" | "allow_always" | "deny"
+
+/** An MCP tool call awaiting approval, as the elicitation asking for it describes it. */
+export interface McpToolCallRequest {
+  serverName: string
+  /** Codex's own question — the one field that always names the tool. */
+  message: string
+  connectorName?: string
+  toolTitle?: string
+  toolDescription?: string
+  /** Arguments, under the names Codex displays them by. */
+  toolParams?: JsonObject
+}
 
 export interface PendingApproval {
   requestId: JsonRpcId
   kind: PendingApprovalKind
-  method: typeof COMMAND_APPROVAL_METHOD | typeof FILE_APPROVAL_METHOD
+  method:
+    | typeof COMMAND_APPROVAL_METHOD
+    | typeof FILE_APPROVAL_METHOD
+    | typeof MCP_ELICITATION_METHOD
   threadId: string
-  turnId: string
-  itemId: string
+  /** Null when the app-server could not tie an MCP request to a turn. */
+  turnId: string | null
+  /** Absent for MCP tool calls, which the protocol does not link to an item. */
+  itemId?: string
   requestedAt: number
   reason?: string
   command?: string
@@ -67,9 +97,29 @@ export interface PendingApproval {
   grantRoot?: string
   approvalId?: string
   networkApprovalContext?: unknown
+  mcpToolCall?: McpToolCallRequest
   /** UI-level decisions that are valid for this specific server request. */
   availableDecisions: ApprovalDecision[]
   params: JsonObject
+}
+
+/** An MCP server's own request for input, parked until the user answers it. */
+export interface PendingElicitation {
+  requestId: JsonRpcId
+  threadId: string
+  turnId: string | null
+  requestedAt: number
+  serverName: string
+  message: string
+  mode: "form" | "url"
+  url?: string
+  /** Empty for `url` mode and for a bare confirm with no schema. */
+  fields: MissionControlElicitationField[]
+}
+
+export interface ElicitationResponse {
+  action: ElicitationAction
+  content?: ElicitationContent
 }
 
 export interface CodexThread extends JsonObject {

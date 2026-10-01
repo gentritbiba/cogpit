@@ -16,6 +16,7 @@ import {
 } from "./config"
 import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
+import { startDelegatedRequestWatcher } from "./sessionHosts/delegatedRequests"
 import {
   hasUsableNetworkCredentials,
   resolveEnvPassword,
@@ -149,6 +150,7 @@ export async function startStandaloneServer({
   setServerPort(boundPort)
   if (publishPort) writePortFile(boundPort)
   startSessionActivityMonitor()
+  startDelegatedRequestWatcher()
 
   const urlHost = host.includes(":") ? `[${host}]` : host
   let disposed = false

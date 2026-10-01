@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import type { PermissionDecision, PermissionRequest } from "@/hooks/usePermissionRequests"
 import { fetchSharePending, respondSharePermission } from "@/lib/shareApi"
+import { useVisiblePolling } from "@/hooks/useVisiblePolling"
 
 /**
  * The guest's view of what the shared session is blocked on.
@@ -28,30 +29,14 @@ export function useSharePermissions(): SharePermissions {
   const [requests, setRequests] = useState<PermissionRequest[]>([])
   const [responding, setResponding] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    let cancelled = false
-
-    const poll = async () => {
-      const next = await fetchSharePending()
-      // A failed or refused read leaves the last list standing: a stale blocker
-      // beats dropping one the guest must still answer.
-      if (cancelled || next === null) return
-      setRequests((current) => (requestsEqual(current, next) ? current : next))
-    }
-
-    const pollWhenVisible = () => {
-      if (document.visibilityState === "visible") void poll()
-    }
-
-    pollWhenVisible()
-    const id = setInterval(pollWhenVisible, POLL_INTERVAL)
-    document.addEventListener("visibilitychange", pollWhenVisible)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-      document.removeEventListener("visibilitychange", pollWhenVisible)
-    }
+  const poll = useCallback(async (isActive: () => boolean) => {
+    const next = await fetchSharePending()
+    // A failed or refused read leaves the last list standing: a stale blocker
+    // beats dropping one the guest must still answer.
+    if (!isActive() || next === null) return
+    setRequests((current) => (requestsEqual(current, next) ? current : next))
   }, [])
+  useVisiblePolling(poll, POLL_INTERVAL)
 
   const respond = useCallback((requestId: string, behavior: PermissionDecision) => {
     setResponding((prev) => new Set(prev).add(requestId))

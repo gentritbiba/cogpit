@@ -14,11 +14,11 @@ import {
   parseTaskNotifications,
   stripSystemNotificationPreamble,
   stripSystemTags,
-  type LocalCommandOutput,
 } from "@/lib/userMessageContent"
 import { cn } from "@/lib/utils"
 import { ProcessingIcon } from "@/components/ui/StatusIcons"
 import { TaskNotificationCard } from "./TaskNotificationCard"
+import { LocalCommandOutputCard } from "./LocalCommandOutput"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 import { Badge } from "@/components/ui/badge"
@@ -28,28 +28,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-
-function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
-  const isError = output.stream === "stderr"
-  const isInput = output.stream === "input"
-  return (
-    <div className={cn(
-      "rounded-md border px-3 py-2 my-1 font-mono text-xs",
-      isError && "border-destructive/20 bg-destructive/5 text-destructive",
-      isInput && "border-border bg-muted/50 text-foreground",
-      !isError && !isInput && "border-border bg-muted/40 text-muted-foreground",
-    )}>
-      <div className="flex items-center gap-1.5">
-        {isInput ? (
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
-        ) : (
-          <Terminal className={cn("size-3 shrink-0", isError ? "text-destructive" : "text-muted-foreground")} data-icon="inline-start" />
-        )}
-        <span className="whitespace-pre-wrap break-words">{output.text}</span>
-      </div>
-    </div>
-  )
-}
 
 // ── Expanded command content ─────────────────────────────────────────────
 

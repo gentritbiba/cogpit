@@ -37,7 +37,7 @@ Claude token streaming is on by default. Set `COGPIT_STREAM_PARTIAL=0`, `false`,
 
 The model chip beside Send opens the provider, model, reasoning effort, and available speed controls. You can change several settings before clicking outside to close it. Image drag-and-drop and paste appear for models that accept images. Slash command suggestions include supported built-in commands and project skills and commands. Claude sessions offer `/output-style` to list output styles or switch to one.
 
-On capable Claude models, Ultracode sets XHigh effort and standing multi-agent orchestration for the current session. It is off until you enable it and does not carry into another session.
+On capable Claude models, Ultracode turns on standing multi-agent orchestration for the current session, at whichever effort you pick. It is off until you enable it and does not carry into another session.
 
 Full access is the default permission mode. Choose a more restrictive profile to require approvals or limit operations. Native approval requests show the command or operation and the decisions the runtime accepts. Codex requests from nested subagents also appear in the composer.
 

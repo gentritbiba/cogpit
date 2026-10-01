@@ -286,13 +286,13 @@ describe("ChatInputSettings", () => {
     expect(within(panel).getByRole("button", { name: "Ultracode" })).toBeDisabled()
   })
 
-  it("pins the effort selector while Ultracode is enabled", () => {
+  it("leaves the effort selector adjustable while Ultracode is enabled", () => {
     render(
       <ChatInputSettings
         agentKind="claude"
         selectedModel="fable"
         onModelChange={vi.fn()}
-        selectedEffort="xhigh"
+        selectedEffort="medium"
         onEffortChange={vi.fn()}
         ultracodeEnabled
         onUltracodeEnabledChange={vi.fn()}
@@ -303,9 +303,8 @@ describe("ChatInputSettings", () => {
     const panel = openModelPicker(/Ultracode on/)
     expect(within(panel).getByRole("button", { name: "Ultracode" })).toHaveAttribute("aria-pressed", "true")
     const slider = within(panel).getByRole("slider", { name: /Reasoning/ })
-    expect(slider).toBeDisabled()
-    expect(slider).toHaveAttribute("aria-valuetext", "Extra High")
-    expect(within(panel).getByText("Pinned by Ultracode")).toBeInTheDocument()
+    expect(slider).toBeEnabled()
+    expect(slider).toHaveAttribute("aria-valuetext", "Medium")
   })
 
   it("changes effort from the slider and keeps the picker open", () => {
@@ -331,6 +330,11 @@ describe("ChatInputSettings", () => {
   })
 
   it("enables Fast only for models that advertise the tier", () => {
+    setDynamicModelOptions("codex", [
+      { value: "", label: "Default" },
+      { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", serviceTiers: [{ value: "priority", label: "Fast" }] },
+      { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
+    ])
     const onFastModeEnabledChange = vi.fn()
     const { rerender } = render(
       <ChatInputSettings

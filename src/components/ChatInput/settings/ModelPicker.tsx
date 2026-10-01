@@ -80,9 +80,7 @@ export function ModelPicker({
   const fastOn = fastModeEnabled && fastAvailable
   const ultracodeOn = ultracodeEnabled && ultracodeAvailable
 
-  const effortCaption = ultracodeOn
-    ? "Pinned by Ultracode"
-    : selectedEffortOption?.description
+  const effortCaption = selectedEffortOption?.description
 
   const chipLabel = [providerLabel, modelLabel, selectedEffortOption?.label].filter(Boolean).join(" · ")
   const chipState = [
@@ -177,7 +175,7 @@ export function ModelPicker({
                       onPressedChange={(next) => onUltracodeEnabledChange?.(next)}
                       disabled={!ultracodeAvailable}
                       title={ultracodeAvailable
-                        ? "Ultracode · Extra High effort with standing multi-agent orchestration"
+                        ? "Ultracode · Standing multi-agent orchestration at any effort"
                         : `Ultracode isn't available for ${modelLabel}`}
                     >
                       <Sparkles className={cn(ultracodeOn && "fill-current")} />
@@ -229,7 +227,6 @@ export function ModelPicker({
                   options={effortOptions}
                   value={selectedEffort}
                   onChange={onEffortChange}
-                  disabled={ultracodeOn}
                   labelId={effortLabelId}
                 />
               )

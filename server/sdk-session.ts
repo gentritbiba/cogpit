@@ -25,6 +25,7 @@ import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { cogpitAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
+import { projectElicitationSchema } from "./lib/elicitationSchema"
 import { asRecord } from "../shared/objects"
 import type {
   MissionControlQuestion,
@@ -121,9 +122,9 @@ export interface SDKSessionState {
   effort?: string
   /** Fast is a Claude session setting, independent from reasoning effort. */
   fastMode?: boolean
-  /** Ultracode: xhigh effort + standing dynamic-workflow orchestration for the
-   *  session. Set at launch via the SDK `settings` option (the --settings path);
-   *  forces effort to xhigh and ensures Workflows are enabled. */
+  /** Ultracode: standing dynamic-workflow orchestration for the session, at
+   *  whatever effort is selected. Set at launch via the SDK `settings` option
+   *  (the --settings path), which also ensures Workflows are enabled. */
   ultracode?: boolean
   mcpConfig?: string | null
   /** stderr captured from the Claude CLI subprocess for the current run —
@@ -219,92 +220,6 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
 }
 
 // ── onElicitation: MCP servers asking the user for input ─────────────
-
-/**
- * What Cogpit can render for `mode: "form"`, or why it cannot.
- *
- * Declining a schema outright beats parking it: a parked prompt the UI can
- * never draw blocks the MCP server until its own timeout with nothing on
- * screen, which is the exact failure this handler exists to remove.
- */
-type ElicitationSchemaProjection =
-  | { fields: MissionControlElicitationField[] }
-  | { unsupported: string }
-
-function describeSchemaType(type: unknown): string {
-  if (type === undefined) return "is an untyped field"
-  if (type === "array") return "is an array"
-  if (type === "object") return "is a nested object"
-  return `is a ${String(type)}`
-}
-
-function elicitationDefault(prop: Record<string, unknown>): { defaultValue?: string | number | boolean } {
-  const value = prop.default
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? { defaultValue: value }
-    : {}
-}
-
-/** A field, or a sentence tail explaining why it cannot be drawn. */
-function projectElicitationField(
-  name: string,
-  prop: Record<string, unknown>,
-  required: boolean,
-): MissionControlElicitationField | string {
-  const base = {
-    name,
-    label: typeof prop.title === "string" && prop.title ? prop.title : name,
-    required,
-    ...(typeof prop.description === "string" && prop.description
-      ? { description: prop.description }
-      : {}),
-  }
-
-  if (Array.isArray(prop.enum)) {
-    if (!prop.enum.every((value) => typeof value === "string")) {
-      return "is an enum of non-string values"
-    }
-    const names = Array.isArray(prop.enumNames) ? prop.enumNames : []
-    return {
-      ...base,
-      type: "enum",
-      options: prop.enum.map((value, index) => ({
-        value: value as string,
-        label: typeof names[index] === "string" ? (names[index] as string) : (value as string),
-      })),
-      ...elicitationDefault(prop),
-    }
-  }
-
-  const type = prop.type
-  if (type === "string" || type === "number" || type === "integer" || type === "boolean") {
-    return { ...base, type, ...elicitationDefault(prop) }
-  }
-  return `${describeSchemaType(type)}, which Cogpit cannot render`
-}
-
-function projectElicitationSchema(schema: Record<string, unknown> | undefined): ElicitationSchemaProjection {
-  if (!schema) return { fields: [] }
-  if (schema.type !== undefined && schema.type !== "object") {
-    return { unsupported: `the request ${describeSchemaType(schema.type)}` }
-  }
-  const properties = asRecord(schema.properties) ?? {}
-  const required = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.filter((entry): entry is string => typeof entry === "string")
-      : [],
-  )
-  const fields: MissionControlElicitationField[] = []
-  for (const [name, raw] of Object.entries(properties)) {
-    const field = projectElicitationField(name, asRecord(raw) ?? {}, required.has(name))
-    if (typeof field === "string") return { unsupported: `"${name}" ${field}` }
-    fields.push(field)
-  }
-  for (const name of required) {
-    if (!(name in properties)) return { unsupported: `required field "${name}" has no schema` }
-  }
-  return { fields }
-}
 
 function makeOnElicitation(state: SDKSessionState): OnElicitation {
   return (request, options) => {
@@ -418,10 +333,6 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 }): Options {
   const isBypass = state.permissionMode === "bypassPermissions"
 
-  // Ultracode requires xhigh effort — override whatever the UI selected so the
-  // launched session and its effort label stay consistent with the flag.
-  const effort = state.ultracode ? "xhigh" : state.effort
-
   const queryOpts: Options = {
     abortController: state.abort!,
     cwd: state.cwd,
@@ -440,7 +351,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     onElicitation: makeOnElicitation(state),
     onUserDialog: makeOnUserDialog(state),
     supportedDialogKinds: [...SUPPORTED_DIALOG_KINDS],
-    effort: effort as Options["effort"],
+    effort: state.effort as Options["effort"],
     enableFileCheckpointing: true,
     persistSession: true,
     pathToClaudeCodeExecutable: claudeCliPath(),
@@ -530,6 +441,12 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 /** Human-readable text for an errored `result` message. */
 export function describeErrorResult(result: Record<string, unknown>): string {
   if (result.result != null) return String(result.result)
+  // Error results carry no `result` text; the cause, a startup failure's
+  // stderr included, is listed in `errors`.
+  const errors = Array.isArray(result.errors)
+    ? result.errors.filter((error): error is string => typeof error === "string" && error.trim() !== "")
+    : []
+  if (errors.length > 0) return errors.join("\n")
   const subtype = result.subtype
   return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`
 }
@@ -938,9 +855,7 @@ function applySessionUpdates(
   state: SDKSessionState,
   updates?: SDKSessionUpdates,
 ): AppliedSessionUpdates {
-  const effectiveEffort = (session: SDKSessionState) =>
-    session.ultracode ? "xhigh" : session.effort
-  const previousEffort = effectiveEffort(state)
+  const previousEffort = state.effort
   const modelChanged = updates?.model !== undefined && updates.model !== state.model
   const fastModeChanged = updates?.fastMode !== undefined && updates.fastMode !== state.fastMode
   const ultracodeChanged = updates?.ultracode !== undefined && updates.ultracode !== state.ultracode
@@ -961,7 +876,7 @@ function applySessionUpdates(
     if (updates.disallowedTools !== undefined) state.disallowedTools = [...updates.disallowedTools]
   }
 
-  const nextEffort = effectiveEffort(state)
+  const nextEffort = state.effort
   return {
     modelChanged,
     effortChanged: nextEffort !== undefined && nextEffort !== previousEffort,
@@ -992,7 +907,9 @@ async function pushSessionUpdates(
   }
 
   const flagSettings: Record<string, unknown> = {}
-  if (changes.ultracodeChanged) {
+  // An effort change sent without the ultracode key switches ultracode off, so
+  // a session that has it on re-states it alongside the new level.
+  if (changes.ultracodeChanged || (changes.effortChanged && state.ultracode)) {
     flagSettings.ultracode = state.ultracode ?? false
     flagSettings.enableWorkflows = state.ultracode ?? false
   }

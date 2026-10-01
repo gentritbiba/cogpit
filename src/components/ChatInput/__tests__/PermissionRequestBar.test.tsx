@@ -106,4 +106,48 @@ describe("PermissionRequestBar", () => {
     expect(screen.getByText("Resolve this approval in Codex")).toBeInTheDocument()
     expect(screen.queryAllByRole("button")).toHaveLength(0)
   })
+
+  it("shows terminal input as input to a running terminal rather than a command", () => {
+    const onRespond = vi.fn()
+    render(
+      <PermissionRequestBar
+        requests={[request({
+          toolName: "write_stdin",
+          input: { chars: "y⏎", session_id: "12" },
+          description: "Terminal session 12",
+          availableDecisions: ["allow", "deny"],
+        })]}
+        responding={new Set()}
+        onRespond={onRespond}
+        onRespondAll={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Send terminal input")).toBeInTheDocument()
+    expect(screen.queryByText("Run command")).not.toBeInTheDocument()
+    expect(screen.getByText("y⏎")).toBeInTheDocument()
+    expect(screen.getByText("Terminal session 12")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
+    expect(onRespond).toHaveBeenCalledWith("approval-1", "deny")
+  })
+
+  it("shows an MCP tool call with the agent's question and its arguments", () => {
+    const onRespond = vi.fn()
+    render(
+      <PermissionRequestBar
+        requests={[request({
+          toolName: "github: Create issue",
+          input: { message: "Allow github to create an issue?", arguments: { Title: "Bug" } },
+        })]}
+        responding={new Set()}
+        onRespond={onRespond}
+        onRespondAll={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("github: Create issue")).toBeInTheDocument()
+    expect(screen.getByText('Allow github to create an issue? · {"Title":"Bug"}')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Session/ }))
+    expect(onRespond).toHaveBeenCalledWith("approval-1", "allow_always")
+  })
 })

@@ -33,6 +33,7 @@ function supportsDecision(
 function getToolMeta(toolName: string): ToolMeta {
   switch (toolName) {
     case "Bash": return { label: "Run command", icon: Terminal, tone: "cmd" }
+    case "write_stdin": return { label: "Send terminal input", icon: Terminal, tone: "cmd" }
     case "Edit": return { label: "Edit file", icon: PenLine, tone: "write" }
     case "Write": return { label: "Write file", icon: PenLine, tone: "write" }
     case "Read": return { label: "Read file", icon: Eye, tone: "read" }
@@ -46,6 +47,7 @@ function getToolMeta(toolName: string): ToolMeta {
 
 function getToolDetail(toolName: string, input: Record<string, unknown>): string | null {
   if (toolName === "Bash" && typeof input.command === "string") return input.command
+  if (toolName === "write_stdin" && typeof input.chars === "string") return input.chars
   if ((toolName === "Edit" || toolName === "Write" || toolName === "Read") && typeof input.file_path === "string") return input.file_path
   if ((toolName === "Glob" || toolName === "Grep") && typeof input.pattern === "string") return input.pattern
   if (toolName === "WebFetch" && typeof input.url === "string") return input.url

@@ -209,6 +209,19 @@ describe("buildProjectSection", () => {
     expect(byName.get("config.toml")).toMatchObject({ fileType: "settings", cli: ["codex"] })
   })
 
+  it("credits AGENTS.md to Claude only while the project has no CLAUDE.md", async () => {
+    await writeFile(join(cwd, "AGENTS.md"), "shared")
+
+    const agentsFile = async () =>
+      (await buildProjectSection(cwd)).items.find((item) => item.name === "AGENTS.md")
+
+    expect((await agentsFile())?.cli).toEqual(["claude", "codex", "copilot"])
+
+    await mkdirp(join(cwd, ".claude"))
+    await writeFile(join(cwd, ".claude", "CLAUDE.md"), "claude")
+    expect((await agentsFile())?.cli).toEqual(["codex", "copilot"])
+  })
+
   it("merges a skill both CLIs link at the shared source into one entry", async () => {
     const sharedSkills = join(cwd, ".agents", "skills")
     await writeSkill(sharedSkills, "commit")

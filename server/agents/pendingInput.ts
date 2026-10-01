@@ -1,11 +1,8 @@
 import { getToolSummary } from "../../shared/session/toolSummary"
 import { copilotRuntime } from "./copilotTransport"
 import { allRuntimes } from "./runtimes"
-import {
-  AgentRuntimeError,
-  type ApprovalDecision,
-  type UserQuestionAnswers,
-} from "./runtimeTypes"
+import type { PendingInput, PendingInputResponse } from "../../shared/contracts/pendingInput"
+import { AgentRuntimeError } from "./runtimeTypes"
 
 /**
  * Everything a session is blocked on until someone answers: tool approvals,
@@ -17,32 +14,7 @@ import {
  * give the UI.
  */
 
-export type PendingInput =
-  | {
-      kind: "permission"
-      requestId: string
-      toolName: string
-      summary: string
-      title?: string
-      availableDecisions: ApprovalDecision[]
-    }
-  | {
-      kind: "question"
-      requestId: string
-      questions: Array<{ question: string; multiSelect: boolean; options: string[] }>
-    }
-  | {
-      kind: "plan"
-      requestId: string
-      summary: string
-      actions: string[]
-      recommendedAction: string
-    }
-
-export type PendingInputResponse =
-  | { decision: ApprovalDecision }
-  | { answers: UserQuestionAnswers }
-  | { approved: boolean; action?: string; feedback?: string }
+export type { PendingInput, PendingInputResponse } from "../../shared/contracts/pendingInput"
 
 export function listPendingInput(sessionId: string): PendingInput[] {
   const pending: PendingInput[] = []
@@ -52,7 +24,7 @@ export function listPendingInput(sessionId: string): PendingInput[] {
         kind: "permission",
         requestId: approval.requestId,
         toolName: approval.toolName,
-        summary: getToolSummary({ name: approval.toolName, input: approval.input }),
+        summary: approval.summary ?? getToolSummary({ name: approval.toolName, input: approval.input }),
         ...(approval.title && { title: approval.title }),
         availableDecisions: approval.availableDecisions,
       })

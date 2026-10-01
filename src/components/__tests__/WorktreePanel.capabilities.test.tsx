@@ -38,7 +38,7 @@ describe("WorktreePanel capability gating", () => {
         headMessage: "Feature work",
         isDirty: false,
         commitsAhead: 1,
-        linkedSessions: ["session-1"],
+        linkedSessions: [{ dirName: "project", sessionId: "session-1" }],
         createdAt: "2026-08-10T00:00:00.000Z",
         changedFiles: [],
       }]}
@@ -103,5 +103,42 @@ describe("WorktreePanel capability gating", () => {
       )
     })
     expect(onRefetch).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    ["a detached checkout", "", true],
+    ["a named branch", "feature/login", false],
+  ])("warns about commits on %s only when deleting would lose them", async (_label, branch, warns) => {
+    const user = userEvent.setup()
+    mocks.authFetch.mockResolvedValue({ ok: true })
+
+    render(<WorktreePanel
+      worktrees={[{
+        name: "feature",
+        path: "/srv/project/.claude/worktrees/feature",
+        branch,
+        head: "abc1234",
+        headMessage: "Feature work",
+        isDirty: false,
+        commitsAhead: 2,
+        linkedSessions: [],
+        createdAt: "2026-08-10T00:00:00.000Z",
+        changedFiles: [],
+      }]}
+      loading={false}
+      dirName="project"
+      onRefetch={vi.fn()}
+      onOpenSession={vi.fn()}
+      onClose={vi.fn()}
+    />)
+
+    await user.click(screen.getByRole("button", { name: "Delete worktree" }))
+    if (warns) {
+      const dialog = await screen.findByRole("alertdialog")
+      expect(within(dialog).getByText("Delete worktree with unpushed commits?")).toBeInTheDocument()
+      expect(mocks.authFetch).not.toHaveBeenCalled()
+    } else {
+      await waitFor(() => expect(mocks.authFetch).toHaveBeenCalled())
+    }
   })
 })

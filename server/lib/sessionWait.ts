@@ -15,7 +15,8 @@ import type { SessionStatusInfo } from "../../shared/session/types"
  * so a poll loop on `running` alone hangs on the first permission prompt.
  */
 
-export type SessionOutcome = "running" | "needs_input" | "completed" | "error" | "not_found"
+/** `unreachable` is a remote session whose device did not answer. */
+export type SessionOutcome = "running" | "needs_input" | "completed" | "error" | "not_found" | "unreachable"
 
 export interface SessionState extends Partial<SessionStatusInfo> {
   sessionId: string
@@ -102,7 +103,8 @@ export interface WaitResult {
   sessions: SessionState[]
 }
 
-const settled = (state: SessionState) => state.outcome !== "running"
+/** Done with its turn or blocked on someone; an unreachable device may still be working. */
+export const isSettled = (state: SessionState) => state.outcome !== "running" && state.outcome !== "unreachable"
 
 export async function waitForSessions(
   sessionIds: readonly string[],
@@ -111,7 +113,7 @@ export async function waitForSessions(
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const sessions = await Promise.all(sessionIds.map(readSessionState))
-    const done = mode === "all" ? sessions.every(settled) : sessions.some(settled)
+    const done = mode === "all" ? sessions.every(isSettled) : sessions.some(isSettled)
     if (done) return { timedOut: false, sessions }
     if (signal?.aborted || Date.now() >= deadline) return { timedOut: true, sessions }
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, Math.max(0, deadline - Date.now()))))

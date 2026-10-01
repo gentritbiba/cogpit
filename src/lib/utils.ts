@@ -116,9 +116,8 @@ export function supportsAutoPermissionMode(
 }
 
 /**
- * Whether the selected model can run "ultracode", which pins effort to xhigh.
- * Only the haiku family lacks the high-effort levels it needs, so every other
- * selection — including the empty "Default" — qualifies.
+ * Whether the selected model can run "ultracode". Only the haiku family cannot,
+ * so every other selection — including the empty "Default" — qualifies.
  */
 export function isUltracodeCapableModel(agentKind: AgentKind, model?: string | null): boolean {
   if (!capabilitiesFor(agentKind).ultracode) return false

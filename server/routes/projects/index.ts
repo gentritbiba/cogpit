@@ -5,10 +5,10 @@ import {
   open,
   readFile,
 } from "../../helpers"
-import { allStores, storeForDirName, storeForPath } from "../../agents"
+import { storeForDirName, storeForPath } from "../../agents"
 import { findJsonlPath, resolveSessionFilePath } from "../../sessionPaths"
 import { handleActiveSessions } from "./activeSessionsRoute"
-import { projectLabel } from "./projectLabel"
+import { listAllProjects } from "../../lib/projectList"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getScannedSessionPullRequests } from "../../lib/sessionPrIndex"
 import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
@@ -184,20 +184,7 @@ export function registerProjectRoutes(use: UseFn) {
     if (_req.url && _req.url !== "/" && _req.url !== "") return next()
 
     try {
-      const projects = []
-      for (const store of allStores()) {
-        for (const project of await store.listProjects()) {
-          projects.push({ ...project, shortName: projectLabel(project.dirName, project.path) })
-        }
-      }
-
-      projects.sort((a, b) => {
-        if (!a.lastModified) return 1
-        if (!b.lastModified) return -1
-        return b.lastModified.localeCompare(a.lastModified)
-      })
-
-      sendJson(res, 200, projects)
+      sendJson(res, 200, await listAllProjects())
     } catch (err) {
       sendJson(res, 500, { error: String(err) })
     }

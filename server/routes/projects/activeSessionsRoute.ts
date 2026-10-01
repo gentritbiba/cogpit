@@ -24,7 +24,7 @@ import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import { archiveReason, readArchive, setSessionsArchived, type ArchiveReason } from "../../lib/sessionArchive"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
-import { projectLabel } from "./projectLabel"
+import { projectLabel } from "../../lib/projectLabel"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50

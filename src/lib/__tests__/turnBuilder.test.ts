@@ -902,6 +902,41 @@ function awaySummaryMsg(
   }
 }
 
+describe("local command output", () => {
+  const stdout = "<local-command-stdout>Current session: 41% used</local-command-stdout>"
+  const localCommandMsg: SystemMessage = {
+    type: "system",
+    subtype: "local_command",
+    content: stdout,
+    isMeta: false,
+    uuid: "local-command-1",
+    timestamp: "2025-01-15T10:00:00.500Z",
+  }
+
+  it("files a local command's output under the turn that ran it", () => {
+    const session = parseSession(toJsonl([
+      userMsg("<command-name>/usage</command-name>"),
+      localCommandMsg,
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks).toEqual([
+      { kind: "local_command", content: stdout, timestamp: "2025-01-15T10:00:00.500Z" },
+    ])
+  })
+
+  it("never opens a turn, so turn boundaries stay on user and assistant records", () => {
+    const session = parseSession(toJsonl([
+      localCommandMsg,
+      userMsg("Next prompt"),
+      textAssistant("Sure!"),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.some((b) => b.kind === "local_command")).toBe(false)
+  })
+})
+
 describe("recap / away_summary parsing", () => {
   it("produces a recap content block from a system message with subtype 'away_summary'", () => {
     const jsonl = toJsonl([

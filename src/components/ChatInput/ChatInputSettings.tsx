@@ -21,7 +21,7 @@ export interface ChatInputSettingsProps {
   isNewSession: boolean
   worktreeEnabled?: boolean
   onWorktreeEnabledChange?: (enabled: boolean) => void
-  /** Ultracode toggle state (xhigh effort + standing workflow orchestration) */
+  /** Ultracode toggle state (standing workflow orchestration, at any effort) */
   ultracodeEnabled?: boolean
   /** Provided only when ultracode is available (Claude + new session + capable model) */
   onUltracodeEnabledChange?: (enabled: boolean) => void

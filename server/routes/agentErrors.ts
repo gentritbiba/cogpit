@@ -1,7 +1,9 @@
 import type { ServerResponse } from "node:http"
 import { AgentRuntimeError } from "../agents/runtimes"
+import { DeviceAuthError, DeviceUnreachableError } from "../hub/device-client"
+import { DeviceRequestError } from "../hub/deviceRequest"
 import { sendJson } from "../http"
-import { ErrorCodes } from "../lib/routeError"
+import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
 
 /**
  * One place where an agent failure becomes an HTTP response.
@@ -28,4 +30,23 @@ export function sendAgentError(
     error: error instanceof Error ? error.message : fallbackMessage,
     code: ErrorCodes.INTERNAL_ERROR,
   })
+}
+
+/**
+ * `sendAgentError` for routes that may answer for a session on a hub device:
+ * the device's own refusal keeps its status, and a device that cannot be
+ * reached or refuses the hub's credentials is a 502.
+ */
+export function sendHostError(res: ServerResponse, error: unknown, fallbackMessage: string): void {
+  if (error instanceof RouteError) return sendError(res, error)
+  if (error instanceof DeviceRequestError) {
+    return sendJson(res, error.status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+  }
+  if (error instanceof DeviceUnreachableError || error instanceof DeviceAuthError) {
+    return sendJson(res, 502, {
+      error: error.message,
+      code: error instanceof DeviceAuthError ? "DEVICE_AUTH_FAILED" : "DEVICE_UNREACHABLE",
+    })
+  }
+  sendAgentError(res, error, fallbackMessage)
 }

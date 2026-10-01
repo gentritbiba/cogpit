@@ -547,6 +547,24 @@ describe("sdk-session silent turn failures", () => {
     expect(String(message)).toContain("CLI exited with code 1")
   })
 
+  it("reports the listed causes of an error result that carries no result text", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession, describeErrorResult } = await loadModule()
+    scriptedMessages = [{
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["The working directory /gone no longer exists."],
+      startup_failure_reason: "cwd_unavailable",
+    }]
+
+    createSDKSession({ sessionId: "startup-fail", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 0)
+    expect(vi.mocked(streamBus.publishError).mock.calls[0][1]).toBe("The working directory /gone no longer exists.")
+    expect(describeErrorResult({ subtype: "error_max_turns", errors: [] })).toBe("Claude returned an error (error_max_turns)")
+  })
+
   it("reports a thrown query error over the stream bus when nothing is listening", async () => {
     const streamBus = await import("../lib/streamBus")
     const { createSDKSession } = await loadModule()
@@ -945,7 +963,7 @@ describe("sdk-session effort propagation", () => {
     expect(setModelSpy).toHaveBeenCalledWith("claude-opus-4-7")
   })
 
-  it("ultracode at creation forces xhigh effort and injects the ultracode setting", async () => {
+  it("ultracode at creation keeps the selected effort and injects the ultracode setting", async () => {
     const { createSDKSession } = await loadModule()
 
     createSDKSession({
@@ -957,8 +975,7 @@ describe("sdk-session effort propagation", () => {
     })
     await waitUntil(() => captured.length === 1)
 
-    // effort is pinned to xhigh regardless of the selected "low"
-    expect(captured[0].options.effort).toBe("xhigh")
+    expect(captured[0].options.effort).toBe("low")
     // ultracode is supplied via the settings layer, with workflows enabled
     expect(captured[0].options.settings).toEqual(
       expect.objectContaining({ ultracode: true, enableWorkflows: true }),
@@ -1012,7 +1029,7 @@ describe("sdk-session effort propagation", () => {
     expect(result.found).toBe(true)
   })
 
-  it("applies Ultracode through live settings and pins effort to xhigh", async () => {
+  it("applies Ultracode through live settings without touching effort", async () => {
     const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
     createSDKSession({
       sessionId: "live-ultracode",
@@ -1025,16 +1042,28 @@ describe("sdk-session effort propagation", () => {
     const result = await updateSDKSession("live-ultracode", { ultracode: true })
 
     expect(sdkSessions.get("live-ultracode")?.ultracode).toBe(true)
-    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith({ ultracode: true, enableWorkflows: true })
+    expect(result.appliedLive).toEqual(["ultracode", "enableWorkflows"])
+  })
+
+  it("re-states Ultracode when the effort changes, so the new level does not switch it off", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+    createSDKSession({
+      sessionId: "live-ultracode-effort",
+      cwd: "/tmp",
+      message: "first",
+      effort: "high",
+      ultracode: true,
+    })
+    await waitUntil(() => captured.length === 1)
+
+    await updateSDKSession("live-ultracode-effort", { effort: "medium" })
+
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith({
       ultracode: true,
       enableWorkflows: true,
-      effortLevel: "xhigh",
-    }))
-    expect(result.appliedLive).toEqual(expect.arrayContaining([
-      "ultracode",
-      "enableWorkflows",
-      "effortLevel",
-    ]))
+      effortLevel: "medium",
+    })
   })
 
   it("applies scoped tool rules and clears MCP servers live", async () => {
@@ -1064,7 +1093,7 @@ describe("sdk-session effort propagation", () => {
     expect(result.appliedLive).toEqual(expect.arrayContaining(["permissions", "mcpConfig"]))
   })
 
-  it("enabling ultracode mid-turn applies the flag and pins effort to xhigh live", async () => {
+  it("enabling ultracode mid-turn applies the flag live and leaves effort alone", async () => {
     const { createSDKSession, sendSDKMessage, sdkSessions } = await loadModule()
 
     createSDKSession({
@@ -1085,9 +1114,8 @@ describe("sdk-session effort propagation", () => {
     expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
       expect.objectContaining({ ultracode: true }),
     )
-    // effort jumps to xhigh because ultracode pins it
-    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ effortLevel: "xhigh" }),
+    expect(applyFlagSettingsSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ effortLevel: expect.anything() }),
     )
   })
 })

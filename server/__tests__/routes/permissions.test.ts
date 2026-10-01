@@ -426,6 +426,20 @@ describe("GET /api/permissions — cross-session listing", () => {
     expect(JSON.stringify(body)).not.toContain(wholeFile)
   })
 
+  it("prefers the summary a runtime supplies over the tool summary of the input", async () => {
+    const runtime = fakeRuntime("codex", [pendingApproval({
+      sessionId: "s1",
+      toolName: "github: Create issue",
+      input: { message: "Allow the tool?", arguments: { Title: "Bug" } },
+      summary: 'Allow the tool? · {"Title":"Bug"}',
+    })])
+
+    const { response } = await invoke(register(registryOf([runtime])), { method: "GET", url: "" })
+    const body = response.json() as { bySession: Record<string, Record<string, unknown>[]> }
+
+    expect(body.bySession.s1[0].summary).toBe('Allow the tool? · {"Title":"Bug"}')
+  })
+
   it("omits full plan content from the cross-session poll", async () => {
     const plan: CopilotPendingExitPlan = {
       sessionId: "copilot-1",

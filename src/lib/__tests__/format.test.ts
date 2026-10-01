@@ -480,6 +480,25 @@ describe("parseWorktreePath", () => {
     })
   })
 
+  it("parses Claude Code's .claude/worktrees layout", () => {
+    expect(parseWorktreePath("/Users/user/code/project/.claude/worktrees/inventory-admin")).toEqual({
+      parentPath: "/Users/user/code/project",
+      worktreeName: "inventory-admin",
+    })
+  })
+
+  it("parses Windows separators", () => {
+    expect(parseWorktreePath("C:\\code\\project\\.claude\\worktrees\\fix")).toEqual({
+      parentPath: "C:\\code\\project",
+      worktreeName: "fix",
+    })
+  })
+
+  it("returns null for other folders named worktrees", () => {
+    expect(parseWorktreePath("/Users/user/code/worktrees/fix")).toBeNull()
+    expect(parseWorktreePath("/Users/user/.claude/projects/worktrees")).toBeNull()
+  })
+
   it("returns null when .worktrees is not preceded by /", () => {
     expect(parseWorktreePath("/Users/user/.worktrees-backup/foo")).toBeNull()
   })

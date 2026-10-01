@@ -35,6 +35,20 @@ function jsonResponse(data: Record<string, unknown>): Response {
 }
 
 describe("mapCodexRuntimeResponse", () => {
+  it.each([
+    ["promax", "Pro (Max)"],
+    ["prolite", "Pro"],
+    ["some_future_plan", "some_future_plan"],
+  ])("names the %s plan the way Codex does", (planType, name) => {
+    const usage = mapCodexRuntimeResponse({
+      available: true,
+      rateLimits: { rateLimits: { planType, primary: { usedPercent: 1, windowDurationMins: 300 } } },
+    })
+
+    expect(usage?.subscriptionType).toBe(name)
+  })
+
+
   it("maps native rate-limit windows, plan, credits, and token history", () => {
     const usage = mapCodexRuntimeResponse({
       available: true,
@@ -51,7 +65,7 @@ describe("mapCodexRuntimeResponse", () => {
     })
 
     expect(usage).toMatchObject({
-      subscriptionType: "plus",
+      subscriptionType: "Plus",
       lifetimeTokens: 1_234_567,
       creditBalance: "25.5",
       fiveHour: { utilization: 42, label: "5-hour" },

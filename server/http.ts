@@ -88,6 +88,27 @@ export function readJsonBody<T = unknown>(
   })
 }
 
+interface ReadBinaryBodyOptions {
+  maxBytes: number
+  tooLargeMessage?: string
+}
+
+/** Read a bounded raw request body, for uploads that are not JSON. */
+export async function readBinaryBody(req: IncomingMessage, options: ReadBinaryBodyOptions): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let length = 0
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
+    length += bytes.length
+    if (length > options.maxBytes) {
+      throw new HttpBodyError(options.tooLargeMessage ?? "Request body too large", 413)
+    }
+    chunks.push(bytes)
+  }
+  if (req.aborted) throw new HttpBodyError("Upload was interrupted", 400)
+  return Buffer.concat(chunks, length)
+}
+
 /** Distinguishes a failed read from a body that legitimately parsed to undefined. */
 const BODY_FAILED = Symbol("body-failed")
 
@@ -137,6 +158,15 @@ export function catchAsyncErrors(handler: Middleware): Middleware {
       next(error)
     }
   }
+}
+
+/**
+ * The one path segment left under a route's mount, decoded — the `:id` of
+ * `/api/thing/:id` — or null when there is not exactly one.
+ */
+export function singlePathParam(req: IncomingMessage): string | null {
+  const parts = new URL(req.url || "/", "http://localhost").pathname.split("/").filter(Boolean)
+  return parts.length === 1 ? decodeURIComponent(parts[0]) : null
 }
 
 /** Send a JSON response with the supplied HTTP status. */

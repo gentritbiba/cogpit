@@ -1,13 +1,13 @@
 import {
   sdkSessions,
-  resolveElicitation,
   resolveUserDialog,
-  getSDKElicitations,
   getSDKUserDialogs,
   listAgentPromptSessionIds,
   normalizeElicitationContent,
 } from "../sdk-session"
+import { answerElicitation, listPendingElicitations } from "../agents/elicitations"
 import { sendJson, type UseFn, withJsonBody } from "../http"
+import { sendAgentError } from "./agentErrors"
 import type {
   ElicitationAction,
   ElicitationContent,
@@ -35,10 +35,12 @@ export function registerAgentPromptRoutes(use: UseFn) {
       return
     }
     const elicitationsBySession: Record<string, MissionControlElicitation[]> = {}
+    for (const elicitation of listPendingElicitations()) {
+      const elicitations = elicitationsBySession[elicitation.sessionId] ??= []
+      elicitations.push(elicitation)
+    }
     const dialogsBySession: Record<string, MissionControlUserDialog[]> = {}
     for (const sessionId of listAgentPromptSessionIds()) {
-      const elicitations = getSDKElicitations(sessionId)
-      if (elicitations.length > 0) elicitationsBySession[sessionId] = elicitations
       const dialogs = getSDKUserDialogs(sessionId)
       if (dialogs.length > 0) dialogsBySession[sessionId] = dialogs
     }
@@ -56,7 +58,7 @@ export function registerAgentPromptRoutes(use: UseFn) {
       requestId?: unknown
       action?: unknown
       content?: unknown
-    }>(req, res, (parsed) => {
+    }>(req, res, async (parsed) => {
       const { sessionId, requestId, action, content } = parsed
 
       if (!sessionId || typeof sessionId !== "string") {
@@ -84,16 +86,17 @@ export function registerAgentPromptRoutes(use: UseFn) {
         parsedContent = normalized
       }
 
-      if (!sdkSessions.has(sessionId)) {
-        sendJson(res, 404, { error: "Session not found or not a live SDK session" })
+      let answered: boolean
+      try {
+        answered = await answerElicitation(sessionId, requestId, {
+          action: action as ElicitationAction,
+          ...(parsedContent ? { content: parsedContent } : {}),
+        })
+      } catch (error) {
+        sendAgentError(res, error, "Failed to answer the elicitation")
         return
       }
-
-      const result = resolveElicitation(sessionId, requestId, {
-        action: action as ElicitationAction,
-        ...(parsedContent ? { content: parsedContent } : {}),
-      })
-      if (!result.found) {
+      if (!answered) {
         sendJson(res, 404, { error: "Elicitation not found or already answered" })
         return
       }

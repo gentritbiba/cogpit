@@ -3,6 +3,7 @@ import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useWorktrees } from "@/hooks/useWorktrees"
 import type { BuiltInEditorRequest } from "@/lib/fileOpener"
 import type { ProjectPromptContext } from "@/plugin-api"
+import type { WorktreeSessionRef } from "../../../shared/contracts/worktrees"
 
 export interface BuiltInPanelServices {
   projectFilesRoot: string | null
@@ -16,7 +17,7 @@ export interface BuiltInPanelServices {
   loadSession: (dirName: string, fileName: string) => void
   worktrees: Pick<ReturnType<typeof useWorktrees>, "worktrees" | "loading" | "refetch">
   worktreeDirName: string | null
-  openWorktreeSession: (sessionId: string) => void
+  openWorktreeSession: (session: WorktreeSessionRef) => void
 }
 
 const Context = createContext<BuiltInPanelServices | null>(null)

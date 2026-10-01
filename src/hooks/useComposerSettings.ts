@@ -44,7 +44,7 @@ export function useComposerSettings({
     selectedModel || session?.model,
   )
   const ultracodeActive = ultracodeEnabled && ultracodeAvailable
-  const effectiveEffort = ultracodeActive ? "xhigh" : normalizeEffort(selectedEffort)
+  const effectiveEffort = normalizeEffort(selectedEffort)
   const fastModeAvailable = !!fastTier
   const fastModeActive = fastModeAvailable && fastModeEnabled
 

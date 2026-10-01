@@ -26,6 +26,7 @@ const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "plan_mode",
   "recap",
   "task_notification",
+  "local_command",
 ])
 
 /** Blocks that represent the agent working rather than answering. */

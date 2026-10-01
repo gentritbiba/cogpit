@@ -641,8 +641,10 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return workflowSummary(input)
     case "SendFeedback":
       return firstString(input.title, input.details)
-    case "Artifact":
-      return [firstString(input.action), firstString(input.title, input.file_path, input.url), firstString(input.asset_id)].filter(Boolean).join(" · ")
+    case "Artifact": {
+      const uploads = Array.isArray(input.file_paths) ? `${input.file_paths.length} files` : undefined
+      return [firstString(input.action), firstString(input.title, input.file_path, uploads, input.url), firstString(input.asset_id)].filter(Boolean).join(" · ")
+    }
     case "StructuredOutput":
     case "ReportFindings":
     case "DesignSync":

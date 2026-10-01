@@ -230,15 +230,14 @@ describe("session-config transcript effort overlay", () => {
     expect(res.json()).toEqual({ effort: "medium" })
   })
 
-  it("leaves ultracode sessions alone so the underlying preference survives", async () => {
-    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ effort: "medium", ultracode: true }))
+  it("resolves the transcript effort for ultracode sessions too", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ ultracode: true }))
     mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
-    mockReadTranscriptEffort.mockResolvedValue("xhigh")
+    mockReadTranscriptEffort.mockResolvedValue("high")
 
     const res = await invoke("GET", "/abc-123.jsonl")
 
-    expect(res.json()).toEqual({ effort: "medium", ultracode: true })
-    expect(mockReadTranscriptEffort).not.toHaveBeenCalled()
+    expect(res.json()).toEqual({ effort: "high", ultracode: true })
   })
 
   it("does not hunt for a transcript for project-level keys", async () => {

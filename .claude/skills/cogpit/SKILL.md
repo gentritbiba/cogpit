@@ -1,6 +1,6 @@
 ---
 name: cogpit
-description: Working inside Cogpit or against a Cogpit server. Recall and search earlier agent sessions with the cogpit-memory CLI, start, wait on and answer other sessions with the cogpit-session CLI, and show screenshots, recordings and diagrams inline in the Cogpit timeline. Use when asked what happened in a past session, when you need to start or message another agent session, or whenever you have an image or video to show the user.
+description: Working inside Cogpit or against a Cogpit server. Recall and search earlier agent sessions with the cogpit-memory CLI, start, wait on and answer other sessions, on this machine or another one, with the cogpit-session CLI, and show screenshots, recordings and diagrams inline in the Cogpit timeline. Use when asked what happened in a past session, when you need to start or message another agent session or hand a task to another machine, or whenever you have an image or video to show the user.
 ---
 
 # Cogpit
@@ -12,7 +12,7 @@ that matches the job.
 | Need | Read |
 | --- | --- |
 | Recall or search earlier sessions, drill into turns, tool calls and subagents | [references/cogpit-memory.md](references/cogpit-memory.md) |
-| Delegate to other sessions: start, message, wait on, answer or stop them with `cogpit-session` | [references/cogpit-sessions.md](references/cogpit-sessions.md) |
+| Delegate to other sessions, here or on another machine: start, message, wait on, answer or stop them with `cogpit-session` | [references/cogpit-sessions.md](references/cogpit-sessions.md) |
 | Show a screenshot, recording or diagram to the user | "Showing images and videos" below |
 
 Both references talk to the local Cogpit server. Resolve its port the same way

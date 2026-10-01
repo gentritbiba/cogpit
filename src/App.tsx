@@ -14,6 +14,7 @@ import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
+import { DelegatedRequests } from "@/components/DelegatedRequests"
 import { cn } from "@/lib/utils"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
@@ -1084,6 +1085,7 @@ export default function App() {
 
   const composer = (
     <div className={cn("shrink-0", isMobile && "bg-background")}>
+      <DelegatedRequests sessionId={isReadOnlySession ? null : state.session?.sessionId ?? null} />
       <GoalSection />
       <ChatInput
         ref={chatInputRef}

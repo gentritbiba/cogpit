@@ -4,7 +4,7 @@ import { z } from "zod"
 import { parseFrameMessage } from "@cogpit/plugin-contracts"
 import { clientRuntimeSchema, pluginScopeSchema, pluginProjectSchema } from "../../shared/contracts/pluginManagement"
 import { pluginConnectionTargetSchema, pluginConnectionIdentitySchema, pluginConnectionMutationSchema } from "../../shared/contracts/pluginConnections"
-import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../http"
+import { HttpBodyError, readBinaryBody, readJsonBody, sendJson, type UseFn } from "../http"
 import { PluginAuthorizationError } from "../plugins/authorization"
 import { clientImpact } from "../plugins/clientImpact"
 import { getPluginManager } from "../plugins/manager"
@@ -17,19 +17,6 @@ const revisionSchema = z.strictObject({ expectedRevision: z.number().int().nonne
 const uninstallSchema = z.union([revisionSchema.extend({ deleteData: z.literal(false).optional() }), revisionSchema.extend({ deleteData: z.literal(true), expectedConnectionRevision: revisionSchema.shape.expectedRevision })])
 const leaseSchema = z.strictObject({ pluginId: z.string().max(128), projectId: z.string().max(64).nullable(), workspacePath: z.string().min(1).max(8192).nullable().optional(), contextEpoch: z.string().min(1).max(128), client: clientRuntimeSchema })
 const publisherSchema = z.strictObject({ publisher: z.string().max(64), label: z.string().min(1).max(100), root: z.string().max(PACKAGE_LIMITS.metadata), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), development: z.literal(true) })
-
-async function readBinary(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  let length = 0
-  for await (const chunk of req) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
-    length += bytes.length
-    if (length > PACKAGE_LIMITS.upload) throw new HttpBodyError("Plugin package exceeds the 4 MiB upload limit", 413)
-    chunks.push(bytes)
-  }
-  if (req.aborted) throw new HttpBodyError("Package upload was interrupted", 400)
-  return Buffer.concat(chunks, length)
-}
 
 function headerJson(req: IncomingMessage, name: string): unknown {
   const raw = req.headers[name]
@@ -139,7 +126,7 @@ export function registerPluginRoutes(use: UseFn): void {
       if (method === "POST" && path === "/stage") {
         const client = clientRuntimeSchema.parse(headerJson(req, "x-cogpit-plugin-client"))
         const scope = pluginScopeSchema.parse(headerJson(req, "x-cogpit-plugin-scope"))
-        const bytes = await readBinary(req)
+        const bytes = await readBinaryBody(req, { maxBytes: PACKAGE_LIMITS.upload, tooLargeMessage: "Plugin package exceeds the 4 MiB upload limit" })
         await manager.validateScope(scope)
         authorize()
         const preview = await manager.store.stage(bytes, { owner: binding.sessionId, client, scope, authorize })

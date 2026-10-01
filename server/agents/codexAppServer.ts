@@ -8,6 +8,7 @@ import {
   COMMAND_APPROVAL_METHOD,
   CURRENT_TIME_METHOD,
   FILE_APPROVAL_METHOD,
+  MCP_ELICITATION_METHOD,
 } from "./codexAppServerProtocol"
 import type {
   ApprovalDecision,
@@ -17,10 +18,12 @@ import type {
   CodexNotification,
   CodexNotificationListener,
   CodexThread,
+  ElicitationResponse,
   InitializeResult,
   JsonObject,
   JsonRpcId,
   PendingApproval,
+  PendingElicitation,
   ThreadGoalClearResponse,
   ThreadGoalResponse,
   ThreadGoalSetParams,
@@ -35,12 +38,15 @@ import type {
 } from "./codexAppServerProtocol"
 import {
   normalizeAvailableDecisions,
-  wireApprovalDecision,
+  wireApprovalResult,
 } from "./codexApprovalCodec"
+import { routeElicitation, wireElicitationResponse } from "./codexElicitation"
+import { PendingRequests } from "./codexPendingRequests"
 import { resolveAgentCommand } from "../lib/binaryResolver"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
+import { publishError } from "../lib/streamBus"
 import { codexQuestions } from "./codexQuestions"
 import {
   parseUserAgentVersion,
@@ -114,10 +120,6 @@ function stringField(object: JsonObject, key: string): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
-function approvalKey(id: JsonRpcId): string {
-  return `${typeof id}:${String(id)}`
-}
-
 function textInput(input: string | UserInput[]): UserInput[] {
   return typeof input === "string"
     ? [{ type: "text", text: input, text_elements: [] }]
@@ -142,6 +144,7 @@ export class CodexAppServer {
   private readonly clearTimer: typeof globalThis.clearTimeout
   private readonly versionCheckIntervalMs: number
   private readonly readInstalledVersion: () => Promise<string | null>
+  private readonly reportError: (threadId: string, message: string) => void
 
   private child: CodexAppServerProcess | null = null
   private reader: ReadlineInterface | null = null
@@ -159,11 +162,8 @@ export class CodexAppServer {
   private readonly notificationListeners = new Set<CodexNotificationListener>()
   private readonly activeTurnIds = new Map<string, string>()
   private readonly parentThreadIds = new Map<string, string>()
-  private readonly approvalsByThread = new Map<
-    string,
-    Map<string, PendingApproval>
-  >()
-  private readonly approvalsByRequest = new Map<string, PendingApproval>()
+  private readonly approvals = new PendingRequests<PendingApproval>()
+  private readonly elicitations = new PendingRequests<PendingElicitation>()
 
   constructor(options: CodexAppServerOptions = {}) {
     this.spawn = options.spawn ?? defaultSpawn
@@ -179,6 +179,7 @@ export class CodexAppServer {
     this.readInstalledVersion =
       options.readInstalledVersion ??
       (() => readInstalledCodexVersion(this.command))
+    this.reportError = options.reportError ?? (() => undefined)
   }
 
   start(): Promise<InitializeResult> {
@@ -455,22 +456,39 @@ export class CodexAppServer {
    * only answers for a thread you already know about.
    */
   listApprovalThreadIds(): string[] {
-    return [...this.approvalsByThread.keys()]
+    return this.approvals.threadIds()
   }
 
   listPendingApprovals(threadId: string): PendingApproval[] {
-    const approvals = [...this.approvalsByThread.entries()]
-      .filter(([approvalThreadId]) =>
+    return this.approvals
+      .list((approvalThreadId) =>
         this.isThreadOrDescendant(approvalThreadId, threadId),
       )
-      .flatMap(([, threadApprovals]) => [...threadApprovals.values()])
-    return approvals
-      .sort((left, right) => left.requestedAt - right.requestedAt)
       .map((approval) => ({
         ...approval,
         availableDecisions: [...approval.availableDecisions],
         params: { ...approval.params },
       }))
+  }
+
+  /**
+   * Threads a pending elicitation is listed under: the one that asked and each
+   * of its ancestors, so a subagent's prompt reaches the session that owns it.
+   */
+  listElicitationThreadIds(): string[] {
+    return [
+      ...new Set(
+        this.elicitations
+          .threadIds()
+          .flatMap((threadId) => this.threadLineage(threadId)),
+      ),
+    ]
+  }
+
+  listPendingElicitations(threadId: string): PendingElicitation[] {
+    return this.elicitations.list((elicitationThreadId) =>
+      this.isThreadOrDescendant(elicitationThreadId, threadId),
+    )
   }
 
   async respondApproval(
@@ -481,7 +499,7 @@ export class CodexAppServer {
       typeof requestOrApproval === "object"
         ? requestOrApproval.requestId
         : requestOrApproval
-    const approval = this.approvalsByRequest.get(approvalKey(requestId))
+    const approval = this.approvals.get(requestId)
     if (!approval) {
       throw new CodexAppServerError(
         `Approval request ${String(requestId)} is no longer pending`,
@@ -492,30 +510,52 @@ export class CodexAppServer {
         `Decision ${decision} is not available for approval request ${String(requestId)}`,
       )
     }
-    const child = this.child
-    if (!child || !this.initializeResult) {
-      throw new CodexAppServerError("Codex app-server is not connected")
-    }
-    const wireDecision = wireApprovalDecision(approval, decision)
-    if (wireDecision === undefined) {
+    const result = wireApprovalResult(approval, decision)
+    if (result === undefined) {
       throw new CodexAppServerError(
         `Decision ${decision} cannot be represented for approval request ${String(requestId)}`,
       )
     }
+    await this.answerServerRequest(requestId, result, "approval")
+    this.approvals.remove(requestId)
+  }
+
+  async respondElicitation(
+    requestId: JsonRpcId,
+    response: ElicitationResponse,
+  ): Promise<void> {
+    if (!this.elicitations.get(requestId)) {
+      throw new CodexAppServerError(
+        `Elicitation request ${String(requestId)} is no longer pending`,
+      )
+    }
+    await this.answerServerRequest(
+      requestId,
+      wireElicitationResponse(response),
+      "elicitation",
+    )
+    this.elicitations.remove(requestId)
+  }
+
+  private async answerServerRequest(
+    requestId: JsonRpcId,
+    result: JsonObject,
+    kind: "approval" | "elicitation",
+  ): Promise<void> {
+    const child = this.child
+    if (!child || !this.initializeResult) {
+      throw new CodexAppServerError("Codex app-server is not connected")
+    }
     try {
-      await this.writeMessage(child, {
-        id: requestId,
-        result: { decision: wireDecision },
-      })
+      await this.writeMessage(child, { id: requestId, result })
     } catch (error) {
       const connectionError = new CodexAppServerError(
-        "Failed to respond to Codex approval request",
+        `Failed to respond to Codex ${kind} request`,
         { cause: error },
       )
       this.disconnect(connectionError, child, true)
       throw connectionError
     }
-    this.removeApproval(requestId)
   }
 
   subscribe(listener: CodexNotificationListener): () => void {
@@ -669,11 +709,7 @@ export class CodexAppServer {
   private handleServerRequest(request: ServerRequest): void {
     if (request.method === CURRENT_TIME_METHOD) {
       if (!isRecord(request.params) || !stringField(request.params, "threadId")) {
-        this.respondServerError(
-          request.id,
-          -32602,
-          `Invalid params for Codex server request ${request.method}`,
-        )
+        this.rejectInvalidParams(request)
         return
       }
       this.respondServerResult(request.id, {
@@ -684,7 +720,8 @@ export class CodexAppServer {
 
     if (
       request.method !== COMMAND_APPROVAL_METHOD &&
-      request.method !== FILE_APPROVAL_METHOD
+      request.method !== FILE_APPROVAL_METHOD &&
+      request.method !== MCP_ELICITATION_METHOD
     ) {
       this.respondServerError(
         request.id,
@@ -694,32 +731,30 @@ export class CodexAppServer {
       return
     }
     if (!isRecord(request.params)) {
-      this.respondServerError(
-        request.id,
-        -32602,
-        `Invalid params for Codex server request ${request.method}`,
-      )
+      this.rejectInvalidParams(request)
+      return
+    }
+    if (request.method === MCP_ELICITATION_METHOD) {
+      this.handleElicitation(request, request.params)
       return
     }
     const threadId = stringField(request.params, "threadId")
     const turnId = stringField(request.params, "turnId")
     const itemId = stringField(request.params, "itemId")
     if (!threadId || !turnId || !itemId) {
-      this.respondServerError(
-        request.id,
-        -32602,
-        `Invalid params for Codex server request ${request.method}`,
-      )
+      this.rejectInvalidParams(request)
       return
     }
 
     const requestedAtValue = request.params.startedAtMs
-    const approval: PendingApproval = {
+    this.approvals.store({
       requestId: request.id,
       kind:
-        request.method === COMMAND_APPROVAL_METHOD
-          ? "commandExecution"
-          : "fileChange",
+        request.method === FILE_APPROVAL_METHOD
+          ? "fileChange"
+          : request.params.kind === "writeStdin"
+            ? "writeStdin"
+            : "commandExecution",
       method: request.method,
       threadId,
       turnId,
@@ -736,8 +771,53 @@ export class CodexAppServer {
         request.params.availableDecisions,
       ),
       params: { ...request.params },
+    })
+  }
+
+  /**
+   * Keyed by the JSON-RPC id alone: an elicitation has no item, and its turn is
+   * only the app-server's best guess.
+   */
+  private handleElicitation(request: ServerRequest, params: JsonObject): void {
+    const threadId = stringField(params, "threadId")
+    const serverName = stringField(params, "serverName")
+    if (!threadId || !serverName) {
+      this.rejectInvalidParams(request)
+      return
     }
-    this.storeApproval(approval)
+    const pending = {
+      requestId: request.id,
+      threadId,
+      turnId: stringField(params, "turnId") ?? null,
+      requestedAt: this.now(),
+    }
+    const routed = routeElicitation(params)
+    if (routed.route === "approval") {
+      this.approvals.store({
+        ...pending,
+        kind: "mcpToolCall",
+        method: MCP_ELICITATION_METHOD,
+        mcpToolCall: { serverName, ...routed.toolCall },
+        availableDecisions: routed.availableDecisions,
+        params: { ...params },
+      })
+    } else if (routed.route === "prompt") {
+      this.elicitations.store({ ...pending, serverName, ...routed.prompt })
+    } else {
+      this.respondServerResult(request.id, { action: "decline" })
+      this.reportError(
+        threadId,
+        `Declined a request from MCP server "${serverName}": ${routed.reason}.`,
+      )
+    }
+  }
+
+  private rejectInvalidParams(request: ServerRequest): void {
+    this.respondServerError(
+      request.id,
+      -32602,
+      `Invalid params for Codex server request ${request.method}`,
+    )
   }
 
   private respondServerResult(requestId: JsonRpcId, result: JsonObject): void {
@@ -795,13 +875,20 @@ export class CodexAppServer {
         if (!turnId || this.activeTurnIds.get(threadId) === turnId) {
           this.activeTurnIds.delete(threadId)
         }
-        if (turnId) this.removeApprovalsForTurn(threadId, turnId)
+        if (turnId) {
+          this.approvals.removeForTurn(threadId, turnId)
+          this.elicitations.removeForTurn(threadId, turnId)
+        }
       } else if (notification.method === "thread/closed" && threadId) {
         this.activeTurnIds.delete(threadId)
-        this.clearApprovalsForThread(threadId)
+        this.approvals.clearThread(threadId)
+        this.elicitations.clearThread(threadId)
       } else if (notification.method === "serverRequest/resolved") {
         const requestId = params.requestId
-        if (isRpcId(requestId)) this.removeApproval(requestId)
+        if (isRpcId(requestId)) {
+          this.approvals.remove(requestId)
+          this.elicitations.remove(requestId)
+        }
       }
     }
 
@@ -886,49 +973,6 @@ export class CodexAppServer {
         reject(error)
       }
     })
-  }
-
-  private storeApproval(approval: PendingApproval): void {
-    const key = approvalKey(approval.requestId)
-    const previous = this.approvalsByRequest.get(key)
-    if (previous) this.removeApproval(previous.requestId)
-    let threadApprovals = this.approvalsByThread.get(approval.threadId)
-    if (!threadApprovals) {
-      threadApprovals = new Map()
-      this.approvalsByThread.set(approval.threadId, threadApprovals)
-    }
-    threadApprovals.set(key, approval)
-    this.approvalsByRequest.set(key, approval)
-  }
-
-  private removeApproval(requestId: JsonRpcId): void {
-    const key = approvalKey(requestId)
-    const approval = this.approvalsByRequest.get(key)
-    if (!approval) return
-    this.approvalsByRequest.delete(key)
-    const threadApprovals = this.approvalsByThread.get(approval.threadId)
-    threadApprovals?.delete(key)
-    if (threadApprovals?.size === 0) {
-      this.approvalsByThread.delete(approval.threadId)
-    }
-  }
-
-  private removeApprovalsForTurn(threadId: string, turnId: string): void {
-    const approvals = this.approvalsByThread.get(threadId)
-    if (!approvals) return
-    const requestIds = [...approvals.values()]
-      .filter((approval) => approval.turnId === turnId)
-      .map((approval) => approval.requestId)
-    for (const requestId of requestIds) this.removeApproval(requestId)
-  }
-
-  private clearApprovalsForThread(threadId: string): void {
-    const approvals = this.approvalsByThread.get(threadId)
-    if (!approvals) return
-    for (const approval of approvals.values()) {
-      this.approvalsByRequest.delete(approvalKey(approval.requestId))
-    }
-    this.approvalsByThread.delete(threadId)
   }
 
   private rememberThread(thread: CodexThread): void {
@@ -1037,13 +1081,13 @@ export class CodexAppServer {
 
   private clearRuntimeState(): void {
     this.activeTurnIds.clear()
-    this.approvalsByRequest.clear()
-    this.approvalsByThread.clear()
+    this.approvals.clear()
+    this.elicitations.clear()
     this.parentThreadIds.clear()
   }
 }
 
 /** Shared process-backed client used by the HTTP runtime and approval routes. */
-export const codexAppServer = new CodexAppServer()
+export const codexAppServer = new CodexAppServer({ reportError: publishError })
 codexAppServer.subscribe(forwardCodexStreamNotification)
 codexAppServer.subscribe((notification) => codexQuestions.observe(notification))

@@ -1,14 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { isAbsolute } from "node:path"
-import { respondToPendingInput, type PendingInputResponse } from "../agents/pendingInput"
+import type { PendingInputResponse } from "../agents/pendingInput"
 import type { UserQuestionAnswers } from "../agents/runtimes"
-import { sessionChildren } from "../lib/sessionLineage"
-import { readSessionResult } from "../lib/sessionResult"
-import { parseWaitSeconds, readSessionState, waitForSessions } from "../lib/sessionWait"
-import { sendJson, withJsonBody, type UseFn } from "../http"
+import { sessionChildren } from "../lib/sessionOrigins"
+import { parseWaitSeconds } from "../lib/sessionWait"
+import { sendJson, singlePathParam, withJsonBody, type UseFn } from "../http"
 import { runSessionCli } from "../sessionCli/commands"
+import { hostForSession, locateSessions, SESSION_SCOPE_HEADER, waitAcrossHosts } from "../sessionHosts"
+import {
+  listDelegatedRequests,
+  markDelegatedRequestAnswered,
+  watchDelegatedRequestsOf,
+} from "../sessionHosts/delegatedRequests"
+import { isTeamEdition } from "../team/edition"
 import { getRequestPrincipal } from "../team/requestPrincipal"
-import { sendAgentError } from "./agentErrors"
+import { sendHostError } from "./agentErrors"
 
 const INVOCATION_ID_RE = /^[a-zA-Z0-9_-]{8,128}$/
 
@@ -16,6 +22,10 @@ const INVOCATION_ID_RE = /^[a-zA-Z0-9_-]{8,128}$/
  * Endpoints for agents that drive other sessions: block until a session needs
  * someone, read what it produced, answer what it is blocked on, and list the
  * sessions an agent started. The `cogpit-session` CLI wraps these.
+ *
+ * A session id may belong to a hub device; each endpoint answers for it there.
+ * A hub asking a device sends the local scope header, so the device answers
+ * for itself only.
  */
 
 const MAX_WAIT_SESSIONS = 50
@@ -28,10 +38,8 @@ function abortOnClose(req: IncomingMessage, res: ServerResponse): AbortSignal {
   return controller.signal
 }
 
-function sessionIdFromPath(req: IncomingMessage): string | null {
-  const url = new URL(req.url || "/", "http://localhost")
-  const parts = url.pathname.split("/").filter(Boolean)
-  return parts.length === 1 ? decodeURIComponent(parts[0]) : null
+function scopeOf(req: IncomingMessage): { localOnly: boolean } {
+  return { localOnly: req.headers[SESSION_SCOPE_HEADER] === "local" }
 }
 
 export function registerSessionOrchestrationRoutes(use: UseFn) {
@@ -39,13 +47,18 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
   // POST /api/session-wait { sessionIds, mode: "any" | "all", timeout }
   use("/api/session-wait", async (req, res, next) => {
     if (req.method === "GET") {
-      const sessionId = sessionIdFromPath(req)
+      const sessionId = singlePathParam(req)
       if (!sessionId) return next()
       const timeout = parseWaitSeconds(new URL(req.url || "/", "http://localhost").searchParams.get("timeout"))
       if (timeout === null) return sendJson(res, 400, { error: "timeout must be a non-negative number of seconds" })
       const signal = abortOnClose(req, res)
-      const result = await waitForSessions([sessionId], { mode: "all", timeoutMs: timeout * 1000, signal })
-      if (!res.writableEnded) sendJson(res, 200, { timedOut: result.timedOut, ...result.sessions[0] })
+      try {
+        const located = await locateSessions([sessionId], scopeOf(req))
+        const result = await waitAcrossHosts(located, { mode: "all", timeoutMs: timeout * 1000, signal })
+        if (!res.writableEnded) sendJson(res, 200, { timedOut: result.timedOut, ...result.sessions[0] })
+      } catch (error) {
+        if (!res.writableEnded) sendHostError(res, error, "Failed to wait on the session")
+      }
       return
     }
     if (req.method !== "POST") return next()
@@ -63,28 +76,33 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
       const timeout = parseWaitSeconds(body.timeout)
       if (timeout === null) return sendJson(res, 400, { error: "timeout must be a non-negative number of seconds" })
       const signal = abortOnClose(req, res)
-      const result = await waitForSessions([...new Set(sessionIds as string[])], {
-        mode,
-        timeoutMs: timeout * 1000,
-        signal,
-      })
-      if (!res.writableEnded) sendJson(res, 200, result)
+      try {
+        const located = await locateSessions([...new Set(sessionIds as string[])], scopeOf(req))
+        const result = await waitAcrossHosts(located, { mode, timeoutMs: timeout * 1000, signal })
+        if (!res.writableEnded) sendJson(res, 200, result)
+      } catch (error) {
+        if (!res.writableEnded) sendHostError(res, error, "Failed to wait on the sessions")
+      }
     })
   })
 
   // GET /api/session-result/:sessionId?turn=<index>
   use("/api/session-result/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-    const sessionId = sessionIdFromPath(req)
+    const sessionId = singlePathParam(req)
     if (!sessionId) return next()
     const rawTurn = new URL(req.url || "/", "http://localhost").searchParams.get("turn")
     const turn = rawTurn === null ? undefined : Number.parseInt(rawTurn, 10)
     if (turn !== undefined && (!Number.isInteger(turn) || turn < 0)) {
       return sendJson(res, 400, { error: "turn must be a non-negative integer" })
     }
-    const result = await readSessionResult(sessionId, turn)
-    if (!result) return sendJson(res, 404, { error: "Session not found" })
-    sendJson(res, 200, result)
+    try {
+      const result = await (await hostForSession(sessionId, scopeOf(req))).result(sessionId, turn)
+      if (!result) return sendJson(res, 404, { error: "Session not found" })
+      sendJson(res, 200, result)
+    } catch (error) {
+      sendHostError(res, error, "Failed to read the session's result")
+    }
   })
 
   // POST /api/session-respond { sessionId, requestId, decision | answers | approved, action?, feedback? }
@@ -102,10 +120,12 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         })
       }
       try {
-        const answered = await respondToPendingInput(sessionId, requestId, response)
+        const host = await hostForSession(sessionId, scopeOf(req))
+        const answered = await host.respond(sessionId, requestId, response)
+        markDelegatedRequestAnswered(sessionId, requestId)
         sendJson(res, 200, { success: true, answered })
       } catch (error) {
-        sendAgentError(res, error, "Failed to answer the request")
+        sendHostError(res, error, "Failed to answer the request")
       }
     })
   })
@@ -113,10 +133,43 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
   // GET /api/session-children/:sessionId — sessions it started, with their state
   use("/api/session-children/", async (req, res, next) => {
     if (req.method !== "GET") return next()
-    const sessionId = sessionIdFromPath(req)
+    const sessionId = singlePathParam(req)
     if (!sessionId) return next()
-    const children = await Promise.all((await sessionChildren(sessionId)).map(readSessionState))
+    const located = await locateSessions(await sessionChildren(sessionId))
+    const children = await Promise.all(located.map(async ({ host, sessionId: childId }) => ({
+      ...await host.state(childId),
+      ...(host.remote ? { device: { id: host.id, name: host.name } } : {}),
+    })))
     sendJson(res, 200, { sessionId, children })
+  })
+
+  // POST /api/session-send { sessionId, message, interrupt? } — deliver a
+  // follow-up and answer at once; `session-wait` reports how the turn ends.
+  use("/api/session-send", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    withJsonBody<Record<string, unknown>>(req, res, async (body) => {
+      const { sessionId, message, interrupt } = body
+      if (typeof sessionId !== "string" || !sessionId || typeof message !== "string" || !message.trim()) {
+        return sendJson(res, 400, { error: "sessionId and message are required" })
+      }
+      try {
+        const host = await hostForSession(sessionId, scopeOf(req))
+        const delivered = await host.send(sessionId, message, { interrupt: interrupt === true })
+        watchDelegatedRequestsOf(sessionId)
+        sendJson(res, 200, delivered)
+      } catch (error) {
+        sendHostError(res, error, "The agent failed to accept the message")
+      }
+    })
+  })
+
+  // GET /api/session-requests?parent=<sessionId> — what delegated sessions
+  // whose questions go to the user are waiting on, for the parent's view.
+  use("/api/session-requests", (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const parent = new URL(req.url || "/", "http://localhost").searchParams.get("parent")
+    if (!parent) return sendJson(res, 400, { error: "parent is required" })
+    sendJson(res, 200, { requests: listDelegatedRequests(parent) })
   })
 
   // POST /api/session-cli { argv, cwd, invocationId, callerSessionId? } — the
@@ -140,6 +193,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         invocationId,
         callerSessionId: typeof callerSessionId === "string" && callerSessionId ? callerSessionId : undefined,
         scope: getRequestPrincipal(req)?.userId ?? "local",
+        admin: !isTeamEdition() || getRequestPrincipal(req)?.role === "admin",
         signal: abortOnClose(req, res),
       })
       if (!res.writableEnded) sendJson(res, 200, output)

@@ -1,15 +1,17 @@
 import { stat } from "node:fs/promises"
 import type { ServerResponse } from "node:http"
+import { resolveProjectCwd } from "../../lib/projectCwd"
 import {
   dirs,
   isWithinDir,
   readdir,
   join,
 } from "../../helpers"
-import type { FileChange, WorktreeInfo } from "../../../shared/contracts/worktrees"
+import { storeForDirName } from "../../agents"
+import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
+import type { FileChange, WorktreeInfo, WorktreeSessionRef } from "../../../shared/contracts/worktrees"
 import {
   parseWorktreeList,
-  resolveProjectPath,
   getMainWorktreeRoot,
   getDefaultBranch,
   readFirstJsonLine,
@@ -55,6 +57,19 @@ async function loadSessionBranches(projectDir: string): Promise<Map<string, stri
   }
 
   return sessionBranches
+}
+
+/** Sessions started inside the worktree live under its own project directory, newest first. */
+async function loadWorktreeSessions(dirName: string, worktreePath: string): Promise<WorktreeSessionRef[]> {
+  const worktreeDirName = descriptorForDirName(dirName).dirName.encode(worktreePath)
+  try {
+    const files = await storeForDirName(worktreeDirName).listProjectSessionFiles(worktreeDirName) ?? []
+    return [...files]
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .map((file) => ({ dirName: worktreeDirName, sessionId: file.sessionId || file.fileName.replace(/\.jsonl$/, "") }))
+  } catch {
+    return []
+  }
 }
 
 function mergeNumstat(changedFiles: FileChange[], seen: Set<string>, output: string): void {
@@ -121,12 +136,11 @@ async function loadChangedFiles(worktreePath: string, defaultBranch: string): Pr
 }
 
 async function buildWorktreeInfo(
+  dirName: string,
   worktree: WorktreeRaw,
   defaultBranch: string,
   sessionBranches: ReadonlyMap<string, string[]>,
 ): Promise<WorktreeInfo> {
-  const name = worktree.branch.replace("worktree-", "")
-
   let isDirty = false
   try {
     const status = await runWorktreeCommand("git", ["status", "--porcelain"], {
@@ -166,14 +180,17 @@ async function buildWorktreeInfo(
   }
 
   return {
-    name,
+    name: worktree.name,
     path: worktree.path,
     branch: worktree.branch,
     head: worktree.head?.slice(0, 7) || "",
     headMessage,
     isDirty,
     commitsAhead,
-    linkedSessions: sessionBranches.get(worktree.branch) || [],
+    linkedSessions: [
+      ...await loadWorktreeSessions(dirName, worktree.path),
+      ...(sessionBranches.get(worktree.branch) ?? []).map((sessionId) => ({ dirName, sessionId })),
+    ],
     createdAt,
     changedFiles: await loadChangedFiles(worktree.path, defaultBranch),
   }
@@ -191,8 +208,8 @@ export async function handleWorktreeList(
     return
   }
 
-  const projectPath = await resolveProjectPath(projectDir, dirName)
-  const gitRoot = await getMainWorktreeRoot(projectPath)
+  const projectPath = await resolveProjectCwd(projectDir, dirName)
+  const gitRoot = projectPath ? await getMainWorktreeRoot(projectPath) : null
 
   if (!gitRoot) {
     res.setHeader("Content-Type", "application/json")
@@ -213,7 +230,7 @@ export async function handleWorktreeList(
     const worktrees = await mapWithConcurrency(
       rawWorktrees,
       WORKTREE_SCAN_CONCURRENCY,
-      (worktree) => buildWorktreeInfo(worktree, defaultBranch, sessionBranches),
+      (worktree) => buildWorktreeInfo(dirName, worktree, defaultBranch, sessionBranches),
     )
 
     res.setHeader("Content-Type", "application/json")

@@ -110,6 +110,21 @@ then `~/.cogpit/port`, then `19384`):
 - `POST /api/session-respond`: answer a pending permission, question or plan
 - `GET /api/session-result/:id`: final reply, changed files, tokens
 - `GET /api/session-children/:id`: sessions started by a session
+- `POST /api/session-send`: send a follow-up without waiting for the turn
+
+Sessions can also run on hub devices (the multi-device hub). Every command
+goes through a `SessionHost` (`server/sessionHosts/`): `localHost` calls the
+runtimes, and a remote host calls the same endpoints on the device via
+`server/hub/deviceRequest.ts`, sending `x-cogpit-session-scope: local` so the
+device answers only for itself. `hostForSession` finds a session's machine
+from `session-origins.json` (parent, device, handoff, who answers its
+questions), falling back to asking every device. `new --device` sends the
+caller's repository (HEAD plus uncommitted work) through
+`server/workspaceTransfer/` to the device's `/api/workspaces` routes as a git
+worktree, then brings the work back as a local `cogpit/<device>/<task>` branch.
+Questions from sessions routed to the user are collected by
+`sessionHosts/delegatedRequests.ts` and shown above the parent session's
+composer (`GET /api/session-requests`).
 
 See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for usage.
 

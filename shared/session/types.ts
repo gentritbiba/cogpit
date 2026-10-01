@@ -530,6 +530,13 @@ export type TurnContentBlock =
    * for the same reason `queued_prompt` is: the renderers own that grammar.
    */
   | { kind: "task_notification"; content: string; timestamp?: string }
+  /**
+   * Output of a slash command that ran locally and answered the user directly
+   * (`/usage`, `/context`, `/recap`), recorded as a `local_command` system
+   * record. `content` is the raw record text, `<local-command-stdout>` tags
+   * included, left for the renderers like `task_notification`.
+   */
+  | { kind: "local_command"; content: string; timestamp?: string }
 
 export interface Turn {
   id: string

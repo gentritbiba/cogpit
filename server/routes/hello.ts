@@ -71,6 +71,8 @@ export function registerHelloRoutes(use: UseFn, opts: { mode: HubMode }) {
       app: "cogpit",
       version: VERSION,
       hubApi: 1,
+      // The session endpoints a hub drives remote sessions through.
+      sessionApi: 1,
       mode: opts.mode,
       // Read per request: initEdition runs during composition, after modules
       // load — a value captured at import time could freeze stale "personal".

@@ -62,7 +62,7 @@
     "plugins:pack": "bun scripts/pack-runtime-plugin.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.270",
+    "@anthropic-ai/claude-agent-sdk": "0.3.287",
     "@cogpit/plugin-contracts": "workspace:*",
     "@cogpit/plugin-integrations": "workspace:*",
     "electron-updater": "^6.8.3",

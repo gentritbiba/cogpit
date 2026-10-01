@@ -241,6 +241,8 @@ export interface AgentConfigFile {
   readonly scopes: readonly AgentConfigScope[]
   /** Tree label; defaults to `path`. */
   readonly label?: string
+  /** Read only when none of the agent's other instruction files exist at that scope. */
+  readonly fallback?: true
 }
 
 /**
@@ -368,6 +370,8 @@ export interface AgentDescriptor {
   readonly binName: string
   readonly dirName: AgentDirNameCodec
   readonly sessionFile: AgentSessionFileCodec
+  /** Folder inside a project where the CLI cuts its worktrees; null when they live elsewhere. */
+  readonly projectWorktreeDir: string | null
   /**
    * Whether header metadata is complete after reading only the first bytes of a
    * transcript. False when an exact line count or the last user message matters
@@ -518,6 +522,7 @@ const claude: AgentDescriptor = {
       return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
     },
   },
+  projectWorktreeDir: ".claude/worktrees",
   sessionFile: {
     name: (sessionId) => `${sessionId}.jsonl`,
     sessionId: sessionIdFromJsonlName,
@@ -576,6 +581,7 @@ const claude: AgentDescriptor = {
     instructions: [
       { in: "scope", path: "CLAUDE.md", scopes: ["global", "project"] },
       { in: "root", path: "CLAUDE.md", label: ".claude/CLAUDE.md", scopes: ["project"] },
+      { in: "scope", path: "AGENTS.md", scopes: ["project"], fallback: true },
     ],
     settings: [
       { in: "root", path: "settings.json", scopes: ["global"] },
@@ -662,6 +668,7 @@ const codex: AgentDescriptor = {
   displayName: "Codex",
   binName: "codex",
   dirName: base64DirNameCodec(CODEX_DIR_PREFIX),
+  projectWorktreeDir: null,
   sessionFile: {
     /**
      * Codex nests rollouts by local date:
@@ -802,6 +809,7 @@ const copilot: AgentDescriptor = {
   displayName: "GitHub Copilot CLI",
   binName: "copilot",
   dirName: base64DirNameCodec(COPILOT_DIR_PREFIX),
+  projectWorktreeDir: null,
   sessionFile: {
     /** Copilot keeps one directory per session: `<uuid>/events.jsonl`. */
     name: (sessionId) => `${sessionId}/events.jsonl`,

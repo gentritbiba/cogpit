@@ -48,6 +48,8 @@ export interface CliSourceFile {
   path: string
   name: string
   cli: ConfigCli[]
+  /** Files that take this one's place: the CLI reads it only when none of them exist. */
+  supersededBy?: string[]
 }
 
 export interface ConfigScopeLayout {

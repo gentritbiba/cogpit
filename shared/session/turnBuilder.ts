@@ -676,6 +676,14 @@ export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
       continue
     }
 
+    // A local slash command's answer follows the user record that typed it,
+    // so it belongs to that turn. It never opens one: turn boundaries are
+    // user and assistant records only (see `findTurnStartIndices`).
+    if (isSystemMessage(msg) && msg.subtype === "local_command" && msg.content) {
+      current?.contentBlocks.push({ kind: "local_command", content: msg.content, timestamp: msg.timestamp })
+      continue
+    }
+
     // Claude Code records messages submitted during an active turn as
     // queue-operation/enqueue entries instead of normal user messages. Keep
     // those prompts inline at their chronological position so they remain

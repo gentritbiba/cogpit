@@ -2,20 +2,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AGENT_KINDS, agentKindForDirName, descriptorFor } from "../../../shared/session/agent-descriptors"
 
-const { start, recordSessionParent } = vi.hoisted(() => ({ start: vi.fn(), recordSessionParent: vi.fn() }))
+const { start, recordSessionOrigin } = vi.hoisted(() => ({ start: vi.fn(), recordSessionOrigin: vi.fn() }))
 vi.mock("../../agents/runtimes", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
   runtimeFor: () => ({ descriptor: { displayName: "Test agent" }, start }),
 }))
-vi.mock("../../lib/sessionLineage", () => ({ recordSessionParent }))
+vi.mock("../../lib/sessionOrigins", () => ({ recordSessionOrigin }))
 
-import { createSession } from "../../routes/session-new/sessionSpawner"
+import { createSession } from "../../lib/sessionCreate"
 
 const defaultKind = agentKindForDirName(undefined)
 const otherKind = AGENT_KINDS.find((kind) => kind !== defaultKind)!
 
 beforeEach(() => {
-  recordSessionParent.mockReset()
+  recordSessionOrigin.mockReset()
   start.mockReset().mockImplementation(async (req: { dirName: string }) => ({
     sessionId: "child-1",
     dirName: req.dirName,
@@ -43,10 +43,10 @@ describe("createSession", () => {
 
   it("records the parent, and only when one is given", async () => {
     await createSession({ cwd: "/work/my-app", message: "hi", parentSessionId: "parent-1" })
-    expect(recordSessionParent).toHaveBeenCalledWith("child-1", "parent-1")
+    expect(recordSessionOrigin).toHaveBeenCalledWith("child-1", { parentSessionId: "parent-1" })
 
     await createSession({ cwd: "/work/my-app", message: "hi" })
-    expect(recordSessionParent).toHaveBeenCalledTimes(1)
+    expect(recordSessionOrigin).toHaveBeenCalledTimes(1)
   })
 
   it("refuses a request with neither a project nor an absolute cwd", async () => {

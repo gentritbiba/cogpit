@@ -187,15 +187,19 @@ describe("BUILTIN_SKILLS", () => {
 
   it("offers current headless commands and the workflow reference", () => {
     const names = BUILTIN_SKILLS.map((s) => s.name)
-    for (const name of ["advisor", "reload-plugins", "reload-skills", "skill-doctor", "workflow-authoring", "output-style"]) {
+    for (const name of [
+      "advisor", "reload-plugins", "reload-skills", "skill-doctor", "workflow-authoring", "output-style",
+      "usage", "context", "recap", "rename", "goal", "autocompact", "mcp", "doctor",
+    ]) {
       expect(names).toContain(name)
     }
   })
 
-  it("leaves out commands whose UX is bound to the terminal", () => {
+  it("leaves out commands that do nothing outside the terminal", () => {
     const names = BUILTIN_SKILLS.map((s) => s.name)
-    expect(names).not.toContain("doctor")
-    expect(names).not.toContain("color")
+    for (const name of ["color", "focus", "fast", "rate-limit-options"]) {
+      expect(names).not.toContain(name)
+    }
   })
 })
 

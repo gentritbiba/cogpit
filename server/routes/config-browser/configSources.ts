@@ -57,18 +57,20 @@ function filesFor(
   scope: AgentConfigScope,
   scopeRoot: string,
 ): CliSourceFile[] {
-  return orderedDescriptors().flatMap((descriptor) =>
-    pick(descriptor.config)
-      .filter((file) => file.scopes.includes(scope))
-      .map((file) => ({
-        path: join(
-          file.in === "scope" ? scopeRoot : configRoot(descriptor, scope, scopeRoot),
-          file.path,
-        ),
-        name: file.label ?? file.path,
-        cli: [descriptor.kind as ConfigCli],
-      })),
-  )
+  return orderedDescriptors().flatMap((descriptor) => {
+    const files = pick(descriptor.config).filter((file) => file.scopes.includes(scope))
+    const pathOf = (file: AgentConfigFile) => join(
+      file.in === "scope" ? scopeRoot : configRoot(descriptor, scope, scopeRoot),
+      file.path,
+    )
+    const primaries = files.filter((file) => !file.fallback).map(pathOf)
+    return files.map((file) => ({
+      path: pathOf(file),
+      name: file.label ?? file.path,
+      cli: [descriptor.kind as ConfigCli],
+      ...(file.fallback ? { supersededBy: primaries } : {}),
+    }))
+  })
 }
 
 function dirsFor(

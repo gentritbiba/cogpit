@@ -60,8 +60,6 @@ interface MobileSelectControlProps {
   value: string
   options: ReadonlyArray<{ value: string; label: string; menuLabel?: string }>
   onChange: (value: string) => void
-  disabled?: boolean
-  title?: string
 }
 
 function MobileSelectControl({
@@ -70,8 +68,6 @@ function MobileSelectControl({
   value,
   options,
   onChange,
-  disabled,
-  title,
 }: MobileSelectControlProps) {
   return (
     <MobileControl label={label}>
@@ -81,11 +77,9 @@ function MobileSelectControl({
         onValueChange={(nextValue) => {
           if (nextValue !== null) onChange(nextValue)
         }}
-        disabled={disabled}
       >
         <SelectTrigger
           aria-label={ariaLabel}
-          title={title}
           className="h-10 w-full"
         >
           <SelectValue />
@@ -115,7 +109,6 @@ interface MobileModelControlsProps {
   selectedEffort: string
   onEffortChange: (effort: string) => void
   effortOptions: readonly SettingOption[]
-  ultracodeEnabled?: boolean
   fastTier?: CommonSettingsControlProps["fastTier"]
   fastModeEnabled?: boolean
   onFastModeEnabledChange?: (enabled: boolean) => void
@@ -136,7 +129,6 @@ function MobileModelControls({
   selectedEffort,
   onEffortChange,
   effortOptions,
-  ultracodeEnabled,
   fastTier,
   fastModeEnabled,
   onFastModeEnabledChange,
@@ -181,8 +173,6 @@ function MobileModelControls({
             value={selectedEffort}
             options={effortOptions}
             onChange={onEffortChange}
-            disabled={ultracodeEnabled}
-            title={ultracodeEnabled ? "Effort is pinned to XHigh while Ultracode is on" : undefined}
           />
         )}
 
@@ -454,7 +444,6 @@ export function MobileChatInputSettings({
               selectedEffort={selectedEffort}
               onEffortChange={onEffortChange}
               effortOptions={effortOptions}
-              ultracodeEnabled={ultracodeEnabled}
               fastTier={fastTier}
               fastModeEnabled={fastModeEnabled}
               onFastModeEnabledChange={onFastModeEnabledChange}

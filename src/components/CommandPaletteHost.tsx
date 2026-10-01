@@ -10,6 +10,7 @@ import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
+import { nestWorktreeProjects } from "@/lib/projectWorktrees"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
@@ -68,6 +69,8 @@ export function CommandPaletteHost({
     return () => controller.abort()
   }, [open])
 
+  const repositories = useMemo(() => nestWorktreeProjects(projects), [projects])
+
   const terminalCwd = useMemo(() => {
     if (projectCwd) return projectCwd
     if (!currentProjectDirName) return null
@@ -119,7 +122,7 @@ export function CommandPaletteHost({
     <CommandPalette
       {...paletteProps}
       open={open}
-      projects={projects}
+      projects={repositories}
       recentSessions={recentSessions}
       loadingNavigation={loadingNavigation}
       onOpenIntegratedTerminal={

@@ -1,9 +1,9 @@
 /**
  * Wire contract for GET /api/agent-prompts — the out-of-band prompts a live
- * Claude session is blocked on that are NOT tool calls: MCP elicitations
- * (`onElicitation`) and CLI user dialogs (`onUserDialog`). Browser-safe.
+ * session is blocked on that are NOT tool calls: MCP elicitations and CLI user
+ * dialogs. Browser-safe.
  *
- * Both are answered through a callback the CLI is parked on, so neither ever
+ * Both are answered through a request the agent is parked on, so neither ever
  * reaches a transcript. The in-memory resolver map is the only source: being
  * listed here means the prompt can still be answered.
  */
@@ -31,7 +31,7 @@ export interface MissionControlElicitationField {
 /** An MCP elicitation blocking a session. */
 export interface MissionControlElicitation {
   sessionId: string
-  /** The control_request id — the only thing that can answer it. */
+  /** The id of the request the agent is parked on — the only thing that can answer it. */
   requestId: string
   serverName: string
   message: string

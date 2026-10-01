@@ -119,6 +119,8 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     "/api/session-result",
     "/api/session-respond",
     "/api/session-children",
+    "/api/session-send",
+    "/api/session-requests",
     "/api/session-cli",
   ),
   // Guest login is public because it is where a guest whose token expired gets
@@ -141,6 +143,8 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/worktrees", methods: ["GET"], requires: "authed" },
     { prefix: "/api/worktrees", requires: "admin" },
   ],
+  // Imports write repositories onto this machine and exports read any of them.
+  workspaces: admin("/api/workspaces"),
   usage: admin("/api/usage"),
   // The rate table is public LiteLLM data; the summary reads machine-wide
   // transcript directories, which is a host capability.

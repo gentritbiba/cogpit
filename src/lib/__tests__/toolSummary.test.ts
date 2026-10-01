@@ -163,6 +163,8 @@ describe("getToolSummary — schema-driven payloads", () => {
   })
 
   it("Artifact: stays empty when nothing in the payload reads as a gist", () => {
+    expect(summarize("Artifact", { action: "upload_asset", url: "https://claude.ai/artifact/demo", file_paths: ["/tmp/a.png", "/tmp/b.png"] })).toBe("upload_asset · 2 files")
+    expect(summarize("Artifact", { action: "pin", url: "https://claude.ai/artifact/demo" })).toBe("pin · https://claude.ai/artifact/demo")
     expect(summarize("Artifact", { version: 3 })).toBe("")
   })
 })

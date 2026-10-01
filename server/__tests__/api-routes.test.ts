@@ -42,6 +42,7 @@ const CANONICAL_ROUTE_IDS = [
   "share-guest",
   "editor",
   "worktrees",
+  "workspaces",
   "usage",
   "usage-cost",
   "slash-suggestions",

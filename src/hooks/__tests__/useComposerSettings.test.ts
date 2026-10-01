@@ -107,7 +107,7 @@ describe("useComposerSettings", () => {
     expect(result.current.contextWindowAvailable).toBe(false)
   })
 
-  it("derives provider capabilities and pins ultracode to xhigh", () => {
+  it("derives provider capabilities and keeps the chosen effort under ultracode", () => {
     const { result } = renderSettings({ agentKind: "claude", session: makeSession() })
 
     expect(result.current.selectedModel).toBe("")
@@ -118,7 +118,7 @@ describe("useComposerSettings", () => {
 
     act(() => result.current.setUltracodeEnabled(true))
     expect(result.current.ultracodeActive).toBe(true)
-    expect(result.current.effectiveEffort).toBe("xhigh")
+    expect(result.current.effectiveEffort).toBe("high")
   })
 
   it("turns ultracode off when another session is opened", async () => {

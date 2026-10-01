@@ -83,6 +83,12 @@ vi.mock("../../agents/pendingInput", () => ({
   listPendingInput: mockListPendingInput,
 }))
 
+// Which machine answers is the host layer's concern; these cases are all local.
+vi.mock("../../sessionHosts", async () => {
+  const { readSessionState } = await import("../../lib/sessionWait")
+  return { SESSION_SCOPE_HEADER: "x-cogpit-session-scope", hostForSession: async () => ({ state: readSessionState }) }
+})
+
 import type { UseFn, Middleware } from "../../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerSessionStatusRoutes } from "../../routes/session-status"
@@ -104,7 +110,7 @@ async function request(method: string, url: string) {
     end: (data?: string) => { body = data ?? "" },
   })
   const next = vi.fn()
-  await buildHandler()(asIncomingMessage({ method, url }), res, next)
+  await buildHandler()(asIncomingMessage({ method, url, headers: {} }), res, next)
   return { res, next, json: () => JSON.parse(body) }
 }
 

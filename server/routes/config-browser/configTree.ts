@@ -187,6 +187,11 @@ export async function scanDir(
 
 // ── Section builders ───────────────────────────────────────────────────
 
+async function anyExists(paths: string[]): Promise<boolean> {
+  const found = await Promise.all(paths.map((path) => stat(path).then(() => true, () => false)))
+  return found.includes(true)
+}
+
 /** Build a tree item for a single known config file, following a symlink to it. */
 async function buildFileItem(
   source: CliSourceFile,
@@ -198,6 +203,7 @@ async function buildFileItem(
   } catch {
     return null
   }
+  if (source.supersededBy && await anyExists(source.supersededBy)) return null
 
   let linkTarget: string | undefined
   if (info.isSymbolicLink()) {

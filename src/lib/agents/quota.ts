@@ -141,6 +141,23 @@ function codexBucket(
   )
 }
 
+/** Plan ids as Codex 0.158+ names them; an id missing here is shown as it is. */
+const CODEX_PLAN_NAMES: Record<string, string> = {
+  free: "Free",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro (More)",
+  prolite: "Pro",
+  promax: "Pro (Max)",
+  team: "Team",
+  business: "Business",
+  ent26: "Enterprise",
+  enterprise: "Enterprise",
+  edu: "Edu",
+  edu_plus: "Edu Plus",
+  edu_pro: "Edu Pro",
+}
+
 /** Map the app-server runtime response into the shared header UI. */
 export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageData | null {
   if (data.available !== true) return null
@@ -156,11 +173,13 @@ export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageDat
       ? Number(lifetime)
       : undefined)
 
+  const planType = str(snapshot?.planType) ?? str(account?.planType)
+
   if (!primary && !secondary && lifetimeTokens === undefined) return null
   return {
     fiveHour: primary,
     sevenDay: secondary,
-    subscriptionType: str(snapshot?.planType) ?? str(account?.planType),
+    subscriptionType: planType ? CODEX_PLAN_NAMES[planType] ?? planType : undefined,
     lifetimeTokens,
     creditBalance: str(credits?.balance),
     creditsUnlimited: credits?.unlimited === true,

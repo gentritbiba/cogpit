@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises"
 import { dirs, join, mkdir, readFile } from "../helpers"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 
@@ -10,6 +11,15 @@ interface StoreState {
   snapshot(): unknown
 }
 
+/** Undefined for a missing or corrupt file, which a store treats as empty. */
+async function parseFile(path: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, "utf-8")) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * A server-wide JSON record in the session-config directory, such as the
  * archive list or session lineage. Loaded once per directory — a data-root
@@ -20,10 +30,18 @@ export class SessionConfigFile {
   private activePath: string | null = null
   private loading: Promise<void> | null = null
   private writeChain: Promise<void> = Promise.resolve()
+  /** A legacy file whose entries are in memory but not yet known to be on disk under the current name. */
+  private legacyToRemove: string | null = null
 
+  /**
+   * `legacyFileName` is the name this record was stored under before a rename.
+   * Its entries are folded in once, under the current file's, and it is then
+   * removed.
+   */
   constructor(
     private readonly fileName: string,
     private readonly state: StoreState,
+    private readonly legacyFileName?: string,
   ) {}
 
   private currentPath(): string {
@@ -37,16 +55,26 @@ export class SessionConfigFile {
       return
     }
     this.activePath = path
+    this.legacyToRemove = null
     this.state.reset()
-    this.loading = readFile(path, "utf-8")
-      .then((raw) => this.state.apply(JSON.parse(raw)))
-      .catch(() => {
-        // Missing or corrupt file — start empty.
-      })
-      .finally(() => {
-        this.loading = null
-      })
+    this.loading = this.read(path).finally(() => {
+      this.loading = null
+    })
     await this.loading
+  }
+
+  private async read(path: string): Promise<void> {
+    const legacyPath = this.legacyFileName && join(dirs.SESSION_CONFIG_DIR, this.legacyFileName)
+    const legacy = legacyPath ? await parseFile(legacyPath) : undefined
+    if (legacy !== undefined) this.state.apply(legacy)
+    const current = await parseFile(path)
+    if (current !== undefined) this.state.apply(current)
+    if (legacyPath && legacy !== undefined) {
+      // Removed by the first write that lands, this one or a later one; until
+      // then the legacy file is the only durable copy of its entries.
+      this.legacyToRemove = legacyPath
+      await this.persist().catch(() => undefined)
+    }
   }
 
   persist(): Promise<void> {
@@ -55,6 +83,12 @@ export class SessionConfigFile {
     const write = this.writeChain.then(async () => {
       await mkdir(dirs.SESSION_CONFIG_DIR, { recursive: true })
       await writeOwnerOnlyJson(path, snapshot)
+      const legacy = this.legacyToRemove
+      if (legacy) {
+        await rm(legacy, { force: true }).then(() => {
+          if (this.legacyToRemove === legacy) this.legacyToRemove = null
+        }, () => undefined)
+      }
     })
     // A failed write must not poison later writes; each caller sees its own error.
     this.writeChain = write.catch(() => {})
@@ -65,6 +99,7 @@ export class SessionConfigFile {
     this.activePath = null
     this.loading = null
     this.writeChain = Promise.resolve()
+    this.legacyToRemove = null
     this.state.reset()
   }
 }
