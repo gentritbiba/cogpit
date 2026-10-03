@@ -20,6 +20,7 @@ import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { binDir, shimPath } from "../../browser/paths"
 import { ensureShim, findRealAgentBrowser, findVisibleBrowser, renderShim, SHIM_VERSION } from "../../browser/shim"
+import { logged, runAtOnce, SLOW_START_BINARY, stopFakeDaemon } from "./singleFlightFixture"
 
 const FAKE_BINARY = [
   "#!/usr/bin/env bash",
@@ -28,6 +29,7 @@ const FAKE_BINARY = [
   'echo "ARGS=${AGENT_BROWSER_ARGS:-}"',
   'echo "HEADED=${AGENT_BROWSER_HEADED:-}"',
   'echo "EXECUTABLE=${AGENT_BROWSER_EXECUTABLE_PATH:-}"',
+  'echo "NAME=${AGENT_BROWSER_SESSION:-}"',
   "printf '[%s]' \"$@\"",
   "",
 ].join("\n")
@@ -64,6 +66,8 @@ interface ShimRun {
   args: string
   headed: string
   executable: string
+  /** AGENT_BROWSER_SESSION as the real binary sees it. */
+  name: string
   argv: string
 }
 
@@ -75,13 +79,14 @@ function spawnShim(file: string, args: string[], extraEnv: Record<string, string
 function runShim(args: string[], extraEnv: Record<string, string> = {}, file = shimFile): ShimRun {
   const result = spawnShim(file, args, extraEnv)
   if (result.status !== 0) throw new Error(`shim exited ${result.status}: ${result.stderr}`)
-  const [sessionDir, profile, argLine, headed, executable, argv = ""] = result.stdout.split("\n")
+  const [sessionDir, profile, argLine, headed, executable, name, argv = ""] = result.stdout.split("\n")
   return {
     sessionDir: sessionDir.replace(/^SESSION_DIR=/, ""),
     profile: profile.replace(/^PROFILE=/, ""),
     args: argLine.replace(/^ARGS=/, ""),
     headed: headed.replace(/^HEADED=/, ""),
     executable: executable.replace(/^EXECUTABLE=/, ""),
+    name: name.replace(/^NAME=/, ""),
     argv,
   }
 }
@@ -113,9 +118,17 @@ describe.skipIf(process.platform === "win32")("shim routing", () => {
     expect(readFileSync(join(profile, ".driver"), "utf8")).toBe("s1\n")
   })
 
-  it("writes an empty .driver when no Cogpit session drives it", () => {
-    runShim([])
+  it("writes an empty .driver for an agent that serves no one session", () => {
+    runShim([], { COGPIT_SESSION_ID: "" })
     expect(readFileSync(join(home, "profiles", "default", ".driver"), "utf8")).toBe("\n")
+  })
+
+  it("keeps the last driver when Cogpit itself opens or closes the browser", () => {
+    runShim([])
+    expect(existsSync(join(home, "profiles", "default", ".driver"))).toBe(false)
+    runShim([], { COGPIT_SESSION_ID: "s1" })
+    runShim([])
+    expect(readFileSync(join(home, "profiles", "default", ".driver"), "utf8")).toBe("s1\n")
   })
 
   it("routes --session <name> into that profile and passes arguments through", () => {
@@ -215,6 +228,122 @@ describe.skipIf(process.platform === "win32")("shim routing", () => {
   it("preserves arguments with spaces and quotes", () => {
     const run = runShim(["fill", "@e1", "hello world", 'say "hi"', "it's"])
     expect(run.argv).toBe('[fill][@e1][hello world][say "hi"][it\'s]')
+  })
+})
+
+describe.skipIf(process.platform === "win32")("starting a browser's daemon", () => {
+  let flightShim = ""
+  let log = ""
+
+  beforeEach(() => {
+    const slow = join(fakeBinDir, "slow-start")
+    writeFileSync(slow, SLOW_START_BINARY, { mode: 0o755 })
+    flightShim = join(root, "flight-shim.sh")
+    writeFileSync(flightShim, renderShim(slow), { mode: 0o755 })
+    log = join(root, "flight.log")
+    writeFileSync(log, "")
+  })
+
+  function flightEnv(name: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return { HOME: root, PATH: process.env.PATH ?? "", COGPIT_BROWSER_HOME: home, FLIGHT_LOG: log, FLIGHT_NAME: name, ...extra }
+  }
+
+  it.each([
+    ["a named browser", "work", ["--session", "work", "open", "x"], join("run", "shared")],
+    ["a throwaway", "tmp-1", ["--session", "tmp-1", "open", "x"], join("run", "s1")],
+  ])("starts one daemon for %s however many calls arrive at once", async (_label, name, args, runDir) => {
+    const codes = await runAtOnce("bash", [flightShim, ...args], flightEnv(name, { COGPIT_SESSION_ID: "s1" }), 6)
+    try {
+      expect(codes).toEqual([0, 0, 0, 0, 0, 0])
+      expect(logged(log, "started")).toBe(1)
+      expect(logged(log, "ran")).toBe(6)
+      expect(existsSync(join(home, runDir, `${name}.starting`))).toBe(false)
+    } finally {
+      stopFakeDaemon(join(home, runDir, `${name}.pid`))
+    }
+  })
+
+  it("dates every call to a throwaway, and none to a named browser, for the idle sweep", () => {
+    runShim(["--session", "tmp-1", "snapshot"], { COGPIT_SESSION_ID: "s1" })
+    runShim(["--session", "work", "snapshot"])
+    expect(existsSync(join(home, "run", "s1", "tmp-1.used"))).toBe(true)
+    expect(existsSync(join(home, "run", "shared", "work.used"))).toBe(false)
+  })
+
+  it("breaks a lock whose holder died", () => {
+    const lock = join(home, "run", "shared", "work.starting")
+    mkdirSync(lock, { recursive: true })
+    const dead = spawnSync("bash", ["-c", "echo $$"], { encoding: "utf8" }).stdout.trim()
+    writeFileSync(join(lock, "pid"), `${dead}\n`)
+    try {
+      const result = spawnSync("bash", [flightShim, "--session", "work", "open", "x"], { env: flightEnv("work"), timeout: 10_000 })
+      expect(result.status).toBe(0)
+      expect(logged(log, "started")).toBe(1)
+      expect(existsSync(lock)).toBe(false)
+    } finally {
+      stopFakeDaemon(join(home, "run", "shared", "work.pid"))
+    }
+  })
+})
+
+/** Leave the notes `server/browser/owners.ts` writes: `notes[file]` is the profile it names. */
+function writeNotes(notes: Record<string, string>): void {
+  mkdirSync(join(home, "owners"), { recursive: true })
+  for (const [file, profile] of Object.entries(notes)) writeFileSync(join(home, "owners", file), `${profile}\n`)
+}
+
+describe.skipIf(process.platform === "win32")("shim routing of an owned default", () => {
+  it("opens the session owner's profile as default, under that name everywhere", () => {
+    writeNotes({ s1: "user-u_alice", ".unowned": "user-unassigned" })
+    const run = runShim(["open", "x"], { COGPIT_SESSION_ID: "s1" })
+    const profile = join(home, "profiles", "user-u_alice")
+    expect(run.profile).toBe(profile)
+    expect(run.name).toBe("user-u_alice")
+    expect(run.sessionDir).toBe(join(home, "run", "shared"))
+    expect(run.argv).toBe("[open][x]")
+    expect(readFileSync(join(profile, ".driver"), "utf8")).toBe("s1\n")
+    expect(existsSync(join(home, "profiles", "default"))).toBe(false)
+  })
+
+  it("swaps a default the call spelled, in either form, and leaves the rest alone", () => {
+    writeNotes({ s1: "user-u_alice" })
+    expect(runShim(["--session", "default", "open", "default"], { COGPIT_SESSION_ID: "s1" }).argv)
+      .toBe("[--session][user-u_alice][open][default]")
+    expect(runShim(["--session=default", "snapshot"], { COGPIT_SESSION_ID: "s1" }).argv)
+      .toBe("[--session=user-u_alice][snapshot]")
+    expect(runShim([], { COGPIT_SESSION_ID: "s1", AGENT_BROWSER_SESSION: "default" }).name).toBe("user-u_alice")
+  })
+
+  it("sends an agent no note names to the unowned profile", () => {
+    writeNotes({ ".unowned": "user-unassigned" })
+    expect(runShim([], { COGPIT_SESSION_ID: "s2" }).profile).toBe(join(home, "profiles", "user-unassigned"))
+    // A process serving many sessions passes an id that is not one.
+    expect(runShim([], { COGPIT_SESSION_ID: "" }).profile).toBe(join(home, "profiles", "user-unassigned"))
+  })
+
+  it("leaves Cogpit's own calls, which unset the id, on the host's default", () => {
+    writeNotes({ s1: "user-u_alice", ".unowned": "user-unassigned" })
+    const run = runShim(["--session", "default", "open", "about:blank"])
+    expect(run.profile).toBe(join(home, "profiles", "default"))
+    expect(run.name).toBe("")
+    expect(run.argv).toBe("[--session][default][open][about:blank]")
+  })
+
+  it("keeps the host's default without notes, as personal edition always is", () => {
+    expect(runShim([], { COGPIT_SESSION_ID: "s1" }).profile).toBe(join(home, "profiles", "default"))
+  })
+
+  it("never lets a note send default into a throwaway, itself, or outside the tree", () => {
+    for (const note of ["tmp-x", "default", "../escape", "Upper", ""]) {
+      writeNotes({ s1: note })
+      expect(runShim([], { COGPIT_SESSION_ID: "s1" }).profile, note).toBe(join(home, "profiles", "default"))
+    }
+  })
+
+  it("leaves named and throwaway browsers where they were", () => {
+    writeNotes({ s1: "user-u_alice", ".unowned": "user-unassigned" })
+    expect(runShim(["--session", "github"], { COGPIT_SESSION_ID: "s1" }).profile).toBe(join(home, "profiles", "github"))
+    expect(runShim(["--session", "tmp-1"], { COGPIT_SESSION_ID: "s1" }).sessionDir).toBe(join(home, "run", "s1"))
   })
 })
 

@@ -6,11 +6,10 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile, mkdir } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseConnectionDefinition } from "@cogpit/plugin-contracts"
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
 vi.mock("../../security", () => ({ onSessionRevoked: () => () => {}, isSessionTokenActive: () => true, getSessionPrincipal: () => null }))
 vi.mock("../../routes/hello", () => ({ getInstanceId: () => "legacy-fixture", getAppVersion: () => "2.6.6" }))
 vi.mock("../../agents", () => ({ allStores: () => [] }))
-import * as edition from "../../team/edition"
+import { __resetEditionForTest } from "../../edition"
 import * as security from "../../security"
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { PluginManager } from "../../plugins/manager"
@@ -18,6 +17,7 @@ import type { ConnectionTransport } from "../../plugins/connectionExecutor"
 import type { LegacyHostClassification } from "../../plugins/legacyHost"
 import { registerClickUpRoutes } from "../../routes/clickup"
 import type { Middleware } from "../../http"
+import { useAccountSignIn } from "../edition/fakeEdition"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { createAuthority, createRoot } from "./fixtures/signing"
 import { authorize, client, signedPackage, type SignedPackage } from "./fixtures/storeSigning"
@@ -100,7 +100,7 @@ beforeEach(async () => {
   authority = createAuthority(); transport = vi.fn(async input => response(input.path))
   await start(); await install()
 })
-afterEach(async () => { await manager.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(directory, { recursive: true, force: true }) })
+afterEach(async () => { await manager.close(); vi.unstubAllEnvs(); vi.restoreAllMocks(); __resetEditionForTest(); await rm(directory, { recursive: true, force: true }) })
 
 describe("legacy ClickUp migration and one-way route adapters", () => {
   it("makes an exact backup and stores all pending projects without contacting a provider at startup", async () => {
@@ -168,8 +168,8 @@ describe("legacy ClickUp migration and one-way route adapters", () => {
     expect(transport).not.toHaveBeenCalled()
     expect(await readFile(join(directory, "runtime-plugin-connections", "connections.json"))).toEqual(before)
   })
-  it("leaves team legacy credentials unclaimed until one administrator explicitly imports them", async () => {
-    vi.spyOn(edition, "isTeamEdition").mockReturnValue(true)
+  it("leaves legacy credentials unclaimed where accounts sign in until one administrator explicitly imports them", async () => {
+    useAccountSignIn()
     const principals = new Map(["admin-a", "admin-b"].map(userId => [userId, { userId, username: userId, role: "admin" as const }]))
     vi.spyOn(security, "getSessionPrincipal").mockImplementation(token => principals.get(token) ?? null)
     const admin = (id: string) => {

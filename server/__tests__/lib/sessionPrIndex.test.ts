@@ -160,6 +160,26 @@ describe("getSessionPullRequests", () => {
     expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1, 2])
   })
 
+  it("keeps scanning a long transcript while more sidebars poll other sessions in between than one fills", async () => {
+    const filler = JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "text", text: "x".repeat(1000) }] },
+    })
+    write(
+      ...Array.from({ length: 4600 }, () => filler),
+      create("t1", "gh pr create --fill"),
+      result("t1", "https://github.com/o/r/pull/1"),
+    )
+    const others = Array.from({ length: 250 }, (_, index) => join(dir, `other-${index}.jsonl`))
+    for (const other of others) writeFileSync(other, `${create("t", "ls")}\n`)
+
+    for (let poll = 0; poll < 2; poll += 1) {
+      await getSessionPullRequests(file, size())
+      for (const other of others) await getSessionPullRequests(other, statSync(other).size)
+    }
+    expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1])
+  })
+
   it("handles multi-byte characters split across an append boundary", async () => {
     const title = "Añadir búsqueda — ✅"
     write(create("t1", `gh pr create --title "${title}"`))

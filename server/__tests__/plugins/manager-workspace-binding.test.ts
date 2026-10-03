@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parseFrameMessage, parseManifest, type PluginRequest } from "@cogpit/plugin-contracts"
 
 const inventory = vi.hoisted(() => ({ paths: [] as string[] }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
 vi.mock("../../security", () => ({ onSessionRevoked: () => () => {}, isSessionTokenActive: () => true, getSessionPrincipal: () => null }))
 vi.mock("../../routes/hello", () => ({ getInstanceId: () => "workspace-host", getAppVersion: () => "2.6.6" }))
 vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => inventory.paths.map(path => ({ dirName: "fixture", path, sessionCount: 1, lastModified: null })) }] }))

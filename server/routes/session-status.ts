@@ -1,3 +1,4 @@
+import { authorizeSession } from "../edition"
 import { sendJson, singlePathParam, type UseFn } from "../http"
 import { sendHostError } from "./agentErrors"
 import { hostForSession, SESSION_SCOPE_HEADER } from "../sessionHosts"
@@ -14,9 +15,12 @@ export function registerSessionStatusRoutes(use: UseFn) {
   use("/api/session-status/", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
-    const sessionId = singlePathParam(req)
-    if (!sessionId) return next()
+    const requested = singlePathParam(req)
+    if (!requested) return next()
 
+    const session = await authorizeSession(req, res, { sessionId: requested }, "view")
+    if (session === null) return
+    const { sessionId } = session
     try {
       const host = await hostForSession(sessionId, { localOnly: req.headers[SESSION_SCOPE_HEADER] === "local" })
       const state = await host.state(sessionId)

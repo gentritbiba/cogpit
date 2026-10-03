@@ -3,14 +3,17 @@ import type { Duplex } from "node:stream"
 import { WebSocket } from "ws"
 
 import {
+  editionAdmitsSocket,
   getRequestSessionToken,
   getSessionPrincipal,
   isSessionTokenActive,
   isTrustedDirectLocalRequest,
   onSessionRevoked,
+  socketTransportFor,
   validateSessionToken,
 } from "./security"
-import { isTeamEdition } from "./team/edition"
+import { editionOwnsSignIn, type SocketTransport } from "./edition"
+import { setRequestPrincipal } from "./requestPrincipal"
 
 const AUTHORIZATION_RECHECK_MS = 5_000
 
@@ -26,13 +29,11 @@ export interface AuthorizableSocketManager {
   handleConnection(ws: WebSocket, authorize?: SocketAuthorizer): void
 }
 
-function createPtyAuthorizer(token: string, userAgent?: string): SocketAuthorizer {
+function createPtyAuthorizer(token: string, transport: SocketTransport, userAgent?: string): SocketAuthorizer {
   return (touch) => {
     try {
       if (touch && !validateSessionToken(token, userAgent)) return false
-      return isTeamEdition()
-        ? getSessionPrincipal(token)?.role === "admin"
-        : isSessionTokenActive(token)
+      return editionOwnsSignIn() ? editionAdmitsSocket(token, transport) : isSessionTokenActive(token)
     } catch {
       return false
     }
@@ -44,7 +45,7 @@ function sessionTokenForUpgrade(req: IncomingMessage, url: URL): string | null {
 }
 
 function requestRequiresSession(req: IncomingMessage): boolean {
-  return isTeamEdition() || !isTrustedDirectLocalRequest(req)
+  return editionOwnsSignIn() || !isTrustedDirectLocalRequest(req)
 }
 
 /**
@@ -93,8 +94,13 @@ export class PtyAuthorizationController {
 
     this.ptyTokens.set(ws, token)
     ws.once("close", () => this.ptyTokens.delete(ws))
+    // The upgrade never passed authMiddleware, so whoever the token names is
+    // put on it here, for a manager that checks the caller against what the
+    // socket reaches.
+    const principal = getSessionPrincipal(token)
+    if (principal) setRequestPrincipal(req, principal)
     const browserUserAgent = req.headers.origin ? req.headers["user-agent"] : undefined
-    manager.handleConnection(ws, createPtyAuthorizer(token, browserUserAgent))
+    manager.handleConnection(ws, createPtyAuthorizer(token, socketTransportFor(url.pathname), browserUserAgent))
   }
 
   /** Track a hub upgrade after its initial trust check has accepted the socket. */
@@ -104,7 +110,7 @@ export class PtyAuthorizationController {
     if (!token) return
 
     const browserUserAgent = req.headers.origin ? req.headers["user-agent"] : undefined
-    const authorize = createPtyAuthorizer(token, browserUserAgent)
+    const authorize = createPtyAuthorizer(token, socketTransportFor(url.pathname), browserUserAgent)
     const timer = setInterval(() => {
       if (!authorize(false)) socket.destroy()
     }, AUTHORIZATION_RECHECK_MS)

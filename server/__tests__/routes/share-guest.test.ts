@@ -104,6 +104,8 @@ const MOUNTS = [
 const GET_MOUNTS = new Set<string>(["/api/share/session", "/api/share/pending"])
 
 let registryRoot: string
+/** The folder the shared session runs in, which a resume needs to exist. */
+let projectDir: string
 
 function handlers(): Map<string, Middleware> {
   const collected = new Map<string, Middleware>()
@@ -192,6 +194,7 @@ beforeEach(async () => {
   mocks.persistentSessions.clear()
   mocks.activeProcesses.clear()
   registryRoot = await mkdtemp(join(tmpdir(), "cogpit-share-guest-"))
+  projectDir = await mkdtemp(join(tmpdir(), "cogpit-share-guest-project-"))
   await initShareRegistry(registryRoot)
   __resetShareTokensForTest()
   await createShare({ sessionId: SESSION_A, dirName: DIR_NAME, fileName: FILE_NAME })
@@ -199,7 +202,7 @@ beforeEach(async () => {
   mocks.resolveSessionFilePath.mockResolvedValue(FILE_PATH)
   mocks.getSessionMeta.mockResolvedValue({
     aiTitle: "Fixing the parser",
-    cwd: "/Users/me/proj",
+    cwd: projectDir,
   })
   mocks.getActiveTurnId.mockReturnValue(undefined)
   mocks.sendSDKMessage.mockReturnValue({ running: true })
@@ -213,6 +216,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(registryRoot, { recursive: true, force: true })
+  await rm(projectDir, { recursive: true, force: true })
 })
 
 describe("guest authentication", () => {
@@ -285,7 +289,7 @@ describe("GET /api/share/session", () => {
     const result = await call("/api/share/session")
 
     const raw = result.raw()
-    expect(raw).not.toContain("/Users/me/proj")
+    expect(raw).not.toContain(projectDir)
     expect(raw).not.toContain(FILE_PATH)
     expect(result.json()).not.toHaveProperty("cwd")
     expect(result.json()).not.toHaveProperty("filePath")
@@ -448,7 +452,7 @@ describe("what a guest may not smuggle into a delegated call", () => {
     const resumed = mocks.resumeSDKSession.mock.calls[0][0] as Record<string, unknown>
     expect(resumed.sessionId).toBe(SESSION_A)
     // The cwd comes from the session's own transcript metadata.
-    expect(resumed.cwd).toBe("/Users/me/proj")
+    expect(resumed.cwd).toBe(projectDir)
     expect(resumed.mcpConfig).toBeUndefined()
     expect(resumed.permissionMode).toBeUndefined()
   })

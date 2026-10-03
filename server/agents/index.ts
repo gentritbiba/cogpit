@@ -6,7 +6,7 @@ import {
 import { claudeStore } from "./claudeStore"
 import { codexStore } from "./codexStore"
 import { copilotStore } from "./copilotStore"
-import type { AgentStore } from "./types"
+import type { AgentStore, TopLevelSessionInfo } from "./types"
 
 /**
  * The server-side agent registry: one `AgentStore` per CLI, plus the resolvers
@@ -31,6 +31,12 @@ export interface StoreRegistry {
   storeForPath(filePath: string | null | undefined): AgentStore | null
   storeForDirName(dirName: string | null | undefined): AgentStore
   allStores(): readonly AgentStore[]
+  allTopLevelSessions(options?: TopLevelSessionsOptions): Promise<TopLevelSessionInfo[]>
+}
+
+export interface TopLevelSessionsOptions {
+  /** Leave out a store that cannot read its sessions instead of failing. */
+  skipUnreadable?: boolean
 }
 
 /**
@@ -40,6 +46,7 @@ export interface StoreRegistry {
 export function createStoreRegistry(
   stores: Readonly<Record<AgentKind, AgentStore>>,
 ): StoreRegistry {
+  const allStores = () => AGENT_KINDS.map((kind) => stores[kind])
   return {
     storeFor: (kind) => stores[kind],
     storeForPath(filePath) {
@@ -50,7 +57,14 @@ export function createStoreRegistry(
       return null
     },
     storeForDirName: (dirName) => stores[descriptorForDirName(dirName).kind],
-    allStores: () => AGENT_KINDS.map((kind) => stores[kind]),
+    allStores,
+    async allTopLevelSessions({ skipUnreadable = false } = {}) {
+      const listings = await Promise.all(allStores().map((store) => {
+        const listing = store.listTopLevelSessions()
+        return skipUnreadable ? listing.catch(() => []) : listing
+      }))
+      return listings.flat().sort((a, b) => b.mtimeMs - a.mtimeMs)
+    },
   }
 }
 
@@ -73,4 +87,12 @@ export function storeForDirName(dirName: string | null | undefined): AgentStore 
 /** Every store, in agent-detection order. */
 export function allStores(): readonly AgentStore[] {
   return registry.allStores()
+}
+
+/**
+ * Every store's top-level sessions, newest first. Fails when a store cannot
+ * read them, unless `skipUnreadable` leaves that store out.
+ */
+export function allTopLevelSessions(options?: TopLevelSessionsOptions): Promise<TopLevelSessionInfo[]> {
+  return registry.allTopLevelSessions(options)
 }

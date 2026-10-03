@@ -12,7 +12,7 @@
 
 import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import { authFetch } from "@/lib/auth"
+import { authFetch, type AuthFetchInit } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
@@ -32,15 +32,20 @@ export interface LoadedSessionTail {
   hasMore: boolean
 }
 
+/** Whether the user asked for a load; a hover prefetch did not. */
+export type TailLoadOptions = Pick<AuthFetchInit, "background">
+
 /** Fetch the tail of a session file and parse it via worker. Uses the ?tail=30 endpoint. */
 export async function fetchTailAndParse(
   dirName: string,
   fileName: string,
   workerParse: (text: string) => Promise<ParsedSession>,
   errorLabel: string,
+  { background = false }: TailLoadOptions = {},
 ): Promise<LoadedSessionTail> {
   const res = await authFetch(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`
+    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`,
+    { background },
   )
   if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
   const data: TailResponse = await res.json()
@@ -77,6 +82,7 @@ export async function loadSessionTailCached(
   fileName: string,
   workerParse: (text: string) => Promise<ParsedSession>,
   errorLabel: string,
+  options: TailLoadOptions = {},
 ): Promise<{ parsed: ParsedSession; source: SessionSource }> {
   const cached = sessionCache.get(dirName, fileName)
   if (cached) {
@@ -89,6 +95,7 @@ export async function loadSessionTailCached(
     fileName,
     workerParse,
     errorLabel,
+    options,
   )
   // The old App subtree may finish after a login/logout remount. Never read a
   // raced entry from, or write this response into, the newly active identity.

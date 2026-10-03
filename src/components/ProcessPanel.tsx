@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "react"
 import { stripAnsi } from "@/lib/ansi"
-import { authUrl } from "@/lib/auth"
+import { openSessionStream } from "@/lib/sessionStream"
 import { ChevronDown, ChevronRight, Plus, TerminalSquare, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,17 +33,13 @@ function ProcessOutput({
   const outputRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
-    let url: string
-    if (process.type === "task" && process.outputPath) {
-      url = authUrl(`/api/task-output?path=${encodeURIComponent(process.outputPath)}`)
-    } else {
-      return
-    }
+    if (process.type !== "task" || !process.outputPath) return
 
     setOutput("")
     setConnected(false)
 
-    const es = new EventSource(url)
+    const stream = openSessionStream(`/api/task-output?path=${encodeURIComponent(process.outputPath)}`)
+    const es = stream.source
 
     es.onopen = () => setConnected(true)
 
@@ -64,11 +60,7 @@ function ProcessOutput({
       }
     }
 
-    es.onerror = () => {
-      // EventSource will auto-reconnect
-    }
-
-    return () => es.close()
+    return stream.close
   }, [process.id, process.type, process.outputPath])
 
   // Auto-scroll

@@ -297,7 +297,7 @@ describe("persistence", () => {
         markFirstWriteStarted()
         await firstWriteReleased
       }
-      await atomicWrite.original!(...args)
+      return atomicWrite.original!(...args)
     }
 
     const firstAdd = addDevice({

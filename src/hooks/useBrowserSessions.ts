@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { withBase } from "@/lib/device"
 import { readError, readJson } from "@/lib/httpJson"
-import type { BrowserSkillStatus, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
+import type { BrowserSessionInfo, BrowserSkillStatus, BrowserSkillTarget, BrowserStatus } from "../../shared/browser/types"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 
 /**
@@ -32,6 +32,8 @@ export interface UseBrowserSessions {
   status: BrowserStatus | null
   /** Last status-refresh failure, cleared by the next successful poll. */
   error: string | null
+  /** Reads the list now instead of at the next poll. */
+  refresh: () => Promise<void>
   create: (name: string, note?: string) => Promise<BrowserActionResult>
   remove: (name: string) => Promise<BrowserActionResult>
   stop: (name: string) => Promise<BrowserActionResult>
@@ -130,11 +132,23 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
     return result.ok ? { ok: true } : result
   }, [mutate])
 
-  const create = useCallback((name: string, note?: string) => perform(
-    `${BROWSER_API}/sessions`,
-    { method: "POST", ...jsonBody({ name, note }) },
-    `Could not create ${name}`,
-  ), [perform])
+  const create = useCallback(async (name: string, note?: string): Promise<BrowserActionResult> => {
+    const result = await mutate(
+      `${BROWSER_API}/sessions`,
+      { method: "POST", ...jsonBody({ name, note }) },
+      `Could not create ${name}`,
+    )
+    if (!result.ok) return result
+    // The panel shows only what the list holds, so the new browser joins it
+    // now rather than at the refresh, and switching to it sticks.
+    const created = result.data as BrowserSessionInfo | null
+    if (created?.name === name) {
+      setStatus((current) => current && !current.sessions.some((session) => session.name === name)
+        ? { ...current, sessions: [...current.sessions, created] }
+        : current)
+    }
+    return { ok: true }
+  }, [mutate])
 
   const remove = useCallback((name: string) => perform(
     sessionPath(name),
@@ -186,6 +200,7 @@ export function useBrowserSessions(enabled: boolean): UseBrowserSessions {
   return {
     status,
     error,
+    refresh,
     create,
     remove,
     stop,

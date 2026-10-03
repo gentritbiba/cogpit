@@ -23,6 +23,7 @@ import { deviceScopedKey } from "@/lib/device"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
+import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import { useMissionControl } from "@/hooks/useMissionControl"
@@ -82,6 +83,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const [goneQuestions, setGoneQuestions] = useState<Set<string>>(new Set())
   const { names: sessionNames } = useSessionNames()
   const { names: projectNames } = useProjectNames()
+  const permissionsOf = useListedPermissions()
   const [filter, setFilter] = useState<MissionFilter>("all")
   const [layout, setLayout] = useLocalStorage<Layout>(
     deviceScopedKey("mission-control-layout"),
@@ -99,10 +101,11 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
       dialogsBySession,
       awaitingPlan,
       newlyCompleted,
+      canAnswer: (session) => permissionsOf(session.access).answer,
     }),
     [
       sessions, procBySession, summaries, permissionsBySession, questionsBySession,
-      elicitationsBySession, dialogsBySession, awaitingPlan, newlyCompleted,
+      elicitationsBySession, dialogsBySession, awaitingPlan, newlyCompleted, permissionsOf,
     ],
   )
 

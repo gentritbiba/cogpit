@@ -7,7 +7,6 @@ vi.mock("../../helpers", () => ({
     TEAMS_DIR: "/tmp/test-teams",
     TASKS_DIR: "/tmp/test-tasks",
   },
-  isWithinDir: vi.fn(),
   readdir: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
@@ -16,14 +15,12 @@ vi.mock("../../helpers", () => ({
 }))
 
 import {
-  isWithinDir,
   readdir,
   readFile,
   writeFile,
   watch,
 } from "../../helpers"
 
-const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
@@ -170,20 +167,19 @@ describe("team routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("returns 403 for paths outside TEAMS_DIR", async () => {
+    it("refuses a team name that is not one path segment", async () => {
       const handler = getRouteHandler(handlers, "/api/team-detail/")
-      const { req, res, next } = createMockReqRes("GET", "../../etc")
-      mockedIsWithinDir.mockReturnValueOnce(false)
+      const { req, res, next } = createMockReqRes("GET", "..%2F..%2Fetc")
 
       await handler(req, res, next)
 
-      expect(res._getStatus()).toBe(403)
+      expect(res._getStatus()).toBe(400)
+      expect(mockedReadFile).not.toHaveBeenCalled()
     })
 
     it("returns full team detail with config, tasks, and inboxes", async () => {
       const handler = getRouteHandler(handlers, "/api/team-detail/")
       const { req, res, next } = createMockReqRes("GET", "my-team")
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       // config
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -215,7 +211,6 @@ describe("team routes", () => {
     it("returns 404 when team config not found", async () => {
       const handler = getRouteHandler(handlers, "/api/team-detail/")
       const { req, res, next } = createMockReqRes("GET", "nonexistent")
-      mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
 
       await handler(req, res, next)
@@ -226,7 +221,6 @@ describe("team routes", () => {
     it("returns empty tasks and inboxes when dirs do not exist", async () => {
       const handler = getRouteHandler(handlers, "/api/team-detail/")
       const { req, res, next } = createMockReqRes("GET", "my-team")
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       // config succeeds
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -248,7 +242,6 @@ describe("team routes", () => {
     it("excludes deleted tasks", async () => {
       const handler = getRouteHandler(handlers, "/api/team-detail/")
       const { req, res, next } = createMockReqRes("GET", "my-team")
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({ name: "my-team" }) as unknown as Buffer)
       mockedReaddir.mockResolvedValueOnce(["1.json", "2.json"] as unknown as Dirent[])
@@ -274,25 +267,24 @@ describe("team routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("returns 403 for paths outside TEAMS_DIR", () => {
+    it("refuses a team name that is not one path segment", async () => {
       const handler = getRouteHandler(handlers, "/api/team-watch/")
-      const { req, res, next } = createMockReqRes("GET", "../../etc")
-      mockedIsWithinDir.mockReturnValueOnce(false)
+      const { req, res, next } = createMockReqRes("GET", "..%2F..%2Fetc")
 
-      handler(req, res, next)
+      await handler(req, res, next)
 
-      expect(res._getStatus()).toBe(403)
+      expect(res._getStatus()).toBe(400)
+      expect(mockedWatch).not.toHaveBeenCalled()
     })
 
-    it("sets SSE headers and sends init event", () => {
+    it("sets SSE headers and sends init event", async () => {
       const handler = getRouteHandler(handlers, "/api/team-watch/")
       const { req, res, next } = createMockReqRes("GET", "my-team")
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       const mockWatcher = { on: vi.fn(), close: vi.fn() }
       mockedWatch.mockReturnValue(mockWatcher as unknown as FSWatcher)
 
-      handler(req, res, next)
+      await handler(req, res, next)
 
       expect(res.writeHead).toHaveBeenCalledWith(200, {
         "Content-Type": "text/event-stream",
@@ -302,6 +294,18 @@ describe("team routes", () => {
       expect(res.write).toHaveBeenCalledWith(
         `data: ${JSON.stringify({ type: "init" })}\n\n`
       )
+      expect(mockedReadFile).not.toHaveBeenCalled()
+    })
+
+    it("opens nothing for a caller who went away while access was checked", async () => {
+      const handler = getRouteHandler(handlers, "/api/team-watch/")
+      const { req, res, next } = createMockReqRes("GET", "my-team")
+      Object.assign(res, { destroyed: true })
+
+      await handler(req, res, next)
+
+      expect(res.writeHead).not.toHaveBeenCalled()
+      expect(mockedWatch).not.toHaveBeenCalled()
     })
   })
 
@@ -322,21 +326,23 @@ describe("team routes", () => {
       expect(next).toHaveBeenCalled()
     })
 
-    it("returns 403 for paths outside TEAMS_DIR", () => {
-      const handler = getRouteHandler(handlers, "/api/team-message/")
-      const { req, res, next } = createMockReqRes("POST", "../../etc/member")
-      mockedIsWithinDir.mockReturnValueOnce(false)
+    it.each(["..%2F..%2Fetc/member", "my-team/..%2F..%2Fother%2Finboxes%2Fworker", "my-team/..%5Cother"])(
+      "refuses %s, whose names are not one path segment each",
+      async (path) => {
+        const handler = getRouteHandler(handlers, "/api/team-message/")
+        const { req, res, next } = createMockReqRes("POST", path)
 
-      handler(req, res, next)
+        await handler(req, res, next)
 
-      expect(res._getStatus()).toBe(403)
-    })
+        expect(res._getStatus()).toBe(400)
+        expect(mockedWriteFile).not.toHaveBeenCalled()
+      },
+    )
 
     it("appends message to inbox file", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ message: "hello team" })
       const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       // Existing inbox
       mockedReadFile.mockResolvedValueOnce(JSON.stringify([
@@ -352,14 +358,14 @@ describe("team routes", () => {
       })
       const response = JSON.parse(res._getData())
       expect(response.success).toBe(true)
-      expect(mockedWriteFile).toHaveBeenCalled()
+      const written = JSON.parse(String(mockedWriteFile.mock.calls[0]?.[1]))
+      expect(written.map((entry: { text: string }) => entry.text)).toEqual(["welcome", "hello team"])
     })
 
     it("creates new inbox when file does not exist", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ message: "first message" })
       const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
       mockedWriteFile.mockResolvedValueOnce(undefined)
@@ -378,7 +384,6 @@ describe("team routes", () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const body = JSON.stringify({ notMessage: "oops" })
       const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body })
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       handler(req, res, next)
       sendBody()
@@ -391,7 +396,6 @@ describe("team routes", () => {
     it("returns 400 for invalid JSON body", async () => {
       const handler = getRouteHandler(handlers, "/api/team-message/")
       const { req, res, next, sendBody } = createMockReqRes("POST", "my-team/worker", { body: "not-json{" })
-      mockedIsWithinDir.mockReturnValueOnce(true)
 
       handler(req, res, next)
       sendBody()

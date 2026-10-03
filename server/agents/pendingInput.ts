@@ -1,6 +1,6 @@
 import { getToolSummary } from "../../shared/session/toolSummary"
 import { copilotRuntime } from "./copilotTransport"
-import { allRuntimes } from "./runtimes"
+import { allRuntimes, resolveSessionAgent } from "./runtimes"
 import type { PendingInput, PendingInputResponse } from "../../shared/contracts/pendingInput"
 import { AgentRuntimeError } from "./runtimeTypes"
 
@@ -83,7 +83,16 @@ export async function respondToPendingInput(
       if (!("answers" in response)) throw mismatch(request.kind, "answers")
       for (const runtime of allRuntimes()) {
         if (!runtime.listPendingQuestions(sessionId).some((q) => q.toolUseId === requestId)) continue
-        answered = await runtime.answerQuestion(sessionId, requestId, response.answers)
+        const accepted = await runtime.answerQuestion(sessionId, requestId, response.answers)
+        if (accepted?.message) {
+          // A message may start a turn, so the agent gets it as a send.
+          const { filePath } = await resolveSessionAgent(sessionId)
+          const outcome = await runtime.send(sessionId, { ...accepted.message, filePath })
+          if (outcome.delivery === "busy") {
+            throw new AgentRuntimeError(409, "CONFLICT", "Session is busy; the question is still waiting for an answer")
+          }
+        }
+        answered = accepted !== null
         break
       }
       break

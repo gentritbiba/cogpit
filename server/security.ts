@@ -7,18 +7,8 @@ import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
   type SessionPrincipal,
-} from "./team/constants"
-import { isTeamEdition } from "./team/edition"
-import { setRequestPrincipal } from "./team/requestPrincipal"
-import {
-  clearAllSessions,
-  persistSession,
-  removeSession,
-  removeSessionsForUser,
-  restoreSession,
-  touchSession,
-} from "./team/sessionPersistence"
-import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
+} from "./sessionConstants"
+import { editionModule, editionOwnsSignIn, type PersistentSessionStore, type SocketTransport } from "./edition"
 import { shareRequestAllowed } from "./share/allowlist"
 import { getShareWithHash, touchShare } from "./share/registry"
 import { markShareGuestRequest } from "./share/requestGuest"
@@ -39,9 +29,9 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 const BROWSER_SESSION_COOKIE = "__Host-cogpit_session"
 const SESSION_ACTIVITY_PERSIST_INTERVAL_MS = 60 * 1000
 
-// Defined in ./team/constants so the team modules can share them without
-// importing this file back (security.ts imports them — the reverse edge
-// would be an import cycle). This module stays their public home.
+// Defined in ./sessionConstants so an edition's session modules can share them
+// without importing this file back (security.ts imports them — the reverse
+// edge would be an import cycle). This module stays their public home.
 export { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS }
 export type { SessionPrincipal }
 
@@ -83,7 +73,7 @@ export function isTrustedDirectLocalRequest(req: IncomingMessage): boolean {
   return isLocalRequest(req) && isTrustedLocalHost(req) && !isForwardedRequest(req)
 }
 
-function isUnforwardedUntrustedLoopback(req: IncomingMessage): boolean {
+export function isUnforwardedUntrustedLoopback(req: IncomingMessage): boolean {
   return isLocalRequest(req) && !isForwardedRequest(req) && !isTrustedLocalHost(req)
 }
 
@@ -99,6 +89,11 @@ function hasSameOrigin(req: IncomingMessage): boolean {
   } catch {
     return false
   }
+}
+
+/** A state-changing request whose browser source metadata does not vouch for it. */
+export function isUntrustedMutation(req: IncomingMessage): boolean {
+  return !SAFE_METHODS.has((req.method || "GET").toUpperCase()) && !hasTrustedMutationSource(req)
 }
 
 export function hasTrustedMutationSource(req: IncomingMessage): boolean {
@@ -180,7 +175,7 @@ export function websocketUpgradeRejection(
 ): 401 | 403 | null {
   if (isUnforwardedUntrustedLoopback(req)) return 403
 
-  if (isTeamEdition()) return teamWebsocketUpgradeRejection(req, url)
+  if (editionOwnsSignIn()) return namedUserWebsocketRejection(req, url)
 
   if (isTrustedDirectLocalRequest(req)) {
     if (req.headers.origin && !hasSameOrigin(req)) return 403
@@ -224,12 +219,13 @@ export function rejectWebsocketUpgrade(
 }
 
 /**
- * Team edition: the PTY is admin-only and local trust is off. Browser clients
- * need a same-origin upgrade with a valid session cookie; machine clients keep
- * the ?token= handshake. The networkAccess config gate does not apply — user
- * credentials replace the network password entirely.
+ * An edition that signs accounts in: local trust is off, and the edition
+ * decides who holds a socket. Browser clients need a same-origin upgrade with
+ * a valid session cookie; machine clients keep the ?token= handshake. The
+ * networkAccess config gate does not apply — account credentials replace the
+ * network password entirely.
  */
-function teamWebsocketUpgradeRejection(req: IncomingMessage, url: URL): 401 | 403 | null {
+function namedUserWebsocketRejection(req: IncomingMessage, url: URL): 401 | 403 | null {
   let token: string | null
   if (req.headers.origin) {
     if (!hasSameOrigin(req)) return 403
@@ -239,8 +235,22 @@ function teamWebsocketUpgradeRejection(req: IncomingMessage, url: URL): 401 | 40
     token = url.searchParams.get("token")
     if (!token || !validateSessionToken(token)) return 401
   }
-  // Principal-less legacy tokens fall in here too: not an admin, no PTY.
-  return getSessionPrincipal(token)?.role === "admin" ? null : 403
+  return editionAdmitsSocket(token, socketTransportFor(url.pathname)) ? null : 403
+}
+
+/**
+ * Which transport an upgrade path opens. Only this server's own `/__browser`
+ * is a browser viewer, which checks its caller against the browser it shows;
+ * a hub upgrade reaches a whole device, as the terminal does.
+ */
+export function socketTransportFor(pathname: string): SocketTransport {
+  return pathname === "/__browser" ? "browser" : "terminal"
+}
+
+/** Whether the edition lets the session behind `token` hold a `transport` socket now. Principal-less legacy tokens never do. */
+export function editionAdmitsSocket(token: string, transport: SocketTransport): boolean {
+  const principal = getSessionPrincipal(token)
+  return principal !== null && editionModule().auth?.admitsSocket(principal, transport) === true
 }
 
 export function safeCompare(a: string, b: string): boolean {
@@ -269,12 +279,12 @@ type SessionRevocationListener = (token: string | null) => void
 const sessionRevocationListeners = new Set<SessionRevocationListener>()
 
 function logPersistenceFailure(error: unknown): void {
-  console.error("[team-sessions] Failed to write the persisted session store:", error)
+  console.error("[sessions] Failed to write the persisted session store:", error)
 }
 
 /**
  * A live-process invalidation (idle/absolute expiry, UA mismatch, revocation,
- * sweep) must also drop the persisted row, or the team-edition restore path
+ * sweep) must also drop the persisted row, or the edition's restore path
  * would resurrect the session the next time the token is presented. Only
  * process death skips this — which is exactly what leaves not-yet-expired
  * sessions restorable after a restart.
@@ -327,17 +337,30 @@ export function isAuthenticatedHttpStreamRequest(req: IncomingMessage): boolean 
     || path?.startsWith("/api/workflow-watch/") === true
 }
 
+/** An edition's hold on a stream's session access, kept in step with the token's. */
+export interface HttpStreamAccess {
+  /** Re-check the stream's access now. */
+  recheck(): void
+  unbind(): void
+}
+
+/** Binds a stream's session access; called only for a request that is a stream. */
+export type HttpStreamAccessBinder = () => HttpStreamAccess | null
+
 interface StreamTokenBinding {
   onRevoked: (listener: (revokedToken: string | null) => void) => () => void
   /** Must not refresh idle time — a recheck may not keep its own stream alive. */
   isActive: (token: string) => boolean
+  /** An edition that scopes sessions per user keeps the stream's access in step. */
+  bindAccess?: HttpStreamAccessBinder
 }
 
 /**
  * Bind a long-lived HTTP response to the token that admitted it. Normal
  * responses unregister on finish; SSE responses are destroyed when that token
  * is revoked (logout, disable/demotion/password reset, share turned off,
- * global revocation) or stops being active.
+ * global revocation) or stops being active. With `bindAccess`, a stream also
+ * ends once its caller loses access to the session it serves.
  */
 function trackRevocableHttpStream(
   req: IncomingMessage,
@@ -350,11 +373,13 @@ function trackRevocableHttpStream(
   let cleaned = false
   let timer: ReturnType<typeof setInterval> | null = null
   let unsubscribe = (): void => {}
+  const access = binding.bindAccess?.() ?? null
   const cleanup = (): void => {
     if (cleaned) return
     cleaned = true
     if (timer) clearInterval(timer)
     unsubscribe()
+    access?.unbind()
   }
   const terminate = (): void => {
     cleanup()
@@ -365,26 +390,40 @@ function trackRevocableHttpStream(
   })
   timer = setInterval(() => {
     if (!binding.isActive(token)) terminate()
+    else access?.recheck()
   }, HTTP_STREAM_AUTHORIZATION_RECHECK_MS)
   timer.unref?.()
   res.once("finish", cleanup)
   res.once("close", cleanup)
 }
 
-function trackAuthenticatedHttpStream(
+/** Bind a stream a main session token admitted to that token (see trackRevocableHttpStream). */
+export function trackAuthenticatedHttpStream(
   req: IncomingMessage,
   res: ServerResponse,
   token: string,
+  bindAccess?: HttpStreamAccessBinder,
 ): void {
   trackRevocableHttpStream(req, res, token, {
     onRevoked: onSessionRevoked,
     isActive: isSessionTokenActive,
+    bindAccess,
   })
+}
+
+/** Where an edition keeps login sessions across restarts; personal edition keeps none. */
+function persistentSessions(): PersistentSessionStore | null {
+  return editionModule().auth?.sessions ?? null
+}
+
+/** Resolves once every persisted login change so far is on disk. */
+export function flushPersistentSessions(): Promise<void> {
+  return persistentSessions()?.flush() ?? Promise.resolve()
 }
 
 function discardSession(token: string): Promise<void> {
   if (activeSessions.delete(token)) notifySessionRevoked(token)
-  return isTeamEdition() ? removeSession(token) : Promise.resolve()
+  return persistentSessions()?.remove(token) ?? Promise.resolve()
 }
 
 function discardSessionBestEffort(token: string): void {
@@ -402,8 +441,9 @@ export function createSessionToken(ip: string, userAgent?: string, principal?: S
     persistedActivityAt: now,
     principal,
   })
-  if (principal && isTeamEdition()) {
-    void persistSession(token, principal, now).catch(logPersistenceFailure)
+  const persistent = persistentSessions()
+  if (principal && persistent) {
+    void persistent.persist(token, principal, now).catch(logPersistenceFailure)
   }
   return token
 }
@@ -424,25 +464,25 @@ function getLiveSession(token: string): SessionInfo | null {
 }
 
 /**
- * Rehydrate a persisted team-edition session after a restart. Username and
- * role are re-read from the users store so role changes apply and disabled
- * users stay out; the original createdAt is kept so the absolute TTL spans
- * restarts. The presenting request's user agent becomes the pinned one — the
- * original was never persisted.
+ * Rehydrate a persisted session after a restart. The edition re-reads the
+ * principal so role changes apply and disabled users stay out; the original
+ * createdAt is kept so the absolute TTL spans restarts. The presenting
+ * request's user agent becomes the pinned one — the original was never
+ * persisted.
  */
-function restorePersistedSession(token: string, userAgent: string | undefined): SessionInfo | null {
-  const restored = restoreSession(token)
+function restorePersistedSession(
+  store: PersistentSessionStore,
+  token: string,
+  userAgent: string | undefined,
+): SessionInfo | null {
+  const restored = store.restore(token)
   if (!restored) return null
   const now = Date.now()
   if (
     now - restored.createdAt > SESSION_ABSOLUTE_TTL_MS
     || now - restored.lastActivity > SESSION_IDLE_TTL_MS
+    || !restored.principal
   ) {
-    discardSessionBestEffort(token)
-    return null
-  }
-  const user = getUserById(restored.userId)
-  if (!user || user.disabled) {
     discardSessionBestEffort(token)
     return null
   }
@@ -452,15 +492,16 @@ function restorePersistedSession(token: string, userAgent: string | undefined): 
     userAgent: userAgent ?? "",
     lastActivity: restored.lastActivity,
     persistedActivityAt: restored.lastActivity,
-    principal: { userId: user.id, username: user.username, role: user.role },
+    principal: restored.principal,
   }
   activeSessions.set(token, session)
   return session
 }
 
 export function validateSessionToken(token: string, userAgent?: string): boolean {
+  const persistent = persistentSessions()
   const session = getLiveSession(token)
-    ?? (isTeamEdition() ? restorePersistedSession(token, userAgent) : null)
+    ?? (persistent ? restorePersistedSession(persistent, token, userAgent) : null)
   if (!session) return false
   if (userAgent !== undefined && session.userAgent !== userAgent) {
     discardSessionBestEffort(token)
@@ -470,11 +511,11 @@ export function validateSessionToken(token: string, userAgent?: string): boolean
   session.lastActivity = now
   if (
     session.principal
-    && isTeamEdition()
+    && persistent
     && now - session.persistedActivityAt >= SESSION_ACTIVITY_PERSIST_INTERVAL_MS
   ) {
     session.persistedActivityAt = now
-    void touchSession(token, now).catch(logPersistenceFailure)
+    void persistent.touch(token, now).catch(logPersistenceFailure)
   }
   return true
 }
@@ -496,16 +537,16 @@ export function revokeSessionToken(token: string): Promise<void> {
 export function revokeAllSessions(): Promise<void> {
   activeSessions.clear()
   notifySessionRevoked(null)
-  return isTeamEdition() ? clearAllSessions() : Promise.resolve()
+  return persistentSessions()?.clear() ?? Promise.resolve()
 }
 
-export function revokeSessionsForUser(userId: string): Promise<void> {
+export function revokeSessionsForPrincipal(userId: string): Promise<void> {
   for (const [token, session] of activeSessions) {
     if (session.principal?.userId !== userId) continue
     activeSessions.delete(token)
     notifySessionRevoked(token)
   }
-  return isTeamEdition() ? removeSessionsForUser(userId) : Promise.resolve()
+  return persistentSessions()?.removeForUser(userId) ?? Promise.resolve()
 }
 
 /** Clears only the in-memory session map — simulates a process restart in tests. */
@@ -565,8 +606,9 @@ setInterval(() => {
 //
 // A share token grants full participation in exactly ONE session. It is kept
 // in its own map rather than `activeSessions` because a share principal is not
-// a team principal: it must never satisfy the main auth path, never persist to
-// the team session store, and never appear in getConnectedDevices().
+// a signed-in principal: it must never satisfy the main auth path, never
+// persist to the edition's session store, and never appear in
+// getConnectedDevices().
 
 const SHARE_COOKIE = "__Host-cogpit_share"
 
@@ -751,7 +793,6 @@ export {
   hashPassword,
   isMalformedPasswordHash,
   isPasswordHashed,
-  MIN_PASSWORD_LENGTH,
   needsPasswordRehash,
   validatePasswordStrength,
   verifyPassword,
@@ -878,14 +919,15 @@ function isProtectedTransportRequest(req: IncomingMessage): boolean {
   return path === null || isProtectedTransportPath(path)
 }
 
-function isPublicPath(url: string): boolean {
+/** Reachable without credentials: the login endpoints, discovery, and anything outside the API and transports. */
+export function isPublicPath(url: string): boolean {
   const path = requestTargetPath(url)
   if (path === null) return false
   return PUBLIC_PATHS.has(path) || !isProtectedTransportPath(path)
 }
 
 /** The presented main-session token, or null when there is no valid one. */
-function validSessionToken(req: IncomingMessage): string | null {
+export function validSessionToken(req: IncomingMessage): string | null {
   const bearer = bearerToken(req)
   const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
   const token = bearer ?? browserCookie
@@ -902,24 +944,32 @@ function validSessionToken(req: IncomingMessage): string | null {
 }
 
 /**
+ * Why an edition turns away a guest whose share is live, or null to admit it.
+ * Asked on every guest request and at every recheck of a guest stream, so a
+ * refusal also ends the streams a guest already has open.
+ */
+export type ShareGuestRefusal = () => { error: string; code: string } | null
+
+/**
  * A share guest's entire request surface. This function always responds or
  * calls next() — it never falls through to the full-access paths that follow
  * it, so a share cookie arriving on loopback (a tunnel terminating locally, a
  * browser on the host) cannot be upgraded by the local-trust shortcut.
  */
-function handleShareRequest(
+export function handleShareRequest(
   req: IncomingMessage,
   res: ServerResponse,
   next: NextFn,
   token: string,
+  guestRefusal?: ShareGuestRefusal,
 ): void {
   // A share is remote access, so it lives behind the same switch as every
   // other remote request. This branch sits above the gate in both middlewares,
   // so without the check here a guest would be admitted on a request an
-  // ordinary remote user gets 403 on. Team edition replaces the network
-  // password with user credentials, and the host's own loopback browser is
-  // trusted there as everywhere else.
-  if (!isTrustedDirectLocalRequest(req) && !isTeamEdition()) {
+  // ordinary remote user gets 403 on. An edition that signs accounts in
+  // replaces the network password with their credentials, and the host's own
+  // loopback browser is trusted there as everywhere else.
+  if (!isTrustedDirectLocalRequest(req) && !editionOwnsSignIn()) {
     const config = getConfig()
     if (!config?.networkAccess || !config?.networkPassword) {
       return sendJson(res, 403, { error: "Network access is disabled" })
@@ -936,30 +986,34 @@ function handleShareRequest(
     return sendJson(res, 401, { error: "Share authentication required" })
   }
 
-  const method = (req.method || "GET").toUpperCase()
-  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+  // Asked only once the share is proven, so a made-up cookie learns nothing.
+  const refusal = guestRefusal?.()
+  if (refusal) return sendJson(res, 403, refusal)
+
+  if (isUntrustedMutation(req)) {
     return sendJson(res, 403, { error: "Untrusted request source" })
   }
 
-  if (!shareRequestAllowed(method, req.url || "/", share)) {
+  if (!shareRequestAllowed((req.method || "GET").toUpperCase(), req.url || "/", share)) {
     return sendJson(res, 403, { error: "Not available on a shared session" })
   }
 
   touchShare(sessionId)
   trackRevocableHttpStream(req, res, token, {
     onRevoked: onShareRevoked,
-    isActive: isShareTokenActive,
+    isActive: (active) => isShareTokenActive(active) && !guestRefusal?.(),
   })
-  // Team edition's authz middleware runs next and refuses every request it
+  // The edition's authz middleware runs next and may refuse every request it
   // cannot account for. A guest carries no SessionPrincipal by design, so it
   // has to arrive there labelled as a guest rather than as nothing at all.
-  markShareGuestRequest(req)
+  markShareGuestRequest(req, sessionId)
   next()
 }
 
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   clearRequestAuthentication(req)
-  if (isTeamEdition()) return teamAuthMiddleware(req, res, next)
+  const editionAuth = editionModule().auth
+  if (editionAuth) return editionAuth.middleware(req, res, next)
 
   const url = req.url || "/"
   const publicPath = isPublicPath(url)
@@ -977,10 +1031,8 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     return handleShareRequest(req, res, next, shareToken)
   }
 
-  const method = (req.method || "GET").toUpperCase()
-
   if (isTrustedDirectLocalRequest(req)) {
-    if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    if (isUntrustedMutation(req)) {
       return sendJson(res, 403, { error: "Untrusted request source" })
     }
     const token = validSessionToken(req)
@@ -1000,70 +1052,11 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     return sendJson(res, 401, { error: "Authentication required" })
   }
 
-  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+  if (isUntrustedMutation(req)) {
     return sendJson(res, 403, { error: "Untrusted request source" })
   }
 
   trackAuthenticatedHttpStream(req, res, sessionToken)
   setRequestAuthentication(req, { kind: "session", token: sessionToken, principal: getSessionPrincipal(sessionToken) })
-  next()
-}
-
-/**
- * Team edition flips the trust model: a loopback socket is no longer a trust
- * boundary, so every request must present a valid principal-carrying session
- * token regardless of where it came from. The first-admin bootstrap stays
- * reachable only while the users store is initialized and empty (the route then
- * verifies its process-local one-time token). That carve-out admits
- * unauthenticated requests, so it still demands a trusted mutation source:
- * a cross-site page in a local browser gets 403 while headerless curl/agent
- * clients pass. The networkAccess/networkPassword config is ignored — user
- * credentials replace the network password entirely.
- */
-function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
-  const url = req.url || "/"
-  const publicPath = isPublicPath(url)
-
-  if (!publicPath && isUnforwardedUntrustedLoopback(req)) {
-    return sendJson(res, 403, { error: "Untrusted local host" })
-  }
-
-  const path = requestTargetPath(url)
-  const bootstrapCarveOut =
-    path === "/api/team/bootstrap" && isUsersStoreInitialized() && userCount() === 0
-  if (bootstrapCarveOut) {
-    if (!hasTrustedMutationSource(req)) {
-      return sendJson(res, 403, { error: "Untrusted request source" })
-    }
-    return next()
-  }
-
-  if (publicPath) return next()
-
-  // Identical precedence to the personal middleware: the guest branch owns the
-  // request from here, so neither edition can hand a share cookie more than the
-  // allowlist grants.
-  const token = validSessionToken(req)
-  const shareToken = getRequestShareToken(req)
-  if (shareToken && !token) return handleShareRequest(req, res, next, shareToken)
-
-  if (!token) {
-    return sendJson(res, 401, { error: "Authentication required" })
-  }
-
-  // A token issued before team edition carries no principal — force re-login.
-  const principal = getSessionPrincipal(token)
-  if (!principal) {
-    return sendJson(res, 401, { error: "Authentication required" })
-  }
-  setRequestPrincipal(req, principal)
-
-  const method = (req.method || "GET").toUpperCase()
-  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
-    return sendJson(res, 403, { error: "Untrusted request source" })
-  }
-
-  trackAuthenticatedHttpStream(req, res, token)
-  setRequestAuthentication(req, { kind: "session", token, principal })
   next()
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 
-interface UploadedImage {
+export interface UploadedImage {
   id: string
   file: File
   preview: string
@@ -101,6 +101,11 @@ export function useImageUpload(enabled = true) {
     setUnsupportedAttempt(false)
   }, [])
 
+  /** Puts back the images of a send the session refused, unless others were attached since. */
+  const restoreImages = useCallback((draft: UploadedImage[]) => {
+    setImages((current) => current.length > 0 ? current : draft)
+  }, [])
+
   const dismissImageError = useCallback(() => setUnsupportedAttempt(false), [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -151,6 +156,7 @@ export function useImageUpload(enabled = true) {
     dismissImageError,
     removeImage,
     clearImages,
+    restoreImages,
     handleDragOver,
     handleDragLeave,
     handleDrop,

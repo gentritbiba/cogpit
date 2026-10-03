@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { toast } from "sonner"
 import { Toaster } from "@/components/ui/sonner"
+import { useEditionUiUnavailable } from "@/edition/hooks"
 import { themeMode, type ThemeId } from "@/lib/themes"
 
 interface AppStatusToastsProps {
@@ -56,6 +57,12 @@ export function AppStatusToasts({
       duration: Infinity,
     })
   }, [connectionLost])
+
+  const editionUiUnavailable = useEditionUiUnavailable()
+  useEffect(() => {
+    if (!editionUiUnavailable) return
+    toast.info("This server offers features this build of Cogpit doesn’t include.", { id: "edition-ui-unavailable" })
+  }, [editionUiUnavailable])
 
   return (
     <Toaster

@@ -1,5 +1,6 @@
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import type { PendingInput, PendingInputResponse } from "../agents/pendingInput"
+import type { VisibilityCheck } from "../edition"
 import type { SessionResult } from "../lib/sessionResult"
 import type { SessionState, WaitOptions, WaitResult } from "../lib/sessionWait"
 
@@ -25,7 +26,8 @@ export interface SessionHost {
   has(sessionId: string): Promise<boolean>
   /** Where the UI finds the session's transcript; null until it is on disk. */
   address(sessionId: string): Promise<SessionAddress | null>
-  projects(): Promise<HostProject[]>
+  /** The projects holding a session `visible` lets the caller see; a device applies its own credentials instead. */
+  projects(visible: VisibilityCheck): Promise<HostProject[]>
 }
 
 export interface HostCreateInput {

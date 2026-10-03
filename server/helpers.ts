@@ -41,13 +41,12 @@ export {
   validateSessionToken,
   revokeSessionToken,
   revokeAllSessions,
-  revokeSessionsForUser,
+  revokeSessionsForPrincipal,
   getConnectedDevices,
   hashPassword,
   needsPasswordRehash,
   verifyPassword,
   verifyPasswordAsync,
-  MIN_PASSWORD_LENGTH,
   validatePasswordStrength,
   securityHeaders,
   devSecurityHeaders,
@@ -64,7 +63,7 @@ export { sendJson } from "./http"
 // Re-export utilities needed by route handlers that spawn processes
 export { spawn, homedir, randomUUID }
 export { createInterface } from "node:readline"
-export { readdir, readFile, stat, open } from "node:fs/promises"
+export { readdir, readFile, realpath, stat, open } from "node:fs/promises"
 export { writeFile, mkdir, unlink, lstat } from "node:fs/promises"
 export { join, resolve, dirname } from "node:path"
 export { watch } from "node:fs"

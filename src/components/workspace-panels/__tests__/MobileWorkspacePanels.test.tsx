@@ -9,7 +9,7 @@ afterEach(cleanup)
 
 const context: WorkspacePanelContext = {
   session: null, sessionChangeKey: 0, projectPath: "/repo/project", hasFileChanges: false,
-  canAccessHostFiles: true, supportsWorktrees: true,
+  canAccessHostFiles: true, canUseBrowser: true, supportsWorktrees: true,
 }
 
 function Preview({ active }: WorkspacePanelProps) {

@@ -57,6 +57,10 @@ function isTeammate(s: ActiveSessionInfo): boolean {
  *
  * They stay separate reasons because the remedies differ: a deferred permission
  * is cleared by resuming the session, a question by answering it.
+ *
+ * Only a session the user can act on (`canAct`: interact or own) needs them; a
+ * teammate's session they can only view is left out, though its running work
+ * still shows.
  */
 export function classifyAttention(
   sessions: ActiveSessionInfo[],
@@ -66,29 +70,33 @@ export function classifyAttention(
   sessionsAwaitingQuestion?: ReadonlySet<string>,
   sessionsAwaitingPrompt?: ReadonlySet<string>,
   sessionsAwaitingPlan?: ReadonlySet<string>,
+  canAct: (session: ActiveSessionInfo) => boolean = () => true,
 ): AttentionGroups {
   const needsYou: AttentionItem[] = []
   const working: ActiveSessionInfo[] = []
 
   for (const s of sortSessionsByRecency(sessions)) {
+    const needs = (reason: AttentionReason) => {
+      if (canAct(s)) needsYou.push({ session: s, reason })
+    }
     if (sessionsAwaitingPermission?.has(s.sessionId)) {
-      needsYou.push({ session: s, reason: "permission" })
+      needs("permission")
       continue
     }
     if (sessionsAwaitingQuestion?.has(s.sessionId)) {
-      needsYou.push({ session: s, reason: "question" })
+      needs("question")
       continue
     }
     if (sessionsAwaitingPrompt?.has(s.sessionId)) {
-      needsYou.push({ session: s, reason: "prompt" })
+      needs("prompt")
       continue
     }
     if (sessionsAwaitingPlan?.has(s.sessionId)) {
-      needsYou.push({ session: s, reason: "plan" })
+      needs("plan")
       continue
     }
     if (s.agentStatus === "deferred") {
-      needsYou.push({ session: s, reason: "deferred" })
+      needs("deferred")
       continue
     }
     if (isTeammate(s)) continue
@@ -97,11 +105,11 @@ export function classifyAttention(
     // to a PID, and would all be triaged as finished. See lib/sessionActivity.
     const live = isSessionActive(s, procBySession)
     if (s.agentStatus === "completed" || !live) {
-      if (newlyCompleted.has(s.sessionId)) needsYou.push({ session: s, reason: "done" })
+      if (newlyCompleted.has(s.sessionId)) needs("done")
       continue
     }
     if (s.agentStatus === "idle") {
-      needsYou.push({ session: s, reason: "waiting" })
+      needs("waiting")
       continue
     }
     if (!s.agentStatus || WORKING_STATUSES.has(s.agentStatus)) {

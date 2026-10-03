@@ -66,6 +66,7 @@ vi.mock("../../workspaceTransfer/handoff", () => ({
 const handoff = { repoRoot: "/work/app", base: "b".repeat(40), workspaceId: "app-1234567890/fix", branch: "cogpit/agentbox/fix" }
 
 import { EXIT, runSessionCli, type CliInvocation } from "../../sessionCli/commands"
+import { PERSONAL_EDITION } from "../../edition"
 
 function run(argv: string[], overrides: Partial<CliInvocation> = {}) {
   return runSessionCli({
@@ -74,6 +75,7 @@ function run(argv: string[], overrides: Partial<CliInvocation> = {}) {
     invocationId: "invocation-1",
     scope: "local",
     admin: true,
+    visible: PERSONAL_EDITION.access.visibilityFor({} as never),
     callerSessionId: "parent-1",
     ...overrides,
   })

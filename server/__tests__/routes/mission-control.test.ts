@@ -2,12 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  listTopLevelSessions: vi.fn(),
+  allTopLevelSessions: vi.fn(),
   summarizeSession: vi.fn(),
 }))
 
 vi.mock("../../agents", () => ({
-  allStores: () => [{ listTopLevelSessions: mocks.listTopLevelSessions }],
+  allTopLevelSessions: mocks.allTopLevelSessions,
 }))
 vi.mock("../../lib/missionControlSummary", () => ({
   summarizeSession: mocks.summarizeSession,
@@ -32,27 +32,17 @@ async function run(url: string): Promise<{ body: string; next: ReturnType<typeof
 describe("GET /api/mission-control", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.listTopLevelSessions.mockResolvedValue([])
+    mocks.allTopLevelSessions.mockResolvedValue([])
     mocks.summarizeSession.mockImplementation(async (sessionId: string) => ({ sessionId }))
   })
 
-  it("summarises the sessions every store lists, newest first", async () => {
-    mocks.listTopLevelSessions.mockResolvedValue([
-      {
-        sessionId: "22222222-2222-4222-8222-222222222222",
-        fileName: "22222222-2222-4222-8222-222222222222/events.jsonl",
-        filePath: "/tmp/copilot/22222222-2222-4222-8222-222222222222/events.jsonl",
-        mtimeMs: 100,
-      },
-      {
-        sessionId: "11111111-1111-4111-8111-111111111111",
-        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
-        filePath: "/tmp/copilot/11111111-1111-4111-8111-111111111111/events.jsonl",
-        mtimeMs: 200,
-      },
-    ])
+  it("summarises the newest sessions every store lists, up to the limit", async () => {
+    mocks.allTopLevelSessions.mockResolvedValue(["1", "2", "3"].map((digit) => {
+      const sessionId = `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`
+      return { sessionId, fileName: `${sessionId}/events.jsonl`, filePath: `/tmp/copilot/${sessionId}/events.jsonl`, mtimeMs: 300 - Number(digit) }
+    }))
 
-    const { body, next } = await run("/?limit=10")
+    const { body, next } = await run("/?limit=2")
 
     expect(mocks.summarizeSession).toHaveBeenCalledTimes(2)
     expect(JSON.parse(body).summaries).toEqual([
@@ -62,8 +52,29 @@ describe("GET /api/mission-control", () => {
     expect(next).not.toHaveBeenCalled()
   })
 
+  it("summarises the stores that can list their sessions when another cannot", async () => {
+    const { createStoreRegistry } = await vi.importActual<typeof import("../../agents")>("../../agents")
+    const sessionId = "44444444-4444-4444-8444-444444444444"
+    const listing = (sessions: object[], error?: Error) => ({
+      listTopLevelSessions: async () => {
+        if (error) throw error
+        return sessions
+      },
+    })
+    const registry = createStoreRegistry({
+      claude: listing([], Object.assign(new Error("EACCES"), { code: "EACCES" })),
+      codex: listing([{ sessionId, fileName: `${sessionId}.jsonl`, filePath: `/tmp/codex/${sessionId}.jsonl`, mtimeMs: 1 }]),
+      copilot: listing([]),
+    } as unknown as Parameters<typeof createStoreRegistry>[0])
+    mocks.allTopLevelSessions.mockImplementation(registry.allTopLevelSessions)
+
+    const { body } = await run("/?limit=10")
+
+    expect(JSON.parse(body).summaries).toEqual([{ sessionId }])
+  })
+
   it("names a session after its file when the listing carries no id", async () => {
-    mocks.listTopLevelSessions.mockResolvedValue([
+    mocks.allTopLevelSessions.mockResolvedValue([
       {
         fileName: "33333333-3333-4333-8333-333333333333.jsonl",
         filePath: "/tmp/projects/proj/33333333-3333-4333-8333-333333333333.jsonl",

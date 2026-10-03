@@ -1,22 +1,10 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { IncomingMessage } from "node:http"
 
+import { __resetEditionForTest } from "../../edition"
 import { hubProxyAuthorizationRejection, isForbiddenHubDownstreamPath } from "../../hub/proxy"
-import { initEdition, __resetEditionForTest } from "../../team/edition"
-import { setRequestPrincipal } from "../../team/requestPrincipal"
-import type { SessionPrincipal } from "../../team/constants"
-
-const ADMIN: SessionPrincipal = { userId: "admin", username: "alice", role: "admin" }
-const MEMBER: SessionPrincipal = { userId: "member", username: "bob", role: "member" }
-
-function request(principal?: SessionPrincipal): IncomingMessage {
-  const req = {} as IncomingMessage
-  if (principal) setRequestPrincipal(req, principal)
-  return req
-}
-
-afterEach(() => __resetEditionForTest())
+import { installFakeEdition } from "../edition/fakeEdition"
 
 describe("hub downstream trust boundary", () => {
   it.each([
@@ -43,35 +31,24 @@ describe("hub downstream trust boundary", () => {
   )
 })
 
-describe("hub downstream team authorization", () => {
+describe("hub downstream authorization", () => {
+  afterEach(() => __resetEditionForTest())
+
   it("preserves personal-edition proxy behavior", () => {
-    expect(hubProxyAuthorizationRejection(request(), "/api/config", "POST")).toBeNull()
+    expect(hubProxyAuthorizationRejection({} as IncomingMessage, "/api/config", "POST")).toBeNull()
   })
 
-  it("fails closed when team middleware did not attach a principal", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    expect(hubProxyAuthorizationRejection(request(), "/api/projects", "GET")).toBe(401)
-  })
+  it.each([
+    ["/api/projects/../config", "/api/config"],
+    ["/API/Projects/%2e%2e/Config?scope=all", "/api/config"],
+    ["/api/projects%2f..%2fconfig", "/api/config"],
+    ["/api/%E0%A4%A", null],
+  ])("asks the edition about %s as the path the device will serve, %s", (downstreamPath, normalized) => {
+    const hubProxyRejection = vi.fn(() => 403 as const)
+    installFakeEdition({ hubProxyRejection })
+    const req = {} as IncomingMessage
 
-  it("lets members proxy member-readable routes", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/projects", "GET")).toBeNull()
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/hub/devices", "GET")).toBeNull()
-  })
-
-  it("blocks members before an admin device credential is substituted", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/config", "POST")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/project-file", "PUT")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/hub/devices", "POST")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/projects/../config", "POST")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/projects/%2e%2e/config", "POST")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/projects%2f..%2fconfig", "POST")).toBe(403)
-    expect(hubProxyAuthorizationRejection(request(MEMBER), "/api/projects%5c..%5cconfig", "POST")).toBe(403)
-  })
-
-  it("lets admins proxy admin routes", () => {
-    initEdition({ shell: "standalone", configEdition: "team" })
-    expect(hubProxyAuthorizationRejection(request(ADMIN), "/API/CONFIG", "post")).toBeNull()
+    expect(hubProxyAuthorizationRejection(req, downstreamPath, "POST")).toBe(403)
+    expect(hubProxyRejection).toHaveBeenCalledExactlyOnceWith(req, normalized, "POST")
   })
 })

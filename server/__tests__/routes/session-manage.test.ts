@@ -26,6 +26,7 @@ const { mockCodexAppServer, mockSDKControls, mockCopilotRuntime, mockFindJsonlPa
     getActiveSessionIds: vi.fn(),
     getPendingPermissions: vi.fn(() => []),
     getPendingUserInputs: vi.fn(() => []),
+    getPendingExitPlans: vi.fn(() => []),
     abort: vi.fn(),
     destroySession: vi.fn(),
     deleteSession: vi.fn(),
@@ -83,6 +84,7 @@ vi.mock("../../agents", () => {
 
 vi.mock("../../sdk-session", () => ({
   cleanupAllSDKSessions: vi.fn(() => 0),
+  sdkSessions: new Map(),
   ...mockSDKControls,
 }))
 
@@ -100,7 +102,9 @@ import {
   type PersistentSession,
 } from "../../processRegistry"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
+import { SESSION_ACCESS_HEADER } from "../../../shared/contracts/sessionAccess"
 import { resolveSessionFilePath } from "../../sessionPaths"
+import { forgetSessions } from "../../lib/sessionArchive"
 import type { Middleware } from "../../helpers"
 import { collectRoutes } from "../http-fixtures"
 import { registerSessionManageRoutes } from "../../routes/session-manage"
@@ -199,7 +203,7 @@ describe("session lifecycle routes", () => {
     vi.mocked(resolveSessionFilePath).mockResolvedValue(null)
     mockSDKControls.stopSDKSession.mockReturnValue(false)
     mockSDKControls.interruptSDKTurn.mockResolvedValue(true)
-    mockSDKControls.updateSDKSession.mockResolvedValue({ found: true, appliedLive: ["model"], staged: [] })
+    mockSDKControls.updateSDKSession.mockResolvedValue({ found: true, appliedLive: ["model"], staged: [], permissionChange: null })
     mockSDKControls.rewindClaudeFiles.mockResolvedValue({ canRewind: true })
     mockSDKControls.stopSDKTask.mockResolvedValue(true)
     mockSDKControls.backgroundSDKTasks.mockResolvedValue(true)
@@ -742,6 +746,67 @@ describe("session lifecycle routes", () => {
       expect(mockCopilotRuntime.deleteSession).toHaveBeenCalledWith(copilotSessionId)
       expect(vi.mocked(unlink)).not.toHaveBeenCalled()
       expect(res._getData()).toEqual({ success: true })
+    })
+
+    it("stops and forgets a session whose transcript is a dated rollout by the session's own id", async () => {
+      const threadId = "55555555-5555-4555-8555-555555555555"
+      const fileName = `2026/09/22/rollout-2026-09-22T10-00-00-${threadId}.jsonl`
+      const filePath = `/tmp/codex/sessions/${fileName}`
+      vi.mocked(resolveSessionFilePath).mockResolvedValue(filePath)
+      const proc = makeMockProc(4242)
+      trackPersistent(threadId, { dead: false, agentKind: "codex", proc })
+      const handler = handlers.get("/api/delete-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST",
+        "/",
+        JSON.stringify({ dirName: descriptorFor("codex").dirName.encode("/tmp/workspace"), fileName }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(res._getData()).toEqual({ success: true })
+      expect(proc.kill).toHaveBeenCalledWith("SIGTERM")
+      expect(mockPersistentSessions.has(threadId)).toBe(false)
+      expect(vi.mocked(forgetSessions)).toHaveBeenCalledWith([threadId])
+      expect(vi.mocked(unlink)).toHaveBeenCalledWith(filePath)
+    })
+
+    it("answers a transcript that is already gone as not found, never as a refusal", async () => {
+      vi.mocked(resolveSessionFilePath).mockResolvedValue(null)
+      const handler = handlers.get("/api/delete-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST",
+        "/",
+        JSON.stringify({ dirName: "-tmp-workspace", fileName: "66666666-6666-4666-8666-666666666666.jsonl" }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(res._getStatus()).toBe(404)
+      expect(res._getData()).toEqual({ error: "Transcript not found", code: "NOT_FOUND" })
+      expect(res.setHeader).not.toHaveBeenCalledWith(SESSION_ACCESS_HEADER, expect.anything())
+      expect(vi.mocked(unlink)).not.toHaveBeenCalled()
+    })
+
+    it("still refuses a transcript another agent's store serves", async () => {
+      vi.mocked(resolveSessionFilePath).mockResolvedValue("/tmp/codex/sessions/2026/09/22/rollout.jsonl")
+      const handler = handlers.get("/api/delete-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST",
+        "/",
+        JSON.stringify({ dirName: "-tmp-workspace", fileName: "66666666-6666-4666-8666-666666666666.jsonl" }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(res._getStatus()).toBe(403)
+      expect(vi.mocked(unlink)).not.toHaveBeenCalled()
     })
   })
 

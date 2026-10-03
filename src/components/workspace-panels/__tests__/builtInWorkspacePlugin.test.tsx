@@ -14,6 +14,7 @@ function contextOf(overrides: Partial<WorkspacePanelContext> = {}): WorkspacePan
     projectPath: "/repo",
     hasFileChanges: false,
     canAccessHostFiles: true,
+    canUseBrowser: true,
     ...overrides,
   }
 }
@@ -86,11 +87,13 @@ describe("builtInWorkspacePlugin", () => {
       .toBeLessThan(order.indexOf(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges))
   })
 
-  it("hides the Browser panel where the host has no files of its own", () => {
+  it("shows the Browser panel to whoever may use it, host files or not", () => {
     const panel = browserPanel()
 
     expect(panel.when?.(contextOf())).toBe(true)
-    expect(panel.when?.(contextOf({ canAccessHostFiles: false }))).toBe(false)
+    // An account that reaches no host file still watches its agents' browsers.
+    expect(panel.when?.(contextOf({ canAccessHostFiles: false }))).toBe(true)
+    expect(panel.when?.(contextOf({ canUseBrowser: false }))).toBe(false)
   })
 
   it("marks the Browser icon only while the agent is browsing", () => {

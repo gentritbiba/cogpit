@@ -1,3 +1,4 @@
+import { SESSION_ARCHIVE_FILE } from "./sessionConfigDir"
 import { SessionConfigFile } from "./sessionConfigFile"
 
 /**
@@ -10,8 +11,6 @@ import { SessionConfigFile } from "./sessionConfigFile"
  * exempts it from the idle rule. New activity overrides a manual archive: see
  * {@link isStillArchived}.
  */
-
-const ARCHIVE_FILE = "archived-sessions.json"
 
 /**
  * Transcript writes this soon after archiving are trailing writes of the turn
@@ -40,7 +39,7 @@ interface PersistedArchive {
 let archived = new Map<string, number>()
 let kept = new Set<string>()
 
-const file = new SessionConfigFile(ARCHIVE_FILE, {
+const file = new SessionConfigFile(SESSION_ARCHIVE_FILE, {
   reset() {
     archived = new Map()
     kept = new Set()

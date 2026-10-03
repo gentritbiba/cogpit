@@ -1,23 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { LoginScreen } from "@/components/LoginScreen"
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { __resetServerHelloForTest } from "@/lib/auth"
 
 interface MockServerOptions {
-  edition?: "personal" | "team"
+  signIn?: "password" | "account"
   verify?: { status: number; body: Record<string, unknown> }
 }
 
 /** Route the hello handshake and the verify endpoint through one fetch spy. */
 function mockServer({
-  edition = "personal",
+  signIn = "password",
   verify = { status: 200, body: { valid: true } },
 }: MockServerOptions = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : input.toString()
     if (url === "/api/hello") {
       return new Response(
-        JSON.stringify({ app: "cogpit", edition }),
+        JSON.stringify({ app: "cogpit", signIn }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
     }
@@ -44,6 +45,7 @@ describe("LoginScreen", () => {
     sessionStorage.clear()
     vi.restoreAllMocks()
     __resetServerHelloForTest()
+    __resetEditionUiForTest()
   })
 
   it("authenticates with a secure cookie request and never stores a token", async () => {
@@ -80,8 +82,8 @@ describe("LoginScreen", () => {
     expect(await screen.findByText("Secure HTTPS is required for remote browser access")).toBeInTheDocument()
   })
 
-  it("keeps the password-only Bearer flow on a personal server", async () => {
-    const fetchSpy = mockServer({ edition: "personal" })
+  it("keeps the password-only Bearer flow on a password server", async () => {
+    const fetchSpy = mockServer({ signIn: "password" })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
     fireEvent.change(await screen.findByPlaceholderText("Password"), { target: { value: "correct horse battery staple" } })
@@ -93,8 +95,8 @@ describe("LoginScreen", () => {
     expect(init?.headers).toMatchObject({ Authorization: "Bearer correct horse battery staple" })
   })
 
-  it("renders a username field above the password for a team server", async () => {
-    mockServer({ edition: "team" })
+  it("renders a username field above the password for an account server", async () => {
+    mockServer({ signIn: "account" })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
     const username = await screen.findByPlaceholderText("Username")
@@ -105,11 +107,30 @@ describe("LoginScreen", () => {
     // Both credentials are required before the form submits
     fireEvent.change(password, { target: { value: "pw" } })
     expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled()
+    expect(screen.getByText("Sign in with your account to continue.")).toBeInTheDocument()
   })
 
-  it("submits team credentials as a JSON body, not a Bearer header", async () => {
+  it("shows the edition's notice under an account sign-in", async () => {
+    __installEditionUiForTest({ LoginNotice: () => <p>Read this first.</p> })
+    mockServer({ signIn: "account" })
+    render(<LoginScreen onAuthenticated={vi.fn()} />)
+
+    await screen.findByPlaceholderText("Username")
+    expect(screen.getByText("Read this first.")).toBeInTheDocument()
+  })
+
+  it("shows no edition notice on a password server", async () => {
+    __installEditionUiForTest({ LoginNotice: () => <p>Read this first.</p> })
+    mockServer({ signIn: "password" })
+    render(<LoginScreen onAuthenticated={vi.fn()} />)
+
+    await screen.findByPlaceholderText("Password")
+    expect(screen.queryByText("Read this first.")).not.toBeInTheDocument()
+  })
+
+  it("submits account credentials as a JSON body, not a Bearer header", async () => {
     const onAuthenticated = vi.fn()
-    const fetchSpy = mockServer({ edition: "team" })
+    const fetchSpy = mockServer({ signIn: "account" })
     render(<LoginScreen onAuthenticated={onAuthenticated} />)
 
     fireEvent.change(await screen.findByPlaceholderText("Username"), { target: { value: "Alice " } })
@@ -130,7 +151,7 @@ describe("LoginScreen", () => {
     expect(screen.getByPlaceholderText("Password")).toHaveValue("")
   })
 
-  it("holds the credential fields until the edition resolves so a late team answer cannot steal focus", async () => {
+  it("holds the credential fields until the sign-in resolves so a late account answer cannot steal focus", async () => {
     let resolveHello!: (r: Response) => void
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       if (String(input) === "/api/hello") {
@@ -140,27 +161,27 @@ describe("LoginScreen", () => {
     })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
-    // No credential fields while the edition is unknown — nothing to focus,
+    // No credential fields while the sign-in is unknown — nothing to focus,
     // nothing to start typing a password into.
     expect(screen.queryByPlaceholderText("Password")).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText("Username")).not.toBeInTheDocument()
 
-    resolveHello(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+    resolveHello(new Response(JSON.stringify({ signIn: "account" }), { status: 200 }))
     const username = await screen.findByPlaceholderText("Username")
     expect(username).toHaveFocus()
   })
 
-  it("autofocuses the password field once a personal edition resolves", async () => {
-    mockServer({ edition: "personal" })
+  it("autofocuses the password field once password sign-in resolves", async () => {
+    mockServer({ signIn: "password" })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
     const password = await screen.findByPlaceholderText("Password")
     expect(password).toHaveFocus()
   })
 
-  it("shows the server's team login error verbatim and keeps the username", async () => {
+  it("shows the server's account sign-in error verbatim and keeps the username", async () => {
     mockServer({
-      edition: "team",
+      signIn: "account",
       verify: { status: 403, body: { valid: false, error: "Account disabled" } },
     })
     render(<LoginScreen onAuthenticated={vi.fn()} />)

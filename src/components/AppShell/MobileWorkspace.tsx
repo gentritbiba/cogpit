@@ -20,6 +20,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
   const { state } = useAppContext()
   const { session, sessionSource } = useSessionContext()
   const canAccessHostFiles = useCapability("hostFiles")
+  const canUseBrowser = useCapability("browser")
   const canConfigure = useCapability("configWrite")
   const [pluginsOpen, setPluginsOpen] = useState(() => new URLSearchParams(window.location.search).get("pluginSafeMode") === "1")
   const [pluginSettingsId, setPluginSettingsId] = useState<string>()
@@ -56,6 +57,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
     projectPath: project.currentCwd ?? null,
     hasFileChanges: project.hasFileChanges,
     canAccessHostFiles,
+    canUseBrowser,
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,

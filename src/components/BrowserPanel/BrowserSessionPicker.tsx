@@ -9,10 +9,13 @@ import { formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { BrowserActionResult } from "@/hooks/useBrowserSessions"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
+import { browserLabel, controlOf } from "./browserSessions"
 
 interface BrowserSessionPickerProps {
   sessions: BrowserSessionInfo[]
   selected: string
+  /** The caller's default browser, which never archives. */
+  home: string
   currentSessionId: string | null
   busy: boolean
   onSelect: (name: string) => void
@@ -32,7 +35,7 @@ function StatusDot({ running }: { running: boolean }) {
 }
 
 export function BrowserSessionPicker({
-  sessions, selected, currentSessionId, busy, onSelect, onSetArchived, children,
+  sessions, selected, home, currentSessionId, busy, onSelect, onSetArchived, children,
 }: BrowserSessionPickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -41,10 +44,12 @@ export function BrowserSessionPicker({
   const selectedInfo = sessions.find((session) => session.name === selected)
   const search = query.trim().toLowerCase()
   const isArchived = (session: BrowserSessionInfo) => !!session.archived
-    && !session.isDefault && !session.running && session.name !== selected
-  const matches = (session: BrowserSessionInfo) => `${session.name} ${session.note ?? ""}`.toLowerCase().includes(search)
+    && !session.isDefault && session.name !== home && !session.running && session.name !== selected
+  const matches = (session: BrowserSessionInfo) => `${session.name} ${browserLabel(session, session.name)} ${session.note ?? ""}`
+    .toLowerCase().includes(search)
   const recent = sessions.filter((session) => !isArchived(session) && matches(session))
-    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault)
+    .sort((a, b) => Number(b.name === home) - Number(a.name === home)
+      || Number(b.isDefault) - Number(a.isDefault)
       || Number(b.running) - Number(a.running))
   const allArchived = sessions.filter(isArchived)
   const archived = allArchived.filter(matches)
@@ -74,7 +79,7 @@ export function BrowserSessionPicker({
     }}>
       <PopoverTrigger render={<Button variant="ghost" size="xs" aria-label="Switch browser" className="max-w-40" />}>
         <StatusDot running={selectedInfo?.running ?? false} />
-        <span className="truncate">{selected}</span>
+        <span className="truncate">{browserLabel(selectedInfo, selected)}</span>
         <ChevronDown data-icon="inline-end" className="opacity-60" />
       </PopoverTrigger>
       <PopoverContent
@@ -103,6 +108,7 @@ export function BrowserSessionPicker({
                     key={session.name}
                     session={session}
                     archived={group.archived}
+                    home={home}
                     selected={selected}
                     currentSessionId={currentSessionId}
                     busy={busy}
@@ -132,9 +138,10 @@ export function BrowserSessionPicker({
   )
 }
 
-function BrowserSessionRow({ session, archived, selected, currentSessionId, busy, onPick, onArchive }: {
+function BrowserSessionRow({ session, archived, home, selected, currentSessionId, busy, onPick, onArchive }: {
   session: BrowserSessionInfo
   archived: boolean
+  home: string
   selected: string
   currentSessionId: string | null
   busy: boolean
@@ -142,14 +149,17 @@ function BrowserSessionRow({ session, archived, selected, currentSessionId, busy
   onArchive: (name: string) => Promise<void>
 }) {
   const lastUsed = lastUsedLabel(session.lastUsedAt)
+  const label = browserLabel(session, session.name)
   const drivenElsewhere = session.running && session.driverSessionId !== null
     && session.driverSessionId !== currentSessionId
+  // Beside an own browser of the caller's, the host's `default` is not theirs.
+  const defaultBadge = session.isDefault ? (home === session.name ? "Default" : "Host default") : null
   return (
     <li className="group flex items-center gap-1 rounded-md">
       <Button
         variant="ghost"
         className="h-auto min-h-10 min-w-0 flex-1 justify-start px-2 py-2"
-        aria-label={`${archived ? "Restore and switch to" : "Switch to"} ${session.name}`}
+        aria-label={`${archived ? "Restore and switch to" : "Switch to"} ${label}`}
         aria-current={session.name === selected ? "true" : undefined}
         disabled={busy}
         onClick={() => void onPick(session)}
@@ -157,9 +167,10 @@ function BrowserSessionRow({ session, archived, selected, currentSessionId, busy
         <StatusDot running={session.running} />
         <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
           <span className="flex w-full min-w-0 items-center gap-1.5">
-            <span className="truncate">{session.name}</span>
+            <span className="truncate">{label}</span>
             <span className="sr-only">{session.running ? "running" : "stopped"}</span>
-            {session.isDefault && <Badge variant="secondary">Default</Badge>}
+            {defaultBadge && <Badge variant="secondary">{defaultBadge}</Badge>}
+            {controlOf(session) === "watch" && <Badge variant="outline">View only</Badge>}
             {lastUsed && <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">{lastUsed}</span>}
           </span>
           {drivenElsewhere && <span className="max-w-full truncate text-xs font-normal text-muted-foreground">driven by another session</span>}
@@ -167,7 +178,7 @@ function BrowserSessionRow({ session, archived, selected, currentSessionId, busy
         {session.name === selected && <Check data-icon="inline-end" />}
         {archived && <ArchiveRestore data-icon="inline-end" />}
       </Button>
-      {!archived && !session.isDefault && !session.running && (
+      {!archived && !session.isDefault && session.name !== home && !session.running && controlOf(session) === "own" && (
         <Button
           variant="ghost"
           size="icon-sm"

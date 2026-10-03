@@ -2,7 +2,7 @@ import { respondToPendingInput } from "../agents/pendingInput"
 import { resolveSessionAgent, runtimeFor, runtimeForSession } from "../agents/runtimes"
 import { readSessionResult } from "../lib/sessionResult"
 import { clearTurnError, readSessionState, recordTurnError, waitForSessions } from "../lib/sessionWait"
-import { listAllProjects } from "../lib/projectList"
+import { listProjects } from "../routes/projects/projectList"
 import { createSession } from "../lib/sessionCreate"
 import { sendToSession } from "../lib/sessionSend"
 import { storeForPath } from "../agents"
@@ -59,5 +59,5 @@ export const localHost: SessionHost = {
     return (filePath && await storeForPath(filePath)?.sessionAddress(filePath)) || null
   },
 
-  projects: listAllProjects,
+  projects: listProjects,
 }

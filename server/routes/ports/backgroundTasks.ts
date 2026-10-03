@@ -18,6 +18,7 @@ export async function handleBackgroundTasks(
     const tasks: Array<{
       id: string
       outputPath: string
+      sessionId: string
       ports: number[]
       preview: string
       modifiedAt: number
@@ -47,6 +48,7 @@ export async function handleBackgroundTasks(
       tasks.push({
         id: taskId,
         outputPath: file.path,
+        sessionId: file.sessionId,
         ports: [...ports],
         preview,
         modifiedAt,
@@ -84,6 +86,8 @@ export async function handleBackgroundTasks(
     const result: Array<{
       id: string
       outputPath: string
+      /** The session whose task writes the output, which /api/task-output streams it as. */
+      sessionId: string
       ports: number[]
       portStatus: Record<number, boolean>
       preview: string
@@ -96,6 +100,7 @@ export async function handleBackgroundTasks(
       result.push({
         id: task.id,
         outputPath: task.outputPath,
+        sessionId: task.sessionId,
         ports: task.ports,
         portStatus: ps,
         preview: task.preview,

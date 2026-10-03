@@ -1,12 +1,13 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createServer, type Server } from "node:http"
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { getDataRoot, setDataRoot } from "../../config"
-import { setRequestPrincipal } from "../../team/requestPrincipal"
+import { setRequestPrincipal } from "../../requestPrincipal"
 
 const { start } = vi.hoisted(() => ({ start: vi.fn() }))
 vi.mock("../../agents/runtimes", async (importOriginal) => ({
@@ -15,16 +16,22 @@ vi.mock("../../agents/runtimes", async (importOriginal) => ({
 }))
 import { registerCreateAndSendRoute } from "../../routes/session-new/sessionSpawner"
 
+const codexProject = (cwd: string) => descriptorFor("codex").dirName.encode(cwd)
+
 describe("POST /api/create-and-send requestId", () => {
   let server: Server
   let base: string
   let directory: string
   let previousRoot: string
+  /** The folder the session starts in, which has to exist. */
+  const projectDir = mkdtempSync(join(tmpdir(), "cogpit-retry-project-"))
   const body = {
     requestId: "retry-test-123",
-    dirName: descriptorFor("codex").dirName.encode("/tmp/retry-project"),
+    dirName: codexProject(projectDir),
     message: "Do the work",
   }
+
+  afterAll(() => rmSync(projectDir, { recursive: true, force: true }))
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "cogpit-retry-route-"))
@@ -87,6 +94,51 @@ describe("POST /api/create-and-send requestId", () => {
     await post(unkeyed)
     await post(unkeyed)
     expect(start).toHaveBeenCalledTimes(4)
+  })
+
+  it("refuses a folder that does not exist before invoking the runtime", async () => {
+    const missing = join(projectDir, "deleted-since")
+    const response = await post({ ...body, dirName: codexProject(missing) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: `The folder ${missing} does not exist`, code: "INVALID_REQUEST" })
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it("refuses a file in place of a folder before invoking the runtime", async () => {
+    const file = join(projectDir, "notes.txt")
+    writeFileSync(file, "not a folder")
+    const response = await post({ ...body, dirName: codexProject(file) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: `${file} is not a folder`, code: "INVALID_REQUEST" })
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it.skipIf(process.platform === "win32")("starts a Codex session reached through a symlink in the resolved folder", async () => {
+    const link = join(projectDir, "codex-link")
+    symlinkSync(realpathSync(projectDir), link)
+    const response = await post({ dirName: codexProject(link), message: body.message })
+    expect(response.status).toBe(200)
+    const real = realpathSync(projectDir)
+    expect(start.mock.calls[0][0]).toMatchObject({ cwd: real, dirName: codexProject(real) })
+  })
+
+  it.skipIf(process.platform === "win32")("files a Claude session reached through a symlink under the resolved folder", async () => {
+    const claude = descriptorFor("claude").dirName
+    const link = join(projectDir, "claude-link")
+    symlinkSync(realpathSync(projectDir), link)
+    const response = await post({ dirName: claude.encode(link), cwd: link, message: body.message })
+    expect(response.status).toBe(200)
+    const real = realpathSync(projectDir)
+    expect(start.mock.calls[0][0]).toMatchObject({ cwd: real, dirName: claude.encode(real) })
+  })
+
+  it.skipIf(process.platform === "win32")("refuses a dangling symlink with the path the caller asked for", async () => {
+    const link = join(projectDir, "dangling-link")
+    symlinkSync(join(projectDir, "never-created"), link)
+    const response = await post({ ...body, dirName: codexProject(link) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: `The folder ${link} does not exist`, code: "INVALID_REQUEST" })
+    expect(start).not.toHaveBeenCalled()
   })
 
   it("rejects malformed request IDs before invoking the runtime", async () => {

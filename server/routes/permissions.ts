@@ -10,7 +10,9 @@ import {
   type PendingApproval,
 } from "../agents/runtimes"
 import { copilotRuntime, type CopilotExitPlanResponse, type CopilotRuntime } from "../agents/copilotTransport"
+import { authorizeSession, reportSessionEvent } from "../edition"
 import { sendAgentError } from "./agentErrors"
+import { visibleBySession } from "./visibleBySession"
 
 /**
  * The permission bar's server side: what is blocking a session, and how the
@@ -84,41 +86,58 @@ function summarizeRequest(
   }
 }
 
+interface PlanAnswer {
+  requestId: string
+  response: CopilotExitPlanResponse
+}
+
+/** The plan answer a body carries, or why it carries none. */
+function parsePlanAnswer(body: unknown): PlanAnswer | string {
+  if (body === null || body === undefined) return "Invalid JSON body"
+  const { requestId, approved, selectedAction, feedback } = body as Record<string, unknown>
+  if (typeof requestId !== "string" || !requestId) return "requestId is required"
+  if (typeof approved !== "boolean") return "approved must be a boolean"
+  if (selectedAction !== undefined && typeof selectedAction !== "string") return "selectedAction must be a string"
+  if (feedback !== undefined && typeof feedback !== "string") return "feedback must be a string"
+  return {
+    requestId,
+    response: {
+      approved,
+      ...(selectedAction ? { selectedAction } : {}),
+      ...(feedback ? { feedback } : {}),
+    },
+  }
+}
+
 export function registerPermissionRoutes(
   use: UseFn,
   runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
   copilot: CopilotPlanClient = copilotRuntime,
 ) {
-  use("/api/permissions", (req, res, next) => {
-    const url = req.url ?? ""
+  use("/api/permissions", async (req, res, next) => {
+    // A mounted router hands the bare path on as "", "/" or "/?query".
+    const path = (req.url ?? "").split("?")[0]
 
-    // GET /api/permissions — every pending request, grouped by session. Powers
-    // the Mission Control grid, which must surface requests for sessions that
-    // are not open.
-    if (req.method === "GET" && (url === "" || url === "/" || url.startsWith("?"))) {
-      const bySession: Record<string, MissionControlPermission[]> = {}
-      for (const sessionId of listPermissionSessionIds(runtimes)) {
-        const permissions = collectPendingPermissions(sessionId, runtimes)
-        if (permissions.length > 0) {
-          bySession[sessionId] = permissions.map((r) => summarizeRequest(sessionId, r))
-        }
-      }
-      const plansBySession: Record<
-        string,
-        Array<{ sessionId: string; requestId: string; summary: string }>
-      > = {}
-      for (const { sessionId, requestId, summary } of copilot.getPendingExitPlans()) {
-        const plans = plansBySession[sessionId] ??= []
-        plans.push({ sessionId, requestId, summary })
-      }
-      sendJson(res, 200, { bySession, plansBySession })
+    // GET /api/permissions — every pending request the caller may see, grouped
+    // by session. Powers the Mission Control grid, which must surface requests
+    // for sessions that are not open.
+    if (req.method === "GET" && (path === "" || path === "/")) {
+      const permissions = listPermissionSessionIds(runtimes).flatMap((sessionId) =>
+        collectPendingPermissions(sessionId, runtimes).map((request) => summarizeRequest(sessionId, request)),
+      )
+      const plans = copilot.getPendingExitPlans().map(({ sessionId, requestId, summary }) => ({ sessionId, requestId, summary }))
+      sendJson(res, 200, {
+        bySession: await visibleBySession(req, permissions),
+        plansBySession: await visibleBySession(req, plans),
+      })
       return
     }
 
     // GET /api/permissions/:sessionId — return pending permission requests
-    const getMatch = url.match(/^\/([^/?]+)$/)
+    const getMatch = path.match(/^\/([^/]+)$/)
     if (req.method === "GET" && getMatch) {
       const sessionId = decodeURIComponent(getMatch[1])
+      if (await authorizeSession(req, res, { sessionId }, "view") === null) return
       sendJson(res, 200, {
         permissions: collectPendingPermissions(sessionId, runtimes),
         plan: copilot.getPendingExitPlans(sessionId)[0] ?? null,
@@ -126,58 +145,45 @@ export function registerPermissionRoutes(
       return
     }
 
-    const planMatch = url.match(/^\/([^/?]+)\/plan$/)
+    const planMatch = path.match(/^\/([^/]+)\/plan$/)
     if (req.method === "POST" && planMatch) {
       const sessionId = decodeURIComponent(planMatch[1])
-      withJsonBody<unknown>(req, res, (body) => {
-        try {
-          const { requestId, approved, selectedAction, feedback } = body as Record<string, unknown>
-          if (typeof requestId !== "string" || !requestId) {
-            sendJson(res, 400, { error: "requestId is required" })
-            return
-          }
-          if (typeof approved !== "boolean") {
-            sendJson(res, 400, { error: "approved must be a boolean" })
-            return
-          }
-          if (selectedAction !== undefined && typeof selectedAction !== "string") {
-            sendJson(res, 400, { error: "selectedAction must be a string" })
-            return
-          }
-          if (feedback !== undefined && typeof feedback !== "string") {
-            sendJson(res, 400, { error: "feedback must be a string" })
-            return
-          }
-          const pending = copilot
-            .getPendingExitPlans(sessionId)
-            .find((plan) => plan.requestId === requestId)
-          if (!pending) {
-            sendJson(res, 404, { error: "Plan request not found or already resolved" })
-            return
-          }
-          const response: CopilotExitPlanResponse = {
-            approved,
-            ...(selectedAction ? { selectedAction } : {}),
-            ...(feedback ? { feedback } : {}),
-          }
-          try {
-            copilot.answerExitPlan(sessionId, requestId, response)
-          } catch (error) {
-            sendJson(res, 400, {
-              error: error instanceof Error ? error.message : "Failed to answer Copilot plan",
-            })
-            return
-          }
-          sendJson(res, 200, { success: true })
-        } catch {
-          sendJson(res, 400, { error: "Invalid JSON body" })
+      withJsonBody<unknown>(req, res, async (body) => {
+        const answer = parsePlanAnswer(body)
+        if (typeof answer === "string") {
+          sendJson(res, 400, { error: answer })
+          return
         }
+        const authorized = await authorizeSession(req, res, { sessionId }, "interact")
+        if (authorized === null) return
+        // A plan waits inside a live session, so the runtime holding it names the agent.
+        const runtime = runtimes.runtimeForSession(sessionId)
+        const pending = copilot
+          .getPendingExitPlans(sessionId)
+          .find((plan) => plan.requestId === answer.requestId)
+        if (!runtime || !pending) {
+          sendJson(res, 404, { error: "Plan request not found or already resolved" })
+          return
+        }
+        try {
+          copilot.answerExitPlan(sessionId, answer.requestId, answer.response)
+        } catch (error) {
+          sendJson(res, 400, {
+            error: error instanceof Error ? error.message : "Failed to answer Copilot plan",
+          })
+          return
+        }
+        reportSessionEvent(req, "session.permission", { sessionId: authorized.sessionId, agent: runtime.kind }, {
+          requestId: answer.requestId,
+          ...answer.response,
+        })
+        sendJson(res, 200, { success: true })
       })
       return
     }
 
     // POST /api/permissions/:sessionId/respond — approve/deny a single tool
-    const respondMatch = url.match(/^\/([^/?]+)\/respond$/)
+    const respondMatch = path.match(/^\/([^/]+)\/respond$/)
     if (req.method === "POST" && respondMatch) {
       const sessionId = decodeURIComponent(respondMatch[1])
       withJsonBody<unknown>(req, res, async (body) => {
@@ -199,6 +205,8 @@ export function registerPermissionRoutes(
           sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
           return
         }
+        const authorized = await authorizeSession(req, res, { sessionId }, "interact")
+        if (authorized === null) return
 
         const runtime = runtimes.runtimeForSession(sessionId)
         if (!runtime) {
@@ -222,6 +230,12 @@ export function registerPermissionRoutes(
           sendAgentError(res, error, "Failed to resolve the permission request")
           return
         }
+        reportSessionEvent(req, "session.permission", { sessionId: authorized.sessionId, agent: runtime.kind }, {
+          requestId,
+          toolUseId: request?.toolUseId,
+          toolName: request?.toolName,
+          behavior,
+        })
         sendJson(res, 200, {
           success: true,
           action: behavior === "deny" ? "denied" : "allowed",
@@ -233,7 +247,7 @@ export function registerPermissionRoutes(
     }
 
     // POST /api/permissions/:sessionId/respond-all — batch approve/deny
-    const respondAllMatch = url.match(/^\/([^/?]+)\/respond-all$/)
+    const respondAllMatch = path.match(/^\/([^/]+)\/respond-all$/)
     if (req.method === "POST" && respondAllMatch) {
       const sessionId = decodeURIComponent(respondAllMatch[1])
       withJsonBody<unknown>(req, res, async (body) => {
@@ -248,6 +262,8 @@ export function registerPermissionRoutes(
           sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
           return
         }
+        const authorized = await authorizeSession(req, res, { sessionId }, "interact")
+        if (authorized === null) return
 
         const runtime = runtimes.runtimeForSession(sessionId)
         if (!runtime) {
@@ -255,12 +271,15 @@ export function registerPermissionRoutes(
           return
         }
         try {
-          const { count, toolNames } = await runtime.respondToAllApprovals(sessionId, behavior)
+          const resolved = await runtime.respondToAllApprovals(sessionId, behavior)
+          if (resolved.length > 0) {
+            reportSessionEvent(req, "session.permission", { sessionId: authorized.sessionId, agent: runtime.kind }, { behavior, resolved })
+          }
           sendJson(res, 200, {
             success: true,
             action: behavior === "deny" ? "denied" : "allowed",
-            count,
-            toolNames,
+            count: resolved.length,
+            toolNames: [...new Set(resolved.map(({ toolName }) => toolName))],
             ...(runtime.kind === "claude" ? {} : { shouldRetry: false }),
           })
         } catch (error) {

@@ -34,6 +34,8 @@ import { resolveSessionCwd } from "./sessionCwd"
 import { withTimeout } from "./timeout"
 import {
   AgentRuntimeError,
+  reportSessionId,
+  resolvedApproval,
   type AgentRuntime,
   type ApprovalDecision,
   type PendingApproval,
@@ -110,6 +112,7 @@ function watchSubagentsFor(state: SDKSessionState, filePath: string | null): voi
 function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
   const sessionId = randomUUID()
   const { fileName, filePath } = transcriptPath(req.dirName, sessionId)
+  reportSessionId(req, sessionId)
 
   const state = createSDKSession({
     sessionId,
@@ -244,8 +247,11 @@ export const claudeRuntime: AgentRuntime = {
     const live = sdkSessions.get(sessionId)
     if (isSDKQueryLive(live)) {
       // The query is alive: put the message on its input stream and let the
-      // frontend watch the transcript. A turn result can arrive while
-      // background work is still running, so `running` is not a liveness test.
+      // frontend watch the transcript. It joins the turn in progress, or opens
+      // the next one when the query sits idle between turns. A turn result can
+      // arrive while background work is still running, so `running` is not a
+      // liveness test.
+      const joinsTurn = live.running
       const state = sendSDKMessage(sessionId, req.message ?? "", req.images, {
         model: req.model,
         effort: req.effort,
@@ -260,7 +266,7 @@ export const claudeRuntime: AgentRuntime = {
           "Failed to send message to running session",
         )
       }
-      return { delivery: "enqueued" }
+      return { delivery: joinsTurn ? "enqueued" : "started" }
     }
 
     const state = resumeSDKSession({
@@ -347,8 +353,7 @@ export const claudeRuntime: AgentRuntime = {
   async respondToAllApprovals(sessionId, decision) {
     // Every pending callback resolves in one pass: they are all parked in the
     // same map, so there is no window for a new one to arrive mid-batch.
-    const toolNames = resolveAllPermissions(sessionId, decision)
-    return { count: toolNames.length, toolNames }
+    return resolveAllPermissions(sessionId, decision).map(resolvedApproval)
   },
 
   listPendingQuestions(sessionId): PendingQuestion[] {
@@ -357,7 +362,7 @@ export const claudeRuntime: AgentRuntime = {
   },
 
   async answerQuestion(sessionId, questionId, answers: UserQuestionAnswers) {
-    return resolveUserQuestion(sessionId, questionId, answers).found
+    return resolveUserQuestion(sessionId, questionId, answers).found ? { message: null } : null
   },
 
   listModels: fetchClaudeModels,

@@ -1,22 +1,16 @@
-type DeviceConnectionInvalidationListener = (deviceId: string) => void
+import { listenerSet } from "../lib/listenerSet"
 
-const listeners = new Set<DeviceConnectionInvalidationListener>()
+// One broken transport must not prevent the rest from being revoked.
+const invalidations = listenerSet<string>(() => {})
 
 /** Subscribe a long-lived hub transport to committed device connection changes. */
 export function onDeviceConnectionsInvalidated(
-  listener: DeviceConnectionInvalidationListener,
+  listener: (deviceId: string) => void,
 ): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
+  return invalidations.add(listener)
 }
 
 /** Close transports that were authorized and connected through an old record. */
 export function invalidateDeviceConnections(deviceId: string): void {
-  for (const listener of [...listeners]) {
-    try {
-      listener(deviceId)
-    } catch {
-      // One broken transport must not prevent the rest from being revoked.
-    }
-  }
+  invalidations.emit(deviceId)
 }

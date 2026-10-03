@@ -24,7 +24,10 @@ export type MobileAppHandlers = Pick<
 >
 
 export interface MobileNavigation {
-  panels: Pick<DesktopPanels, "activeWorkspacePanel" | "openWorkspacePanel" | "closeWorkspacePanel">
+  panels: Pick<
+    DesktopPanels,
+    "activeWorkspacePanel" | "openWorkspacePanel" | "closeWorkspacePanel" | "openMainView" | "closeMainView"
+  >
   actions: MobileSessionActions
   handlers: MobileAppHandlers
   creatingSession: boolean
@@ -77,6 +80,7 @@ export interface MobileChrome {
   branchModal: ReactNode
   fileChangesOpen: boolean
   onFileChangesOpenChange: (open: boolean) => void
+  onLogout: () => void
 }
 
 export interface MobileAppShellProps {

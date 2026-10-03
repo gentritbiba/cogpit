@@ -1,4 +1,4 @@
-import { extractCodexMetadataFromLines } from "../../shared/session/codex"
+import { codexParentId, extractCodexMetadataFromLines } from "../../shared/session/codex"
 import { isRecord } from "../../shared/objects"
 import { HEAD_BYTES, readHeadLines, readWholeTranscript } from "./transcriptHead"
 import type { SessionIdentity, SessionMeta, TranscriptHead } from "./types"
@@ -29,9 +29,7 @@ export async function readCodexSessionIdentity(filePath: string): Promise<Sessio
       const payload = record.payload
       if (!sessionId && typeof payload.id === "string") sessionId = payload.id
       if (!cwd && typeof payload.cwd === "string") cwd = payload.cwd
-      if (!parentSessionId && typeof payload.forked_from_id === "string") {
-        parentSessionId = payload.forked_from_id || null
-      }
+      parentSessionId ||= codexParentId(payload)
       const source = isRecord(payload.source) ? payload.source : null
       if (source && isRecord(source.subagent)) isSubagent = true
       const git = isRecord(payload.git) ? payload.git : null

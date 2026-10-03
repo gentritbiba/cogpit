@@ -9,6 +9,7 @@ import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useImageUpload } from "./useImageUpload"
+import { keepRefusedDraft, takeRefusedDraft } from "./refusedDrafts"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
@@ -147,7 +148,43 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   const updateMultiline = useCallback((v: boolean) => { isMultilineRef.current = v; setIsMultiline(v) }, [])
 
-  const { images, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(allowImages)
+  const { images, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, restoreImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(allowImages)
+  const imagesRef = useRef(images)
+  useEffect(() => { imagesRef.current = images }, [images])
+
+  const sessionId = session?.sessionId ?? null
+  // Which session the composer shows, until it goes away.
+  const shownRef = useRef<{ sessionId: string | null } | null>(null)
+  // The session whose refused message the composer holds.
+  const refusedFromRef = useRef<string | null>(null)
+
+  // A refused message comes back to the next empty composer that shows its
+  // session, and one this composer still holds leaves with that session. App
+  // keeps one composer across sessions and the next session's run reads the
+  // refs before the text renders, so they move with the text.
+  useEffect(() => {
+    const holdsMessage = () => textRef.current.trim() !== "" || imagesRef.current.length > 0
+    shownRef.current = { sessionId }
+    const draft = sessionId && !holdsMessage() ? takeRefusedDraft(sessionId) : undefined
+    if (draft) {
+      refusedFromRef.current = sessionId
+      textRef.current = draft.text
+      imagesRef.current = draft.images
+      setText(draft.text)
+      restoreImages(draft.images)
+    }
+    return () => {
+      shownRef.current = null
+      if (sessionId && refusedFromRef.current === sessionId && holdsMessage()) {
+        keepRefusedDraft(sessionId, { text: textRef.current, images: imagesRef.current })
+        textRef.current = ""
+        imagesRef.current = []
+        setText("")
+        clearImages()
+      }
+      refusedFromRef.current = null
+    }
+  }, [sessionId, restoreImages, clearImages])
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
@@ -305,12 +342,23 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     }
 
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
-    onSend(trimmed, imagePayload)
+    const draft = { text, images }
+    refusedFromRef.current = null
+    void onSend(trimmed, imagePayload).then((sent) => {
+      if (sent) return
+      if (shownRef.current?.sessionId !== sessionId) {
+        if (sessionId) keepRefusedDraft(sessionId, draft)
+        return
+      }
+      refusedFromRef.current = sessionId
+      setText((current) => current || draft.text)
+      restoreImages(draft.images)
+    })
     setText("")
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse])
+  }, [text, images, allowImages, onSend, clearImages, restoreImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showFiles && e.key === "Escape") {

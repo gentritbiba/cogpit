@@ -5,7 +5,6 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseConnectionDefinition, parseFrameMessage, type PluginRequest } from "@cogpit/plugin-contracts"
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
 vi.mock("../../security", () => ({ onSessionRevoked: () => () => {}, isSessionTokenActive: () => true, getSessionPrincipal: (token: string) => token.startsWith("admin-") ? { userId: token, username: token, role: "admin" } : null }))
 vi.mock("../../routes/hello", () => ({ getInstanceId: () => "fixture-host", getAppVersion: () => "2.6.6" }))
 vi.mock("../../agents", () => ({ allStores: () => [] }))

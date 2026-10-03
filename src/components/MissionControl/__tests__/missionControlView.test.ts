@@ -370,6 +370,21 @@ describe("filterMissionCards / countMissionCards", () => {
     expect(filterMissionCards(cards, "needs-you").map((c) => c.session.sessionId)).toEqual(["perm"])
   })
 
+  it("leaves a blocked session the user can only view out of needs you, still showing what blocks it", () => {
+    const viewed = build(
+      [session({ sessionId: "viewed", agentStatus: "tool_use" }), session({ sessionId: "perm", agentStatus: "tool_use" })],
+      [permission("viewed"), permission("perm")],
+      { canAnswer: (s) => s.sessionId !== "viewed" },
+    )
+
+    expect(Object.fromEntries(viewed.map((card) => [card.session.sessionId, [card.state, card.canAnswer]]))).toEqual({
+      viewed: ["awaiting_approval", false],
+      perm: ["awaiting_approval", true],
+    })
+    expect(filterMissionCards(viewed, "needs-you").map((c) => c.session.sessionId)).toEqual(["perm"])
+    expect(countMissionCards(viewed).needsYou).toBe(1)
+  })
+
   it("filters to finished, including failures", () => {
     expect(filterMissionCards(cards, "finished").map((c) => c.session.sessionId).sort())
       .toEqual(["done", "fail"])

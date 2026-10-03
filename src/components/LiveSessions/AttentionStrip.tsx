@@ -8,6 +8,7 @@ import { formatRelativeTime, dirNameToPath } from "@/lib/format"
 import { getStatusLabel } from "../../../shared/session/sessionStatus"
 import { agentKindForDirName } from "@/lib/agents"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
+import { useListedPermissions } from "@/hooks/useListedPermissions"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
@@ -220,6 +221,7 @@ export function AttentionStrip({
   onResumeSession,
   onPrefetchSession,
 }: AttentionStripProps) {
+  const permissionsOf = useListedPermissions()
   const [showAllWorking, setShowAllWorking] = useState(false)
   const visibleWorking = showAllWorking ? groups.working : groups.working.slice(0, WORKING_VISIBLE)
   const hiddenWorking = groups.working.length - visibleWorking.length
@@ -237,6 +239,7 @@ export function AttentionStrip({
       customName: sessionNames[s.sessionId],
       projectLabel: projectLabel(s),
       onSelect: () => onSelectSession(s.dirName, s.fileName),
+      onKill: permissionsOf(s.access).stop ? onKill : undefined,
       onPrefetch: onPrefetchSession && !isActiveSession
         ? () => onPrefetchSession(s.dirName, s.fileName)
         : undefined,
@@ -260,9 +263,8 @@ export function AttentionStrip({
               chip={REASON_CHIP[reason]}
               dotClassName={REASON_DOT[reason]}
               cardClassName="border-warning/20 bg-warning/5 hover:bg-warning/10"
-              onKill={onKill}
               onResume={
-                reason === "deferred" && onResumeSession
+                reason === "deferred" && onResumeSession && permissionsOf(s.access).send
                   ? () => onResumeSession(s.sessionId, s.cwd, s.dirName)
                   : undefined
               }
@@ -289,7 +291,6 @@ export function AttentionStrip({
                 dotClassName={STATUS_DOT.working}
                 cardClassName="hover:bg-accent/50"
                 compact
-                onKill={onKill}
               />
             ))}
           </div>

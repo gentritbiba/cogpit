@@ -1,8 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useNewSession } from "../useNewSession"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { ParsedSession } from "../../../shared/session/types"
+import { ALL_CAPABILITIES, NO_CAPABILITIES } from "../../../shared/contracts/identity"
+import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 
 // Mock authFetch
 vi.mock("@/lib/auth", () => ({
@@ -14,8 +17,14 @@ vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(),
 }))
 
+vi.mock("@/hooks/useSessionNames", () => ({
+  rename: vi.fn(),
+}))
+
 import { authFetch } from "@/lib/auth"
 import { parseSession } from "../../../shared/session/parser"
+import { __resetSessionAccessForTest, knownSessionAccess } from "@/lib/sessionAccess"
+import { rename as renameSession } from "@/hooks/useSessionNames"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 const mockedParseSession = vi.mocked(parseSession)
@@ -162,6 +171,39 @@ describe("useNewSession", () => {
         })
       )
     })
+  })
+
+  it("owns a session it just created in team edition before showing it", async () => {
+    const alice = { id: "u_alice", username: "alice", displayName: "Alice" }
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { ...alice },
+      capabilities: NO_CAPABILITIES,
+      enforcesSessionAccess: true,
+    })
+    const accessWhenShown = vi.fn()
+    dispatch.mockImplementation((action: { type: string }) => {
+      if (action.type === "FINALIZE_SESSION") accessWhenShown(knownSessionAccess("session-123"))
+    })
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+    act(() => {
+      result.current.handleNewSession("-tmp-my-project", "/tmp/my-project")
+    })
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "-tmp-my-project", fileName: "session.jsonl", sessionId: "session-123" }),
+      } as Response)
+      .mockResolvedValue({ ok: false, text: () => Promise.resolve("") } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("hello")
+    })
+
+    expect(accessWhenShown).toHaveBeenCalledWith("own")
+    __resetCapabilitiesForTest()
+    __resetSessionAccessForTest()
   })
 
   it("createAndSend sets error on failed create response", async () => {
@@ -522,5 +564,145 @@ describe("useNewSession", () => {
         }),
       })
     )
+  })
+
+  it("owns a recovered Codex session before showing it, and learns the listing's access", async () => {
+    const alice = { id: "u_alice", username: "alice", displayName: "Alice" }
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { ...alice },
+      capabilities: NO_CAPABILITIES,
+      enforcesSessionAccess: true,
+    })
+    const accessWhenShown = vi.fn()
+    dispatch.mockImplementation((action: { type: string }) => {
+      if (action.type === "FINALIZE_SESSION") accessWhenShown(knownSessionAccess("codex-session-1"))
+    })
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+    act(() => {
+      result.current.handleNewSession("codex__L3RtcC9wcm9qZWN0", "/tmp/project")
+    })
+    const now = new Date().toISOString()
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "codex exited with code 0" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          sessions: [
+            { fileName: "a.jsonl", sessionId: "codex-session-1", firstUserMessage: "hello codex", lastModified: now },
+            {
+              fileName: "b.jsonl",
+              sessionId: "codex-session-2",
+              lastModified: now,
+              access: { level: "view", mine: false },
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValue({ ok: false, text: () => Promise.resolve("") } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("hello codex")
+    })
+
+    expect(accessWhenShown).toHaveBeenCalledWith("own")
+    expect(knownSessionAccess("codex-session-2")).toBe("view")
+    __resetCapabilitiesForTest()
+    __resetSessionAccessForTest()
+  })
+
+  describe("recovery from a listing that names each session's access", () => {
+    const access = (mine: boolean): ListedAccess => ({ level: "view", mine })
+
+    afterEach(() => {
+      __resetCapabilitiesForTest()
+    })
+
+    /** Fail the create with `failure`, then list `sessions` for recovery. */
+    async function recoverFrom(
+      sessions: Array<{ sessionId: string; access?: ListedAccess }>,
+      failure: { status: number; body: { error: string; code?: string } } = { status: 500, body: { error: "codex exited with code 0" } },
+    ) {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
+      act(() => {
+        result.current.handleNewSession("codex__L3RtcC9wcm9qZWN0", "/tmp/project")
+      })
+      mockedAuthFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: failure.status,
+          json: () => Promise.resolve(failure.body),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({
+            sessions: sessions.map((session) => ({
+              ...session,
+              fileName: `${session.sessionId}.jsonl`,
+              firstUserMessage: "hello codex",
+              lastModified: new Date().toISOString(),
+            })),
+          }),
+        } as Response)
+        .mockResolvedValue({ ok: true, text: () => Promise.resolve("{}") } as Response)
+
+      let sessionId: string | null = null
+      await act(async () => {
+        sessionId = await result.current.createAndSend("hello codex")
+      })
+      return { sessionId, result }
+    }
+
+    it("adopts the caller's own session, not a newer one shared with them", async () => {
+      const { sessionId } = await recoverFrom([
+        { sessionId: "shared-session", access: access(false) },
+        { sessionId: "own-session", access: access(true) },
+      ])
+
+      expect(sessionId).toBe("own-session")
+      expect(renameSession).toHaveBeenCalledWith("own-session", "hello codex")
+    })
+
+    it("adopts nothing when the server refused the start as unconfirmed, though an own session is recent", async () => {
+      const refusal = "Cogpit could not confirm the new session; an admin can assign it once it appears"
+      const { sessionId, result } = await recoverFrom(
+        [{ sessionId: "own-session", access: access(true) }],
+        { status: 502, body: { code: "SESSION_UNCONFIRMED", error: refusal } },
+      )
+
+      expect(sessionId).toBeNull()
+      expect(result.current.createError).toBe(refusal)
+      expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "FINALIZE_SESSION" }))
+      expect(renameSession).not.toHaveBeenCalled()
+    })
+
+    it("adopts nothing when every candidate belongs to someone else", async () => {
+      const { sessionId, result } = await recoverFrom([
+        { sessionId: "shared-session", access: access(false) },
+      ])
+
+      expect(sessionId).toBeNull()
+      expect(result.current.createError).toBe("codex exited with code 0")
+    })
+
+    it("adopts from a listing without access, as a personal server sends it, whatever edition the hub runs", async () => {
+      setMe({
+        authenticated: true,
+        edition: "team",
+        user: { id: "u_me", username: "me", displayName: "Me" },
+        capabilities: ALL_CAPABILITIES,
+        enforcesSessionAccess: true,
+      })
+
+      const { sessionId } = await recoverFrom([{ sessionId: "device-session" }])
+
+      expect(sessionId).toBe("device-session")
+    })
   })
 })

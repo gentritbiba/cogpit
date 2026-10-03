@@ -10,14 +10,15 @@ import { join } from "node:path"
 import { WebSocketServer, WebSocket } from "ws"
 
 import { createHubProxyHandler, handleHubUpgrade } from "../../hub/proxy"
-import { initDeviceRegistry, addDevice, updateDevice, type HubDevice } from "../../hub/registry"
+import { initDeviceRegistry, addDevice, listDevices, updateDevice, type HubDevice } from "../../hub/registry"
 import { invalidateDeviceToken } from "../../hub/device-client"
 import { invalidateDeviceConnections } from "../../hub/connection-invalidation"
 import { getConfig } from "../../config"
 import { createSessionToken, revokeAllSessions } from "../../security"
-import { initEdition, __resetEditionForTest } from "../../team/edition"
-import { setRequestPrincipal } from "../../team/requestPrincipal"
-import type { SessionPrincipal } from "../../team/constants"
+import { __resetEditionForTest } from "../../edition"
+import { installFakeEdition } from "../edition/fakeEdition"
+import { setRequestPrincipal } from "../../requestPrincipal"
+import type { SessionPrincipal } from "../../sessionConstants"
 
 // TLS devices must route through node:https. A real https upstream would need
 // a trusted cert (validation is deliberately strict), so the https module is
@@ -63,7 +64,10 @@ function listen(server: http.Server): Promise<number> {
   })
 }
 
-async function makeTarget(respond: Responder): Promise<Target> {
+/** Answers the target's `/api/auth/verify` instead of minting a token. */
+type VerifyRefusal = (res: ServerResponse) => void
+
+async function makeTarget(respond: Responder, refuseVerify?: VerifyRefusal): Promise<Target> {
   const requests: TargetRequest[] = []
   const mintTokens: string[] = []
   const mintCredentials: string[] = []
@@ -84,6 +88,7 @@ async function makeTarget(respond: Responder): Promise<Target> {
     req.on("end", () => {
       const body = Buffer.concat(chunks)
       if (req.url === "/api/auth/verify" && req.method === "POST") {
+        if (refuseVerify) return refuseVerify(res)
         const token = `tok-${mintTokens.length + 1}`
         mintTokens.push(token)
         mintCredentials.push(String(req.headers.authorization || ""))
@@ -336,7 +341,7 @@ describe("createHubProxyHandler — routing guards", () => {
     ["admin", "/api/auth/logout", { userId: "admin", username: "alice", role: "admin" }],
     ["admin", "/api/auth/verify", { userId: "admin", username: "alice", role: "admin" }],
   ] as const)("rejects a direct %s request to device auth route %s before credential minting", async (_role, path, principal) => {
-    initEdition({ shell: "standalone", configEdition: "team" })
+    installFakeEdition({})
     const target = track(await makeTarget((_req, res) => res.end("should not arrive")))
     const device = await passwordDevice(target.port)
     const hub = track(await makeHub(principal))
@@ -507,6 +512,23 @@ describe("createHubProxyHandler — device auth failures", () => {
     expect(await res.json()).toMatchObject({ code: "DEVICE_AUTH_FAILED" })
     expect(res.headers.get("x-cogpit-device")).toBe(device.id)
     expect(target.mintCount).toBe(2) // one re-mint attempt, then gives up
+  })
+
+  it("maps a device's retryable refusal to a 502 DEVICE_REFUSED, not a credential failure", async () => {
+    const target = track(await makeTarget((_req, res) => res.end("never proxied"), (res) => {
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ valid: false, error: "Only admins can sign in.", code: "PAUSED", retryable: true }))
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/x"))
+
+    expect(res.status).toBe(502)
+    expect(res.headers.get("x-cogpit-hub-error")).toBe("DEVICE_REFUSED")
+    expect(await res.json()).toMatchObject({ code: "DEVICE_REFUSED" })
+    expect(target.requests).toEqual([])
+    expect(listDevices().find((d) => d.id === device.id)?.runtime.authState).not.toBe("bad-password")
   })
 
   it("maps an unreachable device to a 502 DEVICE_UNREACHABLE", async () => {

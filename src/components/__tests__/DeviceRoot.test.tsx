@@ -74,6 +74,7 @@ describe("DeviceRoot offline banner", () => {
   })
   afterEach(() => {
     vi.useRealTimers()
+    window.history.replaceState(null, "", "/")
   })
 
   it("shows the retrying banner when the active device is unreachable", () => {
@@ -121,6 +122,54 @@ describe("DeviceRoot offline banner", () => {
     expect(mocks.testDevice).not.toHaveBeenCalled()
   })
 
+  it("asks the device for its reason as soon as it refuses, then keeps retrying until it admits the account", async () => {
+    mocks.testDevice
+      .mockResolvedValueOnce({ ok: false, reachable: true, authState: "unknown", code: "DEVICE_REFUSED", error: "Studio: Only admins can sign in for now." })
+      .mockResolvedValue({ ok: true, reachable: true, authState: "ok" })
+    render(<DeviceRoot />)
+    fireUnreachable("dev_1", "DEVICE_REFUSED")
+
+    // Until the device answers, the banner says what the hub knows.
+    expect(screen.getByText("Studio is not admitting this account right now. Cogpit will keep retrying.")).toBeInTheDocument()
+    expect(screen.queryByText(/rejected the stored password/i)).not.toBeInTheDocument()
+    expect(mocks.testDevice).toHaveBeenCalledExactlyOnceWith("dev_1")
+
+    // No poll has run yet: the device's own text arrives with the first answer.
+    await act(async () => {})
+    expect(screen.getByText("Studio: Only admins can sign in for now. Cogpit will keep retrying.")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    await waitFor(() => expect(screen.queryByText(/Only admins can sign in/)).not.toBeInTheDocument())
+    expect(mocks.testDevice).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the device's reason when the hub repeats its refusal", async () => {
+    mocks.testDevice.mockResolvedValue({ ok: false, reachable: true, authState: "unknown", code: "DEVICE_REFUSED", error: "Studio: Only admins can sign in for now." })
+    render(<DeviceRoot />)
+    fireUnreachable("dev_1", "DEVICE_REFUSED")
+    await act(async () => {})
+
+    fireUnreachable("dev_1", "DEVICE_REFUSED")
+    await act(async () => {})
+
+    expect(screen.getByText("Studio: Only admins can sign in for now. Cogpit will keep retrying.")).toBeInTheDocument()
+    expect(mocks.testDevice).toHaveBeenCalledOnce()
+  })
+
+  it("names the refusal when a retry finds it on a device that looked unreachable", async () => {
+    mocks.testDevice.mockResolvedValue({ ok: false, reachable: true, authState: "unknown", code: "DEVICE_REFUSED" })
+    render(<DeviceRoot />)
+    fireUnreachable()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+
+    expect(screen.getByText("Studio is not admitting this account right now. Cogpit will keep retrying.")).toBeInTheDocument()
+  })
+
   it("clears the banner when a retry reports the device is healthy again", async () => {
     mocks.testDevice.mockResolvedValue({ ok: true, reachable: true, authState: "ok" })
     render(<DeviceRoot />)
@@ -131,6 +180,50 @@ describe("DeviceRoot offline banner", () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
     await waitFor(() => expect(screen.queryByText(/retrying/i)).not.toBeInTheDocument())
+  })
+
+  describe("a retry still in flight when the target changes", () => {
+    /** Point both the URL, which scopes async work, and DeviceRoot's own read at `deviceId`. */
+    function routeTo(deviceId: string) {
+      window.history.replaceState(null, "", `/d/${deviceId}/`)
+      mocks.getActiveDeviceId.mockReturnValue(deviceId)
+    }
+
+    afterEach(() => {
+      __resetDeviceRevisionsForTest()
+    })
+
+    it.each([
+      ["another device becomes active", () => {
+        routeTo("dev_2")
+        window.dispatchEvent(new Event("cogpit-device-changed"))
+      }],
+      ["the device's credentials change", () => {
+        recordDeviceConnectionRevision("dev_1", 1)
+      }],
+    ])("drops the retry's answer once %s", async (_change, changeTarget) => {
+      let answerRetry: (result: unknown) => void = () => undefined
+      mocks.testDevice.mockReturnValueOnce(new Promise((resolve) => { answerRetry = resolve }))
+      routeTo("dev_1")
+      render(<DeviceRoot />)
+      fireUnreachable()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(mocks.testDevice).toHaveBeenCalledExactlyOnceWith("dev_1")
+
+      act(changeTarget)
+      await act(async () => {
+        answerRetry({ ok: false, reachable: false, authState: "unknown", code: "UNREACHABLE" })
+      })
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+      expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(mocks.testDevice).toHaveBeenCalledOnce()
+    })
   })
 })
 

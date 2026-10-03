@@ -1,6 +1,8 @@
 import { join } from "node:path"
 import { readOwnerOnlyJsonArray, writeOwnerOnlyJson } from "../atomicJsonFile"
+import { listenerSet } from "../lib/listenerSet"
 import { replaceAll, serialQueue } from "../lib/serialQueue"
+import { sha256Hex } from "../lib/sha256"
 import { hashPassword, isPasswordHashed } from "../password-utils"
 import { generatePassphrase } from "./passphrase"
 
@@ -55,9 +57,39 @@ export interface IssuedShare {
 
 // ── Module state ─────────────────────────────────────────────────────
 
+const FILE_NAME = "shares.local.json"
+
 let registryPath: string | null = null
 const shares = new Map<string, ShareRecord>()
 const queue = serialQueue()
+/** sha256 of the bytes the registry last loaded or wrote; null when there were none. */
+let heldSha256: string | null = null
+const commits = listenerSet<string>((error) => {
+  console.error("[share-registry] A commit listener failed:", error)
+})
+
+/**
+ * Each committed write's sha256, and that of the bytes the registry holds, for
+ * an edition that vouches for the file's integrity: a record in it is a
+ * passphrase into a session.
+ */
+export const shareRegistryIntegrity = {
+  name: FILE_NAME,
+  onCommit: (listener: (sha256: string) => void): (() => void) => commits.add(listener),
+  loadedHash: (): string | null => heldSha256,
+  /**
+   * The edition cannot vouch for the file, so none of its passphrases may open
+   * a session: every share is dropped from memory at once, then from the file.
+   */
+  distrusted(): void {
+    if (shares.size === 0) return
+    console.warn("[share-registry] Dropping shares whose integrity could not be confirmed; each session must be shared again")
+    shares.clear()
+    void queue.run(() => persist(registryPath, [])).catch((error: unknown) => {
+      console.error("[share-registry] Could not drop the distrusted shares from the file:", error)
+    })
+  },
+}
 
 // ── Persistence ──────────────────────────────────────────────────────
 
@@ -91,7 +123,8 @@ async function persist(
   // Silently skipping the write would hand out a passphrase for a share that
   // the first initShareRegistry then discards.
   if (!filePath) throw new Error("Share registry mutated before initShareRegistry")
-  await writeOwnerOnlyJson(filePath, snapshot)
+  heldSha256 = sha256Hex(await writeOwnerOnlyJson(filePath, snapshot, 0o600, { durable: true }))
+  commits.emit(heldSha256)
 }
 
 interface ShareMutation<T> {
@@ -124,15 +157,16 @@ function commitShareMutation<T>(
  */
 export async function initShareRegistry(dir: string): Promise<void> {
   await queue.run(async () => {
-    const nextRegistryPath = join(dir, "shares.local.json")
-    const loadedShares = await readOwnerOnlyJsonArray(
+    const nextRegistryPath = join(dir, FILE_NAME)
+    const loaded = await readOwnerOnlyJsonArray(
       nextRegistryPath,
       normalizeShare,
       (share) => share.sessionId,
     )
 
     registryPath = nextRegistryPath
-    replaceAll(shares, loadedShares)
+    replaceAll(shares, loaded.records)
+    heldSha256 = loaded.sha256
   })
 }
 

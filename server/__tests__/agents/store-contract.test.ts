@@ -175,6 +175,14 @@ describe.each(CASES)("$kind store", ({ kind, store, seed }) => {
     }
   })
 
+  it("reads a transcript's own session as its root, where the file really lives", async () => {
+    const seeded = await seed("root-id")
+    await expect(store().transcriptRoot(seeded.filePath))
+      .resolves.toEqual({ rootSessionId: seeded.sessionId, isRootTranscript: true })
+    await expect(store().transcriptRoot(join(fixtureRoot, `${seeded.sessionId}.jsonl`)))
+      .resolves.toBeNull()
+  })
+
   it("refuses a transcript symlinked out of the root, and drops it from the listing", async () => {
     const seeded = await seed("symlink")
     const outside = join(fixtureRoot, `outside-${kind}.jsonl`)
@@ -183,6 +191,7 @@ describe.each(CASES)("$kind store", ({ kind, store, seed }) => {
     await symlink(outside, seeded.filePath)
 
     await expect(store().resolveSessionFile(seeded.dirName, seeded.fileName)).resolves.toBeNull()
+    await expect(store().transcriptRoot(seeded.filePath)).resolves.toBeNull()
     const listed = await store().listSessionFiles()
     expect(listed.some((file) => file.filePath === seeded.filePath)).toBe(false)
   })
@@ -216,6 +225,43 @@ describe("store registry", () => {
     expect(registry.storeForPath("/anywhere")).toBe(fake)
     expect(registry.allStores()).toEqual([fake, fake, fake])
   })
+
+  describe("allTopLevelSessions", () => {
+    /** A store listing sessions modified at each of `mtimes`, or failing with `error`. */
+    function listing(kind: AgentKind, mtimes: number[], error?: Error): AgentStore {
+      const sessions = mtimes.map((mtimeMs) => ({ filePath: `/${kind}/${mtimeMs}.jsonl`, mtimeMs }))
+      return { kind, listTopLevelSessions: async () => { if (error) throw error; return sessions } } as unknown as AgentStore
+    }
+
+    it("lists every store's top-level sessions, newest first", async () => {
+      const registry = agents.createStoreRegistry({
+        claude: listing("claude", [30, 10]),
+        codex: listing("codex", [20]),
+        copilot: listing("copilot", []),
+      })
+      const sessions = await registry.allTopLevelSessions()
+      expect(sessions.map((session) => session.filePath)).toEqual(["/claude/30.jsonl", "/codex/20.jsonl", "/claude/10.jsonl"])
+    })
+
+    it("fails when a store cannot read its sessions", async () => {
+      const registry = agents.createStoreRegistry({
+        claude: listing("claude", [30], Object.assign(new Error("EPERM"), { code: "EPERM" })),
+        codex: listing("codex", [20]),
+        copilot: listing("copilot", []),
+      })
+      await expect(registry.allTopLevelSessions()).rejects.toThrow("EPERM")
+    })
+
+    it("leaves out a store that cannot read its sessions when asked to", async () => {
+      const registry = agents.createStoreRegistry({
+        claude: listing("claude", [30], Object.assign(new Error("EACCES"), { code: "EACCES" })),
+        codex: listing("codex", [20, 40]),
+        copilot: listing("copilot", []),
+      })
+      const sessions = await registry.allTopLevelSessions({ skipUnreadable: true })
+      expect(sessions.map((session) => session.filePath)).toEqual(["/codex/40.jsonl", "/codex/20.jsonl"])
+    })
+  })
 })
 
 describe("per-agent storage shapes", () => {
@@ -246,6 +292,37 @@ describe("per-agent storage shapes", () => {
       .resolves.toBeNull()
   })
 
+  it("files Claude sub-agent and workflow transcripts under the session that spawned them", async () => {
+    const parent = takeUuid()
+    const project = join(sessionPaths.dirs.PROJECTS_DIR, "root-ids")
+    const subagent = join(project, parent, "subagents", "agent-a7264b922eed1be42.jsonl")
+    const workflowAgent = join(project, parent, "subagents", "workflows", "wf_9f75bb56-cf5", "agent-a0448cee5b05d1e5d.jsonl")
+    await Promise.all([write(join(project, `${parent}.jsonl`)), write(subagent), write(workflowAgent)])
+    const claude = agents.storeFor("claude")
+
+    const child = { rootSessionId: parent, isRootTranscript: false }
+    await expect(claude.transcriptRoot(subagent)).resolves.toEqual(child)
+    await expect(claude.transcriptRoot(workflowAgent)).resolves.toEqual(child)
+    // Beside the projects rather than inside one.
+    await write(join(sessionPaths.dirs.PROJECTS_DIR, `${parent}.jsonl`))
+    await expect(claude.transcriptRoot(join(sessionPaths.dirs.PROJECTS_DIR, `${parent}.jsonl`)))
+      .resolves.toBeNull()
+  })
+
+  it("answers for the Claude transcript a symlink really serves, not the session it sits under", async () => {
+    const [sessionA, sessionB] = [takeUuid(), takeUuid()]
+    const project = join(sessionPaths.dirs.PROJECTS_DIR, "root-id-symlink")
+    await write(join(project, `${sessionB}.jsonl`))
+    const alias = join(project, sessionA, "subagents", "agent-alias.jsonl")
+    await mkdir(dirname(alias), { recursive: true })
+    await symlink(join("..", "..", `${sessionB}.jsonl`), alias)
+
+    // B, not A: B's transcript is what reading the alias returns, so B's
+    // access is what serving it has to be checked against.
+    await expect(agents.storeFor("claude").transcriptRoot(alias))
+      .resolves.toEqual({ rootSessionId: sessionB, isRootTranscript: true })
+  })
+
   it("keeps Codex rollout names relative to the sessions root and skips non-JSONL files", async () => {
     const root = agents.storeFor("codex").sessionsRoot() as string
     const relativeName = "2026/07/21/rollout-discovery.jsonl"
@@ -258,6 +335,26 @@ describe("per-agent storage shapes", () => {
       fileName: relativeName,
     }))
     expect(files.some((file) => file.fileName.endsWith("ignored.txt"))).toBe(false)
+  })
+
+  it("finds a Codex rollout only by its whole id, whatever the walk meets first", async () => {
+    const root = agents.storeFor("codex").sessionsRoot() as string
+    const wanted = "7d1a52c4-9b3e-4f0a-8c6d-2e5f4a3b1c0d"
+    const lookalike = "0f9e8d7c-6b5a-4d3c-9b1a-2e5f4a3b1c0d"
+    const wantedPath = join(root, `2026/07/23/rollout-2026-07-23T09-00-00-${wanted}.jsonl`)
+    await write(join(root, `2026/07/22/rollout-2026-07-22T09-00-00-${lookalike}.jsonl`))
+    await write(wantedPath)
+    const codex = agents.storeFor("codex")
+    const fragment = wanted.slice(-12)
+
+    await expect(codex.findSessionFile(wanted)).resolves.toBe(wantedPath)
+    await expect(codex.findSessionFile(fragment)).resolves.toBeNull()
+    await expect(codex.findSessionFile(`-${fragment}`)).resolves.toBeNull()
+    await expect(codex.resolveSessionFile("codex__x", `${fragment}.jsonl`)).resolves.toBeNull()
+    await expect(codex.resolveSessionFile("codex__x", `${lookalike}/subagents/agent-${fragment}.jsonl`))
+      .resolves.toBeNull()
+    await expect(codex.resolveSessionFile("codex__x", `${lookalike}/subagents/agent-${wanted}.jsonl`))
+      .resolves.toBe(wantedPath)
   })
 
   it("resolves the Codex home from the environment", () => {
@@ -299,17 +396,19 @@ describe("cross-agent lookup", () => {
   it("searches Claude first, then falls back to the other agents", async () => {
     const projects = sessionPaths.dirs.PROJECTS_DIR
     const codexRoot = agents.storeFor("codex").sessionsRoot() as string
-    const claudePath = join(projects, "project-lookup", "shared-id.jsonl")
-    const codexSharedPath = join(codexRoot, "2026/07/21/rollout-shared-id.jsonl")
-    const codexOnlyPath = join(codexRoot, "2026/07/21/rollout-codex-only.jsonl")
+    const sharedId = "4e8c2a6b-1d3f-4b5a-9c7e-8f0a2b4c6d8e"
+    const codexOnlyId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    const claudePath = join(projects, "project-lookup", `${sharedId}.jsonl`)
+    const codexSharedPath = join(codexRoot, `2026/07/21/rollout-2026-07-21T08-00-00-${sharedId}.jsonl`)
+    const codexOnlyPath = join(codexRoot, `2026/07/21/rollout-2026-07-21T08-00-00-${codexOnlyId}.jsonl`)
     await Promise.all([
       write(claudePath, "{}\n"),
       write(codexSharedPath, "{}\n"),
       write(codexOnlyPath, "{}\n"),
     ])
 
-    await expect(sessionPaths.findJsonlPath("shared-id")).resolves.toBe(claudePath)
-    await expect(sessionPaths.findJsonlPath("codex-only")).resolves.toBe(codexOnlyPath)
+    await expect(sessionPaths.findJsonlPath(sharedId)).resolves.toBe(claudePath)
+    await expect(sessionPaths.findJsonlPath(codexOnlyId)).resolves.toBe(codexOnlyPath)
     await expect(sessionPaths.findJsonlPath("missing-id")).resolves.toBeNull()
   })
 

@@ -155,7 +155,7 @@ function isWorkflowFile(name: string): boolean {
  * separators and `..` so a crafted runId can't escape the workflows dir.
  * (Matches the runtime's `^wf_[a-z0-9-]{6,}$` shape, permissively.)
  */
-function isSafeRunId(runId: string): boolean {
+export function isSafeRunId(runId: string): boolean {
   return /^wf_[A-Za-z0-9_-]+$/.test(runId)
 }
 

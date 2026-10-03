@@ -18,8 +18,10 @@ import {
   getDeviceToken,
   invalidateDeviceToken,
   DeviceAuthError,
+  DeviceRefusedError,
   DeviceUnreachableError,
 } from "../hub/device-client"
+import { readDeviceRefusal, relayedRefusalText } from "../hub/deviceRefusal"
 import { invalidateDeviceConnections } from "../hub/connection-invalidation"
 import { CONNECT_WATCHDOG_MS } from "../hub/proxy"
 
@@ -63,6 +65,11 @@ const PROBE_MESSAGES: Record<ProbeCode, string> = {
 
 function isCogpitHello(value: unknown): value is HelloPayload {
   return !!value && typeof value === "object" && (value as { app?: unknown }).app === "cogpit"
+}
+
+/** A failed probe or credential check: 502 when the device could not be reached, else 400. */
+function sendCheckFailure(res: ServerResponse, code: string, error: string | undefined): void {
+  sendJson(res, code === "UNREACHABLE" ? 502 : 400, { error, code })
 }
 
 /** GET the device's `/api/hello` and classify the response. */
@@ -112,26 +119,38 @@ async function probeDevice(host: string, port: number, tls: boolean, timeoutMs =
 
 // ── Password verification (device /api/auth/verify) ──────────────────────
 
-type AuthCode = "BAD_PASSWORD" | "ACCOUNT_DISABLED" | "NETWORK_DISABLED" | "NOT_CONFIGURED" | "UNREACHABLE"
+/**
+ * `ACCOUNT_REFUSED`: the device checked the credentials and will not admit
+ * that account. `DEVICE_REFUSED`: it will not admit it for now, for a reason
+ * that can pass. Both carry the device's own text, bounded and prefixed with
+ * the device's name, when it gives one.
+ */
+type AuthCode = "BAD_PASSWORD" | "ACCOUNT_REFUSED" | "DEVICE_REFUSED" | "NETWORK_DISABLED" | "NOT_CONFIGURED" | "UNREACHABLE"
 
 type AuthResult =
   | { ok: true; token?: string }
-  | { ok: false; code: AuthCode }
+  | { ok: false; code: AuthCode; error: string }
 
 const AUTH_MESSAGES: Record<AuthCode, string> = {
   BAD_PASSWORD: "The password was rejected by the device.",
-  ACCOUNT_DISABLED: "That user account is disabled on the device.",
+  ACCOUNT_REFUSED: "The device refused that account.",
+  DEVICE_REFUSED: "The device is not admitting that account right now.",
   NETWORK_DISABLED: "Network access is disabled on that device. Enable it there first.",
   NOT_CONFIGURED: "That device has not finished setup yet.",
   UNREACHABLE: "Could not reach the device to verify the password.",
 }
 
+function authFailure(code: AuthCode, error?: string): AuthResult {
+  return { ok: false, code, error: error || AUTH_MESSAGES[code] }
+}
+
 /**
  * POST the credentials to the device's `/api/auth/verify` and classify the
- * result. When `username` is set the device is a team edition and the Bearer
+ * result. When `username` is set the device signs in accounts and the Bearer
  * carries `user:pass` (usernames reject ":", so the split is unambiguous).
  */
 async function verifyDevicePassword(
+  deviceName: string,
   host: string,
   port: number,
   tls: boolean,
@@ -152,30 +171,20 @@ async function verifyDevicePassword(
       },
     })
   } catch {
-    return { ok: false, code: "UNREACHABLE" }
+    return authFailure("UNREACHABLE")
   } finally {
     clearTimeout(timer)
   }
 
+  // A personal device refuses with 403, naming no code, while its network access is off.
   if (res.status === 403) {
-    // A team device marks a disabled user with code ACCOUNT_DISABLED (older
-    // team devices only send error: "Account disabled"); a personal device
-    // 403s when network access is off.
-    let body: unknown = null
-    try {
-      body = await res.json()
-    } catch {
-      body = null
-    }
-    const payload = body && typeof body === "object"
-      ? body as { code?: unknown; error?: unknown }
-      : null
-    const disabled = payload?.code === "ACCOUNT_DISABLED"
-      || payload?.error === "Account disabled"
-    return { ok: false, code: disabled ? "ACCOUNT_DISABLED" : "NETWORK_DISABLED" }
+    const refusal = await readDeviceRefusal(res)
+    if (!refusal) return authFailure("NETWORK_DISABLED")
+    const code = refusal.retryable ? "DEVICE_REFUSED" : "ACCOUNT_REFUSED"
+    return authFailure(code, refusal.error.trim() ? relayedRefusalText(deviceName, refusal.error) : undefined)
   }
-  if (res.status === 503) return { ok: false, code: "NOT_CONFIGURED" }
-  if (!res.ok) return { ok: false, code: "BAD_PASSWORD" }
+  if (res.status === 503) return authFailure("NOT_CONFIGURED")
+  if (!res.ok) return authFailure("BAD_PASSWORD")
 
   let body: unknown
   try {
@@ -184,7 +193,7 @@ async function verifyDevicePassword(
     body = null
   }
   const valid = !!body && typeof body === "object" && (body as { valid?: unknown }).valid === true
-  if (!valid) return { ok: false, code: "BAD_PASSWORD" }
+  if (!valid) return authFailure("BAD_PASSWORD")
   const rawToken = body && typeof body === "object" ? (body as { token?: unknown }).token : undefined
   return { ok: true, token: typeof rawToken === "string" ? rawToken : undefined }
 }
@@ -201,7 +210,7 @@ function readString(value: unknown): string | undefined {
 }
 
 /**
- * Device usernames, normalized exactly like the team users store. Tri-state so
+ * Device usernames, normalized the way account sign-in stores them. Tri-state so
  * a patch can say all three things: an absent field leaves the stored username
  * alone, an explicit "" or null detaches it (keeping password auth), and a
  * value sets it.
@@ -283,20 +292,15 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
 
   const probe = await probeDevice(host, port, tls)
   if (!probe.ok) {
-    return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
-      error: PROBE_MESSAGES[probe.code],
-      code: probe.code,
-    })
+    return sendCheckFailure(res, probe.code, PROBE_MESSAGES[probe.code])
   }
 
+  const deviceName = name || readString(probe.hello.name) || host
   let auth: "password" | "none"
   if (password) {
-    const verify = await verifyDevicePassword(host, port, tls, password, username)
+    const verify = await verifyDevicePassword(deviceName, host, port, tls, password, username)
     if (!verify.ok) {
-      return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
-        error: AUTH_MESSAGES[verify.code],
-        code: verify.code,
-      })
+      return sendCheckFailure(res, verify.code, verify.error)
     }
     auth = "password"
   } else {
@@ -310,7 +314,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
 
   const device = await addDevice({
-    name: name || readString(probe.hello.name) || host,
+    name: deviceName,
     host,
     port,
     tls,
@@ -377,22 +381,16 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   if (sensitiveChanged) {
     const probe = await probeDevice(host, port, tls)
     if (!probe.ok) {
-      return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
-        error: PROBE_MESSAGES[probe.code],
-        code: probe.code,
-      })
+      return sendCheckFailure(res, probe.code, PROBE_MESSAGES[probe.code])
     }
     // A username change without a new password re-verifies with the stored
     // one, so a typo'd user — or a detachment the device will not accept — is
     // caught here instead of on the next proxy call.
     const verifyPassword = newPassword ?? device.password
     if ((newPassword || usernameChanged) && verifyPassword) {
-      const verify = await verifyDevicePassword(host, port, tls, verifyPassword, username)
+      const verify = await verifyDevicePassword(newName ?? device.name, host, port, tls, verifyPassword, username)
       if (!verify.ok) {
-        return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
-          error: AUTH_MESSAGES[verify.code],
-          code: verify.code,
-        })
+        return sendCheckFailure(res, verify.code, verify.error)
       }
       if (newPassword) {
         patch.password = newPassword
@@ -507,6 +505,16 @@ async function handleTest(id: string, res: ServerResponse): Promise<void> {
           authState: "bad-password",
           code: "BAD_PASSWORD",
           error: AUTH_MESSAGES.BAD_PASSWORD,
+        })
+      }
+      if (err instanceof DeviceRefusedError) {
+        setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now(), lastHello: probe.hello })
+        return sendJson(res, 200, {
+          ok: false,
+          reachable: true,
+          authState: "unknown",
+          code: "DEVICE_REFUSED",
+          error: err.message,
         })
       }
       if (err instanceof DeviceUnreachableError) {

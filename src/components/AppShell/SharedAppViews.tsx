@@ -4,6 +4,7 @@ import { SessionBrowser } from "@/components/session-browser"
 import { Spinner } from "@/components/ui/Spinner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import type { EditionMainView } from "@/edition/contract"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useSessionActions } from "@/hooks/useSessionActions"
@@ -99,6 +100,18 @@ export function MissionControlView({ navigation }: { navigation: ShellNavigation
     <Suspense fallback={<LazyViewFallback label="Loading Mission Control…" />}>
       <div className="motion-session-enter flex min-h-0 flex-1 flex-col">
         <MissionControl onSelectSession={navigation.actions.handleDashboardSelect} />
+      </div>
+    </Suspense>
+  )
+}
+
+/** A main view an edition registers, shared by desktop and mobile shells. Callers check it is available. */
+export function ExtensionMainView({ view, onClose }: { view: EditionMainView; onClose: () => void }) {
+  const { Component } = view
+  return (
+    <Suspense fallback={<LazyViewFallback label={`Loading ${view.label}…`} />}>
+      <div className="motion-session-enter flex min-h-0 flex-1 flex-col">
+        <Component onClose={onClose} />
       </div>
     </Suspense>
   )

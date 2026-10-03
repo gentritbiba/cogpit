@@ -28,7 +28,8 @@ function describe(info: ProviderUpdateInfo): string {
  * Prompts when an installed agent CLI is behind its published release.
  *
  * Runs the upgrade in place when Cogpit recognised how the binary was
- * installed; otherwise it shows the command so the user can run it themselves.
+ * installed. The CLIs belong to the host, so only someone who may change its
+ * config sees the prompt.
  */
 export function ProviderUpdateBanner() {
   const { pending, updating, outcome, update, dismiss, clearOutcome } = useProviderUpdates()
@@ -64,10 +65,10 @@ export function ProviderUpdateBanner() {
     )
   }
 
-  if (pending.length === 0) return null
+  if (pending.length === 0 || !canRunUpdates) return null
 
   const first = pending[0]
-  const runnable = pending.filter((info) => info.updateCommand !== null && canRunUpdates)
+  const runnable = pending.filter((info) => info.updateCommand !== null)
 
   return (
     <Alert className={bannerClasses("warning")}>
@@ -80,11 +81,9 @@ export function ProviderUpdateBanner() {
       <AlertDescription className="text-warning/80">
         {pending.length > 1
           ? pending.map(describe).join(" · ")
-          : runnable.length === 1
+          : first.updateCommand
             ? `Cogpit can run \`${first.updateCommand}\` for you.`
-            : first.updateCommand
-              ? `Run \`${first.updateCommand}\` to upgrade.`
-              : "Update it with whatever installed it — Cogpit could not tell."}
+            : "Update it with whatever installed it — Cogpit could not tell."}
       </AlertDescription>
       <AlertAction className="static col-start-3 row-span-2 row-start-1 flex items-center gap-2 self-center">
         {runnable.map((info) => (

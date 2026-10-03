@@ -46,6 +46,8 @@ export interface MissionCard {
   elicitations: MissionControlElicitation[]
   /** Parked CLI dialogs; non-empty only for awaiting_prompt. */
   dialogs: MissionControlUserDialog[]
+  /** Whether the user may answer the session; a viewer sees what blocks it, read-only. */
+  canAnswer: boolean
 }
 
 /** True when the card is blocked on the user. */
@@ -54,6 +56,11 @@ export function needsYou(state: MissionCardState): boolean {
     || state === "awaiting_prompt"
     || state === "awaiting_question"
     || state === "awaiting_answer"
+}
+
+/** A blocked card needs the user only when they can answer it. */
+function cardNeedsYou(card: MissionCard): boolean {
+  return card.canAnswer && needsYou(card.state)
 }
 
 /** True when the session has stopped, successfully or not. */
@@ -118,6 +125,8 @@ export interface BuildCardsOptions {
   awaitingPlan: ReadonlySet<string>
   /** Sessions that finished during this browser session, kept visible. */
   newlyCompleted: ReadonlySet<string>
+  /** Whether the user may answer a session; everyone may in personal edition. */
+  canAnswer?: (session: ActiveSessionInfo) => boolean
   /** Finished sessions to keep after the recently-finished ones. */
   finishedLimit?: number
   /** Injected for tests; defaults to now. */
@@ -137,6 +146,7 @@ export function buildMissionCards({
   dialogsBySession,
   awaitingPlan,
   newlyCompleted,
+  canAnswer = () => true,
   finishedLimit = DEFAULT_FINISHED_LIMIT,
   now = Date.now(),
 }: BuildCardsOptions): MissionCard[] {
@@ -170,6 +180,7 @@ export function buildMissionCards({
       questions,
       elicitations,
       dialogs,
+      canAnswer: canAnswer(session),
     })
   }
 
@@ -195,7 +206,7 @@ export function filterMissionCards(
     case "running":
       return cards.filter((c) => c.state === "running")
     case "needs-you":
-      return cards.filter((c) => needsYou(c.state))
+      return cards.filter(cardNeedsYou)
     case "finished":
       return cards.filter((c) => isFinished(c.state))
     default:
@@ -215,7 +226,7 @@ export function countMissionCards(cards: MissionCard[]): MissionCounts {
   const counts: MissionCounts = { total: cards.length, running: 0, needsYou: 0, finished: 0, failed: 0 }
   for (const card of cards) {
     if (card.state === "running") counts.running++
-    if (needsYou(card.state)) counts.needsYou++
+    if (cardNeedsYou(card)) counts.needsYou++
     if (isFinished(card.state)) counts.finished++
     if (card.state === "failed") counts.failed++
   }

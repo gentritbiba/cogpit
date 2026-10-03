@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/sessionCreate", () => ({ createSession: mocks.createSession }))
 vi.mock("../../lib/sessionSend", () => ({ sendToSession: mocks.sendToSession }))
-vi.mock("../../lib/projectList", () => ({ listAllProjects: vi.fn() }))
+vi.mock("../../routes/projects/projectList", () => ({ listProjects: vi.fn() }))
 vi.mock("../../lib/sessionWait", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
   recordTurnError: mocks.recordTurnError,

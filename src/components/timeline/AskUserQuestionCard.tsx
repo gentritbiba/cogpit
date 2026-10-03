@@ -167,12 +167,15 @@ export function AskUserQuestionCard({
   expandToolPayloads,
   isAwaitingAnswer,
   sessionId,
+  canAnswer,
 }: {
   toolCall: ToolCall
   expandToolPayloads: boolean
   /** True when this question is the session's pending interaction. */
   isAwaitingAnswer?: boolean
   sessionId?: string
+  /** False for a viewer, who sees the open question without the form to answer it. */
+  canAnswer: boolean
 }): React.ReactElement {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const questions = useMemo(() => getQuestions(toolCall), [toolCall])
@@ -234,7 +237,7 @@ export function AskUserQuestionCard({
       </header>
 
       <div className="px-3">
-        {isWaiting && sessionId ? (
+        {isWaiting && sessionId && canAnswer ? (
           <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} />
         ) : questions.length > 0 ? (
           questions.map((question, index) => (

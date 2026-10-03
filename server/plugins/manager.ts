@@ -20,7 +20,7 @@ import { pluginHttpsTransport } from "./httpsTransport"
 import type { AppPluginSeed } from "./seeds"
 import type { LegacyHostClassification } from "./legacyHost"
 import { setRequestAuthentication, clearRequestAuthentication } from "../requestAuthentication"
-import { isTeamEdition } from "../team/edition"
+import { editionOwnsSignIn } from "../edition"
 import { backupLegacyClickUpConfig, isClickUpToken, readLegacyClickUpConfig } from "../lib/clickupConfig"
 import { executeGitHubIntegration, GitHubRouteError } from "./integrations/github"
 import { executeVercelIntegration, VercelDeploymentsRouteError } from "./integrations/vercel"
@@ -243,7 +243,7 @@ export class PluginManager {
     if (previous?.hash === source.hash) return
     const revision = this.connections.revision, preparedAt = Date.now()
     const backup = await backupLegacyClickUpConfig(input.path, source, preparedAt, input.authorize)
-    await this.connections.prepareLegacy({ hash: source.hash, backup, preparedAt, token: source.token, projects: source.projects, principalId: input.principalId ?? (isTeamEdition() ? null : "owner"), automatic: !previous && !isTeamEdition(), automaticFailed: false, credentialImported: false, environmentPrepared: false, importedProjects: [], decidedProjects: [], suppressed: false }, revision, input.authorize)
+    await this.connections.prepareLegacy({ hash: source.hash, backup, preparedAt, token: source.token, projects: source.projects, principalId: input.principalId ?? (editionOwnsSignIn() ? null : "owner"), automatic: !previous && !editionOwnsSignIn(), automaticFailed: false, credentialImported: false, environmentPrepared: false, importedProjects: [], decidedProjects: [], suppressed: false }, revision, input.authorize)
   }
   private async maybeImportLegacy(req: IncomingMessage, target: PluginConnectionTarget, options: PluginAdminOptions): Promise<boolean> {
     if (target.pluginId !== "cogpit.clickup") return false

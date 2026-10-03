@@ -1,9 +1,10 @@
 /**
  * The environment Cogpit hands an agent: `~/.cogpit/bin` first on PATH, so its
  * `agent-browser` calls land in the managed browser tree and `cogpit-session`
- * resolves; the Cogpit session id the shim files throwaway browsers under and
- * the session CLI records as the parent of sessions the agent starts; and the
- * port this server listens on.
+ * resolves; the Cogpit session id the shim files throwaway browsers under,
+ * stamps on a named browser's `.driver` and looks up the session's own
+ * `default` profile by, and the session CLI records as the parent of sessions
+ * the agent starts; and the port this server listens on.
  *
  * A spawn that serves every session rather than one passes `NO_COGPIT_SESSION`,
  * which the shim rejects — the alternative, a stand-in that looks like an id,
@@ -12,6 +13,7 @@
 import { existsSync } from "node:fs"
 import { delimiter } from "node:path"
 import { serverPort } from "../lib/portFile"
+import { noteBrowserProfiles } from "./owners"
 import { binDir, pluginDir, shimPath } from "./paths"
 import { pluginManifestFile } from "./skill"
 
@@ -39,6 +41,14 @@ export function cogpitAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string)
     ...(port !== null ? { COGPIT_PORT: String(port) } : {}),
   }
   if (!agentBinInstalled()) return env
+  if (browserShimInstalled()) {
+    try {
+      noteBrowserProfiles(cogpitSessionId)
+    } catch (error) {
+      // The agent still starts; without a fresh note its `default` goes where the last one said.
+      console.error("Browser support: noting the session's browser profile failed.", error)
+    }
+  }
   const dir = binDir()
   const key = pathKey(base)
   const path = base[key] ?? ""

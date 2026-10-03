@@ -5,6 +5,9 @@ import type { ParsedSession, Turn } from "../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { MobileTab } from "@/components/MobileNav"
 
+/** "extension" is a main view an edition registers, named by `extensionViewId`. */
+export type MainView = "sessions" | "config" | "mission" | "extension"
+
 export interface SessionState {
   session: ParsedSession | null
   /**
@@ -28,7 +31,9 @@ export interface SessionState {
   sessionChangeKey: number
   currentMemberName: string | null
   loadingMember: string | null
-  mainView: "sessions" | "config" | "mission"
+  mainView: MainView
+  /** The edition main view on screen; read only while `mainView` is "extension". */
+  extensionViewId: string | null
   configFilePath: string | null
   mobileTab: MobileTab
   dashboardProject: string | null
@@ -37,6 +42,8 @@ export interface SessionState {
 export type SessionAction =
   | { type: "LOAD_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
   | { type: "GO_HOME"; isMobile: boolean }
+  /** Leaves the open session only: a view it was open behind stays on screen. */
+  | { type: "CLOSE_SESSION"; isMobile: boolean }
   | { type: "SWITCH_TEAM_MEMBER"; session: ParsedSession; source: SessionSource; memberName: string }
   | { type: "JUMP_TO_TURN"; index: number; toolCallId?: string }
   | { type: "SET_SEARCH_QUERY"; value: string }
@@ -57,6 +64,8 @@ export type SessionAction =
   | { type: "CLOSE_CONFIG" }
   | { type: "OPEN_MISSION" }
   | { type: "CLOSE_MISSION" }
+  | { type: "OPEN_EXTENSION_VIEW"; id: string }
+  | { type: "CLOSE_EXTENSION_VIEW" }
 
 const COLLAPSED_EXPANSION = {
   expandAll: false,
@@ -78,6 +87,7 @@ const initialState: SessionState = {
   currentMemberName: null,
   loadingMember: null,
   mainView: "sessions",
+  extensionViewId: null,
   configFilePath: null,
   mobileTab: "sessions",
   dashboardProject: null,
@@ -132,6 +142,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     }
 
     case "GO_HOME":
+    case "CLOSE_SESSION": {
+      const home = action.type === "GO_HOME"
       return {
         ...state,
         ...openSession(null),
@@ -143,11 +155,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         searchQuery: "",
         ...COLLAPSED_EXPANSION,
 
-        mainView: "sessions",
+        mainView: home ? "sessions" : state.mainView,
         currentMemberName: null,
         dashboardProject: null,
-        mobileTab: action.isMobile ? "sessions" : state.mobileTab,
+        mobileTab: action.isMobile && (home || state.mobileTab === "chat") ? "sessions" : state.mobileTab,
       }
+    }
 
     case "SWITCH_TEAM_MEMBER":
       return {
@@ -262,6 +275,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "CLOSE_MISSION":
       return { ...state, mainView: "sessions" }
+
+    case "OPEN_EXTENSION_VIEW":
+      return { ...state, mainView: "extension", extensionViewId: action.id }
+
+    case "CLOSE_EXTENSION_VIEW":
+      return { ...state, mainView: "sessions", extensionViewId: null }
 
     default:
       return state

@@ -1,6 +1,7 @@
 import type { SessionStatus } from "../../../shared/session/sessionStatus"
 import type { AgentKind } from "@/lib/agents"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
+import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -38,6 +39,8 @@ export interface ActiveSessionInfo {
   archived?: boolean
   /** "manual" for the user's own archive action, "inactive" for the idle-for-two-weeks rule. */
   archivedReason?: "manual" | "inactive"
+  /** The caller's access, where the server enforces session access. */
+  access?: ListedAccess
 }
 
 export interface RunningProcess {

@@ -1,6 +1,12 @@
+import { soleDescriptorWhere } from "../../shared/session/agent-descriptors"
+import {
+  authorizeSession,
+  authorizeStreamSession,
+  handPrompt,
+  observeAgentTeam,
+} from "../edition"
 import {
   dirs,
-  isWithinDir,
   readdir,
   readFile,
   writeFile,
@@ -8,6 +14,34 @@ import {
   watch,
 } from "../helpers"
 import { sendJson, withJsonBody, type UseFn } from "../http"
+import {
+  authorizeTeam,
+  authorizeTeamAccess,
+  decodeTeamPathSegment,
+  readTeamConfig,
+  sendInvalidTeamName,
+  teamVisibilityFor,
+} from "./agentTeamAccess"
+
+const TEAM_AGENT = soleDescriptorWhere((descriptor) => descriptor.capabilities.agentTeams, "agent teams").kind
+
+/** Append a message from the user to a member's inbox file, creating it when missing. */
+async function appendToInbox(inboxPath: string, message: string): Promise<void> {
+  let inbox: unknown[] = []
+  try {
+    const raw = await readFile(inboxPath, "utf-8")
+    inbox = JSON.parse(raw)
+    if (!Array.isArray(inbox)) inbox = []
+  } catch { /* file doesn't exist yet */ }
+
+  inbox.push({
+    from: "user",
+    text: message,
+    timestamp: new Date().toISOString(),
+    read: false,
+  })
+  await writeFile(inboxPath, JSON.stringify(inbox, null, 2), "utf-8")
+}
 
 export function registerTeamRoutes(use: UseFn) {
   // GET /api/teams - list all teams with task progress summary
@@ -18,6 +52,7 @@ export function registerTeamRoutes(use: UseFn) {
     const pathParts = url.pathname.split("/").filter(Boolean)
     if (pathParts.length > 0) return next()
 
+    const visibleTeam = teamVisibilityFor(req)
     try {
       let teamDirs: string[]
       try {
@@ -31,9 +66,11 @@ export function registerTeamRoutes(use: UseFn) {
       const teams = []
       for (const teamName of teamDirs) {
         try {
-          const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
-          const configRaw = await readFile(configPath, "utf-8")
-          const config = JSON.parse(configRaw)
+          const config = await readTeamConfig(teamName)
+          if (!config) continue
+          const lead = await visibleTeam(config)
+          if (lead === "hidden") continue
+          observeAgentTeam(teamName)
 
           const taskSummary = { total: 0, completed: 0, inProgress: 0, pending: 0 }
           try {
@@ -52,11 +89,9 @@ export function registerTeamRoutes(use: UseFn) {
             }
           } catch { /* no tasks dir */ }
 
-          const leadMember = config.members?.find(
-            (m: { agentType?: string }) => m.agentType === "team-lead"
-          )
+          const leadMember = config.members?.find((m) => m.agentType === "team-lead")
 
-          teams.push({
+          const team = await lead.annotate({
             name: config.name || teamName,
             description: config.description || "",
             createdAt: config.createdAt || 0,
@@ -64,6 +99,7 @@ export function registerTeamRoutes(use: UseFn) {
             leadName: leadMember?.name || "unknown",
             taskSummary,
           })
+          if (team) teams.push(team)
         } catch { /* skip teams with bad config */ }
       }
 
@@ -84,53 +120,48 @@ export function registerTeamRoutes(use: UseFn) {
 
     if (parts.length !== 1) return next()
 
-    const teamName = decodeURIComponent(parts[0])
-    const teamDir = join(dirs.TEAMS_DIR, teamName)
-
-    if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
-      sendJson(res, 403, { error: "Access denied" })
+    const teamName = decodeTeamPathSegment(parts[0])
+    if (!teamName) return sendInvalidTeamName(res)
+    const team = await authorizeTeam(req, res, teamName, (lead) => authorizeSession(req, res, lead, "view"))
+    if (!team) return
+    const { config } = team
+    if (!config) {
+      sendJson(res, 404, { error: "Team not found" })
       return
     }
 
+    const tasks: unknown[] = []
     try {
-      const configRaw = await readFile(join(teamDir, "config.json"), "utf-8")
-      const config = JSON.parse(configRaw)
+      const taskDir = join(dirs.TASKS_DIR, teamName)
+      const taskFiles = await readdir(taskDir)
+      for (const tf of taskFiles.filter((f) => f.endsWith(".json"))) {
+        try {
+          const taskRaw = await readFile(join(taskDir, tf), "utf-8")
+          const task = JSON.parse(taskRaw)
+          if (task.status !== "deleted") tasks.push(task)
+        } catch { /* skip */ }
+      }
+    } catch { /* no tasks */ }
 
-      const tasks: unknown[] = []
-      try {
-        const taskDir = join(dirs.TASKS_DIR, teamName)
-        const taskFiles = await readdir(taskDir)
-        for (const tf of taskFiles.filter((f) => f.endsWith(".json"))) {
-          try {
-            const taskRaw = await readFile(join(taskDir, tf), "utf-8")
-            const task = JSON.parse(taskRaw)
-            if (task.status !== "deleted") tasks.push(task)
-          } catch { /* skip */ }
-        }
-      } catch { /* no tasks */ }
+    const inboxes: Record<string, unknown[]> = {}
+    try {
+      const inboxDir = join(dirs.TEAMS_DIR, teamName, "inboxes")
+      const inboxFiles = await readdir(inboxDir)
+      for (const inf of inboxFiles.filter((f) => f.endsWith(".json"))) {
+        try {
+          const inboxRaw = await readFile(join(inboxDir, inf), "utf-8")
+          const messages = JSON.parse(inboxRaw)
+          const memberName = inf.replace(".json", "")
+          inboxes[memberName] = Array.isArray(messages) ? messages : []
+        } catch { /* skip */ }
+      }
+    } catch { /* no inboxes */ }
 
-      const inboxes: Record<string, unknown[]> = {}
-      try {
-        const inboxDir = join(teamDir, "inboxes")
-        const inboxFiles = await readdir(inboxDir)
-        for (const inf of inboxFiles.filter((f) => f.endsWith(".json"))) {
-          try {
-            const inboxRaw = await readFile(join(inboxDir, inf), "utf-8")
-            const messages = JSON.parse(inboxRaw)
-            const memberName = inf.replace(".json", "")
-            inboxes[memberName] = Array.isArray(messages) ? messages : []
-          } catch { /* skip */ }
-        }
-      } catch { /* no inboxes */ }
-
-      sendJson(res, 200, { config, tasks, inboxes })
-    } catch {
-      sendJson(res, 404, { error: "Team not found" })
-    }
+    sendJson(res, 200, { config, tasks, inboxes })
   })
 
   // GET /api/team-watch/:teamName - SSE for live team updates
-  use("/api/team-watch/", (req, res, next) => {
+  use("/api/team-watch/", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
     const url = new URL(req.url || "/", "http://localhost")
@@ -138,14 +169,13 @@ export function registerTeamRoutes(use: UseFn) {
 
     if (parts.length !== 1) return next()
 
-    const teamName = decodeURIComponent(parts[0])
+    const teamName = decodeTeamPathSegment(parts[0])
+    if (!teamName) return sendInvalidTeamName(res)
+    if (!(await authorizeTeamAccess(req, res, teamName, (lead) => authorizeStreamSession(req, res, lead)))) return
     const teamDir = join(dirs.TEAMS_DIR, teamName)
     const taskDir = join(dirs.TASKS_DIR, teamName)
-
-    if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
+    // The caller may have gone, or lost its login, while access was checked.
+    if (res.destroyed || res.writableEnded) return
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -158,6 +188,8 @@ export function registerTeamRoutes(use: UseFn) {
     const sendUpdate = () => {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
+        // A change to a running team is often a member joining.
+        observeAgentTeam(teamName)
         res.write(`data: ${JSON.stringify({ type: "update" })}\n\n`)
       }, 500)
     }
@@ -196,39 +228,24 @@ export function registerTeamRoutes(use: UseFn) {
 
     if (parts.length !== 2) return next()
 
-    const teamName = decodeURIComponent(parts[0])
-    const memberName = decodeURIComponent(parts[1])
+    const teamName = decodeTeamPathSegment(parts[0])
+    const memberName = decodeTeamPathSegment(parts[1])
+    if (!teamName || !memberName) return sendInvalidTeamName(res)
     const inboxPath = join(dirs.TEAMS_DIR, teamName, "inboxes", `${memberName}.json`)
 
-    if (!isWithinDir(dirs.TEAMS_DIR, inboxPath)) {
-      sendJson(res, 403, { error: "Access denied" })
-      return
-    }
-
     withJsonBody<{ message?: string }>(req, res, async ({ message }) => {
+      const receivedAt = Date.now()
+      if (!message || typeof message !== "string") {
+        sendJson(res, 400, { error: "message is required" })
+        return
+      }
+      const team = await authorizeTeamAccess(req, res, teamName, (lead) => authorizeSession(req, res, lead, "interact"))
+      if (!team) return
+      const session = team.lead && { sessionId: team.lead.sessionId, agent: TEAM_AGENT }
+      const prompt = { receivedAt, route: "team-message" as const, session, recipient: memberName, input: message }
+
       try {
-        if (!message || typeof message !== "string") {
-          sendJson(res, 400, { error: "message is required" })
-          return
-        }
-
-        let inbox: unknown[] = []
-        try {
-          const raw = await readFile(inboxPath, "utf-8")
-          inbox = JSON.parse(raw)
-          if (!Array.isArray(inbox)) inbox = []
-        } catch { /* file doesn't exist yet */ }
-
-        const newMsg = {
-          from: "user",
-          text: message,
-          timestamp: new Date().toISOString(),
-          read: false,
-        }
-        inbox.push(newMsg)
-
-        await writeFile(inboxPath, JSON.stringify(inbox, null, 2), "utf-8")
-
+        await handPrompt(req, prompt, () => appendToInbox(inboxPath, message), "enqueued")
         sendJson(res, 200, { success: true })
       } catch {
         sendJson(res, 400, { error: "Invalid JSON body" })

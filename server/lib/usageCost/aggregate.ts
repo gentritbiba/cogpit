@@ -73,6 +73,20 @@ export interface AggregateResult {
   distinctSessions: number
 }
 
+/**
+ * A filter passing each record the first time its `dedupeKey` is seen. A
+ * record without a key is always new.
+ */
+export function firstOccurrences(): (record: UsageCostRecord) => boolean {
+  const seen = new Set<string>()
+  return (record) => {
+    if (record.dedupeKey === null) return true
+    if (seen.has(record.dedupeKey)) return false
+    seen.add(record.dedupeKey)
+    return true
+  }
+}
+
 /** Model names may contain anything printable, so keys join on an unusable byte. */
 const KEY_SEPARATOR = "\u0000"
 
@@ -84,7 +98,7 @@ const KEY_SEPARATOR = "\u0000"
  */
 export class UsageCostAggregator {
   readonly #buckets = new Map<string, MutableBucket>()
-  readonly #seen = new Set<string>()
+  readonly #isFirst = firstOccurrences()
   readonly #sessions = new Set<string>()
   readonly #toDay: (timestampMs: number) => string
   readonly #options: AggregateOptions
@@ -96,10 +110,7 @@ export class UsageCostAggregator {
 
   /** Folds one record in; returns whether it actually contributed. */
   add(record: UsageCostRecord): boolean {
-    if (record.dedupeKey !== null) {
-      if (this.#seen.has(record.dedupeKey)) return false
-      this.#seen.add(record.dedupeKey)
-    }
+    if (!this.#isFirst(record)) return false
 
     const day = this.#toDay(record.timestampMs)
     if (day < this.#options.sinceDay || day > this.#options.untilDay) return false
@@ -255,7 +266,7 @@ export function aggregateSessionUsage(
   scopedRecords: readonly ScopedUsageCostRecord[],
   rates: RateTable,
 ): AggregatedSessionUsage {
-  const seen = new Set<string>()
+  const isFirst = firstOccurrences()
   let totals = emptyUsageCostTotals()
   const breakdown = emptyCostBreakdown()
   const models = new Map<string, MutableSessionModel>()
@@ -267,10 +278,7 @@ export function aggregateSessionUsage(
   let unpricedRecords = 0
 
   for (const { record, isSubagent } of scopedRecords) {
-    if (record.dedupeKey !== null) {
-      if (seen.has(record.dedupeKey)) continue
-      seen.add(record.dedupeKey)
-    }
+    if (!isFirst(record)) continue
 
     const priced = priceUsage(rates, record.model, record.totals, record.reportedCostUsd, record.speed)
     const recordSavings = cacheSavingsUsd(rates, record.model, record.totals, record.speed)

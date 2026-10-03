@@ -17,13 +17,14 @@ const CLAUDE_DIR = "-work-app"
 const blocked: RateLimitBlock = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
 const weekly: RateLimitBlock = { limit: "seven_day", resetsAt: 1_760_500_000, lowPriority: false }
 
-function renderBanner(block: RateLimitBlock, dirName = CLAUDE_DIR) {
+function renderBanner(block: RateLimitBlock, dirName = CLAUDE_DIR, terminal = true) {
   return render(
     <RateLimitBanner
       block={block}
       dirName={dirName}
       fileName={`${SESSION}.jsonl`}
       cwd="/work/app"
+      terminal={terminal}
     />,
   )
 }
@@ -87,6 +88,13 @@ describe("RateLimitBanner", () => {
   it("shows the command but no button while a remote device is active", () => {
     mockIsRemoteDeviceActive.mockReturnValue(true)
     renderBanner(blocked)
+
+    expect(screen.queryByRole("button", { name: /terminal/i })).toBeNull()
+    expect(screen.getByRole("status")).toHaveTextContent(`claude --resume ${SESSION}`)
+  })
+
+  it("shows the command but no button to a user who may not open a terminal on this session", () => {
+    renderBanner(blocked, CLAUDE_DIR, false)
 
     expect(screen.queryByRole("button", { name: /terminal/i })).toBeNull()
     expect(screen.getByRole("status")).toHaveTextContent(`claude --resume ${SESSION}`)

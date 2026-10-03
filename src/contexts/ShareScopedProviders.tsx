@@ -20,8 +20,9 @@ import { detectPendingInteraction } from "../../shared/session/parser"
 import { loadSessionTailFresh } from "@/lib/sessionLoader"
 import { agentKindForDirName } from "@/lib/agents"
 import { stopShare, type SharedSessionInfo } from "@/lib/shareApi"
+import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 import type { ParsedSession, Turn } from "../../shared/session/types"
-import { NO_CAPABILITIES, type MeResponse } from "../../shared/contracts/team"
+import { NO_CAPABILITIES, type MeResponse } from "../../shared/contracts/identity"
 
 /**
  * The three contexts the transcript and the composer read, backed by only what
@@ -191,6 +192,8 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     respondPermission: permissions.respond,
     respondAllPermissions: permissions.respondAll,
     isSubAgentView: false,
+    // A guest drives the session but owns nothing, so it cannot archive or delete it.
+    permissions: permissionsForAccess("interact"),
     // A guest has no project on disk, so there are no commands or skills to
     // suggest — `/api/slash-suggestions` reads the host's config directories.
     slashSuggestions: [],

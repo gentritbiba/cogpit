@@ -4,6 +4,7 @@ import { agentKindForDirName } from "../../shared/session/agent-descriptors"
 import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type Middleware, type UseFn } from "../http"
 import { getRequestShareToken, validateShareToken } from "../security"
 import { getShareWithHash, type ShareRecord } from "../share/registry"
+import { markShareGuestRequest } from "../share/requestGuest"
 import { sessionTitle } from "./shares"
 import { registerAskUserRoutes } from "./ask-user"
 import { registerSessionManageRoutes } from "./session-manage"
@@ -43,12 +44,15 @@ function mounts(register: (use: UseFn) => void): (path: string) => Middleware {
  *
  * The guest's own headers are not forwarded: the delegated handlers read a JSON
  * body, and passing the share cookie along would put a guest credential on a
- * request that runs past the guest boundary.
+ * request that runs past the guest boundary. The request is marked as the
+ * guest's instead, so the host handler checks and logs it as the guest of the
+ * token's session and no other.
  */
 function delegate(
   handler: Middleware,
   req: IncomingMessage,
   res: ServerResponse,
+  share: ShareRecord,
   url: string,
   payload: Record<string, unknown>,
 ): void {
@@ -63,6 +67,7 @@ function delegate(
     },
     socket: req.socket,
   }) as unknown as IncomingMessage
+  markShareGuestRequest(delegated, share.sessionId)
 
   const notFound = () => sendJson(res, 404, { error: "Not found" })
   void Promise.resolve(handler(delegated, res, notFound)).catch(() => {
@@ -114,7 +119,7 @@ function guestPost(
       const share = requireShare(req, res)
       if (!share) return
       const call = build(share, body ?? {})
-      delegate(call.handler, req, res, call.url, call.payload)
+      delegate(call.handler, req, res, share, call.url, call.payload)
     }, { allowEmpty: true, maxBytes })
   })
 }

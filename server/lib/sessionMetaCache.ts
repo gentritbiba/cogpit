@@ -14,6 +14,7 @@
  */
 
 import type { SessionStatusInfo } from "../../shared/session/sessionStatus"
+import { recencyCache } from "./recencyCache"
 
 export type SessionMeta = Awaited<ReturnType<typeof import("../sessionMetadata").getSessionMeta>>
 
@@ -26,10 +27,8 @@ export interface CachedMeta {
 
 export const SESSION_META_TTL_MS = 600_000
 
-/** Memory backstop: evict the oldest entries once the cache grows past this. */
-const MAX_ENTRIES = 1000
-
-const cache = new Map<string, CachedMeta>()
+/** Every user's sidebar rows stay cached while their polls read them, up to the ceiling. */
+const cache = recencyCache<CachedMeta>({ capacity: 1_000, inUseMs: 60_000, ceiling: 5_000 })
 const inFlight = new Map<string, Promise<CachedMeta>>()
 
 /**
@@ -50,17 +49,6 @@ export function getCachedSessionMeta(filePath: string, mtimeMs: number): CachedM
 /** Store (or overwrite) a metadata entry for `filePath`. */
 export function setCachedSessionMeta(filePath: string, value: CachedMeta): void {
   cache.set(filePath, value)
-  if (cache.size > MAX_ENTRIES) {
-    let oldestKey: string | null = null
-    let oldestAt = Infinity
-    for (const [key, entry] of cache) {
-      if (entry.cachedAt < oldestAt) {
-        oldestAt = entry.cachedAt
-        oldestKey = key
-      }
-    }
-    if (oldestKey !== null) cache.delete(oldestKey)
-  }
 }
 
 /**

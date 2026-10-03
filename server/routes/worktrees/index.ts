@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises"
-import type { ServerResponse } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import { resolveProjectCwd } from "../../lib/projectCwd"
 import {
   dirs,
@@ -16,12 +16,27 @@ import {
 import type { WorktreeRaw } from "./worktreeUtils"
 import { isGeneratedWorktreeBranch } from "../../../shared/worktreePath"
 import { handleWorktreeList } from "./worktreeListRoute"
+import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import {
-  mapWithConcurrency,
   runWorktreeCommand,
   WORKTREE_NETWORK_TIMEOUT_MS,
   WORKTREE_SCAN_CONCURRENCY,
 } from "./worktreeIo"
+
+/** The request's JSON body, or null after answering a malformed one. */
+async function readBody<T>(req: IncomingMessage, res: ServerResponse): Promise<T | null> {
+  try {
+    const body = await readJsonBody<T | null>(req, { allowEmpty: true })
+    if (body !== null && typeof body === "object") return body
+    sendJson(res, 400, { error: "Invalid request body" })
+    return null
+  } catch (error) {
+    sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
+      error: error instanceof HttpBodyError ? error.message : "Invalid request body",
+    })
+    return null
+  }
+}
 
 function requireProjectDir(dirName: string, res: ServerResponse): string | null {
   const projectDir = join(dirs.PROJECTS_DIR, dirName)
@@ -82,7 +97,7 @@ export function registerWorktreeRoutes(use: UseFn) {
     // GET /api/worktrees/:dirName — list worktrees for a project
     if (req.method === "GET" && pathParts.length === 1) {
       const dirName = decodeURIComponent(pathParts[0])
-      await handleWorktreeList(dirName, res)
+      await handleWorktreeList(req, res, dirName)
       return
     }
 
@@ -102,15 +117,9 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let force = false
-      try {
-        ({ force = false } = await readJsonBody<{ force?: boolean }>(req, { allowEmpty: true }))
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
+      const body = await readBody<{ force?: boolean }>(req, res)
+      if (!body) return
+      const { force = false } = body
       try {
         const worktree = await findWorktree(gitRoot, worktreeName)
         if (!worktree) {
@@ -150,15 +159,8 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let parsed: { worktreeName?: string; title?: string; body?: string } = {}
-      try {
-        parsed = await readJsonBody<typeof parsed>(req, { allowEmpty: true })
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
+      const parsed = await readBody<{ worktreeName?: string; title?: string; body?: string }>(req, res)
+      if (!parsed) return
       const { worktreeName, title, body: prBody } = parsed
       if (!worktreeName) {
         res.statusCode = 400
@@ -223,21 +225,9 @@ export function registerWorktreeRoutes(use: UseFn) {
       const gitRoot = await requireGitRoot(projectDir, dirName, res)
       if (!gitRoot) return
 
-      let confirm: boolean | undefined
-      let names: string[] | undefined
-      let maxAgeDays = 7
-      try {
-        ({ confirm, names, maxAgeDays = 7 } = await readJsonBody<{
-          confirm?: boolean
-          names?: string[]
-          maxAgeDays?: number
-        }>(req, { allowEmpty: true }))
-      } catch (error) {
-        sendJson(res, error instanceof HttpBodyError ? error.statusCode : 400, {
-          error: error instanceof HttpBodyError ? error.message : "Invalid request body",
-        })
-        return
-      }
+      const body = await readBody<{ confirm?: boolean; names?: string[]; maxAgeDays?: number }>(req, res)
+      if (!body) return
+      const { confirm, names, maxAgeDays = 7 } = body
 
       try {
         const rawOutput = await runWorktreeCommand("git", ["worktree", "list", "--porcelain"], {

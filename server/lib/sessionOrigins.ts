@@ -1,3 +1,4 @@
+import { LEGACY_SESSION_LINEAGE_FILE, SESSION_ORIGINS_FILE } from "./sessionConfigDir"
 import { SessionConfigFile } from "./sessionConfigFile"
 import type { Handoff } from "../workspaceTransfer/handoff"
 
@@ -7,10 +8,6 @@ import type { Handoff } from "../workspaceTransfer/handoff"
  * on. An orchestrator lists and stops the sessions it spawned from this, and
  * the hub finds a remote session's device without asking every device.
  */
-
-const ORIGINS_FILE = "session-origins.json"
-/** The parent-only record this file replaced; its entries are a subset of an origin. */
-const LINEAGE_FILE = "session-lineage.json"
 
 export interface SessionOrigin {
   parentSessionId?: string
@@ -41,7 +38,7 @@ function handoffFrom(value: unknown): Handoff | undefined {
   return repoRoot && base && workspaceId && branch ? { repoRoot, base, workspaceId, branch } : undefined
 }
 
-const file = new SessionConfigFile(ORIGINS_FILE, {
+const file = new SessionConfigFile(SESSION_ORIGINS_FILE, {
   reset() {
     origins = new Map()
   },
@@ -67,7 +64,7 @@ const file = new SessionConfigFile(ORIGINS_FILE, {
   snapshot(): PersistedOrigins {
     return { version: 1, sessions: Object.fromEntries(origins) }
   },
-}, LINEAGE_FILE)
+}, LEGACY_SESSION_LINEAGE_FILE)
 
 /** Merge what is known about a session's origin; a session is never its own parent. */
 export async function recordSessionOrigin(

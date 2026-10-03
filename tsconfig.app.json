@@ -8,10 +8,11 @@
     "jsx": "react-jsx",
 
     /* Path aliases */
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@cogpit/core/*": ["./*"],
+      "@cogpit/edition-ui": ["./editions/team/ui/index.ts", "./src/edition/absent.ts"]
     }
   },
-  "include": ["src", "plugins"]
+  "include": ["src", "plugins", "editions/team/ui", "editions/team/shared", "editions/team/tests/ui"]
 }

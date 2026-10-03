@@ -17,6 +17,8 @@ import {
   refreshServerHello,
 } from "@/lib/auth"
 import { useNetworkAuth } from "../useNetworkAuth"
+import { __resetIdentityForTest, setActiveIdentity } from "@/lib/device"
+import { readCachedList, sessionListCacheKeys, writeCachedList } from "@/lib/sessionListCache"
 
 const mockedIsRemoteClient = vi.mocked(isRemoteClient)
 const mockedCheckAuthSession = vi.mocked(checkAuthSession)
@@ -24,13 +26,14 @@ const mockedLogoutSession = vi.mocked(logoutSession)
 const mockedGetServerHello = vi.mocked(getServerHello)
 const mockedRefreshServerHello = vi.mocked(refreshServerHello)
 
-const PERSONAL_HELLO = { edition: "personal", needsBootstrap: false } as const
-const TEAM_HELLO = { edition: "team", needsBootstrap: false } as const
-const TEAM_BOOTSTRAP_HELLO = { edition: "team", needsBootstrap: true } as const
+const PERSONAL_HELLO = { edition: "personal", signIn: "password", setupRequired: false } as const
+const ACCOUNT_HELLO = { edition: "team", signIn: "account", setupRequired: false } as const
+const ACCOUNT_SETUP_HELLO = { edition: "team", signIn: "account", setupRequired: true } as const
 
 describe("useNetworkAuth", () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    __resetIdentityForTest()
     mockedCheckAuthSession.mockResolvedValue(false)
     mockedLogoutSession.mockResolvedValue()
     mockedGetServerHello.mockResolvedValue(PERSONAL_HELLO)
@@ -46,9 +49,9 @@ describe("useNetworkAuth", () => {
     expect(mockedCheckAuthSession).not.toHaveBeenCalled()
   })
 
-  it("gates a local client when the server is team edition", async () => {
+  it("gates a local client when the server signs in with accounts", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
-    mockedGetServerHello.mockResolvedValue(TEAM_HELLO)
+    mockedGetServerHello.mockResolvedValue(ACCOUNT_HELLO)
     const { result } = renderHook(() => useNetworkAuth())
 
     expect(result.current.authChecked).toBe(false)
@@ -58,18 +61,28 @@ describe("useNetworkAuth", () => {
     expect(mockedCheckAuthSession).toHaveBeenCalledOnce()
   })
 
-  it("restores a local team session from the HttpOnly cookie", async () => {
+  it("keeps trusting a local client when a server of another edition signs in with the password", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
-    mockedGetServerHello.mockResolvedValue(TEAM_HELLO)
+    mockedGetServerHello.mockResolvedValue({ ...ACCOUNT_HELLO, signIn: "password" })
+    const { result } = renderHook(() => useNetworkAuth())
+
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+    expect(result.current.edition).toBe("team")
+    expect(mockedCheckAuthSession).not.toHaveBeenCalled()
+  })
+
+  it("restores a local account session from the HttpOnly cookie", async () => {
+    mockedIsRemoteClient.mockReturnValue(false)
+    mockedGetServerHello.mockResolvedValue(ACCOUNT_HELLO)
     mockedCheckAuthSession.mockResolvedValue(true)
     const { result } = renderHook(() => useNetworkAuth())
 
     await waitFor(() => expect(result.current.authenticated).toBe(true))
   })
 
-  it("responds to auth-required on a local team client", async () => {
+  it("responds to auth-required on a local client of an account server", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
-    mockedGetServerHello.mockResolvedValue(TEAM_HELLO)
+    mockedGetServerHello.mockResolvedValue(ACCOUNT_HELLO)
     mockedCheckAuthSession.mockResolvedValue(true)
     const { result } = renderHook(() => useNetworkAuth())
     await waitFor(() => expect(result.current.authenticated).toBe(true))
@@ -78,33 +91,33 @@ describe("useNetworkAuth", () => {
     expect(result.current.authenticated).toBe(false)
   })
 
-  it("reports an open first-admin bootstrap so the gate can render it", async () => {
+  it("reports an open first-time setup so the gate can render it", async () => {
     mockedIsRemoteClient.mockReturnValue(true)
-    mockedGetServerHello.mockResolvedValue(TEAM_BOOTSTRAP_HELLO)
+    mockedGetServerHello.mockResolvedValue(ACCOUNT_SETUP_HELLO)
     const { result } = renderHook(() => useNetworkAuth())
 
-    await waitFor(() => expect(result.current.needsBootstrap).toBe(true))
+    await waitFor(() => expect(result.current.setupRequired).toBe(true))
     expect(result.current.authenticated).toBe(false)
   })
 
-  it("never reports a bootstrap on a personal server", async () => {
+  it("never reports a setup on a personal server", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
     const { result } = renderHook(() => useNetworkAuth())
 
     await waitFor(() => expect(result.current.authChecked).toBe(true))
-    expect(result.current.needsBootstrap).toBe(false)
+    expect(result.current.setupRequired).toBe(false)
   })
 
-  it("re-reads the probe when the bootstrap closes", async () => {
+  it("re-reads the probe when the setup closes", async () => {
     mockedIsRemoteClient.mockReturnValue(true)
-    mockedGetServerHello.mockResolvedValue(TEAM_BOOTSTRAP_HELLO)
-    mockedRefreshServerHello.mockResolvedValue(TEAM_HELLO)
+    mockedGetServerHello.mockResolvedValue(ACCOUNT_SETUP_HELLO)
+    mockedRefreshServerHello.mockResolvedValue(ACCOUNT_HELLO)
     const { result } = renderHook(() => useNetworkAuth())
-    await waitFor(() => expect(result.current.needsBootstrap).toBe(true))
+    await waitFor(() => expect(result.current.setupRequired).toBe(true))
 
     await act(() => result.current.refreshServerState())
 
-    expect(result.current.needsBootstrap).toBe(false)
+    expect(result.current.setupRequired).toBe(false)
   })
 
   it("restores a valid remote HttpOnly-cookie session", async () => {
@@ -171,6 +184,20 @@ describe("useNetworkAuth", () => {
     await waitFor(() => expect(mockedLogoutSession).toHaveBeenCalledOnce())
   })
 
+  it("clears the signed-in identity's session list cache on logout", async () => {
+    mockedIsRemoteClient.mockReturnValue(true)
+    mockedCheckAuthSession.mockResolvedValue(true)
+    setActiveIdentity("u_1")
+    writeCachedList(sessionListCacheKeys.activeSessions, [{ sessionId: "s1" }])
+    const { result } = renderHook(() => useNetworkAuth())
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+
+    act(() => result.current.logout())
+
+    expect(readCachedList(sessionListCacheKeys.activeSessions)).toBeUndefined()
+    expect(localStorage.getItem("cogpit:session-list-cache::local::u_1")).toBeNull()
+  })
+
   it("responds to auth-required only for remote clients", async () => {
     mockedIsRemoteClient.mockReturnValue(true)
     mockedCheckAuthSession.mockResolvedValue(true)
@@ -194,7 +221,7 @@ describe("useNetworkAuth", () => {
   it("upgrades a transient local hello fallback when a later request requires auth", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
     mockedGetServerHello.mockResolvedValue(PERSONAL_HELLO)
-    mockedRefreshServerHello.mockResolvedValue(TEAM_HELLO)
+    mockedRefreshServerHello.mockResolvedValue(ACCOUNT_HELLO)
     const { result } = renderHook(() => useNetworkAuth())
     await waitFor(() => expect(result.current.authenticated).toBe(true))
 

@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto"
 import type { IncomingMessage } from "node:http"
 import { parseClientRuntimeDescriptor, type ClientRuntimeDescriptor } from "@cogpit/plugin-contracts"
+import { listenerSet } from "../lib/listenerSet"
 import { getRequestAuthentication, type RequestAuthentication } from "../requestAuthentication"
 import { getSessionPrincipal, isSessionTokenActive, onSessionRevoked } from "../security"
-import { isTeamEdition } from "../team/edition"
+import { editionModule, editionOwnsSignIn } from "../edition"
 
 export const PLUGIN_SESSION_HEADER = "x-cogpit-plugin-session"
 export const PLUGIN_SESSION_TTL_MS = 60_000
@@ -27,13 +28,14 @@ export function pluginSessionHeader(req: IncomingMessage): string | null {
 }
 
 export function isPluginAuthenticationActive(authentication: RequestAuthentication): boolean {
-  if (authentication.kind === "local") return !isTeamEdition()
+  if (authentication.kind === "local") return !editionOwnsSignIn()
   if (!isSessionTokenActive(authentication.token)) return false
   const principal = getSessionPrincipal(authentication.token)
   if (authentication.principal) {
-    return principal?.userId === authentication.principal.userId && principal.role === "admin"
+    const auth = editionModule().auth
+    return principal?.userId === authentication.principal.userId && (auth === null || auth.administers(principal))
   }
-  return !isTeamEdition() && principal === null
+  return !editionOwnsSignIn() && principal === null
 }
 
 export function requirePluginAuthentication(req: IncomingMessage): RequestAuthentication {
@@ -62,7 +64,8 @@ interface ClientSession {
 
 export class PluginAuthorization {
   private readonly sessions = new Map<string, ClientSession>()
-  private readonly listeners = new Set<(sessionId: string) => void>()
+  // A failed consumer must not preserve other leases.
+  private readonly listeners = listenerSet<string>(() => {})
   private readonly unsubscribe: () => void
   private readonly timer: ReturnType<typeof setInterval>
   private readonly now: () => number
@@ -139,15 +142,11 @@ export class PluginAuthorization {
   }
 
   onRevoked(listener: (sessionId: string) => void): () => void {
-    this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
+    return this.listeners.add(listener)
   }
 
   private revoke(id: string): void {
-    if (!this.sessions.delete(id)) return
-    for (const listener of [...this.listeners]) {
-      try { listener(id) } catch { /* A failed consumer must not preserve other leases. */ }
-    }
+    if (this.sessions.delete(id)) this.listeners.emit(id)
   }
 
   private sweep(): void {

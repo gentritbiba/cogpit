@@ -16,6 +16,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -23,6 +24,8 @@ import {
   type RefObject,
 } from "react"
 import { authFetch } from "@/lib/auth"
+import { listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
+import { useAppGate } from "@/hooks/useCurrentUser"
 import { respondToPermission, type PermissionDecision } from "@/lib/permissionApi"
 import {
   submitUserQuestionAnswers,
@@ -90,21 +93,29 @@ export interface PendingHumanInput {
 
 const PendingHumanInputContext = createContext<PendingHumanInput | null>(null)
 
-/**
- * Read one endpoint, yielding its body only when the raw text differs from the
- * last body accepted from *that* endpoint — a shared dedupe key would let a
- * stable permissions payload suppress a changed questions payload. An
- * unchanged, failed or unparseable read yields undefined, leaving the previous
- * list standing: a stale blocker beats dropping one the user must still answer.
- */
-async function readIfChanged<T>(url: string, seen: RefObject<string>): Promise<T | undefined> {
+/** One endpoint's raw body; undefined when the read failed. */
+async function readBody(url: string): Promise<string | undefined> {
   try {
     const res = await authFetch(url)
-    if (!res.ok) return undefined
-    const text = await res.text()
-    if (text === seen.current) return undefined
-    seen.current = text
-    return JSON.parse(text) as T
+    return res.ok ? await res.text() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A body about to be applied, parsed, when it differs from the last one
+ * applied from *that* endpoint — a shared dedupe key would let a stable
+ * permissions payload suppress a changed questions payload. An unchanged,
+ * failed or unparseable read yields undefined, leaving the previous list
+ * standing: a stale blocker beats dropping one the user must still answer.
+ */
+function changedBody<T>(text: string | undefined, applied: RefObject<string>): T | undefined {
+  if (text === undefined || text === applied.current) return undefined
+  try {
+    const body = JSON.parse(text) as T
+    applied.current = text
+    return body
   } catch {
     return undefined
   }
@@ -146,19 +157,27 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
   const lastPermissionsRef = useRef("")
   const lastQuestionsRef = useRef("")
   const lastPromptsRef = useRef("")
+  const filter = useSessionListFilter()
+  // The server refuses these reads while its gate shows; polling resumes once it lifts.
+  const gated = useAppGate() !== null
+  // A poll for a filter just left never lands after it; overlapping polls for this one all do.
+  const filterKeyRef = useRef(filter.key)
+
+  useLayoutEffect(() => { filterKeyRef.current = filter.key }, [filter.key])
 
   const fetchNow = useCallback(async () => {
-    const [permissions, questions, prompts] = await Promise.all([
-      readIfChanged<{
-        bySession?: Record<string, MissionControlPermission[]>
-        plansBySession?: Record<string, unknown[]>
-      }>(
-        "/api/permissions",
-        lastPermissionsRef,
-      ),
-      readIfChanged<Partial<UserQuestionsResponse>>("/api/user-questions", lastQuestionsRef),
-      readIfChanged<Partial<AgentPromptsResponse>>("/api/agent-prompts", lastPromptsRef),
+    const [permissionsText, questionsText, promptsText] = await Promise.all([
+      readBody(listUrl("/api/permissions", filter)),
+      readBody(listUrl("/api/user-questions", filter)),
+      readBody(listUrl("/api/agent-prompts", filter)),
     ])
+    if (filterKeyRef.current !== filter.key) return
+    const permissions = changedBody<{
+      bySession?: Record<string, MissionControlPermission[]>
+      plansBySession?: Record<string, unknown[]>
+    }>(permissionsText, lastPermissionsRef)
+    const questions = changedBody<Partial<UserQuestionsResponse>>(questionsText, lastQuestionsRef)
+    const prompts = changedBody<Partial<AgentPromptsResponse>>(promptsText, lastPromptsRef)
     if (permissions) {
       setPermissionsBySession(toMap(permissions.bySession))
       setAwaitingPlan(new Set(toMap(permissions.plansBySession).keys()))
@@ -168,9 +187,10 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
       setElicitationsBySession(toMap(prompts.elicitationsBySession))
       setDialogsBySession(toMap(prompts.dialogsBySession))
     }
-  }, [])
+  }, [filter])
 
   useEffect(() => {
+    if (gated) return
     const pollWhenVisible = () => {
       if (document.visibilityState === "visible") void fetchNow()
     }
@@ -181,7 +201,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
       clearInterval(id)
       document.removeEventListener("visibilitychange", pollWhenVisible)
     }
-  }, [fetchNow])
+  }, [fetchNow, gated])
 
   /**
    * Every answer shares a shape: flag the id as in flight, run the call, then

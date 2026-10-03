@@ -56,7 +56,7 @@ describe("fetchTailAndParse", () => {
 
     const result = await fetchTailAndParse("-dir", "sess.jsonl", workerParse, "session")
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?tail=30")
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?tail=30", { background: false })
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"t":1}')
     // Critical for live updates: the SSE watcher must resume at the end of the
     // file, not at the byte length of the (much smaller) tail text.

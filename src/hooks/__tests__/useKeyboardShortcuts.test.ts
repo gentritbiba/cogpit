@@ -3,7 +3,7 @@ import { renderHook } from "@testing-library/react"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { resetKeybinding, setKeybinding } from "@/lib/keybindings"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { SessionAction } from "@/hooks/useSessionState"
 import type { RefObject, Dispatch } from "react"
@@ -443,8 +443,8 @@ describe("useKeyboardShortcuts", () => {
       setMe({
         authenticated: true,
         edition: "team",
-        user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
-        capabilities: MEMBER_CAPABILITIES,
+        user: { id: "u_1", username: "alice", displayName: "Alice" },
+        capabilities: NO_CAPABILITIES,
       })
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))
@@ -460,8 +460,8 @@ describe("useKeyboardShortcuts", () => {
       setMe({
         authenticated: true,
         edition: "team",
-        user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
-        capabilities: MEMBER_CAPABILITIES,
+        user: { id: "u_1", username: "alice", displayName: "Alice" },
+        capabilities: NO_CAPABILITIES,
       })
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))

@@ -1,10 +1,12 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { cogpitAgentEnv, browserPluginPaths, browserShimInstalled } from "../../browser/agentEnv"
-import { binDir, NO_COGPIT_SESSION, pluginDir, shimPath } from "../../browser/paths"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { browserPluginPaths, browserShimInstalled, cogpitAgentEnv } from "../../browser/agentEnv"
+import { binDir, NO_COGPIT_SESSION, ownersDir, pluginDir, shimPath } from "../../browser/paths"
+import { __resetEditionForTest, PERSONAL_EDITION } from "../../edition"
+import { installFakeEdition } from "../edition/fakeEdition"
 import { resetServerPortForTest, setServerPort } from "../../lib/portFile"
 import { ensurePlugin } from "../../browser/skill"
 
@@ -18,6 +20,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  __resetEditionForTest()
   if (previousHome === undefined) delete process.env.COGPIT_BROWSER_HOME
   else process.env.COGPIT_BROWSER_HOME = previousHome
   rmSync(root, { recursive: true, force: true })
@@ -52,6 +55,24 @@ describe("cogpitAgentEnv", () => {
   it("becomes the whole PATH when the base has none", () => {
     writeShim()
     expect(cogpitAgentEnv({}, "session-1").PATH).toBe(binDir())
+  })
+
+  it("tells the shim which profile the session's default opens", () => {
+    writeShim()
+    installFakeEdition({ browsers: { ...PERSONAL_EDITION.browsers, profileForSession: (id) => (id ? `user-${id}` : "user-none") } })
+    cogpitAgentEnv({ PATH: "/usr/bin" }, "session-1")
+    expect(readFileSync(join(ownersDir(), "session-1"), "utf8")).toBe("user-session-1\n")
+    expect(readFileSync(join(ownersDir(), ".unowned"), "utf8")).toBe("user-none\n")
+  })
+
+  it("still starts the agent when the note cannot be written", () => {
+    writeShim()
+    installFakeEdition({ browsers: { ...PERSONAL_EDITION.browsers, profileForSession: () => { throw new Error("store down") } } })
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    expect(cogpitAgentEnv({ PATH: "/usr/bin" }, "session-1").COGPIT_SESSION_ID).toBe("session-1")
+    expect(existsSync(ownersDir())).toBe(false)
+    expect(logged).toHaveBeenCalledOnce()
+    logged.mockRestore()
   })
 
   it("prepends the bin directory for the session CLI even without the browser shim", () => {

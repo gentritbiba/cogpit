@@ -460,6 +460,24 @@ describe("extractCodexMetadataFromLines", () => {
     expect(meta.sessionId).toBe("sub-agent-id")
   })
 
+  it("reads the parent from every header shape a spawned rollout uses", () => {
+    const header = (payload: Record<string, unknown>) => JSON.stringify({
+      type: "session_meta",
+      timestamp: "2026-09-20T10:00:00.000Z",
+      payload: { id: "child-id", cwd: "/home/user/project", ...payload },
+    })
+    const threadSpawn = { subagent: { thread_spawn: { parent_thread_id: "spawning-thread", depth: 1 } } }
+
+    expect(extractCodexMetadataFromLines([header({ source: threadSpawn })]).parentSessionId)
+      .toBe("spawning-thread")
+    expect(extractCodexMetadataFromLines([
+      header({ parent_thread_id: "spawning-thread", source: threadSpawn }),
+    ]).parentSessionId).toBe("spawning-thread")
+    expect(extractCodexMetadataFromLines([
+      header({ parent_thread_id: "reviewed-thread", source: { subagent: "review" } }),
+    ]).parentSessionId).toBe("reviewed-thread")
+  })
+
   it("marks regular sessions as not sub-agent", () => {
     const meta = extractCodexMetadataFromLines(SIMPLE_SESSION.split("\n"))
     expect(meta.isSubagent).toBe(false)

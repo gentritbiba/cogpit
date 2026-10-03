@@ -10,7 +10,7 @@ import { removePortFile, setServerPort, writePortFile } from "../server/lib/port
 import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "../server/sessionHosts/delegatedRequests"
-import { markNotificationsRead } from "../server/lib/notificationHistory"
+import { LOCAL_READER, markNotificationsRead } from "../server/lib/notificationHistory"
 import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
 interface WorkerConfig {
@@ -72,7 +72,7 @@ process.parentPort.on("message", ({ data }: { data: unknown }) => {
   }
 
   if (isNotificationClickedMessage(data)) {
-    void markNotificationsRead([data.historyId]).catch((err: unknown) => {
+    void markNotificationsRead(LOCAL_READER, [data.historyId]).catch((err: unknown) => {
       console.error("[server-worker] Failed to mark notification read:", err)
     })
     return

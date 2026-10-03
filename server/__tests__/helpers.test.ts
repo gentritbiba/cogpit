@@ -10,7 +10,6 @@ import {
   hashPassword,
   verifyPassword,
   validatePasswordStrength,
-  MIN_PASSWORD_LENGTH,
   isLocalRequest,
   createSessionToken,
   validateSessionToken,
@@ -26,6 +25,7 @@ import {
   activeProcesses,
   persistentSessions,
 } from "../helpers"
+import { PASSWORD_MIN_LENGTH } from "../../shared/contracts/password"
 
 // ── isWithinDir ─────────────────────────────────────────────────────────
 
@@ -156,16 +156,16 @@ describe("hashPassword / verifyPassword", () => {
 describe("validatePasswordStrength", () => {
   it("returns error for too short password", () => {
     const result = validatePasswordStrength("short")
-    expect(result).toContain(`at least ${MIN_PASSWORD_LENGTH} characters`)
+    expect(result).toContain(`at least ${PASSWORD_MIN_LENGTH} characters`)
   })
 
   it("returns null for valid length password", () => {
-    const result = validatePasswordStrength("a".repeat(MIN_PASSWORD_LENGTH))
+    const result = validatePasswordStrength("a".repeat(PASSWORD_MIN_LENGTH))
     expect(result).toBeNull()
   })
 
   it("returns null for password longer than minimum", () => {
-    const result = validatePasswordStrength("a".repeat(MIN_PASSWORD_LENGTH + 10))
+    const result = validatePasswordStrength("a".repeat(PASSWORD_MIN_LENGTH + 10))
     expect(result).toBeNull()
   })
 })
@@ -614,13 +614,13 @@ describe("validatePasswordStrength edge cases", () => {
     expect(validatePasswordStrength("")).not.toBeNull()
   })
 
-  it("returns error for password of length MIN_PASSWORD_LENGTH - 1", () => {
-    const result = validatePasswordStrength("a".repeat(MIN_PASSWORD_LENGTH - 1))
+  it("returns error for password of length PASSWORD_MIN_LENGTH - 1", () => {
+    const result = validatePasswordStrength("a".repeat(PASSWORD_MIN_LENGTH - 1))
     expect(result).not.toBeNull()
   })
 
-  it("returns null for exactly MIN_PASSWORD_LENGTH characters", () => {
-    expect(validatePasswordStrength("a".repeat(MIN_PASSWORD_LENGTH))).toBeNull()
+  it("returns null for exactly PASSWORD_MIN_LENGTH characters", () => {
+    expect(validatePasswordStrength("a".repeat(PASSWORD_MIN_LENGTH))).toBeNull()
   })
 })
 

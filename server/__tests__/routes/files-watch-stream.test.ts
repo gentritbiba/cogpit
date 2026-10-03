@@ -48,6 +48,7 @@ vi.mock("../../agents/runtimes", () => ({
   }),
 }))
 
+import { __resetEditionForTest, installEdition, PERSONAL_EDITION, type EditionSessionAccess } from "../../edition"
 import { registerFileWatchRoutes } from "../../routes/files-watch"
 import { publish, clear, publishRateLimit, _resetForTests } from "../../lib/streamBus"
 import type { UseFn, Middleware } from "../../helpers"
@@ -108,12 +109,20 @@ async function connect(urlPath: string) {
 }
 
 const SESSION = "11111111-2222-3333-4444-555555555555"
-// Mirrors the allowlist in files-watch.ts: Windows has no /tmp, so task output
-// lives under %TEMP% there.
-const TASK_OUTPUT_DIR = join(
+const OTHER_SESSION = "66666666-7777-4888-9999-000000000000"
+// Mirrors the allowlist in agents/taskOutput.ts: Windows has no /tmp, so task
+// output lives under %TEMP% there.
+const TASK_OUTPUT_PROJECT = join(
   process.platform === "win32" ? tmpdir() : "/tmp",
   "claude-cogpit-test",
+  "-work-project",
 )
+
+/** The task-output stream URL for `fileName` in `owner`'s task directory, naming the session `named` if given. */
+function taskOutputUrl(fileName: string, { owner = SESSION, named }: { owner?: string; named?: string } = {}): string {
+  const path = join(TASK_OUTPUT_PROJECT, owner, "tasks", fileName)
+  return `/?path=${encodeURIComponent(path)}${named ? `&sessionId=${named}` : ""}`
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -228,6 +237,22 @@ describe("/api/watch stream-bus forwarding", () => {
     closeConnection()
   })
 
+  it.each([
+    ["another session", OTHER_SESSION],
+    ["this session", SESSION],
+  ])("streams nothing for a transcript filed under this session, named after %s", async (_name, spelled) => {
+    publishRateLimit(spelled, { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true })
+    publish(spelled, { type: "message_start", message: { id: "msg_5" } }, null)
+
+    const planted = `${SESSION}/workflows/${spelled}.jsonl`
+    const { frames, closeConnection } = await connect(`/proj-a/${encodeURIComponent(planted)}`)
+    publish(spelled, { type: "content_block_start", index: 0, content_block: { type: "text" } }, null)
+    await new Promise((r) => setTimeout(r, 100))
+
+    expect(parseFrames(frames).map((event) => event.type)).toEqual(["init"])
+    closeConnection()
+  })
+
   it("keeps an active Copilot turn live across quiet transcript periods", async () => {
     vi.useFakeTimers()
     mockIsCopilotTurnActive.mockReturnValue(true)
@@ -316,11 +341,83 @@ describe("/api/watch stream-bus forwarding", () => {
 })
 
 describe("/api/task-output streaming", () => {
+  afterEach(() => {
+    __resetEditionForTest()
+  })
+
+  /** An edition that allows every stream and shows `everything` as asked, remembering the sessions it checked. */
+  function useEditionShowing(everything: boolean) {
+    const authorizeSession = vi.fn<EditionSessionAccess["authorizeSession"]>(async (_req, _res, ref) =>
+      ({ sessionId: "sessionId" in ref ? ref.sessionId : "", filePath: null, isRootTranscript: true }))
+    const visibilityFor = () => Object.assign(async () => "hidden" as const, { everything, nothing: false })
+    installEdition({ ...PERSONAL_EDITION, edition: "team", access: { ...PERSONAL_EDITION.access, authorizeSession, visibilityFor } })
+    return authorizeSession
+  }
+
+  it("requires the output's path", async () => {
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(`/?sessionId=${SESSION}`)
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+
+    expect(harness.res.statusCode).toBe(400)
+    expect(harness.res.writeHead).not.toHaveBeenCalled()
+  })
+
+  it("streams output as the session whose task directory holds it, unnamed by the caller", async () => {
+    const authorizeSession = useEditionShowing(false)
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(taskOutputUrl("task.output", { owner: OTHER_SESSION }))
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+
+    expect(authorizeSession).toHaveBeenCalledWith(harness.req, harness.res, { sessionId: OTHER_SESSION }, "view", undefined)
+    expect(harness.res.writeHead).toHaveBeenCalledWith(200, expect.anything())
+    harness.closeConnection()
+  })
+
+  it("streams output filed under no session only to a caller who sees every session", async () => {
+    const handler = getHandler("/api/task-output")
+    const path = join(TASK_OUTPUT_PROJECT, "tasks", "legacy.output")
+
+    const shown = makeReqRes(`/?path=${encodeURIComponent(path)}`)
+    await handler(shown.req as never, shown.res as never, shown.next)
+    expect(shown.res.writeHead).toHaveBeenCalledWith(200, expect.anything())
+    shown.closeConnection()
+
+    const authorizeSession = useEditionShowing(false)
+    const refused = makeReqRes(`/?path=${encodeURIComponent(path)}`)
+    await handler(refused.req as never, refused.res as never, refused.next)
+    expect(refused.res.statusCode).toBe(403)
+    expect(refused.res.writeHead).not.toHaveBeenCalled()
+    expect(authorizeSession).not.toHaveBeenCalled()
+  })
+
+  it("refuses a path outside a claude-* temp tree", async () => {
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(`/?path=${encodeURIComponent(join(tmpdir(), "elsewhere", "task.output"))}`)
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+
+    expect(harness.res.statusCode).toBe(403)
+    expect(harness.res.writeHead).not.toHaveBeenCalled()
+    expect(mockWatch).not.toHaveBeenCalled()
+  })
+
+  it("refuses output that belongs to a session other than the one named", async () => {
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(taskOutputUrl("task.output", { owner: OTHER_SESSION, named: SESSION }))
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+
+    expect(harness.res.statusCode).toBe(403)
+    expect(harness.res.writeHead).not.toHaveBeenCalled()
+    expect(mockWatch).not.toHaveBeenCalled()
+  })
+
   it("does not install stream resources after authorization destroys the response", async () => {
     const handler = getHandler("/api/task-output")
-    const harness = makeReqRes(
-      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "revoked.output"))}`,
-    )
+    const harness = makeReqRes(taskOutputUrl("revoked.output"))
     harness.res.destroyed = true
 
     await handler(harness.req as never, harness.res as never, harness.next)
@@ -344,9 +441,7 @@ describe("/api/task-output streaming", () => {
     }))
 
     const handler = getHandler("/api/task-output")
-    const harness = makeReqRes(
-      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "task.output"))}`,
-    )
+    const harness = makeReqRes(taskOutputUrl("task.output"))
     await handler(harness.req as never, harness.res as never, harness.next)
     await vi.waitFor(() => expect(readSizes.reduce((sum, size) => sum + size, 0)).toBe(totalBytes))
 
@@ -375,9 +470,7 @@ describe("/api/task-output streaming", () => {
     }))
 
     const handler = getHandler("/api/task-output")
-    const harness = makeReqRes(
-      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "utf8.output"))}`,
-    )
+    const harness = makeReqRes(taskOutputUrl("utf8.output"))
     await handler(harness.req as never, harness.res as never, harness.next)
     await vi.waitFor(() => {
       const text = parseFrames(harness.frames)

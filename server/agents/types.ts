@@ -1,4 +1,4 @@
-import type { AgentDescriptor, AgentKind } from "../../shared/session/agent-descriptors"
+import type { AgentDescriptor, AgentKind, TranscriptRoot } from "../../shared/session/agent-descriptors"
 
 /** One transcript found by walking an agent's storage root. */
 export interface SessionFileInfo {
@@ -133,6 +133,12 @@ export interface AgentStore {
   resolveSessionFile(dirName: string, fileName: string): Promise<string | null>
   /** Locate a session by id within this agent's storage. */
   findSessionFile(sessionId: string): Promise<string | null>
+  /**
+   * The top-level session the file at `filePath` belongs to, read from where it
+   * really lives once symlinks are resolved, so the answer is about the bytes a
+   * read returns. Null when that is outside this store's root or names no session.
+   */
+  transcriptRoot(filePath: string): Promise<TranscriptRoot | null>
   /** Cheap head-read identity, or null when this agent has no such fast path. */
   readIdentity(filePath: string): Promise<SessionIdentity | null>
   /** Full metadata, given the transcript head the caller already read. */

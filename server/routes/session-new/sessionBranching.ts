@@ -2,6 +2,7 @@ import {
   dirname,
   mkdir,
   readFile,
+  stat,
   writeFile,
   randomUUID,
 } from "../../helpers"
@@ -14,8 +15,9 @@ import {
 } from "../../../shared/session/agents"
 import { storeForDirName, storeForPath } from "../../agents"
 import { runtimeForDirName } from "../../agents/runtimes"
-import { resolveSessionFilePath } from "../../sessionPaths"
 import { sendJson, withJsonBody, type UseFn } from "../../http"
+import { reportSessionEvent, recordSessionOwner } from "../../edition"
+import { authorizeTranscript } from "../../edition/transcript"
 
 /**
  * Prefer the turn-id cut — exact regardless of how much of the session the
@@ -52,13 +54,20 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
 
-        const sourcePath = await resolveSessionFilePath(dirName, fileName)
+        const source = await authorizeTranscript(req, res, { dirName, fileName }, "view")
+        if (source === null) return
+        const sourcePath = source.filePath
         const descriptor = descriptorForDirName(dirName)
         // The resolved path has to sit in the storage of the agent the dirName
         // claims, so one agent's dirName cannot reach another's transcript.
         if (!sourcePath || storeForPath(sourcePath)?.kind !== descriptor.kind) {
           sendJson(res, 403, { error: "Access denied" })
           return
+        }
+        // Whoever branches owns the copy, whoever owns the source.
+        const recordBranch = (sessionId: string) => {
+          recordSessionOwner(req, sessionId, descriptor.kind)
+          reportSessionEvent(req, "session.branch", { sessionId, agent: descriptor.kind, dirName }, { branchedFrom: source.sessionId })
         }
 
         const content = await readFile(sourcePath, "utf-8")
@@ -71,12 +80,13 @@ export function registerBranchSessionRoute(use: UseFn) {
 
         if (descriptor.capabilities.nativeFork) {
           // The CLI forks its own session; the transcript is never copied.
-          const originalId = descriptor.sessionFile.sessionId(fileName)
+          const originalId = source.transcriptSessionId
           if (!originalId) {
             sendJson(res, 400, { error: `Invalid ${descriptor.displayName} session path` })
             return
           }
           const forked = await runtimeForDirName(dirName).fork(originalId, { lines, turnIndex, turnUuid })
+          recordBranch(forked.sessionId)
           sendJson(res, 200, {
             dirName,
             fileName: forked.fileName,
@@ -95,6 +105,7 @@ export function registerBranchSessionRoute(use: UseFn) {
           JSON.parse(lines[0]) as Record<string, unknown>,
           newSessionId,
           turnIndex ?? null,
+          Date.now(),
         )
         lines[0] = JSON.stringify(record)
 
@@ -104,7 +115,10 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
         await mkdir(dirname(target.filePath), { recursive: true })
-        await writeFile(target.filePath, lines.join("\n") + "\n")
+        // The copy is no more readable than the transcript it came from.
+        const { mode } = await stat(sourcePath)
+        await writeFile(target.filePath, lines.join("\n") + "\n", { mode: mode & 0o777 })
+        recordBranch(newSessionId)
 
         sendJson(res, 200, {
           dirName,

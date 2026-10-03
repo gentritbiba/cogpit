@@ -1,0 +1,5 @@
+Cogpit is released under the MIT license; see LICENSE.
+
+Official builds of Cogpit also include a proprietary module, the Cogpit Team
+UI, which is not part of this repository and is not covered by the MIT
+license. Builds made from this repository alone do not contain it.

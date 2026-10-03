@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { ConfigBrowser } from "../ConfigBrowser"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
@@ -68,8 +68,8 @@ describe("ConfigBrowser capability gating", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
 
     render(<ConfigBrowser projectPath={null} />)
@@ -89,8 +89,8 @@ describe("ConfigBrowser capability gating", () => {
       setMe({
         authenticated: true,
         edition: "team",
-        user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-        capabilities: MEMBER_CAPABILITIES,
+        user: { id: "u_member", username: "member", displayName: "Member" },
+        capabilities: NO_CAPABILITIES,
       })
     })
 

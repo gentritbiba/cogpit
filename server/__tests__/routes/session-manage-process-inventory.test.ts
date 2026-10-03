@@ -191,7 +191,7 @@ describe("registerRunningProcessesRoute", () => {
   })
 
   /** Drive one request to completion, feeding `stdout` through the child. */
-  function runRoute(stdout: string) {
+  async function runRoute(stdout: string) {
     const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter }
     child.stdout = new EventEmitter()
     spawn.mockReturnValue(child)
@@ -212,6 +212,7 @@ describe("registerRunningProcessesRoute", () => {
     child.stdout.emit("data", Buffer.from(stdout))
     child.emit("close")
     child.emit("close")
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
 
     return { res, next }
   }
@@ -223,10 +224,10 @@ describe("registerRunningProcessesRoute", () => {
     Object.defineProperty(process, "platform", { ...originalPlatform, value })
   }
 
-  it("streams ps output through the posix parser and responds once", () => {
+  it("streams ps output through the posix parser and responds once", async () => {
     pinPlatform("linux")
 
-    const { res, next } = runRoute(
+    const { res, next } = await runRoute(
       `alice 1001 2.0 0.1 0 2048 ttys001 S+ 10:00 0:01.00 claude --resume ${CLAUDE_SESSION_ID}`,
     )
 
@@ -239,10 +240,10 @@ describe("registerRunningProcessesRoute", () => {
     expect(next).not.toHaveBeenCalled()
   })
 
-  it("streams PowerShell output through the windows parser", () => {
+  it("streams PowerShell output through the windows parser", async () => {
     pinPlatform("win32")
 
-    const { res } = runRoute(JSON.stringify({
+    const { res } = await runRoute(JSON.stringify({
       ProcessId: 1001,
       WorkingSetSize: 2 * 1024 * 1024,
       CommandLine: `claude --resume ${CLAUDE_SESSION_ID}`,

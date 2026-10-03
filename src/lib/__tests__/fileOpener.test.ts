@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/auth", () => ({ jsonFetch: vi.fn() }))
-vi.mock("@/lib/device", () => ({ isRemoteDeviceActive: vi.fn(() => false) }))
+vi.mock("@/lib/device", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/device")>()),
+  isRemoteDeviceActive: vi.fn(() => false),
+}))
 vi.mock("@/lib/utils", () => ({ copyToClipboard: vi.fn().mockResolvedValue(true) }))
 
 import { jsonFetch } from "@/lib/auth"
@@ -18,7 +21,7 @@ import {
   setBuiltInEditorEnabled,
   type FileOpenTarget,
 } from "@/lib/fileOpener"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
 const mockJsonFetch = vi.mocked(jsonFetch)
 const mockIsRemoteDeviceActive = vi.mocked(isRemoteDeviceActive)
@@ -134,7 +137,7 @@ describe("openFile", () => {
   })
 
   it("does nothing without the hostFiles capability", () => {
-    setMe({ authenticated: true, edition: "team", user: null, capabilities: MEMBER_CAPABILITIES })
+    setMe({ authenticated: true, edition: "team", user: null, capabilities: NO_CAPABILITIES })
 
     openFile("/repo/src/app.ts")
 

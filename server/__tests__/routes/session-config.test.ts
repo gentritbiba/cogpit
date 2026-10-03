@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { EventEmitter } from "node:events"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -13,15 +13,10 @@ const { mockDirs, mockFindJsonlPath, mockReadTranscriptEffort } = vi.hoisted(() 
 }))
 
 vi.mock("../../sessionPaths", () => ({ findJsonlPath: mockFindJsonlPath }))
+vi.mock("../../dirs", () => ({ dirs: mockDirs }))
 
 vi.mock("../../helpers", async () => {
-  const fs = await import("node:fs/promises")
-  const path = await import("node:path")
   return {
-    dirs: mockDirs,
-    join: path.join,
-    mkdir: fs.mkdir,
-    readFile: fs.readFile,
     readTranscriptEffort: mockReadTranscriptEffort,
     sendJson: (
       res: { statusCode: number; setHeader: (n: string, v: string) => void; end: (v?: string) => void },
@@ -175,6 +170,21 @@ describe("session-config routes", () => {
     expect(isValidSessionConfigKey("")).toBe(false)
     expect(isValidSessionConfigKey("abc-123.jsonl")).toBe(true)
     expect(isValidSessionConfigKey("-Users-gentritbiba-agent-window")).toBe(true)
+  })
+
+  it("refuses keys naming a file another store keeps beside the configs, in any case", async () => {
+    await mkdir(mockDirs.SESSION_CONFIG_DIR, { recursive: true })
+    for (const store of ["archived-sessions", "pr-search-index"]) {
+      const storePath = join(mockDirs.SESSION_CONFIG_DIR, `${store}.json`)
+      await writeFile(storePath, JSON.stringify({ version: 2, sessions: {} }))
+
+      for (const key of [store, store.toUpperCase()]) {
+        expect(isValidSessionConfigKey(key), key).toBe(false)
+        expect((await invoke("GET", `/${key}`)).statusCode, key).toBe(400)
+        expect((await invoke("PUT", `/${key}`, JSON.stringify({ injected: true }))).statusCode, key).toBe(400)
+      }
+      expect(JSON.parse(await readFile(storePath, "utf-8"))).toEqual({ version: 2, sessions: {} })
+    }
   })
 
   it("rejects non-object payloads", async () => {

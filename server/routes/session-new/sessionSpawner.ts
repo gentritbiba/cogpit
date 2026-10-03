@@ -1,11 +1,12 @@
-import type { ServerResponse } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import { AGENT_KINDS, type AgentKind } from "../../../shared/session/agent-descriptors"
 import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes"
 import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type UseFn } from "../../http"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
 import { createSession, type CreateSessionInput } from "../../lib/sessionCreate"
-import { getRequestPrincipal } from "../../team/requestPrincipal"
+import { getRequestPrincipal, markDecided, startTurn } from "../../edition"
 import { sendAgentError } from "../agentErrors"
+import { imagesRefusal } from "../imageAttachments"
 
 /**
  * The session-creation route, for every agent: validating the request and
@@ -32,10 +33,15 @@ interface NewSessionBody {
   name?: string
 }
 
-/** Run a spawn and answer with the created session. */
-async function respondWithSession(res: ServerResponse, input: CreateSessionInput): Promise<void> {
+/** Run a spawn on the caller's behalf and answer with the created session. */
+async function respondWithSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  receivedAt: number,
+  input: CreateSessionInput,
+): Promise<void> {
   try {
-    const started = await createSession(input)
+    const started = await createSession(input, (runtime, request) => startTurn(req, receivedAt, runtime, request))
     sendJson(res, 200, {
       success: true,
       ...(input.retry ? { requestId: input.retry.requestId } : {}),
@@ -60,6 +66,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     if (req.method !== "POST") return next()
 
     withJsonBody<NewSessionBody>(req, res, async (body) => {
+      const receivedAt = Date.now()
       const {
         requestId, dirName, cwd, agent, parentSessionId, message, images, permissions,
         model, effort, contextWindowTokens, fastMode, ultracode, worktreeName, mcpConfig, name,
@@ -76,7 +83,14 @@ export function registerCreateAndSendRoute(use: UseFn) {
         sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, `agent must be one of ${AGENT_KINDS.join(", ")}`))
         return
       }
-      await respondWithSession(res, {
+      const refusal = imagesRefusal(images)
+      if (refusal) {
+        sendError(res, refusal)
+        return
+      }
+      // A new session names no session the caller could lack access to.
+      markDecided(req)
+      await respondWithSession(req, res, receivedAt, {
         dirName,
         cwd,
         agent,

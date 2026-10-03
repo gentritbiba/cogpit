@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown"
 import { authUrl, jsonFetch } from "@/lib/auth"
 import { markdownComponents, parseLocalFileHref, preprocessMediaPaths } from "../markdown-components"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../../shared/contracts/identity"
 
 vi.mock("@/lib/auth", () => ({
   jsonFetch: vi.fn().mockResolvedValue({ ok: true }),
@@ -74,8 +74,8 @@ describe("markdown file links", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
     render(
       <ReactMarkdown components={markdownComponents}>
@@ -116,8 +116,8 @@ describe("markdown images", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
     render(
       <ReactMarkdown components={markdownComponents}>
@@ -206,8 +206,8 @@ describe("markdown videos", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
     const { container } = render(
       <ReactMarkdown components={markdownComponents}>

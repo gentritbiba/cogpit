@@ -171,7 +171,12 @@ describe("GET /api/browser", () => {
     const call = await drive("GET", "/")
 
     expect(call.status()).toBe(200)
-    expect(call.body()).toEqual({ installed: true, binaryPath: BINARY, sessions })
+    // Personal edition owns every browser there is.
+    expect(call.body()).toEqual({
+      installed: true,
+      binaryPath: BINARY,
+      sessions: sessions.map((session) => ({ ...session, control: "own" })),
+    })
     expect(deps.listBrowsers).toHaveBeenCalledWith(deps.isRunning)
   })
 
@@ -196,13 +201,14 @@ describe("POST /api/browser/sessions", () => {
     const call = await drive("POST", "/sessions", { name: "github", note: "release bot" })
 
     expect(call.status()).toBe(201)
-    expect(call.body()).toMatchObject({ name: "github", note: "release bot" })
-    expect(deps.createBrowser).toHaveBeenCalledWith("github", "release bot")
+    expect(call.body()).toMatchObject({ name: "github", note: "release bot", control: "own" })
+    // A caller without an account records no creator.
+    expect(deps.createBrowser).toHaveBeenCalledWith("github", "release bot", undefined)
   })
 
   it("omits a non-string note", async () => {
     await drive("POST", "/sessions", { name: "github", note: 7 })
-    expect(deps.createBrowser).toHaveBeenCalledWith("github", undefined)
+    expect(deps.createBrowser).toHaveBeenCalledWith("github", undefined, undefined)
   })
 
   it("rejects a missing name without touching the registry", async () => {

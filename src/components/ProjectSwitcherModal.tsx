@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ProjectSwitcherList, useProjectList } from "@/components/ProjectSwitcherList"
+import { ProjectSwitcherList, useProjectList, type ProjectSwitcherView } from "@/components/ProjectSwitcherList"
 import { findProjectDirNameForCwd, type AgentKind } from "@/lib/agents"
 import { matchesKeybinding } from "@/lib/keybindings"
 
@@ -18,6 +18,8 @@ interface ProjectSwitcherModalProps {
   defaultAgentKind: AgentKind
   currentProjectDirName: string | null
   currentProjectCwd: string | null
+  /** Which view it opens on; the project list by default. */
+  initialView?: ProjectSwitcherView
 }
 
 export function ProjectSwitcherModal({
@@ -28,6 +30,7 @@ export function ProjectSwitcherModal({
   defaultAgentKind,
   currentProjectDirName,
   currentProjectCwd,
+  initialView,
 }: ProjectSwitcherModalProps) {
   const projects = useProjectList(open)
 
@@ -57,7 +60,7 @@ export function ProjectSwitcherModal({
       <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
         <DialogHeader className="sr-only">
           <DialogTitle>Start a session</DialogTitle>
-          <DialogDescription>Choose a project or enter an absolute folder path.</DialogDescription>
+          <DialogDescription>Choose a project, enter an absolute folder path, or browse the folders.</DialogDescription>
         </DialogHeader>
         <ProjectSwitcherList
           projects={projects}
@@ -65,6 +68,7 @@ export function ProjectSwitcherModal({
           onNewSession={(dirName, cwd) => { onNewSession(dirName, cwd); onClose() }}
           onNewFolder={(cwd) => { onNewFolder(cwd); onClose() }}
           defaultAgentKind={defaultAgentKind}
+          initialView={initialView}
         />
       </DialogContent>
     </Dialog>

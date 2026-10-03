@@ -38,6 +38,8 @@ interface WorkflowsPanelProps {
   sessionId: string | null
   workflows: WorkflowSummary[]
   isLive: boolean
+  /** Whether the user may stop a run; a viewer only watches. */
+  canStop: boolean
   onRefetchList: () => void
 }
 
@@ -48,6 +50,7 @@ export function WorkflowsPanel({
   sessionId,
   workflows,
   isLive,
+  canStop,
   onRefetchList,
 }: WorkflowsPanelProps) {
   const [preferredRunId, setPreferredRunId] = useState<string | null>(null)
@@ -233,7 +236,7 @@ export function WorkflowsPanel({
                       sessionId={sessionId ?? ""}
                       stopping={stopping}
                       confirming={confirmingStop}
-                      onForceStop={handleForceStop}
+                      onForceStop={canStop ? handleForceStop : undefined}
                     />
                   </>
                 ) : selected ? (

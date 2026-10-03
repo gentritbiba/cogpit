@@ -4,7 +4,7 @@ import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
-import { resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
+import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
 import { readCopilotSessionIdentity, readCopilotSessionMeta } from "./copilotMetadata"
 import {
   addressFromTranscript,
@@ -82,6 +82,8 @@ export const copilotStore: AgentStore = {
     const { sessionDir, filePath } = transcriptPath(sessionId)
     return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
   },
+
+  transcriptRoot: (filePath) => transcriptRootWithin(SESSIONS_DIR, filePath, descriptor.sessionFile),
 
   readIdentity: readCopilotSessionIdentity,
 

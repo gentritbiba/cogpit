@@ -8,6 +8,8 @@ vi.mock("../../agents/runtimes", async (importOriginal) => ({
   runtimeFor: () => ({ descriptor: { displayName: "Test agent" }, start }),
 }))
 vi.mock("../../lib/sessionOrigins", () => ({ recordSessionOrigin }))
+// "/work/my-app" is made up; a missing folder is covered in sessionCwd.test.ts.
+vi.mock("../../lib/folders", () => ({ sessionFolderProblem: async () => null }))
 
 import { createSession } from "../../lib/sessionCreate"
 

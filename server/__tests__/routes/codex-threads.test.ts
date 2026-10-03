@@ -126,6 +126,21 @@ describe("Codex thread routes", () => {
     expect(client.setGoal).not.toHaveBeenCalled()
   })
 
+  it.each([
+    [{ type: "audio", url: "data:audio/wav;base64,UklGRg==" }],
+    [{ type: "localAudio", path: "/tmp/note.wav" }],
+  ])("refuses to steer with an input item of a type it does not take: %o", async (item) => {
+    const handler = handlers.get("/api/codex/threads")!
+    const steer = await invoke(handler, {
+      method: "POST",
+      url: "/thread-1/steer",
+      body: { input: [{ type: "text", text: "Listen to this" }, item] },
+    })
+    expect(steer.response.statusCode).toBe(400)
+    expect(steer.response.json()).toMatchObject({ code: "INVALID_INPUT" })
+    expect(client.steerTurn).not.toHaveBeenCalled()
+  })
+
   it("steers and interrupts the active native turn", async () => {
     const handler = handlers.get("/api/codex/threads")!
     const steer = await invoke(handler, {

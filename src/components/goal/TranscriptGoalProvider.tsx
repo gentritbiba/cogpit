@@ -31,7 +31,8 @@ function statusVariant(status: TranscriptGoalState["status"]): "secondary" | "de
 interface TranscriptGoalProviderProps {
   agentKind: AgentKind
   session: ParsedSession
-  onSendCommand: (command: string) => void
+  /** Resolves false when the session refused the command. */
+  onSendCommand: (command: string) => Promise<boolean>
   children: ReactNode
 }
 
@@ -69,29 +70,37 @@ export function TranscriptGoalProvider({ agentKind, session, onSendCommand, chil
     setEditing(true)
   }, [goal])
 
-  const save = () => {
+  /** Show `shown` while `command` is sent; a refused command puts back what was on screen. */
+  const sendShowing = async (command: string, shown: TranscriptGoalState | null): Promise<boolean> => {
+    const before = optimisticGoal
+    setOptimisticGoal(shown)
+    setEditing(false)
+    const sent = await onSendCommand(command)
+    if (!sent) setOptimisticGoal(before)
+    return sent
+  }
+
+  const save = async () => {
     const next = condition.trim()
     if (!next) return
     if (next.length > 4_000) {
       setError("Goal conditions can be at most 4,000 characters")
       return
     }
-    setOptimisticGoal({
+    const sent = await sendShowing(`/goal ${next}`, {
       condition: next,
       status: "active",
       iterations: 0,
       durationMs: 0,
       tokens: 0,
     })
-    setEditing(false)
-    onSendCommand(`/goal ${next}`)
+    if (!sent) {
+      setCondition(next)
+      setEditing(true)
+    }
   }
 
-  const clear = () => {
-    setOptimisticGoal(null)
-    setEditing(false)
-    onSendCommand("/goal clear")
-  }
+  const clear = () => void sendShowing("/goal clear", null)
 
   let section: ReactNode = null
 
@@ -121,7 +130,7 @@ export function TranscriptGoalProvider({ agentKind, session, onSendCommand, chil
             <X data-icon="inline-start" />
             Cancel
           </Button>
-          <Button type="button" size="xs" onClick={save} disabled={!condition.trim()}>
+          <Button type="button" size="xs" onClick={() => void save()} disabled={!condition.trim()}>
             <Check data-icon="inline-start" />
             Start goal
           </Button>

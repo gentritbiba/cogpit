@@ -6,9 +6,10 @@ import {
   type AgentKind,
 } from "../../shared/session/agent-descriptors"
 import { runtimeFor } from "../agents/runtimes"
-import type { StartSessionRequest, StartedSession } from "../agents/runtimes"
+import type { AgentRuntime, StartSessionRequest, StartedSession } from "../agents/runtimes"
 import { getDataRoot } from "../config"
-import { dirs, isWithinDir, join } from "../helpers"
+import { dirs, isWithinDir, join, realpath } from "../helpers"
+import { sessionFolderProblem } from "./folders"
 import { resolveProjectCwd } from "./projectCwd"
 import { ErrorCodes, RouteError } from "./routeError"
 import { SessionCreationRequests } from "./sessionCreationRequests"
@@ -74,6 +75,16 @@ async function resolveSpawnCwd(
   return requestedCwd
 }
 
+/**
+ * The folder as the agent will record it. A POSIX process's cwd is always the
+ * physical path, so an agent started through a symlink files its transcript
+ * under the resolved folder; Windows keeps the path it was given.
+ */
+async function canonicalCwd(cwd: string): Promise<string> {
+  if (process.platform === "win32") return cwd
+  return await realpath(cwd).catch(() => cwd)
+}
+
 export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" | "cwd"> {
   /** The project to create the session under; derived from `cwd` when absent. */
   dirName?: string
@@ -85,11 +96,18 @@ export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" 
   retry?: { requestId: string; scope: string }
 }
 
+type StartFn = (runtime: AgentRuntime, request: StartSessionRequest) => Promise<StartedSession>
+
 /**
  * Create a session for the HTTP route and the session CLI alike. Throws a
- * `RouteError` for a request that cannot name a usable project.
+ * `RouteError` for a request that cannot name a usable project. `start` is how
+ * the runtime is asked to start it; the route passes one that runs on its
+ * caller's behalf.
  */
-export async function createSession(input: CreateSessionInput): Promise<StartedSession> {
+export async function createSession(
+  input: CreateSessionInput,
+  start: StartFn = (runtime, request) => runtime.start(request),
+): Promise<StartedSession> {
   const { dirName: requestedDirName, cwd: requestedCwd, agent, parentSessionId, retry, ...request } = input
   if (!requestedDirName && !isUsablePath(requestedCwd)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName or an absolute cwd is required")
@@ -97,15 +115,22 @@ export async function createSession(input: CreateSessionInput): Promise<StartedS
   const dirName = requestedDirName
     ?? projectDirNameFor(agent ?? agentKindForDirName(undefined), requestedCwd as string)
   const kind = agentKindForDirName(dirName)
-  const cwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
-  if (cwd instanceof RouteError) throw cwd
+  const spawnCwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
+  if (spawnCwd instanceof RouteError) throw spawnCwd
+  const missing = await sessionFolderProblem(spawnCwd)
+  if (missing) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, missing)
+  const cwd = await canonicalCwd(spawnCwd)
 
   const runtime = runtimeFor(kind)
-  const startRequest = { ...request, dirName, cwd }
-  const start = () => runtime.start(startRequest)
+  const startRequest = {
+    ...request,
+    dirName: cwd === spawnCwd ? dirName : descriptorFor(kind).dirName.encode(cwd),
+    cwd,
+  }
+  const run = () => start(runtime, startRequest)
   const started = retry
-    ? await creationRequests.run(retry.scope, retry.requestId, startRequest, start)
-    : await start()
+    ? await creationRequests.run(retry.scope, retry.requestId, startRequest, run)
+    : await run()
   if (parentSessionId) await recordSessionOrigin(started.sessionId, { parentSessionId })
   return started
 }

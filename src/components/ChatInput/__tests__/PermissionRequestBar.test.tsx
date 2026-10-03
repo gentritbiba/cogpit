@@ -23,6 +23,15 @@ function request(
 }
 
 describe("PermissionRequestBar", () => {
+  it("shows a request without decisions to a reader who cannot answer", () => {
+    render(<PermissionRequestBar requests={[request(), request({ requestId: "second" })]} />)
+
+    expect(screen.getByText("bun test")).toBeInTheDocument()
+    expect(screen.getByText("+1 more")).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Resolve this approval/)).not.toBeInTheDocument()
+  })
+
   it("requires an explicit approval for a prompt that defaults to no", () => {
     const onRespond = vi.fn()
     const onRespondAll = vi.fn()

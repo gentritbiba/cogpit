@@ -16,6 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Public only: the checkout leaves the editions/team submodule empty, and the
+  # builds prove it by failing if they emit the edition UI chunk.
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -83,9 +85,13 @@ jobs:
         run: bun run build
 
       - name: Build web application
+        env:
+          COGPIT_EXPECT_EDITION_UI: absent
         run: bun run build:web
 
       - name: Build Electron application
+        env:
+          COGPIT_EXPECT_EDITION_UI: absent
         run: bun run electron:build
 
       - name: Build cogpit-memory npm package
@@ -98,6 +104,8 @@ jobs:
 
       - name: Verify install-free Cogpit package contract
         working-directory: packages/cogpit-cli
+        env:
+          COGPIT_EXPECT_EDITION_UI: absent
         run: bun run test:contracts
 
       - name: Verify public plugin packages outside the repository

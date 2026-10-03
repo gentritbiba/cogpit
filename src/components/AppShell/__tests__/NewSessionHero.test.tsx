@@ -7,6 +7,7 @@ import { NewSessionHeadline, type HeadlineProjectSwitcher } from "../NewSessionH
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, authUrl: (path: string) => path }))
 vi.mock("@/hooks/useProjectNames", () => ({ useProjectNames: () => ({ names: {} }) }))
+vi.mock("@/hooks/useFolderHostName", () => ({ useFolderHostName: () => null }))
 vi.mock("@/components/ProjectFavicon", () => ({
   ProjectFavicon: ({ fallback }: { fallback: ReactNode }) => <>{fallback}</>,
 }))
@@ -92,7 +93,7 @@ describe("NewSessionHeadline", () => {
     render(<NewSessionHeadline projectPath="/Users/me/code/honest-cms" switcher={switcher({ onNewFolder })} />)
 
     await user.click(screen.getByRole("button", { name: "honest-cms" }))
-    await user.type(screen.getByPlaceholderText("Search projects or paste an absolute path..."), "/workspace/fresh")
+    await user.type(screen.getByPlaceholderText("Search projects, paste a folder path, or browse"), "/workspace/fresh")
     await user.click(screen.getByRole("option", { name: /Start in this folder/ }))
 
     expect(onNewFolder).toHaveBeenCalledWith("/workspace/fresh")

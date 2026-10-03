@@ -88,7 +88,7 @@ describe("registerSessionContextRoutes", () => {
   let handler: Middleware
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     handler = getRouteHandler(collectRoutes(registerSessionContextRoutes), "/api/session-context/")
   })
 
@@ -98,6 +98,28 @@ describe("registerSessionContextRoutes", () => {
     const { req, res, next } = createMockReqRes("POST", "/test-session")
     await handler(req, res, next)
     expect(next).toHaveBeenCalled()
+  })
+
+  it("answers 404 for a path it does not serve, before reading the session", async () => {
+    mockedFindJsonlPath.mockResolvedValue("/path/to/session.jsonl")
+    mockedReadFile.mockResolvedValue("" as never)
+    mockedParseSession.mockReturnValue(makeSession())
+
+    for (const path of [
+      "/",
+      "/test-session/extra",
+      "/test-session/turn",
+      "/test-session/turn/0/extra",
+      "/test-session/agent/a1/extra",
+      "/test-session/agent/a1/turn/0/extra",
+      "/test-session/unknown/path/shape",
+    ]) {
+      const { req, res, next } = createMockReqRes("GET", path)
+      await handler(req, res, next)
+      expect(res._getStatus(), path).toBe(404)
+      expect(next, path).not.toHaveBeenCalled()
+    }
+    expect(mockedFindJsonlPath).not.toHaveBeenCalled()
   })
 
   // ── L1: Session Overview ─────────────────────────────────────────────────
@@ -856,17 +878,6 @@ describe("registerSessionContextRoutes", () => {
 
       expect(res._getStatus()).toBe(500)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Error: Disk failure" })
-    })
-
-    it("calls next for unknown path shapes", async () => {
-      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
-      mockedReadFile.mockResolvedValueOnce("" as never)
-      mockedParseSession.mockReturnValueOnce(makeSession())
-
-      const { req, res, next } = createMockReqRes("GET", "/test-session/unknown/path/shape")
-      await handler(req, res, next)
-
-      expect(next).toHaveBeenCalled()
     })
   })
 })

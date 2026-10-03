@@ -1,5 +1,6 @@
 import { memo, useId, useState } from "react"
-import { CircleStop, Crosshair, Plus, Sparkles, Trash2, TriangleAlert, X } from "lucide-react"
+import { CircleStop, Crosshair, Eye, Plus, Sparkles, Trash2, TriangleAlert, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -26,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Toggle } from "@/components/ui/toggle"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { BrowserSessionPicker } from "./BrowserSessionPicker"
+import { controlOf } from "./browserSessions"
 import { cn } from "@/lib/utils"
 import type { BrowserActionResult } from "@/hooks/useBrowserSessions"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
@@ -33,10 +35,9 @@ import type { BrowserSessionInfo } from "../../../shared/browser/types"
 /**
  * Which browser the panel is showing, and everything that changes that: the
  * picker, creating and removing named browsers, following the agent, and the
- * standing reminder when the visible browser is not the shared default.
+ * standing reminder when the visible browser is not the caller's default.
+ * Each control shows only when the server lets the caller use it.
  */
-
-export const DEFAULT_BROWSER = "default"
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
 const NAME_RULE = "Lowercase letters, numbers, - and _, starting with a letter or number (40 max)."
@@ -44,6 +45,8 @@ const NAME_RULE = "Lowercase letters, numbers, - and _, starting with a letter o
 interface BrowserSessionBarProps {
   sessions: BrowserSessionInfo[]
   selected: string
+  /** The caller's default browser: their own, or the host's `default`. */
+  home: string
   /** This Cogpit session, so a browser another one drives can say so. */
   currentSessionId: string | null
   followAgent: boolean
@@ -64,6 +67,7 @@ interface BrowserSessionBarProps {
 export const BrowserSessionBar = memo(function BrowserSessionBar({
   sessions,
   selected,
+  home,
   currentSessionId,
   followAgent,
   busy = false,
@@ -86,8 +90,13 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
-  const isDefault = selected === DEFAULT_BROWSER
+  const isHome = selected === home
   const selectedInfo = sessions.find((session) => session.name === selected) ?? null
+  const control = controlOf(selectedInfo)
+  const homeIsOwn = sessions.some((session) => session.mine && session.name === home)
+  // The host's `default` stays whatever else the caller may do with it.
+  const canStop = !isHome && !selectedInfo?.isDefault && control !== "watch"
+  const canDelete = !isHome && !selectedInfo?.isDefault && control === "own"
 
   const trimmedName = newName.trim()
   const nameBroken = trimmedName.length > 0 && !NAME_PATTERN.test(trimmedName)
@@ -119,12 +128,13 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
     <div
       className={cn(
         "@container/browser-bar flex h-10 shrink-0 items-center gap-2 border-b px-2",
-        !isDefault && "border-amber-500/40 bg-amber-500/10",
+        !isHome && "border-amber-500/40 bg-amber-500/10",
       )}
     >
       <BrowserSessionPicker
         sessions={sessions}
         selected={selected}
+        home={home}
         currentSessionId={currentSessionId}
         busy={busy}
         onSelect={onSelect}
@@ -140,23 +150,32 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
               <Sparkles data-icon="inline-start" />
               Agent skill…
             </Button>
-            {!isDefault && <>
+            {canStop && (
               <Button variant="ghost" size="xs" disabled={busy || !selectedInfo?.running} onClick={() => { close(); onStop(selected) }}>
                 <CircleStop data-icon="inline-start" />
                 Stop
               </Button>
+            )}
+            {canDelete && (
               <Button variant="ghost" size="xs" disabled={busy} onClick={() => { close(); setDeleteTarget(selected) }}>
                 <Trash2 data-icon="inline-start" />
                 Delete…
               </Button>
-            </>}
+            )}
           </div>
         </>}
       </BrowserSessionPicker>
 
       <span className="flex-1" />
 
-      {!isDefault && (
+      {control === "watch" && (
+        <Badge variant="outline" title="Only someone who can interact with the session driving it can use it">
+          <Eye data-icon="inline-start" />
+          View only
+        </Badge>
+      )}
+
+      {!isHome && (
         <div className="flex min-w-0 items-center gap-1.5">
           <span
             role="status"
@@ -165,11 +184,11 @@ export const BrowserSessionBar = memo(function BrowserSessionBar({
             <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
             {/* Too narrow and only the icon is left, but the words stay in the a11y tree. */}
             <span className="sr-only @sm/browser-bar:not-sr-only @sm/browser-bar:whitespace-nowrap">
-              Not the default browser
+              {homeIsOwn ? "Not your browser" : "Not the default browser"}
             </span>
           </span>
           <Button variant="outline" size="xs" onClick={onShowDefault}>
-            Show default
+            {homeIsOwn ? "Show yours" : "Show default"}
           </Button>
         </div>
       )}

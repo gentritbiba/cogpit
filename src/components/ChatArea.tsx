@@ -20,6 +20,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { FindInSession, type FindInSessionHandle } from "@/components/FindInSession"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { useCapability } from "@/hooks/useCapability"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 
@@ -46,7 +47,8 @@ export const ChatArea = memo(function ChatArea({
   onMobileSearchClose,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
-  const { session, sessionSource, rateLimit } = useSessionContext()
+  const { session, sessionSource, rateLimit, permissions } = useSessionContext()
+  const canUseTerminal = useCapability("terminal")
   const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery } = state
@@ -119,7 +121,11 @@ export const ChatArea = memo(function ChatArea({
           banner clears it the same way the team bar does. */}
       {rateLimitBanner && (
         <div className={cn("shrink-0", !isMobile && "pt-10")}>
-          <RateLimitBanner {...rateLimitBanner} cwd={currentSession.cwd} />
+          <RateLimitBanner
+            {...rateLimitBanner}
+            cwd={currentSession.cwd}
+            terminal={canUseTerminal && permissions.send}
+          />
         </div>
       )}
 

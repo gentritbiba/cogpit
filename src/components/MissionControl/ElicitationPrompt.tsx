@@ -25,7 +25,8 @@ import type {
 interface ElicitationPromptProps {
   request: MissionControlElicitation
   responding: boolean
-  onAnswer: (requestId: string, answer: ElicitationAnswer) => void
+  /** Omitted for a reader who cannot answer: the request shows, its form disabled. */
+  onAnswer?: (requestId: string, answer: ElicitationAnswer) => void
 }
 
 /** Form state is kept as text/booleans; numbers are parsed on submit. */
@@ -88,7 +89,7 @@ export function ElicitationPrompt({
     setValues((prev) => ({ ...prev, [name]: value }))
   }
 
-  const decline = () => onAnswer(request.requestId, { action: "decline" })
+  const decline = () => onAnswer?.(request.requestId, { action: "decline" })
 
   if (request.mode === "url" && request.url) {
     const url = request.url
@@ -98,22 +99,24 @@ export function ElicitationPrompt({
         <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={url}>
           {url}
         </p>
-        <div className="mt-3 flex items-center gap-2">
-          <Button
-            size="sm"
-            disabled={responding}
-            onClick={() => {
-              window.open(url, "_blank", "noopener,noreferrer")
-              onAnswer(request.requestId, { action: "accept" })
-            }}
-          >
-            Open link
-            <ExternalLink data-icon="inline-end" />
-          </Button>
-          <Button variant="ghost" size="sm" disabled={responding} onClick={decline}>
-            Decline
-          </Button>
-        </div>
+        {onAnswer && (
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={responding}
+              onClick={() => {
+                window.open(url, "_blank", "noopener,noreferrer")
+                onAnswer(request.requestId, { action: "accept" })
+              }}
+            >
+              Open link
+              <ExternalLink data-icon="inline-end" />
+            </Button>
+            <Button variant="ghost" size="sm" disabled={responding} onClick={decline}>
+              Decline
+            </Button>
+          </div>
+        )}
       </Shell>
     )
   }
@@ -129,27 +132,29 @@ export function ElicitationPrompt({
             id={`elicit-${request.requestId}-${field.name}`}
             field={field}
             value={values[field.name]}
-            disabled={responding}
+            disabled={responding || !onAnswer}
             onChange={(value) => setValue(field.name, value)}
           />
         ))}
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <Button
-          size="sm"
-          disabled={responding || !complete}
-          onClick={() => onAnswer(request.requestId, {
-            action: "accept",
-            content: toContent(request.fields, values),
-          })}
-        >
-          Send
-        </Button>
-        <Button variant="ghost" size="sm" disabled={responding} onClick={decline}>
-          Decline
-        </Button>
-      </div>
+      {onAnswer && (
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={responding || !complete}
+            onClick={() => onAnswer(request.requestId, {
+              action: "accept",
+              content: toContent(request.fields, values),
+            })}
+          >
+            Send
+          </Button>
+          <Button variant="ghost" size="sm" disabled={responding} onClick={decline}>
+            Decline
+          </Button>
+        </div>
+      )}
     </Shell>
   )
 }

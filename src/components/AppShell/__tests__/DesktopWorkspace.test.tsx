@@ -1,11 +1,15 @@
 import type { ReactNode } from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { Users } from "lucide-react"
 import { DesktopWorkspace } from "../DesktopWorkspace"
 import type { DesktopAppShellProps } from "../desktopTypes"
 import type { ParsedSession } from "../../../../shared/session/types"
 import type { useAppContext } from "@/contexts/AppContext"
 import type { useSessionContext } from "@/contexts/SessionContext"
+import type { EditionMainView } from "@/edition/contract"
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
+import type { MainView } from "@/hooks/useSessionState"
 
 const contextMocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -110,11 +114,13 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
 
 function setContexts({
   mainView = "sessions",
+  extensionViewId = null,
   pendingDirName = null,
   pendingCwd = null,
   session = null,
 }: {
-  mainView?: "sessions" | "config" | "mission"
+  mainView?: MainView
+  extensionViewId?: string | null
   pendingDirName?: string | null
   pendingCwd?: string | null
   session?: ParsedSession | null
@@ -133,6 +139,7 @@ function setContexts({
       currentMemberName: null,
       loadingMember: null,
       mainView,
+      extensionViewId,
       configFilePath: null,
       mobileTab: "sessions",
       dashboardProject: null,
@@ -167,6 +174,8 @@ function makeProps(
         closeWorkspacePanel: vi.fn(),
         handleToggleConfig: vi.fn(),
         handleToggleMission: vi.fn(),
+        openMainView: vi.fn(),
+        closeMainView: vi.fn(),
         handleOpenProjectSwitcher: vi.fn(),
         handleCloseProjectSwitcher: vi.fn(),
         handleToggleThemeSelector: vi.fn(),
@@ -239,6 +248,7 @@ function makeProps(
       branchModal: null,
       killing: false,
       onKillAll: vi.fn(),
+      onLogout: vi.fn(),
       commandPaletteOpen: false,
       onCommandPaletteOpenChange: vi.fn(),
       onOpenCommandPalette: vi.fn(),
@@ -277,6 +287,51 @@ describe("DesktopWorkspace", () => {
     expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Config" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "false")
+  })
+
+  describe("an edition main view", () => {
+    function reportsView(available: boolean): EditionMainView {
+      return {
+        id: "reports",
+        label: "Reports",
+        icon: Users,
+        keywords: "reports",
+        isAvailable: () => available,
+        Component: ({ onClose }) => <button onClick={onClose}>Close Reports</button>,
+      }
+    }
+
+    afterEach(() => __resetEditionUiForTest())
+
+    it("replaces the open session while the caller may open it", () => {
+      __installEditionUiForTest({ mainViews: [reportsView(true)] })
+      setContexts({ mainView: "extension", extensionViewId: "reports", session: makeSession() })
+      const props = makeProps()
+
+      render(<DesktopWorkspace {...props} />)
+
+      screen.getByRole("button", { name: "Close Reports" }).click()
+      expect(props.navigation.panels.closeMainView).toHaveBeenCalledOnce()
+      expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
+    })
+
+    it("falls through to the dashboard once the caller may not open it", async () => {
+      __installEditionUiForTest({ mainViews: [reportsView(false)] })
+      setContexts({ mainView: "extension", extensionViewId: "reports" })
+
+      render(<DesktopWorkspace {...makeProps()} />)
+
+      expect(await screen.findByTestId("dashboard")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Close Reports" })).not.toBeInTheDocument()
+    })
+
+    it("falls through to the dashboard when no edition registered it", async () => {
+      setContexts({ mainView: "extension", extensionViewId: "reports" })
+
+      render(<DesktopWorkspace {...makeProps()} />)
+
+      expect(await screen.findByTestId("dashboard")).toBeInTheDocument()
+    })
   })
 
   it("renders pending turns and the pending composer before the dashboard", () => {

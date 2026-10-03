@@ -115,15 +115,17 @@ export interface AgentFormat {
   /** Status derived from raw records. */
   status(records: readonly RawRecord[]): SessionStatusInfo
   /**
-   * The first record of a transcript, rewritten for a branch: it now names
-   * `sessionId` and records the session and turn it was cut from. Returns the
-   * id the record carried before, which is what the branch reports as its
-   * origin.
+   * The first record of a transcript, rewritten for a branch cut at
+   * `branchedAt`: it now names `sessionId` and records the session and turn
+   * it was cut from, and when, where the copied lines cannot otherwise be
+   * told from the branch's own. Returns the id the record carried before,
+   * which is what the branch reports as its origin.
    */
   brandBranch(
     firstRecord: Record<string, unknown>,
     sessionId: string,
     turnIndex: number | null,
+    branchedAt: number,
   ): { record: Record<string, unknown>; originalId: string }
   /**
    * Indexes of the records at which a turn starts, in file order.

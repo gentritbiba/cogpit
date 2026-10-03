@@ -12,8 +12,7 @@ import {
   markDelegatedRequestAnswered,
   watchDelegatedRequestsOf,
 } from "../sessionHosts/delegatedRequests"
-import { isTeamEdition } from "../team/edition"
-import { getRequestPrincipal } from "../team/requestPrincipal"
+import { getRequestPrincipal, mayActHostWide, visibilityFor } from "../edition"
 import { sendHostError } from "./agentErrors"
 
 const INVOCATION_ID_RE = /^[a-zA-Z0-9_-]{8,128}$/
@@ -193,7 +192,8 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         invocationId,
         callerSessionId: typeof callerSessionId === "string" && callerSessionId ? callerSessionId : undefined,
         scope: getRequestPrincipal(req)?.userId ?? "local",
-        admin: !isTeamEdition() || getRequestPrincipal(req)?.role === "admin",
+        admin: mayActHostWide(req),
+        visible: visibilityFor(req),
         signal: abortOnClose(req, res),
       })
       if (!res.writableEnded) sendJson(res, 200, output)

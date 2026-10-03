@@ -5,9 +5,10 @@
  *
  * Codex's `request_user_input_async` has no reply channel: it returns
  * `{"accepted":true}` to the model at once and the thread reads its next
- * message as the answer. So the runtime answers by sending — steering the
- * asking turn if it is still running, opening a new one if it is not — and the
- * pending question is cleared by any message, however the reader typed it.
+ * message as the answer. So the runtime answers with that message for its
+ * caller to send — steering the asking turn if it is still running, opening a
+ * new one if it is not — and the pending question is cleared by any message,
+ * however the reader typed it.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -80,7 +81,7 @@ vi.mock("../../agents/index", () => ({
 import { codexRuntime } from "../../agents/codexRuntime"
 import { codexQuestions } from "../../agents/codexQuestions"
 import { resolveSessionCwd } from "../../agents/sessionCwd"
-import { AgentRuntimeError } from "../../agents/runtimeTypes"
+import { AgentRuntimeError, type UserQuestionAnswers } from "../../agents/runtimeTypes"
 import { unlink } from "../../helpers"
 
 function ask(questions: Array<{ title: string; options?: string[] }>): void {
@@ -115,6 +116,12 @@ function sentMessage(): string | undefined {
   return sentOptions()?.message as string | undefined
 }
 
+/** Answer the way the route does: accept, then send the message the answer became. */
+async function answer(questionId: string, answers: UserQuestionAnswers): Promise<void> {
+  const accepted = await codexRuntime.answerQuestion("thread-1", questionId, answers)
+  if (accepted?.message) await codexRuntime.send("thread-1", accepted.message)
+}
+
 const fullAccess = {
   cwd: "/project",
   permissions: { mode: "bypassPermissions" },
@@ -145,30 +152,32 @@ describe("codexRuntime.listPendingQuestions", () => {
     }])
   })
 
-  it("reports nothing once the question is answered", async () => {
+  it("keeps the question pending until its answer is sent", async () => {
     ask([{ title: "What is your budget?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "What is your budget?": "900" })
+    const accepted = await codexRuntime.answerQuestion("thread-1", "call-q", { "What is your budget?": "900" })
 
+    expect(codexRuntime.listPendingQuestions("thread-1")).toHaveLength(1)
+    await codexRuntime.send("thread-1", accepted!.message!)
     expect(codexRuntime.listPendingQuestions("thread-1")).toEqual([])
   })
 })
 
 describe("codexRuntime.answerQuestion", () => {
-  it("sends a single answer as the message itself, with no echoed question", async () => {
+  it("answers with the message itself, unsent and with no echoed question", async () => {
     ask([{ title: "What is your budget?" }])
 
     expect(await codexRuntime.answerQuestion(
       "thread-1",
       "call-q",
       { "What is your budget?": "About 900 a month" },
-    )).toBe(true)
-    expect(sentMessage()).toBe("About 900 a month")
+    )).toEqual({ message: { message: "About 900 a month" } })
+    expect(execution.continueCodexExecution).not.toHaveBeenCalled()
   })
 
   it("labels each answer when the agent asked more than one question", async () => {
     ask([{ title: "Which month?" }, { title: "Do you have a car?" }])
 
-    await codexRuntime.answerQuestion("thread-1", "call-q", {
+    await answer("call-q", {
       "Which month?": "June",
       "Do you have a car?": "No",
     })
@@ -179,7 +188,7 @@ describe("codexRuntime.answerQuestion", () => {
   it("joins a multi-select answer array into one message", async () => {
     ask([{ title: "Which regions?" }])
 
-    await codexRuntime.answerQuestion("thread-1", "call-q", ["Alps", "Jura"])
+    await answer("call-q", ["Alps", "Jura"])
 
     expect(sentMessage()).toBe("Alps, Jura")
   })
@@ -190,7 +199,7 @@ describe("codexRuntime.answerQuestion", () => {
     // the reader's typing.
     ask([{ title: "Which month?" }])
 
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month": "June" })
+    await answer("call-q", { "Which month": "June" })
 
     expect(sentMessage()).toBe("June")
   })
@@ -199,7 +208,7 @@ describe("codexRuntime.answerQuestion", () => {
     await codexRuntime.send("thread-1", { message: "Plan a trip", ...fullAccess })
     ask([{ title: "Which month?" }])
 
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    await answer("call-q", { "Which month?": "June" })
 
     expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
     expect(resolveSessionCwd).toHaveBeenLastCalledWith("/project", undefined)
@@ -208,7 +217,7 @@ describe("codexRuntime.answerQuestion", () => {
   it("refuses an unknown question rather than sending a stray message", async () => {
     ask([{ title: "Which month?" }])
 
-    expect(await codexRuntime.answerQuestion("thread-1", "other-call", { a: "b" })).toBe(false)
+    expect(await codexRuntime.answerQuestion("thread-1", "other-call", { a: "b" })).toBeNull()
     expect(execution.continueCodexExecution).not.toHaveBeenCalled()
   })
 
@@ -248,7 +257,7 @@ describe("codexRuntime.send", () => {
     })
 
     ask([{ title: "Which month?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    await answer("call-q", { "Which month?": "June" })
 
     expect(sentOptions()).toMatchObject({
       cwd: "/project",
@@ -270,7 +279,7 @@ describe("codexRuntime.send", () => {
     })).rejects.toThrow("Send failed")
 
     ask([{ title: "Which month?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    await answer("call-q", { "Which month?": "June" })
 
     expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
   })
@@ -282,7 +291,7 @@ describe("remembered question settings lifecycle", () => {
     await codexRuntime.shutdown()
 
     ask([{ title: "Which month?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    await answer("call-q", { "Which month?": "June" })
 
     expect(sentOptions()).toMatchObject({
       permissions: undefined,
@@ -300,12 +309,12 @@ describe("remembered question settings lifecycle", () => {
     await expect(codexRuntime.deleteSession("thread-1", "/project/thread-1.jsonl"))
       .rejects.toThrow("Delete failed")
     ask([{ title: "Which month?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "June" })
+    await answer("call-q", { "Which month?": "June" })
     expect(sentOptions()).toMatchObject({ message: "June", ...fullAccess })
 
     await codexRuntime.deleteSession("thread-1", "/project/thread-1.jsonl")
     ask([{ title: "Which month?" }])
-    await codexRuntime.answerQuestion("thread-1", "call-q", { "Which month?": "July" })
+    await answer("call-q", { "Which month?": "July" })
     expect(sentOptions()).toMatchObject({
       permissions: undefined,
       model: undefined,

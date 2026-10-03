@@ -2,7 +2,7 @@
 import { homedir } from "node:os"
 import { describe, expect, it } from "vitest"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
-import { projectLabel } from "../../lib/projectLabel"
+import { projectLabel } from "../../routes/projects/projectLabel"
 
 const home = homedir()
 const claudeDirName = (cwd: string) => descriptorFor("claude").dirName.encode(cwd)

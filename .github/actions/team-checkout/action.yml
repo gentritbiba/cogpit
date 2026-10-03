@@ -1,0 +1,40 @@
+name: Check out the edition package
+description: >
+  Checks out gentritbiba/cogpit-team at editions/team, at the commit this
+  checkout's editions/team pointer records (never a branch), and fails closed
+  when the package or its UI entry is missing. The public checkout must come
+  first.
+
+inputs:
+  ssh-key:
+    description: Read-only deploy key for gentritbiba/cogpit-team
+    required: true
+  require-merged:
+    description: Also refuse a pointer that is not on the package's main branch
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - id: pointer
+      shell: bash
+      run: echo "sha=$(git rev-parse HEAD:editions/team)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        repository: gentritbiba/cogpit-team
+        ref: ${{ steps.pointer.outputs.sha }}
+        path: editions/team
+        ssh-key: ${{ inputs.ssh-key }}
+        persist-credentials: false
+        fetch-depth: ${{ inputs.require-merged == 'true' && '0' || '1' }}
+
+    - name: Require the package and its UI entry
+      shell: bash
+      run: test -f editions/team/index.ts && test -f editions/team/ui/index.ts
+
+    - name: Require the pointer to be on main
+      if: inputs.require-merged == 'true'
+      shell: bash
+      run: git -C editions/team merge-base --is-ancestor HEAD origin/main

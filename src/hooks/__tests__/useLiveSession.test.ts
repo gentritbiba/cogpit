@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react"
 import { useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
 import type { ParsedSession } from "../../../shared/session/types"
+import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 
 // Mock auth
 vi.mock("@/lib/auth", () => ({
@@ -58,7 +59,7 @@ const mockParsedSession: ParsedSession = {
 }
 
 // Mock EventSource
-class MockEventSource {
+class MockEventSource extends EventTarget {
   static instances: MockEventSource[] = []
   url: string
   onopen: ((ev: Event) => void) | null = null
@@ -68,6 +69,7 @@ class MockEventSource {
   closed = false
 
   constructor(url: string) {
+    super()
     this.url = url
     MockEventSource.instances.push(this)
   }
@@ -211,6 +213,19 @@ describe("useLiveSession", () => {
 
     expect(result.current.sseState).toBe("disconnected")
     expect(result.current.isLive).toBe(false)
+  })
+
+  it("passes on what the server says about the caller's access to the watched session", () => {
+    const lost = vi.fn()
+    window.addEventListener(SESSION_ACCESS_LOST_EVENT, lost)
+    renderHook(() => useLiveSession({ dirName: "dir", fileName: "file.jsonl", rawText: "{}" }, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().dispatchEvent(new MessageEvent("access", { data: JSON.stringify({ sessionId: "s1", level: "none" }) }))
+    })
+
+    expect(lost).toHaveBeenCalledOnce()
+    window.removeEventListener(SESSION_ACCESS_LOST_EVENT, lost)
   })
 
   it("surfaces a turn_error and clears it when the next turn produces tokens", () => {

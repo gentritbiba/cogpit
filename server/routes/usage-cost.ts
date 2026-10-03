@@ -4,10 +4,11 @@
  * - `GET /api/usage-cost?days=30&tz=<IANA>` — scans the provider CLIs' on-disk
  *   transcripts and returns priced `(day, provider, model)` buckets.
  * - `GET /api/usage-cost/session?dirName=&fileName=` — prices one selected
- *   transcript plus its child-agent transcripts.
+ *   transcript plus the child-agent transcripts its caller may see.
  * - `GET /api/usage-cost/rates` — the LiteLLM model rate table snapshot, for
  *   client-side per-turn pricing.
  */
+import { authorizeTranscript, visibleChildTranscripts } from "../edition/transcript"
 import { sendJson } from "../http"
 import type { UseFn } from "../http"
 import {
@@ -42,7 +43,16 @@ export function registerUsageCostRoutes(use: UseFn) {
       return
     }
 
-    const summary = await readSessionUsageCostSummary({ dirName, fileName })
+    const address = { dirName, fileName }
+    const transcript = await authorizeTranscript(req, res, address, "view")
+    if (transcript === null) return
+    const { filePath, transcriptSessionId } = transcript
+    const summary = filePath && await readSessionUsageCostSummary({
+      ...address,
+      filePath,
+      sessionId: transcriptSessionId,
+      visibleChildren: visibleChildTranscripts(req, dirName),
+    })
     if (!summary) {
       sendJson(res, 404, { error: "Session transcript not found" })
       return

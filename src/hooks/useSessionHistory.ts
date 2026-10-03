@@ -1,4 +1,5 @@
 import { useRef, useCallback } from "react"
+import { rootSessionIdOf } from "@/lib/agents"
 import { deviceScopedKey } from "@/lib/device"
 
 interface HistoryEntry {
@@ -102,5 +103,14 @@ export function useSessionHistory() {
     navigatingRef.current = false
   }, [])
 
-  return { push, goBack, goForward, commitNavigation }
+  /** Drop every visit to a session, and to the transcripts filed under it. */
+  const forget = useCallback((sessionId: string) => {
+    const kept = history.current.filter((e) => rootSessionIdOf(e.dirName, e.fileName) !== sessionId)
+    if (kept.length === history.current.length) return
+    history.current = kept
+    indexRef.current = 0
+    saveHistory(kept)
+  }, [])
+
+  return { push, goBack, goForward, commitNavigation, forget }
 }

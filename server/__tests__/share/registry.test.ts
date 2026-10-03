@@ -27,6 +27,7 @@ import {
   listShares,
   removeShare,
   rotateSharePassword,
+  shareRegistryIntegrity,
   touchShare,
 } from "../../share/registry"
 import { verifyPassword } from "../../password-utils"
@@ -124,7 +125,9 @@ describe("share registry", () => {
     const writes: string[] = []
     atomicWrite.implementation = async (path, data) => {
       writes.push(path)
-      await writeFile(path, JSON.stringify(data), { mode: 0o600 })
+      const content = JSON.stringify(data)
+      await writeFile(path, content, { mode: 0o600 })
+      return content
     }
 
     await clearAllShares()
@@ -136,11 +139,24 @@ describe("share registry", () => {
     expect(JSON.parse(await readFile(registryFile(), "utf-8"))).toEqual([])
   })
 
+  it("has each write on the disk before it resolves", async () => {
+    const options: unknown[] = []
+    atomicWrite.implementation = async (...args) => {
+      options.push(args[3])
+      return "[]"
+    }
+
+    await createShare(INPUT)
+    expect(options).toEqual([{ durable: true }])
+  })
+
   it("does not rewrite the file when there is nothing to clear", async () => {
     const writes: string[] = []
     atomicWrite.implementation = async (path, data) => {
       writes.push(path)
-      await writeFile(path, JSON.stringify(data), { mode: 0o600 })
+      const content = JSON.stringify(data)
+      await writeFile(path, content, { mode: 0o600 })
+      return content
     }
 
     await clearAllShares()
@@ -222,6 +238,7 @@ describe("share registry", () => {
     atomicWrite.implementation = async () => {
       startWrite()
       await writeGate
+      return "[]"
     }
 
     const pending = createShare({ ...INPUT, sessionId: "sess-2" })
@@ -253,5 +270,50 @@ describe("share registry", () => {
     atomicWrite.implementation = undefined
     expect(await removeShare("sess-1")).toBe(true)
     expect(listShares()).toHaveLength(0)
+  })
+})
+
+describe("a registry the audit cannot vouch for", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("opens no session from the moment it is distrusted, and drops every share from the file too", async () => {
+    await createShare(INPUT)
+    await createShare({ ...INPUT, sessionId: "sess-2", fileName: "sess-2.jsonl" })
+
+    shareRegistryIntegrity.distrusted()
+    expect(listShares()).toEqual([])
+
+    await vi.waitFor(async () => {
+      expect(JSON.parse(await readFile(registryFile(), "utf-8"))).toEqual([])
+    })
+  })
+
+  it("keeps the shares out of memory though the file cannot be rewritten", async () => {
+    await createShare(INPUT)
+    atomicWrite.implementation = async () => {
+      throw new Error("simulated persistence failure")
+    }
+
+    shareRegistryIntegrity.distrusted()
+    await clearAllShares()
+    expect(getShareWithHash("sess-1")).toBeUndefined()
+  })
+
+  it("writes nothing when it holds no share", async () => {
+    const writes: string[] = []
+    atomicWrite.implementation = async (path) => {
+      writes.push(path)
+      return "[]"
+    }
+
+    shareRegistryIntegrity.distrusted()
+    await clearAllShares()
+    expect(writes).toEqual([])
   })
 })

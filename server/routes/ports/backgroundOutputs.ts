@@ -1,31 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import {
-  lstat,
-  readdir,
-  join,
-  open,
-  stat,
-} from "../../helpers"
-import { tmpdir } from "node:os"
+import { open, stat } from "../../helpers"
+import { listProjectTaskOutputs, type ListedTaskOutput } from "../../agents/taskOutput"
+import { allVisible, visibilityFor, type VisibilityCheck } from "../../edition"
 import type { NextFn } from "../../http"
-
-/**
- * Roots Claude Code may place per-project task output under, most likely first.
- * macOS resolves /tmp to /private/tmp; Windows has neither, so it needs %TEMP%.
- * The uid suffix only exists where getuid() does.
- */
-function taskOutputBases(): string[] {
-  const uid = process.getuid?.()
-  const suffix = uid === undefined ? "claude" : `claude-${uid}`
-  if (process.platform === "win32") return [join(tmpdir(), suffix)]
-  return [...new Set([`/private/tmp/${suffix}`, `/tmp/${suffix}`, join(tmpdir(), suffix)])]
-}
-
-export interface BackgroundOutputFile {
-  fileName: string
-  path: string
-  isSymbolicLink: boolean
-}
 
 export interface BackgroundOutputPrefix {
   content: string
@@ -50,47 +27,24 @@ function getBackgroundOutputCwd(
   return url.searchParams.get("cwd") || null
 }
 
-/** List Claude task output files while tolerating a missing task directory. */
-async function listBackgroundOutputFiles(
-  cwd: string,
-): Promise<BackgroundOutputFile[]> {
-  const projectHash = cwd.replace(/[\\/:@. ]/g, "-")
-
-  let fileNames: string[] = []
-  let tasksDir = ""
-  for (const base of taskOutputBases()) {
-    const candidate = join(base, projectHash, "tasks")
-    try {
-      fileNames = await readdir(candidate)
-      tasksDir = candidate
-      break
-    } catch {
-      continue
-    }
-  }
-  if (!tasksDir) return []
-
-  const files: BackgroundOutputFile[] = []
-  for (const fileName of fileNames) {
-    if (!fileName.endsWith(".output")) continue
-
-    const path = join(tasksDir, fileName)
-    try {
-      const stats = await lstat(path)
-      files.push({ fileName, path, isSymbolicLink: stats.isSymbolicLink() })
-    } catch {
-      continue
-    }
-  }
-  return files
+/** The outputs filed under a session `check` shows, each session checked once. */
+async function visibleOutputs(check: VisibilityCheck, files: ListedTaskOutput[]): Promise<ListedTaskOutput[]> {
+  if (check.everything) return files
+  const sessions = [...new Set(files.map((file) => file.sessionId))]
+  const visible = new Set((await allVisible(sessions, check, (sessionId) => ({ sessionId }))).map(({ item }) => item))
+  return files.filter((file) => visible.has(file.sessionId))
 }
 
-/** Execute the common HTTP and discovery lifecycle for both collections. */
+/**
+ * Execute the common HTTP and discovery lifecycle for both collections.
+ * `collect` sees only output filed under a session the caller may see, and
+ * gets the check for whatever else a row names.
+ */
 export async function handleBackgroundOutputCollection<T>(
   req: IncomingMessage,
   res: ServerResponse,
   next: NextFn,
-  collect: (files: BackgroundOutputFile[]) => Promise<T>,
+  collect: (files: ListedTaskOutput[], check: VisibilityCheck) => Promise<T>,
 ): Promise<void> {
   const cwd = getBackgroundOutputCwd(req)
   if (cwd === undefined) return next()
@@ -101,8 +55,9 @@ export async function handleBackgroundOutputCollection<T>(
   }
 
   try {
-    const files = await listBackgroundOutputFiles(cwd)
-    const result = await collect(files)
+    const check = visibilityFor(req)
+    const files = check.nothing ? [] : await visibleOutputs(check, await listProjectTaskOutputs(cwd))
+    const result = await collect(files, check)
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify(result))
   } catch (err) {

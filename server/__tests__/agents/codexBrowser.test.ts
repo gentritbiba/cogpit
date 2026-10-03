@@ -13,6 +13,8 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "cogpit-browser-config-"))
   vi.stubEnv("COGPIT_BROWSER_HOME", join(root, "browser"))
   vi.stubEnv("PATH", "/ordinary/bin")
+  // An agent Cogpit started inherits one; the expectations below assume none.
+  vi.stubEnv("COGPIT_PORT", undefined)
 })
 afterEach(() => {
   vi.unstubAllEnvs()

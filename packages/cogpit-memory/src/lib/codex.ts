@@ -89,6 +89,22 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+/**
+ * The session a rollout was forked or spawned from, read from its
+ * `session_meta` payload. Forks name it in `forked_from_id`; spawned threads
+ * and reviews in `parent_thread_id`, and some spawned threads only under
+ * `source.subagent.thread_spawn`.
+ */
+export function codexParentId(payload: Record<string, unknown>): string | null {
+  const source = isObject(payload.source) ? payload.source : null
+  const subagent = source && isObject(source.subagent) ? source.subagent : null
+  const threadSpawn = subagent && isObject(subagent.thread_spawn) ? subagent.thread_spawn : null
+  for (const candidate of [payload.forked_from_id, payload.parent_thread_id, threadSpawn?.parent_thread_id]) {
+    if (typeof candidate === "string" && candidate) return candidate
+  }
+  return null
+}
+
 function isCodexRecord(record: CodexRecord | null): record is CodexRecord {
   if (!record || typeof record.type !== "string") return false
   return record.type === "session_meta"
@@ -459,9 +475,7 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
           agentPath = threadSpawn.agent_path
         }
       }
-      if (typeof record.payload.forked_from_id === "string" && record.payload.forked_from_id) {
-        parentSessionId = record.payload.forked_from_id
-      }
+      parentSessionId = codexParentId(record.payload) ?? parentSessionId
       const git = isObject(record.payload.git) ? record.payload.git : null
       gitBranch ||= git && typeof git.branch === "string" ? git.branch : ""
     }
@@ -1433,16 +1447,21 @@ export function deriveCodexSessionStatus(rawMessages: readonly RawRecord[]): Ses
 
 // ── Branching ──────────────────────────────────────────────────────────────
 
-/** A branch keeps the `session_meta` record, renamed and pointed back at its origin. */
+/**
+ * A branch keeps the `session_meta` record, renamed and pointed back at its
+ * origin. The copied lines keep their origin's timestamps, so `at` is what
+ * tells them from the branch's own.
+ */
 export function brandCodexBranch(
   firstRecord: Record<string, unknown>,
   sessionId: string,
   turnIndex: number | null,
+  branchedAt: number,
 ): { record: Record<string, unknown>; originalId: string } {
   const payload = isObject(firstRecord.payload) ? { ...firstRecord.payload } : {}
   const originalId = typeof payload.id === "string" ? payload.id : ""
   payload.id = sessionId
-  payload.branchedFrom = { sessionId: originalId, turnIndex }
+  payload.branchedFrom = { sessionId: originalId, turnIndex, at: new Date(branchedAt).toISOString() }
   return { record: { ...firstRecord, payload }, originalId }
 }
 

@@ -52,11 +52,18 @@ export interface SessionArchiveToggle {
   toggle: () => void
 }
 
-/** The one archive/restore control for the open session, shared by every chat-view surface. */
-export function useSessionArchiveToggle(sessionId: string, isLive: boolean): SessionArchiveToggle | null {
+/**
+ * The one archive/restore control for the open session, shared by every
+ * chat-view surface. Null when the user does not own the session.
+ */
+export function useSessionArchiveToggle(
+  sessionId: string,
+  isLive: boolean,
+  canArchive: boolean,
+): SessionArchiveToggle | null {
   const inventory = useSessionInventoryOptional()
   const applyArchive = useSessionArchive()
-  if (!inventory) return null
+  if (!inventory || !canArchive) return null
   const archived = inventory.isArchived(sessionId)
   return {
     archived,

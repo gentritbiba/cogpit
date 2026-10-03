@@ -20,6 +20,8 @@ interface BgTask {
 interface BackgroundServersProps {
   cwd: string
   turns: Turn[]
+  /** The user may stop this session's processes: offers Stop on each running server. */
+  canStop?: boolean
   onToggleServer?: (id: string, outputPath: string, title: string) => void
   onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
 }
@@ -96,6 +98,7 @@ function PortBadge({ port, isActive }: { port: number; isActive: boolean }): Rea
 export function BackgroundServers({
   cwd,
   turns,
+  canStop = false,
   onToggleServer,
   onServersChanged,
 }: BackgroundServersProps): React.JSX.Element | null {
@@ -232,7 +235,7 @@ export function BackgroundServers({
                     <TerminalSquare data-icon="inline-start" />
                   </Button>
                 )}
-                {activePorts.length > 0 && (
+                {canStop && activePorts.length > 0 && (
                   <Button
                     variant="ghost"
                     size="xs"

@@ -1,7 +1,15 @@
 import type { AgentKind } from "../session/types"
 
+/**
+ * What the caller may do with a browser: watch its page, drive it (input,
+ * navigation, opening and stopping it), or own it, which adds its note,
+ * archiving and deleting it.
+ */
+export type BrowserControl = "watch" | "drive" | "own"
+
 export interface BrowserSessionInfo {
   name: string
+  /** The host's own `default` browser. */
   isDefault: boolean
   running: boolean
   /** Absent on older hosts. Archiving preserves the browser's profile. */
@@ -10,8 +18,14 @@ export interface BrowserSessionInfo {
   createdAt: string | null
   lastUsedAt: string | null
   lastUrl: string | null
-  /** Cogpit session that last drove it, from the shim's .driver file. */
+  /** Cogpit session that last drove it, from the shim's .driver file; null when the caller cannot see that session. */
   driverSessionId: string | null
+  /** Absent on older hosts, which let every caller own every browser. */
+  control?: BrowserControl
+  /** The caller's own browser, which their sessions' agents open when they name none. */
+  mine?: boolean
+  /** The account whose own browser this is, by display name. */
+  account?: string
 }
 
 export interface BrowserStatus {

@@ -6,8 +6,9 @@
  * whether or not this view is open.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
+import { listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import type {
   MissionControlResponse,
   MissionControlSummary,
@@ -27,32 +28,38 @@ export interface MissionControlData {
 }
 
 export function useMissionControl(): MissionControlData {
+  const filter = useSessionListFilter()
   const [summaries, setSummaries] = useState<MissionControlSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const cancelledRef = useRef(false)
+  // A poll for a filter just left never lands after it; overlapping polls for this one all do.
+  const filterKeyRef = useRef(filter.key)
 
   useEffect(() => {
     cancelledRef.current = false
     return () => { cancelledRef.current = true }
   }, [])
 
+  useLayoutEffect(() => { filterKeyRef.current = filter.key }, [filter.key])
+
   const fetchNow = useCallback(async () => {
+    const stale = () => cancelledRef.current || filterKeyRef.current !== filter.key
     try {
-      const res = await authFetch("/api/mission-control")
-      if (cancelledRef.current) return
+      const res = await authFetch(listUrl("/api/mission-control", filter))
+      if (stale()) return
       if (!res.ok) throw new Error(`Mission Control request failed (${res.status})`)
       const data = await res.json() as MissionControlResponse
-      if (cancelledRef.current) return
+      if (stale()) return
       setSummaries(Array.isArray(data.summaries) ? data.summaries : [])
       setError(null)
     } catch (err) {
-      if (cancelledRef.current) return
+      if (stale()) return
       setError(err instanceof Error ? err.message : "Failed to load Mission Control")
     } finally {
-      if (!cancelledRef.current) setLoading(false)
+      if (!stale()) setLoading(false)
     }
-  }, [])
+  }, [filter])
 
   useEffect(() => {
     setLoading(true)

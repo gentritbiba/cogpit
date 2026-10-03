@@ -11,9 +11,10 @@ import type { WorkspacePanelProps } from "@/plugin-api"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { AgentCaption } from "./AgentCaption"
-import { BrowserNotInstalled, BrowserStopped } from "./BrowserEmptyState"
+import { BrowserListFailed, BrowserNoneYet, BrowserNotInstalled, BrowserStopped } from "./BrowserEmptyState"
 import { BrowserNavBar } from "./BrowserNavBar"
-import { BrowserSessionBar, DEFAULT_BROWSER } from "./BrowserSessionBar"
+import { BrowserSessionBar } from "./BrowserSessionBar"
+import { browserLabel, canDrive, DEFAULT_BROWSER, drivenBrowser, homeBrowser } from "./browserSessions"
 import { BrowserSkillDialog } from "./BrowserSkillDialog"
 import { BrowserViewport } from "./BrowserViewport"
 
@@ -21,7 +22,9 @@ import { BrowserViewport } from "./BrowserViewport"
  * The Browser panel: one managed browser on screen, streamed over the
  * `/__browser` socket and driveable by hand. The list of browsers comes from
  * the REST hook, the page itself from the socket, and which browser to show
- * from the user — or, while Follow agent is on, from the transcript.
+ * from the user — or, while Follow agent is on, from the transcript. The
+ * server decides what the list holds and what the caller may do with each
+ * browser; a pick it no longer lists falls back to the caller's default.
  *
  * A frame re-renders this component thirty times a second, so everything it
  * hands the bars keeps its identity between frames and the bars are memoised.
@@ -36,7 +39,7 @@ const STILL_AFTER_MS = 3_000
 const NO_SESSIONS: BrowserSessionInfo[] = []
 
 export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProps) {
-  const [selected, setSelected] = useLocalStorage(deviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
+  const [picked, setSelected] = useLocalStorage(deviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
   const [followAgent, setFollowAgent] = useLocalStorage(deviceScopedKey(FOLLOW_KEY), true)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -47,6 +50,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const {
     status,
     error: listError,
+    refresh: refreshList,
     create,
     remove,
     stop,
@@ -54,15 +58,20 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     readSkillTargets,
     installSkill,
   } = useBrowserSessions(active)
+  const sessions = status?.sessions ?? NO_SESSIONS
+  const home = homeBrowser(sessions)
+  const listed = status !== null && sessions.length > 0
+  const selected = status === null || sessions.some((session) => session.name === picked) ? picked : home
   // What the page copies goes on the user's own clipboard; the page's belongs to
   // a headless browser process nothing else can reach.
   const receiveClipboard = useCallback((text: string) => void copyToClipboard(text), [])
-  const socket = useBrowserSocket(active ? selected : null, receiveClipboard)
+  // Only a browser the server listed: anything else it would refuse.
+  const socket = useBrowserSocket(active && listed ? selected : null, receiveClipboard)
 
-  const sessions = status?.sessions ?? NO_SESSIONS
+  const currentSessionId = context.session?.sessionId ?? null
   // Walking the transcript per frame would cost more than painting one.
   const activity = useMemo(() => latestBrowserActivity(context.session), [context.session])
-  const driven = activity?.session ?? null
+  const driven = drivenBrowser(activity?.session ?? null, sessions, currentSessionId)
   const drivenExists = sessions.some((session) => session.name === driven && !session.archived)
 
   useEffect(() => {
@@ -98,18 +107,18 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
     setFollowAgent(next)
   }, [setFollowAgent])
 
-  const showDefault = useCallback(() => select(DEFAULT_BROWSER), [select])
+  const showDefault = useCallback(() => select(home), [select, home])
   const openSkill = useCallback(() => setSkillOpen(true), [])
   const handleRemove = useCallback((name: string) => {
-    select(DEFAULT_BROWSER)
+    select(home)
     void run(() => remove(name))
-  }, [select, run, remove])
+  }, [select, home, run, remove])
   const handleStop = useCallback((name: string) => void run(() => stop(name)), [run, stop])
   const handleSetArchived = useCallback(async (name: string, archived: boolean) => {
     const result = await run(() => setArchived(name, archived))
-    if (result.ok && archived && name === selected) select(DEFAULT_BROWSER)
+    if (result.ok && archived && name === selected) select(home)
     return result
-  }, [run, setArchived, selected, select])
+  }, [run, setArchived, selected, select, home])
 
   const navigate = useCallback((url: string) => send({ type: "navigate", url }), [send])
   const goBack = useCallback(() => send({ type: "back" }), [send])
@@ -117,6 +126,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const reload = useCallback(() => send({ type: "reload" }), [send])
   const follow = useCallback((targetId: string) => send({ type: "follow", targetId }), [send])
   const closeTab = useCallback((targetId: string) => send({ type: "close-tab", targetId }), [send])
+  const openPage = useCallback((url: string) => send({ type: "launch", url }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
   const state = socket.state?.state ?? null
@@ -124,11 +134,18 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const live = !notInstalled && state === "live"
   const stopped = !notInstalled && state === "stopped"
   const selectedInfo = sessions.find((session) => session.name === selected) ?? null
+  const label = browserLabel(selectedInfo, selected)
+  const drive = canDrive(selectedInfo)
+  // Their own browser, before any agent of theirs has opened it.
+  const noneYet = selectedInfo?.mine === true && !selectedInfo.running && selectedInfo.lastUsedAt === null
   // The transport dropped under a page that was live: the last frame is still
   // worth looking at, as long as the panel stops calling it the live one.
   const reconnecting = live && (socket.status === "disconnected" || socket.status === "connecting")
 
-  const failure = socket.error ?? actionError ?? listError
+  // Never read the list: that failure replaces the panel rather than sitting
+  // above a connection that cannot start.
+  const listFailed = status === null && listError !== null
+  const failure = socket.error ?? actionError ?? (listFailed ? null : listError)
   const problem = failure !== null && failure !== dismissed ? failure : null
 
   return (
@@ -136,7 +153,8 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
       <BrowserSessionBar
         sessions={sessions}
         selected={selected}
-        currentSessionId={context.session?.sessionId ?? null}
+        home={home}
+        currentSessionId={currentSessionId}
         followAgent={followAgent}
         busy={busy}
         onSelect={select}
@@ -156,6 +174,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           tabs={socket.tabs}
           followed={socket.followed}
           status={reconnecting ? "offline" : frameStatus}
+          readOnly={!drive}
           onNavigate={navigate}
           onBack={goBack}
           onForward={goForward}
@@ -176,16 +195,20 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {listFailed && <BrowserListFailed message={listError} onRetry={refreshList} />}
         {notInstalled && (
           <BrowserNotInstalled onOpenSkill={openSkill} />
         )}
-        {stopped && (
-          <BrowserStopped
-            name={selected}
-            lastUrl={selectedInfo?.lastUrl ?? null}
-            onOpen={(url) => send({ type: "launch", url })}
-          />
-        )}
+        {!notInstalled && status !== null && !listed && <BrowserNoneYet />}
+        {stopped && (noneYet
+          ? <BrowserNoneYet onOpen={openPage} />
+          : (
+            <BrowserStopped
+              name={label}
+              lastUrl={selectedInfo?.lastUrl ?? null}
+              onOpen={drive ? openPage : undefined}
+            />
+          ))}
         {live && (
           <>
             <BrowserViewport
@@ -193,18 +216,19 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
               frame={socket.frame}
               send={send}
               onSizeChange={handleResize}
+              readOnly={!drive}
             />
             {reconnecting && <ReconnectingBanner />}
-            <AgentCaption activity={activity && activity.session === selected ? activity : null} />
+            <AgentCaption activity={activity && driven === selected ? activity : null} />
           </>
         )}
-        {!notInstalled && !stopped && !live && (
+        {!notInstalled && !listFailed && (status === null || listed) && !stopped && !live && (
           <div
             role="status"
             className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
           >
             <Spinner />
-            Connecting to {selected}…
+            Connecting to {label}…
           </div>
         )}
       </div>

@@ -1,21 +1,25 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
-const mockList = vi.hoisted(() => vi.fn())
-const mockMarkRead = vi.hoisted(() => vi.fn())
-const mockMarkAllRead = vi.hoisted(() => vi.fn())
-
-vi.mock("../../lib/notificationHistory", () => ({
-  listNotifications: mockList,
-  markNotificationsRead: mockMarkRead,
-  markAllNotificationsRead: mockMarkAllRead,
+// The history file lives in the real home directory; nothing here may touch it.
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+  readFile: vi.fn(async () => "[]"),
+  mkdir: vi.fn(async () => undefined),
 }))
+vi.mock("../../atomicJsonFile", () => ({ writeOwnerOnlyText: vi.fn(async () => undefined) }))
 
 import { Readable } from "node:stream"
 import type { IncomingMessage } from "node:http"
 import type { UseFn, Middleware } from "../../helpers"
 import { asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerNotificationRoutes } from "../../routes/notifications"
+import {
+  listNotifications,
+  LOCAL_READER,
+  resetNotificationHistoryForTests,
+  type NotificationHistoryEntry,
+} from "../../lib/notificationHistory"
 
 /** Request double whose body is a real stream, so readJsonBody works. */
 function makeRequest(method: string, url: string, body?: string): IncomingMessage {
@@ -32,7 +36,7 @@ function buildHandler(): Middleware {
   return getRouteHandler(handlers, "/api/notifications")
 }
 
-async function request(method: string, url: string, body?: unknown) {
+async function request(method: string, url: string, body?: unknown, rawBody?: string) {
   let responseBody = ""
   const res = asServerResponse({
     statusCode: 200,
@@ -40,79 +44,100 @@ async function request(method: string, url: string, body?: unknown) {
     end: (data?: string) => { responseBody = data ?? "" },
   })
   const next = vi.fn()
-  const req = makeRequest(method, url, body !== undefined ? JSON.stringify(body) : undefined)
+  const req = makeRequest(method, url, rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined))
   await buildHandler()(req, res, next)
   return { res, next, json: () => JSON.parse(responseBody) as Record<string, unknown> }
 }
 
-const ENTRY = {
-  id: "n-1",
-  at: "2026-08-19T10:00:00.000Z",
-  title: "Claude Code — proj",
-  body: "Waiting for your input",
-  kind: "turnComplete",
-  sessionId: "s1",
-  dirName: "-d",
-  readAt: null,
+function entry(id: string, fields: Partial<NotificationHistoryEntry> = {}): NotificationHistoryEntry {
+  return {
+    id,
+    at: "2026-08-19T10:00:00.000Z",
+    title: "Claude Code — proj",
+    body: "Waiting for your input",
+    kind: "turnComplete",
+    sessionId: "s1",
+    dirName: "-d",
+    readBy: {},
+    ...fields,
+  }
+}
+
+async function readBy(): Promise<Record<string, Record<string, string>>> {
+  return Object.fromEntries((await listNotifications()).map(({ id, readBy }) => [id, readBy]))
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  mockList.mockResolvedValue([ENTRY])
-  mockMarkRead.mockResolvedValue(undefined)
-  mockMarkAllRead.mockResolvedValue(undefined)
+  resetNotificationHistoryForTests([
+    entry("n-1", { readBy: { [LOCAL_READER]: "2026-08-19T11:00:00.000Z", u_bob: "2026-08-19T12:00:00.000Z" } }),
+    entry("for-bob", { recipientId: "u_bob" }),
+    entry("n-2", { sessionId: null, dirName: null, kind: "system" }),
+  ])
 })
+afterEach(() => resetNotificationHistoryForTests())
 
 describe("GET /api/notifications", () => {
-  it("returns the notification list", async () => {
+  it("returns each notification as this reader sees it", async () => {
     const { res, json } = await request("GET", "/")
     expect(res.statusCode).toBe(200)
-    expect(json()).toEqual({ notifications: [ENTRY] })
-    expect(mockList).toHaveBeenCalledWith(100)
+    expect(json()).toEqual({
+      notifications: [
+        {
+          id: "n-1",
+          at: "2026-08-19T10:00:00.000Z",
+          title: "Claude Code — proj",
+          body: "Waiting for your input",
+          kind: "turnComplete",
+          sessionId: "s1",
+          dirName: "-d",
+          readAt: "2026-08-19T11:00:00.000Z",
+        },
+        expect.objectContaining({ id: "n-2", readAt: null }),
+      ],
+    })
   })
 
   it("honors the limit parameter", async () => {
-    await request("GET", "/?limit=5")
-    expect(mockList).toHaveBeenCalledWith(5)
+    const { json } = await request("GET", "/?limit=1")
+    expect((json().notifications as unknown[]).length).toBe(1)
   })
 
   it("falls back to the default on a malformed limit", async () => {
-    await request("GET", "/?limit=banana")
-    expect(mockList).toHaveBeenCalledWith(100)
+    const { json } = await request("GET", "/?limit=banana")
+    expect((json().notifications as unknown[]).length).toBe(2)
   })
 })
 
 describe("POST /api/notifications/read", () => {
-  it("marks the given ids read", async () => {
-    const { res, json } = await request("POST", "/read", { ids: ["n-1", "n-2"] })
+  it("marks the given ids read for this reader", async () => {
+    const { res, json } = await request("POST", "/read", { ids: ["n-2", "unknown"] })
     expect(res.statusCode).toBe(200)
     expect(json()).toEqual({ success: true })
-    expect(mockMarkRead).toHaveBeenCalledWith(["n-1", "n-2"])
+    expect((await readBy())["n-2"]).toEqual({ [LOCAL_READER]: expect.any(String) })
   })
 
-  it("marks everything read with { all: true }", async () => {
+  it("marks everything this reader can see with { all: true }", async () => {
     const { res } = await request("POST", "/read", { all: true })
     expect(res.statusCode).toBe(200)
-    expect(mockMarkAllRead).toHaveBeenCalledOnce()
+    const state = await readBy()
+    expect(state["n-2"]).toHaveProperty(LOCAL_READER)
+    expect(state["for-bob"]).toEqual({})
+  })
+
+  it("leaves a notification meant for someone else alone", async () => {
+    await request("POST", "/read", { ids: ["for-bob"] })
+    expect((await readBy())["for-bob"]).toEqual({})
   })
 
   it("rejects a body with neither ids nor all", async () => {
     const { res } = await request("POST", "/read", { ids: "n-1" })
     expect(res.statusCode).toBe(400)
-    expect(mockMarkRead).not.toHaveBeenCalled()
   })
 
   it("rejects malformed JSON", async () => {
-    let responseBody = ""
-    const res = asServerResponse({
-      statusCode: 200,
-      setHeader: vi.fn(),
-      end: (data?: string) => { responseBody = data ?? "" },
-    })
-    const req = makeRequest("POST", "/read", "{ not json")
-    await buildHandler()(req, res, vi.fn())
+    const { res, json } = await request("POST", "/read", undefined, "{ not json")
     expect(res.statusCode).toBe(400)
-    expect(responseBody).toContain("Invalid JSON")
+    expect(json().error).toContain("Invalid JSON")
   })
 })
 

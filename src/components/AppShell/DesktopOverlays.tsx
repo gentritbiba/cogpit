@@ -1,9 +1,11 @@
 import { lazy, useCallback, useEffect, useMemo, useState, Suspense } from "react"
 import { FIND_IN_CONVERSATION_EVENT } from "@/components/ChatArea"
-import type { CommandPaletteDevice } from "@/components/CommandPalette"
+import type { CommandPaletteDevice, CommandPaletteExtraAction } from "@/components/CommandPalette"
 import { DevicesDialog } from "@/components/DevicesDialog"
+import { FolderBrowserHost } from "@/components/FolderBrowserHost"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { useMainViews } from "@/edition/hooks"
 import { useDevices } from "@/hooks/useDevices"
 import { can } from "@/lib/capabilities"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
@@ -35,6 +37,8 @@ export function DesktopOverlays({
   const { devices, activeDeviceId } = useDevices()
   const [devicesDialogMode, setDevicesDialogMode] = useState<null | "add" | "manage">(null)
   const canManageDevices = can("manageDevices")
+  const mainViews = useMainViews()
+  const openMainViewId = state.mainView === "extension" ? state.extensionViewId : null
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const currentDirName = sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
@@ -68,6 +72,18 @@ export function DesktopOverlays({
       isActive: device.id === activeDeviceId,
     })),
   ], [devices, activeDeviceId])
+
+  const { openMainView, closeMainView } = navigation.panels
+  const mainViewActions = useMemo<CommandPaletteExtraAction[]>(() => mainViews.map((view) => {
+    const open = view.id === openMainViewId
+    return {
+      id: `main-view-${view.id}`,
+      label: `${open ? "Close" : "Open"} ${view.label}`,
+      keywords: view.keywords,
+      icon: view.icon,
+      onSelect: open ? closeMainView : () => openMainView(view.id),
+    }
+  }), [mainViews, openMainViewId, openMainView, closeMainView])
 
   const handleCopyResumeCommand = useCallback(() => {
     if (!session) return
@@ -107,6 +123,12 @@ export function DesktopOverlays({
         />
       </Suspense>
 
+      <FolderBrowserHost
+        onNewSession={navigation.onStartNewSession}
+        onNewFolder={navigation.onStartNewFolder}
+        defaultAgentKind={config.defaultAgentKind}
+      />
+
       <Suspense fallback={null}>
         <ThemeSelectorModal
           open={navigation.panels.showThemeSelector}
@@ -136,6 +158,7 @@ export function DesktopOverlays({
             BUILT_IN_WORKSPACE_PANEL_IDS.worktrees,
           )}
           onToggleMissionControl={navigation.panels.handleToggleMission}
+          extraActions={mainViewActions}
           onDuplicateSession={session ? navigation.handlers.handleDuplicateSession : undefined}
           onCopyResumeCommand={session ? handleCopyResumeCommand : undefined}
           onFindInConversation={session ? handleFindInConversation : undefined}
@@ -145,7 +168,7 @@ export function DesktopOverlays({
           onOpenKeyboardShortcuts={() => onKeyboardShortcutsOpenChange(true)}
           onTogglePreview={project.currentCwd ? project.onTogglePreview : undefined}
           onToggleProjectFiles={can("hostFiles") && project.currentCwd ? project.onToggleProjectFiles : undefined}
-          onToggleBrowser={can("hostFiles")
+          onToggleBrowser={can("browser")
             ? () => navigation.panels.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.browser)
             : undefined}
           onOpenTheme={navigation.panels.handleToggleThemeSelector}

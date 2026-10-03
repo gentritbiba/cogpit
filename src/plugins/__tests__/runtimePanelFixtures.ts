@@ -11,7 +11,7 @@ export const panelManifest = parseManifest({
 export const panelPlugin: InstalledPlugin = { id: panelManifest.id, selectedDigest: "a".repeat(64), manifest: panelManifest, enabled: true, scope: { type: "all" }, pinned: false,
   versions: [{ digest: "a".repeat(64), manifest: panelManifest, targetPath: "sample.cogpit-plugin", installedAt: 1 }] }
 export const panelProject = { id: `p_${"a".repeat(40)}`, name: "Sample project", paths: ["/private/repo"] }
-export const panelWorkspace: WorkspacePanelContext = { session: null, sessionChangeKey: 1, projectPath: "/private/repo", hasFileChanges: false, canAccessHostFiles: true }
+export const panelWorkspace: WorkspacePanelContext = { session: null, sessionChangeKey: 1, projectPath: "/private/repo", hasFileChanges: false, canAccessHostFiles: true, canUseBrowser: true }
 export const panelClientDescriptor: ClientRuntimeDescriptor = { appVersion: "2.7.0", apiVersions: ["1.0.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, browser: ["message-channel", "blob-script", "web-crypto"] }
 export const panelHostStatus: PluginHostStatus = { runtime: { ...panelClientDescriptor, platform: "linux", registryRevision: 1 }, host: { name: "Host", instanceId: "host-1" },
   store: { available: true, revision: 1, plugins: [panelPlugin], publishers: [] }, projects: [panelProject], safeMode: false }

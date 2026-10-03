@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CommandPaletteHost } from "@/components/CommandPaletteHost"
 import { createCommandPaletteProps } from "./commandPaletteProps"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { __resetEditionUiForTest } from "@/edition/registry"
+import { installStubListFilter } from "@/__tests__/listFilter"
+import { __resetSessionAccessForTest, knownSessionAccess } from "@/lib/sessionAccess"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -63,6 +68,40 @@ describe("CommandPaletteHost", () => {
     mocks.spawnTerminal.mockClear()
     mocks.authFetch.mockImplementation((url: string) =>
       Promise.resolve(response(url.startsWith("/api/projects") ? projects : sessions)),
+    )
+  })
+
+  afterEach(() => {
+    __resetCapabilitiesForTest()
+    __resetSessionAccessForTest()
+    __resetEditionUiForTest()
+    localStorage.clear()
+  })
+
+  it("learns the access of the sessions it lists", async () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_bob", username: "bob", displayName: "Bob" },
+      capabilities: NO_CAPABILITIES,
+    })
+    mocks.authFetch.mockImplementation((url: string) => Promise.resolve(response(url.startsWith("/api/projects")
+      ? projects
+      : [{ ...sessions[0], access: { level: "view", mine: false } }])))
+    render(<CommandPaletteHost {...createProps()} />)
+
+    await screen.findByText("Improve terminal workflow")
+    expect(knownSessionAccess("session-1")).toBe("view")
+  })
+
+  it("lists recent sessions under the session list filter", async () => {
+    installStubListFilter("narrow")
+    render(<CommandPaletteHost {...createProps()} />)
+
+    expect(await screen.findByText("Improve terminal workflow")).toBeInTheDocument()
+    expect(mocks.authFetch).toHaveBeenCalledWith(
+      "/api/active-sessions?limit=12&perProject=3&filter=narrow",
+      expect.anything(),
     )
   })
 

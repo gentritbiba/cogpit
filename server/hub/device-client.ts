@@ -1,3 +1,5 @@
+import type { MintFailureCode } from "../../shared/contracts/hub"
+import { readDeviceRefusal, relayedRefusalText } from "./deviceRefusal"
 import { setDeviceRuntime, type HubDevice } from "./registry"
 
 /**
@@ -14,9 +16,10 @@ import { setDeviceRuntime, type HubDevice } from "./registry"
  *  2. Cooldown — after a failed mint, further attempts within
  *     `MINT_COOLDOWN_MS` rethrow the last error without touching the network.
  *
- * Errors are typed so the proxy can map them: `DeviceAuthError` (bad password →
- * registry authState "bad-password") and `DeviceUnreachableError` (network /
- * timeout).
+ * Errors are typed so the proxy can map them: `DeviceAuthError` (bad password or
+ * a refusal that stands → registry authState "bad-password"), `DeviceRefusedError`
+ * (the device is not admitting the account for now; retried like an outage) and
+ * `DeviceUnreachableError` (network / timeout).
  */
 
 // ── Errors ───────────────────────────────────────────────────────────
@@ -32,6 +35,16 @@ export class DeviceAuthError extends Error {
   }
 }
 
+/** The device checked the credentials and is not admitting the account for now. The message is the device's own, bounded and attributed to it. */
+export class DeviceRefusedError extends Error {
+  readonly deviceId: string
+  constructor(deviceId: string, message: string) {
+    super(message)
+    this.name = "DeviceRefusedError"
+    this.deviceId = deviceId
+  }
+}
+
 export class DeviceUnreachableError extends Error {
   readonly deviceId: string
   constructor(deviceId: string, message: string, options?: { cause?: unknown }) {
@@ -39,6 +52,13 @@ export class DeviceUnreachableError extends Error {
     this.name = "DeviceUnreachableError"
     this.deviceId = deviceId
   }
+}
+
+/** How the hub reports (`X-Cogpit-Hub-Error`) a device token it could not mint. */
+export function mintFailureCode(error: unknown): MintFailureCode {
+  if (error instanceof DeviceAuthError) return "DEVICE_AUTH_FAILED"
+  if (error instanceof DeviceRefusedError) return "DEVICE_REFUSED"
+  return "DEVICE_UNREACHABLE"
 }
 
 /** A credential update superseded this mint before its token could be used. */
@@ -189,7 +209,7 @@ async function mint(device: HubDevice, generation: number): Promise<string> {
 
   const url = `${device.tls ? "https" : "http"}://${device.host}:${device.port}/api/auth/verify`
 
-  // A team device authenticates as a named user (`user:pass` — usernames
+  // A device that signs accounts in takes a named user (`user:pass` — usernames
   // reject ":", so the first colon always splits correctly); a personal
   // device takes the bare network password.
   const credential = device.username
@@ -216,7 +236,22 @@ async function mint(device: HubDevice, generation: number): Promise<string> {
     throw error
   }
 
-  // Invalid password: the device says no. Mark the registry and stop trying.
+  // The credentials are fine, the device just admits nobody like this account
+  // right now: keep them and let the device take the account back.
+  const refusal = res.status === 403 ? await readDeviceRefusal(res) : null
+  if (refusal?.retryable) {
+    const error = new DeviceRefusedError(id, refusal.error.trim()
+      ? relayedRefusalText(device.name, refusal.error)
+      : `Device "${device.name}" is not admitting this account right now`)
+    record.error = error
+    if (generationIsCurrent(id, generation)) {
+      setDeviceRuntime(id, { lastProbe: Date.now() })
+    }
+    throw error
+  }
+
+  // Invalid password, or a refusal that stands: the device says no. Mark the
+  // registry and stop trying.
   if (res.status === 401 || res.status === 403) {
     const error = new DeviceAuthError(id, `Device "${device.name}" rejected the password`, res.status)
     record.error = error
@@ -238,12 +273,7 @@ async function mint(device: HubDevice, generation: number): Promise<string> {
     throw error
   }
 
-  let body: { valid?: boolean; token?: unknown } | null = null
-  try {
-    body = (await res.json()) as { valid?: boolean; token?: unknown }
-  } catch {
-    body = null
-  }
+  const body = await res.json().catch(() => null) as { valid?: boolean; token?: unknown } | null
 
   if (!body || body.valid === false || typeof body.token !== "string" || !body.token) {
     const error = new DeviceAuthError(id, `Device "${device.name}" did not return a valid token`, res.status)

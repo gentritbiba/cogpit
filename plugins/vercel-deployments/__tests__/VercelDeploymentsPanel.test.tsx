@@ -92,6 +92,7 @@ const context: WorkspacePanelContext = {
   projectPath: "/repo",
   hasFileChanges: false,
   canAccessHostFiles: true,
+  canUseBrowser: true,
 }
 
 function state(overrides: Record<string, unknown> = {}) {

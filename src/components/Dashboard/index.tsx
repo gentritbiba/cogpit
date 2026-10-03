@@ -5,8 +5,13 @@ import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
 import { matchesSessionFilter } from "./sessionPresentation"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
+import { useEditionUi } from "@/edition/hooks"
+import { activeSessionsUrl, listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
+import { learnListedAccess, onListsStale, sessionAccessTicket } from "@/lib/sessionAccess"
 import type { ProjectInfo, SessionInfo } from "./types"
+import type { DeleteSession } from "@/components/session-browser/types"
 import {
+  activeSessionsCacheKey,
   readCachedList,
   readCachedSessionPage,
   sessionListCacheKeys,
@@ -37,7 +42,7 @@ interface DashboardProps {
   selectedProjectDirName?: string | null
   onSelectProject?: (dirName: string | null) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
-  onDeleteSession?: (dirName: string, fileName: string) => void
+  onDeleteSession?: DeleteSession
 }
 
 export const Dashboard = memo(function Dashboard({
@@ -49,14 +54,18 @@ export const Dashboard = memo(function Dashboard({
   onDuplicateSession,
   onDeleteSession,
 }: DashboardProps) {
+  const filter = useSessionListFilter()
+  const FilterEmpty = useEditionUi().sessionListFilter?.Empty
   const [initialCachedData] = useState(() => ({
     projects: readCachedList<ProjectInfo>(sessionListCacheKeys.projects),
-    activeSessions: readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions),
+    activeSessions: readCachedList<ActiveSessionInfo>(activeSessionsCacheKey(filter.key)),
   }))
   const [projects, setProjects] = useState<ProjectInfo[]>(initialCachedData.projects ?? [])
   const [activeSessions, setActiveSessions] = useState<ActiveSessionInfo[]>(initialCachedData.activeSessions ?? [])
   const [loading, setLoading] = useState(initialCachedData.projects === undefined)
   const [refreshing, setRefreshing] = useState(false)
+  const [projectsError, setProjectsError] = useState<string | null>(null)
+  const [activeError, setActiveError] = useState<string | null>(null)
 
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
@@ -67,37 +76,65 @@ export const Dashboard = memo(function Dashboard({
 
   const sessionRequestGeneration = useRef(0)
   const sessionAbortController = useRef<AbortController | null>(null)
+  const activeAbortController = useRef<AbortController | null>(null)
+  const shownFilter = useRef(filter.key)
 
-  const fetchDashboard = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true)
+  const fetchProjects = useCallback(async () => {
     try {
-      const [projectsRes, sessionsRes] = await Promise.all([
-        authFetch("/api/projects"),
-        authFetch("/api/active-sessions"),
-      ])
-      if (!projectsRes.ok || !sessionsRes.ok) {
-        throw new Error("Failed to fetch dashboard data")
-      }
-      const projectsData = await projectsRes.json()
-      const sessionsData = await sessionsRes.json()
-      const nextProjects = Array.isArray(projectsData) ? projectsData as ProjectInfo[] : []
-      const nextActiveSessions = Array.isArray(sessionsData) ? sessionsData as ActiveSessionInfo[] : []
+      const res = await authFetch("/api/projects")
+      if (!res.ok) throw new Error("Failed to fetch dashboard data")
+      const data = await res.json()
+      const nextProjects = Array.isArray(data) ? data as ProjectInfo[] : []
       setProjects(nextProjects)
-      setActiveSessions(nextActiveSessions)
       writeCachedList(sessionListCacheKeys.projects, nextProjects)
-      writeCachedList(sessionListCacheKeys.activeSessions, nextActiveSessions)
-      setFetchError(null)
+      setProjectsError(null)
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load data")
+      setProjectsError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
+  // Filter switches can race; each request aborts the one before it.
+  const fetchActiveSessions = useCallback(async () => {
+    activeAbortController.current?.abort()
+    const controller = new AbortController()
+    activeAbortController.current = controller
+    const accessTicket = sessionAccessTicket()
+    try {
+      const res = await authFetch(activeSessionsUrl({}, filter), { signal: controller.signal })
+      if (!res.ok) throw new Error("Failed to fetch dashboard data")
+      const data = await res.json()
+      if (controller.signal.aborted) return
+      const nextActiveSessions = Array.isArray(data) ? data as ActiveSessionInfo[] : []
+      learnListedAccess(nextActiveSessions, accessTicket)
+      setActiveSessions(nextActiveSessions)
+      writeCachedList(activeSessionsCacheKey(filter.key), nextActiveSessions)
+      setActiveError(null)
+    } catch (err) {
+      if (controller.signal.aborted) return
+      setActiveError(err instanceof Error ? err.message : "Failed to load data")
+    }
+  }, [filter])
+
   useEffect(() => {
-    fetchDashboard()
-  }, [fetchDashboard])
+    void fetchProjects()
+  }, [fetchProjects])
+
+  // A new filter shows its own cached list while its request runs.
+  useEffect(() => {
+    if (shownFilter.current !== filter.key) {
+      shownFilter.current = filter.key
+      setActiveSessions(readCachedList<ActiveSessionInfo>(activeSessionsCacheKey(filter.key)) ?? [])
+    }
+    void fetchActiveSessions()
+  }, [filter, fetchActiveSessions])
+
+  async function refreshDashboard() {
+    setRefreshing(true)
+    await Promise.all([fetchProjects(), fetchActiveSessions()])
+    setRefreshing(false)
+  }
 
   const fetchSessions = useCallback(async (dirName: string, page = 1, append = false) => {
     const requestGeneration = ++sessionRequestGeneration.current
@@ -108,8 +145,9 @@ export const Dashboard = memo(function Dashboard({
 
     setSessionsLoading(true)
     setFetchError(null)
+    const accessTicket = sessionAccessTicket()
     if (!append) {
-      const cached = readCachedSessionPage<SessionInfo>(dirName)
+      const cached = readCachedSessionPage<SessionInfo>(dirName, filter.key)
       if (cached) {
         setSessions(cached.sessions)
         setSessionsTotal(cached.total)
@@ -120,7 +158,7 @@ export const Dashboard = memo(function Dashboard({
     }
     try {
       const res = await authFetch(
-        `/api/sessions/${encodeURIComponent(dirName)}?page=${page}&limit=20`,
+        listUrl(`/api/sessions/${encodeURIComponent(dirName)}`, filter, { page: String(page), limit: "20" }),
         { signal: controller.signal },
       )
       if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
@@ -128,11 +166,12 @@ export const Dashboard = memo(function Dashboard({
       if (!isCurrentRequest()) return
       const nextSessions = Array.isArray(data.sessions) ? data.sessions as SessionInfo[] : []
       const total = typeof data.total === "number" ? data.total : nextSessions.length
+      learnListedAccess(nextSessions, accessTicket)
       setSessions((prev) => append ? [...prev, ...nextSessions] : nextSessions)
       setSessionsTotal(total)
       setSessionsPage(page)
       if (!append) {
-        writeCachedSessionPage(dirName, { sessions: nextSessions, total })
+        writeCachedSessionPage(dirName, filter.key, { sessions: nextSessions, total })
       }
     } catch (err) {
       if (!isCurrentRequest() || controller.signal.aborted) return
@@ -143,9 +182,9 @@ export const Dashboard = memo(function Dashboard({
         setSessionsLoading(false)
       }
     }
-  }, [])
+  }, [filter])
 
-  // Load sessions when selectedProjectDirName changes
+  // A project, or the filter, changed: list the project's sessions again.
   useEffect(() => {
     if (!selectedProjectDirName) {
       sessionRequestGeneration.current += 1
@@ -154,18 +193,28 @@ export const Dashboard = memo(function Dashboard({
       setSessions([])
       setSessionsTotal(0)
       setSessionsPage(1)
-      setSearchFilter("")
       setSessionsLoading(false)
       return
     }
-    setSearchFilter("")
     void fetchSessions(selectedProjectDirName)
   }, [selectedProjectDirName, fetchSessions])
+
+  // Another project, or none, starts unfiltered; a filter change keeps the search.
+  useEffect(() => {
+    setSearchFilter("")
+  }, [selectedProjectDirName])
 
   useEffect(() => () => {
     sessionRequestGeneration.current += 1
     sessionAbortController.current?.abort()
+    activeAbortController.current?.abort()
   }, [])
+
+  // Owners moved, so which sessions each list holds and whose they are may have too.
+  useEffect(() => onListsStale(() => {
+    void fetchActiveSessions()
+    if (selectedProjectDirName) void fetchSessions(selectedProjectDirName)
+  }), [fetchActiveSessions, fetchSessions, selectedProjectDirName])
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectDirName) return null
@@ -192,6 +241,7 @@ export const Dashboard = memo(function Dashboard({
 
   const pullRequestResults = usePullRequestSessionSearch<SessionInfo>(
     selectedProjectDirName ? searchFilter : "",
+    filter,
     selectedProjectDirName ?? undefined,
   )
 
@@ -201,8 +251,8 @@ export const Dashboard = memo(function Dashboard({
   }, [sessions, searchFilter])
   const visibleSessions = pullRequestResults.results ?? filteredSessions
 
-  function handleDeleteSession(dirName: string, fileName: string) {
-    onDeleteSession?.(dirName, fileName)
+  async function handleDeleteSession(dirName: string, fileName: string) {
+    if (!await onDeleteSession?.(dirName, fileName)) return
     setSessions((prev) => prev.filter((x) => x.fileName !== fileName))
     setSessionsTotal((prev) => prev - 1)
   }
@@ -212,6 +262,7 @@ export const Dashboard = memo(function Dashboard({
     return (
       <SessionsView
         selectedProject={selectedProject}
+        filterEmpty={filter.key !== null && FilterEmpty ? <FilterEmpty className="min-h-72 border" /> : null}
         sessions={sessions}
         sessionsTotal={sessionsTotal}
         sessionsLoading={sessionsLoading}
@@ -250,10 +301,10 @@ export const Dashboard = memo(function Dashboard({
       refreshing={refreshing}
       searchFilter={searchFilter}
       setSearchFilter={setSearchFilter}
-      fetchError={fetchError}
+      fetchError={projectsError ?? activeError}
       selectedProjectDirName={selectedProjectDirName ?? null}
       onSelectProject={onSelectProject}
-      onRefresh={() => fetchDashboard(true)}
+      onRefresh={() => void refreshDashboard()}
     />
   )
 })

@@ -14,7 +14,9 @@ import {
   invalidateDeviceTokenGeneration,
   DeviceAuthError,
   DeviceCredentialsChangedError,
+  DeviceRefusedError,
   DeviceUnreachableError,
+  mintFailureCode,
 } from "../../hub/device-client"
 import { setDeviceRuntime, type HubDevice } from "../../hub/registry"
 
@@ -257,5 +259,62 @@ describe("getDeviceToken — errors and authState", () => {
 
     await getDeviceToken(device)
     expect(mockSetRuntime).toHaveBeenCalledWith(device.id, expect.objectContaining({ authState: "ok" }))
+  })
+
+  it("maps a refusal that stands to DeviceAuthError and marks the device bad-password", async () => {
+    mockFetch.mockResolvedValue(statusResponse(403, { valid: false, error: "Account disabled", code: "ACCOUNT_OFF" }))
+    const device = makeDevice({ username: "bob" })
+
+    await expect(getDeviceToken(device)).rejects.toBeInstanceOf(DeviceAuthError)
+    expect(mockSetRuntime).toHaveBeenCalledWith(device.id, expect.objectContaining({ authState: "bad-password" }))
+  })
+
+  it("maps a retryable refusal to DeviceRefusedError carrying the device's text, without blaming the password", async () => {
+    mockFetch.mockResolvedValue(statusResponse(403, { valid: false, error: "Only admins can sign in", code: "PAUSED", retryable: true }))
+    const device = makeDevice({ username: "bob" })
+
+    await expect(getDeviceToken(device)).rejects.toMatchObject({ name: "DeviceRefusedError", message: `${device.name}: Only admins can sign in` })
+    expect(mockSetRuntime).not.toHaveBeenCalledWith(device.id, expect.objectContaining({ authState: "bad-password" }))
+  })
+
+  it("bounds the text a device refuses with before relaying it", async () => {
+    mockFetch.mockResolvedValue(statusResponse(403, { valid: false, error: "y".repeat(5000), code: "PAUSED", retryable: true }))
+    const device = makeDevice({ username: "bob" })
+
+    await expect(getDeviceToken(device)).rejects.toThrow(`${device.name}: ${"y".repeat(299)}…`)
+  })
+
+  it.each([
+    ["no text", {}],
+    ["only whitespace", { error: "   " }],
+  ])("names the device when a retryable refusal carries %s", async (_label, text) => {
+    mockFetch.mockResolvedValue(statusResponse(403, { valid: false, code: "PAUSED", retryable: true, ...text }))
+    const device = makeDevice({ username: "bob" })
+
+    await expect(getDeviceToken(device)).rejects.toThrow(`Device "${device.name}" is not admitting this account right now`)
+  })
+
+  it("mints again after the cooldown once the device admits the account again", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    mockFetch
+      .mockResolvedValueOnce(statusResponse(403, { valid: false, code: "PAUSED", retryable: true }))
+      .mockResolvedValueOnce(okResponse("renewed"))
+    const device = makeDevice({ username: "bob" })
+    await expect(getDeviceToken(device)).rejects.toBeInstanceOf(DeviceRefusedError)
+
+    vi.setSystemTime(6000)
+
+    await expect(getDeviceToken(device)).resolves.toBe("renewed")
+    expect(mockSetRuntime).toHaveBeenLastCalledWith(device.id, expect.objectContaining({ authState: "ok" }))
+  })
+})
+
+describe("mintFailureCode", () => {
+  it("names each mint failure the way the hub reports it", () => {
+    expect(mintFailureCode(new DeviceAuthError("d", "rejected"))).toBe("DEVICE_AUTH_FAILED")
+    expect(mintFailureCode(new DeviceRefusedError("d", "Not now"))).toBe("DEVICE_REFUSED")
+    expect(mintFailureCode(new DeviceUnreachableError("d", "down"))).toBe("DEVICE_UNREACHABLE")
+    expect(mintFailureCode(new Error("anything else"))).toBe("DEVICE_UNREACHABLE")
   })
 })

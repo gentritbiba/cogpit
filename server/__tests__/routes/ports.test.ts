@@ -2,7 +2,6 @@
 import { EventEmitter } from "node:events"
 import type { FileHandle } from "node:fs/promises"
 import type { Socket } from "node:net"
-import { tmpdir } from "node:os"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -16,20 +15,14 @@ vi.mock("../../helpers", () => ({
   createConnection: vi.fn(),
   stat: vi.fn(),
   open: vi.fn(),
-  lstat: vi.fn(),
-  readdir: vi.fn(),
-  join: vi.fn((...parts: string[]) => parts.join("/")),
 }))
 
+vi.mock("../../agents/taskOutput", () => ({ listProjectTaskOutputs: vi.fn() }))
+
 import { readlink } from "node:fs/promises"
-import {
-  createConnection,
-  join,
-  lstat,
-  open,
-  readdir,
-  stat,
-} from "../../helpers"
+import type { ListedTaskOutput } from "../../agents/taskOutput"
+import { listProjectTaskOutputs } from "../../agents/taskOutput"
+import { createConnection, open, stat } from "../../helpers"
 import type { Middleware, UseFn } from "../../http"
 import { registerPortRoutes } from "../../routes/ports"
 import {
@@ -40,7 +33,6 @@ import {
 
 interface OutputFixture {
   content?: string
-  lstatError?: boolean
   mtimeMs?: number
   statError?: boolean
   symlink?: boolean
@@ -55,14 +47,14 @@ interface MockSocket extends EventEmitter {
 const mockedCreateConnection = vi.mocked(createConnection) as unknown as Mock<
   (options: { port: number; host: string }) => Socket
 >
-const mockedJoin = vi.mocked(join)
-const mockedLstat = vi.mocked(lstat)
+const mockedListProjectTaskOutputs = vi.mocked(listProjectTaskOutputs)
 const mockedOpen = vi.mocked(open)
 const mockedReadlink = vi.mocked(readlink)
-const mockedReaddir = vi.mocked(readdir)
 const mockedStat = vi.mocked(stat)
 
+const SESSION = "0f8fad5b-d9cb-469f-a165-70867728950e"
 const fixtures = new Map<string, OutputFixture>()
+const listed: ListedTaskOutput[] = []
 const livePorts = new Set<number>()
 const sockets = new Map<number, MockSocket>()
 
@@ -71,27 +63,12 @@ function fixtureFor(filePath: string): OutputFixture | undefined {
     ?? [...fixtures.values()].find((fixture) => fixture.target === filePath)
 }
 
-/**
- * Mirrors the first candidate root in backgroundOutputs.ts. The mocked `join`
- * uses "/" on every host, so the fixture keys stay comparable to the paths the
- * route builds.
- */
-function taskDirectory(cwd: string): string {
-  const uid = process.getuid?.()
-  const suffix = uid === undefined ? "claude" : `claude-${uid}`
-  const base = process.platform === "win32" ? `${tmpdir()}/${suffix}` : `/private/tmp/${suffix}`
-  const projectHash = cwd.replace(/\//g, "-").replace(/ /g, "-").replace(/@/g, "-").replace(/\./g, "-")
-  return `${base}/${projectHash}/tasks`
-}
-
-function addOutput(
-  cwd: string,
-  fileName: string,
-  fixture: OutputFixture,
-): string {
-  const filePath = `${taskDirectory(cwd)}/${fileName}`
-  fixtures.set(filePath, fixture)
-  return filePath
+/** A task output the project listing returns, in `sessionId`'s task directory. */
+function addOutput(fileName: string, fixture: OutputFixture, sessionId = SESSION): string {
+  const path = `/tmp/claude-501/-tmp-project/${sessionId}/tasks/${fileName}`
+  fixtures.set(path, fixture)
+  listed.push({ sessionId, fileName, path, isSymbolicLink: fixture.symlink === true })
+  return path
 }
 
 function createMockReqRes(method: string, url: string) {
@@ -118,14 +95,11 @@ describe("background process port routes", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fixtures.clear()
+    listed.length = 0
     livePorts.clear()
     sockets.clear()
 
-    mockedLstat.mockImplementation(async (filePath) => {
-      const fixture = fixtureFor(String(filePath))
-      if (!fixture || fixture.lstatError) throw new Error("lstat failed")
-      return { isSymbolicLink: () => fixture.symlink === true } as never
-    })
+    mockedListProjectTaskOutputs.mockImplementation(async () => [...listed])
     mockedReadlink.mockImplementation(async (filePath) => {
       const fixture = fixtures.get(String(filePath))
       if (!fixture?.target) throw new Error("readlink failed")
@@ -208,7 +182,7 @@ describe("background process port routes", () => {
     "/api/background-agents",
     "/api/background-tasks",
   ])("returns the existing 500 payload for unexpected setup failures in %s", async (route) => {
-    mockedJoin.mockImplementationOnce(() => { throw new Error("unexpected") })
+    mockedListProjectTaskOutputs.mockRejectedValueOnce(new Error("unexpected"))
     const handler = getRouteHandler(handlers, route)
     const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
 
@@ -222,10 +196,7 @@ describe("background process port routes", () => {
   it.each([
     "/api/background-agents",
     "/api/background-tasks",
-  ])("treats an unreadable tasks directory as an empty collection for %s", async (route) => {
-    // Every candidate temp root must be unreadable: the lookup falls back
-    // across /private/tmp, /tmp and os.tmpdir().
-    mockedReaddir.mockRejectedValue(new Error("ENOENT"))
+  ])("answers an empty collection for a project with no task output for %s", async (route) => {
     const handler = getRouteHandler(handlers, route)
     const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
 
@@ -239,12 +210,11 @@ describe("background process port routes", () => {
 
   it("returns only valid background-agent symlinks, newest first, with both preview shapes", async () => {
     vi.spyOn(Date, "now").mockReturnValue(120_000)
-    const cwd = "/tmp/My.Project@app"
     const oldTarget = "/projects/proj-old/parent-old/subagents/agent-old.jsonl"
     const newTarget = "/projects/proj-new/parent-new/subagents/agent-new.jsonl"
     const badTarget = "/elsewhere/proj/parent/subagents/agent-bad.jsonl"
-    addOutput(cwd, "regular.output", { content: "port 4000", symlink: false })
-    addOutput(cwd, "agent-old.output", {
+    addOutput("regular.output", { content: "port 4000", symlink: false })
+    addOutput("agent-old.output", {
       symlink: true,
       target: oldTarget,
       content: [
@@ -254,7 +224,7 @@ describe("background process port routes", () => {
       ].join("\n"),
       mtimeMs: 1_000,
     })
-    addOutput(cwd, "agent-new.output", {
+    addOutput("agent-new.output", {
       symlink: true,
       target: newTarget,
       content: JSON.stringify({
@@ -263,21 +233,13 @@ describe("background process port routes", () => {
       }),
       mtimeMs: 100_000,
     })
-    addOutput(cwd, "bad-target.output", { symlink: true, target: badTarget })
-    addOutput(cwd, "broken.output", { lstatError: true })
-    mockedReaddir.mockResolvedValueOnce([
-      "regular.output",
-      "agent-old.output",
-      "ignored.txt",
-      "bad-target.output",
-      "broken.output",
-      "agent-new.output",
-    ] as never)
+    addOutput("bad-target.output", { symlink: true, target: badTarget })
 
     const handler = getRouteHandler(handlers, "/api/background-agents")
-    const { req, res, next } = createMockReqRes("GET", `/?cwd=${encodeURIComponent(cwd)}`)
+    const { req, res, next } = createMockReqRes("GET", `/?cwd=${encodeURIComponent("/tmp/My.Project@app")}`)
     await handler(req, res, next)
 
+    expect(mockedListProjectTaskOutputs).toHaveBeenCalledWith("/tmp/My.Project@app")
     expect(JSON.parse(res.getBody())).toEqual([
       {
         agentId: "agent-new",
@@ -302,68 +264,54 @@ describe("background process port routes", () => {
   })
 
   it("skips agent targets with invalid layouts or unreadable output", async () => {
-    const cwd = "/tmp/project"
-    addOutput(cwd, "shallow.output", {
+    addOutput("shallow.output", {
       symlink: true,
       target: "/projects/proj/parent/subagents",
     })
-    addOutput(cwd, "wrong-dir.output", {
+    addOutput("wrong-dir.output", {
       symlink: true,
       target: "/projects/proj/parent/not-subagents/agent-wrong.jsonl",
     })
-    addOutput(cwd, "unreadable.output", {
+    addOutput("unreadable.output", {
       symlink: true,
       target: "/projects/proj/parent/subagents/agent-unreadable.jsonl",
       statError: true,
     })
-    mockedReaddir.mockResolvedValueOnce([
-      "shallow.output",
-      "wrong-dir.output",
-      "unreadable.output",
-    ] as never)
 
     const handler = getRouteHandler(handlers, "/api/background-agents")
-    const { req, res, next } = createMockReqRes("GET", `/?cwd=${encodeURIComponent(cwd)}`)
+    const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
     await handler(req, res, next)
 
     expect(JSON.parse(res.getBody())).toEqual([])
     expect(next).not.toHaveBeenCalled()
   })
 
-  it("detects live task ports and keeps the newest owner without changing result order", async () => {
-    const cwd = "/tmp/project"
+  it("detects live task ports, keeps the newest owner, and names each task's session", async () => {
+    const OTHER = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
     livePorts.add(4321)
     livePorts.add(5678)
-    const oldPath = addOutput(cwd, "old.output", {
+    const oldPath = addOutput("old.output", {
       content: "[2Kdiscard me\nserver on localhost:4321\nbackup :5678",
       mtimeMs: 1_000,
     })
-    const newPath = addOutput(cwd, "new.output", {
+    const newPath = addOutput("new.output", {
       content: "new server on port 4321",
       mtimeMs: 2_000,
-    })
-    addOutput(cwd, "dead.output", { content: "port 6000", mtimeMs: 3_000 })
-    addOutput(cwd, "symlink.output", { content: "port 7000", symlink: true })
-    addOutput(cwd, "empty.output", { content: "" })
-    addOutput(cwd, "noise.output", { content: "no listening address" })
-    mockedReaddir.mockResolvedValueOnce([
-      "old.output",
-      "new.output",
-      "dead.output",
-      "symlink.output",
-      "empty.output",
-      "noise.output",
-      "ignored.log",
-    ] as never)
+    }, OTHER)
+    addOutput("dead.output", { content: "port 6000", mtimeMs: 3_000 })
+    addOutput("symlink.output", { content: "port 7000", symlink: true })
+    addOutput("empty.output", { content: "" })
+    addOutput("noise.output", { content: "no listening address" })
 
     const handler = getRouteHandler(handlers, "/api/background-tasks")
-    const { req, res, next } = createMockReqRes("GET", `/?cwd=${encodeURIComponent(cwd)}`)
+    const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
     await handler(req, res, next)
 
     expect(JSON.parse(res.getBody())).toEqual([
       {
         id: "new",
         outputPath: newPath,
+        sessionId: OTHER,
         ports: [4321],
         portStatus: { 4321: true },
         preview: "new server on port 4321",
@@ -371,6 +319,7 @@ describe("background process port routes", () => {
       {
         id: "old",
         outputPath: oldPath,
+        sessionId: SESSION,
         ports: [4321, 5678],
         portStatus: { 4321: true, 5678: true },
         preview: "server on localhost:4321\nbackup :5678",
@@ -383,23 +332,14 @@ describe("background process port routes", () => {
     expect(next).not.toHaveBeenCalled()
   })
 
-  it("skips malformed, unreadable, empty, and portless regular task outputs", async () => {
-    const cwd = "/tmp/project"
-    addOutput(cwd, "broken.output", { lstatError: true })
-    addOutput(cwd, "unreadable.output", { statError: true })
-    addOutput(cwd, "empty.output", { content: "" })
-    addOutput(cwd, "invalid-ports.output", { content: "port 99999 and port 0000" })
-    addOutput(cwd, "portless.output", { content: "ready without a port" })
-    mockedReaddir.mockResolvedValueOnce([
-      "broken.output",
-      "unreadable.output",
-      "empty.output",
-      "invalid-ports.output",
-      "portless.output",
-    ] as never)
+  it("skips unreadable, empty, and portless regular task outputs", async () => {
+    addOutput("unreadable.output", { statError: true })
+    addOutput("empty.output", { content: "" })
+    addOutput("invalid-ports.output", { content: "port 99999 and port 0000" })
+    addOutput("portless.output", { content: "ready without a port" })
 
     const handler = getRouteHandler(handlers, "/api/background-tasks")
-    const { req, res, next } = createMockReqRes("GET", `/?cwd=${encodeURIComponent(cwd)}`)
+    const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
     await handler(req, res, next)
 
     expect(JSON.parse(res.getBody())).toEqual([])

@@ -58,7 +58,8 @@ interface WorkflowDetailViewProps {
   sessionId: string
   stopping: boolean
   confirming: boolean
-  onForceStop: () => void
+  /** Omitted when the user may only watch the run. */
+  onForceStop?: () => void
 }
 
 export function WorkflowDetailView({
@@ -97,7 +98,7 @@ export function WorkflowDetailView({
             )}
           </div>
 
-          {active && (
+          {active && onForceStop && (
             <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
               <Button
                 variant={confirming ? "destructive" : "outline"}

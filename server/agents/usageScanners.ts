@@ -23,6 +23,19 @@ export interface UsageCostRecord {
   speed: "standard" | "fast" | null
   /** Key for cross-file de-duplication, or null when inherently unique. */
   dedupeKey: string | null
+  /**
+   * Usage a Cogpit branch copied, timestamps and all, from the transcript it
+   * was cut from, which holds it too. The usage summaries count it as ever;
+   * attributing usage to the prompts that drove it leaves it to the parent.
+   */
+  branchCopy?: true
+  /**
+   * Set on a record that sums what a session used over a stretch of time
+   * rather than one model response: the usage accrued after this, up to
+   * `timestampMs`. Negative infinity when the stretch runs from the
+   * session's beginning.
+   */
+  accruedSinceMs?: number
 }
 
 function int(value: unknown): number {
@@ -125,10 +138,14 @@ export interface CodexScanState {
   /** While true, leading usage events are re-stamped copies of parent history. */
   suppressingForkCopies: boolean
   forkCopyAnchorMs: number
+  /** Usage events stamped at or before this were copied, timestamps and all, into a Cogpit branch. */
+  branchCopiedThroughMs: number
+  /** The end of the second the rollout's file name records it was written in, when it records one. */
+  namedThroughMs: number | null
   speed: UsageCostRecord["speed"]
 }
 
-export function initialCodexScanState(): CodexScanState {
+export function initialCodexScanState(namedThroughMs: number | null = null): CodexScanState {
   return {
     model: "",
     sessionId: "",
@@ -136,8 +153,21 @@ export function initialCodexScanState(): CodexScanState {
     sawSessionMeta: false,
     suppressingForkCopies: false,
     forkCopyAnchorMs: 0,
+    branchCopiedThroughMs: Number.NEGATIVE_INFINITY,
+    namedThroughMs,
     speed: null,
   }
+}
+
+/** `rollout-YYYY-MM-DDTHH-MM-SS-<id>.jsonl`, named in local time when the rollout is written. */
+const ROLLOUT_NAME_TIME = /^rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-/
+
+/** The last millisecond of the second a rollout's file name says it was written in; null for another name. */
+function rolloutNamedThroughMs(filePath: string): number | null {
+  const match = ROLLOUT_NAME_TIME.exec(basename(filePath))
+  if (!match) return null
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number)
+  return new Date(year, month - 1, day, hour, minute, second, 999).getTime()
 }
 
 /**
@@ -176,6 +206,11 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
     if (metaTimestampMs !== null && isForkedSessionMeta(payload)) {
       state.suppressingForkCopies = true
       state.forkCopyAnchorMs = metaTimestampMs
+    }
+    const branchedFrom = asRecord(payload.branchedFrom)
+    if (branchedFrom) {
+      // A branch cut before branches recorded when is dated by its rollout, named as it was written.
+      state.branchCopiedThroughMs = parseTimestampMs(branchedFrom.at) ?? state.namedThroughMs ?? Number.NEGATIVE_INFINITY
     }
     return null
   }
@@ -249,18 +284,21 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
     // Codex does not report cost in the rollout.
     reportedCostUsd: null,
     speed: state.speed,
-    // Events surviving fork-copy suppression are unique to this rollout.
+    // Events surviving fork-copy suppression carry no key: a branch's copies are marked instead.
     dedupeKey: null,
+    ...(timestampMs <= state.branchCopiedThroughMs && { branchCopy: true }),
   }
 }
 
 export interface CopilotScanState {
   sessionId: string
   lastUsageByModel: Map<string, UsageCostTokenTotals>
+  /** When the latest cumulative snapshot was taken: the next one's usage accrued after it. */
+  snapshotAtMs: number
 }
 
 export function initialCopilotScanState(sessionId = ""): CopilotScanState {
-  return { sessionId, lastUsageByModel: new Map() }
+  return { sessionId, lastUsageByModel: new Map(), snapshotAtMs: Number.NEGATIVE_INFINITY }
 }
 
 function cumulativeDelta(current: number, previous: number): number {
@@ -286,7 +324,10 @@ function usageDelta(
   }
 }
 
-/** Convert Copilot's cumulative runtime/shutdown metrics into new usage only. */
+/**
+ * Convert Copilot's cumulative runtime/shutdown metrics into new usage only,
+ * each record the usage of the whole stretch since the snapshot before.
+ */
 export function parseCopilotUsageMetrics(
   value: unknown,
   state: CopilotScanState,
@@ -295,6 +336,8 @@ export function parseCopilotUsageMetrics(
   const metrics = asRecord(value)
   const modelMetrics = metrics ? asRecord(metrics.modelMetrics) : null
   if (!metrics || !modelMetrics || !Number.isFinite(timestampMs)) return []
+  const accruedSinceMs = state.snapshotAtMs
+  state.snapshotAtMs = timestampMs
 
   const records: UsageCostRecord[] = []
   for (const [model, rawMetric] of Object.entries(modelMetrics)) {
@@ -327,6 +370,7 @@ export function parseCopilotUsageMetrics(
       reportedCostUsd: null,
       speed: null,
       dedupeKey: null,
+      accruedSinceMs,
     })
   }
   return records
@@ -384,8 +428,8 @@ const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> 
     },
   }),
 
-  codex: (): UsageScanner => {
-    const state = initialCodexScanState()
+  codex: (filePath): UsageScanner => {
+    const state = initialCodexScanState(rolloutNamedThroughMs(filePath))
     return {
       // token_count carries the usage, turn_context the model it belongs to and
       // session_meta the session it belongs to. The latter two report no tokens

@@ -212,10 +212,12 @@ async function ensureCodexAppServer(client: CodexExecutionClient): Promise<void>
 export async function startCodexExecution(
   client: CodexExecutionClient,
   options: CodexExecutionOptions,
+  onThreadStarted?: (threadId: string) => void,
 ): Promise<{ thread: CodexThread; turnId: string }> {
   await ensureCodexAppServer(client)
   const input = buildCodexUserInput(options.message, options.images)
   const response = await client.startThread(await threadSettings(client, options))
+  onThreadStarted?.(response.thread.id)
   const turn = await client.startTurn({
     threadId: response.thread.id,
     input,

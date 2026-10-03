@@ -26,6 +26,7 @@ const context: WorkspacePanelContext = {
   projectPath: "/repo",
   hasFileChanges: false,
   canAccessHostFiles: true,
+  canUseBrowser: true,
   supportsWorktrees: true,
 }
 

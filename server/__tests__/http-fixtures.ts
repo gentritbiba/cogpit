@@ -85,6 +85,10 @@ export function createMockReqRes(method: string, url = "/", opts: MockReqResOpti
     get statusCode() { return statusCode },
     set statusCode(v: number) { statusCode = v },
     setHeader: vi.fn((name: string, value: string) => { headers[name] = value }),
+    getHeaderNames: () => Object.keys(headers).map((name) => name.toLowerCase()),
+    removeHeader: (name: string) => {
+      for (const key of Object.keys(headers)) if (key.toLowerCase() === name.toLowerCase()) delete headers[key]
+    },
     end: vi.fn((data?: string) => { endData = data || "" }),
     write: vi.fn(),
     writeHead: vi.fn(),
@@ -110,11 +114,26 @@ export function getRouteHandler(
   return handler
 }
 
-/** Run a route registrar and return the path -> handler map it produced. */
+/**
+ * Run a route registrar and return the path -> handler map it produced. A path
+ * mounted more than once, as `/api` is, keeps every handler, run in mount order.
+ */
 export function collectRoutes(register: (use: UseFn) => void): Map<string, Middleware> {
-  const handlers = new Map<string, Middleware>()
-  register((path, handler) => { handlers.set(path, handler) })
-  return handlers
+  const stacks = new Map<string, Middleware[]>()
+  register((path, handler) => { stacks.set(path, [...(stacks.get(path) ?? []), handler]) })
+  return new Map([...stacks].map(([path, stack]) => [path, inSequence(stack)]))
+}
+
+/** One middleware for a stack, which moves on only when a handler calls `next()`, and stops on an error. */
+function inSequence(stack: readonly Middleware[]): Middleware {
+  if (stack.length === 1) return stack[0]
+  return (req, res, next) => {
+    const run = (index: number, error?: unknown): unknown =>
+      error !== undefined || index === stack.length
+        ? next(error)
+        : stack[index](req, res, (nextError) => run(index + 1, nextError))
+    return run(0)
+  }
 }
 
 /** Response double for middleware tests: records the status and body written. */
@@ -125,6 +144,7 @@ export function createMiddlewareRes(): { res: ServerResponse; body: string; stat
     get statusCode() { return statusCode },
     set statusCode(v: number) { statusCode = v },
     setHeader: vi.fn(),
+    getHeaderNames: () => [],
     end: (data?: string) => { body = data || "" },
     once: vi.fn(),
     destroy: vi.fn(),

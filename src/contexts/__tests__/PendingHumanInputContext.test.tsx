@@ -28,6 +28,10 @@ import {
   PendingHumanInputProvider,
   usePendingHumanInput,
 } from "../PendingHumanInputContext"
+import { __resetEditionUiForTest } from "@/edition/registry"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { installStubListFilter } from "@/__tests__/listFilter"
+import { ALL_CAPABILITIES, type MeResponse } from "../../../shared/contracts/identity"
 
 function textResponse(body: unknown): Response {
   return {
@@ -68,6 +72,12 @@ const ONE_ELICITATION = {
       originalModel: "claude-opus-5",
       fallbackModel: "claude-opus-4-8",
     }],
+  },
+}
+
+const ONE_PERMISSION = {
+  bySession: {
+    "sess-p": [{ sessionId: "sess-p", requestId: "r1", toolName: "Bash", summary: "ls", timestamp: 1 }],
   },
 }
 
@@ -152,7 +162,13 @@ beforeEach(() => {
   mocks.submitUserDialogChoice.mockResolvedValue({ ok: true, gone: false })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  vi.useRealTimers()
+  cleanup()
+  __resetCapabilitiesForTest()
+  __resetEditionUiForTest()
+  localStorage.clear()
+})
 
 describe("PendingHumanInputProvider", () => {
   it("polls both endpoints and exposes each blocker separately", async () => {
@@ -295,6 +311,78 @@ describe("PendingHumanInputProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("dialogs").textContent).toBe(""))
     expect(mocks.submitUserDialogChoice).toHaveBeenCalledWith("sess-d", "dlg-1", "retry_fallback")
+  })
+
+  it("asks with the session list filter, and only for it once the filter changes", async () => {
+    const filter = installStubListFilter("narrow")
+    let answerOld!: (res: Response) => void
+    mocks.authFetch.mockImplementation((url: string) => (url.startsWith("/api/permissions")
+      ? new Promise<Response>((resolve) => { answerOld = resolve })
+      : Promise.resolve(textResponse({ bySession: {}, ...NO_PROMPTS }))))
+    renderProbe()
+    await waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith("/api/permissions?filter=narrow"))
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/user-questions?filter=narrow")
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/agent-prompts?filter=narrow")
+
+    routeFetch({ bySession: {} }, { bySession: {} })
+    act(() => filter.setKey("other"))
+    await waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith("/api/permissions?filter=other"))
+    await act(async () => answerOld(textResponse({
+      bySession: { "sess-narrow": [{ sessionId: "sess-narrow", requestId: "r1", toolName: "Bash", summary: "ls", timestamp: 1 }] },
+    })))
+    expect(screen.getByTestId("perms").textContent).toBe("")
+  })
+
+  it("shows a prompt that two overlapping polls both report", async () => {
+    const answers: Array<() => void> = []
+    mocks.authFetch.mockImplementation((url: string) => (url.startsWith("/api/permissions")
+      ? new Promise<Response>((resolve) => { answers.push(() => resolve(textResponse(ONE_PERMISSION))) })
+      : Promise.resolve(textResponse({ bySession: {}, ...NO_PROMPTS }))))
+    renderProbe()
+    await act(async () => { screen.getByRole("button", { name: "refresh" }).click() })
+    expect(answers).toHaveLength(2)
+
+    await act(async () => answers[0]())
+    await act(async () => answers[1]())
+
+    expect(screen.getByTestId("perms").textContent).toBe("sess-p")
+  })
+
+  it("shows prompts while the server answers slower than the poll interval", async () => {
+    vi.useFakeTimers()
+    mocks.authFetch.mockImplementation((url: string) => new Promise<Response>((resolve) => {
+      const body = url.startsWith("/api/permissions") ? ONE_PERMISSION : { bySession: {}, ...NO_PROMPTS }
+      setTimeout(() => resolve(textResponse(body)), 4_000)
+    }))
+    renderProbe()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
+
+    expect(screen.getByTestId("perms").textContent).toBe("sess-p")
+  })
+
+  it("stops polling while the server's gate shows, and polls again once it lifts", async () => {
+    const admin: MeResponse = {
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_alice", username: "alice", displayName: "Alice" },
+      capabilities: ALL_CAPABILITIES,
+    }
+    setMe(admin)
+    vi.useFakeTimers()
+    renderProbe()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(mocks.authFetch).toHaveBeenCalled()
+
+    act(() => setMe({ ...admin, gate: "paused" }))
+    mocks.authFetch.mockClear()
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(mocks.authFetch).not.toHaveBeenCalled()
+
+    routeFetch(ONE_PERMISSION, { bySession: {} })
+    act(() => setMe(admin))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByTestId("perms").textContent).toBe("sess-p")
   })
 
   it("throws a clear error when used outside the provider", () => {

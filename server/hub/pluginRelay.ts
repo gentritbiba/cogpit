@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { getDevice, sameDeviceConnection, type HubDevice } from "./registry"
-import { DeviceAuthError, getDeviceTokenLease, invalidateDeviceTokenGeneration, type DeviceTokenLease } from "./device-client"
+import { DeviceAuthError, getDeviceTokenLease, invalidateDeviceTokenGeneration, mintFailureCode, type DeviceTokenLease } from "./device-client"
 import { onDeviceConnectionsInvalidated } from "./connection-invalidation"
 import { sendDeviceRequest } from "./deviceRequest"
 import { onSessionRevoked } from "../security"
@@ -126,7 +126,7 @@ export class HubPluginRelay {
     } catch (error) {
       if (res.destroyed || res.writableEnded) return
       const authError = error instanceof PluginAuthorizationError
-      const code = authError ? error.code : error instanceof DeviceAuthError ? "DEVICE_AUTH_FAILED" : "DEVICE_UNREACHABLE"
+      const code = authError ? error.code : mintFailureCode(error)
       res.statusCode = authError ? error.status : 502
       res.setHeader("Content-Type", "application/json")
       res.setHeader("Cache-Control", "no-store")

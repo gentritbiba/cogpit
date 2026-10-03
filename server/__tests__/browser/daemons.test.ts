@@ -12,8 +12,12 @@ import {
   launch,
   readDaemonPid,
   readDevToolsEndpoint,
+  reapIdleThrowaways,
   reapRunDir,
+  reapStrayDaemons,
   shutdownBrowsers,
+  STRAY_GRACE_MS,
+  THROWAWAY_IDLE_MS,
   startSweeper,
   stop,
   sweep,
@@ -27,6 +31,7 @@ import {
   shimPath,
   sweepOwnerFile,
 } from "../../browser/paths"
+import type { DaemonProcess } from "../../browser/processControl"
 
 /** One Cogpit session's throwaway-browser directory. */
 function sessionRunDir(id: string): string {
@@ -71,6 +76,8 @@ interface FakeDeps extends DaemonDeps {
 
 interface FakeOptions {
   alive?: number[]
+  /** What the process table lists. */
+  daemons?: DaemonProcess[]
   probe?: boolean
   spawnResult?: { code: number; stderr: string }
   spawnError?: Error
@@ -101,6 +108,7 @@ function fakeDeps(options: FakeOptions = {}): FakeDeps {
       return true
     },
     isPidAlive: (pid) => alive.has(pid),
+    listDaemons: () => options.daemons ?? [],
   }
   return deps
 }
@@ -481,6 +489,106 @@ describe("sweep", () => {
     expect(existsSync(weird)).toBe(false)
     expect(isLive).not.toHaveBeenCalled()
     expect(deps.kills).toEqual([{ pid: 10, signal: "SIGTERM" }])
+  })
+})
+
+describe("reapIdleThrowaways", () => {
+  const IDLE = new Date(Date.now() - THROWAWAY_IDLE_MS - 60_000)
+
+  function backdate(dir: string, file: string, when = IDLE): void {
+    utimesSync(join(dir, file), when, when)
+  }
+
+  it("closes a throwaway nobody has called for too long, wherever it runs", () => {
+    writePid(sharedRunDir(), "tmp-shared", "10")
+    writePid(sessionRunDir("live"), "tmp-live", "20")
+    writeFileSync(join(sharedRunDir(), "tmp-shared.used"), "")
+    backdate(sharedRunDir(), "tmp-shared.used")
+    backdate(sessionRunDir("live"), "tmp-live.pid")
+    const deps = fakeDeps({ alive: [10, 20] })
+
+    reapIdleThrowaways(deps)
+
+    expect(killedPids(deps)).toEqual([10, 20])
+    expect(runFiles(sharedRunDir(), "tmp-shared")).toEqual([false, false])
+    expect(existsSync(join(sharedRunDir(), "tmp-shared.used"))).toBe(false)
+    expect(runFiles(sessionRunDir("live"), "tmp-live")).toEqual([false, false])
+  })
+
+  it("keeps a throwaway called within the idle time, however long ago it started", () => {
+    writePid(sharedRunDir(), "tmp-busy", "10")
+    backdate(sharedRunDir(), "tmp-busy.pid")
+    writeFileSync(join(sharedRunDir(), "tmp-busy.used"), "")
+    const deps = fakeDeps({ alive: [10] })
+
+    reapIdleThrowaways(deps)
+
+    expect(deps.kills).toEqual([])
+    expect(runFiles(sharedRunDir(), "tmp-busy")).toEqual([true, true])
+  })
+
+  it("never closes a named browser for being idle", () => {
+    writePid(sharedRunDir(), "work", "10")
+    backdate(sharedRunDir(), "work.pid")
+    const deps = fakeDeps({ alive: [10] })
+
+    reapIdleThrowaways(deps)
+
+    expect(deps.kills).toEqual([])
+    expect(runFiles(sharedRunDir(), "work")).toEqual([true, true])
+  })
+
+  it("runs as part of every sweep, a restart's first included", () => {
+    writePid(sharedRunDir(), "tmp-old", "10")
+    backdate(sharedRunDir(), "tmp-old.pid")
+    const deps = fakeDeps({ alive: [10] })
+
+    sweep(() => true, deps)
+
+    expect(deps.kills).toEqual([{ pid: 10, signal: "SIGTERM" }])
+  })
+})
+
+describe("reapStrayDaemons", () => {
+  const MINUTES = 5 * 60_000
+
+  function daemon(pid: number, name: string, socketDir: string, ageMs = MINUTES): DaemonProcess {
+    return { pid, name, socketDir, ageMs }
+  }
+
+  it("keeps the daemon a browser's pid file names and kills the others racing starts left", () => {
+    writePid(sharedRunDir(), "work", "100")
+    const deps = fakeDeps({
+      daemons: [daemon(100, "work", sharedRunDir()), daemon(101, "work", sharedRunDir()), daemon(102, "work", sharedRunDir())],
+    })
+    reapStrayDaemons(deps)
+    // Never SIGTERM: a stray shutting down cleanly deletes the files it shares with the owner.
+    expect(deps.kills).toEqual([{ pid: 101, signal: "SIGKILL" }, { pid: 102, signal: "SIGKILL" }])
+    expect(runFiles(sharedRunDir(), "work")).toEqual([true, true])
+  })
+
+  it("kills a throwaway's daemon whose directory was reaped under it", () => {
+    const deps = fakeDeps({ daemons: [daemon(200, "tmp-a", sessionRunDir("gone"))] })
+    reapStrayDaemons(deps)
+    expect(deps.kills).toEqual([{ pid: 200, signal: "SIGKILL" }])
+  })
+
+  it("leaves a daemon that may still be starting, and every daemon outside this tree", () => {
+    const deps = fakeDeps({
+      daemons: [
+        daemon(300, "work", sharedRunDir(), STRAY_GRACE_MS - 1),
+        daemon(301, "work", join(root, "elsewhere")),
+        daemon(302, "work", join(runRoot(), "..", "..", "outside")),
+      ],
+    })
+    reapStrayDaemons(deps)
+    expect(deps.kills).toEqual([])
+  })
+
+  it("runs as part of every sweep", () => {
+    const deps = fakeDeps({ daemons: [daemon(400, "tmp-a", sessionRunDir("gone"))] })
+    sweep(() => false, deps)
+    expect(deps.kills).toEqual([{ pid: 400, signal: "SIGKILL" }])
   })
 })
 

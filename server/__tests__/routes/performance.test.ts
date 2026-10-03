@@ -14,9 +14,10 @@ vi.mock("../../lib/leakReaper", () => ({
 import type { SystemProcessesSnapshot } from "../../../shared/contracts/performance"
 import { captureSystemProcesses } from "../../lib/systemProcesses"
 import { registerPerformanceRoutes } from "../../routes/performance"
-import { initEdition, __resetEditionForTest } from "../../team/edition"
-import { setRequestPrincipal } from "../../team/requestPrincipal"
-import type { SessionPrincipal } from "../../team/constants"
+import { __resetEditionForTest } from "../../edition"
+import { useAccountSignIn } from "../edition/fakeEdition"
+import { setRequestPrincipal } from "../../requestPrincipal"
+import type { SessionPrincipal } from "../../sessionConstants"
 import type { Middleware, UseFn } from "../../http"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 
@@ -42,10 +43,6 @@ const systemFixture: SystemProcessesSnapshot = {
 const mockedCapture = vi.mocked(captureSystemProcesses)
 
 const originalEditionEnv = process.env.COGPIT_EDITION
-
-function enterTeamEdition(): void {
-  initEdition({ shell: "standalone", configEdition: "team" })
-}
 
 function createMockReqRes(principal?: SessionPrincipal) {
   let body = ""
@@ -97,28 +94,28 @@ describe("GET /api/performance system snapshot gating", () => {
     expect(snapshot.system).toEqual(systemFixture)
   })
 
-  it("includes the system snapshot for a team-edition admin", async () => {
-    enterTeamEdition()
+  it("includes the system snapshot for an account the edition lets act host-wide", async () => {
+    useAccountSignIn()
     const snapshot = await fetchSnapshot(ADMIN)
     expect(snapshot.system).toEqual(systemFixture)
   })
 
-  it("omits the system snapshot for a team-edition member", async () => {
-    enterTeamEdition()
+  it("omits the system snapshot for an account the edition does not let act host-wide", async () => {
+    useAccountSignIn()
     const snapshot = await fetchSnapshot(MEMBER)
     expect("system" in snapshot).toBe(false)
     expect(mockedCapture).not.toHaveBeenCalled()
   })
 
-  it("omits the system snapshot for principal-less team-edition requests", async () => {
-    enterTeamEdition()
+  it("omits the system snapshot for principal-less requests where accounts sign in", async () => {
+    useAccountSignIn()
     const snapshot = await fetchSnapshot()
     expect("system" in snapshot).toBe(false)
     expect(mockedCapture).not.toHaveBeenCalled()
   })
 
   it("still ships the core snapshot fields a member's perf panel reads", async () => {
-    enterTeamEdition()
+    useAccountSignIn()
     const snapshot = await fetchSnapshot(MEMBER)
     for (const key of ["cpuPercent", "eventLoopPercent", "memory", "activities", "requests", "sampleWindowSeconds"]) {
       expect(snapshot).toHaveProperty(key)

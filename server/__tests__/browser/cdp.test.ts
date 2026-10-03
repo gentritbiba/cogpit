@@ -436,6 +436,33 @@ describe("BrowserViewer", () => {
     expect(events.errors).toEqual([])
   })
 
+  it("streams a watcher at its panel's size and never sizes the page to it", async () => {
+    const { fake, events, viewer } = await openViewer()
+    await viewer.setStreamSize(800, 600, 1)
+
+    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 800, maxHeight: 600 })
+    await vi.waitFor(() => expect(events.frames.length).toBeGreaterThan(0))
+    expect(fake.sent("Emulation.setDeviceMetricsOverride")).toEqual([])
+  })
+
+  it("hands the page back its own size when a driver goes back to watching", async () => {
+    const { fake, viewer } = await openViewer()
+    await viewer.setViewport(1600, 900, 1)
+    const applied = fake.sent("Emulation.setDeviceMetricsOverride").length
+    expect(applied).toBeGreaterThan(0)
+
+    await viewer.setStreamSize(1600, 900, 1)
+
+    const overrides = fake.sent("Emulation.setDeviceMetricsOverride")
+    expect(overrides).toHaveLength(applied + 1)
+    expect(last(overrides)).toMatchObject({
+      sessionId: sessionFor("t2"),
+      params: { width: 1280, height: 720, deviceScaleFactor: AGENT_DPR },
+    })
+    await viewer.setStreamSize(800, 600, 1)
+    expect(last(fake.sent("Page.startScreencast")).params).toMatchObject({ maxWidth: 800, maxHeight: 600 })
+  })
+
   it("waits for the viewer to flush a frame before acking it, and acks even when it throws", async () => {
     const events = record()
     const flush = deferred()

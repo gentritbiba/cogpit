@@ -23,6 +23,7 @@ vi.mock("../../helpers", () => ({
   join: (...parts: string[]) => parts.join("/"),
   mkdir: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn(),
+  stat: vi.fn().mockResolvedValue({ mode: 0o100600 }),
   writeFile: vi.fn().mockResolvedValue(undefined),
   randomUUID: vi.fn(() => "branched-session"),
   refreshDirs: vi.fn(),
@@ -65,7 +66,8 @@ vi.mock("../../agents/runtimes", async (importOriginal) => ({
   runtimeForDirName: () => ({ fork: vi.fn() }),
 }))
 
-vi.mock("../../config", () => ({
+vi.mock("../../config", async (importOriginal) => ({
+  configuredEdition: (await importOriginal<typeof import("../../config")>()).configuredEdition,
   getConfig: vi.fn(),
   getConfiguredEditionValue: vi.fn(() => "personal"),
   saveConfig: vi.fn().mockResolvedValue(undefined),

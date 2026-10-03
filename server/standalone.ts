@@ -6,21 +6,19 @@
  */
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { join } from "node:path"
-import { homedir, hostname, networkInterfaces } from "node:os"
+import { hostname, networkInterfaces } from "node:os"
 import { removePortFile } from "./lib/portFile"
 import {
   buildBootBanner,
-  buildTeamBootNotices,
+  resolveDataDir,
   resolveDeviceName,
 } from "./lib/standalone-bootstrap"
-import { getEdition, isTeamEdition } from "./team/edition"
-import { userCount } from "./team/users"
-import { getBootstrapToken } from "./team/bootstrapToken"
+import { editionModule, editionOwnsSignIn } from "./edition"
 import { startStandaloneServer } from "./standalone-runtime"
 
 const host = process.env.COGPIT_HOST || "127.0.0.1"
 const port = parseInt(process.env.COGPIT_PORT || "19384", 10)
-const dataDir = process.env.COGPIT_DATA_DIR || join(homedir(), ".config", "cogpit")
+const dataDir = resolveDataDir()
 
 // Resolve static dir: built Vite output
 const staticDir = join(import.meta.dirname, "../dist")
@@ -52,20 +50,17 @@ const banner = buildBootBanner({
 })
 for (const line of banner) console.log(line)
 console.log(`Data directory: ${dataDir}`)
-if (runtime.envPassword && !isTeamEdition()) {
+if (runtime.envPassword && !editionOwnsSignIn()) {
   console.log("Network access: enabled via environment (password kept in memory only)")
 }
-const teamNotices = buildTeamBootNotices({
-  edition: getEdition(),
-  userCount: userCount(),
+const editionNotices = editionModule().bootNotices({
   envPasswordSet: runtime.envPassword,
   host,
   port: runtime.port,
   interfaces: networkInterfaces(),
   publicUrl: process.env.COGPIT_PUBLIC_URL,
-  bootstrapToken: getBootstrapToken(),
 })
-for (const line of teamNotices) console.log(line)
+for (const line of editionNotices) console.log(line)
 
 // Graceful shutdown
 let shuttingDown = false

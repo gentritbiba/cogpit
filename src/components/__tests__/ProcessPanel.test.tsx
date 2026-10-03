@@ -215,4 +215,32 @@ describe("ProcessPanel", () => {
     fireEvent.click(serverTab)
     expect(onSetActive).toHaveBeenCalledWith("terminal-2")
   })
+
+  it("streams a task's output by its path alone, leaving its session to the server", () => {
+    const opened: string[] = []
+    vi.stubGlobal("EventSource", class extends EventTarget {
+      onopen: (() => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(url: string) {
+        super()
+        opened.push(url)
+      }
+      close() {}
+    })
+    const outputPath = "/tmp/claude-501/-work/0f8fad5b-d9cb-469f-a165-70867728950e/tasks/b1.output"
+    const processes = new Map([
+      ["task-1", { id: "task-1", name: "Dev server", type: "task" as const, status: "running" as const, outputPath }],
+    ])
+
+    try {
+      render(<ProcessPanel {...defaultProps} processes={processes} activeProcessId="task-1" collapsed={false} />)
+      const url = new URL(opened[0], "http://cogpit.test")
+      expect(url.pathname).toBe("/api/task-output")
+      expect(url.searchParams.get("path")).toBe(outputPath)
+      expect(url.searchParams.has("sessionId")).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

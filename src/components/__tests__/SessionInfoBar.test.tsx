@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import type { ParsedSession } from "../../../shared/session/types"
+import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 
 const mocks = vi.hoisted(() => ({
   session: null as ParsedSession | null,
@@ -17,6 +18,7 @@ vi.mock("@/contexts/SessionContext", () => ({
     sessionSource: mocks.dirName === null
       ? null
       : { dirName: mocks.dirName, fileName: "s.jsonl", rawText: "" },
+    permissions: permissionsForAccess("own"),
   }),
 }))
 

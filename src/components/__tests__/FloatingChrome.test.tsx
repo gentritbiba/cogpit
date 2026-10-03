@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
+import type { AccountControlProps } from "@/edition/contract"
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { getResumeCommand, type AgentKind } from "@/lib/agents"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { permissionsForAccess, type SessionAccessState } from "@/lib/sessionAccessPermissions"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import type { ParsedSession, Turn } from "../../../shared/session/types"
 
@@ -22,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     agentKind?: AgentKind
   } | null,
   isLive: false,
+  level: "own" as SessionAccessState,
   copy: vi.fn(),
   copyToClipboard: vi.fn(),
   dispatch: vi.fn(),
@@ -43,6 +47,7 @@ vi.mock("@/contexts/SessionContext", () => ({
     session: mocks.session,
     sessionSource: mocks.sessionSource,
     isLive: mocks.isLive,
+    permissions: permissionsForAccess(mocks.level),
   }),
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
@@ -58,7 +63,10 @@ vi.mock("@/hooks/useCopyWithFeedback", () => ({
   useCopyWithFeedback: () => [false, mocks.copy],
 }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
-vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, jsonFetch: mocks.jsonFetch }))
+vi.mock("@/lib/auth", () => ({
+  authFetch: mocks.authFetch,
+  jsonFetch: mocks.jsonFetch,
+}))
 vi.mock("@/lib/utils", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/utils")>()),
   copyToClipboard: mocks.copyToClipboard,
@@ -91,6 +99,8 @@ const PROPS = {
   onToggleSidebar: vi.fn(),
   onKillAll: vi.fn(),
   onOpenSettings: vi.fn(),
+  onLogout: vi.fn(),
+  onOpenMainView: vi.fn(),
 }
 
 function prTurn(id: string, command: string, result: string): Turn {
@@ -195,6 +205,7 @@ describe("FloatingChrome", () => {
     cleanup()
     vi.clearAllMocks()
     __resetCapabilitiesForTest()
+    __resetEditionUiForTest()
   })
 
   it("owns the window-drag strip and paints it under the pills", () => {
@@ -236,6 +247,25 @@ describe("FloatingChrome", () => {
     expect(screen.getByRole("menuitem", { name: "Reveal in file manager" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Open terminal in project" })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "View all sessions in this project" })).toBeInTheDocument()
+  })
+
+  it("offers a member without host access none of the host's project actions", async () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_1", username: "alice", displayName: "Alice" },
+      capabilities: NO_CAPABILITIES,
+    })
+    mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
+    renderChrome()
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /my-session/ }))
+
+    expect(await screen.findByRole("menuitem", { name: "New session in this project" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "View all sessions in this project" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Open project in editor" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Reveal in file manager" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Open terminal in project" })).not.toBeInTheDocument()
   })
 
   it("preserves project action request and project-session navigation semantics", async () => {
@@ -431,12 +461,55 @@ describe("FloatingChrome", () => {
       authenticated: true,
       edition: "team",
       user: null,
-      capabilities: MEMBER_CAPABILITIES,
+      capabilities: NO_CAPABILITIES,
     })
 
     renderChrome()
 
     expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+  })
+
+  it("carries the edition's actions for the open session, never for a sub-agent view", () => {
+    const SessionHeaderActions = ({ sessionId }: { sessionId: string }) => <button>Act on {sessionId}</button>
+    renderChrome()
+    expect(screen.queryByRole("button", { name: /Act on/ })).not.toBeInTheDocument()
+    cleanup()
+
+    __installEditionUiForTest({ SessionHeaderActions })
+    const { unmount } = renderChrome()
+    expect(screen.getByRole("button", { name: "Act on test-session-id" })).toBeInTheDocument()
+    unmount()
+
+    // Access follows the root session, so a sub-agent view has nothing to act on.
+    mocks.sessionSource = {
+      dirName: "-tmp-project",
+      fileName: "test-session-id/subagents/agent-abc.jsonl",
+      rawText: "",
+      agentKind: "claude",
+    }
+    renderChrome()
+    expect(screen.queryByRole("button", { name: /Act on/ })).not.toBeInTheDocument()
+  })
+
+  it("carries the edition's account control, wired to sign-out and the edition's main views", async () => {
+    renderChrome()
+    expect(screen.queryByRole("button", { name: "Account" })).not.toBeInTheDocument()
+    cleanup()
+
+    __installEditionUiForTest({
+      AccountControl: ({ onLogout, onOpenMainView }: AccountControlProps) => (
+        <>
+          <button onClick={onLogout}>Account</button>
+          <button onClick={() => onOpenMainView("reports")}>Reports</button>
+        </>
+      ),
+    })
+    renderChrome()
+
+    await userEvent.click(screen.getByRole("button", { name: "Account" }))
+    await userEvent.click(screen.getByRole("button", { name: "Reports" }))
+    expect(PROPS.onLogout).toHaveBeenCalledOnce()
+    expect(PROPS.onOpenMainView).toHaveBeenCalledWith("reports")
   })
 
   it("makes an already-shared session visible without opening anything", async () => {
@@ -485,6 +558,14 @@ describe("FloatingChrome archive", () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    mocks.level = "own"
+  })
+
+  it.each(["view", "interact", "unknown"] as const)("withholds archiving while access is %s", (level) => {
+    mocks.level = level
+    renderChrome()
+
+    expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
   })
 
   it("archives the open session, refreshes the inventory and offers an undo", async () => {

@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import { type PermissionsConfig, DEFAULT_PERMISSIONS } from "@/lib/permissions"
+import type { PermissionsConfig } from "@/lib/permissions"
 import { authFetch } from "@/lib/auth"
 import { agentKindForDirName, sessionIdFromFileName } from "@/lib/agents"
 import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
+import { isAccessRefusal } from "@/lib/sessionAccessEvents"
+import type { SessionSettingField } from "../../shared/contracts/sessionSettings"
 
 export type PtyChatStatus = "idle" | "connected" | "error"
 
@@ -12,6 +14,7 @@ interface UsePtyChatOpts {
   /** The parsed session's UUID — used to resume the active agent session. Falls back to fileName-based derivation. */
   parsedSessionId?: string | null
   cwd?: string
+  /** Sent only when given: without it the session keeps its own permission mode. */
   permissions?: PermissionsConfig
   onPermissionsApplied?: () => void
   model?: string
@@ -19,6 +22,10 @@ interface UsePtyChatOpts {
   contextWindowTokens?: number | null
   fastMode?: boolean
   ultracode?: boolean
+  /** The settings the user picked, which the send names so that they, not the session's stored ones, take effect. */
+  settingsChange?: readonly SessionSettingField[]
+  /** Called once a send naming a settings change went through. */
+  onSettingsChangeSent?: () => void
   mcpConfig?: string | null
   onModelRejected?: (model: string) => void
   /** Prevent all session mutations while another process owns the session. */
@@ -30,7 +37,9 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, onModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
+const NO_SETTINGS_CHANGE: readonly SessionSettingField[] = []
+
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, settingsChange = NO_SETTINGS_CHANGE, onSettingsChangeSent, mcpConfig, onModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -88,9 +97,14 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     if (readOnly) resetState()
   }, [readOnly, resetState])
 
+  /**
+   * Resolves false when the message was not sent because the session may not
+   * be driven here — read-only, or the server refused the caller's access — so
+   * the composer can keep it.
+   */
   const sendMessage = useCallback(
-    async (text: string, images?: Array<{ data: string; mediaType: string }>) => {
-      if (readOnly) return
+    async (text: string, images?: Array<{ data: string; mediaType: string }>): Promise<boolean> => {
+      if (readOnly) return false
       // If there's no sessionId yet, this is a pending session — create it first
       if (!sessionId && onCreateSession) {
         setPendingMessages(prev => [...prev, text])
@@ -106,7 +120,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             creatingRef.current = false
             setStatus("idle")
             setPendingMessages([])
-            return
+            return true
           }
           // Session was created and first message was sent.
           // Don't clear pendingMessages — useChatScroll will consume them
@@ -118,16 +132,15 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           setStatus("error")
           setPendingMessages([])
         }
-        return
+        return true
       }
 
-      if (!sessionId) return
+      if (!sessionId) return true
 
       setPendingMessages(prev => [...prev, text])
       setStatus("connected")
       setError(undefined)
 
-      const permsConfig = permissions ?? DEFAULT_PERMISSIONS
       onPermissionsApplied?.()
 
       const abortController = new AbortController()
@@ -139,12 +152,14 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           message: text,
           images: images || undefined,
           cwd: cwd || undefined,
-          permissions: permsConfig,
+          permissions,
           effort: effort || undefined,
           contextWindowTokens,
-          fastMode: fastMode ? true : undefined,
-          ultracode: ultracode ? true : undefined,
+          // Turned off, these go out only as a pick, to replace the stored setting.
+          fastMode: fastMode || settingsChange.includes("fastMode") ? fastMode : undefined,
+          ultracode: ultracode || settingsChange.includes("ultracode") ? ultracode : undefined,
           mcpConfig: mcpConfig || undefined,
+          settingsChange: settingsChange.length > 0 ? settingsChange : undefined,
         }
 
         const { res, errorMessage } = await fetchWithModelFallback(
@@ -172,19 +187,22 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             setStatus("idle")
           }
         }
+        if (res.ok && settingsChange.length > 0) onSettingsChangeSent?.()
+        return !isAccessRefusal(res)
       } catch (err: unknown) {
         if (err instanceof Error && err.name === "AbortError") {
           // Intentionally stopped — don't set error
-          return
+          return true
         }
         if (activeAbortRef.current === abortController) {
           setError(err instanceof Error ? err.message : "Unknown error")
           setStatus("error")
           setPendingMessages(prev => prev.slice(0, -1))
         }
+        return true
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, onModelRejected, readOnly, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, settingsChange, onSettingsChangeSent, mcpConfig, onModelRejected, readOnly, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.

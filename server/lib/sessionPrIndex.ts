@@ -6,6 +6,7 @@ import {
   type SessionPullRequest,
   type SessionPullRequestReference,
 } from "../../shared/session/prLinks"
+import { recencyCache } from "./recencyCache"
 
 interface IndexEntry {
   /** Bytes already folded into the scanner. */
@@ -15,8 +16,11 @@ interface IndexEntry {
   decoder: StringDecoder
 }
 
-const cache = new Map<string, IndexEntry>()
-const MAX_ENTRIES = 200
+/**
+ * Every sidebar's rows stay cached while it polls them, so a long transcript
+ * keeps its scan progress however many users poll other sessions in between.
+ */
+const cache = recencyCache<IndexEntry>({ capacity: 200, inUseMs: 60_000, ceiling: 5_000 })
 
 /** Read buffer size, so a transcript is never held in memory whole. */
 const CHUNK_BYTES = 256 * 1024
@@ -34,16 +38,6 @@ export interface SessionPullRequestData {
 
 function freshEntry(): IndexEntry {
   return { parsedBytes: 0, scanner: createPullRequestScanner(), decoder: new StringDecoder("utf8") }
-}
-
-/** Evicts the least recently used file once the cache is full. */
-function touch(filePath: string, entry: IndexEntry) {
-  cache.delete(filePath)
-  cache.set(filePath, entry)
-  if (cache.size > MAX_ENTRIES) {
-    const oldest = cache.keys().next()
-    if (!oldest.done) cache.delete(oldest.value)
-  }
 }
 
 /**
@@ -88,7 +82,7 @@ async function scanSessionPullRequests(
     }
   }
 
-  touch(filePath, entry)
+  cache.set(filePath, entry)
   return {
     pullRequests: entry.scanner.pullRequests,
     references: entry.scanner.references,
@@ -125,7 +119,6 @@ export function getScannedSessionPullRequests(
 ): SessionPullRequest[] | null {
   const entry = cache.get(filePath)
   if (!entry || entry.parsedBytes < size) return null
-  touch(filePath, entry)
   return entry.scanner.pullRequests
 }
 

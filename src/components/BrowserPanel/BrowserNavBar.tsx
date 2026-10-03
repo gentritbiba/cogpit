@@ -30,6 +30,8 @@ interface BrowserNavBarProps {
   followed: string | null
   /** Left off when there is no stream to report on. */
   status?: BrowserStreamStatus
+  /** The caller may watch the page but not move it: only which tab they watch is theirs. */
+  readOnly?: boolean
   onNavigate: (url: string) => void
   onBack: () => void
   onForward: () => void
@@ -102,6 +104,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
   tabs,
   followed,
   status,
+  readOnly = false,
   onNavigate,
   onBack,
   onForward,
@@ -115,6 +118,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
 
   function submit(event: FormEvent): void {
     event.preventDefault()
+    if (readOnly) return
     const value = (draft ?? liveUrl).trim()
     setDraft(null)
     if (value) onNavigate(value)
@@ -134,7 +138,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Back"
-          disabled={!page?.canGoBack}
+          disabled={readOnly || !page?.canGoBack}
           onClick={onBack}
         >
           <ArrowLeft data-icon="inline-start" />
@@ -143,7 +147,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Forward"
-          disabled={!page?.canGoForward}
+          disabled={readOnly || !page?.canGoForward}
           onClick={onForward}
         >
           <ArrowRight data-icon="inline-start" />
@@ -152,7 +156,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
           variant="ghost"
           size="icon-sm"
           aria-label="Reload"
-          disabled={!page}
+          disabled={readOnly || !page}
           onClick={onReload}
         >
           <RotateCw data-icon="inline-start" />
@@ -166,6 +170,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
               placeholder="Enter a URL"
               spellCheck={false}
               autoComplete="off"
+              readOnly={readOnly}
               value={draft ?? liveUrl}
               onChange={(event) => setDraft(event.target.value)}
               onFocus={(event) => event.target.select()}
@@ -201,7 +206,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
               <Button
                 size="xs"
                 variant="ghost"
-                className="min-w-0 shrink rounded-r-none"
+                className={cn("min-w-0 shrink", !readOnly && "rounded-r-none")}
                 aria-current={tab.targetId === followed ? "page" : undefined}
                 title={tab.title || tab.url}
                 onClick={() => onFollow(tab.targetId)}
@@ -209,23 +214,25 @@ export const BrowserNavBar = memo(function BrowserNavBar({
                   if (event.button === 1) event.preventDefault()
                 }}
                 onAuxClick={(event) => {
-                  if (event.button !== 1) return
+                  if (event.button !== 1 || readOnly) return
                   event.preventDefault()
                   onCloseTab(tab.targetId)
                 }}
               >
                 <span className="truncate">{tabLabel(tab)}</span>
               </Button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="rounded-l-none"
-                aria-label={`Close tab: ${tabLabel(tab)}`}
-                title="Close tab"
-                onClick={() => onCloseTab(tab.targetId)}
-              >
-                <X data-icon="inline-start" />
-              </Button>
+              {!readOnly && (
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="rounded-l-none"
+                  aria-label={`Close tab: ${tabLabel(tab)}`}
+                  title="Close tab"
+                  onClick={() => onCloseTab(tab.targetId)}
+                >
+                  <X data-icon="inline-start" />
+                </Button>
+              )}
             </div>
           ))}
         </div>

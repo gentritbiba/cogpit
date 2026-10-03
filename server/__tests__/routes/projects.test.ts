@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
  * The project routes compose the agent stores; what each store answers about
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     sessionAddress: perKind(),
     listSessionFiles: perKind(),
     runtimeRunning: vi.fn(),
+    teamLeadFor: vi.fn(),
     getSessionPrSearchSnapshot: vi.fn(),
     archived: new Map<string, number>(),
     kept: new Set<string>(),
@@ -60,6 +61,7 @@ vi.mock("../../agents", async () => {
   const { descriptorFor, descriptorForDirName } = await vi.importActual<
     typeof import("../../../shared/session/agent-descriptors")
   >("../../../shared/session/agent-descriptors")
+  const { createStoreRegistry } = await vi.importActual<typeof import("../../agents")>("../../agents")
   const roots: Record<string, string> = {
     claude: "/tmp/test-projects",
     codex: "/tmp/codex-sessions",
@@ -78,9 +80,13 @@ vi.mock("../../agents", async () => {
     sessionAddress: mocks.sessionAddress[kind],
   })
   const kinds = ["codex", "copilot", "claude"]
+  const registry = createStoreRegistry(
+    Object.fromEntries(kinds.map((kind) => [kind, storeFor(kind)])) as unknown as Parameters<typeof createStoreRegistry>[0],
+  )
   return {
     storeFor,
     allStores: () => kinds.map(storeFor),
+    allTopLevelSessions: registry.allTopLevelSessions,
     storeForDirName: (dirName: string) => storeFor(descriptorForDirName(dirName).kind),
     storeForPath: (filePath: string) => kinds
       .map(storeFor)
@@ -92,6 +98,11 @@ vi.mock("../../agents/runtimes", () => ({
   runtimeFor: () => ({
     activity: (sessionId: string) => ({ live: false, running: mocks.runtimeRunning(sessionId) === true }),
   }),
+}))
+
+vi.mock("../../agents/lineage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../agents/lineage")>(),
+  teamLeadFor: mocks.teamLeadFor,
 }))
 
 vi.mock("../../lib/sessionPrSearchIndex", () => ({
@@ -130,6 +141,8 @@ import {
   makeSessionMeta,
 } from "../http-fixtures"
 import { registerProjectRoutes } from "../../routes/projects"
+import { __resetEditionForTest, PERSONAL_EDITION, type VisibleSession } from "../../edition"
+import { installFakeEdition } from "../edition/fakeEdition"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 
 const COPILOT_SESSION_ID = "68596e24-db5d-46a4-86fe-9d82425f36d7"
@@ -157,6 +170,7 @@ describe("project routes", () => {
       mocks.sessionAddress[kind].mockResolvedValue(null)
     }
     mocks.runtimeRunning.mockReturnValue(false)
+    mocks.teamLeadFor.mockResolvedValue("none")
     mocks.archived.clear()
     mocks.kept.clear()
     mocks.setSessionsArchived.mockResolvedValue([])
@@ -250,6 +264,68 @@ describe("project routes", () => {
       await handler(req, res, next)
 
       expect(JSON.parse(res._getData())).toEqual([])
+    })
+
+    describe("for a caller who sees only some sessions", () => {
+      /** An edition that shows the caller `visible` alone, or every session. */
+      function showOnly(visible: readonly string[] | "everything") {
+        const everything = visible === "everything"
+        const check = async (sessionId: string): Promise<VisibleSession | "hidden"> =>
+          everything || visible.includes(sessionId) ? { annotate: async (item) => item } : "hidden"
+        installFakeEdition({
+          access: {
+            ...PERSONAL_EDITION.access,
+            visibilityFor: () => Object.assign(check, { everything, nothing: !everything && visible.length === 0 }),
+          },
+        })
+      }
+
+      async function listed(): Promise<Array<{ dirName: string; sessionCount: number; lastModified: string | null }>> {
+        const handler = getRouteHandler(handlers, "/api/projects")
+        const { req, res, next } = createMockReqRes("GET", "/")
+        await handler(req, res, next)
+        return JSON.parse(res._getData())
+      }
+
+      beforeEach(() => {
+        mocks.listProjects.claude.mockResolvedValue([
+          { dirName: "proj-a", path: "/proj/a", sessionCount: 2, lastModified: new Date(5000).toISOString() },
+          { dirName: "proj-b", path: "/proj/b", sessionCount: 1, lastModified: new Date(4000).toISOString() },
+          { dirName: "proj-empty", path: "/proj/empty", sessionCount: 0, lastModified: null },
+        ])
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("proj-a", "mine.jsonl", 1000, 10),
+          claudeFile("proj-a", "theirs.jsonl", 5000, 10),
+          claudeFile("proj-b", "hers.jsonl", 4000, 10),
+        ])
+        mockedProjectDirToReadableName.mockImplementation((dirName: string) => ({ path: `/${dirName}`, shortName: dirName }))
+      })
+
+      afterEach(() => __resetEditionForTest())
+
+      it("lists only the projects holding a session they may see, counted and dated by those alone", async () => {
+        showOnly(["mine"])
+
+        expect(await listed()).toEqual([
+          expect.objectContaining({ dirName: "proj-a", sessionCount: 1, lastModified: new Date(1000).toISOString() }),
+        ])
+      })
+
+      it("lists no project to a caller who may see no session", async () => {
+        showOnly([])
+
+        expect(await listed()).toEqual([])
+      })
+
+      it("keeps every project, empty ones too, for a caller who sees every session", async () => {
+        showOnly("everything")
+
+        expect((await listed()).map((project) => [project.dirName, project.sessionCount])).toEqual([
+          ["proj-a", 2],
+          ["proj-b", 1],
+          ["proj-empty", 0],
+        ])
+      })
     })
   })
 
@@ -352,6 +428,19 @@ describe("project routes", () => {
       expect(response.sessions).toHaveLength(1)
       expect(response.sessions[0].sessionId).toBe("bad")
       expect(response.sessions[0].fileName).toBe("bad.jsonl")
+    })
+
+    it("names each row after the transcript listed, not the id its content opens with", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const { req, res, next } = createMockReqRes("GET", "proj-a")
+      mocks.listProjectSessionFiles.claude.mockResolvedValueOnce([
+        claudeFile("proj-a", "resumed-copy.jsonl", 1000, 50),
+      ])
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({ sessionId: "copied-from" }))
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).sessions[0].sessionId).toBe("resumed-copy")
     })
 
     it("keeps a listing's own session id when it carries one", async () => {
@@ -674,6 +763,24 @@ describe("project routes", () => {
       expect(mocks.runtimeRunning).not.toHaveBeenCalled()
     })
 
+    it("names each row after the transcript listed, not the id its content opens with", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
+        claudeFile("proj-a", "resumed-copy.jsonl", Date.now(), 500),
+      ])
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
+        sessionId: "copied-from", version: "", gitBranch: "main", model: "claude",
+        slug: "", cwd: "/code", firstUserMessage: "hello", lastUserMessage: "bye",
+        timestamp: "", turnCount: 3, lineCount: 10,
+      }))
+      mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/a", shortName: "a" })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())[0].sessionId).toBe("resumed-copy")
+    })
+
     it("returns Copilot rows with nested file identity and a UUID sessionId", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
@@ -746,6 +853,52 @@ describe("project routes", () => {
 
       const response = JSON.parse(res._getData())
       expect(response[0].isActive).toBe(false)
+    })
+
+    it("groups only the teammates their team's config accepts, sharing one config read per request", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "/")
+
+      const now = Date.now()
+      mocks.listTopLevelSessions.claude.mockResolvedValue([
+        claudeFile("proj-team", "teammate-reviewer.jsonl", now, 100),
+        claudeFile("proj-team", "teammate-earlier.jsonl", now - 1000, 100),
+      ])
+      mockedGetSessionMeta.mockImplementation(async (filePath: string) => {
+        const sessionId = filePath.split("/").at(-1)!.replace(".jsonl", "")
+        return makeSessionMeta({
+          sessionId,
+          teamName: "release-review",
+          agentName: sessionId.replace("teammate-", ""),
+          timestamp: `started-${sessionId}`,
+        })
+      })
+      mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/team", shortName: "team" })
+      // The earlier teammate belonged to a previous team under the same name.
+      mocks.teamLeadFor.mockImplementation(async (member: { sessionId: string }) =>
+        member.sessionId === "teammate-reviewer" ? { sessionId: "team-lead-session", createdAt: now - 60_000 } : "none")
+
+      await handler(req, res, next)
+
+      const [reviewer, earlier] = JSON.parse(res._getData())
+      expect(reviewer).toMatchObject({
+        sessionId: "teammate-reviewer",
+        teamName: "release-review",
+        agentName: "reviewer",
+        teamLeadSessionId: "team-lead-session",
+      })
+      expect(earlier).toMatchObject({ sessionId: "teammate-earlier", teamName: "release-review" })
+      expect(earlier.teamLeadSessionId).toBeUndefined()
+      // The two teammates are placed concurrently, so only the set of calls is fixed.
+      const calls = mocks.teamLeadFor.mock.calls
+      expect(calls.map(([member]) => member)).toHaveLength(2)
+      expect(calls.map(([member]) => member)).toEqual(expect.arrayContaining([
+        { sessionId: "teammate-reviewer", teamName: "release-review", timestamp: "started-teammate-reviewer" },
+        { sessionId: "teammate-earlier", teamName: "release-review", timestamp: "started-teammate-earlier" },
+      ]))
+      const caches = new Set(calls.map(([, cache]) => cache))
+      expect(caches.size).toBe(1)
+      expect([...caches][0]).toBeInstanceOf(Map)
     })
 
     describe("archived sessions", () => {

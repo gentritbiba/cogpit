@@ -70,6 +70,7 @@ describe("AgentsPanel", () => {
         session={makeSession()}
         sessionSource={{ dirName: "project", fileName: "main-session.jsonl" }}
         bgAgents={[]}
+        canStop
         onLoadSession={onLoadSession}
       />,
     )
@@ -85,5 +86,26 @@ describe("AgentsPanel", () => {
       "project",
       "main-session/subagents/agent-ad663a1cf11922085.jsonl",
     )
+  })
+
+  it.each([true, false])("offers to stop a running background agent only when allowed (%s)", (canStop) => {
+    render(
+      <AgentsPanel
+        session={makeSession()}
+        sessionSource={{ dirName: "project", fileName: "main-session.jsonl" }}
+        bgAgents={[{
+          agentId: "bg-1",
+          dirName: "project",
+          fileName: "main-session/subagents/agent-bg-1.jsonl",
+          parentSessionId: "main-session",
+          modifiedAt: 1,
+          isActive: true,
+          preview: "Watching the build",
+        }]}
+        canStop={canStop}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: /^Stop / }) !== null).toBe(canStop)
   })
 })

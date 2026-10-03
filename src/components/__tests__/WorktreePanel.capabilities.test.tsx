@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
+import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { WorktreePanel } from "../WorktreePanel"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
@@ -25,8 +25,8 @@ describe("WorktreePanel capability gating", () => {
     setMe({
       authenticated: true,
       edition: "team",
-      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
-      capabilities: MEMBER_CAPABILITIES,
+      user: { id: "u_member", username: "member", displayName: "Member" },
+      capabilities: NO_CAPABILITIES,
     })
 
     render(<WorktreePanel

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Activity, AlertTriangle, Archive, Layers, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -113,6 +114,8 @@ interface LiveSessionsFeedbackProps {
   /** The project the sidebar is focused on, when it is not showing every project. */
   focusedProject?: string | null
   onShowAllProjects?: () => void
+  /** Stands for a list the edition's session filter left empty; null while the list is unfiltered. */
+  filterEmpty?: ReactNode
   onShowArchived: () => void
   onRetry: () => void
 }
@@ -128,10 +131,11 @@ export function LiveSessionsFeedback({
   hiddenArchivedCount,
   focusedProject = null,
   onShowAllProjects,
+  filterEmpty = null,
   onShowArchived,
   onRetry,
 }: LiveSessionsFeedbackProps) {
-  const empty = emptyVariant({ showEmpty, searching, focusedProject, hiddenArchivedCount })
+  const empty = emptyVariant({ showEmpty, searching, focusedProject, hiddenArchivedCount, filtered: Boolean(filterEmpty) })
   return (
     <>
       {fetchError && (
@@ -193,6 +197,8 @@ export function LiveSessionsFeedback({
         </Empty>
       )}
 
+      {empty === "filtered" && filterEmpty}
+
       {empty === "plain" && (
         <Empty className="min-h-56 px-4 py-8">
           <EmptyHeader>
@@ -226,22 +232,26 @@ export function LiveSessionsFeedback({
 
 /**
  * Which empty state the list shows, if any. A focused project explains itself
- * first, then a list emptied only by the archive filter, then the plain case.
+ * first, then a list emptied only by the archive filter, then one the
+ * edition's session filter emptied, then the plain case.
  */
 function emptyVariant({
   showEmpty,
   searching,
   focusedProject,
   hiddenArchivedCount,
+  filtered,
 }: {
   showEmpty: boolean
   searching: boolean
   focusedProject: string | null
   hiddenArchivedCount: number
-}): "archived" | "focused" | "plain" | null {
+  filtered: boolean
+}): "archived" | "focused" | "filtered" | "plain" | null {
   if (!showEmpty) return null
   if (focusedProject !== null) return "focused"
   if (!searching && hiddenArchivedCount > 0) return "archived"
+  if (!searching && filtered) return "filtered"
   return "plain"
 }
 

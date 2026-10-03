@@ -92,3 +92,31 @@ describe("sessionCache device scoping", () => {
     expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeDefined()
   })
 })
+
+describe("sessionCache.evictSession", () => {
+  const SESSION = "00000000-0000-4000-8000-000000000001"
+  const OTHER = "00000000-0000-4000-8000-000000000002"
+
+  beforeEach(() => {
+    sessionCache.clear()
+    __resetIdentityForTest()
+    setPath("/")
+  })
+
+  it("drops the session's transcript and the ones filed under it, for the active device only", () => {
+    seed("-work", `${SESSION}.jsonl`)
+    seed("-work", `${SESSION}/subagents/agent-a1.jsonl`)
+    seed("-work", `${OTHER}.jsonl`)
+    setPath("/d/dev_x/")
+    seed("-work", `${SESSION}.jsonl`)
+    setPath("/")
+
+    sessionCache.evictSession(SESSION)
+
+    expect(sessionCache.get("-work", `${SESSION}.jsonl`)).toBeUndefined()
+    expect(sessionCache.get("-work", `${SESSION}/subagents/agent-a1.jsonl`)).toBeUndefined()
+    expect(sessionCache.get("-work", `${OTHER}.jsonl`)).toBeDefined()
+    setPath("/d/dev_x/")
+    expect(sessionCache.get("-work", `${SESSION}.jsonl`)).toBeDefined()
+  })
+})

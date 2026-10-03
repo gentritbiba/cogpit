@@ -8,13 +8,14 @@
  */
 
 import { memo } from "react"
-import { CheckCircle2, ChevronRight, MessageCircleQuestion, XCircle } from "lucide-react"
+import { CheckCircle2, ChevronRight, Eye, MessageCircleQuestion, XCircle } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { formatRelativeTime, shortenModel } from "@/lib/format"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
+import { SessionBadges } from "@/components/shared/SessionBadges"
 import type { PermissionDecision } from "@/lib/permissionApi"
 import type { UserQuestionAnswerMap } from "@/lib/askUserApi"
 import type {
@@ -103,7 +104,7 @@ export const SessionCard = memo(function SessionCard({
   onAnswerElicitation,
   onChooseDialog,
 }: SessionCardProps) {
-  const { session, state, summary, permissions, questions, elicitations, dialogs } = card
+  const { session, state, summary, permissions, questions, elicitations, dialogs, canAnswer } = card
   const style = STATE_STYLES[state]
   const request = permissions[0]
   const question = questions[0]
@@ -130,6 +131,7 @@ export const SessionCard = memo(function SessionCard({
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {projectLabel}
           </span>
+          <SessionBadges access={session.access} />
           {summary?.model && (
             <span className="shrink-0 font-mono text-xs text-muted-foreground">
               {shortenModel(summary.model)}
@@ -160,7 +162,9 @@ export const SessionCard = memo(function SessionCard({
           request={request}
           queued={permissions.length - 1}
           responding={responding.has(request.requestId)}
-          onRespond={(requestId, behavior) => onRespond(session.sessionId, requestId, behavior)}
+          onRespond={canAnswer
+            ? (requestId, behavior) => onRespond(session.sessionId, requestId, behavior)
+            : undefined}
         />
       )}
 
@@ -170,7 +174,9 @@ export const SessionCard = memo(function SessionCard({
           key={dialog.requestId}
           request={dialog}
           responding={responding.has(dialog.requestId)}
-          onChoose={(requestId, choice) => onChooseDialog(session.sessionId, requestId, choice)}
+          onChoose={canAnswer
+            ? (requestId, choice) => onChooseDialog(session.sessionId, requestId, choice)
+            : undefined}
         />
       )}
 
@@ -179,7 +185,9 @@ export const SessionCard = memo(function SessionCard({
           key={elicitation.requestId}
           request={elicitation}
           responding={responding.has(elicitation.requestId)}
-          onAnswer={(requestId, answer) => onAnswerElicitation(session.sessionId, requestId, answer)}
+          onAnswer={canAnswer
+            ? (requestId, answer) => onAnswerElicitation(session.sessionId, requestId, answer)
+            : undefined}
         />
       )}
 
@@ -189,9 +197,18 @@ export const SessionCard = memo(function SessionCard({
           request={question}
           responding={responding.has(question.toolUseId)}
           gone={goneQuestions.has(question.toolUseId)}
-          onAnswer={(toolUseId, answers) => onAnswerQuestion(session.sessionId, toolUseId, answers)}
+          onAnswer={canAnswer
+            ? (toolUseId, answers) => onAnswerQuestion(session.sessionId, toolUseId, answers)
+            : undefined}
           onOpenSession={onOpen}
         />
+      )}
+
+      {blocked && !canAnswer && (
+        <p className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
+          <Eye data-icon="inline-start" className="size-3.5 shrink-0" />
+          View only · you can’t answer this
+        </p>
       )}
 
       {!blocked && summary?.currentTool && <CurrentTool tool={summary.currentTool} />}

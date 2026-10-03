@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Bell, CheckCheck, CircleAlert, MessageSquare } from "lucide-react"
+import { Bell, CheckCheck, CircleAlert, MessageSquare, UsersRound, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,11 +16,19 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { useNotifications, type CogpitNotification } from "@/hooks/useNotifications"
-import { getActiveDeviceId, LOCAL_DEVICE_ID } from "@/lib/device"
+import { useNotifications } from "@/hooks/useNotifications"
+import { devicePathPrefix } from "@/lib/device"
 import { revealSessionPath } from "@/lib/revealSession"
 import { formatAge } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import type { CogpitNotification, NotificationKind } from "../../shared/notifications"
+
+const KIND_ICON: Record<NotificationKind, LucideIcon> = {
+  turnComplete: MessageSquare,
+  permission: CircleAlert,
+  system: MessageSquare,
+  access: UsersRound,
+}
 
 /**
  * Header bell with the notification inbox: every notification the server
@@ -34,10 +42,8 @@ export function NotificationsBell() {
   function openNotification(notification: CogpitNotification): void {
     void markRead([notification.id])
     if (!notification.dirName || !notification.sessionId) return
-    const deviceId = getActiveDeviceId()
-    const prefix = deviceId === LOCAL_DEVICE_ID ? "" : `/d/${deviceId}`
     revealSessionPath(
-      `${prefix}/${encodeURIComponent(notification.dirName)}/${encodeURIComponent(notification.sessionId)}`,
+      `${devicePathPrefix()}/${encodeURIComponent(notification.dirName)}/${encodeURIComponent(notification.sessionId)}`,
     )
     setOpen(false)
   }
@@ -118,7 +124,7 @@ function NotificationRow({ notification, onOpen }: NotificationRowProps) {
   const unread = notification.readAt === null
   const hasTarget = Boolean(notification.dirName && notification.sessionId)
   const ageSeconds = Math.max(0, (Date.now() - new Date(notification.at).getTime()) / 1000)
-  const Icon = notification.kind === "permission" ? CircleAlert : MessageSquare
+  const Icon = KIND_ICON[notification.kind] ?? MessageSquare
 
   return (
     <DropdownMenuItem

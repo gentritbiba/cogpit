@@ -24,6 +24,17 @@ Electron composition -> server public composition API
 7. Session parsing, turn construction, status, token, and pricing semantics have one governed implementation consumed by the app and CLI.
 8. Root `plugins/` may import plugin peers, `shared/`, and the public `src/plugin-api/` surface. Only `src/plugins/registry.ts` may import root plugins; plugins may not import private renderer, server, or Electron modules.
 9. Circular imports are not allowed.
+10. The edition package `@cogpit/team` is the submodule `editions/team/`, which a public clone leaves empty; the package is there when `editions/team/index.ts` is. Nothing outside it imports it: `server/edition/load.ts` installs its server side at boot, and only `src/edition/load.ts` imports its UI, through the `@cogpit/edition-ui` alias. It reaches core only through the `@cogpit/core/*` alias, each subtree only as far as this table allows:
+
+    | Source | May import from the package | May import from core (only through `@cogpit/core/`) |
+    | --- | --- | --- |
+    | `editions/team/ui/**` | `ui/**`, `shared/**` | `src/edition/**`, `src/components/ui/**`, `shared/**`. Never `server/`, `electron/` or `node:*`; bare packages must be declared in the root `package.json`. |
+    | `editions/team/server/**`, `index.ts` | `server/**`, `shared/**` (never `ui/**`) | `server/**`, `shared/**` |
+    | `editions/team/shared/**` | `shared/**` | `shared/**`, with no runtime dependencies, like core `shared/` |
+    | `editions/team/tests/ui/**` | `ui/**`, `shared/**` | `src/**` including `__tests__` fixtures, and `shared/**` |
+    | `editions/team/tests/*` (server), `tools/**` | `server/**`, `shared/**` | `server/**`, `shared/**`, test fixtures |
+
+    At build time `build/bundleBoundary.ts` keeps server modules out of client bundles and the edition UI inside its own lazy chunk.
 
 `bun run check:architecture` enforces new cross-layer imports, exact legacy exceptions, and cycles. Exceptions are a debt ledger, not a permanent allow-list: when an edge is removed, the check fails until its exception is deleted too.
 
@@ -41,6 +52,7 @@ Electron composition -> server public composition API
 | Atomic JSON persistence | `server/atomicJsonFile.ts` | Registry/config writers serialize mutations through their owning service; callers never perform parallel read-modify-write cycles. |
 | Undo/redo contracts and mutation | `shared/contracts/undo.ts`, `server/routes/undo/` | The route coordinates one optimistic, rollback-capable transaction; clients carry compact operations rather than archived transcripts. |
 | Network trust boundary | `server/security.ts`, `server/password-utils.ts` | Every server composition installs it before routes; WebSocket upgrades use the same trust policy. |
+| Edition seam | `server/edition/` | Core asks the running edition through it: routes import its named functions (`authorizeSession`, `filterVisible`, `sendTurn`, `reportSessionEvent`, …), composition calls `editionModule()` (auth strategy, authz, boot, flush, `/api/me`, edition routes). `PERSONAL_EDITION` answers every hook without I/O. `loadEdition` imports `@cogpit/team` only for a team boot, and a build without it refuses to boot team edition. In the renderer, `src/edition/` holds the slot registry, the personal defaults and the one loader. |
 | Notification contract and fan-out | `shared/notifications.ts`, `server/lib/notificationDelivery.ts` | The server only *describes* a notification and posts it over the utilityProcess parent port; `electron/notifications.ts` owns the `Notification` API and reports desktop presence back. Server code never imports Electron, so the standalone server degrades to `osascript` plus ntfy push. |
 | Install-free npm launcher | `packages/cogpit-cli/`, `server/standalone-runtime.ts` | The package bundles the web app and canonical standalone server at publish time; the installed artifact runs on Node.js without repository files or a pre-existing Cogpit process. |
 | Renderer orchestration | feature hooks plus `src/components/AppShell/` | `src/App.tsx` composes state and feature boundaries; feature logic should not move back into it. |
@@ -64,6 +76,7 @@ bun run check:cogpit-memory-sync
 bun run typecheck
 bun run typecheck:tests
 bun run test:coverage
+bun run test:public
 bun run build:web
 bun run electron:build
 ```
@@ -71,6 +84,8 @@ bun run electron:build
 The canonical run includes the real loopback-listener integration suites in `app-server.test.ts` and `hub/proxy.test.ts`. A restricted sandbox must not turn `listen EPERM` into skipped tests or weaken their assertions; portable results may aid diagnosis but never replace the canonical gate.
 
 `check:audit` requires access to the package advisory service. Its allow-list is package-, advisory-, and maximum-severity-specific, rejects critical/high findings, and also fails when an allowance becomes stale. CI runs the live gate after frozen dependency installation.
+
+`test:public` runs the suite as a public clone, with an empty `editions/team/`, would (`COGPIT_WITHOUT_TEAM=1`), so core never grows a dependency on the edition package. `check:public-clone` checks the committed HEAD out into a temporary worktree without the submodule, runs lint, the checks, both typechecks, the suite and both builds there, and asserts neither build emitted the edition UI chunk.
 
 Changes under `packages/cogpit-memory` additionally run its tests, standalone build, npm build, and package-contract script. Changes under `packages/cogpit-cli` additionally run its unit tests and package-contract script. Security-sensitive changes require trust-boundary tests for literal loopback hosts, same-origin mutations, remote authentication, WebSocket upgrades, and shutdown cleanup.
 

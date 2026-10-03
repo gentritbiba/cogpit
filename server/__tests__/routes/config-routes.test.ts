@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import type { IncomingMessage } from "node:http"
 import type { NetworkInterfaceInfo } from "node:os"
 
 vi.mock("../../helpers", () => ({
@@ -21,9 +22,11 @@ vi.mock("../../helpers", () => ({
 
 vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn() }))
 
-vi.mock("../../config", () => ({
+vi.mock("../../config", async (importOriginal) => ({
+  configuredEdition: (await importOriginal<typeof import("../../config")>()).configuredEdition,
   getConfig: vi.fn(),
   getConfiguredEditionValue: vi.fn(),
+  getProjectsRoot: vi.fn(() => "/srv/projects"),
   saveConfig: vi.fn(),
   validateClaudeDir: vi.fn(),
 }))
@@ -49,7 +52,7 @@ import {
   revokeAllSessions,
 } from "../../helpers"
 import { isRateLimited } from "../../lib/rateLimit"
-import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../../config"
+import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir, type AppConfig } from "../../config"
 import { networkInterfaces } from "node:os"
 
 const mockedIsTrustedDirectLocalRequest = vi.mocked(isTrustedDirectLocalRequest)
@@ -75,11 +78,22 @@ const mockedNetworkInterfaces = vi.mocked(networkInterfaces)
 
 import type { Middleware } from "../../helpers"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
-import { registerConfigRoutes } from "../../routes/config"
+import { issueSessionResponse, registerConfigRoutes } from "../../routes/config"
+import { __resetEditionForTest, installEdition, PERSONAL_EDITION } from "../../edition"
+import type { SessionPrincipal } from "../../sessionConstants"
+import { fakeEditionAuth } from "../edition/fakeAuth"
+import { installFakeEdition } from "../edition/fakeEdition"
 
 /** Every config route here is reached from a LAN client on the default port. */
 function createLanReqRes(method: string, url: string, body?: string) {
   return createMockReqRes(method, url, { body, remoteAddress: "192.168.1.100", socketPort: 19384 })
+}
+
+/** Run an edition that hands every sign-out and settings event reported to the returned spy. */
+function reportedAuthEvents() {
+  const reportAuthEvent = vi.fn()
+  installEdition({ ...PERSONAL_EDITION, activity: { ...PERSONAL_EDITION.activity, reportAuthEvent } })
+  return reportAuthEvent
 }
 
 describe("config routes", () => {
@@ -91,6 +105,10 @@ describe("config routes", () => {
     mockedCanIssueBrowserSession.mockReturnValue(true)
     mockedGetConfiguredEditionValue.mockReturnValue(undefined)
     handlers = collectRoutes(registerConfigRoutes)
+  })
+
+  afterEach(() => {
+    __resetEditionForTest()
   })
 
   // ── GET /api/network-info ─────────────────────────────────────────────
@@ -365,6 +383,92 @@ describe("config routes", () => {
     })
   })
 
+  describe("POST /api/auth/verify in an edition with its own sign-in", () => {
+    let auth: ReturnType<typeof fakeEditionAuth>
+
+    beforeEach(() => {
+      auth = fakeEditionAuth()
+      installFakeEdition({ auth })
+    })
+
+    afterEach(() => __resetEditionForTest())
+
+    async function verify(prepare: (req: IncomingMessage) => void = () => {}) {
+      const handler = getRouteHandler(handlers, "/api/auth/verify")
+      const call = createLanReqRes("POST", "/")
+      prepare(call.req)
+      await handler(call.req, call.res, call.next)
+      return call
+    }
+
+    const asBrowser = (req: IncomingMessage) => { req.headers["x-cogpit-client"] = "1" }
+
+    it("signs even a trusted local caller in through the edition", async () => {
+      mockedIsTrustedDirectLocalRequest.mockReturnValue(true)
+
+      const { req, res } = await verify()
+
+      expect(auth.login).toHaveBeenCalledExactlyOnceWith(req, res, false)
+      expect(res.end).not.toHaveBeenCalled()
+    })
+
+    it("hands a browser login to the edition without reading the network password", async () => {
+      const { req, res } = await verify(asBrowser)
+
+      expect(auth.login).toHaveBeenCalledExactlyOnceWith(req, res, true)
+      expect(mockedGetConfig).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["an untrusted source", 403, () => { mockedHasTrustedMutationSource.mockReturnValue(false) }],
+      ["a browser login over insecure transport", 426, (req: IncomingMessage) => {
+        asBrowser(req)
+        mockedCanIssueBrowserSession.mockReturnValue(false)
+      }],
+      ["a rate-limited caller", 429, () => { mockedIsRateLimited.mockReturnValue(true) }],
+    ])("refuses %s before the edition's login", async (_caller, status, prepare) => {
+      const { res } = await verify(prepare)
+
+      expect(res._getStatus()).toBe(status)
+      expect(auth.login).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("issueSessionResponse", () => {
+    const ALICE: SessionPrincipal = { userId: "u_alice", username: "alice", role: "member" }
+
+    afterEach(() => __resetEditionForTest())
+
+    it("answers a named user's login only once the edition's logins are on disk", async () => {
+      const auth = fakeEditionAuth()
+      let finishFlush = () => {}
+      auth.sessions.flush.mockImplementationOnce(() => new Promise<void>((resolve) => { finishFlush = resolve }))
+      installFakeEdition({ auth })
+      mockedCreateSessionToken.mockReturnValue("named-session")
+      const { req, res } = createLanReqRes("POST", "/")
+
+      const answered = issueSessionResponse(req, res, false, ALICE)
+      expect(auth.sessions.flush).toHaveBeenCalledOnce()
+      expect(res.end).not.toHaveBeenCalled()
+
+      finishFlush()
+      await answered
+      expect(JSON.parse(res._getData())).toEqual({ valid: true, token: "named-session" })
+    })
+
+    it("flushes nothing for a login that names no user", async () => {
+      const auth = fakeEditionAuth()
+      installFakeEdition({ auth })
+      mockedCreateSessionToken.mockReturnValue("password-session")
+      const { req, res } = createLanReqRes("POST", "/")
+
+      await issueSessionResponse(req, res, false)
+
+      expect(auth.sessions.flush).not.toHaveBeenCalled()
+      expect(JSON.parse(res._getData())).toEqual({ valid: true, token: "password-session" })
+    })
+  })
+
   describe("browser session routes", () => {
     it("reports an authenticated session without exposing its token", () => {
       const handler = getRouteHandler(handlers, "/api/auth/session")
@@ -384,6 +488,32 @@ describe("config routes", () => {
       expect(mockedRevokeSessionToken).toHaveBeenCalledWith("current-session")
       expect(mockedClearBrowserSessionCookie).toHaveBeenCalledWith(res)
       expect(JSON.parse(res._getData())).toEqual({ valid: true })
+    })
+
+    it("reports the sign-out once its session is revoked", async () => {
+      const reportAuthEvent = reportedAuthEvents()
+      const handler = getRouteHandler(handlers, "/api/auth/logout")
+      const { req, res, next } = createLanReqRes("POST", "/")
+      mockedGetRequestSessionToken.mockReturnValueOnce("current-session")
+      mockedRevokeSessionToken.mockImplementationOnce(async () => {
+        expect(reportAuthEvent).not.toHaveBeenCalled()
+      })
+
+      await handler(req, res, next)
+
+      expect(reportAuthEvent).toHaveBeenCalledExactlyOnceWith(req, "auth.logout")
+    })
+
+    it("reports no sign-out for a request that had no session", async () => {
+      const reportAuthEvent = reportedAuthEvents()
+      const handler = getRouteHandler(handlers, "/api/auth/logout")
+      const { req, res, next } = createLanReqRes("POST", "/")
+      mockedGetRequestSessionToken.mockReturnValueOnce(null)
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(200)
+      expect(reportAuthEvent).not.toHaveBeenCalled()
     })
   })
 
@@ -467,6 +597,16 @@ describe("config routes", () => {
       expect(response.terminalApp).toBe("Ghostty")
       expect(response.editorApp).toBe("Visual Studio Code")
       expect(response.useBuiltInEditor).toBe(false)
+    })
+
+    it("reports the folder the folder browser starts in", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const { req, res, next } = createLanReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({ claudeDir: "/home/.claude" })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).projectsRoot).toBe("/srv/projects")
     })
 
     it("reports the built-in editor preference", async () => {
@@ -710,7 +850,7 @@ describe("config routes", () => {
       }))
     })
 
-    it("preserves an edition-only team bootstrap when the first full config is saved", async () => {
+    it("preserves an edition the config file selected when the first full config is saved", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({ claudeDir: "/home/.claude" })
       const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
@@ -729,6 +869,21 @@ describe("config routes", () => {
         claudeDir: "/home/.claude",
         edition: "team",
       }))
+    })
+
+    it("keeps the configured projects root and never takes one from the client", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const body = JSON.stringify({ claudeDir: "/home/.claude", projectsRoot: "/etc" })
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
+      mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
+      mockedGetConfig.mockReturnValueOnce({ claudeDir: "/home/.claude", projectsRoot: "/srv/projects" })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ projectsRoot: "/srv/projects" }))
     })
 
     it("never adopts a client-supplied edition (file/env only)", async () => {
@@ -845,6 +1000,89 @@ describe("config routes", () => {
         expect(res.end).toHaveBeenCalled()
       })
       expect(mockedRevokeAllSessions).toHaveBeenCalled()
+    })
+
+    describe("settings audit", () => {
+      const STORED = { claudeDir: "/home/.claude", networkAccess: true, networkPassword: "old-salt:old-hash", terminalApp: "Ghostty" }
+
+      async function save(settings: Record<string, unknown>) {
+        const handler = getRouteHandler(handlers, "/api/config")
+        const { req, res, next, sendBody } = createLanReqRes("POST", "/", JSON.stringify({ claudeDir: "/home/.claude", ...settings }))
+        mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
+        mockedGetConfig.mockReturnValueOnce({ ...STORED })
+        mockedSaveConfig.mockResolvedValueOnce(undefined)
+        await handler(req, res, next)
+        sendBody()
+        await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+        return { req, status: res._getStatus() }
+      }
+
+      it("reports the names of the settings a save changed, never their values", async () => {
+        const reportAuthEvent = reportedAuthEvents()
+        mockedValidatePasswordStrength.mockReturnValueOnce(null)
+        mockedHashPassword.mockReturnValueOnce("new-salt:new-hash")
+
+        const { req, status } = await save({
+          networkAccess: true,
+          networkPassword: "a-new-network-passphrase",
+          terminalApp: "Ghostty",
+          useBuiltInEditor: true,
+        })
+
+        expect(status).toBe(200)
+        expect(reportAuthEvent).toHaveBeenCalledExactlyOnceWith(req, "config.change", {
+          keys: ["networkPassword", "useBuiltInEditor"],
+        })
+      })
+
+      it("reports nothing for a save that changed nothing", async () => {
+        const reportAuthEvent = reportedAuthEvents()
+
+        expect((await save({ networkAccess: true, terminalApp: "Ghostty" })).status).toBe(200)
+
+        expect(reportAuthEvent).not.toHaveBeenCalled()
+      })
+
+      it("compares each save with the settings it replaced when two saves overlap", async () => {
+        const reportAuthEvent = reportedAuthEvents()
+        let stored: AppConfig = { ...STORED }
+        mockedGetConfig.mockImplementation(() => stored)
+        mockedSaveConfig.mockImplementation(async (config) => { stored = config })
+        let finishFirstValidation: () => void = () => undefined
+        mockedValidateClaudeDir
+          .mockReturnValueOnce(new Promise((resolve) => {
+            finishFirstValidation = () => resolve({ valid: true, resolved: "/home/.claude" })
+          }))
+          .mockResolvedValue({ valid: true, resolved: "/home/.claude" })
+
+        const saves = [{ terminalApp: "iTerm" }, { terminalApp: "Ghostty" }].map((settings) => {
+          const handler = getRouteHandler(handlers, "/api/config")
+          const body = JSON.stringify({ claudeDir: "/home/.claude", networkAccess: true, ...settings })
+          const { req, res, next, sendBody } = createLanReqRes("POST", "/", body)
+          void handler(req, res, next)
+          sendBody()
+          return { req, res }
+        })
+        await vi.waitFor(() => expect(mockedValidateClaudeDir).toHaveBeenCalledOnce())
+        finishFirstValidation()
+        await vi.waitFor(() => saves.forEach(({ res }) => expect(res.end).toHaveBeenCalled()))
+
+        expect(stored.terminalApp).toBe("Ghostty")
+        expect(reportAuthEvent.mock.calls).toEqual([
+          [saves[0].req, "config.change", { keys: ["terminalApp"] }],
+          [saves[1].req, "config.change", { keys: ["terminalApp"] }],
+        ])
+      })
+
+      it("reports nothing for a save it refused", async () => {
+        const reportAuthEvent = reportedAuthEvents()
+        mockedValidatePasswordStrength.mockReturnValueOnce("Password must be at least 16 characters")
+
+        expect((await save({ networkAccess: true, networkPassword: "short" })).status).toBe(400)
+
+        expect(reportAuthEvent).not.toHaveBeenCalled()
+        expect(mockedSaveConfig).not.toHaveBeenCalled()
+      })
     })
 
     it("returns 400 for invalid JSON body", async () => {

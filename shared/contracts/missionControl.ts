@@ -3,6 +3,8 @@
  * behind the Mission Control grid. Browser-safe.
  */
 
+import type { ListedAccess } from "./sessionAccess"
+
 export interface MissionControlFileChange {
   path: string
   additions: number
@@ -111,6 +113,7 @@ export interface UserQuestionsResponse {
 
 /** Response body of GET /api/mission-control. */
 export interface MissionControlResponse {
-  summaries: MissionControlSummary[]
+  /** Where the server enforces session access, each carries the caller's `access`. */
+  summaries: Array<MissionControlSummary & { access?: ListedAccess }>
   generatedAt: string
 }

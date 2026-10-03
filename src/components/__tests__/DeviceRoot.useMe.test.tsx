@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DeviceRoot } from "@/components/DeviceRoot"
 import { can, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { getActiveIdentity, __resetIdentityForTest } from "@/lib/device"
-import { MEMBER_CAPABILITIES, type MeResponse } from "../../../shared/contracts/team"
+import { type MeResponse, NO_CAPABILITIES } from "../../../shared/contracts/identity"
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -44,8 +44,8 @@ vi.mock("@/App", async () => {
 const MEMBER_ME: MeResponse = {
   authenticated: true,
   edition: "team",
-  user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
-  capabilities: MEMBER_CAPABILITIES,
+  user: { id: "u_1", username: "alice", displayName: "Alice" },
+  capabilities: NO_CAPABILITIES,
 }
 
 function identityResponse(): Response {

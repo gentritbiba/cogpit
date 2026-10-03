@@ -134,3 +134,40 @@ describe("LiveSessionsFeedback when focused on a project", () => {
     expect(screen.getByText("No matching sessions in App")).toBeInTheDocument()
   })
 })
+
+describe("LiveSessionsFeedback left empty by the session list filter", () => {
+  const base = {
+    fetchError: null,
+    showEmpty: true,
+    searching: false,
+    loading: false,
+    sessionCount: 0,
+    hiddenArchivedCount: 0,
+    onRetry: vi.fn(),
+    onShowArchived: vi.fn(),
+  }
+  const filterEmpty = <p>Nothing under this filter</p>
+
+  it("shows what the filter stands in with", () => {
+    render(<LiveSessionsFeedback {...base} filterEmpty={filterEmpty} />)
+
+    expect(screen.getByText("Nothing under this filter")).toBeInTheDocument()
+    expect(screen.queryByText("No sessions yet")).not.toBeInTheDocument()
+  })
+
+  it("keeps the plain empty state for an unfiltered list and for a search", () => {
+    const { rerender } = render(<LiveSessionsFeedback {...base} filterEmpty={null} />)
+    expect(screen.getByText("No sessions yet")).toBeInTheDocument()
+
+    rerender(<LiveSessionsFeedback {...base} searching filterEmpty={filterEmpty} />)
+    expect(screen.getByText("No matching sessions")).toBeInTheDocument()
+    expect(screen.queryByText("Nothing under this filter")).not.toBeInTheDocument()
+  })
+
+  it("lets a list emptied by the archive filter explain itself first", () => {
+    render(<LiveSessionsFeedback {...base} hiddenArchivedCount={2} filterEmpty={filterEmpty} />)
+
+    expect(screen.getByText("Everything is archived")).toBeInTheDocument()
+    expect(screen.queryByText("Nothing under this filter")).not.toBeInTheDocument()
+  })
+})

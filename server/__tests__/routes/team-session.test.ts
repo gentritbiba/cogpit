@@ -452,15 +452,16 @@ describe("team-session routes", () => {
       )
     })
 
-    it("returns 500 on config read error", async () => {
+    it("answers 404 without the error for a config it cannot read", async () => {
       const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
-      mockedReadFile.mockRejectedValueOnce(new Error("EPERM"))
+      mockedReadFile.mockRejectedValueOnce(new Error("EPERM: /home/cogpit/.claude/teams/my-team/config.json"))
 
       await handler(req, res, next)
 
-      expect(res._getStatus()).toBe(500)
+      expect(res._getStatus()).toBe(404)
+      expect(JSON.parse(res._getData())).toEqual({ error: "Team not found" })
     })
 
     it("finds subagent session by matching member name in first line", async () => {

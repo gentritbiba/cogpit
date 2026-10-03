@@ -2,6 +2,7 @@ import { hostname } from "node:os"
 import { isAbsolute, resolve } from "node:path"
 import { AGENT_KINDS, type AgentKind } from "../../shared/session/agent-descriptors"
 import type { PendingInput, PendingInputResponse } from "../agents/pendingInput"
+import type { VisibilityCheck } from "../edition"
 import { deviceJson } from "../hub/deviceRequest"
 import { clearSessionHandoff, recordSessionOrigin, sessionChildren, sessionOrigin } from "../lib/sessionOrigins"
 import { DEFAULT_WAIT_SECONDS, isSettled, parseWaitSeconds, type SessionState } from "../lib/sessionWait"
@@ -50,6 +51,8 @@ export interface CliInvocation {
    * could not call the workspace routes must not reach them through here.
    */
   admin: boolean
+  /** Which sessions the caller may see, and so which projects it may list. */
+  visible: VisibilityCheck
   signal?: AbortSignal
 }
 
@@ -623,11 +626,11 @@ async function devicesCommand(_inv: CliInvocation, rest: string[]): Promise<CliO
   return json({ devices })
 }
 
-async function projectsCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+async function projectsCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(rest, ["device"], [])
   const deviceName = args.values.get("device")
   const host = deviceName === undefined ? localHost : hostNamed(deviceName)
-  const projects = await host.projects()
+  const projects = await host.projects(inv.visible)
   return json({
     ...deviceField(host),
     projects: projects.map((project) => ({

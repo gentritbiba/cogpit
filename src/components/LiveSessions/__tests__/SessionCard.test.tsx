@@ -2,6 +2,7 @@ import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { SessionCard } from "../SessionCard"
 import type { ActiveSessionInfo, RunningProcess } from "../types"
 
@@ -50,7 +51,10 @@ function renderCard(overrides: Partial<ActiveSessionInfo> = {}, props: Partial<P
   return { onSelectSession }
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  __resetEditionUiForTest()
+})
 
 /** The card's clickable body, as opposed to the hover preview beside it. */
 function cardBody() {
@@ -58,6 +62,13 @@ function cardBody() {
 }
 
 describe("SessionCard", () => {
+  it("carries the edition's badges for the session, given the row's access", () => {
+    __installEditionUiForTest({ SessionBadges: ({ access }) => <span>Badge: {access?.level}</span> })
+    renderCard({ access: { level: "view", mine: false } })
+
+    expect(cardBody().getByText("Badge: view")).toBeInTheDocument()
+  })
+
   it("shows the whole title, the last prompt, branch, turns and selects on click", () => {
     const title = "A title long enough that the compact row would have cut it off before the end"
     const { onSelectSession } = renderCard({

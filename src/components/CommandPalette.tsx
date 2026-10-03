@@ -73,6 +73,16 @@ export interface CommandPaletteDevice {
   isActive: boolean
 }
 
+/** An entry the host adds to the navigation group, such as opening an edition's main view. */
+export interface CommandPaletteExtraAction {
+  id: string
+  label: string
+  /** Search terms besides the label. */
+  keywords: string
+  icon: ComponentType
+  onSelect: () => void
+}
+
 export interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -123,6 +133,7 @@ export interface CommandPaletteProps {
   projects?: CommandPaletteProject[]
   recentSessions?: CommandPaletteSession[]
   devices?: CommandPaletteDevice[]
+  extraActions?: CommandPaletteExtraAction[]
   loadingNavigation?: boolean
 }
 
@@ -180,6 +191,7 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onToggleMissionControl,
       shortcutLabel("missionControl"),
     ),
+    ...(props.extraActions ?? []).map((extra) => action(extra.id, extra.label, extra.keywords, extra.icon, extra.onSelect)),
     action(
       "new-session",
       "Start a new session",

@@ -47,6 +47,7 @@ const remove = vi.fn(async () => ({ ok: true as const }))
 const setArchived = vi.fn(async (_name: string, _archived: boolean) => ({ ok: true as const }))
 const stop = vi.fn(async () => ({ ok: true as const }))
 const noop = vi.fn(async () => ({ ok: true as const }))
+const refreshList = vi.fn(async () => {})
 const closePanel = vi.fn()
 const socketSessions: (string | null)[] = []
 
@@ -56,6 +57,8 @@ let socketState: "not-installed" | "stopped" | "connecting" | "live" = "live"
 let socketStatus: BrowserSocketStatus = "connected"
 let socketError: string | null = null
 let listError: string | null = null
+/** Whether a poll has ever brought the browser list back. */
+let listRead = true
 let lastFrameAt: number | null = null
 let frame: BrowserFrame | null = null
 let tabs: BrowserTab[] = []
@@ -63,10 +66,11 @@ let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
   return {
-    status: enabled
+    status: enabled && listRead
       ? { installed, binaryPath: installed ? "/usr/local/bin/agent-browser" : null, sessions: browsers }
       : null,
     error: listError,
+    refresh: refreshList,
     create: noop,
     remove,
     stop,
@@ -178,6 +182,7 @@ function contextOf(session: ParsedSession | null = null): WorkspacePanelContext 
     projectPath: "/repo",
     hasFileChanges: false,
     canAccessHostFiles: true,
+    canUseBrowser: true,
   }
 }
 
@@ -204,6 +209,7 @@ beforeEach(() => {
   socketStatus = "connected"
   socketError = null
   listError = null
+  listRead = true
   lastFrameAt = Date.now()
   frame = null
   tabs = []
@@ -370,6 +376,29 @@ describe("BrowserPanel", () => {
     expect(screen.getByText("Could not read the browser list (500)")).toBeInTheDocument()
   })
 
+  it("offers a retry instead of connecting forever when the list was never read", async () => {
+    listRead = false
+    listError = "Could not read the browser list (502)"
+    const { user } = setup()
+
+    expect(screen.getByText("Could not load the browsers")).toBeInTheDocument()
+    expect(screen.getAllByText("Could not read the browser list (502)")).toHaveLength(1)
+    expect(screen.queryByText(/Connecting to/)).not.toBeInTheDocument()
+    expect(socketSessions.every((session) => session === null)).toBe(true)
+
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(refreshList).toHaveBeenCalledOnce()
+  })
+
+  it("keeps connecting while the first read of the list is still out", () => {
+    listRead = false
+    setup()
+
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to default")
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+  })
+
   it("keeps the session bar out of the frame path", () => {
     const { rerender } = setup()
     const before = sessionBarRenders
@@ -413,5 +442,73 @@ describe("BrowserPanel archiving", () => {
     browsers = [browserOf(), browserOf({ name: "work", isDefault: false, running: false, archived: true })]
     setup(contextOf(sessionDriving("agent-browser --session work open https://example.com")))
     expect(selectedName()).toContain("default")
+  })
+})
+
+describe("BrowserPanel for a caller with an account of their own", () => {
+  const MINE = browserOf({ name: "user-u_bob", isDefault: false, mine: true, control: "own" })
+  const ALICES = browserOf({
+    name: "user-u_alice",
+    isDefault: false,
+    account: "Alice",
+    control: "watch",
+    driverSessionId: "cogpit-1",
+    lastUsedAt: "2026-09-06T10:00:00.000Z",
+  })
+
+  it("shows their own browser when what was picked before is not listed", async () => {
+    browsers = [MINE]
+    setup()
+
+    await waitFor(() => expect(selectedName()).toContain("Your browser"))
+    expect(socketSessions).not.toContain("default")
+    expect(socketSessions).toContain("user-u_bob")
+  })
+
+  it("says where their agents' browsers will appear before any agent has browsed", async () => {
+    socketState = "stopped"
+    browsers = [{ ...MINE, running: false }]
+    const { user } = setup()
+
+    expect(screen.getByText("Your agents’ browsers show up here")).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Page to open"), "example.com")
+    await user.click(screen.getByRole("button", { name: "Open" }))
+    expect(send).toHaveBeenCalledWith({ type: "launch", url: "example.com" })
+  })
+
+  it("streams a browser they may only watch without taking input", async () => {
+    browsers = [MINE, ALICES]
+    tabs = [{ targetId: "t2", url: "https://example.test", title: "Example" }]
+    const { user } = setup()
+
+    await user.click(screen.getByRole("button", { name: "Switch browser" }))
+    await user.click(await screen.findByRole("button", { name: "Switch to Alice's browser" }))
+
+    await waitFor(() => expect(screen.getByRole("img", { name: "Browser viewport, view only" })).toBeInTheDocument())
+    expect(screen.queryByRole("application", { name: "Browser viewport" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Reload" })).toBeDisabled()
+    expect(screen.getByLabelText("Page URL")).toHaveAttribute("readonly")
+    expect(screen.queryByRole("button", { name: "Close tab: Example" })).not.toBeInTheDocument()
+    expect(screen.getAllByText("View only").length).toBeGreaterThan(0)
+    // Which tab they watch is still theirs to pick.
+    await user.click(screen.getByRole("button", { name: "Example" }))
+    expect(send).toHaveBeenCalledWith({ type: "follow", targetId: "t2" })
+  })
+
+  it("offers no way to open a stopped browser they may only watch", () => {
+    socketState = "stopped"
+    browsers = [MINE, { ...ALICES, running: false }]
+    setup(contextOf(sessionDriving("agent-browser open https://example.com")))
+
+    expect(screen.getByText(/isn.t running/)).toBeInTheDocument()
+    expect(screen.queryByLabelText("Page to open")).not.toBeInTheDocument()
+  })
+
+  it("follows an agent that named no browser into the session owner's own", async () => {
+    browsers = [MINE, { ...ALICES, control: "drive" }]
+    setup(contextOf(sessionDriving("agent-browser open https://example.com")))
+
+    await waitFor(() => expect(selectedName()).toContain("Alice's browser"))
+    expect(socketSessions).toContain("user-u_alice")
   })
 })

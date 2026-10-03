@@ -13,6 +13,8 @@ interface RateLimitBannerProps {
   dirName: string
   fileName: string
   cwd: string | null
+  /** The user may open a terminal here and drive this session. */
+  terminal: boolean
 }
 
 /** How the runtime's own name for an allowance reads in a sentence. */
@@ -53,7 +55,7 @@ function resetText(resetsAt: number | null): string | null {
  * a window on the machine running the session, and copying it is their way
  * through.
  */
-export function RateLimitBanner({ block, dirName, fileName, cwd }: RateLimitBannerProps) {
+export function RateLimitBanner({ block, dirName, fileName, cwd, terminal }: RateLimitBannerProps) {
   const descriptor = descriptorForDirName(dirName)
   const command = getResumeCommand(descriptor.kind, sessionIdFromFileName(fileName), cwd ?? undefined)
   const reset = resetText(block.resetsAt)
@@ -61,7 +63,7 @@ export function RateLimitBanner({ block, dirName, fileName, cwd }: RateLimitBann
   // re-checking it here is belt and braces — but it is what keeps the promise
   // in this copy true no matter which runtime raised the block.
   const lowPriority = block.lowPriority && descriptor.capabilities.lowPriorityInTerminal
-  const canOpenTerminal = lowPriority && !isRemoteDeviceActive()
+  const canOpenTerminal = lowPriority && terminal && !isRemoteDeviceActive()
 
   return (
     <Alert role="status" className="rounded-none border-x-0 border-t-0 px-4 py-2">

@@ -21,6 +21,7 @@ import { ToolCallIndex } from "@/components/stats/ToolCallIndex"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { useCapability } from "@/hooks/useCapability"
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,8 @@ export const StatsPanel = memo(function StatsPanel({
   backgroundAgents,
 }: StatsPanelProps) {
   const { isMobile } = useAppContext()
-  const { session: sessionOrNull, sessionSource } = useSessionContext()
+  const { session: sessionOrNull, sessionSource, permissions } = useSessionContext()
+  const canKillAny = useCapability("killAny")
   const session = sessionOrNull!
   const { turns } = session
   const costRevision = [
@@ -127,6 +129,7 @@ export const StatsPanel = memo(function StatsPanel({
           <BackgroundServers
             cwd={session.cwd}
             turns={turns}
+            canStop={canKillAny && permissions.stop}
             onToggleServer={onToggleServer}
             onServersChanged={onServersChanged}
           />
@@ -134,6 +137,7 @@ export const StatsPanel = memo(function StatsPanel({
             session={session}
             sessionSource={sessionSource}
             bgAgents={backgroundAgents ?? []}
+            canStop={permissions.stop}
             onLoadSession={onLoadSession}
           />
         </TabsContent>

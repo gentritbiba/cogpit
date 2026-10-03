@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { authFetch } from "@/lib/auth"
-
-export interface CogpitNotification {
-  id: string
-  at: string
-  title: string
-  body: string
-  kind: "turnComplete" | "permission" | "system"
-  sessionId: string | null
-  dirName: string | null
-  readAt: string | null
-}
+import { editionUi } from "@/edition/registry"
+import type { CogpitNotification } from "../../shared/notifications"
 
 const POLL_INTERVAL_MS = 15_000
 
@@ -34,16 +25,24 @@ export function useNotifications(): UseNotifications {
       const res = await authFetch("/api/notifications?limit=100")
       if (!res.ok) return
       const data = await res.json() as { notifications?: CogpitNotification[] }
-      if (Array.isArray(data.notifications)) setNotifications(data.notifications)
+      if (!Array.isArray(data.notifications)) return
+      setNotifications(data.notifications)
+      editionUi().onInboxRead?.(data.notifications)
     } catch {
       // Transient network failure — the next poll retries.
     }
   }, [])
 
+  // Also read on focus: someone coming back to the app sees what arrived meanwhile.
   useEffect(() => {
     void refresh()
-    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
-    return () => window.clearInterval(timer)
+    const onFocus = () => void refresh()
+    const timer = window.setInterval(onFocus, POLL_INTERVAL_MS)
+    window.addEventListener("focus", onFocus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener("focus", onFocus)
+    }
   }, [refresh])
 
   // Marks read optimistically first: the local state is good enough until the

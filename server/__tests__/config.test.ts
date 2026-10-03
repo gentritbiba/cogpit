@@ -400,7 +400,7 @@ describe("loadConfig", () => {
     expect(config?.claudeDirIsPlaceholder).toBeUndefined()
   })
 
-  it("loads the team edition flag", async () => {
+  it("loads the edition the config file selects", async () => {
     const { loadConfig } = await import("../config")
     mockedReadFile.mockResolvedValueOnce(JSON.stringify({
       claudeDir: "/home/.claude",
@@ -455,7 +455,7 @@ describe("saveConfig", () => {
     expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
   })
 
-  it("persists the team edition flag", async () => {
+  it("persists the edition the config file selects", async () => {
     const { saveConfig } = await import("../config")
     mockedWriteFile.mockResolvedValueOnce(undefined)
 
@@ -463,6 +463,57 @@ describe("saveConfig", () => {
 
     const written = JSON.parse(mockedWriteFile.mock.calls[0][1] as string)
     expect(written.edition).toBe("team")
+  })
+})
+
+// ── getProjectsRoot ─────────────────────────────────────────────────────
+
+describe("getProjectsRoot", () => {
+  const loadWith = async (file: Record<string, unknown>) => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({ claudeDir: "/home/.claude", ...file }))
+    return loadConfig()
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env.COGPIT_PROJECTS_ROOT
+  })
+
+  afterEach(() => {
+    delete process.env.COGPIT_PROJECTS_ROOT
+    vi.restoreAllMocks()
+  })
+
+  it("starts in the home directory when nothing names a root", async () => {
+    const { getProjectsRoot } = await import("../config")
+    await loadWith({})
+    expect(getProjectsRoot()).toBe("/home/test")
+  })
+
+  it("takes projectsRoot from the config file, normalized", async () => {
+    const { getProjectsRoot } = await import("../config")
+    const config = await loadWith({ projectsRoot: "/srv/projects/" })
+    expect(config?.projectsRoot).toBe(resolve("/srv/projects"))
+    expect(getProjectsRoot()).toBe(resolve("/srv/projects"))
+  })
+
+  it("lets COGPIT_PROJECTS_ROOT win over the config file", async () => {
+    const { getProjectsRoot } = await import("../config")
+    await loadWith({ projectsRoot: "/srv/projects" })
+    process.env.COGPIT_PROJECTS_ROOT = "/Users/owner"
+    expect(getProjectsRoot()).toBe(resolve("/Users/owner"))
+  })
+
+  it("ignores a relative root with a warning and falls back", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { getProjectsRoot } = await import("../config")
+    const config = await loadWith({ projectsRoot: "projects" })
+    process.env.COGPIT_PROJECTS_ROOT = "relative/dir"
+    expect(config?.projectsRoot).toBeUndefined()
+    expect(getProjectsRoot()).toBe("/home/test")
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("COGPIT_PROJECTS_ROOT"))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("projectsRoot in the config file"))
   })
 })
 

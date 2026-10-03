@@ -23,7 +23,14 @@ export default tseslint.config(
     },
   },
   {
-    files: ['server/**/*.ts'],
+    files: [
+      'server/**/*.ts',
+      'editions/team/index.ts',
+      'editions/team/server/**/*.ts',
+      'editions/team/tools/**/*.ts',
+      'editions/team/tests/**/*.ts',
+    ],
+    ignores: ['editions/team/tests/ui/**'],
     rules: {
       'react-hooks/rules-of-hooks': 'off',
       'react-hooks/exhaustive-deps': 'off',

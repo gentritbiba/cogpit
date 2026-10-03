@@ -169,7 +169,8 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/my-dir/session.jsonl?tail=30"
+        "/api/sessions/my-dir/session.jsonl?tail=30",
+        { background: false },
       )
       expect(opts.workerParse).toHaveBeenCalled()
       expect(opts.dispatch).toHaveBeenCalledWith(
@@ -216,7 +217,8 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30`
+        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30`,
+        { background: false },
       )
     })
 
@@ -360,7 +362,8 @@ describe("useSessionActions", () => {
       )
       // Second call goes to the tail endpoint — not the full-file endpoint.
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/member-dir/session.jsonl?tail=30"
+        "/api/sessions/member-dir/session.jsonl?tail=30",
+        { background: false },
       )
       expect(opts.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -518,6 +521,22 @@ describe("useSessionActions", () => {
 
       expect(opts.dispatch).toHaveBeenCalledWith({
         type: "GO_HOME",
+        isMobile: true,
+      })
+    })
+  })
+
+  describe("handleCloseSession", () => {
+    it("dispatches CLOSE_SESSION with isMobile", () => {
+      const opts = makeDefaultOpts()
+      opts.isMobile = true
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      act(() => result.current.handleCloseSession())
+
+      expect(opts.dispatch).toHaveBeenCalledWith({
+        type: "CLOSE_SESSION",
         isMobile: true,
       })
     })

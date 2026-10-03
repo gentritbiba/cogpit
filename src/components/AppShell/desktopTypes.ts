@@ -28,6 +28,8 @@ export type DesktopPanels = Pick<
   | "closeWorkspacePanel"
   | "handleToggleConfig"
   | "handleToggleMission"
+  | "openMainView"
+  | "closeMainView"
   | "handleOpenProjectSwitcher"
   | "handleCloseProjectSwitcher"
   | "handleToggleThemeSelector"
@@ -129,6 +131,7 @@ export interface DesktopChrome {
   onCollapseAll: () => void
   keyboardShortcutsOpen: boolean
   onKeyboardShortcutsOpenChange: Dispatch<SetStateAction<boolean>>
+  onLogout: () => void
 }
 
 export interface DesktopAppShellProps {

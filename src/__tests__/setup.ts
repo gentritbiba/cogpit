@@ -1,4 +1,12 @@
 import "@testing-library/jest-dom/vitest"
+import { vi } from "vitest"
+
+// No power fails under test, and a real flush costs milliseconds per durable
+// write on macOS. The suites that check what reaches the disk unmock it.
+vi.mock("../../server/lib/diskSync", () => ({
+  syncFile: async () => {},
+  syncDirectory: async () => {},
+}))
 
 // jsdom lacks ResizeObserver (needed by react-zoom-pan-pinch)
 if (typeof globalThis.ResizeObserver === "undefined") {

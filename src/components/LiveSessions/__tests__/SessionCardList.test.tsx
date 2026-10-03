@@ -2,12 +2,31 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SessionCardList } from "../SessionCardList"
+import type { SessionRowProps } from "../SessionRow"
 import type { ActiveSessionInfo } from "../types"
+import type { SessionAccessLevel } from "../../../../shared/contracts/sessionAccess"
+
+const ROW_ACTIONS = [
+  "onKill",
+  "onDuplicateSession",
+  "onDeleteSession",
+  "onArchiveSession",
+  "onUnarchiveSession",
+  "onResumeSession",
+] as const
 
 vi.mock("../SessionCard", () => ({
-  SessionCard: ({ session, teammateCount, projectLabel, showProject }: { session: ActiveSessionInfo; teammateCount?: number; projectLabel?: string; showProject?: boolean }) => (
-    <div data-testid={`card-${session.sessionId}`}>{projectLabel} {teammateCount ? `team:${teammateCount}` : null}{showProject ? `project:${projectLabel}` : null}</div>
-  ),
+  SessionCard: (props: SessionRowProps & { teammateCount?: number; projectLabel?: string; showProject?: boolean }) => {
+    const { session, teammateCount, projectLabel, showProject } = props
+    return (
+      <div
+        data-testid={`card-${session.sessionId}`}
+        data-actions={ROW_ACTIONS.filter((action) => props[action]).join(",")}
+      >
+        {projectLabel} {teammateCount ? `team:${teammateCount}` : null}{showProject ? `project:${projectLabel}` : null}
+      </div>
+    )
+  },
 }))
 vi.mock("../SessionRow", () => ({
   SessionRow: ({ session }: { session: ActiveSessionInfo }) => <div data-testid={`row-${session.sessionId}`} />,
@@ -50,6 +69,40 @@ function renderList(
 }
 
 afterEach(cleanup)
+
+describe("SessionCardList access", () => {
+  function renderWithActions(access?: SessionAccessLevel) {
+    render(
+      <SessionCardList
+        sessions={[session("s", access ? { access: { level: access, mine: access === "own" } } : {})]}
+        older={{ canLoad: false, loading: false, load: vi.fn() }}
+        activeSessionKey={null}
+        procBySession={new Map()}
+        killingPids={new Set()}
+        newlyCompleted={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+        onDuplicateSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onArchiveSession={vi.fn()}
+        onUnarchiveSession={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    )
+    return screen.getByTestId("card-s").dataset.actions?.split(",")
+  }
+
+  it.each([
+    [undefined, ROW_ACTIONS],
+    ["own", ROW_ACTIONS],
+    ["interact", ["onKill", "onDuplicateSession", "onResumeSession"]],
+    ["view", ["onDuplicateSession"]],
+  ] as const)("offers a %s session only the actions its level allows", (level, actions) => {
+    expect(renderWithActions(level)).toEqual(actions)
+  })
+})
 
 describe("SessionCardList", () => {
   it("separates the run of cards by when they were last touched, newest first", () => {

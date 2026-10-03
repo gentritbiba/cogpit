@@ -2,7 +2,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { afterEach, describe, expect, it, vi } from "vitest"
 vi.mock("../../config", () => ({ getConfig: () => ({ networkAccess: true, networkPassword: "fixture-network-hash" }) }))
-vi.mock("../../team/edition", () => ({ isTeamEdition: () => false }))
 import { authMiddleware, createSessionToken, revokeAllSessions, revokeSessionToken } from "../../security"
 import { HubPluginRelay, isPluginRelayHeader, type PluginRelayRequest, type PluginRelayResponse } from "../../hub/pluginRelay"
 import { invalidateDeviceConnections } from "../../hub/connection-invalidation"

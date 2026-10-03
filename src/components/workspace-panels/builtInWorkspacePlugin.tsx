@@ -165,7 +165,7 @@ export const builtInWorkspacePlugin = definePlugin({
       minSize: "360px",
       maxSize: "75%",
       keepAlive: true,
-      when: (context) => context.canAccessHostFiles,
+      when: (context) => context.canUseBrowser,
     },
     {
       id: "file-changes",

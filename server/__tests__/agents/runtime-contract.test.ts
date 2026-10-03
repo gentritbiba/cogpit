@@ -25,7 +25,7 @@ const { sdk, codex, copilot, registry } = vi.hoisted(() => ({
     getSDKUserQuestions: vi.fn(() => [] as unknown[]),
     listUserQuestionSessionIds: vi.fn(() => [] as string[]),
     resolvePermission: vi.fn(() => ({ found: false })),
-    resolveAllPermissions: vi.fn(() => [] as string[]),
+    resolveAllPermissions: vi.fn(() => [] as unknown[]),
     resolveUserQuestion: vi.fn(() => ({ found: false })),
   },
   codex: {
@@ -40,17 +40,21 @@ const { sdk, codex, copilot, registry } = vi.hoisted(() => ({
     call: vi.fn(async () => ({})),
   },
   copilot: {
+    createSession: vi.fn(async () => {}),
+    send: vi.fn(async () => {}),
     isSessionActive: vi.fn((_sessionId: string) => false),
     isTurnActive: vi.fn((_sessionId: string) => false),
     getActiveSessionIds: vi.fn(() => [] as string[]),
     getPendingPermissions: vi.fn(() => [] as unknown[]),
     getPendingUserInputs: vi.fn(() => [] as unknown[]),
+    getPendingExitPlans: vi.fn((_sessionId?: string) => [] as unknown[]),
     respondToPermission: vi.fn(async () => true),
     answerUserInput: vi.fn(),
     abort: vi.fn(async () => {}),
     destroySession: vi.fn(async () => {}),
     deleteSession: vi.fn(async () => ({ success: true })),
     getAccountQuota: vi.fn(async () => ({ entitlement: 1 })),
+    getSessionUsage: vi.fn(async (_sessionId: string) => ({})),
     shutdown: vi.fn(async () => [] as Error[]),
   },
   registry: {
@@ -108,7 +112,8 @@ vi.mock("../../agents/index", () => ({
 }))
 
 import { unlink } from "../../helpers"
-import { allRuntimes, isSessionActive, runtimeFor, runtimeForDirName } from "../../agents/runtimes"
+import { createSDKSession, resumeSDKSession, sendSDKMessage, type SDKSessionState } from "../../sdk-session"
+import { allRuntimes, isSessionActive, runtimeFor, runtimeForDirName, runtimeForSession } from "../../agents/runtimes"
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -125,6 +130,7 @@ beforeEach(() => {
   copilot.getActiveSessionIds.mockReturnValue([])
   copilot.getPendingPermissions.mockReturnValue([])
   copilot.getPendingUserInputs.mockReturnValue([])
+  copilot.getPendingExitPlans.mockReturnValue([])
 })
 
 describe("runtime registry", () => {
@@ -194,6 +200,83 @@ describe.each<AgentKind>(["claude", "codex", "copilot"])("%s runtime", (kind) =>
   })
 })
 
+describe("reporting a new session's id", () => {
+  it("tells a Claude caller the id before the SDK query is spawned", async () => {
+    const onSessionId = vi.fn()
+    vi.mocked(createSDKSession).mockReturnValueOnce({} as SDKSessionState)
+
+    const started = await runtimeFor("claude").start({
+      dirName: "-tmp-project",
+      cwd: "/tmp/project",
+      message: "hi",
+      onSessionId,
+    })
+
+    expect(onSessionId.mock.calls).toEqual([[started.sessionId]])
+    expect(onSessionId.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(createSDKSession).mock.invocationCallOrder[0])
+  })
+
+  it("tells a Copilot caller the id even when the session cannot be created", async () => {
+    const onSessionId = vi.fn()
+    copilot.createSession.mockRejectedValueOnce(new Error("rpc connection closed"))
+
+    await expect(runtimeFor("copilot").start({
+      dirName: runtimeFor("copilot").descriptor.dirName.encode("/tmp/project"),
+      cwd: "/tmp/project",
+      message: "hi",
+      onSessionId,
+    })).rejects.toMatchObject({ code: "SPAWN_FAILED" })
+
+    expect(onSessionId.mock.calls).toEqual([["generated-uuid"]])
+  })
+
+  it.each<AgentKind>(["claude", "copilot"])("still starts a %s session when the caller's onSessionId throws", async (kind) => {
+    vi.mocked(createSDKSession).mockReturnValueOnce({} as SDKSessionState)
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const started = await runtimeFor(kind).start({
+        dirName: runtimeFor(kind).descriptor.dirName.encode("/tmp/project"),
+        cwd: "/tmp/project",
+        message: "hi",
+        onSessionId: () => { throw new Error("owner store unavailable") },
+      })
+      expect(started.sessionId).toBe("generated-uuid")
+      expect(logged).toHaveBeenCalled()
+    } finally {
+      logged.mockRestore()
+    }
+  })
+})
+
+describe("a follow-up to a live Claude query", () => {
+  /** A query the SDK still holds, marking itself running as it takes a message the way the real one does. */
+  function liveQuery(running: boolean): void {
+    const state = { running }
+    sdk.sdkSessions.set("session-1", state)
+    sdk.isSDKQueryLive.mockReturnValue(true)
+    vi.mocked(sendSDKMessage).mockImplementationOnce(() => {
+      state.running = true
+      return state as unknown as SDKSessionState
+    })
+  }
+
+  it("starts a turn when the query is idle between turns", async () => {
+    liveQuery(false)
+
+    await expect(runtimeFor("claude").send("session-1", { message: "next" }))
+      .resolves.toEqual({ delivery: "started" })
+    expect(resumeSDKSession).not.toHaveBeenCalled()
+  })
+
+  it("joins the turn the query is running", async () => {
+    liveQuery(true)
+
+    await expect(runtimeFor("claude").send("session-1", { message: "also" }))
+      .resolves.toEqual({ delivery: "enqueued" })
+  })
+})
+
 describe("agent asymmetries the registry must not flatten", () => {
   it("interrupts Codex turns but destroys Copilot sessions on stop-all", async () => {
     codex.listActiveTurns.mockReturnValue([
@@ -236,6 +319,26 @@ describe("agent asymmetries the registry must not flatten", () => {
     expect(registry.terminateTrackedSession).not.toHaveBeenCalled()
   })
 
+  it("holds a Copilot session whose only state is a plan waiting for review", () => {
+    copilot.getPendingExitPlans.mockImplementation((sessionId?: string) => (
+      sessionId === "opening-1" ? [{ sessionId, requestId: "plan-1" }] : []
+    ))
+
+    expect(runtimeForSession("opening-1")?.kind).toBe("copilot")
+    expect(runtimeForSession("elsewhere")).toBeNull()
+  })
+
+  it("asks Copilot for the live usage of the sessions named, or of every open one", async () => {
+    copilot.getActiveSessionIds.mockReturnValue(["copilot-1", "copilot-2", "copilot-3"])
+
+    await runtimeFor("copilot").liveUsageRecords(new Map(), new Set(["copilot-2", "closed"]))
+    expect(copilot.getSessionUsage.mock.calls).toEqual([["copilot-2"]])
+
+    copilot.getSessionUsage.mockClear()
+    await runtimeFor("copilot").liveUsageRecords(new Map())
+    expect(copilot.getSessionUsage.mock.calls).toEqual([["copilot-1"], ["copilot-2"], ["copilot-3"]])
+  })
+
   it("deletes a Copilot session through the CLI, never by unlinking its file", async () => {
     copilot.isSessionActive.mockReturnValue(true)
 
@@ -265,6 +368,6 @@ describe("agent asymmetries the registry must not flatten", () => {
 
   it("has no question channel for Codex", async () => {
     expect(runtimeFor("codex").listPendingQuestions()).toEqual([])
-    await expect(runtimeFor("codex").answerQuestion("t1", "q1", "yes")).resolves.toBe(false)
+    await expect(runtimeFor("codex").answerQuestion("t1", "q1", "yes")).resolves.toBeNull()
   })
 })

@@ -376,6 +376,8 @@ export class BrowserViewer {
   private ready = false
   private closed = false
   private panel: PanelSize | null = null
+  /** False while the panel only watches: its size sets the stream's, never the page's. */
+  private emulating = true
   private screencast: ActiveScreencast | null = null
   private override: ActiveOverride | null = null
   private resizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -410,6 +412,17 @@ export class BrowserViewer {
 
   setViewport(width: number, height: number, dpr: number): Promise<void> {
     this.panel = { width, height, dpr }
+    this.emulating = true
+    return this.enqueue(() => this.syncFollowed())
+  }
+
+  /**
+   * Stream at the panel's size and leave the page's own alone, for a viewer
+   * who may watch but not drive. An override this viewer applied is undone.
+   */
+  setStreamSize(width: number, height: number, dpr: number): Promise<void> {
+    this.panel = { width, height, dpr }
+    this.emulating = false
     return this.enqueue(() => this.syncFollowed())
   }
 
@@ -764,7 +777,7 @@ export class BrowserViewer {
   private async syncMetrics(): Promise<void> {
     if (this.closed) return
     const target = this.followed === null ? undefined : this.targets.get(this.followed)
-    const metrics = this.panel === null ? null : pageMetrics(this.panel)
+    const metrics = this.panel === null || !this.emulating ? null : pageMetrics(this.panel)
     const wanted: ActiveOverride | null = target && metrics ? { sessionId: target.sessionId, ...metrics } : null
     const active = this.override
     if (

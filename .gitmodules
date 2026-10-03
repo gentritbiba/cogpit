@@ -1,0 +1,4 @@
+[submodule "editions/team"]
+	path = editions/team
+	url = ../cogpit-team.git
+	update = none

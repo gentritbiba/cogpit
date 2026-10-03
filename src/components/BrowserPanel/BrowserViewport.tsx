@@ -26,6 +26,8 @@ interface BrowserViewportProps {
   frame: BrowserFrame | null
   send: (message: BrowserClientMessage) => void
   onSizeChange: (width: number, height: number, dpr: number) => void
+  /** Paint the page and take no input: the caller may watch it but not use it. */
+  readOnly?: boolean
   className?: string
 }
 
@@ -95,7 +97,7 @@ function paint(
   }
 }
 
-export function BrowserViewport({ frame, send, onSizeChange, className }: BrowserViewportProps) {
+export function BrowserViewport({ frame, send, onSizeChange, readOnly = false, className }: BrowserViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pendingMove = useRef<PendingMove | null>(null)
@@ -289,7 +291,7 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || readOnly) return
     // React attaches wheel passively at the root, so preventDefault needs a listener of our own.
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
@@ -306,7 +308,7 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
     }
     canvas.addEventListener("wheel", onWheel, { passive: false })
     return () => canvas.removeEventListener("wheel", onWheel)
-  }, [send, fit, deviceWidth, deviceHeight])
+  }, [send, fit, deviceWidth, deviceHeight, readOnly])
 
   // The page cannot reach the clipboard the user copied into — its own belongs
   // to the browser process, which is headless. So the paste is carried across as
@@ -344,28 +346,37 @@ export function BrowserViewport({ frame, send, onSizeChange, className }: Browse
       ref={containerRef}
       className={cn("relative min-h-0 min-w-0 overflow-hidden bg-muted/30", className)}
     >
-      <canvas
-        ref={canvasRef}
-        role="application"
-        aria-label="Browser viewport"
-        tabIndex={0}
-        className={cn(
-          "block size-full cursor-default touch-none select-none outline-none",
-          focused && "ring-2 ring-ring ring-inset",
-        )}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false)
-          releaseHeldKeys()
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onContextMenu={handleContextMenu}
-        onKeyDown={handleKeyDown}
-        onKeyUp={handleKeyUp}
-      />
+      {readOnly ? (
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label="Browser viewport, view only"
+          className="block size-full cursor-default touch-none select-none"
+        />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          role="application"
+          aria-label="Browser viewport"
+          tabIndex={0}
+          className={cn(
+            "block size-full cursor-default touch-none select-none outline-none",
+            focused && "ring-2 ring-ring ring-inset",
+          )}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false)
+            releaseHeldKeys()
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onContextMenu={handleContextMenu}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+        />
+      )}
       {focused && (
         <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
           <span className="rounded-full bg-popover px-2 py-0.5 text-[10px] text-muted-foreground shadow-xs">

@@ -11,6 +11,9 @@
  *
  *   1. Files inside the OWNED zone may name an agent freely — that is their job.
  *   2. Every other production file carries a budget in agent-vocabulary.json.
+ *      The team edition keeps its own files' budgets in its own
+ *      agent-vocabulary.json, keyed by package-relative path, merged here when
+ *      the package is present.
  *      Going over fails. Coming in UNDER also fails, with the new number, so the
  *      budget can only ever be lowered. That ratchet is what stops the vocabulary
  *      leaking back once a domain has been cleaned up.
@@ -23,10 +26,15 @@
  */
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { collectSourceRoots, relativePath, root } from "./lib/sourceFiles"
+import { collectSourceRoots, hasTeamEdition, relativePath, root, TEAM_EDITION_ROOT } from "./lib/sourceFiles"
 
-const sourceRoots = ["shared", "src", "server", "electron", "packages/cogpit-memory/src"] as const
+const sourceRoots = [
+  "shared", "src", "server", "electron", "packages/cogpit-memory/src",
+  ...(hasTeamEdition ? [TEAM_EDITION_ROOT] : []),
+]
 const budgetFile = join(root, "scripts/agent-vocabulary.json")
+const teamBudgetFile = join(root, TEAM_EDITION_ROOT, "agent-vocabulary.json")
+const teamPrefix = `${TEAM_EDITION_ROOT}/`
 
 const AGENT_WORDS = ["claude", "codex", "copilot"] as const
 
@@ -56,7 +64,7 @@ const OWNED_PATTERNS: readonly RegExp[] = [
   /^server\/agents\//,
   // Endpoints that exist only to expose one CLI's own protocol. They are the
   // agent layer reaching the network, not product code branching on an agent.
-  /^server\/routes\/codex-threads\.ts$/,
+  /^server\/routes\/codex-threads\//,
   /^server\/routes\/copilot-history\.ts$/,
   // Renderer-side agent presentation (icons are React and cannot live in shared/).
   /^src\/lib\/agents\//,
@@ -94,30 +102,49 @@ for (const path of paths) {
 
 const writeMode = process.argv.slice(2).includes("--write")
 
-if (writeMode) {
-  const files = Object.fromEntries([...observed].sort(([a], [b]) => a.localeCompare(b)))
-  const total = [...observed.values()].reduce((sum, n) => sum + n, 0)
+async function writeBudgets(path: string, entries: [string, number][]): Promise<void> {
+  const files = Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)))
+  const total = entries.reduce((sum, [, n]) => sum + n, 0)
   const payload: Budgets = {
     $comment: [
       "Per-file budget of lines naming an agent CLI, outside the agent layer.",
-      "These numbers may only go DOWN. check-agents.ts fails if a file exceeds",
-      "its budget, and also if it comes in under — so a cleanup must lower the",
-      "number in the same commit. Delete the entry once a file reaches zero.",
-      `Seeded at ${observed.size} files / ${total} lines.`,
+      "These numbers may only go DOWN. Cogpit's scripts/check-agents.ts fails if a",
+      "file exceeds its budget, and also if it comes in under — so a cleanup must",
+      "lower the number in the same commit. Delete the entry once a file reaches zero.",
+      `Seeded at ${entries.length} files / ${total} lines.`,
     ],
     files,
   }
-  await writeFile(budgetFile, `${JSON.stringify(payload, null, 2)}\n`)
-  console.log(`Wrote ${budgetFile}: ${observed.size} files, ${total} lines.`)
+  await writeFile(path, `${JSON.stringify(payload, null, 2)}\n`)
+  console.log(`Wrote ${relativePath(path)}: ${entries.length} files, ${total} lines.`)
+}
+
+if (writeMode) {
+  const entries = [...observed]
+  await writeBudgets(budgetFile, entries.filter(([path]) => !path.startsWith(teamPrefix)))
+  if (hasTeamEdition) {
+    const team = entries.filter(([path]) => path.startsWith(teamPrefix))
+    await writeBudgets(teamBudgetFile, team.map(([path, count]) => [path.slice(teamPrefix.length), count]))
+  }
   process.exit(0)
 }
 
-let budgets: Budgets
-try {
-  budgets = JSON.parse(await readFile(budgetFile, "utf8")) as Budgets
-} catch {
-  console.error(`Missing ${relativePath(budgetFile)}. Seed it with: bun scripts/check-agents.ts --write`)
-  process.exit(1)
+async function readBudgets(path: string): Promise<Record<string, number>> {
+  try {
+    return (JSON.parse(await readFile(path, "utf8")) as Budgets).files
+  } catch {
+    console.error(`Missing ${relativePath(path)}. Seed it with: bun scripts/check-agents.ts --write`)
+    process.exit(1)
+  }
+}
+
+const budgets: Budgets = {
+  files: {
+    ...await readBudgets(budgetFile),
+    ...hasTeamEdition
+      ? Object.fromEntries(Object.entries(await readBudgets(teamBudgetFile)).map(([path, n]) => [teamPrefix + path, n]))
+      : {},
+  },
 }
 
 const violations: string[] = []
@@ -139,7 +166,8 @@ for (const [path, count] of [...observed].sort(([a], [b]) => a.localeCompare(b))
 
 for (const path of Object.keys(budgets.files)) {
   if (!observed.has(path)) {
-    violations.push(`${path}: no longer names an agent CLI — remove its entry from ${relativePath(budgetFile)}.`)
+    const file = path.startsWith(teamPrefix) ? teamBudgetFile : budgetFile
+    violations.push(`${path}: no longer names an agent CLI — remove its entry from ${relativePath(file)}.`)
   }
 }
 

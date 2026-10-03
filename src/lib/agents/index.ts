@@ -84,6 +84,21 @@ export function sessionIdFromFileName(fileName: string): string {
   return fileName.replace(/\.jsonl$/, "")
 }
 
+/**
+ * The top-level session a transcript in `dirName` is filed under: the one it
+ * belongs to for a sub-agent's or workflow's transcript. Null for a name that
+ * names no session.
+ */
+export function rootSessionIdOf(dirName: string, fileName: string): string | null {
+  return descriptorForDirName(dirName).sessionFile.transcriptRoot(fileName)?.rootSessionId ?? null
+}
+
+/** The session a transcript in `dirName` is the own transcript of; null for a sub-agent's or workflow's transcript. */
+export function ownSessionIdOf(dirName: string, fileName: string): string | null {
+  const root = descriptorForDirName(dirName).sessionFile.transcriptRoot(fileName)
+  return root?.isRootTranscript ? root.rootSessionId : null
+}
+
 /** The session identifier a URL carries for a transcript in `dirName`. */
 export function sessionUrlIdFromFileName(dirName: string, fileName: string): string {
   return descriptorForDirName(dirName).sessionFile.urlId(fileName)
