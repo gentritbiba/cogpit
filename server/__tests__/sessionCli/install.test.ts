@@ -61,7 +61,7 @@ describe("ensureSessionCli", () => {
     ensureSessionCli("/opt/cogpit/runtime", "darwin")
     const launcher = readFileSync(sessionCliPath("darwin"), "utf8")
     expect(launcher).toBe(renderPosixLauncher("/opt/cogpit/runtime"))
-    expect(statSync(sessionCliPath("darwin")).mode & 0o111).not.toBe(0)
+    if (process.platform !== "win32") expect(statSync(sessionCliPath("darwin")).mode & 0o111).not.toBe(0)
     expect(readFileSync(join(binDir(), "cogpit-session.mjs"), "utf8")).toContain("/api/session-cli")
   })
 

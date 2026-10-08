@@ -94,8 +94,8 @@ describe("device workspace store", () => {
       cwd: join(workspacesDir, sent.repoKey, "Fix-the-bug", "packages", "app"),
       branch: "cogpit/Fix-the-bug",
     })
-    expect(await readFile(join(imported.cwd, "index.ts"), "utf8")).toBe("export const version = 2\n")
-    expect(await readFile(join(imported.path, "notes", "todo.md"), "utf8")).toBe("- ship\n")
+    expect((await readFile(join(imported.cwd, "index.ts"), "utf8")).replace(/\r\n/g, "\n")).toBe("export const version = 2\n")
+    expect((await readFile(join(imported.path, "notes", "todo.md"), "utf8")).replace(/\r\n/g, "\n")).toBe("- ship\n")
     await expect(stat(join(imported.path, "hub.log"))).rejects.toThrow()
     expect(await gitOut(imported.path, ["status", "--porcelain"])).toBe("")
     expect(await knownCommits(sent.repoKey)).toContain(sent.snapshot)

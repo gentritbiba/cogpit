@@ -16,7 +16,7 @@ import { cleanupTempDirs, commitAll, gitOut, makeRepo, tempDir, writeFiles } fro
  */
 
 const PREFIX = "/api/workspaces"
-const originalEnv = { TMPDIR: process.env.TMPDIR, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR }
+const originalEnv = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR }
 let server: Server
 let device: HubDevice
 let uploads = 0
@@ -53,6 +53,8 @@ afterAll(async () => {
 beforeEach(async () => {
   const scratch = await tempDir("cogpit-handoff-")
   process.env.TMPDIR = join(scratch, "tmp")
+  process.env.TEMP = process.env.TMPDIR
+  process.env.TMP = process.env.TMPDIR
   await mkdir(process.env.TMPDIR)
   process.env.COGPIT_WORKSPACES_DIR = join(scratch, "workspaces")
   await mkdir(join(scratch, "hub"))
@@ -69,7 +71,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  for (const name of ["TMPDIR", "COGPIT_WORKSPACES_DIR"] as const) {
+  for (const name of ["TMPDIR", "TEMP", "TMP", "COGPIT_WORKSPACES_DIR"] as const) {
     if (originalEnv[name] === undefined) delete process.env[name]
     else process.env[name] = originalEnv[name]
   }
@@ -83,9 +85,9 @@ describe("handing a workspace to a device and back", () => {
     const userStatus = await gitOut(repo, ["status", "--porcelain"])
 
     const sent = await sendWorkspace(device.id, device.name, join(repo, "src"), "Fix the parser!", "req-parser-1")
-    expect(sent.remoteCwd).toMatch(/fix-the-parser\/src$/)
-    expect(await readFile(join(sent.remoteCwd, "app.ts"), "utf8")).toBe("export const a = 2\n")
-    expect(await readFile(join(sent.remoteCwd, "new.ts"), "utf8")).toBe("draft\n")
+    expect(sent.remoteCwd.replaceAll("\\", "/")).toMatch(/fix-the-parser\/src$/)
+    expect((await readFile(join(sent.remoteCwd, "app.ts"), "utf8")).replace(/\r\n/g, "\n")).toBe("export const a = 2\n")
+    expect((await readFile(join(sent.remoteCwd, "new.ts"), "utf8")).replace(/\r\n/g, "\n")).toBe("draft\n")
     // The user's own tree is exactly as it was.
     expect(await gitOut(repo, ["status", "--porcelain"])).toBe(userStatus)
     expect(handoffBriefing(sent, "mac")).toContain("uncommitted changes committed on top")

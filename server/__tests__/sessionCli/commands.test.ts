@@ -1,3 +1,4 @@
+import { resolve } from "node:path"
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -188,7 +189,7 @@ describe("new", () => {
 
   it("resolves a relative --cwd, honors --mode and rejects an unknown agent", async () => {
     await run(["new", "hi", "--cwd", "../lib", "--mode=acceptEdits"])
-    expect(mocks.local.create).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/lib", mode: "acceptEdits" }))
+    expect(mocks.local.create).toHaveBeenCalledWith(expect.objectContaining({ cwd: resolve("/work/app", "../lib"), mode: "acceptEdits" }))
     expect(await run(["new", "hi", "--agent", "nope"])).toMatchObject({ exitCode: EXIT.error })
     expect(await run(["new"])).toMatchObject({ exitCode: EXIT.error, stderr: expect.stringContaining("needs a message") })
   })

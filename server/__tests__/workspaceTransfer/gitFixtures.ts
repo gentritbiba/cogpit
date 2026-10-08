@@ -41,6 +41,7 @@ export async function makeRepo(files: Record<string, string>, name = "project"):
   const repo = join(await tempDir("cogpit-transfer-"), name)
   await mkdir(repo)
   await gitOut(repo, ["init", "-q", "-b", "main"])
+  await gitOut(repo, ["config", "core.autocrlf", "false"])
   await writeFiles(repo, files)
   await commitAll(repo, "initial")
   return repo

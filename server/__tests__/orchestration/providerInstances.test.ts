@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { resolve, join } from "node:path"
 import { createProviderInstance } from "../../agents/instanceConfigurations"
 import { createInstanceRuntime, providerInstanceEnvironment } from "../../agents/instanceRuntime"
@@ -25,7 +25,13 @@ async function instance(label: string, args: string[] = []) {
 async function until(predicate: () => boolean, timeout = 10000) { const deadline = Date.now() + timeout; while (!predicate()) { if (Date.now() > deadline) throw new Error("Provider state did not arrive"); await new Promise((resolve) => setTimeout(resolve, 20)) } }
 describe("provider instances and ACP", () => {
   it("qualifies isolated native plans and sends answers only to their owning worker", async () => {
-    const configuration = await createProviderInstance({ agent: "copilot", label: "Plan account", executable: resolve("server/__tests__/fixtures/plan-provider.mjs") })
+    let executable = resolve("server/__tests__/fixtures/plan-provider.mjs")
+    if (process.platform === "win32") {
+      const fixture = executable
+      executable = join(process.env.COGPIT_ORCHESTRATION_ROOT!, "plan-provider.cmd")
+      await writeFile(executable, `@echo off\r\nbun "${fixture}" %*\r\n`)
+    }
+    const configuration = await createProviderInstance({ agent: "copilot", label: "Plan account", executable })
     const runtime = createInstanceRuntime(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!)
     runtimes.push(runtime)
     const cwd = process.env.COGPIT_ORCHESTRATION_ROOT!

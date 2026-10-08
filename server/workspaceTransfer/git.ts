@@ -60,9 +60,19 @@ export async function git(cwd: string, args: string[], options: GitOptions = {})
     timeout: options.timeout ?? GIT_DEFAULT_TIMEOUT_MS,
     windowsHide: true,
   })
-  pending.child.stdin?.end(options.input ?? "")
+  const input = new Promise<void>((resolve, reject) => {
+    const stdin = pending.child.stdin
+    if (!stdin) return resolve()
+    const finished = (error?: NodeJS.ErrnoException | null) => {
+      if (!error || (error.code === "EPIPE" && !options.input)) resolve()
+      else reject(error)
+    }
+    stdin.on("error", finished)
+    stdin.end(options.input, finished)
+  })
   try {
-    return (await pending).stdout
+    const [result] = await Promise.all([pending, input])
+    return result.stdout
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string; code?: number | string }
     if (failure.code === "ENOENT") throw error

@@ -17,7 +17,7 @@ import { MAX_OPEN_UPLOADS, sweepExpiredTransfers } from "../../workspaceTransfer
 import { cleanupTempDirs, commitAll, gitOut, makeRepo, tempDir, writeFiles } from "../workspaceTransfer/gitFixtures"
 
 const PREFIX = "/api/workspaces"
-const originalEnv = { TMPDIR: process.env.TMPDIR, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR }
+const originalEnv = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR }
 let server: Server
 let baseUrl: string
 let scratch: string
@@ -54,12 +54,16 @@ afterAll(async () => {
 beforeEach(async () => {
   scratch = await tempDir("cogpit-workspace-routes-")
   process.env.TMPDIR = join(scratch, "tmp")
+  process.env.TEMP = process.env.TMPDIR
+  process.env.TMP = process.env.TMPDIR
   await mkdir(process.env.TMPDIR)
   process.env.COGPIT_WORKSPACES_DIR = join(scratch, "workspaces")
 })
 
 afterEach(async () => {
   restoreEnv("TMPDIR")
+  restoreEnv("TEMP")
+  restoreEnv("TMP")
   restoreEnv("COGPIT_WORKSPACES_DIR")
   await cleanupTempDirs()
 })

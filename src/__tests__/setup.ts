@@ -4,6 +4,19 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
+const databaseClosers = vi.hoisted(() => new Set<() => void>())
+vi.mock("../../server/orchestration/database", async (original) => {
+  const actual = await original<typeof import("../../server/orchestration/database")>()
+  return { ...actual, openDatabase: (...args: Parameters<typeof actual.openDatabase>) => {
+    const database = actual.openDatabase(...args)
+    const nativeClose = database.close.bind(database)
+    const close = () => { nativeClose(); databaseClosers.delete(close) }
+    database.close = close
+    databaseClosers.add(close)
+    return database
+  } }
+})
+
 const orchestrationRoots = new Set<string>()
 const initialOrchestrationRoot = mkdtempSync(join(tmpdir(), "cogpit-vitest-orchestration-"))
 orchestrationRoots.add(initialOrchestrationRoot)
@@ -14,6 +27,7 @@ afterAll(async () => {
     const { closeOrchestrationStore } = await import("../../server/orchestration/storage")
     closeOrchestrationStore()
   }
+  for (const close of databaseClosers) close()
   for (const root of orchestrationRoots) rmSync(root, { recursive: true, force: true })
 })
 

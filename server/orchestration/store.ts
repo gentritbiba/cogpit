@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import { DatabaseSync } from "node:sqlite"
+import { openDatabase, type SqliteDatabase } from "./database"
 import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
 
 type Row = Record<string, unknown>
@@ -32,7 +32,7 @@ function receipt(row: Row): CommandReceipt {
 }
 
 export class OrchestrationStore {
-  private readonly db: DatabaseSync
+  private readonly db: SqliteDatabase
   private readonly listeners = new Set<(event: ConversationEvent) => void>()
   private pendingEvents: ConversationEvent[] | null = null
 
@@ -41,7 +41,7 @@ export class OrchestrationStore {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
       if (process.platform !== "win32") chmodSync(dirname(path), 0o700)
     }
-    this.db = new DatabaseSync(path)
+    this.db = openDatabase(path)
     try {
       this.db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
       const version = Number((this.db.prepare("PRAGMA user_version").get() as Row).user_version)

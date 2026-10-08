@@ -76,7 +76,7 @@ An independently launched memory CLI can set that variable to Cogpit's data root
 ## Storage and packaging
 
 SQLite at `<dataRoot>/orchestration/state.sqlite` is separate from native provider
-transcripts. It uses WAL and FULL synchronous transactions, owner-only files on
+transcripts. Node uses its native SQLite driver; Bun uses `bun:sqlite`. It uses WAL and FULL synchronous transactions, owner-only files on
 POSIX, transactional schema version 3 migrations, and refuses future schemas.
 Answer links and handoff reservations retain the caller scope. Legacy answer links
 remain resolved until explicit reconciliation; legacy handoffs acquire an owner
