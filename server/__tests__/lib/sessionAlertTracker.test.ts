@@ -19,6 +19,14 @@ describe("SessionAlertTracker", () => {
     expect(alerts).toEqual([{ session: s("a", "completed"), reason: "turnComplete" }])
   })
 
+  it("leaves a crew member's finished turn to its lead, but still raises its blocked one", () => {
+    const tracker = new SessionAlertTracker()
+    tracker.alerts([s("lane", "tool_use", { reportsToLead: true })])
+    expect(tracker.alerts([s("lane", "completed", { reportsToLead: true })])).toEqual([])
+    expect(tracker.alerts([s("lane", "deferred", { reportsToLead: true })]))
+      .toEqual([{ session: s("lane", "deferred", { reportsToLead: true }), reason: "permission" }])
+  })
+
   it("treats idle as a finished turn too", () => {
     const tracker = new SessionAlertTracker()
     tracker.alerts([s("a", "thinking")])

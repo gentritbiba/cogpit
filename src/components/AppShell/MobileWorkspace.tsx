@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useState } from "react"
+import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
 import { LayoutGrid, Puzzle, SlidersHorizontal } from "lucide-react"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -19,6 +20,7 @@ const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((modu
 export function MobileWorkspace({ navigation, sessionView, project, active }: MobileAppShellProps & { active: boolean }) {
   const { state } = useAppContext()
   const { session, sessionSource } = useSessionContext()
+  const openCrew = useOpenSessionCrew(session?.sessionId ?? null)
   const canAccessHostFiles = useCapability("hostFiles")
   const canUseBrowser = useCapability("browser")
   const canConfigure = useCapability("configWrite")
@@ -61,6 +63,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,
+    crew: openCrew,
   }
 
   return (

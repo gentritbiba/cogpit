@@ -46,6 +46,7 @@ const HEAD = { lines: [], isPartialRead: false, size: 0 }
 
 /** One listed transcript per agent, in that agent's own naming. */
 const FILES: Record<AgentKind, SessionFileInfo> = {
+  acp: { filePath: `/acp/projects/acp__cHJvamVjdA/${SESSION_UUID}.jsonl`, fileName: `${SESSION_UUID}.jsonl`, dirName: "acp__cHJvamVjdA", mtimeMs: 1000, size: 500 },
   claude: {
     filePath: `/projects/proj/${SESSION_UUID}.jsonl`,
     fileName: `${SESSION_UUID}.jsonl`,

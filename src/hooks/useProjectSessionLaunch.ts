@@ -1,3 +1,4 @@
+import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch } from "react"
 import { useNewSession } from "@/hooks/useNewSession"
 import { authFetch } from "@/lib/auth"
@@ -124,6 +125,7 @@ export function useProjectSessionLaunch({
     // Starting in the lossy agent's own project re-derives its dirName from
     // the cwd, which normalises a stale one; starting anywhere else has to
     // look it up.
+    if (splitInstanceDirName(dirName).instanceId !== "default") { setPendingAgentSource({ discoveredDirName: null, cwd: normalizedCwd }); beginNewSession(dirName, normalizedCwd); return }
     const startsInLossyKind = agentKindForDirName(dirName) === DISCOVERED_DIRNAME_KIND
       ? DISCOVERED_DIRNAME_KIND
       : null

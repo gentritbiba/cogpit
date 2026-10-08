@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { isSessionUuid } from "../../shared/session/agent-descriptors"
+import { instanceSessionId, splitInstanceSessionId } from "../../shared/session/instances"
+import { orchestrationStore } from "../orchestration/storage"
+import { canonicalSessionId } from "../../shared/session/agent-descriptors"
 import { isRecord } from "../../shared/objects"
 import { dirs } from "../dirs"
 import { isWithinDir } from "../pathSafety"
@@ -54,9 +56,8 @@ export type TeamConfigCache = Map<string, Promise<Discovered<TeamLead> | TeamGon
 
 /** A parent worth recording: a session id other than the session's own, in the case stores key by. */
 function parentOf(sessionId: string, candidate: string | null | undefined): string | null {
-  if (!candidate || !isSessionUuid(candidate)) return null
-  const parentSessionId = candidate.toLowerCase()
-  return parentSessionId === sessionId.toLowerCase() ? null : parentSessionId
+  const parentSessionId = candidate ? canonicalSessionId(candidate) : null
+  return parentSessionId === canonicalSessionId(sessionId) ? null : parentSessionId
 }
 
 declare const serverRead: unique symbol
@@ -82,7 +83,7 @@ export function lineageFromMeta(
   filePath?: string,
 ): TrustedLineage {
   const lineage = {
-    sessionId: meta.sessionId.toLowerCase(),
+    sessionId: canonicalSessionId(meta.sessionId) ?? meta.sessionId.toLowerCase(),
     parentSessionId: parentOf(meta.sessionId, meta.parentSessionId),
     ...(filePath === undefined ? {} : { filePath }),
   }
@@ -99,17 +100,21 @@ export function teamLeadIn(config: unknown): TeamLead | null {
 }
 
 /** The lead a team's config names; `"teamGone"` once the team is deleted, which is for good. */
-export async function readTeamLead(teamName: string): Promise<Discovered<TeamLead> | TeamGone> {
-  if (!dirs.TEAMS_DIR) return "unknown"
-  const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
-  if (!isWithinDir(dirs.TEAMS_DIR, configPath)) return "none"
+export async function readTeamLead(teamName: string, instanceId = "default"): Promise<Discovered<TeamLead> | TeamGone> {
+  const instance = instanceId === "default" ? null : orchestrationStore().instances().find((value) => value.id === instanceId)
+  const teamsDir = instanceId === "default" ? dirs.TEAMS_DIR : instance ? join(instance.homeDir, "teams") : null
+  if (!teamsDir) return "unknown"
+  const configPath = join(teamsDir, teamName, "config.json")
+  if (!isWithinDir(teamsDir, configPath)) return "none"
   let config: unknown
   try {
     config = JSON.parse(await readFile(configPath, "utf-8"))
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "teamGone" : "unknown"
   }
-  return teamLeadIn(config) ?? "none"
+  const lead = teamLeadIn(config)
+  if (!lead) return "none"
+  return instanceId === "default" ? lead : { ...lead, sessionId: instanceSessionId(instanceId, splitInstanceSessionId(lead.sessionId).nativeId) }
 }
 
 /**
@@ -123,10 +128,12 @@ export async function teamLeadFor(
 ): Promise<Discovered<TeamLead> | TeamGone> {
   const startedAt = Date.parse(member.timestamp)
   if (Number.isNaN(startedAt)) return "unknown"
-  let config = cache?.get(member.teamName)
+  const { instanceId } = splitInstanceSessionId(member.sessionId)
+  const key = instanceId === "default" ? member.teamName : `${instanceId}:${member.teamName}`
+  let config = cache?.get(key)
   if (!config) {
-    config = readTeamLead(member.teamName)
-    cache?.set(member.teamName, config)
+    config = readTeamLead(member.teamName, instanceId)
+    cache?.set(key, config)
   }
   const lead = await config
   if (typeof lead === "string") return lead

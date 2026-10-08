@@ -7,14 +7,14 @@
 // the server, Electron and the standalone cogpit-memory package alike.
 
 /** The agent CLIs Cogpit can drive. */
-export type AgentKind = "claude" | "codex" | "copilot"
+export type AgentKind = "claude" | "codex" | "copilot" | "acp"
 
 /**
  * Every agent kind, in transcript-detection order. Codex and Copilot carry
  * positive discriminators in their records; Claude is the terminal fallback and
  * must stay last.
  */
-export const AGENT_KINDS: readonly AgentKind[] = ["codex", "copilot", "claude"]
+export const AGENT_KINDS: readonly AgentKind[] = ["acp", "codex", "copilot", "claude"]
 
 // ── Session status ──────────────────────────────────────────────────────────
 
@@ -620,6 +620,7 @@ export interface ParsedSession {
    * of truth — the session's dirName is (see `shared/session/agents.ts`).
    */
   agentKind?: AgentKind
+  instanceId?: string
 }
 
 // ── Undo/Redo & Branching ────────────────────────────────────────────────

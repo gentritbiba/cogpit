@@ -1,0 +1,9 @@
+{
+  "upstream": "https://github.com/openai/codex",
+  "ref": "rust-v0.160.0",
+  "cliVersion": "0.160.0",
+  "generator": "codex app-server generate-json-schema --experimental",
+  "schemaSha256": "e6817894c045abffafbdaee87f2f14493fc9943cba18a17894823b472c21357b",
+  "license": "Apache-2.0",
+  "compatibility": "Outgoing known request fields use generated contracts. Unknown incoming fields are retained by existing decoders; native RPC IDs remain unchanged."
+}

@@ -20,6 +20,12 @@ import { useHoverPrefetch } from "./useHoverPrefetch"
 /** Working rows shown before the "+N more" expander. */
 const WORKING_VISIBLE = 6
 
+/** A root working only through its crew says how many members work; otherwise its own tool or phase. */
+function workingLabel(s: ActiveSessionInfo, groups: AttentionGroups): string {
+  const crew = groups.workingCrews?.get(s.sessionId)
+  return crew ? `${crew.working} in crew` : workingChip(s)
+}
+
 /** Relative time that re-renders every 15s so strip rows stay honest. */
 function TimeSince({ iso }: { iso: string }) {
   const [, forceTick] = useState(0)
@@ -42,6 +48,13 @@ const REASON_CHIP: Record<AttentionItem["reason"], { label: string; className: s
   plan: { label: "Review plan", className: "border-warning/30 bg-warning/10 text-warning" },
   waiting: { label: "Waiting", className: "border-warning/30 bg-warning/10 text-warning" },
   done: { label: "Done", className: "border-success/30 bg-success/10 text-success" },
+  crew: { label: "Waiting", className: "border-warning/30 bg-warning/10 text-warning" },
+}
+
+/** A root listed for its crew says how many members wait, instead of a reason of its own. */
+function chipFor({ reason, crew }: AttentionItem): { label: string; className: string } {
+  const chip = REASON_CHIP[reason]
+  return reason === "crew" && crew ? { ...chip, label: `${crew.needsYou} waiting` } : chip
 }
 
 /** Row dot per reason. Anything blocked on a human shares the attention dot. */
@@ -53,6 +66,7 @@ const REASON_DOT: Record<AttentionItem["reason"], string> = {
   prompt: "bg-warning",
   plan: "bg-warning",
   done: "bg-success",
+  crew: STATUS_DOT.attention,
 }
 
 interface StripRowProps {
@@ -60,6 +74,8 @@ interface StripRowProps {
   chip: { label: string; className: string }
   dotClassName: string
   cardClassName: string
+  /** When the row's wait or activity began, where that is not the session's own. */
+  since?: string
   isActiveSession: boolean
   proc?: RunningProcess
   killingPids: Set<number>
@@ -77,6 +93,7 @@ function StripRow({
   chip,
   dotClassName,
   cardClassName,
+  since,
   isActiveSession,
   proc,
   killingPids,
@@ -135,7 +152,7 @@ function StripRow({
             >
               {isReadOnlySession ? "Read-only" : chip.label}
             </Badge>
-            {!compact && <TimeSince iso={s.lastActivityAt || s.lastModified} />}
+            {!compact && <TimeSince iso={since ?? (s.lastActivityAt || s.lastModified)} />}
           </span>
           <span className="mt-1 block truncate pl-3 text-xs text-muted-foreground">{projectLabel}</span>
         </TooltipTrigger>
@@ -256,11 +273,14 @@ export function AttentionStrip({
             label="Needs you"
             count={groups.needsYou.length}
           />
-          {groups.needsYou.map(({ session: s, reason }) => (
+          {groups.needsYou.map((item) => {
+            const { session: s, reason } = item
+            return (
             <StripRow
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
-              chip={REASON_CHIP[reason]}
+              chip={chipFor(item)}
+              since={reason === "crew" ? item.crew?.longestWaitSince : undefined}
               dotClassName={REASON_DOT[reason]}
               cardClassName="border-warning/20 bg-warning/5 hover:bg-warning/10"
               onResume={
@@ -269,7 +289,8 @@ export function AttentionStrip({
                   : undefined
               }
             />
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -287,7 +308,7 @@ export function AttentionStrip({
               <StripRow
                 key={`${s.dirName}/${s.fileName}`}
                 {...rowShared(s)}
-                chip={{ label: workingChip(s), className: "" }}
+                chip={{ label: workingLabel(s, groups), className: "" }}
                 dotClassName={STATUS_DOT.working}
                 cardClassName="hover:bg-accent/50"
                 compact

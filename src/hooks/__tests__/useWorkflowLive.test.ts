@@ -1,3 +1,4 @@
+import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -23,7 +24,7 @@ class MockEventSource extends EventTarget {
   }
 
   update(): void {
-    this.onmessage?.(new MessageEvent("message", {
+    this.dispatchEvent(new MessageEvent("message", {
       data: JSON.stringify({ type: "update" }),
     }))
   }
@@ -31,6 +32,7 @@ class MockEventSource extends EventTarget {
 
 describe("useWorkflowLive", () => {
   beforeEach(() => {
+    __resetStreamsForTest()
     MockEventSource.instances = []
     vi.stubGlobal("EventSource", MockEventSource)
   })

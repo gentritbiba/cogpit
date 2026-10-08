@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<title>Orchestration-first Cogpit: mockups</title>
+<style>
+@font-face { font-family: "Geist"; src: url("../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+:root {
+  --bg: oklch(0.105 0 0); --sidebar: oklch(0.125 0 0); --card: oklch(0.13 0 0); --popover: oklch(0.16 0 0);
+  --muted: oklch(0.18 0 0); --accent: oklch(0.2 0 0); --composer: oklch(0.19 0 0); --border: oklch(0.24 0 0);
+  --fg: oklch(0.985 0 0); --fg-muted: oklch(0.708 0 0); --fg-dim: oklch(0.55 0 0);
+  --success: oklch(0.72 0.17 151); --warning: oklch(0.78 0.15 78); --info: oklch(0.72 0.14 255); --destructive: oklch(0.64 0.22 25);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.4; color: var(--fg); background: var(--bg); font-feature-settings: "tnum";
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { overflow: hidden; }
+body[data-view="home"], body[data-view="wall"] { width: 1440px; height: 900px; display: grid; grid-template-columns: 1fr 44px; }
+body[data-view="wall"] { grid-template-columns: 1fr 400px 44px; }
+body[data-view="mobile"] { width: 390px; height: 844px; }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; }
+.muted { color: var(--fg-muted); }
+.dim { color: var(--fg-dim); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+svg { display: block; }
+.view { display: none; }
+body[data-view="home"] .view-home, body[data-view="wall"] .view-wall, body[data-view="mobile"] .view-mobile { display: contents; }
+
+/* shared atoms */
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+.dot.halo { box-shadow: 0 0 0 2px color-mix(in oklch, var(--success) 30%, transparent); }
+.dot.warn { background: var(--warning); }
+.dot.idle { background: color-mix(in oklch, var(--success) 40%, transparent); }
+.dot.done { background: var(--fg-dim); }
+.chip { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; color: var(--fg-muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.chip.warn { border-color: color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 10%, transparent); color: var(--warning); }
+.chip.ok { color: var(--success); border-color: color-mix(in oklch, var(--success) 30%, transparent); }
+.chip.info { color: var(--info); }
+.btn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.ghost { border-color: transparent; color: var(--fg-muted); }
+.btn.danger { color: var(--destructive); }
+.btn.xs { height: 22px; font-size: 11.5px; padding: 0 8px; }
+.strip { display: flex; gap: 2px; }
+.strip .cell { height: 8px; width: 11px; border-radius: 2px; background: var(--fg-dim); opacity: .55; }
+.strip .cell.work { background: var(--success); opacity: 1; box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--success) 25%, transparent); }
+.strip .cell.need { background: var(--warning); opacity: 1; }
+.strip .cell.here { outline: 1.5px solid var(--fg); outline-offset: 2px; }
+.pills { position: absolute; top: 10px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: center; z-index: 2; }
+.pill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--popover); border: 1px solid var(--border); font-size: 13px; white-space: nowrap; flex: none; }
+.pill.icon { width: 32px; padding: 0; justify-content: center; color: var(--fg-muted); position: relative; }
+.pill .cnt { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; padding: 0 4px; }
+.pillgroup { display: flex; gap: 8px; }
+.rail { border-left: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 14px; color: var(--fg-muted); }
+.rail .ri { position: relative; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; }
+.rail .ri.on { background: var(--accent); color: var(--fg); }
+.rail .badge { position: absolute; top: -4px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; }
+.sec { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.sec b { font-weight: 500; font-size: 14px; }
+.sec span { color: var(--fg-muted); font-size: 12px; }
+.sec .sp { flex: 1; }
+.card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+
+/* ── HOME ── */
+.home { position: relative; display: grid; grid-template-rows: 1fr auto; min-width: 0; height: 900px; }
+.home-body { display: grid; grid-template-columns: 470px 1fr; gap: 36px; padding: 64px 40px 0 40px; min-height: 0; }
+.queue { display: flex; flex-direction: column; min-height: 0; }
+.qcard { border: 1px solid color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 6%, transparent); border-radius: 12px; padding: 14px 16px; }
+.qcard .who { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.qcard .who b { font-weight: 500; }
+.qcard .who .via { color: var(--fg-muted); }
+.qcard .who .wait { margin-left: auto; color: var(--warning); font-size: 12px; }
+.qcard .what { margin: 10px 0 4px; font-size: 13px; color: var(--fg-muted); }
+.qcard .cmd { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; margin: 6px 0 12px; }
+.qcard .cmd .tool { font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; color: var(--fg-muted); }
+.qcard .cmd code { font-family: "Geist Mono", monospace; font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.qcard .acts { display: flex; gap: 6px; align-items: center; }
+.qcard .acts .open { margin-left: auto; }
+.qcard .keys { margin-top: 10px; font-size: 11px; color: var(--fg-dim); }
+.qcard .keys kbd { font-family: inherit; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-right: 2px; }
+.qlist { margin-top: 8px; display: flex; flex-direction: column; }
+.qrow { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; padding: 8px 8px; border-radius: 8px; font-size: 12.5px; }
+.qrow:hover { background: var(--accent); }
+.qrow .n { color: var(--fg-dim); font-size: 11px; text-align: right; }
+.qrow .nm { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.qrow .nm b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow .nm span { color: var(--fg-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow .t { font-size: 11px; color: var(--warning); }
+.qrow .t.dim { color: var(--fg-dim); }
+.right { display: flex; flex-direction: column; min-height: 0; gap: 26px; }
+.sessions { display: flex; flex-direction: column; }
+.srow { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 12px 12px; border-top: 1px solid var(--border); align-items: center; }
+.srow:first-of-type { border-top: 0; }
+.srow:hover { background: var(--accent); border-radius: 8px; }
+.srow .top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.srow .top b { font-weight: 500; font-size: 13.5px; white-space: nowrap; }
+.srow .top .proj { color: var(--fg-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow .tally { display: flex; gap: 12px; font-size: 12px; color: var(--fg-muted); align-items: center; }
+.srow .tally b { color: var(--fg); font-weight: 500; }
+.srow .tally .w { color: var(--warning); }
+.srow .tally .w b { color: var(--warning); }
+.srow .last { grid-column: 1; font-size: 12px; color: var(--fg-muted); display: flex; gap: 8px; align-items: center; }
+.srow .time { grid-column: 2; grid-row: 2; font-size: 11px; color: var(--fg-dim); text-align: right; }
+.landed { display: flex; flex-direction: column; }
+.ln { display: grid; grid-template-columns: 44px 1fr; gap: 10px; padding: 4px 12px; font-size: 12.5px; align-items: baseline; }
+.ln .tm { color: var(--fg-dim); font-size: 11px; }
+.ln b { font-weight: 500; }
+.ln .muted { color: var(--fg-muted); }
+.home-foot { padding: 14px 40px 32px; display: flex; flex-direction: column; gap: 12px; }
+.capacity { display: flex; gap: 18px; font-size: 12px; color: var(--fg-muted); align-items: center; padding: 0 4px; }
+.capacity .dev { display: inline-flex; gap: 6px; align-items: center; }
+.capacity .w { color: var(--warning); }
+.composer { border: 1px solid var(--border); border-radius: 14px; background: var(--composer); padding: 14px 16px 12px; }
+.composer .ph { color: var(--fg-muted); font-size: 14px; margin-bottom: 14px; }
+.composer .row { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+.composer .row .r { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+
+/* ── WALL ── */
+.wall { position: relative; display: flex; flex-direction: column; min-width: 0; height: 900px; }
+.wall-hd { padding: 58px 24px 0; display: flex; align-items: center; gap: 12px; }
+.wall-hd b { font-weight: 500; font-size: 14px; }
+.wall-hd .filters { display: inline-flex; gap: 2px; margin-left: 8px; }
+.wall-hd .filters button { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; color: var(--fg-muted); }
+.wall-hd .filters button.on { background: var(--accent); color: var(--fg); }
+.grid { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 12px; padding: 14px 24px 16px; min-height: 0; }
+.tile { border: 1px solid var(--border); border-radius: 10px; background: var(--card); display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.tile.need { border-color: color-mix(in oklch, var(--warning) 35%, transparent); }
+.tile .hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; white-space: nowrap; min-width: 0; }
+.tile .hd b { flex: none; }
+.tile .hd .st { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tile .hd b { font-weight: 500; }
+.tile .hd .st { color: var(--fg-muted); }
+.tile .hd .st.w { color: var(--warning); }
+.tile .hd .t { margin-left: auto; color: var(--fg-dim); font-size: 11px; }
+.tile .tail { flex: 1; padding: 10px 12px; font-family: "Geist Mono", monospace; font-size: 11px; line-height: 1.55; color: var(--fg-muted); overflow: hidden; white-space: pre; min-height: 0; }
+.tile .tail .me { color: var(--fg); }
+.tile .ask { margin: 0 12px 10px; border: 1px solid color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 6%, transparent); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.tile .ask code { font-family: "Geist Mono", monospace; font-size: 11px; display: block; margin: 4px 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .ask .opts { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 8px; }
+.tile .ask .opts span { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.tile .ask .acts { display: flex; gap: 6px; }
+.tile .ft { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
+.tile .ft .sp { flex: 1; }
+.done-row { padding: 0 24px 22px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.done-row .names { color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* crew panel (condensed copy) */
+.crew { border-left: 1px solid var(--border); background: var(--card); display: flex; flex-direction: column; overflow: hidden; }
+.crew-hd { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border); font-weight: 500; }
+.crew-hd .sp { flex: 1; }
+.crew-hd .ib { width: 26px; height: 26px; display: grid; place-items: center; color: var(--fg-muted); }
+.roll { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); }
+.roll .nm { display: flex; justify-content: space-between; align-items: baseline; }
+.roll .nm b { font-weight: 500; font-size: 14px; }
+.roll .nm span { color: var(--fg-muted); font-size: 12px; }
+.roll .strip { margin: 10px 0 8px; }
+.roll .strip .cell { flex: 1; height: 10px; width: auto; }
+.roll .tally { display: flex; gap: 14px; font-size: 12px; color: var(--fg-muted); }
+.roll .tally b { color: var(--fg); font-weight: 500; }
+.roll .budget { margin-top: 8px; font-size: 11.5px; color: var(--fg-muted); display: flex; gap: 6px; align-items: center; }
+.roll .budget .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--muted); position: relative; }
+.roll .budget .bar::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 50%; border-radius: 2px; background: var(--fg-muted); }
+.rows { flex: 1; overflow: hidden; padding: 6px 6px; }
+.row { display: grid; grid-template-columns: 14px 1fr auto; gap: 2px 8px; padding: 6px 8px; border-radius: 6px; align-items: center; }
+.row .dot { justify-self: center; }
+.row .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .t { font-size: 11px; color: var(--fg-dim); text-align: right; }
+.row .sub { grid-column: 2 / 4; display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; }
+.row .sub .st { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.row .sub .st.warn { color: var(--warning); }
+.row .sub .model { flex: none; color: var(--fg-dim); }
+.feed { border-top: 1px solid var(--border); padding: 8px 0 6px; }
+.feed .sec { padding: 2px 14px 4px; margin: 0; }
+.feed .ln { padding: 3px 14px; font-size: 12px; grid-template-columns: 40px 1fr; }
+.foot { border-top: 1px solid var(--border); padding: 8px 14px; font-size: 11.5px; color: var(--fg-muted); display: flex; gap: 8px; white-space: nowrap; }
+.foot .sp { flex: 1; }
+.foot .w { color: var(--warning); }
+
+/* ── MOBILE ── */
+.mobile { width: 390px; height: 844px; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+.m-top { display: flex; align-items: center; justify-content: space-between; padding: 54px 18px 10px; }
+.m-top b { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.m-top .bell { position: relative; color: var(--fg-muted); }
+.m-top .bell .cnt { position: absolute; top: -6px; right: -8px; min-width: 16px; height: 16px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; padding: 0 4px; }
+.m-body { flex: 1; overflow: hidden; padding: 0 14px; display: flex; flex-direction: column; gap: 14px; }
+.m-sec { display: flex; align-items: baseline; gap: 8px; padding: 4px 4px 0; }
+.m-sec b { font-weight: 500; font-size: 13px; }
+.m-sec span { color: var(--fg-muted); font-size: 12px; }
+.m-sec .sp { flex: 1; }
+.mobile .qcard { padding: 12px 14px; }
+.mobile .qcard .cmd code { font-size: 11.5px; }
+.mobile .qcard .acts .btn { height: 30px; font-size: 13px; padding: 0 12px; }
+.m-next { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-muted); padding: 0 6px; }
+.m-next b { color: var(--fg); font-weight: 500; }
+.m-next .t { margin-left: auto; color: var(--warning); font-size: 11.5px; }
+.m-list { display: flex; flex-direction: column; }
+.m-row { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 11px 6px; border-top: 1px solid var(--border); align-items: center; }
+.m-row:first-child { border-top: 0; }
+.m-row .nm { font-weight: 500; font-size: 14px; }
+.m-row .meta { grid-column: 1; font-size: 12px; color: var(--fg-muted); display: flex; gap: 8px; align-items: center; }
+.m-row .meta .w { color: var(--warning); }
+.m-row .time { grid-column: 2; grid-row: 1; font-size: 11px; color: var(--fg-dim); }
+.m-row .strip { grid-column: 2; grid-row: 2; justify-self: end; }
+.m-row .strip .cell { width: 7px; height: 7px; }
+.m-cap { font-size: 11.5px; color: var(--fg-muted); padding: 2px 6px; display: flex; gap: 10px; }
+.m-cap .w { color: var(--warning); }
+.m-tabs { height: 78px; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(3, 1fr); align-items: start; padding-top: 10px; color: var(--fg-muted); }
+.m-tabs .tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; position: relative; }
+.m-tabs .tab.on { color: var(--fg); }
+.m-tabs .tab .cnt { position: absolute; top: -4px; left: calc(50% + 8px); min-width: 15px; height: 15px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; padding: 0 4px; }
+</style>
+</head>
+<body data-view="home">
+
+<!-- ═══════════════════════════════ HOME ═══════════════════════════════ -->
+<div class="view view-home">
+  <section class="home">
+    <div class="pills">
+      <div class="pillgroup">
+        <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div>
+        <div class="pill"><b style="font-weight:500">Mission Control</b></div>
+      </div>
+      <div class="pillgroup">
+        <div class="pill icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="cnt">4</span></div>
+        <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M2 20h20"/></svg>All devices ⌄</div>
+        <div class="pill icon">⋯</div>
+      </div>
+    </div>
+
+    <div class="home-body">
+      <div class="queue">
+        <div class="sec"><b>Needs you</b><span>4</span><span class="sp"></span><span>1 of 4</span></div>
+        <div class="qcard">
+          <div class="who"><span class="dot warn"></span><b>w3-rooftop</b><span class="via">· Wave 3 coordinator</span><span class="wait">waiting 42 min</span></div>
+          <div class="what">Asked a permission</div>
+          <div class="cmd"><span class="tool">Bash</span><code>gh api repos/HonestCMS/cms/rulesets -X POST -f name=main-protection -f target=branch --input /tmp/ruleset.json</code></div>
+          <div class="acts"><button class="btn primary">Allow</button><button class="btn">Always allow</button><button class="btn danger">Deny</button><button class="btn ghost open">Open ›</button></div>
+          <div class="keys"><kbd>⏎</kbd> allow <kbd>D</kbd> deny <kbd>O</kbd> open <kbd>N</kbd> next</div>
+        </div>
+        <div class="qlist">
+          <div class="qrow"><span class="n">2</span><span class="nm"><b>w3-security-admin · Wave 3 coordinator</b><span>Asked which hostname the admin Access app should use</span></span><span class="t">39m</span></div>
+          <div class="qrow"><span class="n">3</span><span class="nm"><b>Wave 3 coordinator wants to start 2 sessions</b><span>w3-ruleset-apply · Opus 5.5 · worktree, w3-g08-verify · Codex · read-only</span></span><span class="t">4m</span></div>
+          <div class="qrow"><span class="n">4</span><span class="nm"><b>find-20-jobs · Job applications</b><span>Plan: apply to 12 Ashby postings with the stored answers</span></span><span class="t dim">1m</span></div>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="sessions">
+          <div class="sec"><b>Your sessions</b><span>3</span><span class="sp"></span><span>All projects ⌄</span></div>
+          <div class="srow">
+            <div class="top"><span class="strip"><span class="cell"></span><span class="cell"></span><span class="cell work"></span><span class="cell work"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell need"></span><span class="cell need"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span></span><b>Wave 3 coordinator</b><span class="proj">hcms-pr/performance-experiments</span></div>
+            <div class="tally"><span><b>2</b> working</span><span class="w"><b>2</b> need you</span><span><b>11</b> done</span><span class="w"><b>2</b> results unread</span></div>
+            <div class="last"><span class="chip ok">PR #252 merged</span><span>w3-ops-tooling · 2h ago</span></div>
+            <div class="time">crew active now</div>
+          </div>
+          <div class="srow">
+            <div class="top"><span class="strip"><span class="cell work"></span><span class="cell work"></span></span><b>Job applications</b><span class="proj">Code/cv-builder</span></div>
+            <div class="tally"><span><b>2</b> working</span><span class="chip"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>agentbox</span></div>
+            <div class="last"><span class="chip ok">Runway confirmed</span><span>find-20-jobs · 3m ago</span></div>
+            <div class="time">crew active 3m</div>
+          </div>
+          <div class="srow">
+            <div class="top"><span class="strip"><span class="cell work"></span></span><b>Rethink Cogpit's UI</b><span class="proj">gentritbiba/agent-window</span></div>
+            <div class="tally"><span>working · Fable 5.1</span></div>
+            <div class="last"><span>Writing the mockups</span></div>
+            <div class="time">now</div>
+          </div>
+        </div>
+
+        <div class="landed">
+          <div class="sec"><b>Landed today</b><span class="sp"></span><span>all crews</span></div>
+          <div class="ln"><span class="tm">16:31</span><span><span class="chip ok">PR #251 merged</span> <b>w3-cost-model</b> <span class="muted">· first-store capacity and cost audit · result read by coordinator</span></span></div>
+          <div class="ln"><span class="tm">15:50</span><span><span class="chip ok">PR #252 merged</span> <b>w3-ops-tooling</b> <span class="muted">· data-subject tool, restore rehearsal runbooks</span></span></div>
+          <div class="ln"><span class="tm">15:12</span><span><b>You</b> <span class="muted">answered 14 questions for Wave 3 coordinator</span></span></div>
+          <div class="ln"><span class="tm">14:35</span><span><b>w3-theories</b> <span class="muted">started · Opus 5.5 · xhigh · read-only checkout</span></span></div>
+          <div class="ln"><span class="tm">13:40</span><span><b>4 sessions resumed</b> <span class="muted">after the usage limit cleared · Wave 3 coordinator</span></span></div>
+          <div class="ln"><span class="tm">13:10</span><span><b>6 sessions started</b> <span class="muted">· Wave 3 coordinator</span></span></div>
+          <div class="ln"><span class="tm">11:58</span><span><span class="chip ok">PR #249 merged</span> <b>w3-perf-ship</b> <span class="muted">· 15.7 KB less JavaScript, smaller VIN images</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-foot">
+      <div class="capacity">
+        <span class="dev"><span class="dot halo"></span>This Mac · load 8.2 · 11 agents</span>
+        <span class="dev"><span class="dot idle"></span>agentbox · 1 agent</span>
+        <span class="w">Claude limit resets 18:00</span>
+        <span style="margin-left:auto">4.1M tokens today</span>
+      </div>
+      <div class="composer">
+        <div class="ph">What should we build?</div>
+        <div class="row"><span>⌂ performance-experiments ⌄</span><span>⛨ Full access ⌄</span><span class="r"><span>Opus 5.5 · High ⌄</span><span class="dim">➤</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <nav class="rail">
+    <span class="ri on"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span class="badge">4</span></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg></span>
+  </nav>
+</div>
+
+<!-- ═══════════════════════════════ WALL ═══════════════════════════════ -->
+<div class="view view-wall">
+  <section class="wall">
+    <div class="pills">
+      <div class="pillgroup">
+        <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div>
+        <div class="pill"><span class="muted">performance-experiments</span><span class="dim">/</span><b style="font-weight:500">Wave 3 coordinator</b><span class="dim">›</span><span>Wall</span></div>
+      </div>
+      <div class="pillgroup">
+        <div class="pill icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="cnt">4</span></div>
+        <div class="pill icon">⋯</div>
+      </div>
+    </div>
+    <div class="wall-hd"><b>4 of 15 on the wall</b><span class="muted" style="font-size:12px">working and blocked</span><span class="filters"><button class="on">Working + blocked</button><button>All 15</button><button>Blocked</button></span><span style="margin-left:auto;font-size:11.5px;color:var(--fg-dim)">Esc returns to the conversation</span></div>
+
+    <div class="grid">
+      <div class="tile">
+        <div class="hd"><span class="dot halo"></span><b>w3-storefront-quality</b><span class="st">Running tests</span><span class="t">now</span></div>
+        <div class="tail">$ bun run test -- src/storefront
+<span class="me">✓ srp grid renders server side (412 ms)</span>
+<span class="me">✓ vdp gallery keeps trim selection (98 ms)</span>
+<span class="me">✓ confirm dialog traps focus (31 ms)</span>
+ Tests  47 passed (47)
+$ gh pr checks 244 --watch
+ci-required   pass   2m14s
+payload-e2e   pending
+$ git log --oneline -1
+7564c76 feat(storefront): quality pass</div>
+        <div class="ft"><span class="chip ok">#244 merged</span><span class="sp"></span><span>Opus 5.5 · 11 turns</span></div>
+      </div>
+
+      <div class="tile">
+        <div class="hd"><span class="dot halo"></span><b>w3-inventory-pricing</b><span class="st">Rebasing</span><span class="t">1m</span></div>
+        <div class="tail">$ git fetch origin && git rebase origin/main
+Successfully rebased and updated refs/heads/feat/w3-inventory-pricing.
+$ bun run test:integration -- importer
+<span class="me">✓ nightly import respects ORIGIN_SECRET (1.2 s)</span>
+<span class="me">✓ hides 509 expired incentive lists (640 ms)</span>
+<span class="me">✓ /health/import reports stalest feed (210 ms)</span>
+Sending head a3c9ad32 to reviewer for r10…
+$ cogpit-session send 01a11685… - --command-id w3inve-r10</div>
+        <div class="ft"><span class="chip info">#246 checks running</span><span class="sp"></span><span>Opus 5.5 · 14 turns</span></div>
+      </div>
+
+      <div class="tile need">
+        <div class="hd"><span class="dot warn"></span><b>w3-rooftop</b><span class="st w">Waiting on a permission</span><span class="t">42m</span></div>
+        <div class="tail">Importer suite passes 47/47 on cabc3993.
+Applying the ruleset the brief asks for…
+Need to POST the ruleset to the repo:</div>
+        <div class="ask"><div><span class="chip">Bash</span></div><code>gh api repos/HonestCMS/cms/rulesets -X POST -f name=main-protection …</code><div class="acts"><button class="btn xs primary">Allow</button><button class="btn xs">Always allow</button><button class="btn xs danger">Deny</button></div></div>
+        <div class="ft"><span class="chip">reviewer r2 · changes requested</span><span class="sp"></span><span>Opus 5.5</span></div>
+      </div>
+
+      <div class="tile need">
+        <div class="hd"><span class="dot warn"></span><b>w3-security-admin</b><span class="st w">Asked a question</span><span class="t">39m</span></div>
+        <div class="tail">Access app for the admin host needs a hostname before I
+can create it. The brief lists two candidates.</div>
+        <div class="ask">Which hostname should the admin Access app use?<div class="opts"><span>admin.honestdigital.com</span><span>cms-admin.honestdigital.com</span><span>Something else</span></div><div class="acts"><button class="btn xs primary">Answer</button><button class="btn xs ghost">Open ›</button></div></div>
+        <div class="ft"><span class="chip ok">#243 merged</span><span class="sp"></span><span>Opus 5.5 · 9 turns</span></div>
+      </div>
+
+      <div class="tile" style="border-style:dashed;align-items:center;justify-content:center;color:var(--fg-dim);font-size:12.5px">Members that start or get blocked appear here</div>
+    </div>
+    <div class="done-row"><span class="dot done"></span><span>11 done</span><span class="names">w3-theories · w3-parity-soak · w3-cost-model · w3-perf-ship · w3-ops-tooling · w3-access-gaps · w3-leads-email · w3-payload-upgrade · w3-hotfix-duplicate · w3-decisions · w3-existing-data</span><span style="margin-left:auto">show</span></div>
+  </section>
+
+  <aside class="crew">
+    <div class="crew-hd"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg>Crew<span class="sp"></span><span class="ib"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></span><span class="ib"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span></div>
+    <div class="roll">
+      <div class="nm"><b>Wave 3 coordinator</b><span>15 sessions · since 09:14</span></div>
+      <div class="strip"><span class="cell"></span><span class="cell"></span><span class="cell work"></span><span class="cell work"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell need"></span><span class="cell need"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span></div>
+      <div class="tally"><span><span class="dot halo"></span> <b>2</b> working</span><span><span class="dot warn"></span> <b>2</b> need you</span><span><span class="dot done"></span> <b>11</b> done</span></div>
+      <div class="budget"><span>4 of 8 slots</span><span class="bar"></span><span>members may not start crews</span></div>
+    </div>
+    <div class="rows">
+      <div class="row"><span class="dot halo"></span><span class="nm">w3-storefront-quality</span><span class="t">now</span><span class="sub"><span class="st">Running tests</span><span class="chip ok">#244 merged</span><span class="model">Opus 5.5</span></span></div>
+      <div class="row"><span class="dot halo"></span><span class="nm">w3-inventory-pricing</span><span class="t">1m</span><span class="sub"><span class="st">Rebasing</span><span class="chip info">#246 checks</span><span class="model">Opus 5.5</span></span></div>
+      <div class="row"><span class="dot warn"></span><span class="nm">w3-rooftop</span><span class="t">42m</span><span class="sub"><span class="st warn">Waiting on a permission</span><span class="model">Opus 5.5</span></span></div>
+      <div class="row"><span class="dot warn"></span><span class="nm">w3-security-admin</span><span class="t">39m</span><span class="sub"><span class="st warn">Asked a question</span><span class="chip ok">#243 merged</span><span class="model">Opus 5.5</span></span></div>
+      <div class="row"><span class="dot done"></span><span class="nm">w3-theories</span><span class="t">1h</span><span class="sub"><span class="st warn">Finished · result unread</span><span class="model">Opus 5.5 · xhigh</span></span></div>
+      <div class="row"><span class="dot done"></span><span class="nm">w3-parity-soak</span><span class="t">1h</span><span class="sub"><span class="st warn">Finished · result unread</span><span class="chip ok">#250 merged</span></span></div>
+      <div class="row"><span class="dot done"></span><span class="nm">w3-cost-model</span><span class="t">2h</span><span class="sub"><span class="st">Finished</span><span class="chip ok">#251 merged</span></span></div>
+      <div class="row"><span class="dot done"></span><span class="nm">w3-perf-ship</span><span class="t">2h</span><span class="sub"><span class="st">Finished</span><span class="chip ok">#249 merged</span></span></div>
+      <div class="row"><span class="dot done"></span><span class="nm">w3-ops-tooling</span><span class="t">2h</span><span class="sub"><span class="st">Finished</span><span class="chip ok">#252 merged</span></span></div>
+    </div>
+    <div class="feed">
+      <div class="sec"><b>Activity</b><span class="sp"></span><span>today</span></div>
+      <div class="ln"><span class="tm">16:42</span><span><b>w3-rooftop</b> <span class="muted">asked a permission</span></span></div>
+      <div class="ln"><span class="tm">16:31</span><span><b>w3-cost-model</b> <span class="muted">finished · PR #251 merged</span></span></div>
+      <div class="ln"><span class="tm">16:03</span><span><b>w3-security-admin</b> <span class="muted">asked a question</span></span></div>
+      <div class="ln"><span class="tm">14:35</span><span><b>w3-theories</b> <span class="muted">started · Opus 5.5 · xhigh</span></span></div>
+    </div>
+    <div class="foot"><span>Load 8.2</span><span>·</span><span>11 agents</span><span>·</span><span>2.7M tokens</span><span class="sp"></span><span class="w">Limit resets 18:00</span></div>
+  </aside>
+
+  <nav class="rail">
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span class="badge">4</span></span>
+    <span class="ri on"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg></span>
+  </nav>
+</div>
+
+<!-- ═══════════════════════════════ MOBILE ═══════════════════════════════ -->
+<div class="view view-mobile">
+  <section class="mobile">
+    <div class="m-top"><b>Now</b><span class="bell"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="cnt">4</span></span></div>
+    <div class="m-body">
+      <div class="m-sec"><b>Needs you</b><span>4</span><span class="sp"></span><span>1 of 4</span></div>
+      <div class="qcard">
+        <div class="who"><span class="dot warn"></span><b>w3-rooftop</b><span class="wait">42 min</span></div>
+        <div class="what">Wave 3 coordinator · asked a permission</div>
+        <div class="cmd"><span class="tool">Bash</span><code>gh api repos/HonestCMS/cms/rulesets -X POST …</code></div>
+        <div class="acts"><button class="btn primary">Allow</button><button class="btn">Always</button><button class="btn danger">Deny</button></div>
+      </div>
+      <div class="m-next"><span>Next</span><b>w3-security-admin</b><span>asked a question</span><span class="t">39m</span></div>
+
+      <div class="m-sec" style="margin-top:6px"><b>Your sessions</b><span>3</span></div>
+      <div class="m-list">
+        <div class="m-row"><span class="nm">Wave 3 coordinator</span><span class="time">now</span><span class="meta"><span>2 working</span><span class="w">2 need you</span><span>11 done</span></span><span class="strip"><span class="cell"></span><span class="cell"></span><span class="cell work"></span><span class="cell work"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell need"></span><span class="cell need"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span></span></div>
+        <div class="m-row"><span class="nm">Job applications</span><span class="time">3m</span><span class="meta"><span>2 working</span><span>Runway confirmed</span></span><span class="strip"><span class="cell work"></span><span class="cell work"></span></span></div>
+        <div class="m-row"><span class="nm">Rethink Cogpit's UI</span><span class="time">now</span><span class="meta"><span>working · Fable 5.1</span></span><span class="strip"><span class="cell work"></span></span></div>
+      </div>
+
+      <div class="m-sec" style="margin-top:6px"><b>Landed today</b></div>
+      <div class="m-list">
+        <div class="m-row"><span class="nm" style="font-size:13px;font-weight:400">PR #251 merged · w3-cost-model</span><span class="time">16:31</span></div>
+        <div class="m-row"><span class="nm" style="font-size:13px;font-weight:400">PR #252 merged · w3-ops-tooling</span><span class="time">15:50</span></div>
+      </div>
+      <div class="m-cap"><span>Mac load 8.2 · 11 agents</span><span class="w">Limit resets 18:00</span></div>
+    </div>
+    <div class="m-tabs">
+      <span class="tab on"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Now<span class="cnt">4</span></span>
+      <span class="tab"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</span>
+      <span class="tab"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg>Crew</span>
+    </div>
+  </section>
+</div>
+
+<script>
+  const apply = () => {
+    const h = location.hash.replace("#", "")
+    document.body.dataset.view = ["home", "wall", "mobile"].includes(h) ? h : "home"
+  }
+  apply(); addEventListener("hashchange", apply)
+</script>
+</body>
+</html>

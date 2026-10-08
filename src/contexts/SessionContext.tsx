@@ -1,4 +1,4 @@
-import { createContext, useContext, type RefObject, type ReactNode } from "react"
+import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
@@ -31,6 +31,7 @@ export interface ChatState {
 export interface ScrollState {
   chatScrollRef: RefObject<HTMLDivElement | null>
   scrollEndRef: RefObject<HTMLDivElement | null>
+  observeChatContent?: RefCallback<HTMLDivElement>
   canScrollDown: boolean
   initialScrollDone: boolean
   handleScroll: () => void
@@ -85,6 +86,7 @@ export interface SessionContextValue {
     handleToggleExpandAll: () => void
     /** Load a session (or sub-agent session) by dirName + fileName — matches the sidebar behavior. */
     handleLoadSession: (dirName: string, fileName: string) => void
+    handleProviderHandoff?: () => void
   }
 }
 
@@ -119,12 +121,22 @@ export function SessionProvider({ value, chatValue, children }: SessionProviderP
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
+/** The session, or null outside a session provider (shared views, previews). */
+export function useSessionContextOptional(): SessionContextValue | null {
+  return useContext(SessionContext)
+}
+
 export function useSessionContext(): SessionContextValue {
   const ctx = useContext(SessionContext)
   if (!ctx) {
     throw new Error("useSessionContext must be used within a SessionProvider")
   }
   return ctx
+}
+
+/** The chat, or null outside a session provider (shared views, previews). */
+export function useSessionChatContextOptional(): SessionChatContextValue | null {
+  return useContext(SessionChatContext)
 }
 
 export function useSessionChatContext(): SessionChatContextValue {

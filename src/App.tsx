@@ -1,3 +1,4 @@
+import { ConversationComposer } from "@/components/ConversationComposer"
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,7 +21,7 @@ import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
-import { PendingTurnPreview } from "@/components/PendingTurnPreview"
+import { QueuedTurns } from "@/components/QueuedTurns"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { DesktopAppShell } from "@/components/AppShell/DesktopAppShell"
 import { MobileAppShell } from "@/components/AppShell/MobileAppShell"
@@ -228,6 +229,12 @@ export default function App() {
     openWorkspacePanel(panelId)
     if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "workspace" })
   }, [openWorkspacePanel, isMobile, dispatch])
+  const openCrewPanel = useCallback(
+    () => openProjectWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.crew),
+    [openProjectWorkspacePanel],
+  )
+  const crewPanelOpen = panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.crew
+    && (!isMobile || state.mobileTab === "workspace")
 
   const {
     processPanel,
@@ -367,7 +374,7 @@ export default function App() {
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
 
   // Permissions management
-  const perms = usePermissions()
+  const perms = usePermissions(currentAgentKind)
   const permsSetMode = perms.setMode
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
@@ -781,6 +788,17 @@ export default function App() {
   else if (isReadOnlySession) readOnlyReason = { kind: "external", agentKind: currentAgentKind }
   else readOnlyReason = accessReadOnlyReason(sessionAccess)
   const activeReadOnlyNode = readOnlyReason && <SessionReadOnlyNotice reason={readOnlyReason} />
+  const currentSessionId = state.session?.sessionId ?? null
+  const canHandoff = currentSessionId !== null && readOnlyReason === null
+    && state.mainView === "sessions" && (!isMobile || state.mobileTab === "chat")
+  const [providerHandoffSessionId, setProviderHandoffSessionId] = useState<string | null>(null)
+  useEffect(() => { setProviderHandoffSessionId(null) }, [currentSessionId, canHandoff])
+  const handleProviderHandoff = useCallback(() => {
+    if (canHandoff) setProviderHandoffSessionId(currentSessionId)
+  }, [currentSessionId, canHandoff])
+  const handleProviderHandoffOpenChange = useCallback((open: boolean) => {
+    setProviderHandoffSessionId((owner) => open ? currentSessionId : owner === currentSessionId ? null : owner)
+  }, [currentSessionId])
 
   // Collect all error messages for toast display — first non-null wins
   const activeError = actions.loadError || createError || null
@@ -849,6 +867,7 @@ export default function App() {
       handleBranchFromHere: handlers.handleBranchFromHere,
       handleToggleExpandAll,
       handleLoadSession: handlers.handleLoadSessionScrollAware,
+      handleProviderHandoff: canHandoff ? handleProviderHandoff : undefined,
     },
   }), [
     state.session, state.sessionSource,
@@ -859,6 +878,7 @@ export default function App() {
     handlers.handleStopSession, configAdminEnabled, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
     handlers.handleLoadSessionScrollAware,
+    canHandoff, handleProviderHandoff,
   ])
 
   // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
@@ -1145,15 +1165,28 @@ export default function App() {
     </div>
   )
 
+  const composerWithQueue = (
+    <ConversationComposer
+      sessionId={state.session?.sessionId ?? null}
+      readOnly={isReadOnlySession || !sessionPermissions.send}
+      onOpen={actions.handleDashboardSelect}
+      handoffOpen={canHandoff && providerHandoffSessionId === currentSessionId}
+      onHandoffOpenChange={handleProviderHandoffOpenChange}
+      crewOpen={crewPanelOpen}
+      onOpenCrew={openCrewPanel}
+    >
+      {composer}
+    </ConversationComposer>
+  )
   const chatInputNode = goalSession ? (
     <GoalProvider
       agentKind={currentAgentKind}
       session={goalSession}
       onSendCommand={agentChat.sendMessage}
     >
-      {composer}
+      {composerWithQueue}
     </GoalProvider>
-  ) : composer
+  ) : composerWithQueue
 
   const previewChatInputNode = (
     <div className={cn("shrink-0", isMobile && "bg-background")}>
@@ -1167,13 +1200,9 @@ export default function App() {
     </div>
   )
 
-  const pendingPreviewList = agentChat.pendingMessages.map((msg, i) => (
-    <PendingTurnPreview
-      key={i}
-      message={msg}
-      turnNumber={i + 1}
-    />
-  ))
+  const pendingPreviewList = agentChat.pendingMessages.length > 0
+    ? [<QueuedTurns key="queued" sessionId={null} pendingMessages={agentChat.pendingMessages} canManage={false} isMobile={isMobile} />]
+    : []
 
   // Server discovery when StatsPanel is hidden — StatsPanel has its own BackgroundServers instance
   const statsPanelVisible = isMobile

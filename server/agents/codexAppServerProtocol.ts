@@ -1,5 +1,6 @@
 import type { SpawnOptionsWithoutStdio } from "node:child_process"
 import type { Readable, Writable } from "node:stream"
+import type * as Generated from "./generated/codex-protocol"
 import type {
   ElicitationAction,
   ElicitationContent,
@@ -132,26 +133,15 @@ export interface CodexTurn extends JsonObject {
   status?: string
 }
 
-export type ThreadStartParams = JsonObject
+export type ThreadStartParams = Generated.ThreadStartParams & JsonObject
 
-export interface ThreadResumeParams extends JsonObject {
-  threadId: string
-}
+export type ThreadResumeParams = Generated.ThreadResumeParams & JsonObject
 
-export interface UserInput extends JsonObject {
-  type: string
-}
+export type UserInput = Generated.UserInput & JsonObject
 
-export interface TurnStartParams extends JsonObject {
-  threadId: string
-  input: UserInput[]
-}
+export type TurnStartParams = Generated.TurnStartParams & JsonObject
 
-export interface TurnSteerParams extends JsonObject {
-  threadId: string
-  input: UserInput[]
-  expectedTurnId?: string
-}
+export type TurnSteerParams = Omit<Generated.TurnSteerParams, "expectedTurnId"> & JsonObject & { expectedTurnId?: string }
 
 export interface ThreadGoal extends JsonObject {
   threadId: string

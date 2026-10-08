@@ -1,3 +1,4 @@
+import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import type { SessionSource } from "@/hooks/useLiveSession"
@@ -38,7 +39,7 @@ export function useComposerSettings({
     fastTier,
     imageInput: imageInputAvailable,
     normalizeEffort,
-  } = useModelCapabilities(effectiveAgentKind, selectedModel)
+  } = useModelCapabilities(effectiveAgentKind, selectedModel, splitInstanceDirName(sessionSource?.dirName ?? pendingDirName).instanceId)
   const ultracodeAvailable = isUltracodeCapableModel(
     effectiveAgentKind,
     selectedModel || session?.model,

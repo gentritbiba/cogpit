@@ -13,7 +13,7 @@ describe("CommandPalette", () => {
     const props = createProps()
     render(<CommandPalette {...props} />)
 
-    await user.click(screen.getByText("Go to dashboard"))
+    await user.click(screen.getByText("Go to Mission Control"))
 
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
     expect(props.onGoHome).toHaveBeenCalledOnce()

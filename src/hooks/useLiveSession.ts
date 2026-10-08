@@ -1,3 +1,4 @@
+import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { useEffect, useRef, useState } from "react"
 import { openSessionStream } from "@/lib/sessionStream"
 import type { ParsedSession } from "../../shared/session/types"
@@ -102,9 +103,9 @@ export function useLiveSession(
     }
     // Fallback: no pre-parsed session available — parse rawText ourselves.
     workerParseRef.current(rawText).then((parsed) => {
-      sessionRef.current = parsed
+      sessionRef.current = scopeParsedSession(parsed, splitInstanceDirName(source?.dirName).instanceId)
     })
-  }, [rawText])
+  }, [rawText, source?.dirName])
 
   // SSE reconnects when rawText changes (e.g. after JSONL truncation from undo).
   // rawText only changes on explicit session load/reload, not during SSE streaming.
@@ -229,7 +230,8 @@ export function useLiveSession(
         : workerParseRef.current(textRef.current)
 
       parsePromise
-        .then((result) => {
+        .then((parsedResult) => {
+          const result = scopeParsedSession(parsedResult, splitInstanceDirName(dirName).instanceId)
           if (closed) return
           sessionRef.current = result
           if (dirName && fileName) {

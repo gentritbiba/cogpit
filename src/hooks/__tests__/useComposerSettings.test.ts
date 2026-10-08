@@ -6,6 +6,7 @@ import type { AgentKind } from "@/lib/agents"
 import type { ModelOption } from "@/lib/utils"
 
 const modelOptions: Record<AgentKind, ModelOption[]> = {
+  acp: [{ value: "", label: "Provider default" }],
   claude: [
     { value: "", label: "Default" },
     { value: "opus", label: "Opus" },

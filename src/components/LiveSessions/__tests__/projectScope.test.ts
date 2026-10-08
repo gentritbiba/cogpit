@@ -95,6 +95,36 @@ describe("scopeSessions", () => {
   })
 })
 
+describe("scopeSessions with crews", () => {
+  const coordinator = session("coordinator", { dirName: "-home-me-ops", cwd: "/home/me/ops" })
+  const lane = session("lane", {
+    dirName: "-home-me-lane", cwd: "/home/me/lane",
+    crew: { rootId: "coordinator", parentId: "coordinator", startedAt: 1 },
+  })
+  const stray = session("stray", {
+    dirName: "-home-me-lane", cwd: "/home/me/lane",
+    crew: { rootId: "elsewhere", parentId: "elsewhere", startedAt: 2 },
+  })
+  const all = [coordinator, lane, stray]
+
+  it("brings a root's crew into its project from other folders", () => {
+    expect(scopeSessions(all, "me/ops", true).map((s) => s.sessionId)).toEqual(["coordinator", "lane"])
+  })
+
+  it("keeps a member in its own folder's project too, where it stands on its own", () => {
+    expect(scopeSessions(all, "me/lane", true).map((s) => s.sessionId)).toEqual(["lane", "stray"])
+  })
+
+  it("scopes by folder alone when crews are not grouped", () => {
+    expect(scopeSessions(all, "me/ops", false).map((s) => s.sessionId)).toEqual(["coordinator"])
+  })
+
+  it("counts the sessions in a project that carry a crew", () => {
+    const [option] = projectScopeOptions([coordinator], new Map(), {}, new Set(), new Map([["coordinator", [lane]]]))
+    expect(option).toMatchObject({ key: "me/ops", total: 1, crews: 1 })
+  })
+})
+
 describe("mergeSessions", () => {
   it("adds older sessions the list lacks and keeps everything newest first", () => {
     const listed = [session("new", { lastModified: "2026-09-11T10:00:00Z" })]

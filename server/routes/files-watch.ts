@@ -320,6 +320,7 @@ export function registerFileWatchRoutes(use: UseFn) {
       res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
     }
     let unsubscribeStream: (() => void) | null = streamBus.subscribe(sessionId, (ev) => {
+      if (ev.type === "stream_complete") return
       if (!closed) {
         const payload = JSON.stringify(ev)
         recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })

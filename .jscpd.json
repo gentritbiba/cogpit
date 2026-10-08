@@ -5,7 +5,8 @@
     "**/*.test.*",
     "**/*.md",
     "**/dist/**",
-    "**/out/**"
+    "**/out/**",
+    "**/agents/generated/**"
   ],
   "minLines": 5,
   "minTokens": 50,

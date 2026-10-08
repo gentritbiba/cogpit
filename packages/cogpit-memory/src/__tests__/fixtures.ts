@@ -12,6 +12,7 @@ export const mockDirs = {
   TASKS_DIR: "",
   CODEX_SESSIONS_DIR: "",
   COPILOT_SESSIONS_DIR: "",
+  ACP_PROJECTS_DIR: "",
 }
 
 export const mockDbPath = { value: "" }

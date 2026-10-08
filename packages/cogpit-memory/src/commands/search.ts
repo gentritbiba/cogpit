@@ -16,7 +16,8 @@ import { DEFAULT_DB_PATH } from "../lib/dirs"
 import { parseMaxAge } from "../lib/response"
 import { findSessionFile, listAllSessionFiles } from "../lib/stores"
 import { formatForText } from "../lib/agents"
-import { parseSession, getUserMessageText } from "../lib/parser"
+import { getUserMessageText } from "../lib/parser"
+import { parseTranscript } from "../lib/read-session"
 import type { ParsedSession } from "../lib/types"
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -402,7 +403,7 @@ async function walkSubagentFiles(
     matched
       .filter(m => m.rawContent)
       .map(async ({ agentId, filePath, rawContent }) => {
-        const subSession = parseSession(rawContent!)
+        const subSession = parseTranscript(rawContent!, filePath)
         const subHits = walkSession(subSession, query, caseSensitive, `agent/${agentId}/`)
         const nestedHits = await walkSubagentFiles(filePath, query, caseSensitive, currentDepth + 1, maxDepth)
         return [...subHits, ...nestedHits]
@@ -444,7 +445,7 @@ async function rawScanSearch(
       if (!rawContent) continue
 
       // Phase 3: Parse and walk
-      const session = parseSession(rawContent)
+      const session = parseTranscript(rawContent, file.path)
 
       const sessionHits = walkSession(session, query, caseSensitive)
       const subagentHits = await walkSubagentFiles(file.path, query, caseSensitive, 0, MAX_SUBAGENT_DEPTH)

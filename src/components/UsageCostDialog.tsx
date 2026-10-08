@@ -74,11 +74,7 @@ function enumerateDays(sinceDay: string, untilDay: string): string[] {
 }
 
 function emptyProviderTotals(): Record<UsageCostProvider, { costUsd: number; tokens: number }> {
-  return {
-    claude: { costUsd: 0, tokens: 0 },
-    codex: { costUsd: 0, tokens: 0 },
-    copilot: { costUsd: 0, tokens: 0 },
-  }
+  return Object.fromEntries(PROVIDERS.map(({ key }) => [key, { costUsd: 0, tokens: 0 }])) as Record<UsageCostProvider, { costUsd: number; tokens: number }>
 }
 
 function derive(summary: UsageCostSummary): Derived {

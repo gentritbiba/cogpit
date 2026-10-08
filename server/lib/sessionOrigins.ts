@@ -17,7 +17,16 @@ export interface SessionOrigin {
   asksUser?: true
   /** The repository sent to the device for it, to fetch its work back. */
   handoff?: Handoff
+  /** The name it was started with (`cogpit-session new --name`); providers that keep no title still have one. */
+  name?: string
   createdAt: number
+}
+
+/** A session another session started, as `sessionParents` lists it. */
+export interface CrewLink {
+  parentSessionId: string
+  createdAt: number
+  name?: string
 }
 
 interface PersistedOrigins {
@@ -51,12 +60,14 @@ const file = new SessionConfigFile(SESSION_ORIGINS_FILE, {
       const deviceId = optionalString(entry.deviceId)
       const asksUser = entry.asksUser === true
       const handoff = handoffFrom(entry.handoff)
+      const name = optionalString(entry.name)
       if (!parentSessionId && !deviceId && !asksUser) continue
       origins.set(sessionId, {
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(deviceId ? { deviceId } : {}),
         ...(asksUser ? { asksUser } : {}),
         ...(handoff ? { handoff } : {}),
+        ...(name ? { name } : {}),
         createdAt: entry.createdAt,
       })
     }
@@ -82,6 +93,7 @@ export async function recordSessionOrigin(
     ...(origin.deviceId ? { deviceId: origin.deviceId } : {}),
     ...(origin.asksUser ? { asksUser: true as const } : {}),
     ...(origin.handoff ? { handoff: origin.handoff } : {}),
+    ...(!existing?.name && origin.name ? { name: origin.name } : {}),
     createdAt: existing?.createdAt ?? now,
   }
   if (JSON.stringify(existing) === JSON.stringify(next)) return
@@ -101,6 +113,21 @@ export async function sessionChildren(parentSessionId: string): Promise<string[]
     .filter(([, origin]) => origin.parentSessionId === parentSessionId)
     .sort(([, a], [, b]) => a.createdAt - b.createdAt)
     .map(([sessionId]) => sessionId)
+}
+
+/** Every session another session started, keyed by the session started. */
+export async function sessionParents(): Promise<ReadonlyMap<string, CrewLink>> {
+  await file.load()
+  const parents = new Map<string, CrewLink>()
+  for (const [sessionId, origin] of origins) {
+    if (!origin.parentSessionId) continue
+    parents.set(sessionId, {
+      parentSessionId: origin.parentSessionId,
+      createdAt: origin.createdAt,
+      ...(origin.name ? { name: origin.name } : {}),
+    })
+  }
+  return parents
 }
 
 /** Forget a session's handed-over workspace once it has been discarded. */

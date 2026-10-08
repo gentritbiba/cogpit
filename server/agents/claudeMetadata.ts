@@ -3,6 +3,7 @@ import type { AgentSettingMessage, WorktreeStateMessage } from "../../shared/ses
 import { isRecord } from "../../shared/objects"
 import { HEAD_BYTES } from "./transcriptHead"
 import type { SessionMeta, TranscriptHead } from "./types"
+import { isTaskWakeup } from "../../shared/contracts/taskWakeup"
 
 /**
  * Claude Code's session metadata: the identity fields come from the head, and
@@ -44,7 +45,7 @@ function extractUserText(obj: { message?: { content?: unknown } }): string {
       }
     }
   }
-  if (extracted && SKIP_RE.test(extracted)) return ""
+  if (extracted && (SKIP_RE.test(extracted) || isTaskWakeup(extracted))) return ""
   return extracted
 }
 

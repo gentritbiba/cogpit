@@ -26,6 +26,7 @@ const CREATE_TIMEOUT_MS = 60_000
 const CREATE_ATTEMPTS = 3
 
 const sessionApiChecked = new Map<string, number>()
+const durableApiChecked = new Map<string, number>()
 
 function connectionKey(device: HubDevice): number {
   return device.connectionRevision ?? 0
@@ -76,6 +77,14 @@ export async function ensureSessionApi(deviceId: string): Promise<void> {
   sessionApiChecked.set(deviceId, connectionKey(current))
 }
 
+async function ensureDurableApi(deviceId: string): Promise<void> {
+  const current = registered(deviceId)
+  if (durableApiChecked.get(deviceId) === connectionKey(current)) return
+  const hello = await deviceJson<{ sessionApi?: number }>(deviceId, "GET", "/api/hello")
+  if ((hello.sessionApi ?? 0) < 2) throw new DeviceRequestError(deviceId, 426, `Update ${current.name} to support durable command delivery. No automatic send retry was made.`, "DEVICE_TOO_OLD")
+  durableApiChecked.set(deviceId, connectionKey(current))
+}
+
 export function createRemoteHost(deviceId: string): SessionHost {
   async function call<T>(method: string, path: string, body?: unknown, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
     await ensureSessionApi(deviceId)
@@ -90,6 +99,7 @@ export function createRemoteHost(deviceId: string): SessionHost {
       return getDevice(deviceId)?.name ?? deviceId
     },
     remote: true,
+    async transition(input) { await ensureDurableApi(deviceId); return call("POST", "/api/conversation-transition", input) },
 
     /**
      * The device may still be starting a session when the answer is lost, so
@@ -97,6 +107,7 @@ export function createRemoteHost(deviceId: string): SessionHost {
      * resolves to that one session instead of starting another.
      */
     async create(input) {
+      if (input.instanceId && input.instanceId !== "default") await ensureDurableApi(deviceId)
       const body = { ...startFields(input), requestId: input.requestId }
       for (let attempt = 1; ; attempt++) {
         try {
@@ -111,8 +122,25 @@ export function createRemoteHost(deviceId: string): SessionHost {
       }
     },
 
-    send(sessionId, message, { interrupt = false } = {}) {
-      return call("POST", "/api/session-send", { sessionId, message, interrupt })
+    async send(sessionId, message, { interrupt = false, commandId, intent } = {}) {
+      if (commandId) await ensureDurableApi(deviceId)
+      return call("POST", "/api/session-send", { sessionId, message, interrupt, commandId, intent })
+    },
+
+    async receipt(commandId, _req, waitMs) {
+      await ensureDurableApi(deviceId)
+      const deadline = Date.now() + (waitMs ?? 0)
+      for (;;) {
+        let receipt: import("../../shared/contracts/orchestration").CommandReceipt
+        try {
+          ({ receipt } = await call<{ receipt: import("../../shared/contracts/orchestration").CommandReceipt }>("GET", `/api/command-receipt?commandId=${encodeURIComponent(commandId)}`))
+        } catch (error) {
+          if (error instanceof DeviceRequestError && error.status === 404 && error.code !== "UNKNOWN_DEVICE") return null
+          throw error
+        }
+        if (waitMs === undefined || ["completed", "failed", "unknown", "held", "cancelled"].includes(receipt.state) || Date.now() >= deadline) return receipt
+        await sleep(Math.min(500, deadline - Date.now()))
+      }
     },
 
     async state(sessionId) {
@@ -164,10 +192,12 @@ export function createRemoteHost(deviceId: string): SessionHost {
       }
     },
 
-    async respond(sessionId, requestId, response) {
+    async respond(sessionId, requestId, response, { commandId } = {}) {
+      if (commandId) await ensureDurableApi(deviceId)
       const { answered } = await call<{ answered: PendingInput }>("POST", "/api/session-respond", {
         sessionId,
         requestId,
+        commandId,
         ...response,
       })
       return answered

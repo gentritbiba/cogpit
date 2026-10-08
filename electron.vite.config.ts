@@ -16,6 +16,7 @@ export default defineConfig({
         entry: {
           main: "electron/main.ts",
           "server-worker": "electron/server-worker.ts",
+          "instance-worker": "server/agents/instanceWorker.ts",
         },
       },
       rollupOptions: {

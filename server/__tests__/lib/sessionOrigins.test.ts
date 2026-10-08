@@ -35,6 +35,7 @@ import {
   recordSessionOrigin,
   sessionChildren,
   sessionOrigin,
+  sessionParents,
 } from "../../lib/sessionOrigins"
 
 describe("sessionOrigins", () => {
@@ -71,6 +72,29 @@ describe("sessionOrigins", () => {
     await recordSessionOrigin("asks", { asksUser: true }, 100)
     __resetSessionOriginsForTest()
     expect(await sessionOrigin("asks")).toEqual({ asksUser: true, createdAt: 100 })
+  })
+
+  it("keeps the name a session was started with, and the first one wins", async () => {
+    await recordSessionOrigin("lane", { parentSessionId: "coordinator", name: "w3-rooftop" }, 100)
+    await recordSessionOrigin("lane", { parentSessionId: "coordinator", name: "renamed later" }, 200)
+    __resetSessionOriginsForTest()
+    expect(await sessionOrigin("lane")).toEqual({ parentSessionId: "coordinator", name: "w3-rooftop", createdAt: 100 })
+  })
+
+  it("does not record a session that only has a name", async () => {
+    await recordSessionOrigin("plain", { name: "just a name" })
+    expect(await sessionOrigin("plain")).toBeNull()
+  })
+
+  it("lists every session another session started, with when and as what", async () => {
+    await recordSessionOrigin("lane", { parentSessionId: "coordinator", name: "w3-rooftop" }, 100)
+    await recordSessionOrigin("reviewer", { parentSessionId: "lane" }, 200)
+    await recordSessionOrigin("remote-only", { deviceId: "dev_1" }, 300)
+
+    expect(await sessionParents()).toEqual(new Map([
+      ["lane", { parentSessionId: "coordinator", createdAt: 100, name: "w3-rooftop" }],
+      ["reviewer", { parentSessionId: "lane", createdAt: 200 }],
+    ]))
   })
 
   it("ignores a session naming itself as its parent", async () => {

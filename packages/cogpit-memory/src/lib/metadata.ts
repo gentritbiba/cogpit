@@ -1,6 +1,8 @@
 import { readFile, stat, open } from "node:fs/promises"
 import { formatForText, type AgentFormat, type AgentSessionMetadata } from "./agents"
 import { deriveSessionStatus, type SessionStatusInfo } from "./sessionStatus"
+import { storeForPath } from "./stores"
+import { instanceSessionId } from "./instances"
 
 /** Files larger than this are read from the head only. */
 const FULL_READ_LIMIT = 65536
@@ -127,6 +129,7 @@ export async function getSessionMeta(filePath: string) {
   }
 
   const header = readHeader(format, lines)
+  const instanceId = storeForPath(filePath)?.instanceId ?? "default"
   const conversation: ConversationMeta = header.turnCount === undefined
     ? scanClaudeMessages(lines)
     : {
@@ -137,7 +140,7 @@ export async function getSessionMeta(filePath: string) {
       }
 
   return {
-    sessionId: header.sessionId,
+    sessionId: instanceSessionId(instanceId, header.sessionId),
     version: header.version,
     gitBranch: header.gitBranch,
     model: header.model,
@@ -149,7 +152,7 @@ export async function getSessionMeta(filePath: string) {
     lineCount: isPartialRead
       ? Math.round(fileStat.size / (HEAD_READ_BYTES / lines.length))
       : lines.length,
-    branchedFrom: header.branchedFrom,
+    branchedFrom: header.branchedFrom ? { ...header.branchedFrom, sessionId: instanceSessionId(instanceId, header.branchedFrom.sessionId) } : undefined,
   }
 }
 

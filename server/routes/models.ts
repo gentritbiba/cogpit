@@ -1,6 +1,6 @@
 import type { UseFn } from "../http"
 import { AGENT_KINDS, type AgentKind, type ModelOption } from "../../shared/session/agent-descriptors"
-import { allRuntimes } from "../agents/runtimes"
+import { allRuntimes, runtimeFor } from "../agents/runtimes"
 
 /**
  * One list per agent, or null where that CLI could not be asked (missing or
@@ -26,7 +26,7 @@ async function getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
   if (inFlight) return inFlight
 
   inFlight = (async () => {
-    const runtimes = allRuntimes()
+    const runtimes = allRuntimes().filter((runtime) => !runtime.instanceId)
     const lists = await Promise.all(runtimes.map((runtime) => runtime.listModels()))
     // Keep the previous good list for any agent that failed this round
     const next = { ...lastGood }
@@ -51,6 +51,13 @@ export function registerModelRoutes(use: UseFn) {
   // static list for that agent.
   use("/api/models", async (req, res, next) => {
     if (req.method !== "GET") return next()
+    const instanceId = new URL(req.url || "/", "http://localhost").searchParams.get("instanceId")
+    if (instanceId && instanceId !== "default") {
+      const runtime = allRuntimes().find((value) => value.instanceId === instanceId)
+      if (!runtime) { res.statusCode = 404; res.end(JSON.stringify({ error: "Provider instance not found" })); return }
+      try { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ...emptyCatalog(), [runtime.kind]: await runtimeFor(runtime.kind, instanceId).listModels() })) } catch { res.statusCode = 502; res.end(JSON.stringify({ error: "Provider catalog unavailable" })) }
+      return
+    }
     const forceRefresh = (req.url || "").includes("refresh=1")
     const catalog = await getModelCatalog(forceRefresh)
     res.statusCode = 200

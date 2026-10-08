@@ -3,7 +3,7 @@ import { lineageFromMeta, type TrustedLineage } from "./lineage"
 
 /** The top-level session a transcript address belongs to, and the file it reaches. */
 export interface TranscriptSession {
-  /** Lowercased. */
+  /** Canonical access identity. */
   sessionId: string
   filePath: string
   /** False for a transcript filed under the session — a sub-agent's or a workflow's. */

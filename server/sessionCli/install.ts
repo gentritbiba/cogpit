@@ -31,7 +31,7 @@ import { join } from "node:path"
 
 // Safe to repeat after a dropped connection: reads, and \`new\`, which the
 // server creates once per invocation id.
-const REPEATABLE = new Set(["new", "wait", "status", "result", "children", "help"])
+const REPEATABLE = new Set(["new", "send", "answer", "transition", "receipt", "wait", "status", "result", "children", "help"])
 
 function port() {
   if (process.env.COGPIT_PORT) return process.env.COGPIT_PORT

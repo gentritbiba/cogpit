@@ -4,6 +4,7 @@ import { join } from "node:path"
 import type { StartedSession, StartSessionRequest } from "../agents/runtimeTypes"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { ErrorCodes, RouteError } from "./routeError"
+import type { OrchestrationStore } from "../orchestration/store"
 
 interface CreationRecord {
   fingerprint: string
@@ -24,7 +25,7 @@ function digest(value: string): string {
 export class SessionCreationRequests {
   private pending = new Map<string, { fingerprint: string; result: Promise<StartedSession> }>()
 
-  constructor(private directory: () => string) {}
+  constructor(private directory: () => string, private storage?: () => OrchestrationStore) {}
 
   async run(
     scope: string,
@@ -43,7 +44,7 @@ export class SessionCreationRequests {
       return pending.result
     }
 
-    const result = this.create(file, fingerprint, start)
+    const result = this.storage ? this.createDurable(scope, requestId, file, fingerprint, request, start) : this.create(file, fingerprint, start)
     this.pending.set(file, { fingerprint, result })
     try {
       return await result
@@ -56,6 +57,23 @@ export class SessionCreationRequests {
     if (existing !== requested) {
       throw new RouteError(409, ErrorCodes.CONFLICT, "requestId was already used with a different session request")
     }
+  }
+
+  private async createDurable(scope: string, id: string, legacyFile: string, fingerprint: string, request: StartSessionRequest, start: () => Promise<StartedSession>): Promise<StartedSession> {
+    let imported: CreationRecord | undefined
+    try { imported = JSON.parse(await readFile(legacyFile, "utf8")) as CreationRecord }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw this.unknownOutcome() }
+    if (imported) {
+      this.checkFingerprint(imported.fingerprint, fingerprint)
+      if (!imported.result) throw this.unknownOutcome()
+    }
+    const storage = this.storage!()
+    const operation = storage.beginOperation(scope, id, fingerprint, request, imported?.result)
+    if (operation.result) return operation.result as StartedSession
+    if (!operation.fresh) throw this.unknownOutcome()
+    const result = await start()
+    storage.finishOperation(scope, id, result)
+    return result
   }
 
   private async create(

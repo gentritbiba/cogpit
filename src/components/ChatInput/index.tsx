@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import { FileSuggestions } from "@/components/FileSuggestions"
@@ -10,7 +9,7 @@ import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useImageUpload } from "./useImageUpload"
 import { keepRefusedDraft, takeRefusedDraft } from "./refusedDrafts"
-import { InputToolbar, ActionButtons } from "./InputToolbar"
+import { ActionButtons } from "./ActionButtons"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
@@ -214,7 +213,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   useEffect(() => { setSlashSelectedIndex(0) }, [slashFilter])
   useEffect(() => { setFileSelectedIndex(0) }, [fileMention?.query])
 
-  const elapsedSec = useElapsedTimer(isConnected)
   const planRequestId = pendingInteraction?.type === "plan"
     ? pendingInteraction.requestId ?? null
     : null
@@ -539,7 +537,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               getActionRowClass(stacked, isMultiline),
             )}>
               {footer}
-              <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
               <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
             </div>
           </div>

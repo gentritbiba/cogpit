@@ -13,7 +13,7 @@ import {
 import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { RateLimitBanner } from "@/components/RateLimitBanner"
-import { PendingTurnPreview } from "@/components/PendingTurnPreview"
+import { QueuedTurns } from "@/components/QueuedTurns"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
@@ -47,13 +47,13 @@ export const ChatArea = memo(function ChatArea({
   onMobileSearchClose,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
-  const { session, sessionSource, rateLimit, permissions } = useSessionContext()
+  const { session, sessionSource, rateLimit, permissions, isSubAgentView } = useSessionContext()
   const canUseTerminal = useCapability("terminal")
   const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery } = state
   const { pendingMessages } = chat
-  const { chatScrollRef, scrollEndRef, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
+  const { chatScrollRef, scrollEndRef, observeChatContent, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
 
   // Cmd/Ctrl+F (or the command palette) → open find-in-session
@@ -141,7 +141,11 @@ export const ChatArea = memo(function ChatArea({
           onScroll={handleScroll}
           className={cn("h-full overflow-x-hidden overflow-y-auto", isMobile && "mobile-scroll")}
         >
-          <div className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimitBanner ? "pt-4" : "pt-14", hasTodos ? "pb-48" : "pb-32")}>
+          <div
+            ref={observeChatContent}
+            className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimitBanner ? "pt-4" : "pt-14")}
+            style={isMobile ? undefined : { paddingBottom: `max(var(--session-footer-height, 0px), ${hasTodos ? 12 : 8}rem)` }}
+          >
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
                 <ConversationTimeline
@@ -153,14 +157,14 @@ export const ChatArea = memo(function ChatArea({
                 />
               )}
               <StreamingTurnOverlay />
-              {pendingMessages.map((msg, i) => (
-                <PendingTurnPreview
-                  key={i}
-                  message={msg}
-                  turnNumber={currentSession.turns.length + 1 + i}
-                />
-              ))}
               <AgentStatusIndicator />
+              <QueuedTurns
+                sessionId={currentSession.sessionId}
+                turns={currentSession.turns}
+                pendingMessages={pendingMessages}
+                canManage={permissions.send && !isSubAgentView}
+                isMobile={isMobile}
+              />
               <div ref={scrollEndRef} />
             </ErrorBoundary>
           </div>

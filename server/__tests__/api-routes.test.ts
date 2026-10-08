@@ -22,6 +22,7 @@ const CANONICAL_ROUTE_IDS = [
   "edition",
   "projects",
   "session-send",
+  "session-commands",
   "session-new",
   "folders",
   "session-manage",

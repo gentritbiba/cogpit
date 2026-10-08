@@ -70,6 +70,7 @@ export function AskUserAnswerForm({
     Object.fromEntries(questions.map((question) => [question.question, ""]))
   ))
   const [submitting, setSubmitting] = useState(false)
+  const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const { chat: { sendMessage } } = useSessionChatContext()
 
@@ -98,15 +99,18 @@ export function AskUserAnswerForm({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setSubmitting(true)
+    setDeliveryError(null)
     try {
       const result = await submitUserQuestionAnswers(sessionId, toolCall.id, answers)
       if (result.ok) {
         setSubmitted(true)
-      } else {
+      } else if (result.gone) {
         deliverAsMessage()
+      } else {
+        setDeliveryError("Answer delivery could not be confirmed. Check the message queue before trying again.")
       }
     } catch {
-      deliverAsMessage()
+      setDeliveryError("Answer delivery could not be confirmed. Check the message queue before trying again.")
     }
     setSubmitting(false)
   }
@@ -116,6 +120,7 @@ export function AskUserAnswerForm({
       onSubmit={(event) => { void handleSubmit(event) }}
       className={cn("flex flex-col gap-3", submitted && "pointer-events-none opacity-50")}
     >
+      {deliveryError && <p role="alert">{deliveryError}</p>}
       {questions.map((question, questionIndex) => {
         const isMultipleChoice = question.options && question.options.length > 0
         const selectedAnswers = new Set(

@@ -10,6 +10,15 @@ export interface ProjectPromptContext {
   comment?: string
 }
 
+/** The crew the open session belongs to: the sessions its root started through Cogpit, and theirs. */
+export interface OpenSessionCrew {
+  rootId: string
+  /** Members, not counting the root. */
+  size: number
+  needsYou: number
+  working: number
+}
+
 /** Stable workspace data available to every compile-time panel plugin. */
 export interface WorkspacePanelContext {
   session: ParsedSession | null
@@ -26,6 +35,8 @@ export interface WorkspacePanelContext {
   openSession?: (dirName: string, fileName: string) => void
   /** Append text to the message composer and focus it; absent where there is no composer. */
   composePrompt?: (text: string) => void
+  /** The open session's crew; null or absent when it is in none. */
+  crew?: OpenSessionCrew | null
 }
 
 export interface WorkspacePanelProps {

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Activity, AlertTriangle, Archive, Layers, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, Archive, Layers, ListTree, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,9 @@ interface LiveSessionsToolbarProps {
   searchLoading: boolean
   showArchived: boolean
   archivedCount: number
+  /** Whether sessions another session started are listed under it. */
+  groupCrews?: boolean
+  onToggleGroupCrews?: () => void
   onSearchQueryChange: (query: string) => void
   onToggleShowArchived: () => void
   onRefresh: () => void
@@ -39,6 +42,8 @@ export function LiveSessionsToolbar({
   searchLoading,
   showArchived,
   archivedCount,
+  groupCrews,
+  onToggleGroupCrews,
   onSearchQueryChange,
   onToggleShowArchived,
   onRefresh,
@@ -72,6 +77,29 @@ export function LiveSessionsToolbar({
           </InputGroupAddon>
         )}
       </InputGroup>
+      {onToggleGroupCrews && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size={isMobile ? "icon-sm" : "icon-xs"}
+                onClick={onToggleGroupCrews}
+                aria-pressed={groupCrews}
+                aria-label={groupCrews ? "List spawned sessions on their own" : "Group spawned sessions"}
+                className={cn(groupCrews && "bg-accent text-accent-foreground")}
+              />
+            }
+          >
+            <ListTree data-icon="inline-start" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {groupCrews
+              ? "Sessions another session started are listed under it"
+              : "Group spawned sessions under the session that started them"}
+          </TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger
           render={

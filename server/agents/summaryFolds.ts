@@ -514,6 +514,7 @@ const foldCodex: SummaryFold = (acc, entry) => {
 // ── Registry ────────────────────────────────────────────────────────────────
 
 const FOLDS: Readonly<Record<AgentKind, SummaryFold>> = Object.freeze({
+  acp: foldClaude,
   claude: foldClaude,
   codex: foldCodex,
   copilot: foldCopilot,

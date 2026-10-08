@@ -2,6 +2,7 @@ import type { SessionStatus } from "../../../shared/session/sessionStatus"
 import type { AgentKind } from "@/lib/agents"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
 import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
+import type { ListedCrew, ListedCrewSummary } from "../../../shared/contracts/crew"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -11,6 +12,8 @@ export interface ActiveSessionInfo {
   slug?: string
   /** AI-generated session title from Claude Code's ai-title JSONL events. */
   aiTitle?: string
+  /** The title the session was given by name, such as `/rename` or `--name`, where its agent records one. */
+  customTitle?: string
   firstUserMessage?: string
   lastUserMessage?: string
   gitBranch?: string
@@ -41,6 +44,10 @@ export interface ActiveSessionInfo {
   archivedReason?: "manual" | "inactive"
   /** The caller's access, where the server enforces session access. */
   access?: ListedAccess
+  /** Where it sits in a crew, when another session started it through Cogpit. */
+  crew?: ListedCrew
+  /** On a session listed with the members of its crew. */
+  crewSummary?: ListedCrewSummary
 }
 
 export interface RunningProcess {

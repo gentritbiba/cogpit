@@ -332,3 +332,8 @@ export function usePendingHumanInput(): PendingHumanInput {
   }
   return ctx
 }
+
+/** The pending input, or null outside a provider (previews, isolated tests). */
+export function usePendingHumanInputOptional(): PendingHumanInput | null {
+  return useContext(PendingHumanInputContext)
+}

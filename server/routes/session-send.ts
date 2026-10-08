@@ -6,6 +6,7 @@ import { resolveSessionAgent, runtimeFor } from "../agents/runtimes"
 import { authorizeSession, sendTurn } from "../edition"
 import { sendAgentError } from "./agentErrors"
 import { imagesRefusal } from "./imageAttachments"
+import { admitSessionCommand } from "../lib/durableSend"
 import {
   HttpBodyError,
   MAX_REQUEST_BODY_BYTES,
@@ -15,7 +16,7 @@ import {
 } from "../http"
 import type { SendOutcome, SendRequest, TurnResult } from "../agents/runtimes"
 
-type SendBody = Partial<SendRequest> & { sessionId?: string; settingsChange?: unknown }
+type SendBody = Partial<SendRequest> & { sessionId?: string; settingsChange?: unknown; commandId?: unknown; intent?: unknown }
 
 /**
  * POST /api/send-message — deliver a message to an existing session.
@@ -85,13 +86,22 @@ export function registerSessionSendRoutes(use: UseFn) {
       const authorized = await authorizeSession(req, res, { sessionId }, "interact")
       if (authorized === null) return
 
-      const { kind, filePath } = await resolveSessionAgent(sessionId)
-      const runtime = runtimeFor(kind)
+      const { kind, filePath, instanceId } = await resolveSessionAgent(sessionId)
+      const runtime = runtimeFor(kind, instanceId)
       const failure = `${runtime.descriptor.displayName} failed to accept the message`
       const session = { sessionId: authorized.sessionId, agent: kind }
       let outcome: SendOutcome
       try {
         const settled = await settleTurnSettings(req, session, { ...request, filePath }, settingsChange)
+        if (parsed.commandId !== undefined) {
+          if (typeof parsed.commandId !== "string" || (parsed.intent !== undefined && !["queue", "steer", "restart"].includes(String(parsed.intent)))) {
+            sendJson(res, 400, { error: "Invalid commandId or delivery intent" })
+            return
+          }
+          const receipt = await admitSessionCommand({ sessionId, commandId: parsed.commandId, request: settled, req, runtime, intent: parsed.intent as "queue" | "steer" | "restart" | undefined })
+          sendJson(res, 202, { success: true, receipt })
+          return
+        }
         outcome = await sendTurn(req, runtime, sessionId, settled, {
           receivedAt,
           route: "send-message",

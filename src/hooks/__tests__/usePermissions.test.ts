@@ -22,6 +22,33 @@ beforeEach(() => {
 })
 
 describe("usePermissions", () => {
+  it("uses a supported mode immediately when switching providers", () => {
+    const preference = { mode: "bypassPermissions", allowedTools: ["Read"], disallowedTools: ["Bash"] }
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(preference))
+    const { result, rerender } = renderHook(({ kind }) => usePermissions(kind), { initialProps: { kind: "claude" as "claude" | "acp" } })
+    expect(result.current.config.mode).toBe("bypassPermissions")
+    rerender({ kind: "acp" })
+    expect(result.current.config.mode).toBe("default")
+    expect(result.current.config.allowedTools).toEqual([])
+    expect(result.current.config.disallowedTools).toEqual([])
+    expect(result.current.hasPendingChanges).toBe(false)
+    rerender({ kind: "claude" })
+    expect(result.current.config.mode).toBe("bypassPermissions")
+    expect(result.current.config).toEqual(preference)
+    expect(JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!)).toEqual(preference)
+  })
+
+  it("normalizes incompatible saved and hydrated modes for an ACP composer", () => {
+    localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify({ mode: "plan" }))
+    const { result } = renderHook(() => usePermissions("acp"))
+    expect(result.current.config.mode).toBe("default")
+    act(() => result.current.setMode("bypassPermissions"))
+    expect(result.current.config.mode).toBe("default")
+    expect(JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode).toBe("default")
+    act(() => result.current.markApplied())
+    expect(result.current.hasPendingChanges).toBe(false)
+  })
+
   describe("initial state", () => {
     it("returns DEFAULT_PERMISSIONS when localStorage is empty", () => {
       const { result } = renderHook(() => usePermissions())

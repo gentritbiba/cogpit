@@ -8,6 +8,7 @@ import {
   LOCAL_READER,
   markNotificationsRead,
   notificationView,
+  notificationAccessSessionId,
   type NotificationHistoryEntry,
 } from "../lib/notificationHistory"
 
@@ -52,7 +53,7 @@ function notificationVisibility(req: IncomingMessage): (entry: NotificationHisto
       if (entry.recipientId !== userId) return false
       if (entry.sessionId === null) return true
     }
-    return visible(entry.sessionId, NEEDED_TO_SEE[entry.kind])
+    return visible(notificationAccessSessionId(entry), NEEDED_TO_SEE[entry.kind])
   }
 }
 

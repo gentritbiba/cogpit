@@ -10,6 +10,7 @@ import {
   getSessionStatus,
   searchSessionMessages,
 } from "../sessionMetadata"
+import { formatTaskWakeup } from "../../shared/contracts/taskWakeup"
 
 const cleanups: string[] = []
 
@@ -330,6 +331,17 @@ describe("getSessionMeta turn count", () => {
     const meta = await getSessionMeta(filePath)
 
     expect(meta.lastUserMessage).toBe("build the importer")
+  })
+
+  it("never titles a session with a delegated session's wakeup", async () => {
+    const filePath = await writeSession([
+      userLine("split the audit across three sessions"),
+      userLine(formatTaskWakeup({ id: "task-1", parentSessionId: "s1", childSessionId: "child", state: "completed", result: { turn: { reply: "done" } } }), "2026-06-10T10:00:05Z"),
+    ])
+
+    const meta = await getSessionMeta(filePath)
+
+    expect(meta.lastUserMessage).toBe("split the audit across three sessions")
   })
 })
 

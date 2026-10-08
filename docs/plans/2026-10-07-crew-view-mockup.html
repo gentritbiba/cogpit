@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<title>Crew view mockup</title>
+<style>
+@font-face { font-family: "Geist"; src: url("../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+
+:root {
+  --bg: oklch(0.105 0 0);
+  --sidebar: oklch(0.125 0 0);
+  --card: oklch(0.13 0 0);
+  --popover: oklch(0.16 0 0);
+  --muted: oklch(0.18 0 0);
+  --accent: oklch(0.2 0 0);
+  --composer: oklch(0.19 0 0);
+  --border: oklch(0.24 0 0);
+  --fg: oklch(0.985 0 0);
+  --fg-muted: oklch(0.708 0 0);
+  --fg-dim: oklch(0.55 0 0);
+  --success: oklch(0.72 0.17 151);
+  --warning: oklch(0.78 0.15 78);
+  --info: oklch(0.72 0.14 255);
+  --destructive: oklch(0.64 0.22 25);
+  --radius: 8px;
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: var(--bg);
+  font-feature-settings: "tnum";
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1440px; height: 900px; overflow: hidden; display: grid; grid-template-columns: 320px 1fr; }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; }
+.muted { color: var(--fg-muted); }
+.dim { color: var(--fg-dim); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+svg { display: block; }
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.sidebar { background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 0 10px; overflow: hidden; }
+.sb-top { height: 48px; display: flex; align-items: center; justify-content: flex-end; gap: 14px; color: var(--fg-muted); padding-right: 6px; }
+.sb-search { height: 34px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--fg-muted); background: var(--bg); }
+.sb-scope { display: flex; align-items: center; gap: 10px; padding: 14px 6px 12px; }
+.sb-scope b { font-weight: 500; display: block; }
+.sb-section { display: flex; justify-content: space-between; color: var(--fg-muted); font-size: 12px; padding: 6px 4px; }
+.working { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 2px; }
+.wrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+.wrow .proj { color: var(--fg-muted); padding-left: 14px; font-size: 11.5px; }
+.chip { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; color: var(--fg-muted); white-space: nowrap; }
+.chip.warn { border-color: color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 10%, transparent); color: var(--warning); }
+.chip.ok { color: var(--success); }
+.chip.info { background: color-mix(in oklch, var(--info) 14%, transparent); border-color: transparent; color: var(--info); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+.dot.halo { box-shadow: 0 0 0 2px color-mix(in oklch, var(--success) 30%, transparent); }
+.dot.warn { background: var(--warning); }
+.dot.idle { background: color-mix(in oklch, var(--success) 40%, transparent); }
+.dot.done { background: var(--fg-dim); }
+.card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 10px 12px; margin-bottom: 8px; }
+.card.active { box-shadow: 0 0 0 1px var(--fg-dim); }
+.card .eyebrow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-muted); padding-left: 14px; margin-bottom: 4px; }
+.card .title { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; line-height: 1.3; }
+.card .title .dot { margin-top: 6px; }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding-left: 14px; margin-top: 7px; font-size: 11px; color: var(--fg-muted); }
+.card .prompt { padding-left: 14px; margin-top: 4px; font-size: 12px; color: var(--fg-muted); line-height: 1.45; }
+.crew-fold { margin: 8px -4px 0 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.crew-fold .hd { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-muted); padding: 2px 4px; }
+.crew-fold .hd b { color: var(--fg); font-weight: 500; }
+.crew-fold ul { list-style: none; margin: 4px 0 0 7px; border-left: 1px solid var(--border); padding-left: 8px; }
+.crew-fold li { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 4px 6px; border-radius: 6px; }
+.crew-fold li.here { background: var(--accent); }
+.crew-fold li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crew-fold li .t { color: var(--fg-dim); font-size: 11px; }
+.crew-fold .more { color: var(--fg-muted); font-size: 11.5px; padding: 4px 6px; }
+
+/* ── Main ────────────────────────────────────────────────── */
+.main { display: grid; grid-template-columns: 1fr auto 44px; min-width: 0; }
+.chat { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.pills { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; z-index: 2; pointer-events: none; }
+.pill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--popover); border: 1px solid var(--border); font-size: 13px; white-space: nowrap; flex: none; }
+.pill .sep { color: var(--fg-dim); }
+.pill .pct { font-size: 11px; padding: 1px 7px; border-radius: 999px; }
+.pill .pct.ok { background: color-mix(in oklch, var(--warning) 20%, transparent); color: var(--warning); }
+.pill .pct.hot { background: color-mix(in oklch, var(--destructive) 25%, transparent); color: var(--destructive); }
+.pill.up { color: var(--fg-muted); }
+.pill.up b { color: var(--fg); font-weight: 500; }
+.pillgroup { display: flex; gap: 8px; }
+.icon-pill { width: 32px; justify-content: center; padding: 0; color: var(--fg-muted); }
+.sticky { position: absolute; top: 50px; left: 40px; right: 40px; z-index: 2; height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 8px; background: var(--popover); border: 1px solid var(--border); font-size: 12.5px; }
+.sticky .turn { font-family: "Geist Mono", monospace; color: var(--fg-muted); font-size: 12px; }
+.timeline { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 96px 44px 0 44px; max-width: 980px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.asst { font-size: 14px; line-height: 1.6; color: var(--fg); }
+.asst p { margin-bottom: 10px; }
+.asst ul { padding-left: 22px; margin-bottom: 10px; }
+.asst code { font-family: "Geist Mono", monospace; font-size: 12px; background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+.evt { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 10px 14px; display: grid; grid-template-columns: 18px 1fr auto; gap: 10px 10px; align-items: start; }
+.evt .k { margin-top: 3px; }
+.evt .ttl { font-weight: 500; }
+.evt .ttl .muted { font-weight: 400; }
+.evt .body { grid-column: 2; font-size: 13px; color: var(--fg-muted); line-height: 1.5; }
+.evt .act { display: flex; gap: 6px; align-items: center; }
+.btn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; background: transparent; white-space: nowrap; }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.ghost { border-color: transparent; color: var(--fg-muted); }
+.btn.danger { color: var(--destructive); }
+.btn.xs { height: 22px; font-size: 11.5px; padding: 0 8px; }
+.evt.from { border-left: 3px solid var(--info); }
+.evt.waiting { border-color: color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 5%, transparent); }
+.composer { flex: none; margin: 14px 44px 48px; max-width: 980px; width: calc(100% - 88px); align-self: center; border: 1px solid var(--border); border-radius: 14px; background: var(--composer); padding: 14px 16px 12px; }
+.composer .ph { color: var(--fg-muted); font-size: 14px; margin-bottom: 14px; }
+.composer .row { display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--fg); }
+.composer .row .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.terminal { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; font-size: 13px; background: var(--bg); }
+
+/* ── Activity rail ───────────────────────────────────────── */
+.rail { border-left: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 14px; color: var(--fg-muted); }
+.rail .ri { position: relative; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; }
+.rail .ri.on { background: var(--accent); color: var(--fg); }
+.rail .badge { position: absolute; top: -4px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; }
+
+/* ── Crew panel ──────────────────────────────────────────── */
+.crew { width: 400px; border-left: 1px solid var(--border); background: var(--card); display: flex; flex-direction: column; overflow: hidden; }
+.crew-hd { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border); font-weight: 500; }
+.crew-hd .sp { flex: 1; }
+.crew-hd .ib { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--fg-muted); }
+.crew-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.roll { flex: none; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); }
+.roll .nm { display: flex; justify-content: space-between; align-items: baseline; }
+.roll .nm b { font-weight: 500; font-size: 14px; }
+.roll .nm span { color: var(--fg-muted); font-size: 12px; }
+.strip { display: flex; gap: 3px; margin: 10px 0 8px; }
+.cell { height: 10px; flex: 1; border-radius: 2px; background: var(--fg-dim); opacity: .55; }
+.cell.work { background: var(--success); opacity: 1; box-shadow: 0 0 0 2px color-mix(in oklch, var(--success) 25%, transparent); }
+.cell.need { background: var(--warning); opacity: 1; }
+.cell.here { outline: 1.5px solid var(--fg); outline-offset: 2px; border-radius: 3px; }
+.tally { display: flex; gap: 14px; font-size: 12px; color: var(--fg-muted); }
+.tally span { display: inline-flex; align-items: center; gap: 6px; }
+.tally b { color: var(--fg); font-weight: 500; }
+.sec { flex: none; padding: 10px 14px 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+.sec b { color: var(--fg); font-weight: 500; font-size: 13px; }
+.sec .sp { flex: 1; }
+.sec .nav { display: inline-flex; gap: 2px; align-items: center; }
+.sec .nav button { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; }
+.need-card { flex: none; margin: 0 14px 6px; border: 1px solid color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 6%, transparent); border-radius: 10px; padding: 10px 12px; }
+.need-card .who { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.need-card .who b { font-weight: 500; }
+.need-card .who .wait { color: var(--warning); margin-left: auto; font-size: 12px; }
+.need-card .cmd { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; margin: 8px 0 10px; font-size: 12.5px; }
+.need-card .cmd .tool { font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; color: var(--fg-muted); }
+.need-card .cmd code { font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.need-card .acts { display: flex; gap: 6px; align-items: center; }
+.need-card .acts .open { margin-left: auto; }
+.need-next { flex: none; padding: 2px 14px 10px; font-size: 12px; color: var(--fg-muted); border-bottom: 1px solid var(--border); }
+.need-next b { color: var(--fg); font-weight: 500; }
+.filters { display: inline-flex; gap: 2px; }
+.filters button { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; color: var(--fg-muted); }
+.filters button.on { background: var(--accent); color: var(--fg); }
+.rows { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 0 6px; }
+.row { display: grid; grid-template-columns: 14px 1fr auto; gap: 2px 8px; padding: 6px 8px; border-radius: 6px; align-items: center; }
+.row:hover, .row.here { background: var(--accent); }
+.row .dot { justify-self: center; }
+.row .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
+.row .nm .you { font-size: 10.5px; font-weight: 500; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.row .t { font-size: 11px; color: var(--fg-dim); text-align: right; }
+.row .sub { grid-column: 2 / 4; display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; }
+.row .sub .st { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.row .sub .st.warn { color: var(--warning); }
+.row .sub .st.unread { color: var(--warning); }
+.row .sub .pr { flex: none; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; font-size: 11px; color: var(--fg-muted); }
+.row .sub .pr.merged { color: var(--success); border-color: color-mix(in oklch, var(--success) 30%, transparent); }
+.row .sub .pr.ci { color: var(--info); }
+.row .sub .sp { flex: 1; }
+.row .sub .model { flex: none; color: var(--fg-dim); }
+.row .acts { grid-column: 3; display: none; gap: 4px; }
+.row:hover .t { display: none; }
+.row:hover .acts { display: inline-flex; }
+.kids { margin: 0 8px 2px 15px; border-left: 1px solid var(--border); padding-left: 8px; }
+.kid { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 3px 6px; font-size: 11.5px; color: var(--fg-muted); border-radius: 4px; }
+.kid .dot { width: 5px; height: 5px; justify-self: center; }
+.kid .t { color: var(--fg-dim); font-size: 11px; }
+.kid b { color: var(--fg); font-weight: 500; }
+.fold-done { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: var(--fg-muted); }
+.fold-done .ln { flex: 1; height: 1px; background: var(--border); }
+.feed { flex: none; border-top: 1px solid var(--border); padding-bottom: 6px; }
+.feed .ln { display: grid; grid-template-columns: 40px 1fr; gap: 10px; padding: 3px 14px; font-size: 12px; align-items: baseline; }
+.feed .ln .tm { color: var(--fg-dim); font-size: 11px; }
+.feed .ln b { font-weight: 500; }
+.feed .ln .muted { color: var(--fg-muted); }
+.feed .ln .cmd { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--fg-muted); }
+.foot { flex: none; border-top: 1px solid var(--border); padding: 8px 14px; font-size: 11.5px; color: var(--fg-muted); display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+.foot .sp { flex: 1; }
+.foot .w { color: var(--warning); }
+
+/* view switching */
+body[data-view="coordinator"] .only-lane { display: none !important; }
+body[data-view="lane"] .only-coordinator { display: none !important; }
+</style>
+</head>
+<body data-view="coordinator">
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<aside class="sidebar">
+  <div class="sb-top">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+  </div>
+  <div class="sb-search">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    Search sessions or PRs
+  </div>
+  <div class="sb-scope">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="muted"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+    <div><b>All projects</b><span class="muted" style="font-size:12px">19 projects, 50 sessions</span></div>
+  </div>
+
+  <div class="sb-section"><span>Needs you</span><span>1</span></div>
+  <div class="working" style="border-color: color-mix(in oklch, var(--warning) 20%, transparent); background: color-mix(in oklch, var(--warning) 4%, transparent);">
+    <div class="wrow"><span class="dot warn"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Wave 3 coordinator</span><span class="chip warn">2 waiting</span><span class="dim" style="font-size:11px">42m</span></div>
+    <div class="wrow" style="padding-top:0"><span class="proj">hcms-pr/performance-experiments</span></div>
+  </div>
+
+  <div class="sb-section"><span>Working</span><span>1</span></div>
+  <div class="working">
+    <div class="wrow"><span class="dot halo"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">using cogpit memory check how we …</span><span class="chip">Bash</span></div>
+    <div class="wrow" style="padding-top:0"><span class="proj">gentritbiba/agent-window</span></div>
+  </div>
+
+  <div class="sb-section" style="margin-top:6px"><span>Today</span></div>
+
+  <div class="card active">
+    <div class="eyebrow">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      hcms-pr/performance-experiments
+    </div>
+    <div class="title"><span class="dot idle"></span><span>Wave 3 coordinator</span></div>
+    <div class="prompt">I'm really curious as to why. start a opus 5.5 xhigh agent that will only come with theories…</div>
+    <div class="meta"><span class="chip ok">Done</span><span>⎇ main</span><span>20 turns</span><span style="margin-left:auto">1h</span></div>
+    <div class="crew-fold">
+      <div class="hd">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        <b>Crew</b> · 15 <span>·</span> <span style="color:var(--warning)">2 need you</span> <span>·</span> 2 working
+      </div>
+      <ul>
+        <li><span class="dot warn"></span><span class="nm">w3-rooftop</span><span class="t">permission · 42m</span></li>
+        <li><span class="dot warn"></span><span class="nm">w3-security-admin</span><span class="t">question · 39m</span></li>
+        <li><span class="dot halo"></span><span class="nm">w3-storefront-quality</span><span class="t">tests</span></li>
+        <li><span class="dot halo"></span><span class="nm">w3-inventory-pricing</span><span class="t">rebasing</span></li>
+        <li class="more">+11 done · 2 results unread</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      Code/cv-builder
+    </div>
+    <div class="title"><span class="dot idle"></span><span>this part Include a short note on a 0→1 product you shipped and an LLM agent…</span></div>
+    <div class="meta"><span class="chip ok">Done</span><span>⎇ main</span><span>1 turn</span><span style="margin-left:auto">3m</span></div>
+  </div>
+</aside>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+  <section class="chat">
+    <!-- floating pills: coordinator -->
+    <div class="pills only-coordinator">
+      <div class="pillgroup">
+        <div class="pill"><span class="muted">performance-experiments</span><span class="sep">/</span><span class="mono" style="font-size:12.5px">d43823ec</span><span class="muted mono" style="font-size:12px">Sonnet 5.5</span><span class="pct ok">17%</span></div>
+      </div>
+      <div class="pillgroup">
+        <div class="pill icon-pill"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
+        <div class="pill" style="color:var(--fg-muted)">24%</div>
+        <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M2 20h20"/></svg>This machine ⌄</div>
+        <div class="pill icon-pill">⋯</div>
+      </div>
+    </div>
+    <!-- floating pills: lane -->
+    <div class="pills only-lane">
+      <div class="pillgroup">
+        <div class="pill"><span class="muted">w3-rooftop</span><span class="sep">/</span><span class="mono" style="font-size:12.5px">f68fdc85</span><span class="muted mono" style="font-size:12px">Opus 5.5</span><span class="pct hot">7%</span></div>
+        <div class="pill up"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>Reports to <b>Wave 3 coordinator</b></div>
+      </div>
+      <div class="pillgroup">
+        <div class="pill icon-pill"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
+        <div class="pill icon-pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M2 20h20"/></svg></div>
+        <div class="pill icon-pill">⋯</div>
+      </div>
+    </div>
+
+    <div class="sticky only-coordinator"><span class="turn">Turn 19</span><span>w3-ops-tooling finished · PR #252 merged · 44 files changed</span><span style="margin-left:auto" class="muted">⌃</span></div>
+    <div class="sticky only-lane"><span class="turn">Turn 7</span><span>From Wave 3 coordinator · the inventory branch is merged to main as c86033b1</span><span style="margin-left:auto" class="muted">⌃</span></div>
+
+    <!-- ── coordinator timeline ── -->
+    <div class="timeline only-coordinator">
+      <div class="evt">
+        <span class="k dot done" style="width:8px;height:8px"></span>
+        <div class="ttl">w3-ops-tooling finished <span class="muted">· 2h ago · Opus 5.5 · 1 turn · 44 files</span></div>
+        <div class="act"><span class="chip ok">PR #252 merged</span><button class="btn ghost xs">Open ›</button></div>
+        <div class="body">PR #252 (the operator tooling) is merged as 5fa28e15, with the production deploys and Verify release green. It adds the tooling and runbooks for the rehearsals. G11.3, G15.3 and G22.1 stay open because each still needs a person.</div>
+      </div>
+
+      <div class="asst">
+        <p>PR #252 is merged as <code>5fa28e15</code>, with the production deploys and Verify release green. I added a progress comment to each of G11.3, G15.3 and G22.1. All three stay open, because each still needs a person.</p>
+        <ul>
+          <li><b>G11.3:</b> a new <code>data-subject.ts</code> tool exports or erases one shopper's leads, finance requests and newsletter signups within a single tenant. It does nothing without <code>--apply</code>.</li>
+          <li><b>G15.3:</b> the restore rehearsal is scripted end to end; it needs a second operator to run it.</li>
+          <li><b>G22.1:</b> the store-onboarding checklist is now ordered steps with an owner per gap.</li>
+        </ul>
+        <p>Still running: the parity-soak PR #250, the fresh rooftop review, and the PageSpeed theory agent.</p>
+      </div>
+
+      <div class="evt waiting">
+        <span class="k dot warn" style="width:8px;height:8px"></span>
+        <div class="ttl">2 results are waiting for the coordinator <span class="muted">· w3-theories, w3-parity-soak</span></div>
+        <div class="act"><button class="btn xs primary">Deliver now</button><button class="btn xs">Mark read</button></div>
+        <div class="body">The coordinator restarted before these arrived. Deliver now resumes it with both results; mark read keeps them in the crew panel without a turn.</div>
+      </div>
+    </div>
+
+    <!-- ── lane timeline ── -->
+    <div class="timeline only-lane">
+      <div class="evt from">
+        <svg class="k" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        <div class="ttl">From Wave 3 coordinator <span class="muted">· 14:02</span></div>
+        <div class="act"><button class="btn ghost xs">Open coordinator ›</button></div>
+        <div class="body">The inventory branch (your parent) is now merged to main as c86033b1 (squash). Rebase <code>feat/w3-rooftop</code> onto origin/main, re-run the importer integration suite, then send the new head to your reviewer for r3. Do not push until the reviewer approves.</div>
+      </div>
+
+      <div class="asst">
+        <p><b>New head: <code>cabc3993</code></b>, rebased onto origin/main <code>c86033b1</code> and not pushed.</p>
+        <p>I used <code>git rebase --onto origin/main 1a7f…</code> so only the rooftop commits replay. The importer integration suite passes 47/47. I'm sending the head to the reviewer for r3 now, then I'll apply the ruleset the brief asks for.</p>
+      </div>
+
+      <div class="evt waiting">
+        <span class="k dot warn" style="width:8px;height:8px"></span>
+        <div class="ttl">Permission <span class="muted">· waiting 42 min</span></div>
+        <div class="act"><button class="btn xs primary">Allow</button><button class="btn xs">Always allow</button><button class="btn xs danger">Deny</button></div>
+        <div class="body mono" style="font-size:12px">gh api repos/HonestCMS/cms/rulesets -X POST -f name=main-protection -f target=branch -F enforcement=active --input /tmp/ruleset.json</div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="ph">Send a message… (Enter to send)</div>
+      <div class="row">
+        <span>⛨ Full access ⌄</span><span>⚙ MCPs 9/9 ⌄</span><span>⚑ Set goal</span>
+        <span class="right"><span class="only-coordinator">Sonnet 5.5 · Extra High ⌄</span><span class="only-lane">Opus 5.5 · Medium ⌄</span><span class="dim">➤</span></span>
+      </div>
+    </div>
+    <div class="terminal"><span class="muted">›</span> Terminal</div>
+  </section>
+
+  <!-- ═══════════════ CREW PANEL ═══════════════ -->
+  <aside class="crew">
+    <div class="crew-hd">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg>
+      Crew
+      <span class="sp"></span>
+      <span class="ib"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+      <span class="ib"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+    </div>
+    <div class="crew-body">
+      <div class="roll">
+        <div class="nm"><b>Wave 3 coordinator</b><span>15 sessions · since 09:14</span></div>
+        <div class="strip">
+          <span class="cell"></span><span class="cell"></span><span class="cell work"></span><span class="cell work"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell need only-coordinator"></span><span class="cell need here only-lane"></span><span class="cell need"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+        </div>
+        <div class="tally">
+          <span><span class="dot halo"></span><b>2</b> working</span>
+          <span><span class="dot warn"></span><b>2</b> need you</span>
+          <span><span class="dot done"></span><b>11</b> done</span>
+          <span style="margin-left:auto;color:var(--warning)"><b style="color:var(--warning)">2</b> results unread</span>
+        </div>
+      </div>
+
+      <div class="sec"><b>Needs you</b><span>2</span><span class="sp"></span><span>1 of 2</span><span class="nav"><button>‹</button><button>›</button></span></div>
+      <div class="need-card">
+        <div class="who"><span class="dot warn"></span><b>w3-rooftop</b><span class="muted">asked a permission</span><span class="wait">waiting 42 min</span></div>
+        <div class="cmd"><span class="tool">Bash</span><code>gh api repos/HonestCMS/cms/rulesets -X POST -f name=main-protection -f target=branch …</code></div>
+        <div class="acts"><button class="btn xs primary">Allow</button><button class="btn xs">Always allow</button><button class="btn xs danger">Deny</button><button class="btn ghost xs open">Open ›</button></div>
+      </div>
+      <div class="need-next">Next: <b>w3-security-admin</b> asked which hostname the admin Access app should use · 39 min</div>
+
+      <div class="sec"><b>Sessions</b><span class="sp"></span><span class="filters"><button class="on">All</button><button>Working</button><button>Need you</button><button>Done</button></span></div>
+      <div class="rows">
+        <div class="row">
+          <span class="dot halo"></span>
+          <span class="nm">w3-storefront-quality</span><span class="t">now</span>
+          <span class="acts"><button class="btn ghost xs">Open</button><button class="btn ghost xs">Stop</button></span>
+          <span class="sub"><span class="st">Running tests</span><span class="pr merged">#244 merged</span><span class="sp"></span><span class="model">Opus 5.5 · 11 turns · 86 files</span></span>
+        </div>
+        <div class="kids"><div class="kid"><span class="dot done"></span><span><b>Code review r10</b> · Codex · read-only · approved</span><span class="t">8m</span></div></div>
+
+        <div class="row">
+          <span class="dot halo"></span>
+          <span class="nm">w3-inventory-pricing</span><span class="t">1m</span>
+          <span class="acts"><button class="btn ghost xs">Open</button><button class="btn ghost xs">Stop</button></span>
+          <span class="sub"><span class="st">Rebasing</span><span class="pr ci">#246 checks running</span><span class="sp"></span><span class="model">Opus 5.5 · 14 turns · 130 files</span></span>
+        </div>
+        <div class="kids"><div class="kid"><span class="dot done"></span><span><b>Code review r10</b> · Codex · read-only · approved</span><span class="t">14m</span></div></div>
+
+        <div class="row only-coordinator">
+          <span class="dot warn"></span>
+          <span class="nm">w3-rooftop</span><span class="t">42m</span>
+          <span class="acts"><button class="btn ghost xs">Approve</button><button class="btn ghost xs">Open</button><button class="btn ghost xs">Stop</button></span>
+          <span class="sub"><span class="st warn">Waiting on a permission</span><span class="sp"></span><span class="model">Opus 5.5 · 7 turns · 46 files</span></span>
+        </div>
+        <div class="row here only-lane">
+          <span class="dot warn"></span>
+          <span class="nm">w3-rooftop <span class="you">you are here</span></span><span class="t">42m</span>
+          <span class="sub"><span class="st warn">Waiting on a permission · Bash gh api …</span><span class="sp"></span><span class="model">Opus 5.5 · 7 turns · 46 files</span></span>
+        </div>
+        <div class="kids"><div class="kid"><span class="dot warn"></span><span><b>Code review r2</b> · Codex · read-only · changes requested</span><span class="t">1h</span></div></div>
+
+        <div class="row">
+          <span class="dot warn"></span>
+          <span class="nm">w3-security-admin</span><span class="t">39m</span>
+          <span class="acts"><button class="btn ghost xs">Answer</button><button class="btn ghost xs">Open</button><button class="btn ghost xs">Stop</button></span>
+          <span class="sub"><span class="st warn">Asked a question</span><span class="pr merged">#243 merged</span><span class="sp"></span><span class="model">Opus 5.5 · 9 turns · 53 files</span></span>
+        </div>
+
+        <div class="row">
+          <span class="dot done"></span>
+          <span class="nm">w3-theories</span><span class="t">1h</span>
+          <span class="acts"><button class="btn ghost xs">Open</button><button class="btn ghost xs">Mark read</button></span>
+          <span class="sub"><span class="st unread">Finished · result unread</span><span class="sp"></span><span class="model">Opus 5.5 · xhigh · 4 turns</span></span>
+        </div>
+        <div class="row">
+          <span class="dot done"></span>
+          <span class="nm">w3-parity-soak</span><span class="t">1h</span>
+          <span class="acts"><button class="btn ghost xs">Open</button><button class="btn ghost xs">Mark read</button></span>
+          <span class="sub"><span class="st unread">Finished · result unread</span><span class="pr merged">#250 merged</span><span class="sp"></span><span class="model">Opus 5.5 · 44 files</span></span>
+        </div>
+        <div class="row">
+          <span class="dot done"></span>
+          <span class="nm">w3-cost-model</span><span class="t">2h</span>
+          <span class="sub"><span class="st">Finished</span><span class="pr merged">#251 merged</span><span class="sp"></span><span class="model">Opus 5.5 · 2 turns · 44 files</span></span>
+        </div>
+        <div class="row">
+          <span class="dot done"></span>
+          <span class="nm">w3-perf-ship</span><span class="t">2h</span>
+          <span class="sub"><span class="st">Finished</span><span class="pr merged">#249 merged</span><span class="sp"></span><span class="model">Opus 5.5 · 1 turn · 30 files</span></span>
+        </div>
+        <div class="fold-done"><span>7 more done</span><span class="ln"></span><span>show</span></div>
+      </div>
+
+      <div class="feed">
+        <div class="sec"><b>Activity</b><span class="sp"></span><span>today</span></div>
+        <div class="ln"><span class="tm">16:42</span><span><b>w3-rooftop</b> <span class="muted">asked a permission</span> <span class="cmd">gh api …/rulesets</span></span></div>
+        <div class="ln"><span class="tm">16:31</span><span><b>w3-cost-model</b> <span class="muted">finished · PR #251 merged · result read by coordinator</span></span></div>
+        <div class="ln"><span class="tm">16:03</span><span><b>w3-security-admin</b> <span class="muted">asked a question</span></span></div>
+        <div class="ln"><span class="tm">14:35</span><span><b>w3-theories</b> <span class="muted">started · Opus 5.5 · xhigh · read-only checkout</span></span></div>
+        <div class="ln"><span class="tm">13:40</span><span><span class="muted">Coordinator resumed</span> <b>4 sessions</b> <span class="muted">paused by the usage limit at 13:02</span></span></div>
+      </div>
+
+      <div class="foot"><span>Load 8.2</span><span>·</span><span>11 agents</span><span>·</span><span>2.7M tokens</span><span class="sp"></span><span class="w">Limit resets 18:00</span></div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════ RAIL ═══════════════ -->
+  <nav class="rail">
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+    <span class="ri on"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg><span class="badge">2</span></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6.5C12 7 15 9 15.5 11.5"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></span>
+    <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg></span>
+  </nav>
+</div>
+
+<script>
+  const apply = () => { document.body.dataset.view = location.hash === "#lane" ? "lane" : "coordinator" }
+  apply(); addEventListener("hashchange", apply)
+</script>
+</body>
+</html>

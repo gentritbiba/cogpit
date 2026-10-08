@@ -1,6 +1,7 @@
 import type { ThinkingBlock, ToolCall } from "../../shared/session/types"
 import { getCommandText, getToolPresentation } from "../../shared/session/toolSummary"
 import { analyzeSection, parseSectionedCommand } from "./sectionedCommand"
+import { describeCrewCall } from "./crewCommands"
 import type { ActivityItem } from "./timelineHelpers"
 
 export type ToolActivityEntry =
@@ -46,6 +47,15 @@ const OPERATION_NOUNS: Readonly<Record<string, [string, string]>> = {
   "Update plan": ["plan update", "plan updates"],
   "Run tools": ["tool batch", "tool batches"],
   "Run tool script": ["tool script", "tool scripts"],
+  Crew: ["crew call", "crew calls"],
+}
+
+/** "Crew" for a shell command that drives a crew, else the call's own operation. */
+function operationLabel(toolCall: ToolCall): string {
+  const { label, styleName } = getToolPresentation(toolCall)
+  if (styleName !== "Bash") return label
+  const command = getCommandText(toolCall.input)
+  return command && describeCrewCall(command, toolCall.result) ? "Crew" : label
 }
 
 export function toolCallFailed(toolCall: ToolCall): boolean {
@@ -78,7 +88,7 @@ export function summarizeToolActivity(
     else if (isAgentActive) summary.running++
     else summary.unavailable++
 
-    const { label } = getToolPresentation(toolCall)
+    const label = operationLabel(toolCall)
     const nouns = OPERATION_NOUNS[label]
     const key = nouns?.[0] ?? label
     const existing = counts.get(key)

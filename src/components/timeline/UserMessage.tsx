@@ -18,6 +18,8 @@ import {
 import { cn } from "@/lib/utils"
 import { ProcessingIcon } from "@/components/ui/StatusIcons"
 import { TaskNotificationCard } from "./TaskNotificationCard"
+import { DelegatedResultCard } from "./DelegatedResultCard"
+import { parseTaskWakeup } from "../../../shared/contracts/taskWakeup"
 import { LocalCommandOutputCard } from "./LocalCommandOutput"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
@@ -79,6 +81,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     [rawText],
   )
   const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
+  const wakeup = useMemo(() => parseTaskWakeup(cleanText), [cleanText])
   const { text: textAfterBanner, isSystemNotification } = useMemo(
     () => stripSystemNotificationPreamble(cleanText),
     [cleanText],
@@ -126,10 +129,10 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   // hidden. The agent envelope and the notification banner are genuinely
   // hidden, so they still count.
   const hasTags = useMemo(
-    () => hasSystemTags(rawText) || isSystemNotification || isTeammate,
-    [rawText, isSystemNotification, isTeammate],
+    () => hasSystemTags(rawText) || isSystemNotification || isTeammate || wakeup !== null,
+    [rawText, isSystemNotification, isTeammate, wakeup],
   )
-  const displayText = showRaw ? rawText : textAfterInterrupts
+  const displayText = showRaw ? rawText : wakeup ? "" : textAfterInterrupts
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
@@ -268,6 +271,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             ))}
           </div>
         )}
+
+        {!showRaw && wakeup && <DelegatedResultCard wakeup={wakeup} />}
 
         {!showRaw && notifications.length > 0 && (
           <div className="mb-2 flex flex-col gap-2">

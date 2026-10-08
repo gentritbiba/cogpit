@@ -5,13 +5,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-const inventory = vi.hoisted(() => ({ paths: [] as string[] }))
-vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => inventory.paths.map((path, index) => ({ dirName: `inventory-${index}`, path, sessionCount: 1, lastModified: null })) }] }))
+const inventory = vi.hoisted(() => ({ paths: [] as string[], reads: 0 }))
+vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => { inventory.reads++; return inventory.paths.map((path, index) => ({ dirName: `inventory-${index}`, path, sessionCount: 1, lastModified: null })) } }] }))
 import { PluginProjects } from "../../plugins/projects"
 
 const execFile = promisify(callbackExecFile)
 let root: string
-beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), "cogpit-plugin-projects-"))); inventory.paths = [] })
+let now = 0
+beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), "cogpit-plugin-projects-"))); inventory.paths = []; now = 0 })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 async function git(cwd: string, ...args: string[]) {
   return execFile("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", ...args], { cwd, timeout: 10_000 })
@@ -70,14 +71,44 @@ describe("host-owned plugin project identities", { timeout: process.platform ===
     expect(list[0]!.paths).toEqual([repo])
   })
 
-  it("revalidates scope resolution when a project disappears from host inventory", async () => {
+  it("drops a project that left host inventory once the discovery window passes", async () => {
     const directory = join(root, "plain")
     await mkdir(directory)
     inventory.paths = [directory]
-    const projects = new PluginProjects()
+    const projects = new PluginProjects({ now: () => now })
     const id = (await projects.list())[0]!.id
     inventory.paths = []
+    expect(await projects.resolve(id)).toMatchObject({ id })
+    now += 30_000
     await expect(projects.resolve(id)).rejects.toThrow(/no longer available/)
+  })
+
+  it("reuses one host inventory read across project and workspace checks", async () => {
+    const first = join(root, "first"), second = join(root, "second")
+    await mkdir(first)
+    await mkdir(second)
+    inventory.paths = [first, second]
+    const projects = new PluginProjects({ now: () => now })
+    const id = (await projects.list()).find(project => project.paths.includes(first))!.id
+    const reads = inventory.reads
+    await projects.resolve(id)
+    await projects.resolveContext(id, first)
+    await projects.resolveWorkspace(id, first)
+    expect(await projects.resolveWorkspaceProject(first)).toMatchObject({ id })
+    expect(inventory.reads).toBe(reads)
+  })
+
+  it("finds a project added to host inventory without waiting for the discovery window", async () => {
+    const first = join(root, "first"), second = join(root, "second")
+    await mkdir(first)
+    await mkdir(second)
+    inventory.paths = [first]
+    const projects = new PluginProjects({ now: () => now })
+    await projects.list()
+    inventory.paths = [first, second]
+    const added = await projects.resolveWorkspaceProject(second)
+    expect(added?.paths).toEqual([second])
+    expect(await projects.resolve(added!.id)).toEqual(added)
   })
 
   it("does not carry an approved symlink identity across a changed target", async () => {
@@ -86,11 +117,12 @@ describe("host-owned plugin project identities", { timeout: process.platform ===
     await mkdir(second)
     await symlink(first, alias, "dir")
     inventory.paths = [alias]
-    const projects = new PluginProjects()
+    const projects = new PluginProjects({ now: () => now })
     const firstId = (await projects.list())[0]!.id
     await rm(alias)
     await symlink(second, alias, "dir")
     await expect(projects.resolve(firstId)).rejects.toThrow(/no longer available/)
+    now += 30_000
     expect((await projects.list())[0]!.paths).toEqual([second])
   })
 })

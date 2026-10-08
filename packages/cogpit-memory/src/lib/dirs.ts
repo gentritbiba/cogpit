@@ -13,8 +13,8 @@ export function agentHomeDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDirectory = homedir(),
 ): string {
-  const { homeEnvVar, homeDirName } = descriptorFor(kind).cli
-  const override = homeEnvVar ? env[homeEnvVar] : undefined
+  const { homeEnvVar, homeDirName, sdkHomeEnvVar } = descriptorFor(kind).cli
+  const override = env[homeEnvVar ?? sdkHomeEnvVar ?? ""]
   return override || join(homeDirectory, homeDirName)
 }
 
@@ -24,6 +24,7 @@ export const dirs = {
   TASKS_DIR: join(agentHomeDir("claude"), "tasks"),
   CODEX_SESSIONS_DIR: join(agentHomeDir("codex"), "sessions"),
   COPILOT_SESSIONS_DIR: join(agentHomeDir("copilot"), "session-state"),
+  ACP_PROJECTS_DIR: join(agentHomeDir("acp"), "projects"),
 }
 
 /** Default database path for the FTS5 search index. */

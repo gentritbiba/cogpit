@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   } | null,
   isLive: false,
   level: "own" as SessionAccessState,
+  handoff: vi.fn(),
   copy: vi.fn(),
   copyToClipboard: vi.fn(),
   dispatch: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("@/contexts/SessionContext", () => ({
     sessionSource: mocks.sessionSource,
     isLive: mocks.isLive,
     permissions: permissionsForAccess(mocks.level),
+    actions: { handleProviderHandoff: mocks.handoff },
   }),
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
@@ -195,6 +197,7 @@ describe("FloatingChrome", () => {
       agentKind: "claude",
     }
     mocks.isLive = false
+    mocks.level = "own"
     mocks.inventorySessions = []
     mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
     mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
@@ -206,6 +209,23 @@ describe("FloatingChrome", () => {
     vi.clearAllMocks()
     __resetCapabilitiesForTest()
     __resetEditionUiForTest()
+  })
+
+  it("keeps provider handoff inside the overflow menu", async () => {
+    const user = userEvent.setup()
+    renderChrome()
+    expect(screen.queryByText("Continue with another provider…")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Continue with another provider…" }))
+    expect(mocks.handoff).toHaveBeenCalledOnce()
+  })
+
+  it.each(["view", "none"] as const)("withholds provider handoff for %s access", async (level) => {
+    mocks.level = level
+    const user = userEvent.setup()
+    renderChrome()
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    expect(screen.queryByRole("menuitem", { name: "Continue with another provider…" })).not.toBeInTheDocument()
   })
 
   it("owns the window-drag strip and paints it under the pills", () => {
@@ -316,7 +336,8 @@ describe("FloatingChrome", () => {
 
     renderChrome({ workflowCount: 2 })
 
-    expect(screen.getByText("Opus 4.5")).toBeInTheDocument()
+    // The composer's model picker shows the model; the pill keeps it to its details.
+    expect(screen.queryByText("Opus 4.5")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
     // opus-4-5 is a 200k model: 65k used of the 167k usable before auto-compact.
     expect(screen.getByText(/61%/)).toBeInTheDocument()
@@ -324,6 +345,7 @@ describe("FloatingChrome", () => {
     expect(screen.queryByText("feat/clean-header")).not.toBeInTheDocument()
 
     const details = await openSessionDetails(user)
+    expect(details).toHaveTextContent("Opus 4.5")
     expect(details).toHaveTextContent("thinking")
     expect(details).toHaveTextContent("feat/clean-header")
     expect(details).toHaveTextContent("Duplicated from")
@@ -551,6 +573,7 @@ describe("FloatingChrome archive", () => {
     mocks.session = makeSession()
     mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", rawText: "", agentKind: "claude" }
     mocks.isLive = false
+    mocks.level = "own"
     mocks.inventorySessions = []
     mocks.jsonFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
   })
@@ -646,6 +669,7 @@ describe("FloatingChrome pull requests", () => {
       agentKind: "claude",
     }
     mocks.isLive = false
+    mocks.level = "own"
     mocks.inventorySessions = []
   })
 

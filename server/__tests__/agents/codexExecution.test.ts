@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { join, resolve } from "node:path"
-import { CodexAppServerError, type CodexThread } from "../../agents/codexAppServer"
+import { CodexAppServerError, CodexAppServerRpcError, type CodexThread } from "../../agents/codexAppServer"
 import { codexBrowserConfig } from "../../agents/codexBrowser"
 
 vi.mock("../../agents/codexBrowser", () => ({ codexBrowserConfig: vi.fn(async () => ({})) }))
@@ -11,6 +11,7 @@ beforeEach(() => {
 })
 import {
   buildCodexAccessSettings,
+  codexSendError,
   buildCodexUserInput,
   continueCodexExecution,
   getCodexThreadIdentity,
@@ -38,6 +39,11 @@ function client(overrides: Partial<CodexExecutionClient> = {}): CodexExecutionCl
 }
 
 describe("Codex execution mappings", () => {
+  it("marks a definitive model rejection before turn acceptance and keeps an uncertain delivery ambiguous", () => {
+    expect(codexSendError(new CodexAppServerRpcError("turn/start", { code: -32602, message: "There is an issue with the selected model" }))).toMatchObject({ status: 400, code: "MODEL_REJECTED" })
+    expect(codexSendError(new CodexAppServerError("RPC timed out: selected model might be unavailable"))).toMatchObject({ status: 500, code: "INTERNAL_ERROR" })
+    expect(codexSendError(new CodexAppServerRpcError("turn/steer", { code: -32602, message: "There is an issue with the selected model" }))).toMatchObject({ status: 500, code: "INTERNAL_ERROR" })
+  })
   it("passes the context limit on start and resume without losing browser configuration", async () => {
     vi.mocked(codexBrowserConfig).mockResolvedValue({ developer_instructions: "Browser instructions" })
     const runtime = client()

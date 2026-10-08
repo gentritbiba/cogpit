@@ -56,9 +56,10 @@ interface SessionPillProps {
 }
 
 /**
- * `project / session · ● · model · 82%` as one floating pill. Click copies the
+ * `project / session · ● · 82%` as one floating pill. Click copies the
  * resume command, right-click opens the session menu, hover lists the rest of
- * the session state (branch, pull requests, agent, context detail).
+ * the session state (model, branch, pull requests, agent, context detail). The
+ * composer's model picker already shows the model, so the pill does not.
  */
 export const SessionPill = memo(function SessionPill({
   session,
@@ -108,11 +109,6 @@ export const SessionPill = memo(function SessionPill({
           </button>
         )}
         {isLive && <LiveIndicator aria-label="Session is live" />}
-        {session.model && (
-          <span className="shrink-0 font-mono text-[11px] text-foreground/80">
-            {shortenModel(session.model)}
-          </span>
-        )}
         <ContextBadge rawMessages={rawMessages} />
       </TooltipTrigger>
       <TooltipContent role="tooltip" side="bottom" align="start" sideOffset={6} className="p-3">

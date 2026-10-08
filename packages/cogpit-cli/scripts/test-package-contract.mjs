@@ -9,7 +9,7 @@ import { build } from "esbuild"
 const manifest = JSON.parse(readFileSync("package.json", "utf8"))
 assert.equal(manifest.name, "cogpit")
 assert.deepEqual(manifest.bin, { cogpit: "dist/cli.js" })
-assert.equal(manifest.engines.node, ">=20.11")
+assert.equal(manifest.engines.node, ">=22.16")
 assert.ok(manifest.dependencies.express)
 assert.ok(manifest.dependencies["node-pty"])
 
@@ -44,6 +44,8 @@ assert.equal(pack.status, 0, pack.stderr)
 const packResult = JSON.parse(pack.stdout)[0]
 const files = packResult.files
 assert.ok(files.some((file) => file.path === "dist/cli.js"))
+assert.ok(files.some((file) => file.path === "dist/cli-runtime.js"))
+assert.ok(files.some((file) => file.path === "dist/instance-worker.js"))
 assert.ok(files.some((file) => file.path === "dist/web/index.html"))
 const pageHtml = readFileSync("dist/web/index.html", "utf8")
 assert.match(pageHtml, /<script src="\/theme-bootstrap\.js"><\/script>\s*<\/head>/)

@@ -27,6 +27,7 @@ import { resolveAgentCommand } from "../lib/binaryResolver"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import {
+  codexSendError,
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
   continueCodexExecution,
@@ -108,6 +109,8 @@ function executionOptions(
 ): CodexExecutionOptions {
   return {
     cwd: req.cwd,
+    deliveryIntent: "deliveryIntent" in req ? req.deliveryIntent : undefined,
+    commandId: "commandId" in req ? req.commandId : undefined,
     message: req.message,
     images: req.images,
     permissions: req.permissions,
@@ -118,14 +121,14 @@ function executionOptions(
   }
 }
 
-type ThreadSettings = Omit<CodexExecutionOptions, "message" | "images">
+type ThreadSettings = Omit<CodexExecutionOptions, "message" | "images" | "deliveryIntent" | "commandId">
 
 // Question answers omit session settings. Preserve them so replies keep the
 // thread's access mode, working directory, and model options.
 const rememberedSettings = new Map<string, ThreadSettings>()
 
 function rememberThreadSettings(sessionId: string, options: CodexExecutionOptions): void {
-  const { message: _message, images: _images, reloadContextWindow: _reload, ...settings } = options
+  const { message: _message, images: _images, reloadContextWindow: _reload, deliveryIntent: _intent, commandId: _command, ...settings } = options
   rememberedSettings.set(sessionId, settings)
 }
 
@@ -632,19 +635,9 @@ function formatQuestionAnswer(
   pending: CodexAsyncQuestion,
   answers: UserQuestionAnswers,
 ): string {
-  if (typeof answers === "string") return answers.trim()
-  if (Array.isArray(answers)) return answers.join(", ").trim()
-
-  const answered = pending.questions
-    .map((question) => ({ question: question.question, answer: answers[question.question]?.trim() }))
-    .filter((entry): entry is { question: string; answer: string } => Boolean(entry.answer))
-
-  if (answered.length === 0) {
-    return Object.values(answers).map((answer) => answer.trim()).filter(Boolean).join("\n\n")
-  }
-  return answered.length === 1
-    ? answered[0].answer
-    : answered.map(({ question, answer }) => `${question}\n${answer}`).join("\n\n")
+  const values = typeof answers === "string" ? [answers] : Array.isArray(answers) ? answers : pending.questions.map((question) => answers[question.question])
+  if (values.length !== pending.questions.length || values.some((answer) => typeof answer !== "string" || !answer.trim()) || (!Array.isArray(answers) && typeof answers === "object" && Object.keys(answers).some((key) => !pending.questions.some((question) => question.question === key)))) throw new AgentRuntimeError(400, "INVALID_RESPONSE", "Answer every question once, using its question text as the key")
+  return values.length === 1 ? values[0]!.trim() : values.map((answer, index) => `${pending.questions[index]!.question}\n${answer.trim()}`).join("\n\n")
 }
 
 // ── Runtime snapshot ────────────────────────────────────────────────────────
@@ -805,9 +798,6 @@ export const codexRuntime: AgentRuntime = {
     }
 
     const cwd = await resolveSessionCwd(req.cwd, req.filePath)
-    // Any message the thread receives is the answer to whatever it last asked,
-    // whether it was typed into the question card or straight into the composer.
-    codexQuestions.clear(sessionId)
     try {
       const options = executionOptions({ ...req, cwd })
       const previous = rememberedSettings.get(sessionId)
@@ -818,11 +808,7 @@ export const codexRuntime: AgentRuntime = {
       return { delivery: result.action, turnId: result.turnId }
     } catch (error) {
       if (!isCodexAppServerUnavailable(error)) {
-        throw new AgentRuntimeError(
-          500,
-          "INTERNAL_ERROR",
-          error instanceof Error ? error.message : "Codex failed to accept the message",
-        )
+        throw codexSendError(error)
       }
     }
     return sendLegacy(sessionId, { ...req, cwd })
@@ -834,6 +820,8 @@ export const codexRuntime: AgentRuntime = {
     await codexAppServer.interruptTurn(sessionId, turnId)
     return true
   },
+
+  waitForCompletion: (sessionId, turnId) => codexAppServer.waitForCompletion(sessionId, turnId),
 
   async stop(sessionId) {
     let stopped = false
@@ -865,6 +853,7 @@ export const codexRuntime: AgentRuntime = {
     terminateTrackedSession(sessionId)
     await unlink(filePath)
     rememberedSettings.delete(sessionId)
+    codexQuestions.clear(sessionId)
   },
 
   activity(sessionId) {
@@ -970,7 +959,11 @@ export const codexRuntime: AgentRuntime = {
       )
     }
 
-    return { message: { ...rememberedSettings.get(sessionId), message } }
+    return {
+      message: { ...rememberedSettings.get(sessionId), message },
+      durableQuestion: { instanceId: process.env.COGPIT_AGENT_INSTANCE_ID ?? "default", sessionId, requestId: questionId },
+      onDelivered: () => codexQuestions.resolve(sessionId, questionId, `legacy-answer-${questionId}`),
+    }
   },
 
   listModels: fetchCodexModels,

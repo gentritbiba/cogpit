@@ -9,6 +9,8 @@ describe("agentHomeDir", () => {
     // invisible to every command in the package.
     expect(agentHomeDir("codex", { CODEX_HOME: "/opt/codex-data" }, "/Users/me"))
       .toBe("/opt/codex-data")
+    expect(agentHomeDir("claude", { CLAUDE_CONFIG_DIR: "/opt/isolated-sdk" }, "/Users/me")).toBe("/opt/isolated-sdk")
+    expect(agentHomeDir("acp", { COGPIT_ACP_HOME: "/opt/acp" }, "/Users/me")).toBe("/opt/acp")
   })
 
   it("falls back to the CLI's directory under the user's home", () => {

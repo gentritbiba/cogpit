@@ -26,10 +26,11 @@ vi.mock("@/hooks/useParserWorker", async () => {
 // The shell is where App hands over the composer, or what stands in for it.
 vi.mock("@/components/AppShell/DesktopAppShell", () => ({
   DesktopAppShell: ({ sessionView }: { sessionView: { activeComposer: ReactNode; pendingComposer: ReactNode } }) => {
-    const { session } = useSessionContext()
+    const { session, actions } = useSessionContext()
     return (
       <div>
         <span data-testid="open-session">{session?.sessionId ?? ""}</span>
+        {actions.handleProviderHandoff && <button onClick={actions.handleProviderHandoff}>Provider handoff</button>}
         {sessionView.activeComposer === sessionView.pendingComposer
           ? <span>Composer</span>
           : sessionView.activeComposer}
@@ -134,10 +135,12 @@ describe("App session access where the server enforces it", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Checking access…")
     expect(screen.queryByText("Composer")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Provider handoff" })).not.toBeInTheDocument()
 
     await act(async () => grant(json(lookup("interact"))))
 
     expect(await screen.findByText("Composer")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Provider handoff" })).toBeInTheDocument()
     expect(screen.queryByText("Checking access…")).not.toBeInTheDocument()
   })
 
@@ -152,6 +155,7 @@ describe("App session access where the server enforces it", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("View only"), { timeout: 3_000 })
     expect(accessRequests).toHaveBeenCalledTimes(2)
     expect(screen.queryByText("Composer")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Provider handoff" })).not.toBeInTheDocument()
   })
 
   it("writes nothing to an open session while the identity is unresolved", async () => {

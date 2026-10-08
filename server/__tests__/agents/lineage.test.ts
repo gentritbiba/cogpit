@@ -1,5 +1,7 @@
 // @vitest-environment node
 
+import { instanceSessionId } from "../../../shared/session/instances"
+import { orchestrationStore } from "../../orchestration/storage"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -307,5 +309,27 @@ describe("lineageFromMeta", () => {
     expect(lineage.lineageFromMeta({ sessionId: FORK, parentSessionId: FORK.toUpperCase() }).parentSessionId).toBeNull()
     expect(lineage.lineageFromMeta({ sessionId: FORK, parentSessionId: "../escape" }).parentSessionId).toBeNull()
     expect(lineage.lineageFromMeta({ sessionId: FORK, parentSessionId: null })).toEqual({ sessionId: FORK, parentSessionId: null })
+  })
+})
+
+
+describe("configured-instance lineage", () => {
+  it("preserves scoped parent IDs and drops scoped self-links", () => {
+    const child = instanceSessionId("account-1", FORK)
+    const parent = instanceSessionId("account-1", ROLLOUT)
+    expect(lineage.lineageFromMeta({ sessionId: child, parentSessionId: parent })).toEqual({ sessionId: child, parentSessionId: parent })
+    expect(lineage.lineageFromMeta({ sessionId: child, parentSessionId: child }).parentSessionId).toBeNull()
+  })
+
+  it("reads and caches each account's own team config", async () => {
+    const cache = new Map()
+    for (const [id, lead] of [["account-1", LEAD], ["account-2", SOLO]] as const) {
+      const homeDir = join(process.env.COGPIT_ORCHESTRATION_ROOT!, id)
+      orchestrationStore().putInstance({ id, agent: "claude", label: id, homeDir, createdAt: 1 })
+      await writeTeamConfig(join(homeDir, "teams", "release-review", "config.json"), { ...datedLead, leadSessionId: lead })
+      await expect(lineage.teamLeadFor({ sessionId: instanceSessionId(id, MEMBER), teamName: "release-review", timestamp: AFTER_CREATION }, cache))
+        .resolves.toMatchObject({ sessionId: instanceSessionId(id, lead) })
+    }
+    expect(cache.size).toBe(2)
   })
 })

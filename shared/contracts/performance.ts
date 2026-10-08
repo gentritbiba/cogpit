@@ -22,7 +22,9 @@ export interface ActivityMetric {
   active?: number
 }
 
-export type SystemProcessKind =
+import type { AgentKind } from "../session/agent-descriptors"
+
+export type SystemProcessKind = AgentKind
   /** One kind per agent CLI, matching `AgentKind`. */
   | "claude"
   | "codex"

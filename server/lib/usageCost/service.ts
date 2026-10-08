@@ -26,6 +26,7 @@ import { storeForDirName } from "../../agents"
 import type { ChildTranscriptFilter } from "../../edition/transcript"
 import { allRuntimes, runtimeFor } from "../../agents/runtimes"
 import type { UsageCostRecord } from "../../agents/usageScanners"
+import { scopeUsageRecords } from "../../agents/usageScanners"
 import { getDataRoot } from "../../config"
 import { resolveSessionFilePath, sessionStorageRoots } from "../../sessionPaths"
 import {
@@ -252,10 +253,10 @@ export async function readUsageCostSummary(input: {
   )
   const durableTotals: CountedUsage = new Map()
   let scannedFiles = 0
-  for (const { kind: provider, root } of sources) {
+  for (const { kind: provider, root, instanceId } of sources) {
     const files = await listTranscriptFiles(root, windowStartMs)
     for (const file of files) {
-      const records = await readFileRecords(file, provider)
+      const records = scopeUsageRecords(await readFileRecords(file, provider), instanceId)
       scannedFiles += 1
       for (const record of records) {
         aggregator.add(record)
@@ -393,8 +394,9 @@ export async function readSessionUsageRecords(input: UsageTranscript): Promise<S
   const directFile = await transcriptFile(input.filePath)
   if (!directFile) return null
 
-  const provider = storeForDirName(input.dirName).kind
-  const directRecords = await readFileRecords(directFile, provider)
+  const store = storeForDirName(input.dirName)
+  const provider = store.kind
+  const directRecords = scopeUsageRecords(await readFileRecords(directFile, provider), store.instanceId)
   const sessionId =
     input.sessionId
     ?? directRecords.find((record) => record.sessionId.length > 0)?.sessionId
@@ -410,7 +412,7 @@ export async function readSessionUsageRecords(input: UsageTranscript): Promise<S
 
   const recordsByFile = await Promise.all(files.map(async ({ file, isSubagent }) => ({
     isSubagent,
-    records: await readFileRecords(file, provider),
+    records: scopeUsageRecords(await readFileRecords(file, provider), store.instanceId),
   })))
   const scopedRecords: ScopedUsageCostRecord[] = recordsByFile.flatMap(
     ({ records, isSubagent }) => records.map((record) => ({ record, isSubagent })),
@@ -424,7 +426,7 @@ export async function readSessionUsageRecords(input: UsageTranscript): Promise<S
     if (record.sessionId) sessionIds.add(record.sessionId)
   }
   if (sessionId) sessionIds.add(sessionId)
-  const runtime = runtimeFor(provider)
+  const runtime = runtimeFor(provider, store.instanceId)
   if ([...sessionIds].some((id) => runtime.hasSession(id))) {
     const durableThrough = latestRecordBySession(scopedRecords)
     for (const record of await runtime.liveUsageRecords(countedUsageBySession(scopedRecords), sessionIds)) {

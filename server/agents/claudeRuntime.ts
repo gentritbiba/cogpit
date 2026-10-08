@@ -20,6 +20,7 @@ import {
   interruptSDKTurn,
   isSDKQueryLive,
   listUserQuestionSessionIds,
+  observeSDKResult,
   resolveAllPermissions,
   resolvePermission,
   resolveUserQuestion,
@@ -108,6 +109,19 @@ function watchSubagentsFor(state: SDKSessionState, filePath: string | null): voi
   })
 }
 
+function sdkResumeOptions(req: SendRequest) {
+  return {
+    permissionMode: req.permissions?.mode,
+    allowedTools: req.permissions?.allowedTools,
+    disallowedTools: req.permissions?.disallowedTools,
+    model: req.model,
+    effort: req.effort,
+    fastMode: req.fastMode,
+    ultracode: req.ultracode,
+    mcpConfig: req.mcpConfig,
+  }
+}
+
 /** Open a long-lived SDK query and report as soon as its transcript exists. */
 function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
   const sessionId = randomUUID()
@@ -121,16 +135,10 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
     message: req.message ?? "",
     cwd: req.cwd,
     images: req.images,
-    permissionMode: req.permissions?.mode,
-    allowedTools: req.permissions?.allowedTools,
-    disallowedTools: req.permissions?.disallowedTools,
-    model: req.model,
-    effort: req.effort,
-    fastMode: req.fastMode,
+    ...sdkResumeOptions(req),
     ultracode: !!req.ultracode,
     name: req.name,
     worktreeName: req.worktreeName,
-    mcpConfig: req.mcpConfig,
   })
 
   return new Promise<StartedSession>((resolve, reject) => {
@@ -252,6 +260,8 @@ export const claudeRuntime: AgentRuntime = {
       // arrive while background work is still running, so `running` is not a
       // liveness test.
       const joinsTurn = live.running
+      if (joinsTurn && req.deliveryIntent === "queue") return { delivery: "busy" }
+      const observed = req.commandId ? observeSDKResult(live) : null
       const state = sendSDKMessage(sessionId, req.message ?? "", req.images, {
         model: req.model,
         effort: req.effort,
@@ -260,13 +270,14 @@ export const claudeRuntime: AgentRuntime = {
         mcpConfig: req.mcpConfig,
       })
       if (!state) {
+        observed?.cancel()
         throw new AgentRuntimeError(
           500,
           "INTERNAL_ERROR",
           "Failed to send message to running session",
         )
       }
-      return { delivery: joinsTurn ? "enqueued" : "started" }
+      return { delivery: joinsTurn ? "enqueued" : "started", ...(observed ? { completion: observed.completion.then(turnResultFrom) } : {}) }
     }
 
     const state = resumeSDKSession({
@@ -274,14 +285,7 @@ export const claudeRuntime: AgentRuntime = {
       cwd: await resolveSessionCwd(req.cwd, req.filePath),
       message: req.message ?? "",
       images: req.images,
-      permissionMode: req.permissions?.mode,
-      allowedTools: req.permissions?.allowedTools,
-      disallowedTools: req.permissions?.disallowedTools,
-      model: req.model,
-      effort: req.effort,
-      fastMode: req.fastMode,
-      ultracode: req.ultracode,
-      mcpConfig: req.mcpConfig,
+      ...sdkResumeOptions(req),
     })
     watchSubagentsFor(state, req.filePath ?? null)
 

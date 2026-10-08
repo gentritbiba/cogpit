@@ -6,6 +6,7 @@
  * on the already-parsed model.
  */
 import { TERMINAL_AGENT_KIND, formatForRecords, formatForText } from "./agents"
+import { scopeParsedSession } from "./instances"
 import type {
   ContentBlock,
   ImageBlock,
@@ -48,7 +49,8 @@ export function parseSessionAppend(
 ): ParsedSession {
   const byRecords = formatForRecords(existing.rawMessages)
   const format = byRecords.kind === TERMINAL_AGENT_KIND ? formatForText(newJsonlText) : byRecords
-  return format.append(existing, newJsonlText)
+  const appended = format.append(existing, newJsonlText)
+  return existing.instanceId ? scopeParsedSession(appended, existing.instanceId) : appended
 }
 
 export function getUserMessageText(content: UserContent | null): string {

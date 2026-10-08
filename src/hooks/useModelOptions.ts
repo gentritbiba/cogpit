@@ -1,9 +1,11 @@
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useSyncExternalStore } from "react"
 import { authFetch } from "@/lib/auth"
+import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 import {
   getModelOptions,
   setDynamicModelOptions,
   subscribeModelOptions,
+  resetDynamicModelOptions,
   type ModelOption,
 } from "@/lib/utils"
 import { AGENT_KINDS, type AgentKind } from "@/lib/agents"
@@ -15,6 +17,9 @@ export const CATALOG_RETRY_MS = 30 * 1000
 
 let nextFetchAt = 0
 let inFlight: Promise<void> | null = null
+let catalogScope = ""
+let catalogGeneration = 0
+const scopeKey = () => JSON.stringify([getActiveDeviceScope(), getActiveIdentity()])
 
 function isModelOptionArray(value: unknown): value is ModelOption[] {
   return (
@@ -30,10 +35,13 @@ function isModelOptionArray(value: unknown): value is ModelOption[] {
 }
 
 async function fetchModelCatalog(): Promise<void> {
+  const generation = catalogGeneration
+  const scope = scopeKey()
   try {
     const res = await authFetch("/api/models")
     if (!res.ok) throw new Error(`GET /api/models → ${res.status}`)
     const data = await res.json() as Record<string, unknown> | null
+    if (generation !== catalogGeneration || scope !== scopeKey()) return
     for (const kind of AGENT_KINDS) {
       const options = data?.[kind]
       if (isModelOptionArray(options)) setDynamicModelOptions(kind, options)
@@ -41,7 +49,7 @@ async function fetchModelCatalog(): Promise<void> {
     nextFetchAt = Date.now() + CATALOG_TTL_MS
   } catch {
     // Offline / server error — static fallback lists stay in effect
-    nextFetchAt = Date.now() + CATALOG_RETRY_MS
+    if (generation === catalogGeneration && scope === scopeKey()) nextFetchAt = Date.now() + CATALOG_RETRY_MS
   }
 }
 
@@ -53,11 +61,13 @@ async function fetchModelCatalog(): Promise<void> {
  * `CATALOG_TTL_MS`. Any provider that fails keeps its static fallback list.
  */
 export function loadModelCatalog(): Promise<void> {
+  if (catalogScope !== scopeKey()) { resetModelCatalogFetch(); resetDynamicModelOptions(); catalogScope = scopeKey() }
   if (inFlight) return inFlight
   if (Date.now() < nextFetchAt) return Promise.resolve()
-  inFlight = fetchModelCatalog().finally(() => {
-    inFlight = null
+  const request = fetchModelCatalog().finally(() => {
+    if (inFlight === request) inFlight = null
   })
+  inFlight = request
   return inFlight
 }
 
@@ -71,15 +81,20 @@ export function refreshModelCatalogOnFocus(): () => void {
     if (document.visibilityState === "visible") void loadModelCatalog()
   }
   window.addEventListener("focus", refresh)
+  window.addEventListener("cogpit-identity-changed", refresh)
+  window.addEventListener("cogpit-device-scope-changed", refresh)
   document.addEventListener("visibilitychange", refresh)
   return () => {
     window.removeEventListener("focus", refresh)
+    window.removeEventListener("cogpit-identity-changed", refresh)
+    window.removeEventListener("cogpit-device-scope-changed", refresh)
     document.removeEventListener("visibilitychange", refresh)
   }
 }
 
 /** Test-only: forget the TTL so the next load fetches again. */
 export function resetModelCatalogFetch() {
+  catalogGeneration++
   nextFetchAt = 0
   inFlight = null
 }
@@ -89,10 +104,63 @@ export function resetModelCatalogFetch() {
  * replaced by the live CLI catalog once /api/models responds, and kept current
  * while the app stays open.
  */
-export function useModelOptions(agentKind: AgentKind): readonly ModelOption[] {
+export function useModelOptions(agentKind: AgentKind, instanceId = "default"): readonly ModelOption[] {
+  const key = JSON.stringify([scopeKey(), agentKind, instanceId])
+  const catalog = useMemo(() => instanceCatalogFor(key, agentKind, instanceId), [key, agentKind, instanceId])
   useEffect(() => {
+    if (instanceId !== "default") return
     void loadModelCatalog()
     return refreshModelCatalogOnFocus()
-  }, [])
-  return useSyncExternalStore(subscribeModelOptions, () => getModelOptions(agentKind))
+  }, [agentKind, instanceId])
+  const defaults = useSyncExternalStore(subscribeModelOptions, () => getModelOptions(agentKind))
+  const options = useSyncExternalStore(catalog.subscribe, catalog.snapshot)
+  return instanceId === "default" ? defaults : options
+}
+
+const INSTANCE_DEFAULT_MODELS: readonly ModelOption[] = [{ value: "", label: "Provider default" }]
+const instanceCatalogs = new Map<string, InstanceCatalog>()
+class InstanceCatalog {
+  private options: readonly ModelOption[] = INSTANCE_DEFAULT_MODELS
+  private readonly listeners = new Set<() => void>()
+  private controller?: AbortController
+  private nextFetchAt = 0
+  constructor(readonly key: string, readonly agent: AgentKind, readonly instanceId: string, readonly scope: string) {}
+  snapshot = () => this.options
+  private publish = () => { for (const listener of this.listeners) listener() }
+  private invalidate = () => { this.controller?.abort(); this.options = INSTANCE_DEFAULT_MODELS; this.publish(); instanceCatalogs.delete(this.key) }
+  private refresh = () => {
+    if (this.instanceId === "default" || this.controller || Date.now() < this.nextFetchAt || this.scope !== scopeKey()) return
+    const controller = new AbortController(); this.controller = controller
+    void authFetch(`/api/models?instanceId=${encodeURIComponent(this.instanceId)}`, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error("Model catalog unavailable")
+      const data = await response.json() as Record<string, unknown>
+      if (controller.signal.aborted || this.scope !== scopeKey()) return
+      if (isModelOptionArray(data[this.agent])) { this.options = data[this.agent] as ModelOption[]; this.publish() }
+      this.nextFetchAt = Date.now() + CATALOG_TTL_MS
+    }).catch(() => { this.nextFetchAt = Date.now() + CATALOG_RETRY_MS }).finally(() => { if (this.controller === controller) this.controller = undefined })
+  }
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener)
+    if (this.listeners.size === 1 && this.instanceId !== "default") {
+      this.refresh()
+      window.addEventListener("focus", this.refresh)
+      window.addEventListener("cogpit-identity-changed", this.invalidate)
+      window.addEventListener("cogpit-device-scope-changed", this.invalidate)
+    }
+    return () => {
+      this.listeners.delete(listener)
+      if (!this.listeners.size) {
+        this.controller?.abort()
+        window.removeEventListener("focus", this.refresh)
+        window.removeEventListener("cogpit-identity-changed", this.invalidate)
+        window.removeEventListener("cogpit-device-scope-changed", this.invalidate)
+        instanceCatalogs.delete(this.key)
+      }
+    }
+  }
+}
+function instanceCatalogFor(key: string, agent: AgentKind, instanceId: string): InstanceCatalog {
+  let catalog = instanceCatalogs.get(key)
+  if (!catalog) { catalog = new InstanceCatalog(key, agent, instanceId, scopeKey()); instanceCatalogs.set(key, catalog) }
+  return catalog
 }

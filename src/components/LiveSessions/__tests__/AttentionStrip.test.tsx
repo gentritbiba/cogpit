@@ -133,3 +133,41 @@ describe("AttentionStrip working list", () => {
     expect(screen.queryByRole("button", { name: /kill process/i }) !== null).toBe(shown)
   })
 })
+
+describe("AttentionStrip crews", () => {
+  const root = makeSession({ sessionId: "root", firstUserMessage: "Wave 3 coordinator", agentStatus: "completed", isActive: false })
+
+  it("lists a crew as its root, saying how many members wait and since when", () => {
+    const longestWaitSince = new Date(Date.now() - 42 * 60_000).toISOString()
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [{ session: root, reason: "crew", crew: { size: 15, needsYou: 2, working: 2, done: 11, longestWaitSince } }], working: [] }}
+        activeSessionKey={null}
+        procBySession={new Map()}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Wave 3 coordinator")).toBeInTheDocument()
+    expect(screen.getByText("2 waiting")).toBeInTheDocument()
+    expect(screen.getByText("42m")).toBeInTheDocument()
+  })
+
+  it("says a root works through its crew when it does not work itself", () => {
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [], working: [root], workingCrews: new Map([["root", { size: 3, needsYou: 0, working: 2, done: 1 }]]) }}
+        activeSessionKey={null}
+        procBySession={new Map()}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("2 in crew")).toBeInTheDocument()
+  })
+})

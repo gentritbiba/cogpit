@@ -163,3 +163,88 @@ describe("SessionCard", () => {
     expect(onToggleTeammates).toHaveBeenCalledOnce()
   })
 })
+
+describe("SessionCard in a crew", () => {
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+  const member = (sessionId: string, overrides: Partial<ActiveSessionInfo> = {}) => session({
+    sessionId,
+    fileName: `${sessionId}.jsonl`,
+    dirName: `-work-${sessionId}`,
+    cwd: `/work/${sessionId}`,
+    crew: { rootId: "s1", parentId: "s1", startedAt: 1 },
+    lastActivityAt: minutesAgo(2),
+    ...overrides,
+  })
+  const statuses: Record<string, { state: "needs-you" | "working" | "done"; need?: "permission" }> = {
+    "w3-rooftop": { state: "needs-you", need: "permission" },
+    "w3-storefront": { state: "working" },
+    "w3-cost-model": { state: "done" },
+  }
+  const members = [
+    member("w3-cost-model", { lastActivityAt: minutesAgo(120) }),
+    member("w3-storefront", { agentStatus: "tool_use", agentToolName: "Bash" }),
+    member("w3-rooftop", { lastActivityAt: minutesAgo(42) }),
+    member("reviewer", { cwd: "/work/w3-rooftop", firstUserMessage: "Review packet r2", crew: { rootId: "s1", parentId: "w3-rooftop", startedAt: 2 } }),
+  ]
+  const statusOf = (value: ActiveSessionInfo) => statuses[value.sessionId] ?? { state: "done" as const }
+  const crew = (open: boolean, onToggle = vi.fn()) => ({
+    members,
+    counts: { size: 4, needsYou: 1, working: 1, done: 2 },
+    statusOf,
+    activityAt: minutesAgo(0),
+    open,
+    onToggle,
+  })
+
+  it("closes with the crew's line, wears the crew's state and its latest activity", () => {
+    const onToggle = vi.fn()
+    renderCard({ lastActivityAt: minutesAgo(90), agentStatus: "completed" }, { crew: crew(false, onToggle) })
+
+    const line = screen.getByRole("button", { name: "Show crew: Crew of 4, 1 need you, 1 working" })
+    expect(line).toHaveTextContent("Crew· 4· 1 need you· 1 working")
+    expect(document.querySelector("[data-status-dot]")).toHaveAttribute("data-status-dot", "attention")
+    expect(document.querySelector("[data-crew-activity]")).toHaveTextContent("crew active now")
+    expect(document.querySelector("[data-crew-member]")).toBeNull()
+
+    fireEvent.click(line)
+    expect(onToggle).toHaveBeenCalledOnce()
+  })
+
+  it("lists the sessions it started open: waiting first, then working, then done, each opening its session", () => {
+    const { onSelectSession } = renderCard({}, { crew: crew(true) })
+
+    const rows = [...document.querySelectorAll("[data-crew-member]")]
+    // The reviewer w3-rooftop started is counted on its row, not listed.
+    expect(rows.map((row) => row.getAttribute("data-crew-member"))).toEqual(["w3-rooftop", "w3-storefront", "w3-cost-model"])
+    expect(rows[0]).toHaveTextContent("w3-rooftop · 1 session")
+    expect(rows[0]).toHaveTextContent("permission · 42m")
+    expect(rows[1]).toHaveTextContent("Bash")
+
+    fireEvent.click(rows[0]!)
+    expect(onSelectSession).toHaveBeenCalledWith("-work-w3-rooftop", "w3-rooftop.jsonl")
+  })
+
+  it("lists a deeper member that waits on someone, saying who started it", () => {
+    const waiting = { ...crew(true), statusOf: (value: ActiveSessionInfo) => (value.sessionId === "reviewer" ? { state: "needs-you" as const, need: "permission" as const } : statusOf(value)) }
+    renderCard({}, { crew: waiting })
+
+    const reviewer = document.querySelector("[data-crew-member=reviewer]")
+    expect(reviewer).toHaveTextContent("Review packet r2 · via w3-rooftop")
+    expect(reviewer).toHaveTextContent("permission")
+  })
+
+  it("names who started a member listed on its own, in place of its project, and opens it", () => {
+    const onOpenParent = vi.fn()
+    renderCard({}, {
+      showProject: true,
+      projectLabel: "hcms-pr/w3-rooftop",
+      lineage: { parentTitle: "w3-rooftop", rootTitle: "Wave 3 coordinator", onOpenParent },
+    })
+
+    expect(document.querySelector("[data-session-project]")).toBeNull()
+    const eyebrow = screen.getByRole("button", { name: "Open w3-rooftop, which started this session" })
+    expect(eyebrow).toHaveTextContent("w3-rooftop· Wave 3 coordinator")
+    fireEvent.click(eyebrow)
+    expect(onOpenParent).toHaveBeenCalledOnce()
+  })
+})

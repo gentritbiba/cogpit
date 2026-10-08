@@ -4,7 +4,10 @@ import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes
 import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type UseFn } from "../../http"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
 import { createSession, type CreateSessionInput } from "../../lib/sessionCreate"
-import { getRequestPrincipal, markDecided, startTurn } from "../../edition"
+import { authorizeSession, getRequestPrincipal, markDecided, startTurn } from "../../edition"
+import { commandScope } from "../../lib/durableSend"
+import { orchestrationStore } from "../../orchestration/storage"
+import { resumeDelegations } from "../../lib/delegationAuthority"
 import { sendAgentError } from "../agentErrors"
 import { imagesRefusal } from "../imageAttachments"
 
@@ -18,6 +21,7 @@ interface NewSessionBody {
   requestId?: string
   dirName?: string
   cwd?: string
+  instanceId?: string
   agent?: AgentKind
   parentSessionId?: string
   message?: string
@@ -42,6 +46,10 @@ async function respondWithSession(
 ): Promise<void> {
   try {
     const started = await createSession(input, (runtime, request) => startTurn(req, receivedAt, runtime, request))
+    if (input.parentSessionId) {
+      orchestrationStore().putTask(commandScope(req), { parentSessionId: input.parentSessionId, childSessionId: started.sessionId, sourceId: input.retry?.requestId || started.sessionId })
+      resumeDelegations(req, input.parentSessionId)
+    }
     sendJson(res, 200, {
       success: true,
       ...(input.retry ? { requestId: input.retry.requestId } : {}),
@@ -68,7 +76,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     withJsonBody<NewSessionBody>(req, res, async (body) => {
       const receivedAt = Date.now()
       const {
-        requestId, dirName, cwd, agent, parentSessionId, message, images, permissions,
+        requestId, dirName, cwd, agent, instanceId, parentSessionId, message, images, permissions,
         model, effort, contextWindowTokens, fastMode, ultracode, worktreeName, mcpConfig, name,
       } = body
       if (!message && (!images || !images.length)) {
@@ -89,11 +97,13 @@ export function registerCreateAndSendRoute(use: UseFn) {
         return
       }
       // A new session names no session the caller could lack access to.
+      if (parentSessionId && await authorizeSession(req, res, { sessionId: parentSessionId }, "interact") === null) return
       markDecided(req)
       await respondWithSession(req, res, receivedAt, {
         dirName,
         cwd,
         agent,
+        instanceId,
         parentSessionId,
         message,
         images,

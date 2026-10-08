@@ -190,6 +190,13 @@ const claudeFormat: AgentFormat = {
 }
 
 const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({
+  acp: {
+    ...claudeFormat, kind: "acp", descriptor: descriptorFor("acp"),
+    detectsText: (text) => text.split("\n", 1)[0]?.includes('"type":"acp_session"') ?? false,
+    detectsRecords: (records) => records[0]?.type === "acp_session",
+    parse: (text, options) => ({ ...parseClaudeSession(text, options), agentKind: "acp" }),
+    append: (session, text) => ({ ...appendClaudeSession(session, text), agentKind: "acp" }),
+  },
   claude: claudeFormat,
   codex: codexFormat,
   copilot: copilotFormat,

@@ -1,8 +1,11 @@
 import { getToolSummary } from "../../shared/session/toolSummary"
-import { copilotRuntime } from "./copilotTransport"
 import { allRuntimes, resolveSessionAgent } from "./runtimes"
 import type { PendingInput, PendingInputResponse } from "../../shared/contracts/pendingInput"
 import { AgentRuntimeError } from "./runtimeTypes"
+import type { IncomingMessage } from "node:http"
+import { orchestrationStore } from "../orchestration/storage"
+import { fingerprint } from "../orchestration/store"
+import { admitSessionCommand, commandScope } from "../lib/durableSend"
 
 /**
  * Everything a session is blocked on until someone answers: tool approvals,
@@ -27,12 +30,14 @@ export function listPendingInput(sessionId: string): PendingInput[] {
         summary: approval.summary ?? getToolSummary({ name: approval.toolName, input: approval.input }),
         ...(approval.title && { title: approval.title }),
         availableDecisions: approval.availableDecisions,
+        ...(approval.timestamp !== undefined && { askedAt: approval.timestamp }),
       })
     }
     for (const question of runtime.listPendingQuestions(sessionId)) {
       pending.push({
         kind: "question",
         requestId: question.toolUseId,
+        ...(question.askedAt !== undefined && { askedAt: question.askedAt }),
         questions: question.questions.map((item) => ({
           question: item.question,
           multiSelect: item.multiSelect,
@@ -40,14 +45,13 @@ export function listPendingInput(sessionId: string): PendingInput[] {
         })),
       })
     }
-  }
-  for (const plan of copilotRuntime.getPendingExitPlans(sessionId)) {
-    pending.push({
+    for (const plan of runtime.listPendingPlans?.(sessionId) ?? []) pending.push({
       kind: "plan",
       requestId: plan.requestId,
       summary: plan.summary,
       actions: plan.actions,
       recommendedAction: plan.recommendedAction,
+      ...(plan.askedAt !== undefined && { askedAt: plan.askedAt }),
     })
   }
   return pending
@@ -62,7 +66,13 @@ export async function respondToPendingInput(
   sessionId: string,
   requestId: string,
   response: PendingInputResponse,
+  options: { commandId?: string; req?: IncomingMessage } = {},
 ): Promise<PendingInput> {
+  const old = options.commandId ? orchestrationStore().command(commandScope(options.req), options.commandId) : null
+  if (old && "answers" in response) {
+    if (old.receipt.sessionId !== sessionId || old.payload.questionId !== requestId || fingerprint(old.payload.answerInput) !== fingerprint(response.answers)) throw new AgentRuntimeError(409, "CONFLICT", "commandId was reused with another answer")
+    return { kind: "question", requestId, questions: [] }
+  }
   const request = listPendingInput(sessionId).find((pending) => pending.requestId === requestId)
   if (!request) {
     throw new AgentRuntimeError(404, "NOT_FOUND", "No pending request with that id; it may already be answered")
@@ -85,12 +95,18 @@ export async function respondToPendingInput(
         if (!runtime.listPendingQuestions(sessionId).some((q) => q.toolUseId === requestId)) continue
         const accepted = await runtime.answerQuestion(sessionId, requestId, response.answers)
         if (accepted?.message) {
+          if (options.commandId) {
+            await admitSessionCommand({ sessionId, commandId: options.commandId, request: accepted.message, req: options.req, runtime, answer: accepted, answerInput: response.answers })
+            answered = true
+            break
+          }
           // A message may start a turn, so the agent gets it as a send.
           const { filePath } = await resolveSessionAgent(sessionId)
           const outcome = await runtime.send(sessionId, { ...accepted.message, filePath })
           if (outcome.delivery === "busy") {
             throw new AgentRuntimeError(409, "CONFLICT", "Session is busy; the question is still waiting for an answer")
           }
+          accepted.onDelivered?.()
         }
         answered = accepted !== null
         break
@@ -99,12 +115,15 @@ export async function respondToPendingInput(
     }
     case "plan": {
       if (!("approved" in response)) throw mismatch(request.kind, "approved")
-      copilotRuntime.answerExitPlan(sessionId, requestId, {
-        approved: response.approved,
-        ...(response.action ? { selectedAction: response.action } : {}),
-        ...(response.feedback ? { feedback: response.feedback } : {}),
-      })
-      answered = true
+      for (const runtime of allRuntimes()) {
+        if (!runtime.listPendingPlans?.(sessionId).some((plan) => plan.requestId === requestId)) continue
+        answered = await runtime.respondToPlan?.(sessionId, requestId, {
+          approved: response.approved,
+          ...(response.action ? { selectedAction: response.action } : {}),
+          ...(response.feedback ? { feedback: response.feedback } : {}),
+        }) ?? false
+        break
+      }
       break
     }
   }

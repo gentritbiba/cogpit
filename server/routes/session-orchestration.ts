@@ -1,8 +1,18 @@
+import { registerDelegatedTaskRoutes } from "./delegated-tasks"
+import { registerSessionMcpRoutes } from "./session-mcp"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { isAbsolute } from "node:path"
 import type { PendingInputResponse } from "../agents/pendingInput"
 import type { UserQuestionAnswers } from "../agents/runtimes"
-import { sessionChildren } from "../lib/sessionOrigins"
+import { sessionChildren, sessionParents } from "../lib/sessionOrigins"
+import { readSessionCrew } from "../lib/sessionCrew"
+import { sessionBoard } from "../lib/sessionBoards"
+import { commandScope } from "../lib/durableSend"
+import { orchestrationStore } from "../orchestration/storage"
+import { allTopLevelSessions } from "../agents"
+import { listedSessionId } from "../agents/listedSession"
+import type { TopLevelSessionInfo } from "../agents/types"
+import { readActiveSessionRow } from "./projects/activeSessionRow"
 import { parseWaitSeconds } from "../lib/sessionWait"
 import { sendJson, singlePathParam, withJsonBody, type UseFn } from "../http"
 import { runSessionCli } from "../sessionCli/commands"
@@ -12,7 +22,8 @@ import {
   markDelegatedRequestAnswered,
   watchDelegatedRequestsOf,
 } from "../sessionHosts/delegatedRequests"
-import { getRequestPrincipal, mayActHostWide, visibilityFor } from "../edition"
+import { accessLevelOf, authorizeSession, getRequestPrincipal, mayActHostWide, visibilityFor } from "../edition"
+import { accessAtLeast } from "../../shared/contracts/sessionAccess"
 import { sendHostError } from "./agentErrors"
 
 const INVOCATION_ID_RE = /^[a-zA-Z0-9_-]{8,128}$/
@@ -42,6 +53,8 @@ function scopeOf(req: IncomingMessage): { localOnly: boolean } {
 }
 
 export function registerSessionOrchestrationRoutes(use: UseFn) {
+  registerDelegatedTaskRoutes(use)
+  registerSessionMcpRoutes(use)
   // GET /api/session-wait/:sessionId?timeout=<s> — one session
   // POST /api/session-wait { sessionIds, mode: "any" | "all", timeout }
   use("/api/session-wait", async (req, res, next) => {
@@ -52,6 +65,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
       if (timeout === null) return sendJson(res, 400, { error: "timeout must be a non-negative number of seconds" })
       const signal = abortOnClose(req, res)
       try {
+        if (await authorizeSession(req, res, { sessionId }, "view") === null) return
         const located = await locateSessions([sessionId], scopeOf(req))
         const result = await waitAcrossHosts(located, { mode: "all", timeoutMs: timeout * 1000, signal })
         if (!res.writableEnded) sendJson(res, 200, { timedOut: result.timedOut, ...result.sessions[0] })
@@ -76,6 +90,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
       if (timeout === null) return sendJson(res, 400, { error: "timeout must be a non-negative number of seconds" })
       const signal = abortOnClose(req, res)
       try {
+        for (const sessionId of sessionIds as string[]) if (await authorizeSession(req, res, { sessionId }, "view") === null) return
         const located = await locateSessions([...new Set(sessionIds as string[])], scopeOf(req))
         const result = await waitAcrossHosts(located, { mode, timeoutMs: timeout * 1000, signal })
         if (!res.writableEnded) sendJson(res, 200, result)
@@ -96,6 +111,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
       return sendJson(res, 400, { error: "turn must be a non-negative integer" })
     }
     try {
+      if (await authorizeSession(req, res, { sessionId }, "view") === null) return
       const result = await (await hostForSession(sessionId, scopeOf(req))).result(sessionId, turn)
       if (!result) return sendJson(res, 404, { error: "Session not found" })
       sendJson(res, 200, result)
@@ -119,8 +135,10 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         })
       }
       try {
+        if (await authorizeSession(req, res, { sessionId }, "interact") === null) return
         const host = await hostForSession(sessionId, scopeOf(req))
-        const answered = await host.respond(sessionId, requestId, response)
+        if (body.commandId !== undefined && typeof body.commandId !== "string") return sendJson(res, 400, { error: "commandId must be a string" })
+        const answered = await host.respond(sessionId, requestId, response, { req, commandId: body.commandId as string | undefined })
         markDelegatedRequestAnswered(sessionId, requestId)
         sendJson(res, 200, { success: true, answered })
       } catch (error) {
@@ -134,12 +152,81 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
     if (req.method !== "GET") return next()
     const sessionId = singlePathParam(req)
     if (!sessionId) return next()
-    const located = await locateSessions(await sessionChildren(sessionId))
+    if (await authorizeSession(req, res, { sessionId }, "view") === null) return
+    const visibleChildren = []
+    for (const child of await sessionChildren(sessionId)) { const level = await accessLevelOf(req, child); if (level && accessAtLeast(level, "view")) visibleChildren.push(child) }
+    const located = await locateSessions(visibleChildren)
     const children = await Promise.all(located.map(async ({ host, sessionId: childId }) => ({
       ...await host.state(childId),
       ...(host.remote ? { device: { id: host.id, name: host.name } } : {}),
     })))
     sendJson(res, 200, { sessionId, children })
+  })
+
+  // GET /api/session-board/:sessionId — the board the session keeps, or null
+  use("/api/session-board/", async (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const sessionId = singlePathParam(req)
+    if (!sessionId) return next()
+    if (await authorizeSession(req, res, { sessionId }, "view") === null) return
+    sendJson(res, 200, { board: await sessionBoard(sessionId) })
+  })
+
+  // GET /api/session-crew/:sessionId — the crew it belongs to, from its root,
+  // with each member's state and what it is waiting on
+  use("/api/session-crew/", async (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const sessionId = singlePathParam(req)
+    if (!sessionId) return next()
+    try {
+      if (await authorizeSession(req, res, { sessionId }, "view") === null) return
+      const canView = async (id: string) => {
+        const level = await accessLevelOf(req, id)
+        return Boolean(level && accessAtLeast(level, "view"))
+      }
+      let listing: Promise<Map<string, TopLevelSessionInfo>> | null = null
+      const listedById = () => (listing ??= allTopLevelSessions().then(
+        (sessions) => new Map(sessions.map((session) => [listedSessionId(session), session])),
+      ))
+      const crew = await readSessionCrew(sessionId, {
+        parents: await sessionParents(),
+        canView: (id) => (id === sessionId ? Promise.resolve(true) : canView(id)),
+        describe: async (id) => {
+          const host = await hostForSession(id, scopeOf(req))
+          const [state, address] = await Promise.all([host.state(id), host.address(id)])
+          return { host: { remote: host.remote, id: host.id, name: host.name }, state, address }
+        },
+        listed: async (id) => {
+          const candidate = (await listedById()).get(id)
+          if (!candidate) return null
+          const row = await readActiveSessionRow(candidate, {
+            search: "", pullRequestSearch: null, pullRequestIndex: null, archivedById: new Map(), teamConfigs: new Map(),
+          })
+          if (!row) return null
+          return {
+            customTitle: row.customTitle,
+            aiTitle: row.aiTitle,
+            firstUserMessage: row.firstUserMessage,
+            cwd: row.cwd,
+            model: row.model,
+            turnCount: row.turnCount,
+            lastActivityAt: row.lastActivityAt,
+            pullRequests: row.pullRequests,
+          }
+        },
+        tasks: () => {
+          try {
+            return orchestrationStore().tasks(commandScope(req))
+          } catch {
+            return []
+          }
+        },
+      })
+      if (!crew) return sendJson(res, 404, { error: "Session not found" })
+      sendJson(res, 200, crew)
+    } catch (error) {
+      sendHostError(res, error, "Failed to read the crew")
+    }
   })
 
   // POST /api/session-send { sessionId, message, interrupt? } — deliver a
@@ -152,8 +239,11 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         return sendJson(res, 400, { error: "sessionId and message are required" })
       }
       try {
+        if (await authorizeSession(req, res, { sessionId }, "interact") === null) return
         const host = await hostForSession(sessionId, scopeOf(req))
-        const delivered = await host.send(sessionId, message, { interrupt: interrupt === true })
+        if (body.commandId !== undefined && typeof body.commandId !== "string") return sendJson(res, 400, { error: "commandId must be a string" })
+        if (body.intent !== undefined && !["queue", "steer", "restart"].includes(String(body.intent))) return sendJson(res, 400, { error: "Invalid delivery intent" })
+        const delivered = await host.send(sessionId, message, { interrupt: interrupt === true, commandId: body.commandId as string | undefined, intent: body.intent as "queue" | "steer" | "restart" | undefined, req })
         watchDelegatedRequestsOf(sessionId)
         sendJson(res, 200, delivered)
       } catch (error) {
@@ -164,11 +254,14 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
 
   // GET /api/session-requests?parent=<sessionId> — what delegated sessions
   // whose questions go to the user are waiting on, for the parent's view.
-  use("/api/session-requests", (req, res, next) => {
+  use("/api/session-requests", async (req, res, next) => {
     if (req.method !== "GET") return next()
     const parent = new URL(req.url || "/", "http://localhost").searchParams.get("parent")
     if (!parent) return sendJson(res, 400, { error: "parent is required" })
-    sendJson(res, 200, { requests: listDelegatedRequests(parent) })
+    if (await authorizeSession(req, res, { sessionId: parent }, "view") === null) return
+    const requests = []
+    for (const request of listDelegatedRequests(parent)) { const level = await accessLevelOf(req, request.sessionId); if (level && accessAtLeast(level, "view")) requests.push(request) }
+    sendJson(res, 200, { requests })
   })
 
   // POST /api/session-cli { argv, cwd, invocationId, callerSessionId? } — the
@@ -195,6 +288,7 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
         admin: mayActHostWide(req),
         visible: visibilityFor(req),
         signal: abortOnClose(req, res),
+        req,
       })
       if (!res.writableEnded) sendJson(res, 200, output)
     })

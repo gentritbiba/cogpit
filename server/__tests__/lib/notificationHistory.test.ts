@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { instanceDirName, instanceSessionId } from "../../../shared/session/instances"
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
 const mockReadFile = vi.fn()
@@ -27,6 +28,7 @@ import {
   markNotificationsRead,
   NOTIFICATION_HISTORY_FILE,
   notificationView,
+  notificationAccessSessionId,
   recordNotification,
   resetNotificationHistoryForTests,
   type NotificationHistoryEntry,
@@ -92,6 +94,19 @@ describe("notificationHistory", () => {
       dirName: "-d",
       readBy: {},
     })
+  })
+
+  it("persists instance access identity separately from its native navigation id", async () => {
+    const nativeId = "00000000-0000-4000-8000-000000000001"
+    const dirName = instanceDirName("account-1", "-work-repo")
+    const entry = recordNotification({ title: "Private account", body: "Done", nav: { sessionId: nativeId, dirName } }, "turnComplete")
+    await flush()
+    expect(persisted()[0][0]).toMatchObject({ accessSessionId: instanceSessionId("account-1", nativeId), sessionId: nativeId, dirName })
+    expect(notificationAccessSessionId(entry)).toBe(instanceSessionId("account-1", nativeId))
+    expect(notificationView(entry, "alice")).toMatchObject({ sessionId: nativeId, dirName })
+    expect(notificationView(entry, "alice")).not.toHaveProperty("accessSessionId")
+    const { accessSessionId: _access, ...legacy } = entry
+    expect(notificationAccessSessionId(legacy)).toBe(instanceSessionId("account-1", nativeId))
   })
 
   it("returns the entry synchronously with a usable id", () => {

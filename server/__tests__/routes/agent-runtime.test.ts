@@ -13,6 +13,7 @@ import type { Middleware, UseFn } from "../../helpers"
 
 const { runtimes } = vi.hoisted(() => ({
   runtimes: {
+    acp: { describeRuntime: vi.fn() },
     claude: { describeRuntime: vi.fn() },
     codex: { describeRuntime: vi.fn() },
     copilot: { describeRuntime: vi.fn() },

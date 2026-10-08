@@ -1,3 +1,4 @@
+import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useLiveSession } from "../useLiveSession"
@@ -8,6 +9,7 @@ import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 // Mock auth
 vi.mock("@/lib/auth", () => ({
   authUrl: vi.fn((url: string) => url),
+  authFetch: (...args: Parameters<typeof fetch>) => fetch(...args),
 }))
 
 // Mock sessionCache
@@ -60,6 +62,9 @@ const mockParsedSession: ParsedSession = {
 
 // Mock EventSource
 class MockEventSource extends EventTarget {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSED = 2
   static instances: MockEventSource[] = []
   url: string
   onopen: ((ev: Event) => void) | null = null
@@ -82,14 +87,17 @@ class MockEventSource extends EventTarget {
   // Test helpers
   simulateOpen() {
     this.readyState = 1
+    this.dispatchEvent(new Event("open"))
     this.onopen?.(new Event("open"))
   }
 
   simulateMessage(data: unknown) {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }))
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }))
   }
 
   simulateError() {
+    this.dispatchEvent(new Event("error"))
     this.onerror?.(new Event("error"))
   }
 }
@@ -101,6 +109,7 @@ describe("useLiveSession", () => {
   let workerAppend: Mock<(existing: ParsedSession, newText: string) => Promise<ParsedSession>>
 
   beforeEach(() => {
+    __resetStreamsForTest()
     vi.resetAllMocks()
     MockEventSource.instances = []
     rafCallbacks = []
@@ -115,6 +124,7 @@ describe("useLiveSession", () => {
   })
 
   afterEach(() => {
+    __resetStreamsForTest()
     vi.unstubAllGlobals()
     vi.useRealTimers()
   })
@@ -743,7 +753,7 @@ describe("useLiveSession", () => {
 
     // Send invalid JSON via onmessage directly
     act(() => {
-      getLastEventSource().onmessage?.(
+      getLastEventSource().dispatchEvent(
         new MessageEvent("message", { data: "not-json" })
       )
     })

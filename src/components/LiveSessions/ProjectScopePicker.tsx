@@ -26,6 +26,8 @@ interface ProjectScopePickerProps {
   /** The option behind `value`, or null when it has no listed sessions. */
   focused: ProjectScopeOption | null
   totalSessions: number
+  /** Listed sessions that started a crew. */
+  crewCount?: number
   onChange: (key: string | null) => void
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
@@ -44,7 +46,11 @@ function focusedSummary(focused: ProjectScopeOption | null): string {
   if (!focused) return "No sessions listed"
   const sessions = plural(focused.total, "session")
   const activity = focused.live > 0 ? `${sessions}, ${focused.live} live` : sessions
-  return focused.worktrees > 0 ? `${activity} · ${plural(focused.worktrees, "worktree")}` : activity
+  const extras = [
+    focused.crews > 0 && plural(focused.crews, "crew"),
+    focused.worktrees > 0 && plural(focused.worktrees, "worktree"),
+  ].filter(Boolean)
+  return [activity, ...extras].join(" · ")
 }
 
 /** Sessions blocked on the user, as a warning dot and a count. */
@@ -78,6 +84,7 @@ export function ProjectScopePicker({
   value,
   focused,
   totalSessions,
+  crewCount = 0,
   onChange,
   onNewSession,
   creatingSession,
@@ -88,7 +95,7 @@ export function ProjectScopePicker({
   const [open, setOpen] = useState(false)
   const focusedLabel = focused?.customName ?? value
   const summary = value === null
-    ? `${plural(options.length, "project")}, ${plural(totalSessions, "session")}`
+    ? `${plural(options.length, "project")}, ${plural(totalSessions, "session")}${crewCount > 0 ? ` · ${plural(crewCount, "crew")}` : ""}`
     : focusedSummary(focused)
   const elsewhere = waitingElsewhere(options, value)
   const select = (key: string | null) => {

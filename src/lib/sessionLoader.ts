@@ -16,6 +16,7 @@ import { authFetch, type AuthFetchInit } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 
 export interface TailResponse {
   headerLines: string[]
@@ -55,7 +56,7 @@ export async function fetchTailAndParse(
   const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
   const text = [...data.headerLines, ...uniqueTail].join("\n")
 
-  const parsed = await workerParse(text)
+  const parsed = scopeParsedSession(await workerParse(text), splitInstanceDirName(dirName).instanceId)
 
   return {
     parsed,

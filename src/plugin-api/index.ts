@@ -5,6 +5,7 @@ export {
 } from "./workspacePanels"
 export type {
   CogpitPlugin,
+  OpenSessionCrew,
   ProjectPromptContext,
   RegisteredWorkspacePanel,
   WorkspacePanelContext,

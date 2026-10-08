@@ -320,6 +320,33 @@ describe("useChatScroll", () => {
     expect(mockEl.scrollTop).toBe(1200)
   })
 
+  it.each([true, false])("handles padding-only footer growth with bottom anchoring %s", (atBottom) => {
+    let resized!: ResizeObserverCallback
+    const observe = vi.fn(); const disconnect = vi.fn()
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) { resized = callback }
+      observe = observe
+      disconnect = disconnect
+    })
+    const { result } = renderHook(() => useChatScroll({ ...defaultOpts, session: makeSession(1), isLive: false }))
+    const viewport = { scrollTop: atBottom ? 500 : 100, scrollHeight: 1000, clientHeight: 500 }
+    result.current.chatScrollRef.current = viewport as HTMLDivElement
+    const content = document.createElement("div")
+    act(() => { result.current.observeChatContent(content); result.current.handleScroll() })
+    expect(observe).toHaveBeenCalledWith(content, { box: "border-box" })
+    content.style.paddingBottom = "300px"
+    viewport.scrollHeight = 1200
+    act(() => {
+      resized([{ target: content, contentRect: { height: 700 }, borderBoxSize: [{ blockSize: 1200 }] }] as unknown as ResizeObserverEntry[], {} as ResizeObserver)
+      for (const callback of rafCallbacks.splice(0)) callback()
+    })
+    expect(viewport.scrollTop).toBe(atBottom ? 1200 : 100)
+    expect(result.current.canScrollDown).toBe(!atBottom)
+    act(() => result.current.observeChatContent(null))
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(cancelAnimationFrame).toHaveBeenCalled()
+  })
+
   it("reports initialScrollDone only after the session-change placement settles", () => {
     vi.useFakeTimers()
     try {

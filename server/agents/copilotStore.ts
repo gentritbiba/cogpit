@@ -23,84 +23,89 @@ import type { AgentStore, SessionFileInfo } from "./types"
  * fixtures rely on: they set `COPILOT_HOME` before re-importing the module.
  */
 
-const descriptor = descriptorFor("copilot")
+export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(homedir(), ".copilot")): AgentStore {
+  const descriptor = descriptorFor("copilot")
 
-const HOME_DIR = resolve(process.env.COPILOT_HOME || join(homedir(), ".copilot"))
-const SESSIONS_DIR = join(HOME_DIR, "session-state")
+  const HOME_DIR = resolve(homeDir)
+  const SESSIONS_DIR = join(HOME_DIR, "session-state")
 
-/** Absolute path of a session's transcript, without checking it exists. */
-function transcriptPath(sessionId: string): { sessionDir: string; filePath: string } {
-  const sessionDir = join(SESSIONS_DIR, sessionId)
-  return { sessionDir, filePath: join(sessionDir, "events.jsonl") }
-}
+  /** Absolute path of a session's transcript, without checking it exists. */
+  function transcriptPath(sessionId: string): { sessionDir: string; filePath: string } {
+    const sessionDir = join(SESSIONS_DIR, sessionId)
+    return { sessionDir, filePath: join(sessionDir, "events.jsonl") }
+  }
 
-export const copilotStore: AgentStore = {
-  kind: "copilot",
-  descriptor,
+  const copilotStore: AgentStore = {
+    kind: "copilot",
+    descriptor,
 
-  sessionsRoot: () => SESSIONS_DIR,
+    sessionsRoot: () => SESSIONS_DIR,
 
-  ownsPath(filePath: string): boolean {
-    return resolve(filePath) !== resolve(SESSIONS_DIR) && isWithinDir(SESSIONS_DIR, filePath)
-  },
+    ownsPath(filePath: string): boolean {
+      return resolve(filePath) !== resolve(SESSIONS_DIR) && isWithinDir(SESSIONS_DIR, filePath)
+    },
 
-  async listSessionFiles(): Promise<SessionFileInfo[]> {
-    let entries: Dirent[]
-    try {
-      entries = await readdir(SESSIONS_DIR, { withFileTypes: true })
-    } catch {
-      return []
-    }
-
-    const results = await Promise.all(entries.map(async (entry): Promise<SessionFileInfo | null> => {
-      if (!entry.isDirectory() || !isSessionUuid(entry.name)) return null
-      const { filePath } = transcriptPath(entry.name)
-      const stats = await statContainedFile(SESSIONS_DIR, filePath)
-      if (!stats) return null
-      return {
-        filePath,
-        fileName: descriptor.sessionFile.name(entry.name),
-        dirName: null,
-        ...stats,
+    async listSessionFiles(): Promise<SessionFileInfo[]> {
+      let entries: Dirent[]
+      try {
+        entries = await readdir(SESSIONS_DIR, { withFileTypes: true })
+      } catch {
+        return []
       }
-    }))
-    return results.flatMap((entry) => entry ? [entry] : [])
-  },
 
-  async resolveSessionFile(_dirName: string, fileName: string): Promise<string | null> {
-    // Only the exact `<uuid>/events.jsonl` shape addresses a Copilot session;
-    // the descriptor's inverse rejects everything else, including a bare
-    // `<uuid>.jsonl` and backslash variants.
-    const sessionId = descriptor.sessionFile.sessionId(fileName)
-    if (!sessionId) return null
-    const { sessionDir, filePath } = transcriptPath(sessionId)
-    return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
-  },
+      const results = await Promise.all(entries.map(async (entry): Promise<SessionFileInfo | null> => {
+        if (!entry.isDirectory() || !isSessionUuid(entry.name)) return null
+        const { filePath } = transcriptPath(entry.name)
+        const stats = await statContainedFile(SESSIONS_DIR, filePath)
+        if (!stats) return null
+        return {
+          filePath,
+          fileName: descriptor.sessionFile.name(entry.name),
+          dirName: null,
+          ...stats,
+        }
+      }))
+      return results.flatMap((entry) => entry ? [entry] : [])
+    },
 
-  async findSessionFile(sessionId: string): Promise<string | null> {
-    if (!isSessionUuid(sessionId)) return null
-    const { sessionDir, filePath } = transcriptPath(sessionId)
-    return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
-  },
+    async resolveSessionFile(_dirName: string, fileName: string): Promise<string | null> {
+      // Only the exact `<uuid>/events.jsonl` shape addresses a Copilot session;
+      // the descriptor's inverse rejects everything else, including a bare
+      // `<uuid>.jsonl` and backslash variants.
+      const sessionId = descriptor.sessionFile.sessionId(fileName)
+      if (!sessionId) return null
+      const { sessionDir, filePath } = transcriptPath(sessionId)
+      return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
+    },
 
-  transcriptRoot: (filePath) => transcriptRootWithin(SESSIONS_DIR, filePath, descriptor.sessionFile),
+    async findSessionFile(sessionId: string): Promise<string | null> {
+      if (!isSessionUuid(sessionId)) return null
+      const { sessionDir, filePath } = transcriptPath(sessionId)
+      return resolveCanonicalFileWithinRoot(SESSIONS_DIR, sessionDir, filePath)
+    },
 
-  readIdentity: readCopilotSessionIdentity,
+    transcriptRoot: (filePath) => transcriptRootWithin(SESSIONS_DIR, filePath, descriptor.sessionFile),
 
-  readSessionMeta: readCopilotSessionMeta,
+    readIdentity: readCopilotSessionIdentity,
 
-  listProjects: () => projectsFromInventory(copilotStore),
+    readSessionMeta: readCopilotSessionMeta,
 
-  listProjectSessionFiles: (dirName) => projectSessionFilesFromInventory(copilotStore, dirName),
+    listProjects: () => projectsFromInventory(copilotStore),
 
-  listTopLevelSessions: () => topLevelSessionsFromInventory(copilotStore),
+    listProjectSessionFiles: (dirName) => projectSessionFilesFromInventory(copilotStore, dirName),
 
-  // Sub-agents are `subagent.*` events inside the parent transcript, not files.
-  listSubagentFiles: async () => [],
+    listTopLevelSessions: () => topLevelSessionsFromInventory(copilotStore),
 
-  sessionAddress: (filePath) => addressFromTranscript(copilotStore, filePath),
+    // Sub-agents are `subagent.*` events inside the parent transcript, not files.
+    listSubagentFiles: async () => [],
 
-  transcriptPath(_dirName, sessionId) {
-    return { filePath: transcriptPath(sessionId).filePath, fileName: descriptor.sessionFile.name(sessionId) }
-  },
+    sessionAddress: (filePath) => addressFromTranscript(copilotStore, filePath),
+
+    transcriptPath(_dirName, sessionId) {
+      return { filePath: transcriptPath(sessionId).filePath, fileName: descriptor.sessionFile.name(sessionId) }
+    },
+  }
+  return copilotStore
 }
+
+export const copilotStore = createCopilotStore()

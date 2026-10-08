@@ -1,6 +1,13 @@
+import { accessLevelOf, editionModule } from "../edition"
+import { accessAtLeast } from "../../shared/contracts/sessionAccess"
+import { acknowledgeTask, cancelTask, refreshDelegatedTasks } from "../orchestration/delegatedTasks"
+import { delegationAuthority } from "../lib/delegationAuthority"
+import { orchestrationStore } from "../orchestration/storage"
+import { resumeDelegations } from "../lib/delegationAuthority"
 import { hostname } from "node:os"
+import type { IncomingMessage } from "node:http"
 import { isAbsolute, resolve } from "node:path"
-import { AGENT_KINDS, type AgentKind } from "../../shared/session/agent-descriptors"
+import { AGENT_KINDS, descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import type { PendingInput, PendingInputResponse } from "../agents/pendingInput"
 import type { VisibilityCheck } from "../edition"
 import { deviceJson } from "../hub/deviceRequest"
@@ -18,6 +25,9 @@ import {
 } from "../sessionHosts"
 import { markDelegatedRequestAnswered, watchDelegatedRequestsOf } from "../sessionHosts/delegatedRequests"
 import { resolveDeviceName } from "../lib/standalone-bootstrap"
+import { load as loadYaml } from "js-yaml"
+import { parseBoardContent, parseBoardProgress } from "../../shared/contracts/board"
+import { clearSessionBoard, sessionBoard, setSessionBoard, setSessionBoardProgress } from "../lib/sessionBoards"
 import {
   discardWorkspace,
   fetchWorkspaceBack,
@@ -54,6 +64,7 @@ export interface CliInvocation {
   /** Which sessions the caller may see, and so which projects it may list. */
   visible: VisibilityCheck
   signal?: AbortSignal
+  req?: IncomingMessage
 }
 
 export interface CliOutput {
@@ -68,11 +79,12 @@ export const USAGE = `Usage: ${CLI_NAME} <command> [args]
 
 Start and drive other agent sessions through Cogpit. Output is JSON unless noted.
 
-  new MESSAGE [--device NAME] [--cwd DIR] [--agent ${AGENT_KINDS.join("|")}] [--model M]
+  new MESSAGE [--device NAME] [--cwd DIR] [--agent ${AGENT_KINDS.join("|")}] [--instance ID] [--model M]
       [--effort E] [--mode MODE] [--worktree NAME] [--name TITLE] [--questions user|agent]
       [--wait] [--timeout SECS]
         Start a session in DIR (default: your working directory). Runs with
-        --mode bypassPermissions unless you pick another mode. Retries are safe.
+        --mode bypassPermissions for default CLI accounts; configured instances
+        default to supervised mode. Creation retries reuse the invocation id.
         --device runs it on another machine: your repository (HEAD plus
         uncommitted changes) is sent there as a fresh worktree, and when the
         session finishes its work comes back as a local branch. Pass --cwd with
@@ -80,8 +92,19 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
         --questions says who answers what it asks: you (agent, the default) or
         the user in Cogpit (user, the default with --device); wait keeps
         waiting while the user has it.
-  send ID MESSAGE [--interrupt] [--wait] [--timeout SECS]
-        Send a follow-up. --interrupt stops the current turn first.
+  send ID MESSAGE [--command-id ID] [--steer|--interrupt] [--wait] [--timeout SECS]
+        Queue a follow-up and return a durable receipt. Reuse --command-id on
+        retries. --steer joins a supported running turn; --interrupt restarts it.
+  receipt COMMAND_ID --session ID [--wait] [--timeout SECS]
+        Inspect one delivery. Unknown means inspect native history before retrying.
+  tasks [PARENT_ID] [--ack TASK_ID|--cancel TASK_ID]
+        Read durable delegated results. Timeout leaves the child running and
+        reports its eventual result; successful blocking waits acknowledge it.
+  transition ID --agent AGENT --revision N --mode resume|handoff
+      [--instance ID] [--target ID] [--message TEXT] [--command-id ID]
+        Continue the stable conversation on another compatible session or provider.
+  transition ID --resolve --command-id ID [--target ID|--confirm-not-created]
+        Recover an uncertain handoff after checking the native provider history.
   wait ID... [--any] [--timeout SECS]
         Block until the session(s) finish or need input (default ${DEFAULT_WAIT_SECONDS}s).
         Prints the final reply and changed files when a session is done.
@@ -100,6 +123,12 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
   interrupt ID              Stop the current turn, keep the session.
   stop ID... | --children   End sessions; --children stops every session you started.
   children [ID]             Sessions started by ID (default: you), with their state.
+  board set YAML|-          Replace your board, the summary pinned above your crew's
+                            composer: title, progress (DONE/TOTAL) and sections of
+                            { title, tone: warning|success, items }. YAML or JSON.
+  board progress DONE/TOTAL Move only your board's progress, such as 35/99.
+  board get [ID]            Print a session's board (default: yours).
+  board clear               Remove your board.
   devices                   Machines this Cogpit can run sessions on.
   projects [--device NAME]  Project folders on this machine or a device.
 
@@ -334,7 +363,7 @@ function localCwd(inv: CliInvocation, cwdFlag: string | undefined): string {
 async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(
     rest,
-    ["device", "cwd", "agent", "model", "effort", "mode", "worktree", "name", "questions", "timeout"],
+    ["device", "cwd", "agent", "instance", "model", "effort", "mode", "worktree", "name", "questions", "timeout"],
     ["wait"],
   )
   const message = messageArg(args, "new")
@@ -364,8 +393,10 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
   const started = await host.create({
     cwd: sent?.remoteCwd ?? (host.remote ? cwdFlag! : localCwd(inv, cwdFlag)),
     agent: agent as AgentKind | undefined,
+    ...(args.values.has("instance") ? { instanceId: args.values.get("instance") } : {}),
+    ...(inv.req ? { req: inv.req } : {}),
     message: sent ? `${handoffBriefing(sent, resolveDeviceName(process.env, hostname()))}\n\n${message}` : message,
-    mode: args.values.get("mode") ?? "bypassPermissions",
+    mode: args.values.get("mode") ?? (args.values.has("instance") || (agent && descriptorFor(agent as AgentKind).cli.requiresConfiguration) ? "default" : "bypassPermissions"),
     model: args.values.get("model"),
     effort: args.values.get("effort"),
     worktreeName: args.values.get("worktree"),
@@ -373,13 +404,38 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
     requestId: inv.invocationId,
     scope: inv.scope,
   })
+  const name = args.values.get("name")
   await recordSessionOrigin(started.sessionId, {
     parentSessionId: inv.callerSessionId,
+    ...(name ? { name } : {}),
     ...(host.remote ? { deviceId: host.id } : {}),
     ...(questionsFor === "user" ? { asksUser: true as const } : {}),
     ...(sent ? { handoff: sent.handoff } : {}),
   })
-  if (args.switches.has("wait")) return waitAndDescribe(inv, [started.sessionId], "all", timeoutMs)
+  const blocking = args.switches.has("wait")
+  const task = inv.callerSessionId ? orchestrationStore().putTask(inv.scope, {
+    parentSessionId: inv.callerSessionId, childSessionId: started.sessionId, sourceId: inv.invocationId,
+    deliveryDisposition: blocking ? "blocking" : "async", blockingDeadline: blocking ? Date.now() + timeoutMs + 10000 : undefined,
+  }) : undefined
+  if (inv.callerSessionId) {
+    if (inv.req) resumeDelegations(inv.req, inv.callerSessionId)
+  }
+  if (blocking) {
+    try {
+      const output = await waitAndDescribe(inv, [started.sessionId], "all", timeoutMs)
+      if (task) {
+        const report = JSON.parse(output.stdout) as { outcome?: string; timedOut?: boolean }
+        if (!report.timedOut && (report.outcome === "completed" || report.outcome === "error")) {
+          const current = orchestrationStore().tasks(inv.scope).find((value) => value.id === task.id)
+          if (current && current.state !== "cancelled") orchestrationStore().updateTask(inv.scope, task.id, { state: report.outcome, result: report, acknowledgedAt: Date.now() }, current.state)
+        }
+      }
+      return output
+    } finally {
+      if (task) orchestrationStore().updateTask(inv.scope, task.id, { deliveryDisposition: "async", blockingDeadline: undefined })
+      void refreshDelegatedTasks()
+    }
+  }
   return json({
     sessionId: started.sessionId,
     ...deviceField(host),
@@ -390,21 +446,28 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
 }
 
 async function sendCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
-  const args = parseArgs(rest, ["timeout"], ["interrupt", "wait"])
+  const args = parseArgs(rest, ["timeout", "command-id"], ["interrupt", "wait", "steer"])
   const sessionId = sessionIdArg(args, "send")
+  await requireSessionAccess(inv, sessionId, true)
   const message = messageArg(args, "send")
   const timeoutMs = timeoutArg(args)
 
   const host = await hostForSession(sessionId)
-  const { delivery } = await host.send(sessionId, message, { interrupt: args.switches.has("interrupt") })
+  const commandId = args.values.get("command-id") ?? inv.invocationId
+  const { delivery, receipt } = await host.send(sessionId, message, { interrupt: args.switches.has("interrupt"), intent: args.switches.has("steer") ? "steer" : args.switches.has("interrupt") ? "restart" : "queue", commandId, req: inv.req })
   watchDelegatedRequestsOf(sessionId)
-  if (args.switches.has("wait")) return waitAndDescribe(inv, [sessionId], "all", timeoutMs)
-  return json({ sessionId, ...deviceField(host), delivery, next: `${CLI_NAME} wait ${sessionId}` })
+  if (args.switches.has("wait")) {
+    if (!host.receipt) throw new UsageError("This host cannot wait for durable command receipts; update it first")
+    const settled = await host.receipt(commandId, inv.req, timeoutMs)
+    return json({ sessionId, ...deviceField(host), receipt: settled }, settled?.state === "completed" ? EXIT.ok : settled && ["failed", "unknown", "held", "cancelled"].includes(settled.state) ? EXIT.error : EXIT.timedOut)
+  }
+  return json({ sessionId, ...deviceField(host), delivery, receipt, next: `${CLI_NAME} receipt ${commandId} --session ${sessionId}` })
 }
 
 async function waitCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(rest, ["timeout"], ["any"])
   if (args.positionals.length === 0) throw new UsageError("wait needs at least one session id")
+  for (const id of args.positionals) await requireSessionAccess(inv, id)
   return waitAndDescribe(
     inv,
     [...new Set(args.positionals)],
@@ -413,9 +476,10 @@ async function waitCommand(inv: CliInvocation, rest: string[]): Promise<CliOutpu
   )
 }
 
-async function statusCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+async function statusCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(rest, [], [])
   const sessionId = sessionIdArg(args, "status")
+  await requireSessionAccess(inv, sessionId)
   const host = await hostForSession(sessionId)
   const state = await host.state(sessionId)
   const report: Record<string, unknown> = {
@@ -436,9 +500,10 @@ async function statusCommand(_inv: CliInvocation, rest: string[]): Promise<CliOu
   return json(report, exitCodeFor([state], false))
 }
 
-async function resultCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+async function resultCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(rest, ["turn"], ["text"])
   const sessionId = sessionIdArg(args, "result")
+  await requireSessionAccess(inv, sessionId)
   const rawTurn = args.values.get("turn")
   const turn = rawTurn === undefined ? undefined : Number(rawTurn)
   if (turn !== undefined && (!Number.isInteger(turn) || turn < 0)) {
@@ -473,37 +538,36 @@ async function respond(
   sessionId: string,
   requestId: string,
   response: PendingInputResponse,
+  invocation?: CliInvocation,
+  commandId?: string,
 ): Promise<CliOutput> {
-  const answered = await host.respond(sessionId, requestId, response)
+  const answered = await host.respond(sessionId, requestId, response, { commandId: commandId ?? invocation?.invocationId, req: invocation?.req })
   markDelegatedRequestAnswered(sessionId, requestId)
   return json({ sessionId, ...deviceField(host), answered: answered.requestId, kind: answered.kind })
 }
 
-async function approveCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
-  const args = parseArgs(rest, ["request"], ["always"])
-  const sessionId = sessionIdArg(args, "approve")
+async function approvalCommand(inv: CliInvocation, rest: string[], verb: "approve" | "deny"): Promise<CliOutput> {
+  const approved = verb === "approve"
+  const args = parseArgs(rest, approved ? ["request"] : ["request", "feedback"], approved ? ["always"] : [])
+  const sessionId = sessionIdArg(args, verb)
+  await requireSessionAccess(inv, sessionId, true)
   const host = await hostForSession(sessionId)
   const request = await pickRequest(host, sessionId, args.values.get("request"), ["permission", "plan"])
-  return respond(host, sessionId, request.requestId, request.kind === "plan"
-    ? { approved: true }
-    : { decision: args.switches.has("always") ? "allow_always" : "allow" })
+  const response: PendingInputResponse = request.kind === "plan"
+    ? { approved, ...(!approved && { feedback: args.values.get("feedback") }) }
+    : { decision: approved ? args.switches.has("always") ? "allow_always" : "allow" : "deny" }
+  return respond(host, sessionId, request.requestId, response, inv)
 }
 
-async function denyCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
-  const args = parseArgs(rest, ["request", "feedback"], [])
-  const sessionId = sessionIdArg(args, "deny")
-  const host = await hostForSession(sessionId)
-  const request = await pickRequest(host, sessionId, args.values.get("request"), ["permission", "plan"])
-  return respond(host, sessionId, request.requestId, request.kind === "plan"
-    ? { approved: false, feedback: args.values.get("feedback") }
-    : { decision: "deny" })
-}
-
-async function answerCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
-  const args = parseArgs(rest, ["request", "json"], [])
+async function answerCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+  const args = parseArgs(rest, ["request", "json", "command-id"], [])
   const sessionId = sessionIdArg(args, "answer")
+  await requireSessionAccess(inv, sessionId, true)
   const host = await hostForSession(sessionId)
-  const { requestId } = await pickRequest(host, sessionId, args.values.get("request"), ["question"])
+  const commandId = args.values.get("command-id") ?? inv.invocationId
+  const cached = args.values.has("request") || !host.receipt ? null : await host.receipt(commandId, inv.req)
+  if (cached && cached.sessionId !== sessionId) throw new UsageError("This answer receipt belongs to another session")
+  const { requestId } = await pickRequest(host, sessionId, args.values.get("request") ?? cached?.questionId, ["question"])
   const rawJson = args.values.get("json")
   if (rawJson !== undefined) {
     let answers: unknown
@@ -515,16 +579,31 @@ async function answerCommand(_inv: CliInvocation, rest: string[]): Promise<CliOu
     if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
       throw new UsageError("--json must be a JSON object of question → answer")
     }
-    return respond(host, sessionId, requestId, { answers: answers as Record<string, string> })
+    return respond(host, sessionId, requestId, { answers: answers as Record<string, string> }, inv, args.values.get("command-id"))
   }
   if (args.positionals.length === 0) throw new UsageError("answer needs an ANSWER or --json")
   return respond(host, sessionId, requestId, {
     answers: args.positionals.length === 1 ? args.positionals[0] : args.positionals,
-  })
+  }, inv, args.values.get("command-id"))
 }
 
-async function interruptCommand(_inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+async function receiptCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+  const args = parseArgs(rest, ["session", "timeout"], ["wait"])
+  const commandId = args.positionals[0]
+  const sessionId = args.values.get("session")
+  if (!commandId || !sessionId) throw new UsageError("receipt needs COMMAND_ID --session SESSION_ID")
+  await requireSessionAccess(inv, sessionId)
+  const host = await hostForSession(sessionId)
+  if (!host.receipt) throw new UsageError("Update this host to read durable receipts")
+  const receipt = await host.receipt(commandId, inv.req, args.switches.has("wait") ? timeoutArg(args) : undefined)
+  if (!receipt) throw new UsageError("Command receipt not found")
+  if (receipt.sessionId !== sessionId) throw new UsageError("This receipt belongs to a different session")
+  return json({ receipt, ...deviceField(host) })
+}
+
+async function interruptCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const sessionId = sessionIdArg(parseArgs(rest, [], []), "interrupt")
+  await requireSessionAccess(inv, sessionId, true)
   const host = await hostForSession(sessionId)
   const interrupted = await host.interrupt(sessionId)
   return json({ sessionId, ...deviceField(host), interrupted }, interrupted ? EXIT.ok : EXIT.error)
@@ -535,9 +614,11 @@ async function stopCommand(inv: CliInvocation, rest: string[]): Promise<CliOutpu
   const ids = [...args.positionals]
   if (args.switches.has("children")) {
     if (!inv.callerSessionId) throw new UsageError("--children needs COGPIT_SESSION_ID; run it from a Cogpit session")
+    await requireSessionAccess(inv, inv.callerSessionId, true)
     ids.push(...await sessionChildren(inv.callerSessionId))
   }
   if (ids.length === 0) throw new UsageError("stop needs a session id or --children")
+  for (const id of ids) await requireSessionAccess(inv, id, true)
   const located = await locateSessions([...new Set(ids)])
   const stopped = await Promise.all(located.map(async ({ host, sessionId }) => ({
     sessionId,
@@ -551,7 +632,10 @@ async function childrenCommand(inv: CliInvocation, rest: string[]): Promise<CliO
   const args = parseArgs(rest, [], [])
   const parentId = args.positionals[0] ?? inv.callerSessionId
   if (!parentId) throw new UsageError("children needs a session id outside a Cogpit session")
-  const located = await locateSessions(await sessionChildren(parentId))
+  await requireSessionAccess(inv, parentId)
+  const visibleChildren = []
+  for (const id of await sessionChildren(parentId)) { try { await requireSessionAccess(inv, id); visibleChildren.push(id) } catch { /* Omit sessions outside this caller’s view. */ } }
+  const located = await locateSessions(visibleChildren)
   const children = await Promise.all(located.map(async ({ host, sessionId }) => {
     const state = await host.state(sessionId)
     return {
@@ -568,6 +652,7 @@ async function childrenCommand(inv: CliInvocation, rest: string[]): Promise<CliO
 async function fetchCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   requireAdmin(inv, "bring a repository back from another machine")
   const sessionId = sessionIdArg(parseArgs(rest, [], []), "fetch")
+  await requireSessionAccess(inv, sessionId, true)
   const origin = await sessionOrigin(sessionId)
   if (!origin?.handoff || !origin.deviceId) {
     throw new UsageError(`Session ${sessionId} was not handed to another machine with its repository`)
@@ -579,6 +664,7 @@ async function fetchCommand(inv: CliInvocation, rest: string[]): Promise<CliOutp
 async function discardCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   requireAdmin(inv, "delete a workspace on another machine")
   const sessionId = sessionIdArg(parseArgs(rest, [], []), "discard")
+  await requireSessionAccess(inv, sessionId, true)
   const origin = await sessionOrigin(sessionId)
   if (!origin?.handoff || !origin.deviceId) {
     throw new UsageError(`Session ${sessionId} was not handed to another machine with its repository`)
@@ -641,18 +727,102 @@ async function projectsCommand(inv: CliInvocation, rest: string[]): Promise<CliO
   })
 }
 
+async function requireSessionAccess(inv: CliInvocation, id: string, mutate = false): Promise<void> {
+  if (inv.req) { const level = await accessLevelOf(inv.req, id); if (!level || !accessAtLeast(level, mutate ? "interact" : "view")) throw new UsageError("Session access denied") }
+  else if (editionModule().auth) throw new UsageError("An authenticated request is required")
+}
+async function tasksCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+  const args = parseArgs(rest, ["ack", "cancel"], [])
+  const parent = args.positionals[0] || inv.callerSessionId
+  if (!parent) throw new UsageError("tasks needs a parent session ID")
+  await requireSessionAccess(inv, parent, Boolean(args.values.has("ack") || args.values.has("cancel")))
+  if (inv.req) resumeDelegations(inv.req, parent)
+  if (args.values.has("ack")) {
+    const task = orchestrationStore().tasks(inv.scope, parent).find((value) => value.id === args.values.get("ack"))
+    if (!task) throw new UsageError("Delegated task not found")
+    await requireSessionAccess(inv, task.childSessionId, true)
+    acknowledgeTask(inv.scope, parent, task.id)
+  }
+  if (args.values.has("cancel")) { if (!inv.req) throw new UsageError("Cancellation requires an authenticated request"); await cancelTask(inv.scope, parent, args.values.get("cancel")!, delegationAuthority(inv.req)) }
+  await refreshDelegatedTasks()
+  const tasks = []
+  for (const task of orchestrationStore().tasks(inv.scope, parent)) { try { await requireSessionAccess(inv, task.childSessionId); tasks.push(task) } catch { /* Omit inaccessible child results. */ } }
+  return json({ tasks })
+}
+async function transitionCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+  const args = parseArgs(rest, ["agent", "instance", "revision", "mode", "target", "message", "command-id"], ["resolve", "confirm-not-created"])
+  const sessionId = args.positionals[0]
+  if (!sessionId || !inv.req) throw new UsageError("transition needs a session ID and an authenticated request")
+  await requireSessionAccess(inv, sessionId, true)
+  const host = await hostForSession(sessionId)
+  if (!host.transition) throw new UsageError("Update this host to continue conversations across providers")
+  const commandId = args.values.get("command-id") || inv.invocationId
+  const result = await host.transition(args.switches.has("resolve") ? { action: "resolve", sessionId, commandId, targetSessionId: args.values.get("target"), confirmNotCreated: args.switches.has("confirm-not-created") } : { sessionId, commandId, expectedRevision: Number(args.values.get("revision")), mode: args.values.get("mode") as "resume" | "handoff", agent: args.values.get("agent") as AgentKind, instanceId: args.values.get("instance"), targetSessionId: args.values.get("target"), message: args.values.get("message") }, inv.req)
+  return json(result)
+}
+
+/** The calling session, which the board verbs that change a board act on. */
+async function boardOwner(inv: CliInvocation, verb: string): Promise<string> {
+  if (!inv.callerSessionId) throw new UsageError(`board ${verb} needs COGPIT_SESSION_ID; run it from a Cogpit session`)
+  await requireSessionAccess(inv, inv.callerSessionId, true)
+  return inv.callerSessionId
+}
+
+async function boardCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
+  const [verb, ...more] = rest
+  const args = parseArgs(more, [], [])
+  switch (verb) {
+    case "set": {
+      const owner = await boardOwner(inv, "set")
+      const source = args.positionals.join(" ").trim()
+      if (!source) throw new UsageError("board set needs YAML or JSON, or - to read it from stdin")
+      let document: unknown
+      try {
+        document = loadYaml(source)
+      } catch (error) {
+        throw new UsageError(`board set could not read that: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`)
+      }
+      const content = parseBoardContent(document)
+      if (!content) throw new UsageError("board set needs a title, progress or sections")
+      return json(await setSessionBoard(owner, content))
+    }
+    case "progress": {
+      const owner = await boardOwner(inv, "progress")
+      const progress = parseBoardProgress(args.positionals[0])
+      if (!progress) throw new UsageError("board progress needs DONE/TOTAL, such as 35/99")
+      return json(await setSessionBoardProgress(owner, progress))
+    }
+    case "get": {
+      const id = args.positionals[0] ?? inv.callerSessionId
+      if (!id) throw new UsageError("board get needs a session id outside a Cogpit session")
+      await requireSessionAccess(inv, id)
+      return json((await sessionBoard(id)) ?? { sessionId: id, board: null })
+    }
+    case "clear": {
+      const owner = await boardOwner(inv, "clear")
+      return json({ sessionId: owner, cleared: await clearSessionBoard(owner) })
+    }
+    default:
+      throw new UsageError("board needs set, progress, get or clear")
+  }
+}
+
 const COMMANDS: Record<string, (inv: CliInvocation, rest: string[]) => Promise<CliOutput>> = {
   new: newCommand,
   send: sendCommand,
   wait: waitCommand,
   status: statusCommand,
   result: resultCommand,
-  approve: approveCommand,
-  deny: denyCommand,
+  receipt: receiptCommand,
+  tasks: tasksCommand,
+  transition: transitionCommand,
+  approve: (inv, rest) => approvalCommand(inv, rest, "approve"),
+  deny: (inv, rest) => approvalCommand(inv, rest, "deny"),
   answer: answerCommand,
   interrupt: interruptCommand,
   stop: stopCommand,
   children: childrenCommand,
+  board: boardCommand,
   fetch: fetchCommand,
   discard: discardCommand,
   devices: devicesCommand,
@@ -667,6 +837,7 @@ export async function runSessionCli(inv: CliInvocation): Promise<CliOutput> {
   const run = COMMANDS[command]
   if (!run) return { exitCode: EXIT.error, stdout: "", stderr: `Unknown command "${command}"\n\n${USAGE}\n` }
   try {
+    if (command === "new" && inv.callerSessionId) await requireSessionAccess(inv, inv.callerSessionId, true)
     return await run(inv, rest)
   } catch (error) {
     if (error instanceof UsageError) {

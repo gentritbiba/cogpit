@@ -7,6 +7,7 @@
 // The iOS client mirrors this in `ios/CogpitKit/Sources/CogpitKit/Transcript/UserMessageContent.swift`.
 
 import { stripAnsi } from "@/lib/ansi"
+import { isTaskWakeup, parseTaskWakeup } from "../../shared/contracts/taskWakeup"
 
 /** Paired blocks that are pure injected context: hidden, with a "show raw" escape hatch. */
 export const SYSTEM_TAG_NAMES = [
@@ -184,4 +185,30 @@ export function stripSystemNotificationPreamble(text: string): {
     text: (text.slice(0, start) + text.slice(end)).trim(),
     isSystemNotification: true,
   }
+}
+
+// ── Delegated session wakeups ───────────────────────────────────────────
+
+/**
+ * A one-line stand-in for the prompt that reports a delegated session back,
+ * which nobody typed. Given a way to name sessions, it says which one, and how
+ * many files it changed: "w3-ops-tooling finished · 44 files changed".
+ */
+export function taskWakeupSummary(
+  text: string,
+  nameOf?: (sessionId: string) => string | undefined,
+): string | null {
+  if (!isTaskWakeup(text)) return null
+  const wakeup = parseTaskWakeup(text)
+  const failed = wakeup?.state === "error"
+  const name = wakeup && nameOf?.(wakeup.childSessionId)
+  if (!name) return failed ? "Delegated session failed" : "Delegated session finished"
+  const files = changedFileCount(wakeup.result)
+  const changed = files ? ` · ${files} ${files === 1 ? "file" : "files"} changed` : ""
+  return `${name} ${failed ? "failed" : "finished"}${changed}`
+}
+
+function changedFileCount(result: unknown): number {
+  const filesChanged = (result as { filesChanged?: unknown } | null)?.filesChanged
+  return Array.isArray(filesChanged) ? filesChanged.length : 0
 }

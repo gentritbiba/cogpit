@@ -3,6 +3,7 @@ import { Check, Copy } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Button } from "@/components/ui/button"
 import { markdownComponents, markdownPlugins, preprocessMediaPaths } from "./markdown-components"
+import { CogpitBlockScope } from "./cogpit-blocks/kinds"
 import { shortenModel } from "@/lib/format"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { cn } from "@/lib/utils"
@@ -15,6 +16,7 @@ interface AssistantTextProps {
   /** Reasoning effort the turn ran at, when the transcript recorded one. */
   effort?: string
   timestamp?: string
+  messageKey?: string
   compact?: boolean
 }
 
@@ -23,9 +25,11 @@ export const AssistantText = memo(function AssistantText({
   model,
   effort,
   timestamp,
+  messageKey,
   compact = false,
 }: AssistantTextProps) {
   const markdownText = useMemo(() => preprocessMediaPaths(text), [text])
+  const blockScope = useMemo(() => ({ messageKey: messageKey ?? timestamp ?? `${text.length}:${text.slice(0, 64)}` }), [messageKey, timestamp, text])
   const [copied, copy] = useCopyWithFeedback()
 
   if (!text) return null
@@ -61,7 +65,9 @@ export const AssistantText = memo(function AssistantText({
         </Button>
       </div>}
       <div className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
-        <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
+        <CogpitBlockScope.Provider value={blockScope}>
+          <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
+        </CogpitBlockScope.Provider>
       </div>
     </div>
   )

@@ -35,7 +35,7 @@ const configuredAgent = soleDescriptorWhere(
   "a home Cogpit has to be told about",
 )
 /** The rest are found where their CLIs keep them. */
-const detectedAgents = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable)
+const detectedAgents = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable && !descriptor.cli.requiresConfiguration)
 
 /** `a`, `a and b`, `a, b and c`. */
 function joinNames(parts: readonly React.ReactNode[]): React.ReactNode[] {

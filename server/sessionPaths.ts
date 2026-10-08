@@ -1,4 +1,5 @@
 import type { AgentKind } from "../shared/session/agent-descriptors"
+import { splitInstanceSessionId } from "../shared/session/instances"
 import { allStores, storeFor, storeForDirName } from "./agents"
 import { isSinglePathSegment } from "./agents/containment"
 import { getSessionMeta } from "./sessionMetadata"
@@ -32,11 +33,16 @@ export function resolveSessionFilePath(
  * ids are near-unique across agents anyway, so the only thing the order really
  * decides is which store pays for the walk first.
  */
-const LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot"]
+const LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot", "acp"]
 
 /** Find the transcript for a session id across every agent's storage. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {
   if (!isSinglePathSegment(sessionId)) return null
+  const instanceId = splitInstanceSessionId(sessionId).instanceId
+  if (instanceId !== "default") {
+    const store = allStores().find((store) => store.instanceId === instanceId)
+    return store ? store.findSessionFile(sessionId) : null
+  }
   for (const kind of LOOKUP_ORDER) {
     try {
       const filePath = await storeFor(kind).findSessionFile(sessionId)
@@ -83,9 +89,9 @@ export async function findNewestCodexSessionForCwd(
 }
 
 /** Absolute storage roots, one per agent, for whole-tree scans. */
-export function sessionStorageRoots(): Array<{ kind: AgentKind; root: string }> {
+export function sessionStorageRoots(): Array<{ kind: AgentKind; root: string; instanceId?: string }> {
   return allStores().flatMap((store) => {
     const root = store.sessionsRoot()
-    return root ? [{ kind: store.kind, root }] : []
+    return root ? [{ kind: store.kind, root, ...(store.instanceId ? { instanceId: store.instanceId } : {}) }] : []
   })
 }

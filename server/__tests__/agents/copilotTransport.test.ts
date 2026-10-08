@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { EventEmitter } from "node:events"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -22,6 +23,7 @@ import {
   type CopilotUserInputAnswer,
 } from "../../agents/copilotTransport"
 import { binDir, NO_COGPIT_SESSION, shimPath } from "../../browser/paths"
+import { getDataRoot } from "../../config"
 
 class FakeCopilotProcess extends EventEmitter implements CopilotRuntimeProcess {
   readonly stdin = new PassThrough()
@@ -182,7 +184,11 @@ describe("CopilotRuntime", () => {
         cwd: "/workspace",
         // One CLI serves every session, so the sentinel goes in rather than an
         // id: the shim must not stamp a browser as driven by a real session.
-        env: { PATH: `${binDir()}${delimiter}/bin`, COGPIT_SESSION_ID: NO_COGPIT_SESSION },
+        env: {
+          PATH: `${binDir()}${delimiter}/bin`,
+          COGPIT_SESSION_ID: NO_COGPIT_SESSION,
+          COGPIT_ORCHESTRATION_ROOT: getDataRoot(),
+        },
         stdio: ["pipe", "pipe", "pipe"],
       },
     )

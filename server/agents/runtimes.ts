@@ -1,3 +1,4 @@
+import { acpRuntime } from "./acpRuntime"
 import {
   AGENT_KINDS,
   descriptorForDirName,
@@ -9,6 +10,9 @@ import { storeForPath } from "./index"
 import { claudeRuntime } from "./claudeRuntime"
 import { codexRuntime } from "./codexRuntime"
 import { copilotRuntime } from "./copilotRuntime"
+import { instanceRuntimes } from "./instanceRuntimes"
+import { splitInstanceSessionId, splitInstanceDirName } from "../../shared/session/instances"
+import { AgentRuntimeError } from "./runtimeTypes"
 import type { AgentRuntime } from "./runtimeTypes"
 
 /**
@@ -45,15 +49,21 @@ const RUNTIMES: Readonly<Record<AgentKind, AgentRuntime>> = Object.freeze({
   claude: claudeRuntime,
   codex: codexRuntime,
   copilot: copilotRuntime,
+  acp: acpRuntime,
 })
 
-export function runtimeFor(kind: AgentKind): AgentRuntime {
+export function runtimeFor(kind: AgentKind, instanceId = "default"): AgentRuntime {
+  if (instanceId !== "default") {
+    const runtime = instanceRuntimes().find((runtime) => runtime.instanceId === instanceId && runtime.kind === kind)
+    if (!runtime) throw new AgentRuntimeError(404, "INSTANCE_NOT_FOUND", "Provider instance not found")
+    return runtime
+  }
   return RUNTIMES[kind]
 }
 
 /** The runtime owning a project dirName. Claude is the terminal arm. */
 export function runtimeForDirName(dirName: string | null | undefined): AgentRuntime {
-  return RUNTIMES[descriptorForDirName(dirName).kind]
+  return runtimeFor(descriptorForDirName(dirName).kind, splitInstanceDirName(dirName).instanceId)
 }
 
 /**
@@ -64,15 +74,14 @@ export function runtimeForDirName(dirName: string | null | undefined): AgentRunt
  * id to the next agent in line. Ownership is what decides here.
  */
 export function runtimeForSession(sessionId: string): AgentRuntime | null {
-  for (const kind of AGENT_KINDS) {
-    if (RUNTIMES[kind].hasSession(sessionId)) return RUNTIMES[kind]
-  }
-  return null
+  const owners = allRuntimes().filter((runtime) => runtime.hasSession(sessionId))
+  if (owners.length > 1) throw new AgentRuntimeError(409, "AMBIGUOUS_SESSION", "Use the provider instance's scoped session ID")
+  return owners[0] ?? null
 }
 
 /** Every runtime, in agent-detection order. */
 export function allRuntimes(): readonly AgentRuntime[] {
-  return AGENT_KINDS.map((kind) => RUNTIMES[kind])
+  return [...AGENT_KINDS.map((kind) => RUNTIMES[kind]), ...instanceRuntimes()]
 }
 
 /** Whether any runtime still holds this session, open or mid-turn. */
@@ -92,6 +101,7 @@ const LIVE_CONNECTION_KINDS: readonly AgentKind[] = ["copilot", "codex"]
 
 export interface ResolvedSessionAgent {
   kind: AgentKind
+  instanceId?: string
   /** The session's transcript, when one was found without extra work. */
   filePath: string | null
 }
@@ -108,6 +118,14 @@ export interface ResolvedSessionAgent {
  * something, and attempting a resume beats a 404.
  */
 export async function resolveSessionAgent(sessionId: string): Promise<ResolvedSessionAgent> {
+  const scoped = splitInstanceSessionId(sessionId)
+  if (scoped.instanceId !== "default") {
+    const filePath = await findJsonlPath(sessionId)
+    const store = storeForPath(filePath)
+    const runtime = instanceRuntimes().find((runtime) => runtime.instanceId === scoped.instanceId)
+    if (!runtime || (store && store.kind !== runtime.kind)) throw new AgentRuntimeError(404, "INSTANCE_NOT_FOUND", "Provider instance not found")
+    return { kind: runtime.kind, instanceId: scoped.instanceId, filePath }
+  }
   const legacy = persistentSessions.get(sessionId)
   if (!legacy) {
     // An agent holding a live connection already knows the id, for free and

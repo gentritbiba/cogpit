@@ -19,6 +19,7 @@ vi.mock("@/contexts/SessionContext", () => ({
       ? null
       : { dirName: mocks.dirName, fileName: "s.jsonl", rawText: "" },
     permissions: permissionsForAccess("own"),
+    actions: {},
   }),
 }))
 

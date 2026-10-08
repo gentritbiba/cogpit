@@ -26,6 +26,7 @@ describe("submitUserQuestionAnswers", () => {
     const [url, init] = lastCall()
     expect(url).toBe("/api/ask-user-answer")
     expect(JSON.parse(init.body as string)).toEqual({
+      commandId: expect.any(String),
       sessionId: "sess-1",
       toolUseId: "tu-1",
       answers: { "Pick one": "a" },

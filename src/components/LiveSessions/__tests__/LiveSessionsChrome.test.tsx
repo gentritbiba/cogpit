@@ -32,6 +32,19 @@ function renderToolbar(overrides: Partial<Parameters<typeof LiveSessionsToolbar>
 }
 
 describe("LiveSessionsToolbar", () => {
+  it("toggles whether spawned sessions are grouped under the session that started them", () => {
+    const onToggleGroupCrews = vi.fn()
+    const { rerender, props } = renderToolbar({ groupCrews: true, onToggleGroupCrews })
+
+    const toggle = screen.getByRole("button", { name: "List spawned sessions on their own" })
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(toggle)
+    expect(onToggleGroupCrews).toHaveBeenCalledOnce()
+
+    rerender(<LiveSessionsToolbar {...props} groupCrews={false} />)
+    expect(screen.getByRole("button", { name: "Group spawned sessions" })).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("places the archive toggle and refresh after the search box without a sessions heading", () => {
     const { container, props } = renderToolbar()
 

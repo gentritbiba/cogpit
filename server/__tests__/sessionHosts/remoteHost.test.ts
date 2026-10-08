@@ -79,6 +79,17 @@ afterEach(async () => {
 const state = (sessionId: string, outcome: string) => ({ sessionId, outcome, live: true, running: false, waiting: [] })
 
 describe("remote session host", () => {
+  it("returns null for an absent durable receipt so a first answer can proceed", async () => {
+    const { device } = await fakeDevice((_req, res) => send(res, 404, { error: "Command not found" }), { sessionApi: 2 })
+    await expect(createRemoteHost(device.id).receipt!("first-answer")).resolves.toBeNull()
+  })
+
+  it("keeps receipt access and unknown-device errors visible", async () => {
+    const { device } = await fakeDevice((_req, res) => send(res, 403, { error: "Access denied" }), { sessionApi: 2 })
+    await expect(createRemoteHost(device.id).receipt!("answer")).rejects.toMatchObject({ status: 403 })
+    await removeDevice(device.id)
+    await expect(createRemoteHost(device.id).receipt!("answer")).rejects.toMatchObject({ code: "UNKNOWN_DEVICE" })
+  })
   it("creates through the device with its token and asks it to answer for itself", async () => {
     const { device, seen } = await fakeDevice((_req, res) => send(res, 200, { sessionId: "s1", dirName: "-home-app" }))
     const host = createRemoteHost(device.id)

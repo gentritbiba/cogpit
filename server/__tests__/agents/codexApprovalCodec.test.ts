@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { CODEX_CLIENT_CAPABILITIES as facadeCapabilities } from "../../agents/codexAppServer"
 import type * as Facade from "../../agents/codexAppServer"

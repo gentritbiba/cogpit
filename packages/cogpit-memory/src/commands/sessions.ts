@@ -37,7 +37,7 @@ type SessionMeta = Awaited<ReturnType<typeof getSessionMeta>>
 
 function toSessionSummary(file: SessionFile, meta: SessionMeta, status: string): SessionSummary {
   return {
-    sessionId: meta.sessionId,
+    sessionId: file.sessionId || meta.sessionId,
     filePath: file.path,
     timestamp: meta.timestamp,
     model: meta.model,

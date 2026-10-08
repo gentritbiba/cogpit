@@ -100,7 +100,8 @@ export function findExecutableOnPath(binName: string, options: FindOptions = {})
   const windows = isWindows(options)
   const path = windows ? win32 : posix
   const isExecutable = probeExecutable(options)
-  const dirs = ((options.env ?? process.env).PATH ?? "").split(path.delimiter)
+  const explicitPath = windows ? /[\\/]/.test(binName) : binName.includes("/")
+  const dirs = explicitPath ? [""] : ((options.env ?? process.env).PATH ?? "").split(path.delimiter)
 
   let names = [binName]
   if (windows) {
@@ -114,9 +115,9 @@ export function findExecutableOnPath(binName: string, options: FindOptions = {})
   }
 
   for (const dir of dirs) {
-    if (!dir) continue
+    if (!dir && !explicitPath) continue
     for (const name of names) {
-      const candidate = path.join(dir, name)
+      const candidate = explicitPath ? path.resolve(name) : path.join(dir, name)
       if (isExecutable(candidate)) return candidate
     }
   }

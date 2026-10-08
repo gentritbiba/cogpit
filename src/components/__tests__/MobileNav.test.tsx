@@ -54,6 +54,15 @@ describe("MobileNav", () => {
     expect(onTabChange).toHaveBeenCalledWith("workspace")
   })
 
+  it("marks a live chat only from the other tabs, since the chat header shows it", () => {
+    mocks.isLive = true
+    const { rerender } = render(<MobileNav activeTab="sessions" onTabChange={vi.fn()} />)
+    expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
+
+    rerender(<MobileNav activeTab="chat" onTabChange={vi.fn()} />)
+    expect(screen.queryByLabelText("Session is live")).not.toBeInTheDocument()
+  })
+
   it("keeps workspace tools reachable without a session", () => {
     mocks.session = null
 

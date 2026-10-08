@@ -17,7 +17,7 @@ Open one session in the focused chat-only view:
 npx cogpit@latest preview <session-id>
 ```
 
-Both commands require Node.js 20.11 or newer and an authenticated Claude Code,
+Both commands require Node.js 22.16 or newer and an authenticated Claude Code,
 Codex, or GitHub Copilot CLI when you want to continue a session.
 
 Options:

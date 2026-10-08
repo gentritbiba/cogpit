@@ -260,6 +260,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
   }, [foldPlan, turn.contentBlocks, workVisible])
 
   const contentBlockProps = {
+    turnId: turn.id,
+    originalBlocks: turn.contentBlocks,
     model: turn.model,
     effort: turn.effort,
     expandAll,
@@ -469,6 +471,8 @@ function blockIdentity(block: TurnContentBlock): string | null {
 
 function ContentBlocks({
   blocks,
+  turnId,
+  originalBlocks,
   model,
   effort,
   expandAll,
@@ -480,6 +484,8 @@ function ContentBlocks({
   skillMetadata,
 }: {
   blocks: TurnContentBlock[]
+  turnId: string
+  originalBlocks: TurnContentBlock[]
   model: string | null
   effort?: string
   expandAll: boolean
@@ -549,6 +555,7 @@ function ContentBlocks({
                 model={model}
                 effort={effort}
                 timestamp={block.timestamp}
+                messageKey={`${turnId}:${originalBlocks.indexOf(block)}:${ti}`}
               />
             ))}
           </div>

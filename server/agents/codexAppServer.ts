@@ -1,3 +1,4 @@
+import { validateCodexRequest } from "./codexProtocolValidation"
 import { spawn as spawnChild } from "node:child_process"
 import { createInterface } from "node:readline"
 import type { Interface as ReadlineInterface } from "node:readline"
@@ -161,13 +162,15 @@ export class CodexAppServer {
   private readonly pendingRequests = new Map<JsonRpcId, PendingRequest>()
   private readonly notificationListeners = new Set<CodexNotificationListener>()
   private readonly activeTurnIds = new Map<string, string>()
+  private readonly completedTurns = new Map<string, { isError: boolean; message?: string }>()
+  private readonly completionWaiters = new Map<string, Array<{ resolve: (result: { isError: boolean; message?: string }) => void; reject: (error: Error) => void }>>()
   private readonly parentThreadIds = new Map<string, string>()
   private readonly approvals = new PendingRequests<PendingApproval>()
   private readonly elicitations = new PendingRequests<PendingElicitation>()
 
   constructor(options: CodexAppServerOptions = {}) {
     this.spawn = options.spawn ?? defaultSpawn
-    this.command = options.command ?? "codex"
+    this.command = options.command ?? process.env.COGPIT_PROVIDER_EXECUTABLE ?? "codex"
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.clientVersion = options.clientVersion ?? packageJson.version
@@ -302,6 +305,7 @@ export class CodexAppServer {
     params?: unknown,
     options: { timeoutMs?: number } = {},
   ): Promise<T> {
+    try { validateCodexRequest(method, params) } catch (error) { return Promise.reject(error) }
     const connectedChild = this.child
     if (connectedChild && this.initializeResult) {
       return this.request<T>(
@@ -563,6 +567,18 @@ export class CodexAppServer {
     return () => this.notificationListeners.delete(listener)
   }
 
+  waitForCompletion(threadId: string, turnId: string): Promise<{ isError: boolean; message?: string }> {
+    const key = JSON.stringify([threadId, turnId])
+    const completed = this.completedTurns.get(key)
+    if (completed) return Promise.resolve(completed)
+    if (!this.child) return Promise.reject(new CodexAppServerError("Codex disconnected before completion"))
+    return new Promise((resolve, reject) => {
+      const waiting = this.completionWaiters.get(key) ?? []
+      waiting.push({ resolve, reject })
+      this.completionWaiters.set(key, waiting)
+    })
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise
     this.shuttingDown = true
@@ -584,6 +600,7 @@ export class CodexAppServer {
     child: CodexAppServerProcess,
   ): Promise<InitializeResult> {
     try {
+      validateCodexRequest("initialize", { clientInfo: { name: "cogpit", title: "Cogpit", version: this.clientVersion }, capabilities: CODEX_CLIENT_CAPABILITIES })
       const result = await this.request<InitializeResult>(
         child,
         "initialize",
@@ -876,6 +893,13 @@ export class CodexAppServer {
           this.activeTurnIds.delete(threadId)
         }
         if (turnId) {
+          const key = JSON.stringify([threadId, turnId])
+          const error = isRecord(turn) && isRecord(turn.error) ? stringField(turn.error, "message") : undefined
+          const result = { isError: isRecord(turn) && ["failed", "interrupted"].includes(String(turn.status)), ...(error ? { message: error } : {}) }
+          this.completedTurns.set(key, result)
+          while (this.completedTurns.size > 256) this.completedTurns.delete(this.completedTurns.keys().next().value!)
+          for (const waiter of this.completionWaiters.get(key) ?? []) waiter.resolve(result)
+          this.completionWaiters.delete(key)
           this.approvals.removeForTurn(threadId, turnId)
           this.elicitations.removeForTurn(threadId, turnId)
         }
@@ -1071,6 +1095,8 @@ export class CodexAppServer {
   }
 
   private rejectPending(error: Error): void {
+    for (const waiting of this.completionWaiters.values()) for (const waiter of waiting) waiter.reject(error)
+    this.completionWaiters.clear()
     const pending = [...this.pendingRequests.values()]
     this.pendingRequests.clear()
     for (const request of pending) {

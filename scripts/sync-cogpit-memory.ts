@@ -27,6 +27,7 @@ const FILES = [
   "turnBuilder.ts",
   "agentEnvelope.ts",
   "types.ts",
+  "instances.ts",
   "messageTypeGuards.ts",
   "sessionStats.ts",
   "turnContent.ts",

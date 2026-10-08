@@ -9,6 +9,9 @@ vi.mock("node:fs/promises", async (importOriginal) => ({
 }))
 vi.mock("../../atomicJsonFile", () => ({ writeOwnerOnlyText: vi.fn(async () => undefined) }))
 
+import { instanceDirName, instanceSessionId } from "../../../shared/session/instances"
+import { __resetEditionForTest, PERSONAL_EDITION } from "../../edition"
+import { installFakeEdition } from "../edition/fakeEdition"
 import { Readable } from "node:stream"
 import type { IncomingMessage } from "node:http"
 import type { UseFn, Middleware } from "../../helpers"
@@ -16,6 +19,7 @@ import { asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerNotificationRoutes } from "../../routes/notifications"
 import {
   listNotifications,
+  recordNotification,
   LOCAL_READER,
   resetNotificationHistoryForTests,
   type NotificationHistoryEntry,
@@ -74,7 +78,7 @@ beforeEach(() => {
     entry("n-2", { sessionId: null, dirName: null, kind: "system" }),
   ])
 })
-afterEach(() => resetNotificationHistoryForTests())
+afterEach(() => { resetNotificationHistoryForTests(); __resetEditionForTest() })
 
 describe("GET /api/notifications", () => {
   it("returns each notification as this reader sees it", async () => {
@@ -150,5 +154,24 @@ describe("unmatched requests", () => {
   it("falls through to next for unknown subpaths", async () => {
     const { next } = await request("POST", "/frobnicate")
     expect(next).toHaveBeenCalledOnce()
+  })
+})
+
+
+describe("notification access across provider accounts", () => {
+  it("shows a notice only to its profile's owner when native UUIDs match", async () => {
+    const nativeId = "00000000-0000-4000-8000-000000000001"
+    const qualified = instanceSessionId("account-1", nativeId)
+    const dirName = instanceDirName("account-1", "-work-repo")
+    resetNotificationHistoryForTests([])
+    recordNotification({ title: "Private profile title", body: "Private result", nav: { sessionId: nativeId, dirName } }, "turnComplete")
+    let owned = qualified
+    const visibilityFor = () => Object.assign(async (id: string) => id === owned ? { annotate: async <T,>(value: T) => value } : "hidden" as const, { everything: false, nothing: false })
+    installFakeEdition({ access: { ...PERSONAL_EDITION.access, visibilityFor } })
+    expect((await request("GET", "/")).json().notifications).toEqual([expect.objectContaining({ title: "Private profile title", sessionId: nativeId, dirName })])
+    owned = nativeId
+    expect((await request("GET", "/")).json().notifications).toEqual([])
+    await request("POST", "/read", { all: true })
+    expect((await listNotifications())[0].readBy).toEqual({})
   })
 })

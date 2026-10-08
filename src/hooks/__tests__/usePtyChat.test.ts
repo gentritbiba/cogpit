@@ -5,7 +5,13 @@ vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
 }))
 
+vi.mock("@/lib/conversationState", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/conversationState")>(),
+  admitReceipt: vi.fn(() => false),
+}))
+
 import { authFetch } from "@/lib/auth"
+import { admitReceipt } from "@/lib/conversationState"
 import { usePtyChat } from "../usePtyChat"
 
 const mockedAuthFetch = vi.mocked(authFetch)
@@ -87,6 +93,27 @@ describe("usePtyChat", () => {
     expect(body.contextWindowTokens).toBe(200000)
   })
 
+  it("hands an accepted message to the queue the timeline is watching", async () => {
+    const receipt = { id: "command", conversationId: "conversation", sessionId: "sess", bindingRevision: 1, state: "queued", intent: "queue", message: "hello", createdAt: 1, updatedAt: 1, position: 1 }
+    mockedAuthFetch.mockResolvedValueOnce(reply({ success: true, receipt }, 202)).mockResolvedValueOnce(reply({ success: true, receipt: { ...receipt, id: "unwatched" } }, 202))
+    vi.mocked(admitReceipt).mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    const { result } = renderHook(() =>
+      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" } })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    expect(admitReceipt).toHaveBeenCalledWith(receipt)
+    expect(result.current.pendingMessages).toEqual([])
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+    expect(result.current.pendingMessages).toEqual(["hello"])
+  })
+
   it("sets error status on failed response", async () => {
     mockedAuthFetch.mockResolvedValueOnce(reply({ error: "Server error" }, 500))
 
@@ -120,7 +147,7 @@ describe("usePtyChat", () => {
       sent = [await result.current.sendMessage("hello"), await result.current.sendMessage("again")]
     })
 
-    expect(sent).toEqual([false, true])
+    expect(sent).toEqual([false, false])
     expect(result.current.pendingMessages).toEqual([])
   })
 
@@ -210,7 +237,7 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("error")
-    expect(result.current.error).toBe("Network failure")
+    expect(result.current.error).toContain("Delivery could not be confirmed")
   })
 
   it("ignores AbortError without setting error state", async () => {
@@ -409,7 +436,7 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("error")
-    expect(result.current.error).toBe("Unknown error")
+    expect(result.current.error).toContain("Delivery could not be confirmed")
   })
 
   it("uses default error message when response has no error field", async () => {

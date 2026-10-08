@@ -6,6 +6,8 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
+import { closeCommandDispatcher } from "./lib/durableSend"
+import { closeOrchestrationStore } from "./orchestration/storage"
 import {
   setConfigPath,
   setDataRoot,
@@ -270,10 +272,12 @@ export async function createServerComposition(
   }
 
   httpServer.on("close", () => {
-    void cleanupRuntime()
+    closeCommandDispatcher()
+    void cleanupRuntime().finally(closeOrchestrationStore)
   })
 
   const dispose = async (): Promise<void> => {
+    closeCommandDispatcher()
     const serverClosed = httpServer.listening
       ? new Promise<void>((resolve, reject) => {
           httpServer.close((error) => error ? reject(error) : resolve())
@@ -291,6 +295,7 @@ export async function createServerComposition(
     // a login/config mutation that completed during runtime cleanup cannot be
     // acknowledged without its durable session state reaching disk.
     await settleThenFlushEdition([cleanupRuntime(), serverClosed])
+    closeOrchestrationStore()
   }
 
   return { httpServer, dispose }

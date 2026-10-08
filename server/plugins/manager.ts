@@ -249,8 +249,9 @@ export class PluginManager {
     if (target.pluginId !== "cogpit.clickup") return false
     const source = this.connections?.legacy()
     if (!source?.automatic || source.suppressed || source.principalId !== this.authorization.resolve(req).principalId) return false
+    const linksPending = Object.keys(source.projects).some(path => !source.importedProjects.includes(path))
     if ((source.credentialImported || this.environmentToken && source.environmentPrepared)
-      && (target.projectId === null || source.decidedProjects.includes(target.projectId))) return false
+      && (!linksPending || target.projectId === null || source.decidedProjects.includes(target.projectId))) return false
     const binding = this.authorization.resolve(req)
     const installed = this.snapshot().plugins.find(plugin => plugin.id === target.pluginId)
     if (!installed?.enabled || this.safeMode) return false

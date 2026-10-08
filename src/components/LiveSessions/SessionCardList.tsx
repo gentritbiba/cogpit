@@ -3,12 +3,16 @@ import { History, Loader2 } from "lucide-react"
 
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
+import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { revealSessionById } from "@/lib/revealSession"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { sortSessionsByRecency } from "../../../shared/session-ordering"
 
+import { countCrew, crewActivityAt, crewSessionTitle, foldCrewRows, type MemberStatus } from "./crew"
 import { recencyBucket } from "./recencyBuckets"
-import { SessionCard } from "./SessionCard"
+import { SessionCard, type CardCrew, type CardLineage } from "./SessionCard"
 import { SessionRow, type SessionRowProps } from "./SessionRow"
 import { sessionGroupKey, splitTeammates } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
@@ -38,7 +42,15 @@ type SessionCardListProps = SessionListSharedProps & {
   older: { canLoad: boolean; loading: boolean; load: () => void }
   /** Name each card's project; on when the list mixes projects. */
   showProject?: boolean
+  /** Fold each crew under the session that started it; off lists every session on its own. */
+  groupCrews?: boolean
+  /** Every listed session, to name a member's parent and root when they are not in this list. */
+  lineageSessions?: readonly ActiveSessionInfo[]
+  /** What a crew member is doing. */
+  memberStatusOf?: (member: ActiveSessionInfo) => MemberStatus
 }
+
+const DONE: MemberStatus = { state: "done" }
 
 /**
  * The sidebar's session list: one flat run of cards, newest first, shelved
@@ -51,6 +63,9 @@ export function SessionCardList({
   pendingSession,
   older,
   showProject,
+  groupCrews = true,
+  lineageSessions,
+  memberStatusOf = () => DONE,
   activeSessionKey,
   procBySession,
   killingPids,
@@ -68,15 +83,32 @@ export function SessionCardList({
   onResumeSession,
 }: SessionCardListProps) {
   const permissionsOf = useListedPermissions()
-  // Shelf labels come out of the same memo as the ordering they describe.
-  const { topLevelSessions, teammatesByLead, shelves } = useMemo(() => {
-    const split = splitTeammates(sessions)
-    const topLevelSessions = sortSessionsByRecency(split.topLevelSessions)
+  // Shelf labels come out of the same memo as the ordering they describe. A
+  // session carrying a crew is placed by the crew's latest activity.
+  const { topLevelSessions, teammatesByLead, crewOf, shelves } = useMemo(() => {
+    const folded = groupCrews ? foldCrewRows(sessions) : { topLevel: sessions, crewOf: new Map<string, ActiveSessionInfo[]>() }
+    const split = splitTeammates(folded.topLevel)
+    const activityAt = (s: ActiveSessionInfo) => {
+      const members = folded.crewOf.get(s.sessionId)
+      return members ? crewActivityAt(s, members) : s.lastActivityAt || s.lastModified
+    }
+    const placed = new Map(split.topLevelSessions.map((s) => [{ ...s, lastActivityAt: activityAt(s) }, s]))
+    const topLevelSessions = sortSessionsByRecency([...placed.keys()]).map((key) => placed.get(key)!)
     const now = Date.now()
-    const buckets = topLevelSessions.map((s) => recencyBucket(s.lastActivityAt || s.lastModified, now))
+    const buckets = topLevelSessions.map((s) => recencyBucket(activityAt(s), now))
     const shelves = buckets.map((bucket, i) => (bucket === buckets[i - 1] ? null : bucket))
-    return { topLevelSessions, teammatesByLead: split.teammatesByLead, shelves }
-  }, [sessions])
+    return { topLevelSessions, teammatesByLead: split.teammatesByLead, crewOf: folded.crewOf, shelves }
+  }, [sessions, groupCrews])
+  const [openCrews, setOpenCrews] = useLocalStorage<string[]>(deviceScopedKey("live-sessions-open-crews"), [])
+  const openCrewIds = new Set(Array.isArray(openCrews) ? openCrews : [])
+  const toggleCrew = (rootId: string) => {
+    const open = Array.isArray(openCrews) ? openCrews : []
+    setOpenCrews(open.includes(rootId) ? open.filter((id) => id !== rootId) : [...open, rootId])
+  }
+  const knownById = useMemo(
+    () => new Map([...(lineageSessions ?? []), ...sessions].map((s) => [s.sessionId, s])),
+    [lineageSessions, sessions],
+  )
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
   const toggleTeam = (leadId: string) => {
     setCollapsedTeams((previous) => {
@@ -119,6 +151,15 @@ export function SessionCardList({
         const teammates = teammatesByLead.get(session.sessionId)
         const collapsed = collapsedTeams.has(session.sessionId)
         const shelf = shelves[index]
+        const members = crewOf.get(session.sessionId)
+        const crew: CardCrew | undefined = members && {
+          members,
+          counts: countCrew(members, memberStatusOf),
+          statusOf: memberStatusOf,
+          activityAt: crewActivityAt(session, members),
+          open: openCrewIds.has(session.sessionId),
+          onToggle: () => toggleCrew(session.sessionId),
+        }
         const card = (
           <SessionCard
             {...rowProps(session)}
@@ -129,6 +170,10 @@ export function SessionCardList({
             teammateCount={teammates?.length}
             teammatesCollapsed={teammates ? collapsed : undefined}
             onToggleTeammates={teammates ? () => toggleTeam(session.sessionId) : undefined}
+            crew={crew}
+            lineage={lineageOf(session, knownById, sessionNames, onSelectSession)}
+            sessionNames={sessionNames}
+            activeSessionKey={activeSessionKey}
           />
         )
         return (
@@ -164,6 +209,29 @@ export function SessionCardList({
       )}
     </div>
   )
+}
+
+/** For a crew member listed on its own: who started it, and the crew's root when that is someone else. */
+function lineageOf(
+  session: ActiveSessionInfo,
+  knownById: ReadonlyMap<string, ActiveSessionInfo>,
+  sessionNames: Record<string, string>,
+  onSelectSession: (dirName: string, fileName: string) => void,
+): CardLineage | undefined {
+  const crew = session.crew
+  if (!crew) return undefined
+  const parentTitle = crewSessionTitle(crew.parentId, knownById, sessionNames) ?? crew.parentTitle ?? "Another session"
+  const rootTitle = crew.rootId === crew.parentId
+    ? undefined
+    : crewSessionTitle(crew.rootId, knownById, sessionNames) ?? crew.rootTitle
+  const parent = knownById.get(crew.parentId)
+  return {
+    parentTitle,
+    ...(rootTitle && rootTitle !== parentTitle && { rootTitle }),
+    onOpenParent: parent
+      ? () => onSelectSession(parent.dirName, parent.fileName)
+      : () => void revealSessionById(crew.parentId),
+  }
 }
 
 function RecencyDivider({ label }: { label: string }) {

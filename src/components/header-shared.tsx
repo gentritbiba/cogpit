@@ -23,8 +23,8 @@ export const FLOATING_PILL = "rounded-full border bg-popover shadow-sm"
 type LiveIndicatorProps = HTMLAttributes<HTMLSpanElement>
 
 /**
- * The app's one green "live" dot — top bar, dashboard cards, LIVE badges, the
- * composer. Defaults to 8px; pass a size class (`size-1.5`) to shrink it.
+ * The app's one green "live" dot — session header, dashboard cards, LIVE
+ * badges. Defaults to 8px; pass a size class (`size-1.5`) to shrink it.
  */
 export const LiveIndicator = memo(function LiveIndicator({
   className,

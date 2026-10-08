@@ -1,8 +1,11 @@
 import type { AgentKind } from "../../shared/session/agent-descriptors"
+import type { IncomingMessage } from "node:http"
+import type { CommandIntent, CommandReceipt } from "../../shared/contracts/orchestration"
 import type { PendingInput, PendingInputResponse } from "../agents/pendingInput"
 import type { VisibilityCheck } from "../edition"
 import type { SessionResult } from "../lib/sessionResult"
 import type { SessionState, WaitOptions, WaitResult } from "../lib/sessionWait"
+import type { TransitionInput, TransitionResolution } from "../lib/conversationTransition"
 
 /**
  * A machine sessions run on: this server, or a device registered with the hub.
@@ -16,11 +19,13 @@ export interface SessionHost {
   readonly remote: boolean
   create(input: HostCreateInput): Promise<{ sessionId: string; dirName: string }>
   /** Deliver a follow-up without waiting for the turn it starts. */
-  send(sessionId: string, message: string, options?: { interrupt?: boolean }): Promise<{ delivery: string }>
+  send(sessionId: string, message: string, options?: { interrupt?: boolean; commandId?: string; req?: IncomingMessage; intent?: CommandIntent }): Promise<{ delivery: string; receipt?: CommandReceipt }>
+  receipt?(commandId: string, req?: IncomingMessage, waitMs?: number): Promise<CommandReceipt | null>
+  transition?(input: TransitionInput | (TransitionResolution & { action: "resolve" }), req: IncomingMessage): Promise<unknown>
   state(sessionId: string): Promise<SessionState>
   wait(sessionIds: readonly string[], options: WaitOptions): Promise<WaitResult>
   result(sessionId: string, turn?: number): Promise<SessionResult | null>
-  respond(sessionId: string, requestId: string, response: PendingInputResponse): Promise<PendingInput>
+  respond(sessionId: string, requestId: string, response: PendingInputResponse, options?: { commandId?: string; req?: IncomingMessage }): Promise<PendingInput>
   interrupt(sessionId: string): Promise<boolean>
   stop(sessionId: string): Promise<boolean>
   has(sessionId: string): Promise<boolean>
@@ -31,6 +36,8 @@ export interface SessionHost {
 }
 
 export interface HostCreateInput {
+  req?: IncomingMessage
+  instanceId?: string
   /** An absolute path on the host. */
   cwd: string
   agent?: AgentKind
@@ -50,6 +57,7 @@ export function startFields(input: HostCreateInput) {
   return {
     cwd: input.cwd,
     agent: input.agent,
+    instanceId: input.instanceId,
     message: input.message,
     permissions: { mode: input.mode },
     model: input.model,

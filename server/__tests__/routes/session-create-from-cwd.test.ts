@@ -14,7 +14,7 @@ vi.mock("../../lib/folders", () => ({ sessionFolderProblem: async () => null }))
 import { createSession } from "../../lib/sessionCreate"
 
 const defaultKind = agentKindForDirName(undefined)
-const otherKind = AGENT_KINDS.find((kind) => kind !== defaultKind)!
+const otherKind = AGENT_KINDS.find((kind) => kind !== defaultKind && !descriptorFor(kind).cli.requiresConfiguration)!
 
 beforeEach(() => {
   recordSessionOrigin.mockReset()
@@ -49,6 +49,11 @@ describe("createSession", () => {
 
     await createSession({ cwd: "/work/my-app", message: "hi" })
     expect(recordSessionOrigin).toHaveBeenCalledTimes(1)
+  })
+
+  it("records the name a spawned session was given", async () => {
+    await createSession({ cwd: "/work/my-app", message: "hi", parentSessionId: "parent-1", name: "w3-rooftop" })
+    expect(recordSessionOrigin).toHaveBeenCalledWith("child-1", { parentSessionId: "parent-1", name: "w3-rooftop" })
   })
 
   it("refuses a request with neither a project nor an absolute cwd", async () => {

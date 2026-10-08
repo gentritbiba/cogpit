@@ -22,7 +22,7 @@ import { NewSessionHeadline } from "./NewSessionHero"
 import {
   ExtensionMainView,
   PrimarySessionBrowser,
-  ProjectDashboard,
+  MissionControlView,
 } from "./SharedAppViews"
 
 const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then((module) => ({ default: module.MobileFileChanges })))
@@ -221,7 +221,7 @@ function MobileChat({
           )}
         </div>
       ) : (
-        <ProjectDashboard navigation={navigation} />
+        <MissionControlView navigation={navigation} />
       )}
       <div className="shrink-0">
         {chrome.processPanel}

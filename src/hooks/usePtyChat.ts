@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { PermissionsConfig } from "@/lib/permissions"
 import { authFetch } from "@/lib/auth"
+import { deliverCommand } from "@/lib/commandDelivery"
+import { admitReceipt } from "@/lib/conversationState"
 import { agentKindForDirName, sessionIdFromFileName } from "@/lib/agents"
 import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 import { isAccessRefusal } from "@/lib/sessionAccessEvents"
@@ -46,6 +48,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
 
   // Track active requests per session so concurrent sessions work
   const activeAbortRef = useRef<AbortController | null>(null)
+  const deliveryControllers = useRef(new Set<AbortController>())
   const sessionIdRef = useRef<string | null>(null)
   /** Set during session creation to prevent the sessionId-change effect from clearing pendingMessages */
   const creatingRef = useRef(false)
@@ -57,6 +60,8 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
 
   /** Reset all in-flight state -- shared by disconnect() and the sessionId-change effect. */
   const resetState = useCallback(() => {
+    for (const controller of deliveryControllers.current) controller.abort()
+    deliveryControllers.current.clear()
     activeAbortRef.current?.abort()
     activeAbortRef.current = null
     creatingRef.current = false
@@ -88,7 +93,9 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
 
   // Abort any in-flight request on unmount
   useEffect(() => {
+    const controllers = deliveryControllers.current
     return () => {
+      for (const controller of controllers) controller.abort()
       activeAbortRef.current?.abort()
     }
   }, [])
@@ -144,6 +151,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       onPermissionsApplied?.()
 
       const abortController = new AbortController()
+      deliveryControllers.current.add(abortController)
       activeAbortRef.current = abortController
 
       try {
@@ -162,20 +170,28 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           settingsChange: settingsChange.length > 0 ? settingsChange : undefined,
         }
 
-        const { res, errorMessage } = await fetchWithModelFallback(
-          (modelOverride) => authFetch("/api/send-message", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...requestBody, model: modelOverride }),
-            signal: abortController.signal,
-          }),
+        const { res, errorMessage, observingReceipt, receipt } = await fetchWithModelFallback(
+          (modelOverride) => deliverCommand("/api/send-message", { ...requestBody, model: modelOverride }, abortController.signal),
           {
             model,
             agentKind,
             errorFallback: (r) => `Request failed (${r.status})`,
             onModelRejected,
+            signal: abortController.signal,
+            onReceiptSettled: () => deliveryControllers.current.delete(abortController),
+            onDeliveryError: (message) => {
+              if (activeAbortRef.current === abortController) { setError(message); setStatus("error") }
+            },
           },
         )
+        if (!observingReceipt) deliveryControllers.current.delete(abortController)
+        // The timeline now shows the accepted command from the queue instead of the optimistic copy.
+        if (receipt && admitReceipt(receipt)) {
+          setPendingMessages(prev => {
+            const index = prev.lastIndexOf(text)
+            return index < 0 ? prev : prev.filter((_, i) => i !== index)
+          })
+        }
 
         // Only update state if this is still the active request for this session
         if (activeAbortRef.current === abortController) {
@@ -188,8 +204,9 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           }
         }
         if (res.ok && settingsChange.length > 0) onSettingsChangeSent?.()
-        return !isAccessRefusal(res)
+        return res.ok && !isAccessRefusal(res)
       } catch (err: unknown) {
+        deliveryControllers.current.delete(abortController)
         if (err instanceof Error && err.name === "AbortError") {
           // Intentionally stopped — don't set error
           return true
@@ -199,7 +216,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           setStatus("error")
           setPendingMessages(prev => prev.slice(0, -1))
         }
-        return true
+        return false
       }
     },
     [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, contextWindowTokens, fastMode, ultracode, settingsChange, onSettingsChangeSent, mcpConfig, onModelRejected, readOnly, onCreateSession]

@@ -19,7 +19,7 @@ Each runtime panel keeps its three most recently visited project/workspace views
 
 The cache is private to the connected host and signed-in session. Plugin changes, permission changes, connection changes, safe mode and host disconnection clear affected activations. It is an in-memory cache, not offline persistence. Closing the containing workspace or reloading the app releases it.
 
-Project discovery remains separate from request validation. Runtime reads validate current inventory membership and the selected canonical workspace, including linked worktrees, before and after the operation. Every native subprocess retains live permission and cancellation checks. Readiness validates the existing lease without loading provider data or repeating project discovery.
+Project discovery remains separate from request validation. Runtime reads re-resolve the selected canonical workspace and its Git identity before and after the operation, checked against a project inventory snapshot at most 30 seconds old. A workspace or project missing from the snapshot triggers a fresh inventory read, so new projects and worktrees are recognized immediately; a project leaving the inventory or a nested folder becoming its own project takes effect within 30 seconds. Every native subprocess retains live permission and cancellation checks. Readiness validates the existing lease without loading provider data or repeating project discovery.
 
 ## Package contracts
 

@@ -2,19 +2,14 @@
  * Answering a blocked AskUserQuestion call, shared by the timeline form, the
  * composer bar, and the Mission Control grid.
  *
- * Two traps in the wire format fail silently:
- *
- * - Answer keys must be the verbatim question text. The server does no key
- *   validation, so a mistyped key returns 200 and hands the agent an answer map
- *   matching none of its questions.
- * - Multi-select answers are ONE comma-space-joined string, not an array. An
- *   array makes the server return 404 "already answered", which a caller would
- *   reasonably read as success and drop the user's input.
+ * Answers use exact question text as keys. A multi-select answer is one
+ * comma-space-joined string. Durable delivery keeps a stable receipt ID across retries.
  */
 
 import { jsonFetch } from "@/lib/auth"
 import { answerShareQuestion } from "@/lib/shareApi"
 import { isSharedPath } from "@/lib/sharePath"
+import { deliverCommand } from "./commandDelivery"
 
 /** Answers keyed by the exact question text the agent asked. */
 export type UserQuestionAnswerMap = Record<string, string>
@@ -52,5 +47,6 @@ export function submitUserQuestionAnswers(
   if (isSharedPath(window.location.pathname)) {
     return answerShareQuestion(toolUseId, answers)
   }
-  return postAnswer("/api/ask-user-answer", { sessionId, toolUseId, answers })
+  return deliverCommand("/api/ask-user-answer", { sessionId, toolUseId, answers })
+    .then((res) => ({ ok: res.ok, gone: res.status === 404 }), () => ({ ok: false, gone: false }))
 }

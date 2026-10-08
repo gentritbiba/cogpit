@@ -14,6 +14,7 @@
  * the renderer and must stay free of node builtins.
  */
 import { AGENT_KINDS, type AgentKind } from "./types"
+import { instanceDirName, instanceSessionId, splitInstanceDirName, splitInstanceSessionId } from "./instances"
 
 export type { AgentKind } from "./types"
 export { AGENT_KINDS } from "./types"
@@ -100,6 +101,7 @@ export interface AgentCapabilities {
   readonly modelFallbackNotices: boolean
   /** Whether an unattended "auto" permission mode can be offered. */
   readonly autoPermissionMode: "never" | "per-model" | "always"
+  readonly toolPermissionRules: boolean
   /** Whether composer settings take effect immediately or on the next turn. */
   readonly settingsApply: "live" | "next-turn"
   /**
@@ -229,6 +231,7 @@ export interface AgentCli {
   readonly homeDirName: string
   /** Environment variable overriding that directory, if the CLI has one. */
   readonly homeEnvVar: string | null
+  readonly sdkHomeEnvVar?: string
   /**
    * Path inside the home whose existence proves the CLI has been used. Empty
    * when the home directory itself is the evidence.
@@ -240,6 +243,7 @@ export interface AgentCli {
    * that configuration is missing; the rest sit at a fixed, env-overridable
    * location and can be found on a first run.
    */
+  readonly requiresConfiguration?: boolean
   readonly homeIsDiscoverable: boolean
   readonly process: AgentProcessMatch
 }
@@ -622,6 +626,7 @@ const claude: AgentDescriptor = {
     bundledBySdk: true,
     homeDirName: ".claude",
     homeEnvVar: null,
+    sdkHomeEnvVar: "CLAUDE_CONFIG_DIR",
     installMarker: "projects",
     homeIsDiscoverable: false,
     process: {
@@ -693,6 +698,7 @@ const claude: AgentDescriptor = {
     accountSwitching: true,
     modelFallbackNotices: true,
     autoPermissionMode: "per-model",
+    toolPermissionRules: true,
     settingsApply: "live",
     turnLiveness: "transcript",
     tokenStreaming: true,
@@ -851,6 +857,7 @@ const codex: AgentDescriptor = {
     accountSwitching: false,
     modelFallbackNotices: false,
     autoPermissionMode: "always",
+    toolPermissionRules: true,
     settingsApply: "next-turn",
     turnLiveness: "runtime",
     tokenStreaming: true,
@@ -983,6 +990,7 @@ const copilot: AgentDescriptor = {
     accountSwitching: false,
     modelFallbackNotices: false,
     autoPermissionMode: "always",
+    toolPermissionRules: true,
     settingsApply: "next-turn",
     turnLiveness: "runtime",
     tokenStreaming: false,
@@ -991,12 +999,24 @@ const copilot: AgentDescriptor = {
   },
 }
 
+const acp: AgentDescriptor = {
+  ...copilot, kind: "acp", displayName: "ACP agent", binName: "acp",
+  dirName: base64DirNameCodec("acp__"),
+  sessionFile: { name: (id) => `${id}.jsonl`, sessionId: sessionIdFromJsonlName, ...jsonlPathUrlCodec, transcriptRoot: (path) => { const segments = plainPathSegments(path); return segments?.length === 1 ? ownTranscriptRoot(sessionIdFromJsonlName(path)) : null } },
+  resume: { command: () => "Resume this session in Cogpit", args: () => [] },
+  launchArgs: { permissions: () => [], model: () => [], effort: () => [], fastTier: () => [] },
+  cli: { ...copilot.cli, packageName: "", homebrew: null, wingetId: null, selfUpdate: null, requiresConfiguration: true, homeDirName: ".cogpit-acp", homeEnvVar: "COGPIT_ACP_HOME", homeIsDiscoverable: true, installMarker: "projects" },
+  config: { ...copilot.config, rootDirName: ".cogpit-acp", instructions: [], settings: [], skillsDir: null },
+  capabilities: { ...copilot.capabilities, undo: false, redo: false, nativeRewind: false, nativeFork: false, midTurnSteering: false, externalProcesses: false, autoPermissionMode: "never", toolPermissionRules: false, namedSessions: false },
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 const DESCRIPTORS: Readonly<Record<AgentKind, AgentDescriptor>> = Object.freeze({
   claude,
   codex,
   copilot,
+  acp,
 })
 
 export function descriptorFor(kind: AgentKind): AgentDescriptor {
@@ -1037,6 +1057,15 @@ export function soleDescriptorWhere(
  * behaviour every caller depends on.
  */
 export function descriptorForDirName(dirName: string | null | undefined): AgentDescriptor {
+  const scoped = splitInstanceDirName(dirName)
+  if (scoped.instanceId !== "default") {
+    const descriptor = descriptorForDirName(scoped.nativeDirName)
+    return {
+      ...descriptor,
+      dirName: { ...descriptor.dirName, encode: (cwd) => instanceDirName(scoped.instanceId, descriptor.dirName.encode(cwd)), decode: (name) => descriptor.dirName.decode(splitInstanceDirName(name).nativeDirName) },
+      sessionFile: { ...descriptor.sessionFile, name: (id) => descriptor.sessionFile.name(splitInstanceSessionId(id).nativeId), sessionId: (file) => { const nativeId = descriptor.sessionFile.sessionId(file); return nativeId ? instanceSessionId(scoped.instanceId, nativeId) : null }, transcriptRoot: (file) => { const root = descriptor.sessionFile.transcriptRoot(file); return root ? { ...root, rootSessionId: instanceSessionId(scoped.instanceId, root.rootSessionId) } : null } },
+    }
+  }
   for (const kind of AGENT_KINDS) {
     if (kind === "claude") continue
     if (DESCRIPTORS[kind].dirName.owns(dirName)) return DESCRIPTORS[kind]
@@ -1072,6 +1101,16 @@ export function sessionIdFromFileName(kind: AgentKind, fileName: string): string
 /** True when `value` is a bare session UUID. */
 export function isSessionUuid(value: string): boolean {
   return SESSION_UUID_RE.test(value)
+}
+
+/** Canonical access identity, preserving the instance token's case. */
+export function canonicalSessionId(value: string): string | null {
+  try {
+    const { instanceId, nativeId } = splitInstanceSessionId(value)
+    return isSessionUuid(nativeId) ? instanceSessionId(instanceId, nativeId.toLowerCase()) : null
+  } catch {
+    return null
+  }
 }
 
 export const PERSISTED_AGENT_HOME_FIELD = "claudeDir"

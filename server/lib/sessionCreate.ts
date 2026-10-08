@@ -1,7 +1,8 @@
+import { nativeBinding } from "../agents/nativeBindings"
 import { isAbsolute } from "node:path"
 import {
   agentKindForDirName,
-  descriptorFor,
+  descriptorForDirName,
   projectDirNameFor,
   type AgentKind,
 } from "../../shared/session/agent-descriptors"
@@ -14,6 +15,8 @@ import { resolveProjectCwd } from "./projectCwd"
 import { ErrorCodes, RouteError } from "./routeError"
 import { SessionCreationRequests } from "./sessionCreationRequests"
 import { recordSessionOrigin } from "./sessionOrigins"
+import { splitInstanceDirName, instanceDirName } from "../../shared/session/instances"
+import { orchestrationStore } from "../orchestration/storage"
 
 /**
  * Starting a session, for the create-and-send route and the session CLI alike.
@@ -24,7 +27,7 @@ import { recordSessionOrigin } from "./sessionOrigins"
  * working directory, and making retries of one request start one session.
  */
 
-const creationRequests = new SessionCreationRequests(() => join(getDataRoot(), "session-creation-requests"))
+const creationRequests = new SessionCreationRequests(() => join(getDataRoot(), "session-creation-requests"), orchestrationStore)
 
 function isUsablePath(value: unknown): value is string {
   return typeof value === "string" && !value.includes("\0") && isAbsolute(value)
@@ -41,11 +44,10 @@ function isUsablePath(value: unknown): value is string {
  * which is what stops one project's request from writing into another's.
  */
 async function resolveSpawnCwd(
-  kind: AgentKind,
   dirName: string,
   requestedCwd: string | undefined,
 ): Promise<string | RouteError> {
-  const descriptor = descriptorFor(kind)
+  const descriptor = descriptorForDirName(dirName)
   if (!descriptor.dirName.lossy) {
     const cwd = descriptor.dirName.decode(dirName)
     return isUsablePath(cwd)
@@ -61,6 +63,7 @@ async function resolveSpawnCwd(
   if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
     return new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied")
   }
+  if (splitInstanceDirName(dirName).instanceId !== "default" && requestedCwd === undefined) return new RouteError(400, ErrorCodes.INVALID_REQUEST, "cwd is required for an isolated instance")
   if (requestedCwd === undefined) return await resolveProjectCwd(projectDir, dirName) ?? projectDir
   if (!isUsablePath(requestedCwd)) {
     return new RouteError(
@@ -90,6 +93,7 @@ export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" 
   dirName?: string
   cwd?: string
   /** Which agent runs a session created from `cwd` alone. */
+  instanceId?: string
   agent?: AgentKind
   /** The session that asked for this one, recorded so it can find its children. */
   parentSessionId?: string
@@ -108,29 +112,29 @@ export async function createSession(
   input: CreateSessionInput,
   start: StartFn = (runtime, request) => runtime.start(request),
 ): Promise<StartedSession> {
-  const { dirName: requestedDirName, cwd: requestedCwd, agent, parentSessionId, retry, ...request } = input
+  const { dirName: requestedDirName, cwd: requestedCwd, agent, instanceId, parentSessionId, retry, ...request } = input
   if (!requestedDirName && !isUsablePath(requestedCwd)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName or an absolute cwd is required")
   }
-  const dirName = requestedDirName
-    ?? projectDirNameFor(agent ?? agentKindForDirName(undefined), requestedCwd as string)
+  const dirName = instanceId ? instanceDirName(instanceId, splitInstanceDirName(requestedDirName ?? projectDirNameFor(agent ?? agentKindForDirName(undefined), requestedCwd as string)).nativeDirName) : requestedDirName ?? projectDirNameFor(agent ?? agentKindForDirName(undefined), requestedCwd as string)
   const kind = agentKindForDirName(dirName)
-  const spawnCwd = await resolveSpawnCwd(kind, dirName, requestedCwd)
+  const spawnCwd = await resolveSpawnCwd(dirName, requestedCwd)
   if (spawnCwd instanceof RouteError) throw spawnCwd
   const missing = await sessionFolderProblem(spawnCwd)
   if (missing) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, missing)
   const cwd = await canonicalCwd(spawnCwd)
 
-  const runtime = runtimeFor(kind)
+  const runtime = runtimeFor(kind, splitInstanceDirName(dirName).instanceId)
   const startRequest = {
     ...request,
-    dirName: cwd === spawnCwd ? dirName : descriptorFor(kind).dirName.encode(cwd),
+    dirName: cwd === spawnCwd ? dirName : descriptorForDirName(dirName).dirName.encode(cwd),
     cwd,
   }
   const run = () => start(runtime, startRequest)
   const started = retry
     ? await creationRequests.run(retry.scope, retry.requestId, startRequest, run)
     : await run()
-  if (parentSessionId) await recordSessionOrigin(started.sessionId, { parentSessionId })
+  orchestrationStore().ensureConversation(await nativeBinding(started.sessionId, kind, started.filePath, cwd))
+  if (parentSessionId) await recordSessionOrigin(started.sessionId, { parentSessionId, ...(request.name ? { name: request.name } : {}) })
   return started
 }

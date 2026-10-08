@@ -39,6 +39,9 @@ interface ModelFallbackOpts {
   errorFallback: string | ((res: Response) => string)
   /** Called when the model is rejected so the UI can clear the selection. */
   onModelRejected?: (model: string) => void
+  signal?: AbortSignal
+  onDeliveryError?: (message: string) => void
+  onReceiptSettled?: () => void
 }
 
 interface ModelFallbackResult {
@@ -46,6 +49,15 @@ interface ModelFallbackResult {
   errorMessage: string | null
   /** The server's machine-readable `code` for a failed response, when it sent one. */
   errorCode: string | null
+  observingReceipt: boolean
+  /** The durable command the server accepted, when it queued one. */
+  receipt: CommandReceipt | null
+}
+
+async function readReceipt(res: Response): Promise<CommandReceipt | null> {
+  if (res.status !== 202) return null
+  const accepted = await res.clone().json().catch(() => null) as { receipt?: CommandReceipt } | null
+  return accepted?.receipt ?? null
 }
 
 /**
@@ -57,8 +69,9 @@ interface ModelFallbackResult {
  */
 export async function fetchWithModelFallback(
   sendRequest: (model: string | undefined) => Promise<Response>,
-  { model, agentKind, errorFallback, onModelRejected }: ModelFallbackOpts,
+  options: ModelFallbackOpts,
 ): Promise<ModelFallbackResult> {
+  const { model, agentKind, errorFallback, onModelRejected } = options
   const fallback = (r: Response): string =>
     typeof errorFallback === "function" ? errorFallback(r) : errorFallback
 
@@ -68,6 +81,10 @@ export async function fetchWithModelFallback(
   const requestedModel = agentKind === "copilot" ? model || "auto" : model || undefined
   let res = await sendRequest(requestedModel)
   let error = res.ok ? null : await readError(res, fallback(res))
+  let observingReceipt = false
+
+  let receipt = await readReceipt(res)
+  if (receipt && agentKind === "codex" && model) { observingReceipt = true; observeModelRejection(receipt, sendRequest, options) }
 
   if (
     !res.ok &&
@@ -78,7 +95,35 @@ export async function fetchWithModelFallback(
     onModelRejected?.(model)
     res = await sendRequest(undefined)
     error = res.ok ? null : await readError(res, fallback(res))
+    receipt = await readReceipt(res)
   }
 
-  return { res, errorMessage: error?.message ?? null, errorCode: error?.code ?? null }
+  return { res, errorMessage: error?.message ?? null, errorCode: error?.code ?? null, observingReceipt, receipt }
 }
+
+function observeModelRejection(receipt: CommandReceipt, sendRequest: (model: string | undefined) => Promise<Response>, options: ModelFallbackOpts): void {
+  const owner = conversationStateFor(receipt.sessionId)
+  let stopped = false
+  let unsubscribe = () => {}
+  const stop = () => { if (stopped) return; stopped = true; clearTimeout(timer); unsubscribe(); options.signal?.removeEventListener("abort", stop); options.onReceiptSettled?.() }
+  const timer = setTimeout(stop, 24 * 60 * 60 * 1000)
+  const inspect = () => {
+    if (stopped) return
+    const state = owner.snapshot()
+    if (options.signal?.aborted || state.error === "Account or device changed" || /Queue unavailable \((401|403|404)\)/.test(state.error ?? "")) { stop(); return }
+    if (state.freshness !== "current") return
+    const current = state.commands.find((command) => command.id === receipt.id)
+    if (!current || !["failed", "completed", "cancelled", "unknown"].includes(current.state)) return
+    stop()
+    if (current.state !== "failed" || current.errorCode !== "MODEL_REJECTED" || current.delivery || current.turnId || state.conversation?.revision !== receipt.bindingRevision || state.conversation.binding.sessionId !== receipt.sessionId) return
+    options.onModelRejected?.(options.model!)
+    void sendRequest(undefined).then(async (response) => {
+      if (!response.ok) options.onDeliveryError?.((await readError(response, "The default model could not accept the message")).message)
+    }).catch((error: unknown) => { options.onDeliveryError?.(error instanceof Error ? error.message : "Fallback delivery could not be confirmed") })
+  }
+  unsubscribe = owner.subscribe(inspect)
+  options.signal?.addEventListener("abort", stop, { once: true })
+  inspect()
+}
+import { conversationStateFor } from "../conversationState"
+import type { CommandReceipt } from "../../../shared/contracts/orchestration"

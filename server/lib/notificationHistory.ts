@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto"
 import { writeOwnerOnlyText } from "../atomicJsonFile"
 import { editionModule } from "../edition"
 import type { NotificationContent, NotificationKind } from "../../shared/notifications"
+import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import { isRecord } from "../../shared/objects"
 
 /**
@@ -35,6 +36,8 @@ export interface NotificationView {
 }
 
 export interface NotificationHistoryEntry extends Omit<NotificationView, "readAt"> {
+  /** Access identity, separate from the transcript URL used for navigation. */
+  accessSessionId?: string
   /** When each reader acknowledged it, keyed by user id or {@link LOCAL_READER}. */
   readBy: Record<string, string>
   /** Set on a notification meant for this one reader alone: their account id. */
@@ -158,6 +161,13 @@ function flushSync(): void {
   }
 }
 
+export function notificationAccessSessionId(entry: Pick<NotificationView, "sessionId" | "dirName"> & { accessSessionId?: string }): string | null {
+  if (entry.accessSessionId !== undefined) return entry.accessSessionId
+  if (!entry.sessionId || !entry.dirName) return entry.sessionId
+  const codec = descriptorForDirName(entry.dirName).sessionFile
+  return codec.transcriptRoot(codec.fileNameFromUrlId(entry.sessionId))?.rootSessionId ?? entry.sessionId
+}
+
 /**
  * Record a raised notification. Returns the entry synchronously (its id is
  * needed by the desktop sink before any I/O settles); the append itself happens
@@ -169,6 +179,7 @@ export function recordNotification(
   kind: NotificationKind,
   recipientId?: string,
 ): NotificationHistoryEntry {
+  const accessSessionId = notificationAccessSessionId(content.nav)
   const entry: NotificationHistoryEntry = {
     id: randomUUID(),
     at: new Date().toISOString(),
@@ -176,6 +187,7 @@ export function recordNotification(
     body: content.body,
     kind,
     sessionId: content.nav.sessionId,
+    ...(accessSessionId !== null && accessSessionId !== content.nav.sessionId && { accessSessionId }),
     dirName: content.nav.dirName,
     readBy: {},
     ...(recipientId === undefined ? {} : { recipientId }),
@@ -196,7 +208,7 @@ export async function listNotifications(): Promise<NotificationHistoryEntry[]> {
 }
 
 export function notificationView(entry: NotificationHistoryEntry, reader: string): NotificationView {
-  const { readBy, recipientId: _recipient, ...view } = entry
+  const { readBy, recipientId: _recipient, accessSessionId: _access, ...view } = entry
   return { ...view, readAt: Object.hasOwn(readBy, reader) ? readBy[reader] : null }
 }
 

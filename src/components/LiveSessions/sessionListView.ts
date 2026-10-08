@@ -17,6 +17,7 @@ export const UNTITLED_SESSION_TITLE = "Untitled session"
 function ownTitle(s: ActiveSessionInfo, customName?: string): string | undefined {
   const teammateName = s.teamName && s.agentName ? s.agentName : ""
   return customName
+    || s.customTitle
     || s.aiTitle
     || teammateName
     || s.lastUserMessage

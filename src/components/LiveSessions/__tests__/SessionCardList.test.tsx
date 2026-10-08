@@ -16,12 +16,21 @@ const ROW_ACTIONS = [
 ] as const
 
 vi.mock("../SessionCard", () => ({
-  SessionCard: (props: SessionRowProps & { teammateCount?: number; projectLabel?: string; showProject?: boolean }) => {
-    const { session, teammateCount, projectLabel, showProject } = props
+  SessionCard: (props: SessionRowProps & {
+    teammateCount?: number
+    projectLabel?: string
+    showProject?: boolean
+    crew?: { members: ActiveSessionInfo[]; counts: { needsYou: number }; open: boolean; onToggle: () => void }
+    lineage?: { parentTitle: string; rootTitle?: string }
+  }) => {
+    const { session, teammateCount, projectLabel, showProject, crew, lineage } = props
     return (
       <div
         data-testid={`card-${session.sessionId}`}
         data-actions={ROW_ACTIONS.filter((action) => props[action]).join(",")}
+        data-crew={crew?.members.map((member) => member.sessionId).join(",")}
+        data-crew-waiting={crew?.counts.needsYou}
+        data-lineage={lineage ? [lineage.parentTitle, lineage.rootTitle].filter(Boolean).join(" / ") : undefined}
       >
         {projectLabel} {teammateCount ? `team:${teammateCount}` : null}{showProject ? `project:${projectLabel}` : null}
       </div>
@@ -135,6 +144,67 @@ describe("SessionCardList", () => {
     expect(screen.getByTestId("row-tm")).toBeInTheDocument()
     expect(screen.getByTestId("card-solo")).toBeInTheDocument()
     expect(screen.queryByTestId("card-tm")).not.toBeInTheDocument()
+  })
+
+  describe("crews", () => {
+    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+    const coordinator = session("coordinator", { customTitle: "Wave 3 coordinator", lastActivityAt: minutesAgo(90) })
+    const lane = session("lane", {
+      cwd: "/work/w3-rooftop",
+      lastActivityAt: minutesAgo(1),
+      crew: { rootId: "coordinator", parentId: "coordinator", startedAt: 1 },
+    })
+    const reviewer = session("reviewer", {
+      cwd: "/work/w3-rooftop",
+      lastActivityAt: minutesAgo(5),
+      crew: { rootId: "coordinator", parentId: "lane", startedAt: 2 },
+    })
+    const solo = session("solo", { lastActivityAt: minutesAgo(30) })
+
+    function renderCrews(sessions: ActiveSessionInfo[], props: Partial<Parameters<typeof SessionCardList>[0]> = {}) {
+      render(
+        <SessionCardList
+          sessions={sessions}
+          older={{ canLoad: false, loading: false, load: vi.fn() }}
+          activeSessionKey={null}
+          procBySession={new Map()}
+          killingPids={new Set()}
+          newlyCompleted={new Set()}
+          sessionNames={{}}
+          projectNames={{}}
+          onSelectSession={vi.fn()}
+          {...props}
+        />,
+      )
+      return [...document.querySelectorAll("[data-testid^=card-]")].map((el) => el.getAttribute("data-testid"))
+    }
+
+    it("lists a crew as its root, placed by the crew's latest activity, with every member in its line", () => {
+      expect(renderCrews([solo, reviewer, coordinator, lane])).toEqual(["card-coordinator", "card-solo"])
+      expect(screen.getByTestId("card-coordinator").dataset.crew).toBe("lane,reviewer")
+    })
+
+    it("names who started a member listed on its own, and its crew's root", () => {
+      renderCrews([reviewer], { lineageSessions: [coordinator, lane, reviewer] })
+      expect(screen.getByTestId("card-reviewer").dataset.lineage).toBe("w3-rooftop / Wave 3 coordinator")
+    })
+
+    it("falls back to the titles the server sent for a lineage it does not list", () => {
+      renderCrews([{ ...lane, crew: { ...lane.crew!, parentTitle: "Wave 3 coordinator", rootTitle: "Wave 3 coordinator" } }])
+      expect(screen.getByTestId("card-lane").dataset.lineage).toBe("Wave 3 coordinator")
+    })
+
+    it("lists every session on its own when crews are not grouped", () => {
+      expect(renderCrews([coordinator, lane], { groupCrews: false })).toEqual(["card-lane", "card-coordinator"])
+      expect(screen.getByTestId("card-lane").dataset.lineage).toBe("Wave 3 coordinator")
+    })
+
+    it("counts the members waiting on someone", () => {
+      renderCrews([coordinator, lane, reviewer], {
+        memberStatusOf: (member) => (member.sessionId === "reviewer" ? { state: "needs-you", need: "permission" } : { state: "working" }),
+      })
+      expect(screen.getByTestId("card-coordinator").dataset.crewWaiting).toBe("1")
+    })
   })
 
   it("shows the pending session first and offers older sessions until they are loaded", () => {

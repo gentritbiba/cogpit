@@ -266,6 +266,16 @@ describe("legacy ClickUp migration and one-way route adapters", () => {
     expect(transport).not.toHaveBeenCalled()
     expect((await manager.listConnections(req, target(unopenedId))).connections[0].selected.list.id).toBe("31")
   })
+  it("skips the legacy import check in other projects once every legacy link is imported", async () => {
+    await writeFile(legacyPath, JSON.stringify({ token, projects: { [projectPath]: "30" } }))
+    await manager.prepareLegacyClickUp({ path: legacyPath, classification, authorize })
+    expect((await manager.listConnections(req, target(projectId))).connections[0].selected.list.id).toBe("30")
+    vi.mocked(manager.projects.list).mockClear()
+    transport.mockClear()
+    await manager.createLease(req, { pluginId: installed.manifest.id, projectId: unopenedId, contextEpoch: "imported", client })
+    expect(manager.projects.list).not.toHaveBeenCalled()
+    expect(transport).not.toHaveBeenCalled()
+  })
   it("resolves nested projects to the longest canonical root for grants and imports", async () => {
     const childPath = join(projectPath, "nested"), childId = `p_${"3".repeat(40)}`
     await mkdir(childPath)

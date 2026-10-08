@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
-import { FileCode2, FolderTree, GitBranch, Globe, PanelRight } from "lucide-react"
+import { FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { Spinner } from "@/components/ui/Spinner"
@@ -20,6 +20,9 @@ const ProjectFilesPanel = lazy(() =>
 )
 const WorktreePanel = lazy(() =>
   import("@/components/WorktreePanel").then((module) => ({ default: module.WorktreePanel })),
+)
+const CrewPanel = lazy(() =>
+  import("@/components/crew/CrewPanel").then((module) => ({ default: module.CrewPanel })),
 )
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
@@ -113,6 +116,42 @@ function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
   )
 }
 
+function CrewWorkspacePanel(props: WorkspacePanelProps) {
+  return (
+    <Suspense fallback={<PanelFallback />}>
+      <CrewPanel {...props} />
+    </Suspense>
+  )
+}
+
+/**
+ * The crew on the rail: how many members wait on the user, or a dot while
+ * any of them works. Nothing when the crew is idle.
+ */
+function CrewIndicator({ context }: WorkspacePanelIndicatorProps) {
+  const crew = context.crew
+  if (!crew) return null
+  if (crew.needsYou > 0) {
+    return (
+      <span
+        role="status"
+        aria-label={`${crew.needsYou} ${crew.needsYou === 1 ? "session needs" : "sessions need"} you`}
+        className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-warning px-1 text-[9px] font-semibold text-warning-foreground"
+      >
+        {crew.needsYou}
+      </span>
+    )
+  }
+  if (crew.working === 0) return null
+  return (
+    <span
+      role="status"
+      aria-label={`${crew.working} ${crew.working === 1 ? "session" : "sessions"} working`}
+      className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-success ring-2 ring-success/30"
+    />
+  )
+}
+
 function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
   const services = useBuiltInPanelServices()
   return (
@@ -132,6 +171,18 @@ function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
 export const builtInWorkspacePlugin = definePlugin({
   id: BUILT_IN_PLUGIN_ID,
   workspacePanels: [
+    {
+      id: "crew",
+      title: "Crew",
+      icon: Network,
+      component: CrewWorkspacePanel,
+      indicator: CrewIndicator,
+      order: 1,
+      defaultSize: "30%",
+      minSize: "340px",
+      maxSize: "60%",
+      when: (context) => Boolean(context.crew),
+    },
     {
       id: "worktrees",
       title: "Worktrees",

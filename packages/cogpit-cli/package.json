@@ -22,7 +22,7 @@
     "cogpit": "dist/cli.js"
   },
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22.16"
   },
   "files": [
     "dist/",
@@ -47,7 +47,9 @@
     "zod": "4.6.5",
     "proper-lockfile": "4.1.2",
     "ipaddr.js": "2.5.0",
-    "smol-toml": "1.8.0"
+    "js-yaml": "4.3.2",
+    "smol-toml": "1.9.0",
+    "@agentclientprotocol/sdk": "1.7.0"
   },
   "devDependencies": {
     "esbuild": "^0.27.3",

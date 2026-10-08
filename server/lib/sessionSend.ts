@@ -11,8 +11,8 @@ export async function sendToSession(
   sessionId: string,
   request: SendRequest,
 ): Promise<{ runtime: AgentRuntime; outcome: SendOutcome }> {
-  const { kind, filePath } = await resolveSessionAgent(sessionId)
-  const runtime = runtimeFor(kind)
+  const { kind, filePath, instanceId } = await resolveSessionAgent(sessionId)
+  const runtime = runtimeFor(kind, instanceId)
   const outcome = await runtime.send(sessionId, { ...request, filePath })
   if (outcome.delivery === "busy") {
     throw new RouteError(409, ErrorCodes.CONFLICT, "Session is already active")

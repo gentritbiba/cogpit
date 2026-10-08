@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { UserMessage } from "../UserMessage"
 import { ImageGalleryProvider } from "../SessionImageGallery"
+import { formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
 
 const TEAMMATE_MSG =
   `<teammate-message teammate_id="team-lead"> Explore the HonestCMS repo and map the AI chat frontend. Be thorough.\nReport:\n1. Full file inventory\n2. The widget components</teammate-message>`
@@ -177,5 +178,33 @@ describe("UserMessage — animated disclosures", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
+describe("UserMessage — delegated session results", () => {
+  const wakeup = formatTaskWakeup({
+    id: "task-1",
+    parentSessionId: "parent",
+    childSessionId: "child-1",
+    state: "completed",
+    result: { turn: { reply: "Pricing copy fixed." }, filesChanged: [{ path: "a.ts" }, { path: "b.ts" }] },
+  })
+
+  it("shows the finished session as a result card instead of the raw prompt", () => {
+    render(<UserMessage content={wakeup} timestamp="" />)
+    expect(screen.getByText("Delegated session")).toBeInTheDocument()
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument()
+    expect(screen.queryByText(/Acknowledge receipt/)).toBeNull()
+
+    fireEvent.click(screen.getByText("Show detail"))
+    expect(screen.getByText("Pricing copy fixed.")).toBeInTheDocument()
+    expect(screen.getByText("2 files changed")).toBeInTheDocument()
+  })
+
+  it("keeps the raw prompt one click away", () => {
+    render(<UserMessage content={wakeup} timestamp="" />)
+    fireEvent.click(screen.getByText("Show raw"))
+    expect(screen.getByText(/Acknowledge receipt/)).toBeInTheDocument()
   })
 })

@@ -9,7 +9,7 @@ import {
   type ApprovalDecision,
   type PendingApproval,
 } from "../agents/runtimes"
-import { copilotRuntime, type CopilotExitPlanResponse, type CopilotRuntime } from "../agents/copilotTransport"
+import type { PlanResponse } from "../agents/runtimeTypes"
 import { authorizeSession, reportSessionEvent } from "../edition"
 import { sendAgentError } from "./agentErrors"
 import { visibleBySession } from "./visibleBySession"
@@ -25,8 +25,6 @@ import { visibleBySession } from "./visibleBySession"
  * "always allow" degrades to a one-time allow the same way everywhere and a
  * decision an agent cannot express is refused rather than quietly narrowed.
  */
-
-export type CopilotPlanClient = Pick<CopilotRuntime, "getPendingExitPlans" | "answerExitPlan">
 
 /** Test seam: the registry lookups this module resolves sessions through. */
 export interface PermissionRuntimes {
@@ -88,7 +86,7 @@ function summarizeRequest(
 
 interface PlanAnswer {
   requestId: string
-  response: CopilotExitPlanResponse
+  response: PlanResponse
 }
 
 /** The plan answer a body carries, or why it carries none. */
@@ -112,7 +110,6 @@ function parsePlanAnswer(body: unknown): PlanAnswer | string {
 export function registerPermissionRoutes(
   use: UseFn,
   runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
-  copilot: CopilotPlanClient = copilotRuntime,
 ) {
   use("/api/permissions", async (req, res, next) => {
     // A mounted router hands the bare path on as "", "/" or "/?query".
@@ -125,7 +122,7 @@ export function registerPermissionRoutes(
       const permissions = listPermissionSessionIds(runtimes).flatMap((sessionId) =>
         collectPendingPermissions(sessionId, runtimes).map((request) => summarizeRequest(sessionId, request)),
       )
-      const plans = copilot.getPendingExitPlans().map(({ sessionId, requestId, summary }) => ({ sessionId, requestId, summary }))
+      const plans = runtimes.allRuntimes().flatMap((runtime) => runtime.listPendingPlans?.() ?? []).map(({ sessionId, requestId, summary }) => ({ sessionId, requestId, summary }))
       sendJson(res, 200, {
         bySession: await visibleBySession(req, permissions),
         plansBySession: await visibleBySession(req, plans),
@@ -140,7 +137,7 @@ export function registerPermissionRoutes(
       if (await authorizeSession(req, res, { sessionId }, "view") === null) return
       sendJson(res, 200, {
         permissions: collectPendingPermissions(sessionId, runtimes),
-        plan: copilot.getPendingExitPlans(sessionId)[0] ?? null,
+        plan: runtimes.runtimeForSession(sessionId)?.listPendingPlans?.(sessionId)[0] ?? null,
       })
       return
     }
@@ -158,18 +155,17 @@ export function registerPermissionRoutes(
         if (authorized === null) return
         // A plan waits inside a live session, so the runtime holding it names the agent.
         const runtime = runtimes.runtimeForSession(sessionId)
-        const pending = copilot
-          .getPendingExitPlans(sessionId)
+        const pending = runtime?.listPendingPlans?.(sessionId)
           .find((plan) => plan.requestId === answer.requestId)
         if (!runtime || !pending) {
           sendJson(res, 404, { error: "Plan request not found or already resolved" })
           return
         }
         try {
-          copilot.answerExitPlan(sessionId, answer.requestId, answer.response)
+          if (!await runtime.respondToPlan?.(sessionId, answer.requestId, answer.response)) return sendJson(res, 409, { error: "The agent did not accept the plan answer" })
         } catch (error) {
           sendJson(res, 400, {
-            error: error instanceof Error ? error.message : "Failed to answer Copilot plan",
+            error: error instanceof Error ? error.message : "Failed to answer plan",
           })
           return
         }

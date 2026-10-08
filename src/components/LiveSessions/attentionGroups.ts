@@ -1,5 +1,6 @@
-import { sortSessionsByRecency } from "../../../shared/session-ordering"
+import { getSessionRecencyMs, sortSessionsByRecency } from "../../../shared/session-ordering"
 import { isSessionActive, WORKING_STATUSES } from "@/lib/sessionActivity"
+import { countCrew, type CrewCounts, type MemberStatus } from "./crew"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /**
@@ -18,10 +19,14 @@ export type AttentionReason =
   | "plan"
   | "waiting"
   | "done"
+  /** Not the session itself: members of its crew are blocked. */
+  | "crew"
 
 export interface AttentionItem {
   session: ActiveSessionInfo
   reason: AttentionReason
+  /** For a crew's root, its members by what they are doing. */
+  crew?: CrewCounts
 }
 
 export interface AttentionGroups {
@@ -29,6 +34,8 @@ export interface AttentionGroups {
   needsYou: AttentionItem[]
   /** Sessions actively running (thinking / tool use / processing). */
   working: ActiveSessionInfo[]
+  /** Roots listed as working only because members of their crew are. */
+  workingCrews?: ReadonlyMap<string, CrewCounts>
 }
 
 function isTeammate(s: ActiveSessionInfo): boolean {
@@ -118,6 +125,50 @@ export function classifyAttention(
   }
 
   return { needsYou, working }
+}
+
+/**
+ * Fold each crew into its root, so the strip lists the sessions the user
+ * started and never the ones those sessions started. A root whose members are
+ * blocked needs the user even when it is not; one whose members work is
+ * working. `groups` must come from the roots alone.
+ */
+export function rollUpCrews(
+  groups: AttentionGroups,
+  roots: readonly ActiveSessionInfo[],
+  crewOf: ReadonlyMap<string, readonly ActiveSessionInfo[]>,
+  statusOf: (member: ActiveSessionInfo) => MemberStatus,
+  canAct: (session: ActiveSessionInfo) => boolean = () => true,
+): AttentionGroups {
+  const needsYou = [...groups.needsYou]
+  const working = [...groups.working]
+  const workingCrews = new Map<string, CrewCounts>()
+  for (const root of roots) {
+    const members = crewOf.get(root.sessionId)
+    if (!members?.length) continue
+    const counts = countCrew(members, (member) => {
+      const status = statusOf(member)
+      return status.state === "needs-you" && !canAct(member) ? { state: "done" } : status
+    })
+    const listed = needsYou.findIndex((item) => item.session.sessionId === root.sessionId)
+    if (counts.needsYou > 0) {
+      if (listed >= 0) {
+        needsYou[listed] = { ...needsYou[listed]!, crew: counts }
+      } else {
+        needsYou.push({ session: root, reason: "crew", crew: counts })
+        const wasWorking = working.indexOf(root)
+        if (wasWorking >= 0) working.splice(wasWorking, 1)
+      }
+    } else if (counts.working > 0 && listed < 0 && !working.includes(root)) {
+      working.push(root)
+      workingCrews.set(root.sessionId, counts)
+    }
+  }
+  const waitedSince = (item: AttentionItem) => (item.reason === "crew" && item.crew?.longestWaitSince
+    ? Date.parse(item.crew.longestWaitSince)
+    : getSessionRecencyMs(item.session))
+  needsYou.sort((a, b) => waitedSince(b) - waitedSince(a))
+  return { needsYou, working: sortSessionsByRecency(working), workingCrews }
 }
 
 /** Short chip label for a working session — the current tool, or the phase. */

@@ -48,7 +48,7 @@ describe("GET /api/hello", () => {
     const body = JSON.parse(res._getData())
     expect(body.app).toBe("cogpit")
     expect(body.hubApi).toBe(1)
-    expect(body.sessionApi).toBe(1)
+    expect(body.sessionApi).toBe(2)
     expect(body.mode).toBe("standalone")
     expect(typeof body.version).toBe("string")
     expect(body.version.length).toBeGreaterThan(0)

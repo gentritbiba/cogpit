@@ -5,7 +5,7 @@
  * fourth agent is a type error rather than a silently missing row. That is the
  * bug that let Copilot fall out of the config badge map.
  */
-import { Github } from "lucide-react"
+import { Github, Terminal } from "lucide-react"
 import type { ForwardRefExoticComponent, RefAttributes, SVGProps } from "react"
 import type { PermissionMode } from "../permissions"
 import { AGENT_KINDS, descriptorForDirName, type AgentKind } from "."
@@ -16,6 +16,7 @@ export type AgentIcon = ForwardRefExoticComponent<SVGProps<SVGSVGElement> & RefA
 
 /** Each agent's vendor mark, since the product names alone don't say who runs the model. */
 const ICONS: Record<AgentKind, AgentIcon> = {
+  acp: Terminal,
   claude: AnthropicIcon,
   codex: OpenAIIcon,
   copilot: Github,
@@ -23,6 +24,7 @@ const ICONS: Record<AgentKind, AgentIcon> = {
 
 /** Short name for chips and dropdown rows, where the full product name is too long. */
 const SHORT_NAMES: Record<AgentKind, string> = {
+  acp: "ACP",
   claude: "Claude",
   codex: "Codex",
   copilot: "Copilot",
@@ -30,6 +32,7 @@ const SHORT_NAMES: Record<AgentKind, string> = {
 
 /** Name used when the row has space, e.g. the project switcher's folder hint. */
 const SWITCHER_NAMES: Record<AgentKind, string> = {
+  acp: "ACP agent",
   claude: "Claude",
   codex: "Codex",
   copilot: "GitHub Copilot",
@@ -40,6 +43,7 @@ const SWITCHER_NAMES: Record<AgentKind, string> = {
  * no badge means Claude rather than "unknown".
  */
 const PROJECT_BADGES: Record<AgentKind, string | null> = {
+  acp: "ACP",
   claude: null,
   codex: "Codex",
   copilot: "Copilot",
@@ -47,6 +51,7 @@ const PROJECT_BADGES: Record<AgentKind, string | null> = {
 
 /** Single letter plus tooltip for the config browser's "loaded by" badge. */
 const CONFIG_BADGES: Record<AgentKind, { letter: string; label: string }> = {
+  acp: { letter: "A", label: "Loaded by ACP agent" },
   claude: { letter: "C", label: "Loaded by Claude Code" },
   codex: { letter: "X", label: "Loaded by Codex CLI" },
   copilot: { letter: "G", label: "Loaded by GitHub Copilot CLI" },
@@ -54,6 +59,7 @@ const CONFIG_BADGES: Record<AgentKind, { letter: string; label: string }> = {
 
 /** Series colour, so one agent keeps one colour across every chart and legend. */
 const CHART_COLORS: Record<AgentKind, string> = {
+  acp: "var(--chart-4)",
   claude: "var(--chart-1)",
   codex: "var(--chart-2)",
   copilot: "var(--chart-3)",
@@ -61,6 +67,7 @@ const CHART_COLORS: Record<AgentKind, string> = {
 
 /** What the composer's interrupt button says while a turn is running. */
 const INTERRUPT_LABELS: Record<AgentKind, string> = {
+  acp: "Cancel ACP turn",
   claude: "Interrupt agent",
   codex: "Stop active turn",
   copilot: "Stop Copilot turn",
@@ -77,6 +84,7 @@ export interface PermissionModeOption {
  * labelled the way that CLI's policy actually behaves.
  */
 const PERMISSION_MODES: Record<AgentKind, readonly PermissionModeOption[]> = {
+  acp: [{ value: "default", label: "Ask", description: "Use the provider’s permission requests" }],
   claude: [
     { value: "default", label: "Ask", description: "Ask before sensitive actions" },
     { value: "plan", label: "Plan", description: "Read and plan without changing files" },

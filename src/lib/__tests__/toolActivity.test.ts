@@ -75,6 +75,15 @@ describe("summarizeToolActivity", () => {
     expect(summary.completed).toBe(5)
   })
 
+  it("counts the commands that drive a crew as crew calls", () => {
+    const summary = summarizeToolActivity([
+      call("start", "Bash", { input: { command: "cogpit-session new \"Fix the tests\" --name lane" } }),
+      call("wait", "Bash", { input: { command: "cogpit-session wait 01a11695-2938-7ec2-9d9c-0c8af023bd5f" } }),
+      call("status", "Bash", { input: { command: "git status" } }),
+    ])
+    expect(summary.text).toBe("2 crew calls · 1 command")
+  })
+
   it("uses the operation inside a tool script and readable labels for other tools", () => {
     const summary = summarizeToolActivity([
       call("nested", "exec", { input: { raw: 'await tools.exec_command({cmd: "bun test"})' } }),

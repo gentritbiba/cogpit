@@ -10,6 +10,7 @@ import { registerCopilotHistoryRoutes } from "./routes/copilot-history"
 import { registerSessionManageRoutes } from "./routes/session-manage"
 import { registerSessionNewRoutes } from "./routes/session-new"
 import { registerSessionSendRoutes } from "./routes/session-send"
+import { registerSessionCommandRoutes } from "./routes/session-commands"
 import { registerCodexThreadRoutes } from "./routes/codex-threads"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerConfigRoutes } from "./routes/config"
@@ -105,6 +106,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("edition", registerEditionRoutes),
   apiRoute("projects", registerProjectRoutes),
   apiRoute("session-send", registerSessionSendRoutes),
+  apiRoute("session-commands", registerSessionCommandRoutes),
   apiRoute("session-new", registerSessionNewRoutes),
   apiRoute("folders", registerFolderRoutes),
   apiRoute("session-manage", registerSessionManageRoutes),

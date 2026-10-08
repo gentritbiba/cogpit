@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import {
+  ArrowRightLeft,
   ChevronLeft,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -24,7 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
-import { ContextBadge } from "@/components/header-shared"
+import { ContextBadge, LiveIndicator } from "@/components/header-shared"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { projectName } from "@/lib/format"
@@ -52,6 +53,7 @@ interface MobileSessionInfoBarProps extends SessionInfoBarProps {
   isSubAgentView: boolean
   isLive: boolean
   canArchive: boolean
+  onProviderHandoff?: () => void
   claudeRawMessages: readonly RawMessage[]
 }
 
@@ -61,6 +63,7 @@ export function MobileSessionInfoBar({
   isSubAgentView,
   isLive,
   canArchive,
+  onProviderHandoff,
   claudeRawMessages,
   headerAccessory,
   creatingSession,
@@ -100,9 +103,12 @@ export function MobileSessionInfoBar({
       <Separator orientation="vertical" className="h-4" />
       <ContextBadge rawMessages={claudeRawMessages} warnOnly />
 
-      <span className="min-w-0 flex-1 truncate text-center text-xs font-medium text-muted-foreground">
-        {session.cwd ? projectName(session.cwd) : "Session"}
-      </span>
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+        <span className="truncate text-xs font-medium text-muted-foreground">
+          {session.cwd ? projectName(session.cwd) : "Session"}
+        </span>
+        {isLive && <LiveIndicator aria-label="Session is live" />}
+      </div>
 
       {headerAccessory}
       <DropdownMenu>
@@ -139,6 +145,12 @@ export function MobileSessionInfoBar({
               <DropdownMenuItem onClick={onDuplicateSession}>
                 <Copy />
                 <span>Duplicate session</span>
+              </DropdownMenuItem>
+            )}
+            {onProviderHandoff && !isSubAgentView && (
+              <DropdownMenuItem onClick={onProviderHandoff}>
+                <ArrowRightLeft />
+                <span>Continue with another provider…</span>
               </DropdownMenuItem>
             )}
             {archiveToggle && !isSubAgentView && (

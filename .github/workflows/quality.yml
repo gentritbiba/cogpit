@@ -33,7 +33,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: "22.16"
 
       - name: Install application dependencies
         run: bun install --frozen-lockfile
@@ -53,6 +53,9 @@ jobs:
 
       - name: Check agent-vocabulary containment
         run: bun run check:agents
+
+      - name: Check generated Codex protocol
+        run: bun run check:codex-protocol
 
       - name: Check ungoverned duplication
         run: bun run check:duplicates
@@ -130,7 +133,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: "22.16"
 
       - name: Install application dependencies
         run: bun install --frozen-lockfile

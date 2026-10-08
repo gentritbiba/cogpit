@@ -6,10 +6,10 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parseFrameMessage, parseManifest, type PluginRequest } from "@cogpit/plugin-contracts"
 
-const inventory = vi.hoisted(() => ({ paths: [] as string[] }))
+const inventory = vi.hoisted(() => ({ paths: [] as string[], reads: 0 }))
 vi.mock("../../security", () => ({ onSessionRevoked: () => () => {}, isSessionTokenActive: () => true, getSessionPrincipal: () => null }))
 vi.mock("../../routes/hello", () => ({ getInstanceId: () => "workspace-host", getAppVersion: () => "2.6.6" }))
-vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => inventory.paths.map(path => ({ dirName: "fixture", path, sessionCount: 1, lastModified: null })) }] }))
+vi.mock("../../agents", () => ({ allStores: () => [{ listProjects: async () => { inventory.reads++; return inventory.paths.map(path => ({ dirName: "fixture", path, sessionCount: 1, lastModified: null })) } }] }))
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { PluginManager } from "../../plugins/manager"
 import type { PluginIntegrationExecutor } from "../../plugins/integrationTypes"
@@ -111,9 +111,19 @@ describe("manager workspace-bound integrations", { timeout: process.platform ===
     expect(executor).not.toHaveBeenCalled()
   })
 
-  it("rechecks workspace ownership before renewing or invoking a provider", async () => {
+  it("serves activation, renewal and provider calls from one host inventory read", async () => {
+    const reads = inventory.reads
+    const activation = await lease()
+    expect(await manager.call(req, activation.id, frameRequest())).toMatchObject({ ok: true })
+    expect(await manager.call(req, activation.id, frameRequest())).toMatchObject({ ok: true })
+    await manager.renewLease(req, activation.id)
+    expect(inventory.reads).toBe(reads)
+  })
+
+  it("rechecks workspace ownership against refreshed discovery before renewing or invoking a provider", async () => {
     const activation = await lease()
     inventory.paths.push(nested)
+    await manager.projects.list(true)
     await expect(manager.renewLease(req, activation.id)).rejects.toThrow(/workspace/)
     await expect(manager.call(req, activation.id, frameRequest())).rejects.toMatchObject({ code: "STALE_ACTIVATION" })
     expect(executor).not.toHaveBeenCalled()
@@ -126,7 +136,7 @@ describe("manager workspace-bound integrations", { timeout: process.platform ===
     await started.promise
     if (change === "disable") await manager.store.setEnabled(pluginId, false, { expectedRevision: manager.snapshot().revision, authorize })
     else if (change === "revoke") manager.authorization.revokeSession(req)
-    else if (change === "workspace") inventory.paths.push(nested)
+    else if (change === "workspace") { inventory.paths.push(nested); await manager.projects.list(true) }
     else vi.stubEnv("COGPIT_DISABLE_PLUGINS", "1")
     finish.resolve({ sensitiveLateResult: true })
     expect(await running).toHaveProperty("error")

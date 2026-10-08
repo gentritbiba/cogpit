@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { SessionAccessLevel } from "../../shared/contracts/sessionAccess"
-import { descriptorForDirName } from "../../shared/session/agent-descriptors"
+import { descriptorForDirName, canonicalSessionId } from "../../shared/session/agent-descriptors"
 import { resolveTranscriptSession, type TranscriptSession } from "../agents/transcriptSession"
 import type { SessionAddress, SubagentFileInfo } from "../agents/types"
 import { resolveSessionFilePath } from "../sessionPaths"
@@ -27,7 +27,7 @@ export interface AuthorizedTranscript extends AuthorizedSession {
 function ownTranscriptSessionId(address: SessionAddress, session: AuthorizedSession, filePath: string | null): string | null {
   if (filePath === null || !session.isRootTranscript) return null
   const spelled = descriptorForDirName(address.dirName).sessionFile.sessionId(address.fileName)
-  return spelled?.toLowerCase() === session.sessionId.toLowerCase() ? spelled : null
+  return spelled !== null && (canonicalSessionId(spelled) ?? spelled.toLowerCase()) === (canonicalSessionId(session.sessionId) ?? session.sessionId.toLowerCase()) ? spelled : null
 }
 
 /**

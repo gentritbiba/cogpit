@@ -94,9 +94,8 @@ export interface MissionControlQuestionItem {
 }
 
 /**
- * An AskUserQuestion call blocking a session, served by GET /api/user-questions.
- * Read from the in-memory resolver map, so being listed proves the question is
- * still live and answerable.
+ * Answerable input served by GET /api/user-questions. Async input can remain
+ * pending across turns and host restarts; RPC input lives with its process.
  */
 export interface MissionControlQuestion {
   sessionId: string

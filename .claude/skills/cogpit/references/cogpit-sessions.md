@@ -28,7 +28,7 @@ cogpit-session new "Fix the failing tests in src/parser and summarize the cause"
 
 - The session runs in your working directory. Use `--cwd DIR` for another
   project and `--worktree NAME` to isolate its edits in a git worktree.
-- `--agent claude|codex|copilot`, `--model`, `--effort` and `--name` pick how
+- `--agent claude|codex|copilot|acp`, `--model`, `--effort` and `--name` pick how
   it runs.
 - A long message can come from stdin: `cogpit-session new - --wait < task.md`.
 - **Permissions:** new sessions run with `--mode bypassPermissions` so nothing
@@ -134,6 +134,14 @@ cogpit-session answer "$ID" --json '{"Which color?":"Blue"}'
 Then `wait` again. `--request` is optional when exactly one matching request is
 pending.
 
+## Reporting to the user
+
+When you run a crew, the user follows it in Cogpit's Crew panel, so do not
+re-list what every session is doing. Report what changed and what you need:
+show progress with a `cogpit-status` block, ask for several decisions at once
+with a `cogpit-decisions` block, and lay out plans with `cogpit-checklist`.
+The `cogpit` skill describes the three blocks.
+
 ## Reading and cleaning up
 
 ```bash
@@ -178,13 +186,17 @@ transcript exists; use `--max-time 30`.
   "worktreeName": "run in a git worktree with this name",
   "mcpConfig": "JSON-encoded mcpServers config",
   "name": "session title",
-  "parentSessionId": "your own session id, to list it later as your child",
+  "parentSessionId": "$COGPIT_SESSION_ID, your own session id",
   "requestId": "8–128 of [A-Za-z0-9_-]; reuse on retries"
 }
 ```
 
 Response: `{ success, requestId?, dirName, fileName, sessionId, initialContent? }`.
 
+- **Pass `parentSessionId` whenever `COGPIT_SESSION_ID` is set.** It is how
+  Cogpit knows you started the session: it lists the session under yours, in
+  your crew, and in `session-children`. Without it the session shows up on its
+  own as if the user had started it. The CLI sets it for you.
 - **Always pass `permissions.mode`.** The server default, `default`, gates each
   tool call on an approval. Nothing answers it unless you do (see
   `/api/session-respond`). `bypassPermissions` runs everything. The old
@@ -279,3 +291,43 @@ handoff, is CLI-only (`cogpit-session new --device`).
 - Sessions stay alive between messages, so follow-ups have no cold start.
 - Claude transcripts live in `~/.claude/projects/<dirName>/`; Codex and Copilot
   transcripts stay in their own trees but go through the same endpoints.
+
+## Durable delivery, results and provider instances
+
+New sessions accept `--instance ID` for a configured provider account. Those
+instances default to supervised permissions; ACP requires a configured executable.
+Every account has its own home and native history.
+
+```bash
+cogpit-session send "$ID" "Next task" --command-id task-followup-001
+cogpit-session receipt task-followup-001 --session "$ID" --wait --timeout 30
+cogpit-session tasks "$COGPIT_SESSION_ID"
+cogpit-session tasks "$COGPIT_SESSION_ID" --ack "$TASK_ID"
+```
+
+Reuse a command ID and identical content after an interrupted response. `queued`
+means accepted by Cogpit; `completed` means the provider reported completion.
+`held` requires reviewing and resuming the queue. `unknown` requires inspecting
+native history before confirming or explicitly resending; never retry it blindly.
+`--steer` joins a supported running turn; `--interrupt` restarts the turn.
+
+A successful `new --wait` acknowledges its returned child result. A timeout leaves
+the child running and preserves its eventual result; Cogpit sends one durable
+notification to the parent. Use `tasks --cancel TASK_ID` to cancel a running child.
+
+The conversation controls expose compatible native resume and a bounded text
+context handoff across providers. The CLI equivalent is:
+
+```bash
+cogpit-session transition "$ID" --agent codex --revision 1 --mode handoff --command-id handoff-001
+cogpit-session transition "$ID" --resolve --command-id handoff-001 --target "$NATIVE_ID"
+```
+
+Keep the original handoff ID when resolving an uncertain creation.
+`--confirm-not-created` is only for a native-history check that confirms no session
+was created. Durable remote operations require the device's `sessionApi: 2`.
+
+`POST /api/session-mcp` offers the same session operations as stateless MCP tools
+(version `2025-03-26`). Each tool takes `argv` without the CLI command name, optional
+`cwd` and `callerSessionId`, and a stable `commandId` for a mutation. Authorization
+is the same as the session CLI; tools cannot access hidden sessions.

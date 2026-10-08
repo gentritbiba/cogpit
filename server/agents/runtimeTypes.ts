@@ -23,9 +23,10 @@ import type { UsageCostRecord } from "./usageScanners"
  * naming one.
  */
 
-import type { ApprovalDecision, UserQuestionAnswers } from "../../shared/contracts/pendingInput"
+import type { ApprovalDecision, UserQuestionAnswers, PendingPlan, PlanResponse } from "../../shared/contracts/pendingInput"
 
 export type { ApprovalDecision, UserQuestionAnswers }
+export type { PendingPlan, PlanResponse }
 
 export interface ImageAttachment {
   data: string
@@ -80,6 +81,8 @@ export interface StartedSession {
 }
 
 export interface SendRequest extends AgentTurnSettings {
+  deliveryIntent?: "queue" | "steer" | "restart"
+  commandId?: string
   message?: string
   images?: ImageAttachment[]
   /** Working directory, when the caller knows it; recovered otherwise. */
@@ -152,6 +155,8 @@ export function isUserQuestionAnswers(value: unknown): value is UserQuestionAnsw
  */
 export interface AcceptedAnswer {
   message: SendRequest | null
+  durableQuestion?: { instanceId: string; sessionId: string; requestId: string }
+  onDelivered?: () => void
 }
 
 /** Where to fork a session: the transcript as loaded, and the turn to keep through. */
@@ -188,12 +193,15 @@ export class AgentRuntimeError extends Error {
 }
 
 export interface AgentRuntime {
+  isBusy?(): boolean
+  readonly instanceId?: string
   readonly kind: AgentKind
   readonly descriptor: AgentDescriptor
   /** Create a session and open its first turn. */
   start(req: StartSessionRequest): Promise<StartedSession>
   /** Deliver a message, resuming the session first when it is not live. */
   send(sessionId: string, req: SendRequest): Promise<SendOutcome>
+  waitForCompletion?(sessionId: string, turnId: string): Promise<TurnResult>
   /** Stop the turn in flight, keeping the session. False when none was. */
   interrupt(sessionId: string): Promise<boolean>
   /** End the session. False when this runtime held nothing for the id. */
@@ -230,6 +238,8 @@ export interface AgentRuntime {
   ): Promise<ResolvedApproval[]>
   /** Questions blocking a session, or every one this runtime holds. */
   listPendingQuestions(sessionId?: string): PendingQuestion[]
+  listPendingPlans?(sessionId?: string): PendingPlan[]
+  respondToPlan?(sessionId: string, requestId: string, response: PlanResponse): Promise<boolean>
   /** Null when the question is not pending. */
   answerQuestion(
     sessionId: string,

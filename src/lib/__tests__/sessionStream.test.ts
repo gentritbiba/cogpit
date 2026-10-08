@@ -6,7 +6,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, authUrl: (url: string
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { SESSION_ACCESS_CHANGED_EVENT, SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 import { onSessionConfigChanged } from "@/lib/sessionConfigEvents"
-import { openSessionStream } from "@/lib/sessionStream"
+import { openSessionStream, __resetStreamsForTest } from "@/lib/sessionStream"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { SESSION_ACCESS_HEADER } from "../../../shared/contracts/sessionAccess"
 
@@ -68,6 +68,7 @@ describe("openSessionStream", () => {
   })
 
   afterEach(() => {
+    __resetStreamsForTest()
     listening.abort()
     vi.unstubAllGlobals()
     __resetCapabilitiesForTest()
@@ -79,9 +80,9 @@ describe("openSessionStream", () => {
     expect(stream.source.url).toBe(`/hub/dev${URL_PATH}`)
 
     const frame = (level: string) => new MessageEvent("access", { data: JSON.stringify({ sessionId: SESSION, level }) })
-    stream.source.dispatchEvent(frame("interact"))
-    stream.source.dispatchEvent(frame("none"))
-    stream.source.dispatchEvent(new MessageEvent("access", { data: "not json" }))
+    FakeEventSource.last.dispatchEvent(frame("interact"))
+    FakeEventSource.last.dispatchEvent(frame("none"))
+    FakeEventSource.last.dispatchEvent(new MessageEvent("access", { data: "not json" }))
 
     expect(events).toEqual([
       { type: SESSION_ACCESS_CHANGED_EVENT, sessionId: SESSION },
@@ -96,11 +97,11 @@ describe("openSessionStream", () => {
     const stopOther = onSessionConfigChanged("00000000-0000-4000-8000-000000000002", other)
     const stream = openSessionStream(URL_PATH)
 
-    stream.source.dispatchEvent(new MessageEvent("session-config", { data: JSON.stringify({ sessionId: SESSION }) }))
-    stream.source.dispatchEvent(new MessageEvent("session-config", { data: SESSION }))
-    stream.source.dispatchEvent(new MessageEvent("session-config", { data: JSON.stringify({ level: "view" }) }))
+    FakeEventSource.last.dispatchEvent(new MessageEvent("session-config", { data: JSON.stringify({ sessionId: SESSION }) }))
+    FakeEventSource.last.dispatchEvent(new MessageEvent("session-config", { data: SESSION }))
+    FakeEventSource.last.dispatchEvent(new MessageEvent("session-config", { data: JSON.stringify({ level: "view" }) }))
     stream.close()
-    stream.source.dispatchEvent(new MessageEvent("session-config", { data: SESSION }))
+    FakeEventSource.last.dispatchEvent(new MessageEvent("session-config", { data: SESSION }))
     stopChanged()
     stopOther()
 
@@ -118,8 +119,10 @@ describe("openSessionStream", () => {
     FakeEventSource.last.dispatchEvent(new Event("error"))
     expect(mocks.authFetch).not.toHaveBeenCalled()
 
+    __resetStreamsForTest()
+    openSessionStream(URL_PATH)
     FakeEventSource.last.giveUp()
-    expect(mocks.authFetch).toHaveBeenCalledWith(URL_PATH, { signal: expect.any(AbortSignal) })
+    expect(mocks.authFetch).toHaveBeenCalledWith(`/hub/dev${URL_PATH}`, { signal: expect.any(AbortSignal) })
     await vi.waitFor(() => expect(cancel).toHaveBeenCalled())
   })
 
@@ -135,8 +138,10 @@ describe("openSessionStream", () => {
     const closedFirst = vi.fn()
     const lost = vi.fn()
 
-    openSessionStream(TEAM_URL, { onLost: unavailable })
+    const first = openSessionStream(TEAM_URL, { onLost: unavailable })
     FakeEventSource.last.giveUp()
+    await Promise.resolve()
+    first.close()
     const closed = openSessionStream(TEAM_URL, { onLost: closedFirst })
     FakeEventSource.last.giveUp()
     closed.close()
@@ -152,7 +157,9 @@ describe("openSessionStream", () => {
   it("asks nothing of a personal server, and stops asking once closed", () => {
     openSessionStream(URL_PATH)
     FakeEventSource.last.giveUp()
-    expect(mocks.authFetch).not.toHaveBeenCalled()
+    expect(mocks.authFetch).toHaveBeenCalledOnce()
+    __resetStreamsForTest()
+    mocks.authFetch.mockClear()
 
     signInTeamMember()
     mocks.authFetch.mockReturnValue(new Promise(() => undefined))

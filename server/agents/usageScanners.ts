@@ -11,6 +11,10 @@ import type { AgentKind } from "../../shared/session/agent-descriptors"
 import type { UsageCostProvider, UsageCostTokenTotals } from "../../shared/contracts/usageCost"
 import { totalUsageCostTokens } from "../../shared/contracts/usageCost"
 import { asRecord } from "../../shared/objects"
+import { instanceSessionId } from "../../shared/session/instances"
+export function scopeUsageRecords(records: UsageCostRecord[], instanceId = "default"): UsageCostRecord[] {
+  return instanceId === "default" ? records : records.map((record) => ({ ...record, sessionId: instanceSessionId(instanceId, record.sessionId), dedupeKey: record.dedupeKey ? `${instanceId}:${record.dedupeKey}` : null }))
+}
 
 export interface UsageCostRecord {
   provider: UsageCostProvider
@@ -418,6 +422,7 @@ export interface UsageScanner {
 }
 
 const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> = Object.freeze({
+  acp: () => ({ wantsLine: () => false, accept: () => [] }),
   claude: (): UsageScanner => ({
     // Stateless: every assistant record repeats its message's whole usage
     // object, so a line is either self-contained or of no interest.

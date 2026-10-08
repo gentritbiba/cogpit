@@ -38,6 +38,15 @@ vi.mock("@/lib/shiki", () => ({
   getLangFromPath: vi.fn().mockReturnValue(null),
 }))
 
+const mockReveal = vi.fn()
+vi.mock("@/lib/revealSession", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/revealSession")>(),
+  revealSessionById: (...args: unknown[]) => mockReveal(...args),
+}))
+vi.mock("@/hooks/useSessionNamer", () => ({
+  useSessionNamer: () => (sessionId: string) => (sessionId.startsWith("01a11695") ? "w3-rooftop" : undefined),
+}))
+
 vi.mock("@/components/timeline/LiveSubagentTranscript", () => ({
   LiveSubagentTranscript: ({ toolUseId }: { toolUseId: string }) => (
     <div data-testid="live-subagent-transcript">{toolUseId}</div>
@@ -1061,7 +1070,7 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     expect(String(mockSendMessage.mock.calls[0][0])).toContain("Option A")
   })
 
-  it("delivers the answer as a message when the request throws", async () => {
+  it("retains the answer when durable delivery is uncertain", async () => {
     mockSendMessage.mockClear()
     mockJsonFetchFn.mockRejectedValue(new Error("offline"))
 
@@ -1072,8 +1081,9 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     fireEvent.click(screen.getByText("Send answer"))
 
     await waitFor(() => {
-      expect(mockSendMessage).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("alert")).toHaveTextContent("could not be confirmed")
     })
+    expect(mockSendMessage).not.toHaveBeenCalled()
   })
 })
 
@@ -1818,5 +1828,30 @@ describe("structured file-change results", () => {
     expect(screen.getByRole("region", { name: "File diff: /a.ts" })).toHaveTextContent("+after")
     expect(screen.getByText(/2 additional file diffs omitted/)).toBeVisible()
     expect(screen.getByText("Command output")).toBeVisible()
+  })
+})
+
+describe("ToolCallCard crew calls", () => {
+  const LANE = "01a11695-2938-7ec2-9d9c-0c8af023bd5f"
+
+  it("reads a cogpit-session call as what it did, with links to the sessions it touched", async () => {
+    const call = {
+      ...makeToolCall("Bash", { command: `cogpit-session send ${LANE} "rebase onto main" --command-id r3` }),
+      result: `{"sessionId":"${LANE}","delivery":"enqueued"}`,
+    }
+    render(<ToolCallCard toolCall={call} />)
+
+    const header = screen.getByRole("button", { name: /Toggle Crew details/ })
+    expect(header).toHaveTextContent("Messaged w3-rooftop")
+    expect(header).toHaveTextContent("Crew")
+
+    fireEvent.click(header)
+    fireEvent.click(await screen.findByRole("button", { name: "w3-rooftop" }))
+    expect(mockReveal).toHaveBeenCalledWith(LANE)
+  })
+
+  it("leaves other shell commands as they are", () => {
+    render(<ToolCallCard toolCall={makeToolCall("Bash", { command: "git status", description: "Show status" })} />)
+    expect(screen.getByRole("button", { name: /Toggle Run command details: Show status/ })).toBeInTheDocument()
   })
 })

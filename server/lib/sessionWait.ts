@@ -47,8 +47,8 @@ export async function readSessionState(sessionId: string): Promise<SessionState>
   // The transcript decides whose session it is; a live session whose
   // transcript is not on disk yet falls back to the runtime holding it.
   const filePath = await findJsonlPath(sessionId)
-  const kind = storeForPath(filePath)?.kind
-  const runtime = kind ? runtimeFor(kind) : runtimeForSession(sessionId)
+  const store = storeForPath(filePath)
+  const runtime = store ? runtimeFor(store.kind, store.instanceId) : runtimeForSession(sessionId)
   if (!runtime) {
     return { sessionId, outcome: "not_found", live: false, running: false, waiting: [] }
   }

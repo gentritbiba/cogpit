@@ -341,6 +341,7 @@ export class CopilotRuntime {
 
   private readonly activeSessions = new Set<string>()
   private readonly activeTurns = new Set<string>()
+  private readonly turnObservers = new Map<string, Set<{ resolve: (result: { isError: boolean; message?: string }) => void; reject: (error: Error) => void }>>()
   private readonly sendingSessions = new Set<string>()
   private readonly openingSessions = new Set<string>()
   private readonly conflictingResumes = new Set<string>()
@@ -348,7 +349,7 @@ export class CopilotRuntime {
   private readonly pendingUserInputs = new Map<string, InternalPendingUserInput>()
   private readonly pendingExitPlans = new Map<string, InternalPendingExitPlan>()
   constructor(options: CopilotRuntimeOptions = {}) {
-    this.command = options.command ?? "copilot"
+    this.command = options.command ?? process.env.COGPIT_PROVIDER_EXECUTABLE ?? "copilot"
     this.cwd = options.cwd
     this.env = options.env ?? process.env
     this.transportTimeoutMs = options.transportTimeoutMs ?? DEFAULT_TRANSPORT_TIMEOUT_MS
@@ -362,6 +363,18 @@ export class CopilotRuntime {
 
   isTurnActive(sessionId: string): boolean {
     return this.activeTurns.has(sessionId)
+  }
+  observeTurn(sessionId: string) {
+    let observer!: { resolve: (result: { isError: boolean; message?: string }) => void; reject: (error: Error) => void }
+    const completion = new Promise<{ isError: boolean; message?: string }>((resolve, reject) => { observer = { resolve, reject } })
+    const observers = this.turnObservers.get(sessionId) ?? new Set()
+    observers.add(observer); this.turnObservers.set(sessionId, observers)
+    return { completion, cancel: () => { observers.delete(observer); if (!observers.size) this.turnObservers.delete(sessionId); observer.resolve({ isError: true, message: "Message was not accepted" }) } }
+  }
+  private finishObservedTurn(sessionId: string, result: { isError: boolean; message?: string } | Error) {
+    const observers = this.turnObservers.get(sessionId)
+    this.turnObservers.delete(sessionId)
+    for (const observer of observers ?? []) { if (result instanceof Error) observer.reject(result); else observer.resolve(result) }
   }
 
   getActiveSessionIds(): string[] {
@@ -603,6 +616,7 @@ export class CopilotRuntime {
     this.assertSessionActive(sessionId)
     await this.request("session.abort", { sessionId })
     this.activeTurns.delete(sessionId)
+    this.finishObservedTurn(sessionId, { isError: true, message: "Turn was interrupted" })
     this.clearPendingInteractions(sessionId, "Copilot turn was aborted")
   }
 
@@ -1223,6 +1237,7 @@ export class CopilotRuntime {
   }
 
   private clearSessionState(sessionId: string, reason: string): void {
+    this.finishObservedTurn(sessionId, new Error(reason))
     this.activeSessions.delete(sessionId)
     this.activeTurns.delete(sessionId)
     this.sendingSessions.delete(sessionId)
@@ -1260,6 +1275,9 @@ export class CopilotRuntime {
       || notification.event.type === "session.shutdown"
     ) {
       this.activeTurns.delete(notification.sessionId)
+      const type = notification.event.type
+      const data = notification.event.data
+      this.finishObservedTurn(notification.sessionId, type === "session.shutdown" ? new Error("Session shut down before completion") : { isError: type !== "session.idle", message: type === "session.error" && isRecord(data) && typeof data.message === "string" ? data.message : type === "abort" ? "Turn was interrupted" : type === "session.error" ? "Provider turn failed" : undefined })
       if (
         notification.event.type === "abort"
         || notification.event.type === "session.error"

@@ -28,7 +28,7 @@ export const THROWAWAY_USED_SUFFIX = ".used"
 export const NO_COGPIT_SESSION = ""
 
 /** Also rendered into the shim, which reads `COGPIT_SESSION_ID` before using it. */
-export const COGPIT_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/
+export const COGPIT_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,128}[A-Za-z0-9_-]{0,128}$/
 
 export class BrowserNameError extends Error {
   constructor(message: string) {

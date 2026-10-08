@@ -1,6 +1,7 @@
 import { descriptorForDirName } from "@/lib/agents"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { sortSessionsByRecency } from "../../../shared/session-ordering"
+import { foldCrewRows } from "./crew"
 import { countLiveSessions } from "./liveSessionSummary"
 import { groupByProject, primaryProjectSession, sessionGroupKey } from "./sessionListView"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
@@ -21,6 +22,8 @@ export interface ProjectScopeOption {
   needsYou: number
   /** Distinct worktrees the listed sessions ran in. */
   worktrees: number
+  /** Listed sessions that started a crew of their own. */
+  crews: number
 }
 
 /** Where a group's new sessions start: the main checkout, even when only its worktrees have sessions listed. */
@@ -36,11 +39,16 @@ function worktreeCount(group: ActiveSessionInfo[]): number {
   return new Set(names.filter(Boolean)).size
 }
 
+/**
+ * One option per project the listed sessions belong to. Pass the sessions a
+ * list places on its own: a crew member counts toward its root's project.
+ */
 export function projectScopeOptions(
   sessions: ActiveSessionInfo[],
   procBySession: Map<string, RunningProcess>,
   projectNames: Record<string, string>,
   needsYou: ReadonlySet<string>,
+  crewOf: ReadonlyMap<string, readonly ActiveSessionInfo[]> = new Map(),
 ): ProjectScopeOption[] {
   return [...groupByProject(sessions).entries()].map(([key, group]) => {
     const primary = primaryProjectSession(group)!
@@ -54,13 +62,34 @@ export function projectScopeOptions(
       live: countLiveSessions(group, procBySession),
       needsYou: group.filter((s) => needsYou.has(s.sessionId)).length,
       worktrees: worktreeCount(group),
+      crews: group.filter((s) => crewOf.has(s.sessionId)).length,
     }
   })
 }
 
-export function scopeSessions(sessions: ActiveSessionInfo[], scope: string | null): ActiveSessionInfo[] {
+/**
+ * The sessions in one project. Grouped, a crew follows its root: members
+ * come along from other folders, and a member here whose root is elsewhere
+ * stays, on its own.
+ */
+export function scopeSessions(
+  sessions: ActiveSessionInfo[],
+  scope: string | null,
+  grouped = false,
+): ActiveSessionInfo[] {
   if (scope === null) return sessions
-  return sessions.filter((s) => sessionGroupKey(s) === scope)
+  if (!grouped) return sessions.filter((s) => sessionGroupKey(s) === scope)
+  const { topLevel, crewOf } = foldCrewRows(sessions)
+  const scoped = new Set<ActiveSessionInfo>()
+  for (const unit of topLevel) {
+    if (sessionGroupKey(unit) !== scope) continue
+    scoped.add(unit)
+    for (const member of crewOf.get(unit.sessionId) ?? []) scoped.add(member)
+  }
+  for (const members of crewOf.values()) {
+    for (const member of members) if (sessionGroupKey(member) === scope) scoped.add(member)
+  }
+  return sessions.filter((s) => scoped.has(s))
 }
 
 /** Listed sessions first, then any older ones not already present, newest first. */

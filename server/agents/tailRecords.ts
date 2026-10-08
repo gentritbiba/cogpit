@@ -206,6 +206,7 @@ const copilotTail: AgentTailFormat = {
 // ── Registry ────────────────────────────────────────────────────────────────
 
 const TAIL_FORMATS: Readonly<Record<AgentKind, AgentTailFormat>> = Object.freeze({
+  acp: claudeTail,
   claude: claudeTail,
   codex: codexTail,
   copilot: copilotTail,

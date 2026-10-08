@@ -51,8 +51,8 @@ vi.mock("@/components/StatsPanel", () => ({
   StatsPanel: () => <div data-testid="stats-panel" />,
 }))
 
-vi.mock("@/components/MissionControl", () => ({
-  MissionControl: () => <div data-testid="mission-control" />,
+vi.mock("@/components/home/MissionHome", () => ({
+  MissionHome: () => <div data-testid="mission-control" />,
 }))
 
 vi.mock("@/components/WorktreePanel", () => ({
@@ -321,7 +321,7 @@ describe("DesktopWorkspace", () => {
 
       render(<DesktopWorkspace {...makeProps()} />)
 
-      expect(await screen.findByTestId("dashboard")).toBeInTheDocument()
+      expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Close Reports" })).not.toBeInTheDocument()
     })
 
@@ -330,7 +330,7 @@ describe("DesktopWorkspace", () => {
 
       render(<DesktopWorkspace {...makeProps()} />)
 
-      expect(await screen.findByTestId("dashboard")).toBeInTheDocument()
+      expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
     })
   })
 
@@ -346,12 +346,13 @@ describe("DesktopWorkspace", () => {
     expect(screen.queryByTestId("dashboard")).not.toBeInTheDocument()
   })
 
-  it("renders the shared project dashboard for the empty home state", () => {
+  it("renders Mission Control for the empty home state and folds the sidebar away", async () => {
     setContexts()
 
     render(<DesktopWorkspace {...makeProps()} />)
 
-    expect(screen.getByTestId("dashboard")).toBeInTheDocument()
+    expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
+    expect(screen.queryByTestId("session-browser")).not.toBeInTheDocument()
   })
 
   it("floats the chrome over the main pane and puts the header row in the sidebar", () => {

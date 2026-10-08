@@ -32,7 +32,7 @@ vi.mock("@/components/ProviderUpdateBanner", () => ({ ProviderUpdateBanner: () =
 vi.mock("@/components/UpdateBanner", () => ({ UpdateBanner: () => null }))
 vi.mock("../SharedAppViews", () => ({
   PrimarySessionBrowser: () => <div>Session list</div>,
-  ProjectDashboard: () => null,
+  MissionControlView: () => null,
   ExtensionMainView: ({ view }: { view: EditionMainView }) => <div>{view.label} view</div>,
 }))
 

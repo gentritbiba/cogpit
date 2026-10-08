@@ -220,7 +220,7 @@ export function getProjectsRoot(): string {
  * second case covers a CLI that has been installed but never run.
  */
 async function detectBootstrapConfig(): Promise<AppConfig | null> {
-  const discoverable = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable)
+  const discoverable = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable && !descriptor.cli.requiresConfiguration)
   const placeholder = () => join(homedir(), CONFIGURED_HOME_AGENT.cli.homeDirName)
 
   for (const descriptor of discoverable) {

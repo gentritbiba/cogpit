@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<title>Coordinator components: mockup</title>
+<style>
+@font-face { font-family: "Geist"; src: url("../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+:root {
+  --bg: oklch(0.105 0 0); --card: oklch(0.13 0 0); --popover: oklch(0.16 0 0); --muted: oklch(0.18 0 0); --accent: oklch(0.2 0 0); --composer: oklch(0.19 0 0); --border: oklch(0.24 0 0);
+  --fg: oklch(0.985 0 0); --fg-muted: oklch(0.708 0 0); --fg-dim: oklch(0.55 0 0);
+  --success: oklch(0.72 0.17 151); --warning: oklch(0.78 0.15 78); --info: oklch(0.72 0.14 255); --destructive: oklch(0.64 0.22 25);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.4; color: var(--fg); background: var(--bg); font-feature-settings: "tnum";
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1440px; height: 1060px; overflow: hidden; display: grid; grid-template-columns: 1fr 44px; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+svg { display: block; }
+.muted { color: var(--fg-muted); } .dim { color: var(--fg-dim); }
+.mono { font-family: "Geist Mono", ui-monospace, monospace; }
+.chat { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.pills { position: absolute; top: 10px; left: 14px; right: 14px; display: flex; justify-content: space-between; z-index: 2; }
+.pill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--popover); border: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+.pill.icon { width: 32px; padding: 0; justify-content: center; color: var(--fg-muted); position: relative; }
+.pill .cnt { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; padding: 0 4px; }
+.pill .pct { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: color-mix(in oklch, var(--warning) 20%, transparent); color: var(--warning); }
+.pillgroup { display: flex; gap: 8px; }
+.timeline { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 64px 0 0; width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.asst { font-size: 14px; line-height: 1.6; }
+.asst p { margin-bottom: 8px; }
+.asst code { font-family: "Geist Mono", monospace; font-size: 12px; background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+.card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.chip { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; color: var(--fg-muted); white-space: nowrap; display: inline-flex; gap: 4px; align-items: center; }
+.chip.ok { color: var(--success); border-color: color-mix(in oklch, var(--success) 30%, transparent); }
+.chip.warn { color: var(--warning); border-color: color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 10%, transparent); }
+.btn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.ghost { border-color: transparent; color: var(--fg-muted); }
+.btn.on { background: var(--accent); border-color: var(--fg-dim); }
+.btn.xs { height: 22px; font-size: 11.5px; padding: 0 8px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+.dot.halo { box-shadow: 0 0 0 2px color-mix(in oklch, var(--success) 30%, transparent); }
+.dot.warn { background: var(--warning); } .dot.done { background: var(--fg-dim); }
+.strip { display: inline-flex; gap: 2px; }
+.strip .cell { height: 8px; width: 11px; border-radius: 2px; background: var(--success); box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--success) 25%, transparent); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
+/* derived card */
+.derived { padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; }
+.derived .ttl { font-weight: 500; display: flex; align-items: center; gap: 10px; }
+.derived .names { grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 6px; }
+.derived .names span { font-size: 12px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
+.derived .names span b { color: var(--fg); font-weight: 500; }
+.derived .fold { grid-column: 1 / 3; font-size: 12px; color: var(--fg-dim); }
+
+/* status block */
+.status { padding: 12px 14px; }
+.status .hd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.status .hd b { font-weight: 500; font-size: 13.5px; }
+.status .hd .src { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+.status .bar { height: 6px; border-radius: 3px; background: var(--muted); position: relative; overflow: hidden; }
+.status .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 35.3%; background: var(--fg); border-radius: 3px; }
+.status .pct { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--fg-muted); margin: 6px 0 10px; }
+.status .vals { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.status .vals div { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; border-top: 1px solid var(--border); padding-top: 6px; }
+.status .vals div span:first-child { color: var(--fg-muted); }
+.status .vals div.warn span { color: var(--warning); }
+
+/* decisions block */
+.decisions { padding: 12px 14px; }
+.decisions .hd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.decisions .hd b { font-weight: 500; font-size: 13.5px; }
+.decisions .hd span { color: var(--fg-muted); font-size: 12px; }
+.decisions .hd .src { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+.dec { display: grid; grid-template-columns: 22px 1fr; gap: 2px 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+.dec:first-of-type { border-top: 0; }
+.dec .n { font-size: 11px; color: var(--fg-dim); text-align: right; padding-top: 3px; }
+.dec .q { font-size: 13px; font-weight: 500; }
+.dec .d { grid-column: 2; font-size: 12px; color: var(--fg-muted); }
+.dec .opts { grid-column: 2; display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.dec .opts .rec { font-size: 11px; color: var(--fg-dim); margin-left: 4px; }
+.dec.answered .q { color: var(--fg-muted); font-weight: 400; }
+.dec.answered .ans { grid-column: 2; font-size: 12.5px; color: var(--success); display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.dec.answered .ans .edit { color: var(--fg-dim); font-size: 11px; }
+.decisions .ft { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); margin-top: 4px; font-size: 12px; color: var(--fg-muted); }
+.decisions .ft .sp { flex: 1; }
+.decisions .ft kbd { font-family: inherit; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 11px; color: var(--fg-dim); }
+
+/* checklist block */
+.checklist { padding: 12px 14px; }
+.checklist .hd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.checklist .hd b { font-weight: 500; font-size: 13.5px; }
+.checklist .hd span { color: var(--fg-muted); font-size: 12px; }
+.ck { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.ck .g { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--fg-dim); display: grid; place-items: center; flex: none; font-size: 10px; }
+.ck.done .g { border-color: var(--success); color: var(--success); }
+.ck.done span { color: var(--fg-muted); text-decoration: line-through; text-decoration-color: var(--fg-dim); }
+.ck.doing .g { border-color: var(--success); background: color-mix(in oklch, var(--success) 25%, transparent); }
+.ck.blocked .g { border-color: var(--warning); color: var(--warning); }
+.ck.blocked span { color: var(--warning); }
+.ck .t { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+
+/* pinned board + composer */
+.foot { flex: none; width: 920px; margin: 10px auto 40px; display: flex; flex-direction: column; gap: 10px; }
+.board { border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.board .line { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 12.5px; }
+.board .line b { font-weight: 500; }
+.board .line .w { color: var(--warning); }
+.board .line .src { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+.board .line .chev { color: var(--fg-muted); }
+.board .body { border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+.board .col { padding: 10px 14px; border-left: 1px solid var(--border); }
+.board .col:first-child { border-left: 0; }
+.board .col h4 { font-size: 11.5px; font-weight: 500; color: var(--fg-muted); margin-bottom: 6px; }
+.board .col h4.w { color: var(--warning); }
+.board .col div { font-size: 12.5px; padding: 2px 0; display: flex; gap: 8px; align-items: center; }
+.composer { border: 1px solid var(--border); border-radius: 14px; background: var(--composer); padding: 14px 16px 12px; }
+.composer .ph { color: var(--fg-muted); font-size: 14px; margin-bottom: 14px; }
+.composer .row { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+.composer .row .r { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.rail { border-left: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 14px; color: var(--fg-muted); }
+.rail .ri { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; position: relative; }
+.rail .badge { position: absolute; top: -4px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--warning); color: oklch(0.16 0.03 72); font-size: 10px; font-weight: 600; display: grid; place-items: center; }
+.label { font-size: 11px; color: var(--fg-dim); margin: -6px 0 -8px; }
+</style>
+</head>
+<body>
+<section class="chat">
+  <div class="pills">
+    <div class="pillgroup">
+      <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div>
+      <div class="pill"><span class="muted">performance-experiments</span><span class="dim">/</span><b style="font-weight:500">Wave 3 coordinator</b><span class="muted mono" style="font-size:12px">Sonnet 5.5</span><span class="pct">17%</span></div>
+    </div>
+    <div class="pillgroup">
+      <div class="pill icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="cnt">4</span></div>
+      <div class="pill icon">⋯</div>
+    </div>
+  </div>
+
+  <div class="timeline">
+    <div class="label">Tier 1 · derived from the cogpit-session calls in this turn</div>
+    <div class="card derived">
+      <div class="ttl"><span class="strip"><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span></span>Started 6 sessions <span class="muted" style="font-weight:400">· Opus 5.5 · one worktree each</span></div>
+      <button class="btn ghost xs">Open crew ›</button>
+      <div class="names"><span><b>w3-access-gaps</b> G08.1, G08.2</span><span><b>w3-perf-ship</b> G19.1</span><span><b>w3-parity-soak</b> G22.3</span><span><b>w3-ops-tooling</b> G11.3, G15.3, G22.1</span><span><b>w3-cost-model</b> G21.2</span><span><b>w3-existing-data</b> research only</span></div>
+      <div class="fold">▸ Briefs (6)</div>
+    </div>
+
+    <div class="asst">
+      <p>Six lanes are running, each in its own worktree with a Codex reviewer. Here is where the board stands and what I need from you.</p>
+    </div>
+
+    <div class="label">Tier 2 · declared in the reply as <span class="mono">cogpit status</span>, <span class="mono">cogpit decisions</span> and <span class="mono">cogpit checklist</span> blocks</div>
+    <div class="two">
+      <div class="card status">
+        <div class="hd"><b>Wave 3 · 99 tickets</b><span class="src">from the reply</span></div>
+        <div class="bar"><i></i></div>
+        <div class="pct"><span>35 of 99 done</span><span>35%</span></div>
+        <div class="vals">
+          <div><span>Merged today</span><span>7 pull requests</span></div>
+          <div><span>Built, waiting to merge</span><span>12 tickets</span></div>
+          <div class="warn"><span>Blocked on you</span><span>4</span></div>
+          <div><span>Blocked on others</span><span>9</span></div>
+        </div>
+      </div>
+
+      <div class="card checklist">
+        <div class="hd"><b>Shipping w3-rooftop</b><span>3 of 5</span></div>
+        <div class="ck done"><span class="g">✓</span><span>Fix the P1 and both P2 findings</span></div>
+        <div class="ck done"><span class="g">✓</span><span>Rebase onto main c86033b1</span></div>
+        <div class="ck doing"><span class="g"></span><span>Codex review round 3</span><span class="t">running</span></div>
+        <div class="ck blocked"><span class="g">!</span><span>Apply the ruleset (needs your permission)</span><span class="t">42m</span></div>
+        <div class="ck"><span class="g"></span><span>Open the PR and merge when green</span></div>
+      </div>
+    </div>
+
+    <div class="card decisions">
+      <div class="hd"><b>3 decisions</b><span>answer in any order; one message goes back when you send</span><span class="src">from the reply</span></div>
+      <div class="dec answered">
+        <span class="n">1</span><span class="q">Bump sharp to 0.34 through its own PR?</span>
+        <span class="ans">✓ Approve <span class="edit">change</span></span>
+      </div>
+      <div class="dec answered">
+        <span class="n">2</span><span class="q">Run sentry-cli login yourself today?</span>
+        <span class="ans">✓ Later <span class="edit">change</span></span>
+      </div>
+      <div class="dec">
+        <span class="n">3</span><span class="q">Deploy the status page Worker?</span>
+        <span class="d">Verifies the endpoints after deploy and updates both deployment registries.</span>
+        <span class="opts"><button class="btn xs on">Approve</button><button class="btn xs">Hold</button><span class="rec">Enter picks Approve</span></span>
+      </div>
+      <div class="ft"><span>2 of 3 answered</span><span class="sp"></span><kbd>1</kbd><kbd>2</kbd> pick · <kbd>⏎</kbd> recommended · <kbd>⌘⏎</kbd> send<button class="btn xs primary" style="margin-left:10px">Send 2 answers</button></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="label" style="margin:0 0 -2px">Tier 3 · the board, kept current with <span class="mono">cogpit-session board</span>, pinned above the composer</div>
+    <div class="board">
+      <div class="line"><b>Wave 3</b><span>35 of 99</span><span>·</span><span>7 merged today</span><span>·</span><span class="w">4 need you</span><span class="src">updated 2m ago by Wave 3 coordinator · edit</span><span class="chev">⌃</span></div>
+      <div class="body">
+        <div class="col"><h4>Now</h4><div><span class="dot halo"></span>storefront PR shipping</div><div><span class="dot halo"></span>inventory rebasing</div><div><span class="dot halo"></span>G08.3 verification · Codex</div></div>
+        <div class="col"><h4 class="w">Needs you</h4><div><span class="dot warn"></span>sentry-cli login</div><div><span class="dot warn"></span>admin hostname</div><div><span class="dot warn"></span>second operator</div><div><span class="dot warn"></span>ruleset permission · w3-rooftop</div></div>
+        <div class="col"><h4>Done today</h4><div><span class="chip ok">#251</span>cost model</div><div><span class="chip ok">#252</span>ops tooling</div><div><span class="chip ok">#249</span>perf ship</div><div class="dim">+4 more</div></div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="ph">Send a message… (Enter to send)</div>
+      <div class="row"><span>⛨ Full access ⌄</span><span>⚙ MCPs 9/9 ⌄</span><span class="r"><span>Sonnet 5.5 · Extra High ⌄</span><span class="dim">➤</span></span></div>
+    </div>
+  </div>
+</section>
+
+<nav class="rail">
+  <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg><span class="badge">4</span></span>
+  <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5 6.5 17M12 11.5l5.5 5.5"/></svg></span>
+  <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+  <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></span>
+  <span class="ri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+</nav>
+</body>
+</html>

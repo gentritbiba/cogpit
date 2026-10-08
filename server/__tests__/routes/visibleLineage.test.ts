@@ -29,6 +29,17 @@ describe("visibleLineage", () => {
     })
   })
 
+  it("drops a crew placement that names a session the caller cannot see, titles and all", async () => {
+    const lineage = visibleLineage(checkHiding(["coordinator"]))
+    const crew = { rootId: "coordinator", parentId: "lane", startedAt: 1, rootTitle: "Wave 3 coordinator" }
+
+    await expect(lineage({ sessionId: "reviewer", crew })).resolves.toStrictEqual({ sessionId: "reviewer", crew: undefined })
+    await expect(lineage({ sessionId: "lane", crew: { ...crew, parentId: "coordinator" } }))
+      .resolves.toStrictEqual({ sessionId: "lane", crew: undefined })
+    await expect(visibleLineage(checkHiding([]))({ sessionId: "reviewer", crew }))
+      .resolves.toStrictEqual({ sessionId: "reviewer", crew })
+  })
+
   it("keeps a row whose references the caller can see", async () => {
     const row = { sessionId: "mine", branchedFrom: { sessionId: "shared" }, parentSessionId: null }
     await expect(visibleLineage(checkHiding([]))(row)).resolves.toEqual(row)

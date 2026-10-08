@@ -11,6 +11,11 @@ export interface TrackedSessionSnapshot {
   isActiveTurn?: boolean
   /** Teammates report through their lead, mirroring classifyAttention. */
   isTeammate?: boolean
+  /**
+   * Started by another session through Cogpit, which receives its result: a
+   * finished turn is the lead's to report, while a blocked one still needs the user.
+   */
+  reportsToLead?: boolean
 }
 
 export type SessionAlertReason = "turnComplete" | "permission"
@@ -93,7 +98,7 @@ export class SessionAlertTracker {
       // Only a session this tracker watched working can complete. Without that
       // guard the first sweep would announce every idle session in the list.
       const finished = this.seededRunningState && this.running.has(id) && isFinished(session)
-      if (finished && !isBlocked && this.insertIfNew(id, "turnComplete")) {
+      if (finished && !isBlocked && !session.reportsToLead && this.insertIfNew(id, "turnComplete")) {
         alerts.push({ session, reason: "turnComplete" })
       }
     }

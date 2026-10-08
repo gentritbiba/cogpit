@@ -9,6 +9,22 @@ export type ApprovalDecision = "allow" | "allow_always" | "deny"
 /** One answer per question, in order, or keyed by the question text. */
 export type UserQuestionAnswers = Record<string, string> | string[] | string
 
+export interface PendingPlan {
+  sessionId: string
+  requestId: string
+  summary: string
+  planContent?: string
+  actions: string[]
+  recommendedAction: string
+  askedAt: number
+}
+
+export interface PlanResponse {
+  approved: boolean
+  selectedAction?: string
+  feedback?: string
+}
+
 export type PendingInput =
   | {
       kind: "permission"
@@ -17,11 +33,13 @@ export type PendingInput =
       summary: string
       title?: string
       availableDecisions: ApprovalDecision[]
+      askedAt?: number
     }
   | {
       kind: "question"
       requestId: string
       questions: Array<{ question: string; multiSelect: boolean; options: string[] }>
+      askedAt?: number
     }
   | {
       kind: "plan"
@@ -29,6 +47,7 @@ export type PendingInput =
       summary: string
       actions: string[]
       recommendedAction: string
+      askedAt?: number
     }
 
 export type PendingInputResponse =

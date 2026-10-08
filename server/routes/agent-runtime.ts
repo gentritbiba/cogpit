@@ -14,7 +14,7 @@ import { sendJson, type UseFn } from "../http"
  * `available: false`; one that cannot reports a 502.
  */
 export function registerAgentRuntimeRoutes(use: UseFn): void {
-  for (const runtime of allRuntimes()) {
+  for (const runtime of allRuntimes().filter((runtime) => !runtime.instanceId && !runtime.descriptor.cli.requiresConfiguration)) {
     use(`/api/${runtime.descriptor.binName}/runtime`, (req, res, next) => {
       if (req.method !== "GET") return next()
       const url = new URL(req.url ?? "/", "http://localhost")

@@ -134,6 +134,26 @@ export interface SDKSessionState {
 }
 
 export const sdkSessions = new Map<string, SDKSessionState>()
+const inputTurns = new WeakMap<SDKSessionState, { accepted: number; completed: number }>()
+const resultObservers = new WeakMap<SDKSessionState, Set<{ turn: number; resolve: (result: Record<string, unknown>) => void }>>()
+export function observeSDKResult(state: SDKSessionState) {
+  let observer!: { turn: number; resolve: (result: Record<string, unknown>) => void }
+  const turn = (inputTurns.get(state)?.accepted ?? Number(state.running)) + 1
+  const completion = new Promise<Record<string, unknown>>((resolve) => { observer = { turn, resolve } })
+  const observers = resultObservers.get(state) ?? new Set()
+  observers.add(observer); resultObservers.set(state, observers)
+  return { completion, cancel: () => { observers.delete(observer); observer.resolve({ is_error: true, result: "Message was not accepted" }) } }
+}
+function notifyResultObservers(state: SDKSessionState, result: Record<string, unknown>, end = false) {
+  const turns = inputTurns.get(state)
+  if (turns && !end) turns.completed++
+  const observers = resultObservers.get(state)
+  for (const observer of observers ?? []) {
+    if (!end && observer.turn > (turns?.completed ?? 0)) continue
+    observers!.delete(observer); observer.resolve(result)
+  }
+  if (!observers?.size) resultObservers.delete(state)
+}
 
 // ── Attach the sub-agent file watcher once the JSONL path is known ──
 
@@ -460,6 +480,7 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     state.running = (msg.queued_turn_count ?? 0) > 0
     streamBus.clear(state.sessionId)
     const result = msg as unknown as Record<string, unknown>
+    notifyResultObservers(state, result)
     if (state.onResult) {
       state.onResult(result)
       state.onResult = null
@@ -643,6 +664,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 
   const queryOpts = buildQueryOptions(state, opts)
   const messageStream = new SDKMessageStream()
+  inputTurns.set(state, { accepted: 1, completed: 0 })
   messageStream.enqueue(buildUserMessage(prompt, opts.images))
   state.messageStream = messageStream
 
@@ -666,6 +688,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       // Append captured stderr so the surfaced error is verbose enough to
       // diagnose (the SDK's own message is just "exited with code 1").
       const result = detail && !base.includes(detail) ? `${base}\n\n${detail}` : base
+      notifyResultObservers(state, { is_error: true, result }, true)
       if (state.onResult) {
         state.onResult({ type: "result", is_error: true, result })
         state.onResult = null
@@ -690,6 +713,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       if (state.activeQuery === q) state.activeQuery = null
       if (state.abort === queryOpts.abortController) state.abort = null
       if (ownsSession) rejectAllPending(state, "Session ended")
+      notifyResultObservers(state, { is_error: true, result: "Session ended before the turn completed" }, true)
       // The iterator can finish without ever yielding a `result` — Query.close()
       // (teardownState/stopSDKSession) ends it cleanly rather than throwing. Any
       // HTTP response parked on onResult would otherwise never end, leaving the
@@ -1074,6 +1098,8 @@ export function sendSDKMessage(
   if (isSDKQueryLive(state)) {
     const input = buildUserMessage(message, images)
     if (!state.messageStream.enqueue(input)) return null
+    const turns = inputTurns.get(state)
+    if (turns) turns.accepted++
     state.running = true
 
     // Best-effort: the setting is already persisted on `state`, so a failed
@@ -1399,6 +1425,7 @@ export function listUserQuestionSessionIds(): string[] {
 // ── Stop / cleanup ───────────────────────────────────────────────────
 
 function teardownState(state: SDKSessionState): void {
+  notifyResultObservers(state, { is_error: true, result: "Session was stopped" }, true)
   streamBus.clear(state.sessionId)
   rejectAllPending(state, "Session stopped")
   state.subagentWatcher?.close()

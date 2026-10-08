@@ -1,4 +1,5 @@
-import { useState, type HTMLAttributes } from "react"
+import { lazy, Suspense, useContext, useState, type HTMLAttributes } from "react"
+import type { ExtraProps } from "react-markdown"
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
@@ -6,6 +7,10 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useHighlightedTokens } from "./ToolCallResult"
+import { cogpitBlockKind, CogpitBlockScope } from "./cogpit-blocks/kinds"
+
+/** Blocks an agent declares to show structure; loaded with their parser only when a reply has one. */
+const CogpitBlock = lazy(() => import("./cogpit-blocks/CogpitBlock"))
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -80,13 +85,13 @@ function LineNumber({ num }: { num: number }): React.ReactElement {
 
 // ── MarkdownCodeBlock component ─────────────────────────────────────────────
 
-type CodeProps = HTMLAttributes<HTMLElement> & {
+type CodeProps = HTMLAttributes<HTMLElement> & ExtraProps & {
   children?: React.ReactNode
   className?: string
-  node?: unknown
 }
 
 export function MarkdownCodeBlock({ children, className, node: _node, ...rest }: CodeProps): React.ReactElement {
+  const blockScope = useContext(CogpitBlockScope)
   const isInline = !className && typeof children === "string" && !children.includes("\n")
   const lang = parseLang(className)
   const code = String(children).replace(/\n$/, "")
@@ -102,7 +107,16 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
     )
   }
 
-  return <HighlightedCodeBlock code={code} lang={lang} {...rest} />
+  const plain = <HighlightedCodeBlock code={code} lang={lang} {...rest} />
+  const blockKind = blockScope ? cogpitBlockKind(lang) : null
+  if (blockKind) {
+    return (
+      <Suspense fallback={plain}>
+        <CogpitBlock kind={blockKind} source={code} occurrence={String(_node?.position?.start.offset ?? _node?.position?.start.line ?? 0)} fallback={plain} />
+      </Suspense>
+    )
+  }
+  return plain
 }
 
 // ── Highlighted code block with Shiki ───────────────────────────────────────

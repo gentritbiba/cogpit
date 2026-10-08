@@ -1,5 +1,6 @@
 import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
-import { lazy, Suspense, useCallback, useState } from "react"
+import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { Code2, FolderSearch, LayoutGrid, Puzzle, SlidersHorizontal, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,7 @@ import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileO
 import { dirNameToPath } from "@/lib/format"
 import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { ProjectPromptContext, WorkspacePanelContext } from "@/plugin-api"
 import { useRuntimePlugins } from "@/plugins/useRuntimePlugins"
 import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
@@ -30,7 +32,6 @@ import {
   PrimarySessionBrowser,
   LazyViewFallback,
   MissionControlView,
-  ProjectDashboard,
 } from "./SharedAppViews"
 import {
   formatProjectPromptContext,
@@ -119,7 +120,7 @@ function DesktopMainView({
 
   if (view === "mission") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col pt-10">
+      <div className="flex min-h-0 flex-1 flex-col">
         <MissionControlView navigation={navigation} />
       </div>
     )
@@ -225,7 +226,7 @@ function DesktopMainView({
     )
   }
 
-  return <ProjectDashboard navigation={navigation} />
+  return <MissionControlView navigation={navigation} showProjectHistory />
 }
 
 export function DesktopWorkspace({
@@ -236,6 +237,7 @@ export function DesktopWorkspace({
 }: DesktopAppShellProps) {
   const { state, config } = useAppContext()
   const { session, sessionSource } = useSessionContext()
+  const openCrew = useOpenSessionCrew(session?.sessionId ?? null)
   const [pluginsOpen, setPluginsOpen] = useState(() => new URLSearchParams(window.location.search).get("pluginSafeMode") === "1")
   const [pluginSettingsId, setPluginSettingsId] = useState<string>()
   const openPluginSettings = useCallback((pluginId: string) => { setPluginSettingsId(pluginId); setPluginsOpen(true) }, [])
@@ -276,7 +278,15 @@ export function DesktopWorkspace({
     />
   )
 
-  const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config"
+  const isHome = view === "mission" || (view === "dashboard" && !state.dashboardProject)
+  const visitedCrews = useRef(new Set<string>())
+  const openWorkspacePanel = navigation.panels.openWorkspacePanel
+  useEffect(() => {
+    if (isHome || !openCrew || visitedCrews.current.has(openCrew.rootId)) return
+    visitedCrews.current.add(openCrew.rootId)
+    openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.crew)
+  }, [isHome, openCrew, openWorkspacePanel])
+  const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config" && !isHome
 
   const panelContext: WorkspacePanelContext = {
     session,
@@ -289,9 +299,10 @@ export function DesktopWorkspace({
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,
+    crew: openCrew,
   }
   const visiblePanels = availableWorkspacePanels(workspacePanels, panelContext)
-  const activePanel = state.mainView === "sessions"
+  const activePanel = state.mainView === "sessions" && !isHome
     ? resolvePluginPanelPreference(navigation.panels.activeWorkspacePanel, visiblePanels)
     : null
   const worktreeDirName = sessionSource?.dirName
@@ -363,7 +374,7 @@ export function DesktopWorkspace({
             id: "mission-control",
             title: "Mission Control",
             icon: LayoutGrid,
-            active: state.mainView === "mission",
+            active: isHome,
             onSelect: navigation.panels.handleToggleMission,
           },
           ...(can("configWrite") ? [{

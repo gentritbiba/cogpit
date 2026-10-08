@@ -18,10 +18,12 @@ import { runGit } from "../../lib/gitProject"
 const execFile = promisify(callbackExecFile)
 let root: string
 let projects: PluginProjects
+let now = 0
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), "cogpit-workspace-binding-")))
   inventory.paths = []
-  projects = new PluginProjects()
+  now = 0
+  projects = new PluginProjects({ now: () => now })
 })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 async function directory(name: string) { const path = join(root, name); await mkdir(path, { recursive: true }); return path }
@@ -68,7 +70,20 @@ describe("exact plugin workspace binding", { timeout: process.platform === "win3
     expect(vi.mocked(runGit).mock.calls.length).toBeGreaterThan(0)
     expect(vi.mocked(runGit).mock.calls.every(([cwd]) => cwd === selected)).toBe(true)
     inventory.paths = [unrelated]
+    now += 30_000
     await expect(projects.resolveWorkspace(id, selected)).rejects.toThrow(/workspace/)
+  })
+
+  it("validates a linked worktree without running Git against its sibling worktrees", async () => {
+    const repository = await directory("repository"), linked = join(root, "linked")
+    await git(repository, "init", "--initial-branch=main")
+    await git(repository, "commit", "--allow-empty", "-m", "Fixture")
+    await git(repository, "worktree", "add", "-b", "feature", linked)
+    inventory.paths = [repository, linked]
+    const id = await idFor(repository)
+    vi.mocked(runGit).mockClear()
+    expect(await projects.resolveWorkspace(id, linked)).toBe(linked)
+    expect(vi.mocked(runGit).mock.calls.every(([cwd]) => cwd === linked)).toBe(true)
   })
 
   it("detects a newly added worktree from a previously unrelated repository", async () => {
@@ -146,14 +161,16 @@ describe("exact plugin workspace binding", { timeout: process.platform === "win3
     await expect(projects.resolveWorkspace(await idFor(project), alias)).rejects.toThrow(/workspace/)
   })
 
-  it("rechecks fresh inventory when a nested workspace acquires another project owner", async () => {
+  it("rechecks inventory after the discovery window when a nested workspace acquires another project owner", async () => {
     const outer = await directory("outer"), inner = await directory("outer/inner")
     inventory.paths = [outer]
     const id = await idFor(outer)
     expect(await projects.resolveWorkspace(id, inner)).toBe(inner)
     inventory.paths = [outer, inner]
+    now += 30_000
     await expect(projects.resolveWorkspace(id, inner)).rejects.toThrow(/workspace/)
     inventory.paths = []
+    now += 30_000
     await expect(projects.resolveWorkspace(id, outer)).rejects.toThrow(/workspace/)
   })
 

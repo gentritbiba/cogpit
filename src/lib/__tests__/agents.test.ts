@@ -218,7 +218,7 @@ describe("resume", () => {
     expect(getResumeCommand("copilot", "1234", "/tmp/project dir/it's-here")).toBe(
       "copilot -C '/tmp/project dir/it'\\''s-here' --resume 1234",
     )
-    for (const kind of AGENT_KINDS) {
+    for (const kind of AGENT_KINDS.filter((kind) => !descriptorFor(kind).cli.requiresConfiguration)) {
       expect(getResumeCommand(kind, "1234").startsWith(descriptorFor(kind).binName)).toBe(true)
     }
   })
@@ -278,5 +278,20 @@ describe("presentation", () => {
   it("gives every agent a distinct config-badge letter", () => {
     const letters = AGENT_KINDS.map((kind) => agentConfigBadge(kind).letter)
     expect(new Set(letters).size).toBe(letters.length)
+  })
+})
+
+
+describe("canonical access identities", () => {
+  it("canonicalizes native UUIDs while preserving scoped token case", async () => {
+    const { canonicalSessionId } = await import("../../../shared/session/agent-descriptors")
+    const { instanceSessionId } = await import("../../../shared/session/instances")
+    const nativeId = "a1111111-1111-4111-8111-11111111111a"
+    expect(canonicalSessionId(nativeId.toUpperCase())).toBe(nativeId)
+    expect(canonicalSessionId(instanceSessionId("account-1", nativeId.toUpperCase()))).toBe(instanceSessionId("account-1", nativeId))
+    expect(canonicalSessionId(instanceSessionId("account-2", nativeId))).not.toBe(instanceSessionId("account-1", nativeId))
+    for (const invalid of ["not-a-session", "i-account-1__!!!", "i-account-1__wA", instanceSessionId("account-1", "../../etc/passwd")]) {
+      expect(canonicalSessionId(invalid)).toBeNull()
+    }
   })
 })

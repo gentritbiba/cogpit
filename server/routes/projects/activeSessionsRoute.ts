@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { sortSessionsByRecency } from "../../../shared/session-ordering"
+import { compareSessionsByRecency } from "../../../shared/session-ordering"
 import { parsePullRequestSearch } from "../../../shared/session/sessionSearch"
 import { allTopLevelSessions } from "../../agents"
 import type { TopLevelSessionInfo } from "../../agents/types"
@@ -11,6 +11,7 @@ import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readActiveSessionRow, type ActiveSessionQuery } from "./activeSessionRow"
 import { listedSession, listedSessionId } from "../../agents/listedSession"
 import { visibleLineage } from "./visibleLineage"
+import { crewSummary, planCrews } from "./crewRows"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -45,11 +46,31 @@ function selectPool(
   })
 }
 
+interface RecencyRow {
+  sessionId: string
+  dirName: string
+  fileName: string
+  lastActivityAt?: string
+  lastModified?: string
+  crewSummary?: { activityAt: string }
+}
+
+/** Newest first, a session listed with its crew by the crew's latest activity. */
+function sortByCrewRecency<T extends RecencyRow>(rows: readonly T[]): T[] {
+  const placed = (row: T) => (row.crewSummary ? { ...row, lastActivityAt: row.crewSummary.activityAt } : row)
+  return [...rows].sort((a, b) => compareSessionsByRecency(placed(a), placed(b)))
+}
+
 /**
  * GET /api/active-sessions — the sessions the caller may see in `scope`,
  * newest first. Visibility is decided in recency order before any limit, so
  * the list stops checking once it is full; searches read only the transcripts
  * of visible sessions, and the archived count is the caller's own.
+ *
+ * A session another session started through Cogpit rides with its crew's
+ * root: the root takes one place under the caps, ordered by the crew's latest
+ * activity, and its members follow the listed sessions. A search lists every
+ * match on its own, each carrying where it sits in its crew.
  */
 export async function handleActiveSessions(
   req: IncomingMessage,
@@ -78,15 +99,17 @@ export async function handleActiveSessions(
   const includeArchived = Boolean(search) || url.searchParams.get("archived") === "include"
 
   try {
-    // First pass: every session file with its mtime (cheap stat only), newest first
-    const candidates = (await allTopLevelSessions())
-      .filter((session) => !projectFilter || session.dirName === projectFilter)
+    // First pass: every session file with its mtime (cheap stat only), newest first.
+    // Crews are placed across every project, so a root brings members that live elsewhere.
+    const everySession = await allTopLevelSessions()
+    const inProject = (session: TopLevelSessionInfo) => !projectFilter || session.dirName === projectFilter
+    const candidates = everySession.filter(inProject)
 
     const archive = await readArchive()
     const now = Date.now()
     const resumedSessionIds: string[] = []
     const archivedById = new Map<string, ArchiveReason>()
-    for (const c of candidates) {
+    for (const c of everySession) {
       const id = listedSessionId(c)
       const reason = archiveReason(archive, id, c.mtimeMs, now)
       if (reason) archivedById.set(id, reason)
@@ -98,12 +121,20 @@ export async function handleActiveSessions(
       setSessionsArchived(resumedSessionIds, false).catch(() => {})
     }
     const isArchived = (c: TopLevelSessionInfo) => archivedById.has(listedSessionId(c))
+    const plan = await planCrews(everySession, {
+      grouped: !search,
+      canHost: (sessionId) => !archivedById.has(sessionId),
+      listsMember: (sessionId) => includeArchived || !archivedById.has(sessionId),
+      check,
+    })
+    const units = plan.units.filter(inProject)
+    const unitIds = new Set(units.map(listedSessionId))
     // Archived rows are picked separately from the live list so they never
     // take a listed session's place under the per-project cap.
-    const live = candidates.filter((c) => !isArchived(c))
+    const live = units.filter((c) => !isArchived(c))
     const archived = await allVisible(candidates.filter(isArchived), check, listedSession)
     res.setHeader("X-Cogpit-Archived-Count", String(new Set(archived.map(({ item }) => listedSessionId(item))).size))
-    const archivedPool = includeArchived ? archived : []
+    const archivedPool = includeArchived ? archived.filter(({ item }) => unitIds.has(listedSessionId(item))) : []
 
     // A pull-request search filters on the index, which covers every visible candidate.
     const visibleLive = pullRequestSearch ? await allVisible(live, check, listedSession) : null
@@ -141,16 +172,33 @@ export async function handleActiveSessions(
     }
     // A row may name a session the caller can open outside the scope listed.
     const lineage = visibleLineage(scope === "all" ? check : visibilityFor(req))
-    const results = await Promise.all(scanPool.map(async ({ item, session }) => {
+    const readRow = async (item: TopLevelSessionInfo, session: VisibleItem<TopLevelSessionInfo>["session"], onItsOwn: boolean) => {
       const row = await readActiveSessionRow(item, query)
-      return row && session.annotate(await lineage(row))
-    }))
+      if (!row) return null
+      const crew = await plan.membership(row.sessionId, onItsOwn)
+      return session.annotate(await lineage(crew ? { ...row, crew } : row))
+    }
+    const results = await Promise.all(scanPool.map(({ item, session }) => readRow(item, session, true)))
+    const loaded = results.flatMap((row) => row ? [row] : [])
 
-    const loaded = results.flatMap((session) => session ? [session] : [])
-    const activeSessions = [
-      ...sortSessionsByRecency(loaded.filter((session) => !session.archived)).slice(0, totalLimit),
-      ...sortSessionsByRecency(loaded.filter((session) => session.archived)).slice(0, totalLimit),
+    // Every member a listed session carries comes along, whatever the caps.
+    const membersOf = new Map(await Promise.all(loaded.map(async (unit) => {
+      const riding = (plan.membersOf.get(unit.sessionId) ?? [])
+        .filter((member) => includeArchived || !isArchived(member))
+      const visible = riding.length > 0 ? await allVisible(riding, check, listedSession) : []
+      const rows = await Promise.all(visible.map(({ item, session }) => readRow(item, session, false)))
+      return [unit.sessionId, rows.flatMap((row) => row ? [row] : [])] as const
+    })))
+    const withCrews = loaded.map((unit) => {
+      const summary = crewSummary(unit, membersOf.get(unit.sessionId) ?? [])
+      return summary ? { ...unit, crewSummary: summary } : unit
+    })
+
+    const listed = [
+      ...sortByCrewRecency(withCrews.filter((row) => !row.archived)).slice(0, totalLimit),
+      ...sortByCrewRecency(withCrews.filter((row) => row.archived)).slice(0, totalLimit),
     ]
+    const activeSessions = [...listed, ...listed.flatMap((unit) => membersOf.get(unit.sessionId) ?? [])]
 
     sendJson(res, 200, activeSessions)
   } catch (err) {

@@ -3,6 +3,7 @@ import { AgentRuntimeError } from "../agents/runtimes"
 import { DeviceAuthError, DeviceUnreachableError } from "../hub/device-client"
 import { DeviceRequestError } from "../hub/deviceRequest"
 import { sendJson } from "../http"
+import { OrchestrationError } from "../orchestration/store"
 import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
 
 /**
@@ -18,6 +19,10 @@ export function sendAgentError(
   error: unknown,
   fallbackMessage: string,
 ): void {
+  if (error instanceof OrchestrationError) {
+    sendJson(res, error.status, { error: error.message, code: error.status === 409 ? ErrorCodes.CONFLICT : ErrorCodes.INVALID_REQUEST })
+    return
+  }
   if (error instanceof AgentRuntimeError) {
     sendJson(res, error.status, {
       error: error.message,

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { classifyAttention, workingChip } from "../attentionGroups"
+import { classifyAttention, rollUpCrews, workingChip } from "../attentionGroups"
+import type { MemberStatus } from "../crew"
 import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionInfo {
@@ -212,5 +213,50 @@ describe("classifyAttention — sessions with no local process", () => {
     // Otherwise a terminal someone closed sits under "Needs you" indefinitely.
     const s = makeSession({ sessionId: "idle-old", agentStatus: "idle", lastModified: STALE })
     expect(classifyAttention([s], new Map(), new Set()).needsYou).toEqual([])
+  })
+})
+
+describe("rollUpCrews", () => {
+  const NOW = Date.now()
+  const minutesAgo = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
+  const root = makeSession({ sessionId: "root", agentStatus: "completed", lastActivityAt: minutesAgo(90) })
+  const other = makeSession({ sessionId: "other", agentStatus: "deferred", lastActivityAt: minutesAgo(5) })
+  const members = [
+    makeSession({ sessionId: "blocked", lastActivityAt: minutesAgo(42) }),
+    makeSession({ sessionId: "blocked-later", lastActivityAt: minutesAgo(3) }),
+    makeSession({ sessionId: "busy" }),
+  ]
+  const statusOf = (states: Record<string, MemberStatus["state"]>) => (member: ActiveSessionInfo): MemberStatus =>
+    ({ state: states[member.sessionId] ?? "done" })
+
+  it("lists a root whose members wait as needing the user, with the longest wait", () => {
+    const own = classifyAttention([root, other], new Map(), new Set())
+    const groups = rollUpCrews(own, [root, other], new Map([["root", members]]), statusOf({ blocked: "needs-you", "blocked-later": "needs-you", busy: "working" }))
+
+    expect(groups.needsYou.map((item) => [item.session.sessionId, item.reason])).toEqual([["other", "deferred"], ["root", "crew"]])
+    expect(groups.needsYou[1]!.crew).toMatchObject({ needsYou: 2, working: 1, longestWaitSince: minutesAgo(42) })
+    expect(groups.working).toEqual([])
+  })
+
+  it("lists a root whose members only work as working, and says it is the crew", () => {
+    const own = classifyAttention([root], new Map(), new Set())
+    const groups = rollUpCrews(own, [root], new Map([["root", members]]), statusOf({ busy: "working" }))
+
+    expect(groups.needsYou).toEqual([])
+    expect(groups.working.map((session) => session.sessionId)).toEqual(["root"])
+    expect(groups.workingCrews?.get("root")).toMatchObject({ working: 1 })
+  })
+
+  it("keeps a root's own reason and adds what its crew waits on", () => {
+    const blockedRoot = makeSession({ sessionId: "root", agentStatus: "deferred" })
+    const own = classifyAttention([blockedRoot], new Map(), new Set())
+    const groups = rollUpCrews(own, [blockedRoot], new Map([["root", members]]), statusOf({ blocked: "needs-you" }))
+    expect(groups.needsYou).toEqual([expect.objectContaining({ reason: "deferred", crew: expect.objectContaining({ needsYou: 1 }) })])
+  })
+
+  it("does not count members waiting on requests the user cannot answer", () => {
+    const own = classifyAttention([root], new Map(), new Set())
+    const groups = rollUpCrews(own, [root], new Map([["root", members]]), statusOf({ blocked: "needs-you" }), (session) => session.sessionId !== "blocked")
+    expect(groups.needsYou).toEqual([])
   })
 })

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
   const perKind = () => ({
+    acp: vi.fn(),
     claude: vi.fn(),
     codex: vi.fn(),
     copilot: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => {
     teamLeadFor: vi.fn(),
     getSessionPrSearchSnapshot: vi.fn(),
     archived: new Map<string, number>(),
+    sessionParents: vi.fn(),
     kept: new Set<string>(),
     setSessionsArchived: vi.fn(),
   }
@@ -63,6 +65,7 @@ vi.mock("../../agents", async () => {
   >("../../../shared/session/agent-descriptors")
   const { createStoreRegistry } = await vi.importActual<typeof import("../../agents")>("../../agents")
   const roots: Record<string, string> = {
+    acp: "/tmp/acp-sessions",
     claude: "/tmp/test-projects",
     codex: "/tmp/codex-sessions",
     copilot: "/tmp/copilot-sessions",
@@ -79,7 +82,7 @@ vi.mock("../../agents", async () => {
     listSubagentFiles: mocks.listSubagentFiles[kind],
     sessionAddress: mocks.sessionAddress[kind],
   })
-  const kinds = ["codex", "copilot", "claude"]
+  const kinds = ["acp", "codex", "copilot", "claude"]
   const registry = createStoreRegistry(
     Object.fromEntries(kinds.map((kind) => [kind, storeFor(kind)])) as unknown as Parameters<typeof createStoreRegistry>[0],
   )
@@ -103,6 +106,11 @@ vi.mock("../../agents/runtimes", () => ({
 vi.mock("../../agents/lineage", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../agents/lineage")>(),
   teamLeadFor: mocks.teamLeadFor,
+}))
+
+vi.mock("../../lib/sessionOrigins", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../lib/sessionOrigins")>(),
+  sessionParents: mocks.sessionParents,
 }))
 
 vi.mock("../../lib/sessionPrSearchIndex", () => ({
@@ -161,7 +169,7 @@ describe("project routes", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
-    for (const kind of ["claude", "codex", "copilot"]) {
+    for (const kind of ["acp", "claude", "codex", "copilot"]) {
       mocks.listProjects[kind].mockResolvedValue([])
       mocks.listProjectSessionFiles[kind].mockResolvedValue([])
       mocks.listTopLevelSessions[kind].mockResolvedValue([])
@@ -173,6 +181,7 @@ describe("project routes", () => {
     mocks.teamLeadFor.mockResolvedValue("none")
     mocks.archived.clear()
     mocks.kept.clear()
+    mocks.sessionParents.mockResolvedValue(new Map())
     mocks.setSessionsArchived.mockResolvedValue([])
     mocks.getSessionPrSearchSnapshot.mockResolvedValue({
       byFile: new Map(),
@@ -899,6 +908,102 @@ describe("project routes", () => {
       const caches = new Set(calls.map(([, cache]) => cache))
       expect(caches.size).toBe(1)
       expect([...caches][0]).toBeInstanceOf(Map)
+    })
+
+    describe("crews", () => {
+      const NOW = Date.now()
+      const MINUTE = 60_000
+
+      /** A coordinator that started two lanes, one of which started a reviewer, plus an unrelated session. */
+      function listCrew() {
+        mocks.listTopLevelSessions.claude.mockResolvedValue([
+          claudeFile("crew-reviewer", "reviewer.jsonl", NOW - 1 * MINUTE),
+          claudeFile("crew-lane-b", "lane-b.jsonl", NOW - 2 * MINUTE),
+          claudeFile("crew-other", "other.jsonl", NOW - 3 * MINUTE),
+          claudeFile("crew-lane-a", "lane-a.jsonl", NOW - 4 * MINUTE),
+          claudeFile("crew-root", "coordinator.jsonl", NOW - 60 * MINUTE),
+        ])
+        mockedGetSessionMeta.mockImplementation(async (filePath: string) => {
+          const id = filePath.split("/").at(-1)!.replace(".jsonl", "")
+          const minutesAgo = { reviewer: 1, "lane-b": 2, other: 3, "lane-a": 4, coordinator: 60 }[id] ?? 0
+          return makeSessionMeta({
+            sessionId: id,
+            cwd: `/work/${id}`,
+            firstUserMessage: `${id} prompt`,
+            customTitle: id === "coordinator" ? "Wave 3 coordinator" : "",
+            lastTimestamp: new Date(NOW - minutesAgo * MINUTE).toISOString(),
+          })
+        })
+        mockedProjectDirToReadableName.mockImplementation((dirName: string) => ({ path: `/work/${dirName}`, shortName: dirName }))
+        mocks.sessionParents.mockResolvedValue(new Map([
+          ["lane-a", { parentSessionId: "coordinator", createdAt: 10, name: "w3-lane-a" }],
+          ["lane-b", { parentSessionId: "coordinator", createdAt: 20 }],
+          ["reviewer", { parentSessionId: "lane-a", createdAt: 30 }],
+        ]))
+      }
+
+      async function list(query: string) {
+        const handler = getRouteHandler(handlers, "/api/active-sessions")
+        const { req, res, next } = createMockReqRes("GET", query)
+        await handler(req, res, next)
+        return JSON.parse(res._getData()) as Array<Record<string, unknown> & { sessionId: string }>
+      }
+
+      it("lists a crew as its root, ordered by the crew's latest activity, with every member after the listed sessions", async () => {
+        listCrew()
+        const rows = await list("?limit=2")
+
+        expect(rows.map((row) => row.sessionId)).toEqual(["coordinator", "other", "lane-a", "lane-b", "reviewer"])
+        expect(rows[0]).toMatchObject({
+          customTitle: "Wave 3 coordinator",
+          crewSummary: { size: 3, activityAt: new Date(NOW - MINUTE).toISOString() },
+        })
+        expect(rows[0]).not.toHaveProperty("crew")
+        expect(rows[2]!.crew).toEqual({ rootId: "coordinator", parentId: "coordinator", startedAt: 10, name: "w3-lane-a" })
+        expect(rows[4]!.crew).toEqual({ rootId: "coordinator", parentId: "lane-a", startedAt: 30 })
+      })
+
+      it("brings a root's members along when the list is one project's", async () => {
+        listCrew()
+        const rows = await list("?project=crew-root")
+        expect(rows.map((row) => row.sessionId)).toEqual(["coordinator", "lane-a", "lane-b", "reviewer"])
+      })
+
+      it("lists a member on its own, naming its crew, when its root is archived", async () => {
+        listCrew()
+        mocks.archived.set("coordinator", NOW + 5_000)
+        const rows = await list("/")
+
+        // lane-a now carries the reviewer, so it is listed by the reviewer's activity.
+        expect(rows.map((row) => row.sessionId)).toEqual(["lane-a", "lane-b", "other", "reviewer"])
+        expect(rows.find((row) => row.sessionId === "lane-b")!.crew).toEqual({
+          rootId: "coordinator", parentId: "coordinator", startedAt: 20,
+          rootTitle: "Wave 3 coordinator", parentTitle: "Wave 3 coordinator",
+        })
+        expect(rows.find((row) => row.sessionId === "lane-a")).toMatchObject({ crewSummary: { size: 1 } })
+      })
+
+      it("does not let an archived member move its crew up the list", async () => {
+        listCrew()
+        // reviewer is the newest session; archived, it no longer lifts the coordinator above "other".
+        mocks.archived.set("reviewer", NOW + 5_000)
+        mocks.archived.set("lane-b", NOW + 5_000)
+        mocks.archived.set("lane-a", NOW + 5_000)
+        const rows = await list("?limit=2")
+        expect(rows.map((row) => row.sessionId)).toEqual(["other", "coordinator"])
+      })
+
+      it("lists every match of a search on its own, each naming its crew", async () => {
+        listCrew()
+        const rows = await list("?search=prompt")
+
+        expect(rows.map((row) => row.sessionId)).toEqual(["reviewer", "lane-b", "other", "lane-a", "coordinator"])
+        expect(rows[0]!.crew).toEqual({
+          rootId: "coordinator", parentId: "lane-a", startedAt: 30,
+          rootTitle: "Wave 3 coordinator", parentTitle: "w3-lane-a",
+        })
+        expect(rows.every((row) => !("crewSummary" in row))).toBe(true)
+      })
     })
 
     describe("archived sessions", () => {

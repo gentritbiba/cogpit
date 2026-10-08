@@ -81,8 +81,8 @@ async function interactiveSession(
   if (!sessionId) return null
   const authorized = await authorizeSession(req, res, { sessionId }, "interact")
   if (authorized === null) return null
-  const { kind } = await resolveSessionAgent(sessionId)
-  return { sessionId, runtime: runtimeFor(kind), audit: { sessionId: authorized.sessionId, agent: kind } }
+  const { kind, instanceId } = await resolveSessionAgent(sessionId)
+  return { sessionId, runtime: runtimeFor(kind, instanceId), audit: { sessionId: authorized.sessionId, agent: kind } }
 }
 
 export function registerSessionManageRoutes(use: UseFn) {

@@ -12,11 +12,14 @@ import { authorizeSession, reportSessionEvent, sendTurn, type ActivitySessionRef
 import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
 import { sendAgentError } from "./agentErrors"
 import { visibleBySession } from "./visibleBySession"
+import { fingerprint } from "../orchestration/store"
+import { orchestrationStore } from "../orchestration/storage"
+import { admitSessionCommand, commandScope } from "../lib/durableSend"
 
 /** Test seam: the registry lookups this module resolves sessions through. */
 export interface QuestionRuntimes {
   allRuntimes(): readonly AgentRuntime[]
-  runtimeFor(kind: AgentKind): AgentRuntime
+  runtimeFor(kind: AgentKind, instanceId?: string): AgentRuntime
   resolveSessionAgent(sessionId: string): Promise<ResolvedSessionAgent>
 }
 
@@ -34,10 +37,7 @@ export function registerAskUserRoutes(
    * GET /api/user-questions — every question currently blocking a session the
    * caller may see, grouped by session.
    *
-   * Read from the live runtimes rather than from transcripts on purpose: a
-   * session whose server restarted still has the tool call in its JSONL forever,
-   * so a transcript-derived list would claim abandoned sessions are waiting on
-   * the user. Being listed here means the question can actually be answered.
+   * Runtimes distinguish durable async input from process-bound RPC input.
    */
   use("/api/user-questions", async (req, res, next) => {
     if (req.method !== "GET") {
@@ -58,7 +58,8 @@ export function registerAskUserRoutes(
       sessionId?: unknown
       toolUseId?: unknown
       answers?: unknown
-    }>(req, res, async ({ sessionId, toolUseId, answers }) => {
+      commandId?: unknown
+    }>(req, res, async ({ sessionId, toolUseId, answers, commandId }) => {
       const receivedAt = Date.now()
       if (!sessionId || typeof sessionId !== "string") {
         sendJson(res, 400, { error: "sessionId is required" })
@@ -83,10 +84,15 @@ export function registerAskUserRoutes(
       // Dispatch on the session's agent. The old test for "is this Copilot?"
       // was "is it absent from the Claude session map", which sent every Codex
       // session down the Copilot path to collect a misleading error.
-      const { kind, filePath } = await runtimes.resolveSessionAgent(sessionId)
-      const runtime = runtimes.runtimeFor(kind)
+      const { kind, filePath, instanceId } = await runtimes.resolveSessionAgent(sessionId)
+      const runtime = runtimes.runtimeFor(kind, instanceId)
       const session: ActivitySessionRef = { sessionId: authorized.sessionId, agent: kind }
       try {
+        const old = typeof commandId === "string" ? orchestrationStore().command(commandScope(req), commandId) : null
+        if (old) {
+          if (old.receipt.sessionId !== sessionId || old.payload.questionId !== toolUseId || fingerprint(old.payload.answerInput) !== fingerprint(answers)) return sendJson(res, 409, { error: "commandId was reused with another answer" })
+          return sendJson(res, 202, { ok: true, receipt: old.receipt })
+        }
         const accepted = await runtime.answerQuestion(sessionId, toolUseId, answers)
         if (!accepted) {
           sendJson(res, 404, { error: "Question not found or already answered" })
@@ -95,12 +101,19 @@ export function registerAskUserRoutes(
         if (accepted.message === null) {
           reportSessionEvent(req, "session.answer", session, { toolUseId, answers })
         } else {
+          if (commandId !== undefined) {
+            if (typeof commandId !== "string") { sendJson(res, 400, { error: "commandId must be a string" }); return }
+            const receipt = await admitSessionCommand({ sessionId, commandId, request: { ...accepted.message, filePath }, req, runtime, answer: accepted, answerInput: answers })
+            sendJson(res, 202, { ok: true, receipt })
+            return
+          }
           // A message may start a turn, so it goes to the agent as a send: the turn is the answerer's.
           const outcome = await sendTurn(req, runtime, sessionId, { ...accepted.message, filePath }, { receivedAt, route: "answer", session, toolUseId })
           if (outcome.delivery === "busy") {
             sendError(res, new RouteError(409, ErrorCodes.CONFLICT, "Session is busy; the question is still waiting for an answer"))
             return
           }
+          accepted.onDelivered?.()
         }
         sendJson(res, 200, { ok: true })
       } catch (error) {

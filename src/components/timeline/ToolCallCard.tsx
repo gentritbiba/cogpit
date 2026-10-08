@@ -28,6 +28,9 @@ import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { ToolCallStatus, ToolOperationIcon } from "./ToolCallStatus"
 import { ToolFileDiffs } from "./ToolFileDiffs"
 import { toolCallFailed } from "@/lib/toolActivity"
+import { crewCallSentence, describeCrewCall, type CrewCall } from "@/lib/crewCommands"
+import { revealSessionById } from "@/lib/revealSession"
+import { useSessionNamer } from "@/hooks/useSessionNamer"
 
 export function getToolTextStyle(name: string, isError = false): string {
   if (isError) return "text-destructive"
@@ -69,6 +72,37 @@ function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement 
   )
 }
 
+/**
+ * A crew call's line with the sessions it names. Only crew calls subscribe
+ * to the session list for names, so other cards do not re-render on its polls.
+ */
+function CrewCallHeadline({ call, className }: { call: CrewCall; className: string }) {
+  const sentence = crewCallSentence(call, useSessionNamer())
+  return <span className={cn("line-clamp-2 min-w-0 leading-5 [overflow-wrap:anywhere]", className)} title={sentence}>{sentence}</span>
+}
+
+/** The sessions a crew call acted on, each a link to open it. */
+function CrewCallSessions({ call }: { call: CrewCall }) {
+  const nameOf = useSessionNamer()
+  if (call.sessionIds.length === 0) return null
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Sessions this call acted on">
+      {call.sessionIds.map((sessionId, index) => (
+        <Button
+          key={sessionId}
+          type="button"
+          variant="outline"
+          size="xs"
+          onClick={() => void revealSessionById(sessionId)}
+        >
+          {nameOf(sessionId) ?? (call.verb === "new" ? call.names[index] : undefined) ?? sessionId.slice(0, 8)}
+          <ChevronRight data-icon="inline-end" />
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────
 
 interface ToolCallCardProps {
@@ -100,11 +134,16 @@ export const ToolCallCard = memo(function ToolCallCard({
     [hasCommand, toolCall],
   )
   const failed = useMemo(() => toolCallFailed(toolCall), [toolCall])
-  const displayName = presentation.label
+  // A lead drives its crew from the shell; its calls read as what they did.
+  const crewCall = useMemo(
+    () => (hasCommand ? describeCrewCall(getCommandText(toolCall.input), toolCall.result) : null),
+    [hasCommand, toolCall.input, toolCall.result],
+  )
+  const displayName = crewCall ? "Crew" : presentation.label
   const nameTitle = presentation.label === toolCall.name
     ? toolCall.name
     : `${presentation.label} (${toolCall.name})`
-  const nameClass = getToolTextStyle(presentation.styleName, failed)
+  const nameClass = getToolTextStyle(crewCall ? "Crew" : presentation.styleName, failed)
   const timeLabel = toolCall.timestamp
     ? new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : undefined
@@ -112,7 +151,9 @@ export const ToolCallCard = memo(function ToolCallCard({
 
   const showPanel = expandToolPayloads || panelOpen
 
-  const summary = hasCommand && typeof toolCall.input.description === "string" && toolCall.input.description.trim()
+  const summary = crewCall
+    ? crewCallSentence(crewCall, () => undefined)
+    : hasCommand && typeof toolCall.input.description === "string" && toolCall.input.description.trim()
     ? toolCall.input.description
     : sections && sections.length > 1
       ? `${sections.length} commands · ${sections.map((section) => section.label || section.command.split(/\s+/)[0]).join(", ")}`
@@ -167,14 +208,16 @@ export const ToolCallCard = memo(function ToolCallCard({
         }}
       >
         <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground", failed && "text-destructive")}>
-          <ToolOperationIcon styleName={presentation.styleName} />
+          <ToolOperationIcon styleName={crewCall ? "Crew" : presentation.styleName} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {summary && (
+          {crewCall ? (
+            <CrewCallHeadline call={crewCall} className={cn("text-[13px] font-medium", nameClass)} />
+          ) : summary && (
             <ToolSummary
               summary={summary}
               filePath={[toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)}
-              monospace={!hasCommand || !toolCall.input.description}
+              monospace={!crewCall && (!hasCommand || !toolCall.input.description)}
               className={cn("text-[13px] font-medium", nameClass)}
             />
           )}
@@ -232,6 +275,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         <CollapsibleContent id={panelId}>
           <div className="min-w-0 px-3 pb-3 pt-1 sm:pl-14">
             {hasEditDiff && <EditToolDiff toolCall={toolCall} />}
+            {crewCall && <CrewCallSessions call={crewCall} />}
             {hasCommand ? (
               <BashCommandCard
                 toolCall={toolCall}

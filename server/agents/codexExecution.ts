@@ -12,6 +12,7 @@ import {
 import { descriptorFor, type PermissionsConfig } from "../../shared/session/agent-descriptors"
 import { storeFor } from "."
 import { codexBrowserConfig } from "./codexBrowser"
+import { AgentRuntimeError } from "./runtimeTypes"
 
 export interface CodexExecutionClient {
   start(): Promise<unknown>
@@ -34,6 +35,8 @@ export interface CodexImageInput {
 }
 
 export interface CodexExecutionOptions {
+  deliveryIntent?: "queue" | "steer" | "restart"
+  commandId?: string
   message?: string
   images?: CodexImageInput[]
   cwd: string
@@ -52,7 +55,7 @@ export interface CodexThreadIdentity {
 }
 
 export interface CodexContinuationResult {
-  action: "started" | "steered"
+  action: "started" | "steered" | "busy"
   threadId: string
   turnId: string
 }
@@ -221,6 +224,7 @@ export async function startCodexExecution(
   const turn = await client.startTurn({
     threadId: response.thread.id,
     input,
+    ...(options.commandId ? { clientUserMessageId: options.commandId } : {}),
     ...turnSettings(options),
   })
   return { thread: response.thread, turnId: turn.turn.id }
@@ -236,6 +240,7 @@ export async function continueCodexExecution(
   const knownTurnId = client.getActiveTurnId(threadId)
 
   if (knownTurnId) {
+    if (options.deliveryIntent === "queue") return { action: "busy", threadId, turnId: knownTurnId }
     const steered = await client.steerTurn(threadId, input, knownTurnId)
     return { action: "steered", threadId, turnId: steered.turnId }
   }
@@ -251,6 +256,7 @@ export async function continueCodexExecution(
     ?? activeTurnFromThread(resumed.thread)
 
   if (activeTurnId) {
+    if (options.deliveryIntent === "queue") return { action: "busy", threadId: resumedThreadId, turnId: activeTurnId }
     const steered = await client.steerTurn(resumedThreadId, input, activeTurnId)
     return {
       action: "steered",
@@ -262,6 +268,7 @@ export async function continueCodexExecution(
   const turn = await client.startTurn({
     threadId: resumedThreadId,
     input,
+    ...(options.commandId ? { clientUserMessageId: options.commandId } : {}),
     ...turnSettings(options, true),
   })
   return {
@@ -305,4 +312,13 @@ export function isCodexAppServerUnavailable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
   const code = "code" in error ? String(error.code) : ""
   return code === "ENOENT"
+}
+
+export function isCodexModelRejection(error: unknown): boolean {
+  if (!(error instanceof CodexAppServerRpcError) || !["thread/resume", "turn/start"].includes(error.method)) return false
+  return /issue with the selected model|selected model.*may not exist or you may not have access|run --model to pick a different model|model.*(?:not found|does not exist|not available|not supported|not authorized)/i.test(error.message)
+}
+
+export function codexSendError(error: unknown): AgentRuntimeError {
+  return new AgentRuntimeError(isCodexModelRejection(error) ? 400 : 500, isCodexModelRejection(error) ? "MODEL_REJECTED" : "INTERNAL_ERROR", error instanceof Error ? error.message : "Codex failed to accept the message")
 }

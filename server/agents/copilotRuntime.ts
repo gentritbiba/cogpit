@@ -390,13 +390,16 @@ export const copilotRuntime: AgentRuntime = {
 
     const attachments = buildAttachments(req.images)
     const steering = transport.isTurnActive(sessionId)
-    await transport.send(sessionId, {
+    if (steering && req.deliveryIntent === "queue") return { delivery: "busy" }
+    const observed = req.commandId ? transport.observeTurn(sessionId) : null
+    void observed?.completion.catch(() => {})
+    try { await transport.send(sessionId, {
       prompt: req.message || IMAGE_ONLY_PROMPT,
       agentMode: agentMode(req.permissions?.mode),
       ...(steering ? { mode: "immediate" } : {}),
       ...(attachments ? { attachments } : {}),
-    })
-    return { delivery: steering ? "steered" : "started" }
+    }) } catch (error) { observed?.cancel(); throw error }
+    return { delivery: steering ? "steered" : "started", ...(observed ? { completion: observed.completion } : {}) }
   },
 
   async interrupt(sessionId) {
@@ -521,6 +524,13 @@ export const copilotRuntime: AgentRuntime = {
 
   listPendingQuestions(sessionId) {
     return transport.getPendingUserInputs(sessionId).map(normalizeCopilotQuestion)
+  },
+
+  listPendingPlans: (sessionId) => transport.getPendingExitPlans(sessionId),
+  async respondToPlan(sessionId, requestId, response) {
+    if (!transport.getPendingExitPlans(sessionId).some((plan) => plan.requestId === requestId)) return false
+    transport.answerExitPlan(sessionId, requestId, response)
+    return true
   },
 
   async answerQuestion(sessionId, questionId, answers) {

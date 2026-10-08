@@ -38,6 +38,7 @@ vi.mock("../../agents/codexAppServer", () => ({
   CODEX_CLIENT_CAPABILITIES: { experimentalApi: false },
 }))
 vi.mock("../../agents/codexExecution", () => ({
+  codexSendError: (error: Error) => error,
   continueCodexExecution: execution.continueCodexExecution,
   startCodexExecution: vi.fn(),
   getCodexThreadIdentity: vi.fn(() => null),
@@ -119,7 +120,7 @@ function sentMessage(): string | undefined {
 /** Answer the way the route does: accept, then send the message the answer became. */
 async function answer(questionId: string, answers: UserQuestionAnswers): Promise<void> {
   const accepted = await codexRuntime.answerQuestion("thread-1", questionId, answers)
-  if (accepted?.message) await codexRuntime.send("thread-1", accepted.message)
+  if (accepted?.message) { const outcome = await codexRuntime.send("thread-1", accepted.message); if (outcome.delivery !== "busy") accepted.onDelivered?.() }
 }
 
 const fullAccess = {
@@ -158,6 +159,8 @@ describe("codexRuntime.listPendingQuestions", () => {
 
     expect(codexRuntime.listPendingQuestions("thread-1")).toHaveLength(1)
     await codexRuntime.send("thread-1", accepted!.message!)
+    expect(codexRuntime.listPendingQuestions("thread-1")).toHaveLength(1)
+    accepted!.onDelivered?.()
     expect(codexRuntime.listPendingQuestions("thread-1")).toEqual([])
   })
 })
@@ -170,7 +173,7 @@ describe("codexRuntime.answerQuestion", () => {
       "thread-1",
       "call-q",
       { "What is your budget?": "About 900 a month" },
-    )).toEqual({ message: { message: "About 900 a month" } })
+    )).toMatchObject({ message: { message: "About 900 a month" }, durableQuestion: { sessionId: "thread-1", requestId: "call-q" }, onDelivered: expect.any(Function) })
     expect(execution.continueCodexExecution).not.toHaveBeenCalled()
   })
 
@@ -188,20 +191,15 @@ describe("codexRuntime.answerQuestion", () => {
   it("joins a multi-select answer array into one message", async () => {
     ask([{ title: "Which regions?" }])
 
-    await answer("call-q", ["Alps", "Jura"])
+    await answer("call-q", ["Alps, Jura"])
 
     expect(sentMessage()).toBe("Alps, Jura")
   })
 
-  it("keeps an answer whose key does not match the question text", async () => {
-    // The wire format keys answers by verbatim question text, and the server
-    // does not validate them. Dropping an unmatched key would silently discard
-    // the reader's typing.
+  it("rejects unmatched answer keys and leaves the question pending", async () => {
     ask([{ title: "Which month?" }])
-
-    await answer("call-q", { "Which month": "June" })
-
-    expect(sentMessage()).toBe("June")
+    await expect(answer("call-q", { "Which month": "June" })).rejects.toThrow("Answer every question")
+    expect(codexRuntime.listPendingQuestions("thread-1")).toHaveLength(1)
   })
 
   it("keeps the access mode, cwd and model the thread was last sent with", async () => {
@@ -231,12 +229,12 @@ describe("codexRuntime.answerQuestion", () => {
 })
 
 describe("codexRuntime.send", () => {
-  it("clears a pending question, since the message answers it", async () => {
+  it("keeps a pending question after an unrelated message", async () => {
     ask([{ title: "Which month?" }])
 
     await codexRuntime.send("thread-1", { message: "June, and I will have a car" })
 
-    expect(codexRuntime.listPendingQuestions("thread-1")).toEqual([])
+    expect(codexRuntime.listPendingQuestions("thread-1")).toHaveLength(1)
   })
 
   it("clears omitted model options on a normal send and uses the new settings for answers", async () => {

@@ -16,6 +16,8 @@ import { serverPort } from "../lib/portFile"
 import { noteBrowserProfiles } from "./owners"
 import { binDir, pluginDir, shimPath } from "./paths"
 import { pluginManifestFile } from "./skill"
+import { instanceSessionId } from "../../shared/session/instances"
+import { getDataRoot } from "../config"
 
 /** True once `~/.cogpit/bin` exists: it holds the session CLI and, when installed, the shim. */
 export function agentBinInstalled(): boolean {
@@ -34,14 +36,16 @@ function pathKey(env: NodeJS.ProcessEnv): string {
 }
 
 export function cogpitAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string): NodeJS.ProcessEnv {
+  if (cogpitSessionId && base.COGPIT_AGENT_INSTANCE_ID) cogpitSessionId = instanceSessionId(base.COGPIT_AGENT_INSTANCE_ID, cogpitSessionId)
   const port = serverPort()
   const env: NodeJS.ProcessEnv = {
     ...base,
     COGPIT_SESSION_ID: cogpitSessionId,
+    COGPIT_ORCHESTRATION_ROOT: base.COGPIT_ORCHESTRATION_ROOT || getDataRoot(),
     ...(port !== null ? { COGPIT_PORT: String(port) } : {}),
   }
   if (!agentBinInstalled()) return env
-  if (browserShimInstalled()) {
+  if (browserShimInstalled() && base.COGPIT_AGENT_WORKER !== "1") {
     try {
       noteBrowserProfiles(cogpitSessionId)
     } catch (error) {

@@ -16,14 +16,9 @@ vi.mock("../../agents/runtimes", () => ({
     listPendingQuestions: (id: string) => mocks.questions.filter((q) => q.sessionId === id),
     respondToApproval: mocks.respondToApproval,
     answerQuestion: mocks.answerQuestion,
+    listPendingPlans: (id: string) => mocks.plans.filter((p) => p.sessionId === id),
+    respondToPlan: mocks.answerExitPlan,
   }],
-}))
-
-vi.mock("../../agents/copilotTransport", () => ({
-  copilotRuntime: {
-    getPendingExitPlans: (id: string) => mocks.plans.filter((p) => p.sessionId === id),
-    answerExitPlan: mocks.answerExitPlan,
-  },
 }))
 
 import { listPendingInput, respondToPendingInput } from "../../agents/pendingInput"
@@ -46,7 +41,7 @@ beforeEach(() => {
   mocks.plans = [{ sessionId: "s", requestId: "plan-1", summary: "Plan", actions: ["a"], recommendedAction: "a" }]
   mocks.respondToApproval.mockReset().mockResolvedValue(true)
   mocks.answerQuestion.mockReset().mockResolvedValue(true)
-  mocks.answerExitPlan.mockReset()
+  mocks.answerExitPlan.mockReset().mockResolvedValue(true)
 })
 
 describe("listPendingInput", () => {
@@ -62,6 +57,7 @@ describe("listPendingInput", () => {
       {
         kind: "question",
         requestId: "q-1",
+        askedAt: 1,
         questions: [{ question: "Color?", multiSelect: false, options: ["Red"] }],
       },
       { kind: "plan", requestId: "plan-1", summary: "Plan", actions: ["a"], recommendedAction: "a" },

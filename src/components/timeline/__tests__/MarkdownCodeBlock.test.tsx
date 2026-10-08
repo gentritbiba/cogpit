@@ -117,3 +117,23 @@ describe("MarkdownCodeBlock lifecycle", () => {
     expect(screen.getByRole("button", { name: "Expand 31 lines of code" })).toHaveAttribute("type", "button")
   })
 })
+
+describe("MarkdownCodeBlock with cogpit blocks", () => {
+  const source = "- { text: Rebase, state: done }\n- Open the PR"
+
+  it("draws a block in an agent's reply", async () => {
+    const { CogpitBlockScope } = await import("../cogpit-blocks/kinds")
+    render(
+      <CogpitBlockScope.Provider value={{ messageKey: "reply-1" }}>
+        <MarkdownCodeBlock className="language-cogpit-checklist">{source}</MarkdownCodeBlock>
+      </CogpitBlockScope.Provider>,
+    )
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument()
+  })
+
+  it("shows the code anywhere else, such as a prompt that quotes one", () => {
+    render(<MarkdownCodeBlock className="language-cogpit-checklist">{source}</MarkdownCodeBlock>)
+    expect(screen.queryByText("1 of 2")).not.toBeInTheDocument()
+    expect(screen.getByText(/Open the PR/)).toBeInTheDocument()
+  })
+})

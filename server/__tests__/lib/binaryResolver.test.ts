@@ -26,6 +26,21 @@ function windows(files: string[], overrides: Partial<ResolveEnvironment> = {}): 
 const NPM_DIR = "C:\\Users\\me\\AppData\\Roaming\\npm"
 
 describe("findExecutableOnPath", () => {
+  it("checks an explicit executable path without prepending PATH entries", () => {
+    const executable = "/opt/provider tools/agent"
+    expect(findExecutableOnPath(executable, {
+      platform: "darwin",
+      env: { PATH: "/usr/bin" },
+      isExecutable: (candidate) => candidate === executable,
+    })).toBe(executable)
+  })
+
+  it("resolves Windows extensions on an explicit executable path", () => {
+    const executable = "D:\\provider tools\\agent"
+    expect(findExecutableOnPath(executable, windows([`${executable}.cmd`]))).toBe(`${executable}.cmd`)
+    expect(findExecutableOnPath(executable, { ...windows([`${executable}.cmd`]), directOnly: true })).toBeUndefined()
+  })
+
   it("walks PATH with an executable-bit probe outside Windows", () => {
     const found = findExecutableOnPath("claude", {
       platform: "darwin",
@@ -89,6 +104,15 @@ describe("findExecutableOnPath", () => {
 })
 
 describe("resolveAgentCommand", () => {
+  it("launches an ACP npm shim with its configured arguments escaped", () => {
+    const executable = "D:\\provider tools\\adapter.cmd"
+    const cli = resolveAgentCommand(executable, ["--acp", "profile & one"], windows([]))
+    expect(cli.command).toBe("C:\\Windows\\system32\\cmd.exe")
+    expect(cli.spawnOptions).toEqual({ windowsVerbatimArguments: true })
+    expect(cli.args[3]).toContain("adapter.cmd")
+    expect(cli.args[3]).toContain('^"--acp^" ^"profile^ ^&^ one^"')
+  })
+
   it("spawns the bare name outside Windows", () => {
     const cli = resolveAgentCommand("codex", ["exec", "--json"], { platform: "darwin" })
     expect(cli).toEqual({ command: "codex", args: ["exec", "--json"], spawnOptions: {} })

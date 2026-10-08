@@ -1,3 +1,4 @@
+import { acpStore } from "./acpStore"
 import {
   AGENT_KINDS,
   descriptorForDirName,
@@ -6,6 +7,8 @@ import {
 import { claudeStore } from "./claudeStore"
 import { codexStore } from "./codexStore"
 import { copilotStore } from "./copilotStore"
+import { instanceStores } from "./instanceStores"
+import { splitInstanceDirName } from "../../shared/session/instances"
 import type { AgentStore, TopLevelSessionInfo } from "./types"
 
 /**
@@ -24,6 +27,7 @@ const STORES: Readonly<Record<AgentKind, AgentStore>> = Object.freeze({
   claude: claudeStore,
   codex: codexStore,
   copilot: copilotStore,
+  acp: acpStore,
 })
 
 export interface StoreRegistry {
@@ -76,17 +80,24 @@ export function storeFor(kind: AgentKind): AgentStore {
 
 /** The store whose storage contains `filePath`, or null when none does. */
 export function storeForPath(filePath: string | null | undefined): AgentStore | null {
+  if (typeof filePath === "string") { const instance = instanceStores().find((store) => store.ownsPath(filePath)); if (instance) return instance }
   return registry.storeForPath(filePath)
 }
 
 /** The store owning a project dirName. Claude is the terminal arm. */
 export function storeForDirName(dirName: string | null | undefined): AgentStore {
+  const instanceId = splitInstanceDirName(dirName).instanceId
+  if (instanceId !== "default") {
+    const instance = instanceStores().find((store) => store.instanceId === instanceId)
+    if (!instance) throw new Error("Provider instance for this transcript no longer exists")
+    return instance
+  }
   return registry.storeForDirName(dirName)
 }
 
 /** Every store, in agent-detection order. */
 export function allStores(): readonly AgentStore[] {
-  return registry.allStores()
+  return [...registry.allStores(), ...instanceStores()]
 }
 
 /**
@@ -94,5 +105,5 @@ export function allStores(): readonly AgentStore[] {
  * read them, unless `skipUnreadable` leaves that store out.
  */
 export function allTopLevelSessions(options?: TopLevelSessionsOptions): Promise<TopLevelSessionInfo[]> {
-  return registry.allTopLevelSessions(options)
+  return Promise.all(allStores().map((store) => options?.skipUnreadable ? store.listTopLevelSessions().catch(() => []) : store.listTopLevelSessions())).then((lists) => lists.flat().sort((a, b) => b.mtimeMs - a.mtimeMs))
 }

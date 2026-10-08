@@ -121,6 +121,7 @@ export interface SessionAddress {
  * stores live in `server/` while the pure `AgentDescriptor` lives in `shared/`.
  */
 export interface AgentStore {
+  readonly instanceId?: string
   readonly kind: AgentKind
   readonly descriptor: AgentDescriptor
   /** Absolute root of this agent's session storage, or null when unconfigured. */

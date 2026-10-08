@@ -72,7 +72,7 @@ describe("CodexQuestionRegistry", () => {
       .toEqual(["thread-1", "thread-2"])
   })
 
-  it("drops a question once the thread starts a later turn", () => {
+  it("keeps unanswered input across later turns", () => {
     // Any answer — from Cogpit, the CLI, or another device — either steers the
     // asking turn or opens a new one, and a new turn is the visible case.
     const registry = new CodexQuestionRegistry()
@@ -82,7 +82,7 @@ describe("CodexQuestionRegistry", () => {
       params: { threadId: "thread-1", turn: { id: "turn-2" } },
     })
 
-    expect(registry.list("thread-1")).toEqual([])
+    expect(registry.list("thread-1")).toHaveLength(1)
   })
 
   it("keeps a question while its own turn is still running", () => {
@@ -96,12 +96,12 @@ describe("CodexQuestionRegistry", () => {
     expect(registry.list("thread-1")).toHaveLength(1)
   })
 
-  it("forgets a closed thread", () => {
+  it("keeps unanswered input after its process closes", () => {
     const registry = new CodexQuestionRegistry()
     registry.observe(questionAsked())
     registry.observe({ method: "thread/closed", params: { threadId: "thread-1" } })
 
-    expect(registry.list("thread-1")).toEqual([])
+    expect(registry.list("thread-1")).toHaveLength(1)
   })
 
   it("clears on request, which is what answering does", () => {

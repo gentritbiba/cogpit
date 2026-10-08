@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Bell, ChevronDown, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -29,7 +29,7 @@ const STATUS_STYLES = {
 
 const EVENT_STYLE = { Icon: Bell, color: "text-muted-foreground", bg: "border-border/40 bg-muted/30", badgeVariant: "outline" } as const
 
-export function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
+export function TaskNotificationCard({ notification, action }: { notification: TaskNotification; action?: ReactNode }) {
   const [expanded, setExpanded] = useState(false)
   const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES]
     ?? { ...EVENT_STYLE, label: notification.status || "Event" }
@@ -51,6 +51,7 @@ export function TaskNotificationCard({ notification }: { notification: TaskNotif
             <Badge variant={statusStyle.badgeVariant} className={statusStyle.color}>
               {statusStyle.label}
             </Badge>
+            {action && <div className="ml-auto">{action}</div>}
           </div>
           {hasDetail && (
             <>

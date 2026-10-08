@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
   Activity,
+  ArrowRightLeft,
   ChartColumn,
   ChevronRight,
   Globe,
@@ -28,6 +29,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { CrewParentPill } from "@/components/CrewParentPill"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { LeakIndicator } from "@/components/LeakIndicator"
 import { NotificationsBell } from "@/components/NotificationsBell"
@@ -102,7 +104,7 @@ export const FloatingChrome = memo(function FloatingChrome({
   onOpenMainView,
 }: FloatingChromeProps) {
   const { config: { networkUrl, defaultAgentKind } } = useAppContext()
-  const { session, sessionSource, isLive, permissions } = useSessionContext()
+  const { session, sessionSource, isLive, permissions, actions } = useSessionContext()
   const inventory = useSessionInventoryOptional()
   const { AccountControl, SessionHeaderActions } = useEditionUi()
   const canViewUsage = useCapability("viewUsage")
@@ -193,6 +195,8 @@ export const FloatingChrome = memo(function FloatingChrome({
             />
           )}
 
+          {session && !isSubAgent && <CrewParentPill sessionId={session.sessionId} />}
+
           {session && onShowWorkflows && (workflowCount ?? 0) > 0 && (
             <Button
               variant="ghost"
@@ -252,6 +256,17 @@ export const FloatingChrome = memo(function FloatingChrome({
                 <MoreHorizontal data-icon="inline-start" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={6} className="w-64">
+                {session && !isSubAgent && permissions.send && actions.handleProviderHandoff && (
+                  <>
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem onClick={actions.handleProviderHandoff}>
+                        <ArrowRightLeft />
+                        Continue with another provider…
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuGroup>
                   {canViewUsage && (
                     <DropdownMenuItem onClick={() => setUsageOpen(true)}>

@@ -17,7 +17,7 @@
  * bookkeeping the parallel versions needed — while letting the FTS index, whose
  * build is one synchronous SQLite transaction, share exactly this code.
  */
-import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs"
+import { readFileSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs"
 import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import {
   AGENT_KINDS,
@@ -27,6 +27,7 @@ import {
   descriptorForDirName,
 } from "./agent-descriptors"
 import { dirs } from "./dirs"
+import { instanceSessionId, splitInstanceSessionId } from "./instances"
 
 /** One transcript on disk, plus what an index needs to file it under. */
 export interface SessionFile {
@@ -42,6 +43,7 @@ export type SessionFileIdentity = Omit<SessionFile, "path" | "mtimeMs">
 
 export interface AgentSessionStore {
   readonly kind: AgentKind
+  readonly instanceId: string
   readonly descriptor: AgentDescriptor
   /** Absolute root this agent's transcripts live under. */
   root(): string
@@ -295,18 +297,31 @@ const WALKERS: Record<AgentKind, Walker> = {
       return mtimeOf(candidate) === null ? null : candidate
     },
   },
+  acp: {
+    root: () => dirs.ACP_PROJECTS_DIR,
+    list: walkClaude,
+    identify: claudeIdentify,
+    find: (root, id) => WALKERS.claude.find(root, id),
+  },
 }
 
-function makeStore(kind: AgentKind): AgentSessionStore {
+function makeStore(kind: AgentKind, home?: string, configuredId?: string): AgentSessionStore {
   const walker = WALKERS[kind]
+  const instanceId = configuredId ?? (process.env.COGPIT_WORKER_AGENT === kind ? process.env.COGPIT_AGENT_INSTANCE_ID : undefined) ?? "default"
+  const root = home ? () => join(home, kind === "codex" ? "sessions" : kind === "copilot" ? "session-state" : "projects") : walker.root
+  const identify = (filePath: string, directory = root()): SessionFileIdentity => {
+    const identity = walker.identify(filePath, directory)
+    return { ...identity, sessionId: instanceSessionId(instanceId, identity.sessionId), parentSessionId: identity.parentSessionId ? instanceSessionId(instanceId, identity.parentSessionId) : null }
+  }
   return {
     kind,
+    instanceId,
     descriptor: descriptorFor(kind),
-    root: walker.root,
-    ownsPath: (filePath) => isWithin(resolve(walker.root()), resolve(filePath)),
-    identify: (filePath, root = walker.root()) => walker.identify(filePath, root),
-    list: (cutoffMs, root = walker.root()) => walker.list(root, cutoffMs),
-    find: (sessionId) => walker.find(walker.root(), sessionId),
+    root,
+    ownsPath: (filePath) => { if (isWithin(resolve(root()), resolve(filePath))) return true; try { return isWithin(realpathSync(root()), realpathSync(filePath)) } catch { return false } },
+    identify,
+    list: (cutoffMs, directory = root()) => walker.list(directory, cutoffMs).map((file) => ({ ...file, ...identify(file.path, directory) })),
+    find: (sessionId) => { const parts = splitInstanceSessionId(sessionId); return parts.instanceId === instanceId ? walker.find(root(), parts.nativeId) : null },
   }
 }
 
@@ -314,6 +329,7 @@ const STORES: Record<AgentKind, AgentSessionStore> = {
   claude: makeStore("claude"),
   codex: makeStore("codex"),
   copilot: makeStore("copilot"),
+  acp: makeStore("acp"),
 }
 
 export function storeFor(kind: AgentKind): AgentSessionStore {
@@ -327,7 +343,19 @@ export function defaultStore(): AgentSessionStore {
 
 /** Every store, in registry order. */
 export function allStores(): readonly AgentSessionStore[] {
-  return AGENT_KINDS.map((kind) => STORES[kind])
+  if (process.env.COGPIT_AGENT_INSTANCE_ID && AGENT_KINDS.includes(process.env.COGPIT_WORKER_AGENT as AgentKind)) return [STORES[process.env.COGPIT_WORKER_AGENT as AgentKind]]
+  const stores = AGENT_KINDS.map((kind) => STORES[kind])
+  const root = process.env.COGPIT_ORCHESTRATION_ROOT
+  if (!root) return stores
+  for (const entry of readDirSafe(join(root, "provider-instances"))) {
+    if (!entry.isDirectory()) continue
+    const home = join(root, "provider-instances", entry.name)
+    try {
+      const config = JSON.parse(readFileSync(join(home, "config.json"), "utf8")) as { providerInstance?: { id?: string; agent?: AgentKind } }
+      if (config.providerInstance?.id === entry.name && config.providerInstance.agent && AGENT_KINDS.includes(config.providerInstance.agent)) stores.push(makeStore(config.providerInstance.agent, home, entry.name))
+    } catch { /* An incomplete configuration is not a transcript root. */ }
+  }
+  return stores
 }
 
 /** The store whose root contains `filePath`, or null when none does. */

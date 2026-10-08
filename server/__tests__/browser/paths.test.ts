@@ -109,7 +109,7 @@ describe("isValidCogpitSessionId", () => {
     expect(isValidCogpitSessionId(id)).toBe(true)
   })
 
-  it.each(["", "../x", "a/b", "a.b", "a b", "x".repeat(81)])("rejects %j", (id) => {
+  it.each(["", "../x", "a/b", "a.b", "a b", "x".repeat(257)])("rejects %j", (id) => {
     expect(isValidCogpitSessionId(id)).toBe(false)
   })
 })

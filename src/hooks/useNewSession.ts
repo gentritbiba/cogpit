@@ -1,3 +1,4 @@
+import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
@@ -94,12 +95,12 @@ function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession
   }
 }
 
-function parseInitialSessionContent(rawText: string | undefined): { rawText: string; parsed: ParsedSession } | null {
+function parseInitialSessionContent(rawText: string | undefined, dirName?: string): { rawText: string; parsed: ParsedSession } | null {
   if (!rawText?.trim()) return null
   try {
     return {
       rawText,
-      parsed: parseSession(rawText),
+      parsed: scopeParsedSession(parseSession(rawText), splitInstanceDirName(dirName).instanceId),
     }
   } catch {
     return null
@@ -114,7 +115,7 @@ async function tryLoadSessionContent(
   allowInitialContent = true,
 ): Promise<{ rawText: string; parsed: ParsedSession } | null> {
   if (allowInitialContent) {
-    const initialContent = parseInitialSessionContent(response.initialContent)
+    const initialContent = parseInitialSessionContent(response.initialContent, response.dirName)
     if (initialContent) {
       return initialContent
     }
@@ -132,7 +133,7 @@ async function tryLoadSessionContent(
         try {
           return {
             rawText,
-            parsed: parseSession(rawText),
+            parsed: scopeParsedSession(parseSession(rawText), splitInstanceDirName(response.dirName).instanceId),
           }
         } catch {
           // Try again if the file is still mid-write
@@ -178,7 +179,7 @@ async function finalizeDiscoveredSession(
   isMobile: boolean,
   onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
 ): Promise<string> {
-  const loaded = parseInitialSessionContent(response.initialContent)
+  const loaded = parseInitialSessionContent(response.initialContent, response.dirName)
   const rawText = loaded?.rawText ?? ""
   const parsed = loaded?.parsed ?? buildEmptyParsedSession(response)
   const source = buildSessionSource(response, rawText)

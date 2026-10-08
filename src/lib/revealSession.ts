@@ -29,8 +29,9 @@ export function revealSessionPath(path: string): void {
 }
 
 /** The app path that opens a transcript on the active device. */
-export function sessionPath(dirName: string, fileName: string): string {
-  return `${devicePathPrefix()}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionUrlIdFromFileName(dirName, fileName))}`
+export function sessionPath(dirName: string, fileName: string, deviceId?: string): string {
+  const prefix = deviceId === undefined ? devicePathPrefix() : `/d/${encodeURIComponent(deviceId)}`
+  return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionUrlIdFromFileName(dirName, fileName))}`
 }
 
 /** Open a session known only by its id, wherever its transcript is. False when the server finds none the caller may see. */

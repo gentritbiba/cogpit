@@ -53,6 +53,7 @@ export interface StreamMessageState {
 
 export type StreamBusEvent =
   | { type: "stream_delta"; events: StreamDelta[] }
+  | { type: "stream_complete"; messageId: string }
   | { type: "stream_clear" }
   | { type: "turn_error"; message: string }
   | { type: "agent_progress"; toolUseId: string; summary: string }
@@ -406,6 +407,7 @@ export function completeMessage(sessionId: string, messageId: string): void {
   for (const [lane, id] of state.lanes) {
     if (id === messageId) state.lanes.delete(lane)
   }
+  emit(state, { type: "stream_complete", messageId })
   maybeGc(sessionId, state)
 }
 
@@ -520,6 +522,30 @@ export function getSnapshot(sessionId: string): StreamMessageState[] | null {
     ...m,
     blocks: m.blocks.map((b) => ({ ...b })),
   }))
+}
+
+/** Fold a worker's already batched events into the host's snapshot and subscribers. */
+export function forwardEvent(sessionId: string, event: StreamBusEvent): void {
+  if (event.type === "stream_clear") return clear(sessionId)
+  if (event.type === "stream_complete") return completeMessage(sessionId, event.messageId)
+  if (event.type === "compacting") return publishCompacting(sessionId, event.active)
+  if (event.type === "rate_limit") return publishRateLimit(sessionId, event.block)
+  const state = getOrCreate(sessionId)
+  if (event.type === "stream_delta") {
+    for (const delta of event.events) {
+      let message = state.messages.get(delta.messageId)
+      if (!message) { message = { messageId: delta.messageId, parentToolUseId: delta.parentToolUseId, stopped: false, blocks: [] }; state.messages.set(delta.messageId, message) }
+      if (delta.event === "message_stop") message.stopped = true
+      else {
+        let block = message.blocks.find((value) => value.index === delta.blockIndex)
+        if (!block) { block = { index: delta.blockIndex, blockType: delta.blockType, toolName: delta.toolName, text: "" }; message.blocks.push(block) }
+        block.text = (block.text + delta.delta).slice(-MAX_BLOCK_TEXT)
+      }
+    }
+    capMessages(state)
+  }
+  emit(state, event)
+  maybeGc(sessionId, state)
 }
 
 /** Subscribe to a session's stream events. Returns an unsubscribe function. */

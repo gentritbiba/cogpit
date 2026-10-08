@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, rmSync } from "node:fs"
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
@@ -24,12 +24,12 @@ if (webBuild.status !== 0) {
 
 await build({
   absWorkingDir: packageDir,
-  entryPoints: ["src/cli.ts"],
-  outfile: "dist/cli.js",
+  entryPoints: { "cli-runtime": "src/cli.ts", "instance-worker": "../../server/agents/instanceWorker.ts" },
+  outdir: "dist",
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20.11",
+  target: "node22.16",
   packages: "external",
   plugins: [{
     name: "bundle-plugin-packages",
@@ -40,9 +40,17 @@ await build({
       })
     },
   }],
-  banner: { js: "#!/usr/bin/env node" },
+
   sourcemap: false,
 })
 
+writeFileSync(join(outputDir, "cli.js"), `#!/usr/bin/env node
+const [major, minor] = process.versions.node.split(".").map(Number)
+if (major < 22 || (major === 22 && minor < 16)) {
+  console.error("Cogpit requires Node.js 22.16 or newer. Please upgrade Node.js.")
+  process.exit(1)
+}
+await import("./cli-runtime.js")
+`, { mode: 0o755 })
 chmodSync(join(outputDir, "cli.js"), 0o755)
 console.log("Built install-free Cogpit CLI, server, and web app")

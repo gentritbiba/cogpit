@@ -63,8 +63,9 @@ export const MobileNav = memo(function MobileNav({
                 )}
                 aria-hidden="true"
               />
-              {tab.id === "chat" && isLive && (
-                <LiveIndicator className="absolute right-0.5 top-0.5 size-1.5 ring-2 ring-background" />
+              {/* On the chat tab the session header shows it. */}
+              {tab.id === "chat" && isLive && !isActive && (
+                <LiveIndicator aria-label="Session is live" className="absolute right-0.5 top-0.5 size-1.5 ring-2 ring-background" />
               )}
             </div>
           </button>

@@ -83,6 +83,22 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     }
   }, [])
 
+  const [chatContent, observeChatContent] = useState<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!chatContent) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const viewport = chatScrollRef.current
+        if (viewport && chatIsAtBottomRef.current) viewport.scrollTop = viewport.scrollHeight
+        updateScrollIndicators()
+      })
+    })
+    observer.observe(chatContent, { box: "border-box" })
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [chatContent, updateScrollIndicators])
+
   const handleScroll = useCallback(() => {
     const el = chatScrollRef.current
     if (!el) return
@@ -193,11 +209,12 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   return useMemo(() => ({
     chatScrollRef,
     scrollEndRef,
+    observeChatContent,
     canScrollDown,
     initialScrollDone,
     handleScroll,
     scrollToBottomInstant,
     requestScrollToTop,
     resetTurnCount,
-  }), [canScrollDown, initialScrollDone, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
+  }), [observeChatContent, canScrollDown, initialScrollDone, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
 }

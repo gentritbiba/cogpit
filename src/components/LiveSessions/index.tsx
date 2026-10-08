@@ -24,7 +24,8 @@ import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
 import { useSessionArchive } from "@/hooks/useSessionArchive"
 import { isSessionLive, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
-import { classifyAttention } from "./attentionGroups"
+import { classifyAttention, rollUpCrews } from "./attentionGroups"
+import { foldCrewRows, memberStatus, type CrewPendingInput } from "./crew"
 import { AttentionStrip } from "./AttentionStrip"
 import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
 import { SessionCardList, type SessionListSharedProps } from "./SessionCardList"
@@ -96,7 +97,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     deviceScopedKey("live-sessions-project-scope"),
     null,
   )
+  // Sessions another session started through Cogpit fold under it; a search lists every match on its own.
+  const [groupCrewsSetting, setGroupCrews] = useLocalStorage<boolean>(
+    deviceScopedKey("live-sessions-group-crews"),
+    true,
+  )
+  const groupCrewsPreferred = groupCrewsSetting !== false
   const searching = Boolean(searchQuery.trim())
+  const groupCrews = groupCrewsPreferred && !searching
   // A search looks through everything, so archived sessions join the list
   // while one is active even when the toggle is off.
   const listArchived = showArchived || searching
@@ -145,36 +153,50 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   )
   const hiddenArchivedCount = listArchived ? 0 : archivedCount
 
-  // Cross-project triage for the attention strip (independent of search)
-  const attention = useMemo(
-    () => classifyAttention(
-      visibleSessions,
-      procBySession,
-      newlyCompleted,
-      awaitingPermission,
-      awaitingQuestion,
-      awaitingPrompt,
-      awaitingPlan,
-      (session) => permissionsOf(session.access).canInteract,
-    ),
-    [
-      visibleSessions,
-      procBySession,
-      newlyCompleted,
-      awaitingPermission,
-      awaitingQuestion,
-      awaitingPrompt,
-      awaitingPlan,
-      permissionsOf,
-    ],
+  const crewPending = useMemo<CrewPendingInput>(
+    () => ({ awaitingPermission, awaitingQuestion, awaitingPrompt, awaitingPlan }),
+    [awaitingPermission, awaitingQuestion, awaitingPrompt, awaitingPlan],
   )
+  const memberStatusOf = useCallback(
+    (member: ActiveSessionInfo) => memberStatus(member, procBySession, crewPending),
+    [procBySession, crewPending],
+  )
+  // Crews always fold for triage: the strip lists the sessions the user started.
+  const crews = useMemo(() => foldCrewRows(visibleSessions), [visibleSessions])
+
+  // Cross-project triage for the attention strip (independent of search)
+  const attention = useMemo(() => {
+    const canAct = (session: ActiveSessionInfo) => permissionsOf(session.access).canInteract
+    const ownGroups = classifyAttention(
+      crews.topLevel,
+      procBySession,
+      newlyCompleted,
+      awaitingPermission,
+      awaitingQuestion,
+      awaitingPrompt,
+      awaitingPlan,
+      canAct,
+    )
+    return rollUpCrews(ownGroups, crews.topLevel, crews.crewOf, memberStatusOf, canAct)
+  }, [
+    crews,
+    procBySession,
+    newlyCompleted,
+    awaitingPermission,
+    awaitingQuestion,
+    awaitingPrompt,
+    awaitingPlan,
+    permissionsOf,
+    memberStatusOf,
+  ])
   const needsYouIds = useMemo(
     () => new Set(attention.needsYou.map((item) => item.session.sessionId)),
     [attention],
   )
+  const listedUnits = groupCrewsPreferred ? crews.topLevel : visibleSessions
   const scopeOptions = useMemo(
-    () => projectScopeOptions(visibleSessions, procBySession, projectNames, needsYouIds),
-    [visibleSessions, procBySession, projectNames, needsYouIds],
+    () => projectScopeOptions(listedUnits, procBySession, projectNames, needsYouIds, crews.crewOf),
+    [listedUnits, procBySession, projectNames, needsYouIds, crews.crewOf],
   )
   const focusedProject = projectScope === null
     ? null
@@ -182,8 +204,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const focusedProjectLabel = focusedProject?.customName ?? projectScope
   const older = useOlderSessions(projectScope === null ? ALL_PROJECTS : focusedProject, listArchived, listFilter)
   const scopedSessions = useMemo(
-    () => mergeSessions(scopeSessions(visibleSessions, projectScope), older.sessions),
-    [visibleSessions, projectScope, older.sessions],
+    () => mergeSessions(scopeSessions(visibleSessions, projectScope, groupCrews), older.sessions),
+    [visibleSessions, projectScope, groupCrews, older.sessions],
   )
 
   const locallyFilteredSessions = useMemo(() => {
@@ -196,9 +218,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [scopedSessions, searching, searchQuery, sessionNames, projectNames])
   const filteredSessions = useMemo(
     () => (pullRequestResults.results
-      ? scopeSessions(pullRequestResults.results, projectScope)
+      ? scopeSessions(pullRequestResults.results, projectScope, groupCrews)
       : locallyFilteredSessions),
-    [pullRequestResults.results, projectScope, locallyFilteredSessions],
+    [pullRequestResults.results, projectScope, groupCrews, locallyFilteredSessions],
   )
 
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
@@ -347,6 +369,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         searchLoading={pullRequestResults.loading}
         showArchived={showArchived}
         archivedCount={archivedCount}
+        groupCrews={groupCrewsPreferred}
+        onToggleGroupCrews={() => setGroupCrews(!groupCrewsPreferred)}
         onSearchQueryChange={setSearchQuery}
         onToggleShowArchived={() => setShowArchived(!showArchived)}
         onRefresh={() => { hapticMedium(); fetchData() }}
@@ -358,7 +382,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         options={scopeOptions}
         value={projectScope}
         focused={focusedProject}
-        totalSessions={visibleSessions.length}
+        totalSessions={listedUnits.length}
+        crewCount={groupCrewsPreferred ? crews.crewOf.size : 0}
         onChange={setProjectScope}
         onNewSession={onNewSession}
         creatingSession={creatingSession}
@@ -404,6 +429,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             sessions={filteredSessions}
             pendingSession={showPendingSession ? pendingSession : null}
             showProject={projectScope === null}
+            groupCrews={groupCrews}
+            lineageSessions={visibleSessions}
+            memberStatusOf={memberStatusOf}
             older={{
               canLoad: (projectScope === null || Boolean(focusedProject)) && !older.loaded && !searching,
               loading: older.loading,

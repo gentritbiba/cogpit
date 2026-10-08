@@ -90,6 +90,7 @@ const copilotReader: AgentRecordReader = {
 }
 
 const READERS: Readonly<Record<AgentKind, AgentRecordReader>> = Object.freeze({
+  acp: claudeReader,
   claude: claudeReader,
   codex: codexReader,
   copilot: copilotReader,

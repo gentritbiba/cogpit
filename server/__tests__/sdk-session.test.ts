@@ -424,6 +424,26 @@ describe("sdk-session AskUserQuestion handling", () => {
 })
 
 describe("sdk-session turn completion", () => {
+  it("binds two queued sends to their own input turns", async () => {
+    const { createSDKSession, sdkSessions, sendSDKMessage, observeSDKResult } = await loadModule()
+    holdQueryOpen = true
+    scriptedMessages = [
+      { type: "result", is_error: false, result: "A" },
+      { type: "result", is_error: false, result: "B" },
+      { type: "result", is_error: false, result: "C" },
+    ]
+    createSDKSession({ sessionId: "queued-results", cwd: "/tmp", message: "A" })
+    await waitUntil(() => releaseHeldQuery !== null)
+    const state = sdkSessions.get("queued-results")!
+    const second = observeSDKResult(state)
+    sendSDKMessage(state.sessionId, "B")
+    const third = observeSDKResult(state)
+    sendSDKMessage(state.sessionId, "C")
+    releaseHeldQuery!()
+    expect((await second.completion).result).toBe("B")
+    expect((await third.completion).result).toBe("C")
+    await captured[0]!.completed
+  })
   it("settles a parked onResult when the query ends without emitting a result", async () => {
     // Regression: a query can end without ever yielding a `result` message —
     // Query.close() (used by teardownState/stopSDKSession) ends the iterator

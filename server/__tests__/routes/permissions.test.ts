@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Mock } from "vitest"
 import type { Middleware, UseFn } from "../../helpers"
-import type { CopilotPendingExitPlan } from "../../agents/copilotTransport"
+import type { CopilotPendingExitPlan, CopilotExitPlanResponse } from "../../agents/copilotTransport"
 import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import {
   AgentRuntimeError,
@@ -33,9 +33,13 @@ vi.mock("../../processRegistry", () => ({
 
 import {
   registerPermissionRoutes,
-  type CopilotPlanClient,
   type PermissionRuntimes,
 } from "../../routes/permissions"
+
+interface CopilotPlanClient {
+  getPendingExitPlans(sessionId?: string): CopilotPendingExitPlan[]
+  answerExitPlan(sessionId: string, requestId: string, response: CopilotExitPlanResponse): void
+}
 
 interface FakeResponse {
   statusCode: number
@@ -62,7 +66,7 @@ function pendingApproval(overrides: Partial<PendingApproval> = {}): PendingAppro
 type FakeRuntime = Pick<
   AgentRuntime,
   "kind" | "listPendingApprovals" | "respondToApproval" | "respondToAllApprovals"
->
+> & Pick<AgentRuntime, "listPendingPlans" | "respondToPlan">
 
 function fakeRuntime(kind: AgentKind, pending: PendingApproval[] = []): FakeRuntime {
   return {
@@ -83,7 +87,7 @@ function registryOf(runtimes: FakeRuntime[]): PermissionRuntimes {
     allRuntimes: () => runtimes as unknown as AgentRuntime[],
     runtimeForSession: (sessionId) =>
       (runtimes.find((runtime) =>
-        runtime.listPendingApprovals(sessionId).length > 0,
+        runtime.listPendingApprovals(sessionId).length > 0 || Boolean(runtime.listPendingPlans?.(sessionId).length),
       ) ?? null) as AgentRuntime | null,
   }
 }
@@ -105,7 +109,18 @@ function register(
 ): Middleware {
   let handler: Middleware | undefined
   const use: UseFn = (_path, registered) => { handler = registered }
-  registerPermissionRoutes(use, runtimes, copilot)
+  const lookup = (runtime: AgentRuntime | null) => {
+    if (runtime && !runtime.listPendingPlans) {
+      runtime.listPendingPlans = copilot.getPendingExitPlans
+      runtime.respondToPlan = async (id, requestId, response) => { copilot.answerExitPlan(id, requestId, response); return true }
+    }
+    return runtime
+  }
+  for (const runtime of runtimes.allRuntimes()) lookup(runtime)
+  registerPermissionRoutes(use, {
+    allRuntimes: () => runtimes.allRuntimes().map((runtime) => lookup(runtime)!),
+    runtimeForSession: (id) => lookup(runtimes.runtimeForSession(id)),
+  })
   if (!handler) throw new Error("Permission route was not registered")
   return handler
 }
@@ -486,6 +501,19 @@ describe("POST /api/permissions/:sessionId/plan", () => {
     }
   }
 
+  it("answers only the owning account when two accounts have the same plan request ID", async () => {
+    const a = fakeRuntime("copilot"); const b = fakeRuntime("copilot")
+    a.listPendingPlans = () => [{ ...plan, sessionId: "account-a" }]
+    b.listPendingPlans = (id) => !id || id === "account-b" ? [{ ...plan, sessionId: "account-b" }] : []
+    a.respondToPlan = vi.fn(async () => true)
+    b.respondToPlan = vi.fn(async () => true)
+    const registry = { allRuntimes: () => [a, b] as AgentRuntime[], runtimeForSession: (id: string) => id === "account-b" ? b as AgentRuntime : a as AgentRuntime }
+    const { response } = await invoke(register(registry), { method: "POST", url: "/account-b/plan", body: { requestId: "plan-1", approved: true, selectedAction: "autopilot" } })
+    expect(response.statusCode).toBe(200)
+    expect(a.respondToPlan).not.toHaveBeenCalled()
+    expect(b.respondToPlan).toHaveBeenCalledWith("account-b", "plan-1", { approved: true, selectedAction: "autopilot" })
+  })
+
   it("answers a pending exit plan", async () => {
     const copilot = planClient([plan])
     const { response } = await invoke(register(holding(fakeRuntime("copilot")), copilot), {
@@ -514,7 +542,7 @@ describe("POST /api/permissions/:sessionId/plan", () => {
 
   it("returns 404 without answering when no runtime holds the session", async () => {
     const copilot = planClient([plan])
-    const { response } = await invoke(register(registryOf([fakeRuntime("copilot")]), copilot), {
+    const { response } = await invoke(register({ allRuntimes: () => [fakeRuntime("copilot") as AgentRuntime], runtimeForSession: () => null }, copilot), {
       method: "POST",
       url: "/copilot-1/plan",
       body: { requestId: "plan-1", approved: true },

@@ -182,7 +182,7 @@ function availableActions(...items: (PaletteAction | false | undefined)[]): Pale
 
 export function CommandPalette(props: CommandPaletteProps) {
   const navigation = availableActions(
-    action("home", "Go to dashboard", "home overview", Home, props.onGoHome),
+    action("home", "Go to Mission Control", "home overview dashboard", Home, props.onGoHome),
     action(
       "mission-control",
       props.showMission ? "Exit Mission Control" : "Open Mission Control",

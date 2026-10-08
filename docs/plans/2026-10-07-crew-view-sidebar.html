@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<title>Session browser with crews: mockup</title>
+<style>
+@font-face { font-family: "Geist"; src: url("../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; }
+:root {
+  --bg: oklch(0.105 0 0); --sidebar: oklch(0.125 0 0); --card: oklch(0.13 0 0); --popover: oklch(0.16 0 0);
+  --muted: oklch(0.18 0 0); --accent: oklch(0.2 0 0); --border: oklch(0.24 0 0);
+  --fg: oklch(0.985 0 0); --fg-muted: oklch(0.708 0 0); --fg-dim: oklch(0.55 0 0);
+  --success: oklch(0.72 0.17 151); --warning: oklch(0.78 0.15 78); --info: oklch(0.72 0.14 255); --destructive: oklch(0.64 0.22 25);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.4; color: var(--fg); background: var(--bg); font-feature-settings: "tnum";
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { width: 1120px; height: 900px; overflow: hidden; display: grid; grid-template-columns: repeat(3, 320px); gap: 40px; padding: 28px 40px; }
+.col { display: flex; flex-direction: column; min-height: 0; }
+.cap { font-size: 12px; color: var(--fg-muted); margin: 0 0 10px 2px; height: 62px; line-height: 1.35; }
+.cap b { color: var(--fg); font-weight: 500; display: block; }
+.sidebar { flex: 1; min-height: 0; background: var(--sidebar); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; padding: 0 10px; overflow: hidden; }
+.sb-top { height: 44px; display: flex; align-items: center; justify-content: flex-end; gap: 14px; color: var(--fg-muted); padding-right: 6px; }
+.sb-search { height: 34px; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--fg-muted); background: var(--bg); flex: none; }
+.sb-search.on { color: var(--fg); border-color: var(--fg-dim); }
+.sb-scope { display: flex; align-items: center; gap: 10px; padding: 14px 6px 12px; flex: none; }
+.sb-scope b { font-weight: 500; display: block; }
+.sb-scope .pill { margin-left: auto; font-size: 11px; color: var(--warning); border: 1px solid color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 10%, transparent); border-radius: 999px; padding: 1px 7px; }
+.sb-section { display: flex; justify-content: space-between; color: var(--fg-muted); font-size: 12px; padding: 6px 4px; flex: none; }
+.strip { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 2px; flex: none; }
+.strip.warn { border-color: color-mix(in oklch, var(--warning) 20%, transparent); background: color-mix(in oklch, var(--warning) 4%, transparent); }
+.wrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; }
+.wrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrow .via { color: var(--fg-muted); padding-left: 14px; font-size: 11.5px; }
+.chip { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; color: var(--fg-muted); white-space: nowrap; }
+.chip.warn { border-color: color-mix(in oklch, var(--warning) 30%, transparent); background: color-mix(in oklch, var(--warning) 10%, transparent); color: var(--warning); }
+.chip.ok { color: var(--success); }
+.chip.info { background: color-mix(in oklch, var(--info) 14%, transparent); border-color: transparent; color: var(--info); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+.dot.halo { box-shadow: 0 0 0 2px color-mix(in oklch, var(--success) 30%, transparent); }
+.dot.warn { background: var(--warning); }
+.dot.idle { background: color-mix(in oklch, var(--success) 40%, transparent); }
+.dot.done { background: var(--fg-dim); }
+.dot.fail { background: var(--destructive); }
+.list { flex: 1; min-height: 0; overflow: hidden; }
+.card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 10px 12px; margin-bottom: 8px; }
+.card.active { box-shadow: 0 0 0 1px var(--fg-dim); }
+.card .eyebrow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-muted); padding-left: 14px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .eyebrow.lineage { color: var(--fg); }
+.card .eyebrow.lineage .proj { color: var(--fg-muted); }
+.card .title { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; line-height: 1.3; }
+.card .title .dot { margin-top: 6px; }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding-left: 14px; margin-top: 7px; font-size: 11px; color: var(--fg-muted); }
+.card .meta .t { margin-left: auto; }
+.card .meta .t.live { color: var(--success); }
+.card .prompt { padding-left: 14px; margin-top: 4px; font-size: 12px; color: var(--fg-muted); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.crew { margin: 8px -4px 0 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.crew .hd { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-muted); padding: 2px 4px; }
+.crew .hd b { color: var(--fg); font-weight: 500; }
+.crew .hd .w { color: var(--warning); }
+.crew ul { list-style: none; margin: 4px 0 0 7px; border-left: 1px solid var(--border); padding-left: 8px; }
+.crew li { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 4px 6px; border-radius: 6px; }
+.crew li.here { background: var(--accent); }
+.crew li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crew li .nm .kids { color: var(--fg-dim); font-weight: 400; }
+.crew li .t { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+.crew li .t.w { color: var(--warning); }
+.crew .more { color: var(--fg-muted); font-size: 11.5px; padding: 4px 6px; display: flex; gap: 6px; }
+.crew .more u { text-decoration: none; color: var(--fg); }
+.shelf { font-size: 12px; color: var(--fg-muted); padding: 10px 4px 6px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); padding: 6px 4px 0; }
+.toggle .sw { width: 22px; height: 12px; border-radius: 999px; background: var(--success); position: relative; }
+.toggle .sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--bg); }
+.hl { font-weight: 600; color: var(--fg); background: color-mix(in oklch, var(--warning) 25%, transparent); border-radius: 2px; padding: 0 1px; }
+</style>
+</head>
+<body>
+
+<!-- ─── Column 1: All projects, crews folded ─── -->
+<div class="col">
+  <div class="cap"><b>All projects</b>Roots only, in the strips too: a crew rolls up into its root's row. Members never appear while their root is here.</div>
+  <div class="sidebar">
+    <div class="sb-top">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+    </div>
+    <div class="sb-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search sessions or PRs</div>
+    <div class="sb-scope">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--fg-muted)"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+      <div><b>All projects</b><span style="font-size:12px;color:var(--fg-muted)">19 projects · 35 sessions · 2 crews</span></div>
+    </div>
+
+    <div class="sb-section"><span>Needs you</span><span>1</span></div>
+    <div class="strip warn">
+      <div class="wrow"><span class="dot warn"></span><span class="nm">Wave 3 coordinator</span><span class="chip warn">2 waiting</span><span style="font-size:11px;color:var(--fg-dim)">42m</span></div>
+      <div class="wrow" style="padding-top:0"><span class="via">hcms-pr/performance-experiments</span></div>
+    </div>
+    <div class="sb-section"><span>Working</span><span>2</span></div>
+    <div class="strip">
+      <div class="wrow"><span class="dot halo"></span><span class="nm">Job applications</span><span class="chip">2 in crew</span></div>
+      <div class="wrow" style="padding-top:0"><span class="via">Code/cv-builder</span></div>
+      <div class="wrow"><span class="dot halo"></span><span class="nm">using cogpit memory check how we o…</span><span class="chip">Bash</span></div>
+      <div class="wrow" style="padding-top:0"><span class="via">gentritbiba/agent-window</span></div>
+    </div>
+
+    <div class="list">
+      <div class="shelf">Today</div>
+
+      <div class="card active">
+        <div class="eyebrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>hcms-pr/performance-experiments</div>
+        <div class="title"><span class="dot warn"></span><span>Wave 3 coordinator</span></div>
+        <div class="prompt">I'm really curious as to why. start a opus 5.5 xhigh agent that will only come with theories…</div>
+        <div class="meta"><span class="chip ok">Done</span><span>⎇ main</span><span>20 turns</span><span class="t live">crew active now</span></div>
+        <div class="crew">
+          <div class="hd"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg><b>Crew</b> · 15 <span>·</span> <span class="w">2 need you</span> <span>·</span> 2 working</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>gentritbiba/agent-window</div>
+        <div class="title"><span class="dot halo"></span><span>using cogpit memory check how we orchestrated agent sessions using one…</span></div>
+        <div class="meta"><span class="chip info">Using Bash</span><span>⎇ master</span><span>2 turns</span><span class="t">now</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Code/cv-builder</div>
+        <div class="title"><span class="dot halo"></span><span>Job applications</span></div>
+        <div class="prompt">start a new session as well the same but for codex (gpt 6.1 sol high fast mode yolo)</div>
+        <div class="meta"><span class="chip ok">Done</span><span>⎇ main</span><span>26 turns</span><span class="t live">crew active 3m</span></div>
+        <div class="crew">
+          <div class="hd"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg><b>Crew</b> · 2 <span>·</span> 2 working</div>
+          <ul>
+            <li><span class="dot halo"></span><span class="nm">find-20-jobs <span class="kids">· 2 workers</span></span><span class="t">Opus 5.5</span></li>
+            <li><span class="dot halo"></span><span class="nm">find-20-jobs-codex</span><span class="t">gpt-6.1-sol</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="shelf">Yesterday</div>
+      <div class="card">
+        <div class="eyebrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>gentritbiba/agent-window</div>
+        <div class="title"><span class="dot done"></span><span>Hand sessions to other machines; catch up with Claude Code 2.1.287</span></div>
+        <div class="meta"><span>⎇ master</span><span>31 turns</span><span class="t">yesterday</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Column 2: one project, crew expanded ─── -->
+<div class="col">
+  <div class="cap"><b>Project scope: performance-experiments</b>The root's crew comes along even though its members live in other folders. Expanded, members list by state.</div>
+  <div class="sidebar">
+    <div class="sb-top">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+    </div>
+    <div class="sb-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search sessions or PRs</div>
+    <div class="sb-scope">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--fg-muted)"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      <div><b>performance-experiments</b><span style="font-size:12px;color:var(--fg-muted)">1 session · 1 crew of 15</span></div>
+      <span class="pill">1 elsewhere</span>
+    </div>
+
+    <div class="list">
+      <div class="shelf">Today</div>
+      <div class="card active">
+        <div class="title"><span class="dot warn"></span><span>Wave 3 coordinator</span></div>
+        <div class="prompt">I'm really curious as to why. start a opus 5.5 xhigh agent that will only come with theories…</div>
+        <div class="meta"><span class="chip ok">Done</span><span>⎇ main</span><span>20 turns</span><span class="t live">crew active now</span></div>
+        <div class="crew">
+          <div class="hd"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg><b>Crew</b> · 15 <span>·</span> <span class="w">2 need you</span> <span>·</span> 2 working</div>
+          <ul>
+            <li><span class="dot warn"></span><span class="nm">w3-rooftop <span class="kids">· 1 reviewer</span></span><span class="t w">permission · 42m</span></li>
+            <li><span class="dot warn"></span><span class="nm">w3-security-admin</span><span class="t w">question · 39m</span></li>
+            <li><span class="dot halo"></span><span class="nm">w3-storefront-quality <span class="kids">· 1 reviewer</span></span><span class="t">tests</span></li>
+            <li><span class="dot halo"></span><span class="nm">w3-inventory-pricing</span><span class="t">rebasing · 1m</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-theories</span><span class="t w">result unread · 1h</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-parity-soak</span><span class="t w">result unread · 1h</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-cost-model</span><span class="t">PR #251 merged · 2h</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-perf-ship</span><span class="t">PR #249 merged · 2h</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-ops-tooling</span><span class="t">PR #252 merged · 2h</span></li>
+            <li><span class="dot done"></span><span class="nm">w3-access-gaps</span><span class="t">PR #248 merged · 3h</span></li>
+            <li class="more"><u>Show 5 more done</u></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Column 3: search, flat with lineage ─── -->
+<div class="col">
+  <div class="cap"><b>Search: "rooftop"</b>Results are flat. A member whose root is not in the list carries a lineage eyebrow instead of a project; click it to open the root.</div>
+  <div class="sidebar">
+    <div class="sb-top">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+    </div>
+    <div class="sb-search on"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>rooftop<span style="margin-left:auto;color:var(--fg-muted);font-size:12px">3 results</span></div>
+    <div class="sb-scope">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--fg-muted)"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+      <div><b>All projects</b><span style="font-size:12px;color:var(--fg-muted)">19 projects · 35 sessions · 2 crews</span></div>
+    </div>
+
+    <div class="list">
+      <div class="card">
+        <div class="eyebrow lineage"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>Wave 3 coordinator <span class="proj">· performance-experiments</span></div>
+        <div class="title"><span class="dot warn"></span><span>w3-<span class="hl">rooftop</span></span></div>
+        <div class="prompt">Coordinator: the inventory branch (your parent) is now MERGED to main as c86033b1 (squash; rebase feat/w3-rooftop onto it…</div>
+        <div class="meta"><span class="chip warn">Permission</span><span>⎇ feat/w3-rooftop</span><span>7 turns</span><span class="t">42m</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow lineage"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>w3-rooftop <span class="proj">· Wave 3 coordinator</span></div>
+        <div class="title"><span class="dot done"></span><span>Code review: W3roof-r2 <span class="hl">rooftop</span> importer</span></div>
+        <div class="prompt">Review packet r2: W3R-01 importer mapping reads jdpDealerId and enabled the way PostgreSQL's ->> does…</div>
+        <div class="meta"><span class="chip">Codex · read-only</span><span>2 rounds</span><span class="t">1h</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>Insync/…/honest-cms</div>
+        <div class="title"><span class="dot done"></span><span>Fix the <span class="hl">rooftop</span> inventory split for Volvo on quantrell-demo</span></div>
+        <div class="meta"><span>⎇ main</span><span>4 turns</span><span class="t">Sep 29</span></div>
+      </div>
+
+      <div class="toggle"><span class="sw"></span>Group spawned sessions</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

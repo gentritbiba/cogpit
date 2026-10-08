@@ -1,6 +1,6 @@
 import {
   Check, CircleHelp, Clock3, FileSearch, FileText, Globe, ListTodo,
-  Loader2, MessageSquare, Pencil, Plug, Search, Sparkles, Terminal, Users, XCircle,
+  Loader2, MessageSquare, Network, Pencil, Plug, Search, Sparkles, Terminal, Users, XCircle,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
@@ -10,7 +10,7 @@ export function ToolOperationIcon({ styleName }: { styleName: string }) {
     Read: FileText, Write: Pencil, Edit: Pencil, Bash: Terminal,
     Grep: Search, Glob: FileSearch, WebFetch: Globe, WebSearch: Globe,
     TodoWrite: ListTodo, Task: Users, SendMessage: MessageSquare,
-    AskUserQuestion: CircleHelp, Skill: Sparkles,
+    AskUserQuestion: CircleHelp, Skill: Sparkles, Crew: Network,
   })[styleName] ?? Plug
   return <Icon className="size-4 shrink-0" aria-hidden="true" />
 }

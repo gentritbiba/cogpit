@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     result: vi.fn(),
     respond: vi.fn(),
     send: vi.fn(),
+    address: vi.fn(),
   }
   return {
     host,
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     waitAcrossHosts: vi.fn(),
     markAnswered: vi.fn(),
     sessionChildren: vi.fn(),
+    sessionParents: vi.fn(),
     runSessionCli: vi.fn(),
   }
 })
@@ -29,7 +31,18 @@ vi.mock("../../sessionHosts", () => ({
     Promise.all(ids.map(async (sessionId) => ({ host: await mocks.hostForSession(sessionId, options), sessionId }))),
   waitAcrossHosts: mocks.waitAcrossHosts,
 }))
-vi.mock("../../lib/sessionOrigins", () => ({ sessionChildren: mocks.sessionChildren }))
+vi.mock("../../lib/sessionOrigins", () => ({ sessionChildren: mocks.sessionChildren, sessionParents: mocks.sessionParents }))
+vi.mock("../../agents", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../agents")>(),
+  allTopLevelSessions: async () => [],
+}))
+vi.mock("../../lib/sessionBoards", () => ({
+  sessionBoard: async (id: string) => (id === "lead" ? { sessionId: "lead", title: "Wave 3", sections: [], updatedAt: 1 } : null),
+}))
+vi.mock("../../orchestration/storage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../orchestration/storage")>(),
+  orchestrationStore: () => ({ tasks: () => [{ id: "t1", parentSessionId: "p1", childSessionId: "c1", sourceId: "s", state: "completed", createdAt: 1, updatedAt: 2 }] }),
+}))
 vi.mock("../../sessionCli/commands", () => ({ runSessionCli: mocks.runSessionCli }))
 vi.mock("../../sessionHosts/delegatedRequests", () => ({
   listDelegatedRequests: (parent: string) => [{ sessionId: "r1", parentSessionId: parent, waiting: [] }],
@@ -113,7 +126,7 @@ describe("/api/session-respond", () => {
     mocks.host.respond.mockResolvedValue({ kind: "permission", requestId: "r1" })
     const ok = await call("/api/session-respond", "POST", "/", { sessionId: "s1", requestId: "r1", decision: "allow" })
     expect(ok.body).toEqual({ success: true, answered: { kind: "permission", requestId: "r1" } })
-    expect(mocks.host.respond).toHaveBeenCalledWith("s1", "r1", { decision: "allow" })
+    expect(mocks.host.respond).toHaveBeenCalledWith("s1", "r1", { decision: "allow" }, expect.objectContaining({ req: expect.any(Object) }))
     expect(mocks.markAnswered).toHaveBeenCalledWith("s1", "r1")
 
     mocks.host.respond.mockRejectedValue(new AgentRuntimeError(404, "NOT_FOUND", "gone"))
@@ -161,6 +174,38 @@ describe("/api/session-children", () => {
   })
 })
 
+describe("/api/session-crew", () => {
+  it("reports the crew from any member, root first, with state, machine and result", async () => {
+    mocks.sessionParents.mockResolvedValue(new Map([
+      ["c1", { parentSessionId: "p1", createdAt: 10, name: "lane" }],
+      ["r2", { parentSessionId: "c1", createdAt: 20 }],
+    ]))
+    mocks.host.state.mockImplementation(async (id: string) => ({ sessionId: id, outcome: "completed", live: false, running: false, waiting: [] }))
+    mocks.remote.state.mockResolvedValue({ sessionId: "r2", outcome: "needs_input", live: true, running: true, waiting: [{ kind: "question", requestId: "q1", questions: [] }] })
+    mocks.host.address.mockImplementation(async (id: string) => ({ dirName: "-work", fileName: `${id}.jsonl` }))
+    Object.assign(mocks.remote, { address: vi.fn(async () => null) })
+
+    const { status, body } = await call("/api/session-crew/", "GET", "/r2")
+    expect(status).toBe(200)
+    expect(body).toMatchObject({
+      sessionId: "r2",
+      rootId: "p1",
+      members: [
+        { sessionId: "p1", parentId: null, outcome: "completed", device: null },
+        { sessionId: "c1", parentId: "p1", name: "lane", result: { taskId: "t1", state: "completed", acknowledged: false } },
+        { sessionId: "r2", parentId: "c1", outcome: "needs_input", device: { id: "dev_1", name: "agentbox" }, address: null },
+      ],
+    })
+  })
+})
+
+describe("/api/session-board", () => {
+  it("returns the board a session keeps, or null", async () => {
+    expect((await call("/api/session-board/", "GET", "/lead")).body).toEqual({ board: { sessionId: "lead", title: "Wave 3", sections: [], updatedAt: 1 } })
+    expect((await call("/api/session-board/", "GET", "/other")).body).toEqual({ board: null })
+  })
+})
+
 describe("/api/session-requests", () => {
   it("lists what a parent's delegated sessions ask the user", async () => {
     expect((await call("/api/session-requests", "GET", "/?parent=p1")).body).toEqual({
@@ -175,7 +220,7 @@ describe("/api/session-send", () => {
     mocks.host.send.mockResolvedValue({ delivery: "started" })
     const { body } = await call("/api/session-send", "POST", "/", { sessionId: "s1", message: "go on", interrupt: true })
     expect(body).toEqual({ delivery: "started" })
-    expect(mocks.host.send).toHaveBeenCalledWith("s1", "go on", { interrupt: true })
+    expect(mocks.host.send).toHaveBeenCalledWith("s1", "go on", expect.objectContaining({ interrupt: true, req: expect.any(Object) }))
     expect((await call("/api/session-send", "POST", "/", { sessionId: "s1", message: " " })).status).toBe(400)
   })
 })

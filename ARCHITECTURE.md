@@ -213,3 +213,11 @@ whose defaults are personal), and the renderer only through `src/edition/` (type
 that default to nothing, loaded lazily when a server reports another edition).
 `bun run check:architecture` keeps every other file from naming the package. Edition packages
 document themselves.
+
+## Durable conversations and provider instances
+
+The Cogpit-owned conversation, command, question and task store is described in
+[docs/orchestration.md](docs/orchestration.md). Routes, the session CLI and stateless
+session MCP tools use the same dispatcher and SessionHost authorization. Native
+transcripts stay in the agent stores; account instances qualify their identities
+and execute their runtimes in separate workers.

@@ -1,3 +1,4 @@
+import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
@@ -33,15 +34,11 @@ class MockEventSource extends EventTarget {
   }
 
   simulateMessage(data: unknown) {
-    if (this.onmessage) {
-      this.onmessage(new MessageEvent("message", { data: JSON.stringify(data) }))
-    }
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }))
   }
 
   simulateError() {
-    if (this.onerror) {
-      this.onerror()
-    }
+    this.dispatchEvent(new Event("error"))
   }
 
   giveUp() {
@@ -52,6 +49,7 @@ class MockEventSource extends EventTarget {
 
 describe("useTeamLive", () => {
   beforeEach(() => {
+    __resetStreamsForTest()
     vi.resetAllMocks()
     vi.useFakeTimers()
     MockEventSource.instances = []
@@ -59,6 +57,7 @@ describe("useTeamLive", () => {
   })
 
   afterEach(() => {
+    __resetStreamsForTest()
     vi.useRealTimers()
     vi.unstubAllGlobals()
     __resetCapabilitiesForTest()

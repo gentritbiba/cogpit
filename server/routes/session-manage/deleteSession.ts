@@ -1,3 +1,5 @@
+import { splitInstanceDirName } from "../../../shared/session/instances"
+import { orchestrationStore } from "../../orchestration/storage"
 import { agentKindForDirName } from "../../../shared/session/agent-descriptors"
 import { storeForPath } from "../../agents"
 import { runtimeFor } from "../../agents/runtimes"
@@ -59,11 +61,13 @@ export function registerDeleteSessionRoute(use: UseFn): void {
           return
         }
 
-        const runtime = runtimeFor(agentKind)
+        const runtime = runtimeFor(agentKind, splitInstanceDirName(dirName).instanceId)
         // A sub-agent's transcript is no session of its own: the runtime and
         // the sidebar know it only by the id a URL carries for it.
         const sessionId = transcriptSessionId ?? runtime.descriptor.sessionFile.urlId(fileName)
+        if (orchestrationStore().pending().some((command) => command.receipt.sessionId === sessionId && ["dispatching", "delivered", "unknown"].includes(command.receipt.state))) throw new RouteError(409, ErrorCodes.CONFLICT, "Resolve active or uncertain deliveries before deleting this session")
         await runtime.deleteSession(sessionId, filePath)
+        orchestrationStore().forgetSession(sessionId)
         forgetSessions([sessionId]).catch(() => {})
         forgetSessionOrigins([sessionId]).catch(() => {})
         // Deleting a sub-agent's transcript leaves its session, and the session's access, in place.

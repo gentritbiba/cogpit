@@ -18,6 +18,7 @@ import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import type { AgentStore } from "../../agents/types"
 
 let fixtureRoot: string
+let originalAcpHome: string | undefined
 let originalCodexHome: string | undefined
 let originalCopilotHome: string | undefined
 let agents: typeof import("../../agents")
@@ -51,6 +52,8 @@ const takeUuid = (): string => UUIDS[nextUuid++ % UUIDS.length]
 
 beforeAll(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "cogpit-agent-store-"))
+  originalAcpHome = process.env.COGPIT_ACP_HOME
+  process.env.COGPIT_ACP_HOME = join(fixtureRoot, "acp-home")
   originalCodexHome = process.env.CODEX_HOME
   originalCopilotHome = process.env.COPILOT_HOME
   process.env.CODEX_HOME = join(fixtureRoot, "codex-home")
@@ -67,6 +70,8 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  if (originalAcpHome === undefined) delete process.env.COGPIT_ACP_HOME
+  else process.env.COGPIT_ACP_HOME = originalAcpHome
   if (originalCodexHome === undefined) delete process.env.CODEX_HOME
   else process.env.CODEX_HOME = originalCodexHome
   if (originalCopilotHome === undefined) delete process.env.COPILOT_HOME
@@ -205,7 +210,7 @@ describe.each(CASES)("$kind store", ({ kind, store, seed }) => {
 
 describe("store registry", () => {
   it("exposes every agent exactly once, in detection order", () => {
-    expect(agents.allStores().map((store) => store.kind)).toEqual(["codex", "copilot", "claude"])
+    expect(agents.allStores().map((store) => store.kind)).toEqual(["acp", "codex", "copilot", "claude"])
   })
 
   it("owns no path outside every root", () => {
@@ -220,10 +225,11 @@ describe("store registry", () => {
       claude: fake,
       codex: fake,
       copilot: fake,
+      acp: fake,
     })
     expect(registry.storeFor("claude")).toBe(fake)
     expect(registry.storeForPath("/anywhere")).toBe(fake)
-    expect(registry.allStores()).toEqual([fake, fake, fake])
+    expect(registry.allStores()).toEqual([fake, fake, fake, fake])
   })
 
   describe("allTopLevelSessions", () => {
@@ -238,6 +244,7 @@ describe("store registry", () => {
         claude: listing("claude", [30, 10]),
         codex: listing("codex", [20]),
         copilot: listing("copilot", []),
+        acp: listing("acp", []),
       })
       const sessions = await registry.allTopLevelSessions()
       expect(sessions.map((session) => session.filePath)).toEqual(["/claude/30.jsonl", "/codex/20.jsonl", "/claude/10.jsonl"])
@@ -248,6 +255,7 @@ describe("store registry", () => {
         claude: listing("claude", [30], Object.assign(new Error("EPERM"), { code: "EPERM" })),
         codex: listing("codex", [20]),
         copilot: listing("copilot", []),
+        acp: listing("acp", []),
       })
       await expect(registry.allTopLevelSessions()).rejects.toThrow("EPERM")
     })
@@ -257,6 +265,7 @@ describe("store registry", () => {
         claude: listing("claude", [30], Object.assign(new Error("EACCES"), { code: "EACCES" })),
         codex: listing("codex", [20, 40]),
         copilot: listing("copilot", []),
+        acp: listing("acp", []),
       })
       const sessions = await registry.allTopLevelSessions({ skipUnreadable: true })
       expect(sessions.map((session) => session.filePath)).toEqual(["/codex/40.jsonl", "/codex/20.jsonl"])
@@ -453,6 +462,6 @@ describe("cross-agent lookup", () => {
 
   it("reports every configured storage root once", () => {
     expect(sessionPaths.sessionStorageRoots().map((source) => source.kind))
-      .toEqual(["codex", "copilot", "claude"])
+      .toEqual(["acp", "codex", "copilot", "claude"])
   })
 })

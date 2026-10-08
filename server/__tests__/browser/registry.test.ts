@@ -212,7 +212,7 @@ describe("listBrowsers", () => {
     expect(session.lastUsedAt).not.toBeNull()
   })
 
-  it.each(["\n", "../x\n", "not a session id\n", `${"x".repeat(81)}\n`])(
+  it.each(["\n", "../x\n", "not a session id\n", `${"x".repeat(257)}\n`])(
     "reports .driver content %j as no driver but still used",
     async (content) => {
       writeDriver("default", content)

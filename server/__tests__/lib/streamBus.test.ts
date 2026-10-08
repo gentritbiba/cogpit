@@ -4,6 +4,7 @@ import {
   publish,
   publishTextDelta,
   completeMessage,
+  forwardEvent,
   clear,
   publishError,
   publishAgentProgress,
@@ -173,6 +174,19 @@ describe("streamBus", () => {
 
     completeMessage(SID, "msg_1")
     expect(getSnapshot(SID)).toBeNull()
+  })
+
+  it("reconciles a completed worker message while other messages keep streaming", () => {
+    const hostId = "account-session"
+    const unsubscribe = subscribe(SID, (event) => forwardEvent(hostId, event))
+    publishTextDelta(SID, "finished", "persisted text")
+    vi.advanceTimersByTime(80)
+    publishTextDelta(SID, "running", "still live")
+    vi.advanceTimersByTime(80)
+    expect(getSnapshot(hostId)?.map((message) => message.messageId)).toEqual(["finished", "running"])
+    completeMessage(SID, "finished")
+    expect(getSnapshot(hostId)?.map((message) => message.messageId)).toEqual(["running"])
+    unsubscribe()
   })
 
   it("completeMessage discards throttled deltas superseded by the JSONL record", () => {

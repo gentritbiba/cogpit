@@ -49,66 +49,111 @@ async function inspectProject(canonical: string): Promise<ProjectInspection | nu
   }
 }
 
+const DISCOVERY_TTL_MS = 30_000
+const projectIdFor = (identity: string) => `p_${createHash("sha256").update(identity).digest("hex").slice(0, 40)}`
+type RefreshScope = { all: true } | { workspace: { path: string; inspection: ProjectInspection } } | { projectId: string }
+
+function ownerOf(path: string, inspection: ProjectInspection, projects: PluginProject[]): PluginProject | undefined {
+  let owner: PluginProject | undefined
+  let longest = -1
+  for (const project of projects) {
+    for (const root of project.paths) {
+      if (root.length > longest && isWithinDir(root, path)) {
+        owner = project
+        longest = root.length
+      }
+    }
+  }
+  return inspection.git && owner?.id !== projectIdFor(inspection.identity) ? undefined : owner
+}
+
 export class PluginProjects {
+  private readonly now: () => number
   private projects: PluginProject[] = []
-  private refreshedAt = 0
+  private refreshedAt = -Infinity
   private pending: Promise<PluginProject[]> | null = null
+  private inventory: { paths: string[]; readAt: number } | null = null
+  private inventoryPending: Promise<string[]> | null = null
   private inspections = new Map<string, ProjectInspection>()
   private workspaces = new Map<string, Promise<{ projects: PluginProject[]; inspection: ProjectInspection | null }>>()
 
+  constructor(options: { now?: () => number } = {}) {
+    this.now = options.now ?? Date.now
+  }
+
   async list(force = false): Promise<PluginProject[]> {
-    if (!force && Date.now() - this.refreshedAt < 30_000) return structuredClone(this.projects)
+    if (!force && this.now() - this.refreshedAt < DISCOVERY_TTL_MS) return structuredClone(this.projects)
     if (this.pending) return this.pending
-    this.pending = this.refresh().finally(() => { this.pending = null })
+    this.pending = this.refresh(true, { all: true }).finally(() => { this.pending = null })
     return this.pending
   }
 
-  private async refresh(workspace?: string, workspaceInspection?: ProjectInspection | null): Promise<PluginProject[]> {
-    const inventories = await Promise.allSettled(allStores().map((store) => store.listProjects()))
-    const paths = new Set(inventories.flatMap((result) => result.status === "fulfilled" ? result.value.map((project) => project.path) : []))
+  private inventoryPaths(fresh: boolean): Promise<string[]> {
+    if (!fresh && this.inventory && this.now() - this.inventory.readAt < DISCOVERY_TTL_MS) return Promise.resolve(this.inventory.paths)
+    this.inventoryPending ??= (async () => {
+      const readAt = this.now()
+      const inventories = await Promise.allSettled(allStores().map((store) => store.listProjects()))
+      const paths = [...new Set(inventories.flatMap((result) => result.status === "fulfilled" ? result.value.map((project) => project.path) : []))].slice(0, 1024)
+      this.inventory = { paths, readAt }
+      return paths
+    })().finally(() => { this.inventoryPending = null })
+    return this.inventoryPending
+  }
+
+  private needsInspection(canonical: string, previous: ProjectInspection, scope: RefreshScope): boolean {
+    if ("all" in scope) return true
+    if ("projectId" in scope) return projectIdFor(previous.identity) === scope.projectId
+    const { path, inspection } = scope.workspace
+    return isWithinDir(canonical, path) || previous.paths.some(root => isWithinDir(root, path)) || previous.identity === inspection.identity
+  }
+
+  private async refresh(freshInventory: boolean, scope: RefreshScope): Promise<PluginProject[]> {
+    const queue = [...await this.inventoryPaths(freshInventory)]
+    const workspace = "workspace" in scope ? scope.workspace : null
     const known = new Map<string, PluginProject>()
     const inspections = new Map<string, ProjectInspection>()
-    const queue = [...paths].slice(0, 1024)
     await Promise.all(Array.from({ length: Math.min(queue.length, 4) }, async () => {
       let path: string | undefined
       while ((path = queue.shift()) !== undefined) {
         const canonical = await canonicalDirectory(path)
         if (!canonical) continue
         const previous = this.inspections.get(canonical)
-        const relevant = !workspace || !previous || isWithinDir(canonical, workspace)
-          || previous.paths.some(root => isWithinDir(root, workspace)) || previous.identity === workspaceInspection?.identity
-        const project = canonical === workspace ? workspaceInspection : relevant ? await inspectProject(canonical) : previous
+        const covered = workspace && (canonical === workspace.path
+          || previous?.identity === workspace.inspection.identity && workspace.inspection.paths.some(root => isWithinDir(root, canonical)))
+        const project = covered ? workspace.inspection
+          : !previous || this.needsInspection(canonical, previous, scope) ? await inspectProject(canonical) : previous
         if (!project) continue
         inspections.set(canonical, project)
-        const id = `p_${createHash("sha256").update(project.identity).digest("hex").slice(0, 40)}`
+        const id = projectIdFor(project.identity)
         const existing = known.get(id)
         if (existing) existing.paths = [...new Set([...existing.paths, ...project.paths])].sort()
-        else known.set(id, { id, name: basename(project.paths[0]) || "Project", paths: project.paths.sort() })
+        else known.set(id, { id, name: basename(project.paths[0]) || "Project", paths: [...project.paths].sort() })
       }
     }))
     const projects = [...known.values()].sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     this.inspections = inspections
-    if (!workspace) { this.projects = projects; this.refreshedAt = Date.now() }
+    if ("all" in scope) { this.projects = projects; this.refreshedAt = this.now() }
     return structuredClone(projects)
   }
 
   async resolve(id: string | null): Promise<PluginProject | null> {
     if (id === null) return null
-    const project = (await this.list(true)).find((candidate) => candidate.id === id)
+    const project = (await this.refresh(false, { projectId: id })).find((candidate) => candidate.id === id)
+      ?? (await this.refresh(true, { projectId: id })).find((candidate) => candidate.id === id)
     if (!project) throw new Error("The selected project is no longer available on this host")
     return project
   }
 
   async resolveWorkspace(projectId: string | null, workspacePath?: string | null): Promise<string | null> {
     if (workspacePath === undefined || workspacePath === null) return null
-    const workspace = projectId ? await this.inspectWorkspace(workspacePath) : null
+    const workspace = projectId ? await this.inspectWorkspace(workspacePath, projectId) : null
     if (!workspace || workspace.project.id !== projectId) throw new Error("The selected workspace is not available in this project")
     return workspace.path
   }
 
   async resolveContext(projectId: string | null, workspacePath?: string | null): Promise<{ project: PluginProject | null; workspacePath: string | null }> {
     if (!workspacePath) return { project: await this.resolve(projectId), workspacePath: null }
-    const workspace = projectId ? await this.inspectWorkspace(workspacePath) : null
+    const workspace = projectId ? await this.inspectWorkspace(workspacePath, projectId) : null
     if (!workspace || workspace.project.id !== projectId) throw new Error("The selected workspace is not available in this project")
     return { project: workspace.project, workspacePath: workspace.path }
   }
@@ -117,28 +162,19 @@ export class PluginProjects {
     return (await this.inspectWorkspace(workspacePath))?.project ?? null
   }
 
-  private async inspectWorkspace(workspacePath: string): Promise<{ project: PluginProject; path: string } | null> {
+  private async inspectWorkspace(workspacePath: string, expectedId?: string): Promise<{ project: PluginProject; path: string } | null> {
     const canonical = await canonicalDirectory(workspacePath)
     if (!canonical) return null
     let pending = this.workspaces.get(canonical)
     if (!pending) {
-      pending = inspectProject(canonical).then(async inspection => ({ projects: await this.refresh(canonical, inspection), inspection }))
+      pending = inspectProject(canonical).then(async inspection => ({ projects: inspection ? await this.refresh(false, { workspace: { path: canonical, inspection } }) : [], inspection }))
         .finally(() => { this.workspaces.delete(canonical) })
       this.workspaces.set(canonical, pending)
     }
     const { projects, inspection } = await pending
     if (!inspection) return null
-    let owner: PluginProject | undefined
-    let longest = -1
-    for (const project of projects) {
-      for (const path of project.paths) {
-        if (path.length > longest && isWithinDir(path, canonical)) {
-          owner = project
-          longest = path.length
-        }
-      }
-    }
-    if (inspection.git && owner?.id !== `p_${createHash("sha256").update(inspection.identity).digest("hex").slice(0, 40)}`) return null
+    let owner = ownerOf(canonical, inspection, projects)
+    if (!owner || expectedId !== undefined && owner.id !== expectedId) owner = ownerOf(canonical, inspection, await this.refresh(true, { workspace: { path: canonical, inspection } }))
     return owner ? { project: owner, path: canonical } : null
   }
 }

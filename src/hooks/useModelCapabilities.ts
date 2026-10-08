@@ -28,8 +28,8 @@ export interface ModelCapabilities {
  * calling the helpers with a store lookup: the React Compiler memoises on
  * arguments, and the catalog has to be one of them.
  */
-export function useModelCapabilities(agentKind: AgentKind, model: string | null | undefined): ModelCapabilities {
-  const options = useModelOptions(agentKind)
+export function useModelCapabilities(agentKind: AgentKind, model: string | null | undefined, instanceId = "default"): ModelCapabilities {
+  const options = useModelOptions(agentKind, instanceId)
   return {
     options,
     effortOptions: getEffortOptions(agentKind, options, model),

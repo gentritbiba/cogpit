@@ -1,4 +1,8 @@
 import { getSessionMeta, getSessionStatus } from "../helpers"
+import { findJsonlPath } from "../sessionPaths"
+import { crewRootOf } from "./crew"
+import { editionModule } from "../edition"
+import { sessionParents } from "./sessionOrigins"
 import { projectDirToReadableName, shortNameFromPath } from "./projectNames"
 import {
   descriptorFor,
@@ -10,6 +14,7 @@ import { runtimeFor } from "../agents/runtimes"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
+import { instanceDirName, instanceSessionId, splitInstanceSessionId } from "../../shared/session/instances"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -44,12 +49,16 @@ const RECENT_WINDOW_MS = 30 * 60_000
 
 interface SessionSnapshot extends TrackedSessionSnapshot {
   agentKind: AgentKind
+  instanceId?: string
+  urlId: string
   dirName: string
   cwd: string | null
   /** Short project name for the notification title. */
   projectName: string
   /** The id the runtime tracks turns by. */
   threadId: string | null
+  /** For a session another session started: what it is called, and its crew's root. */
+  crew?: { name: string; rootId: string }
 }
 
 interface Candidate {
@@ -59,6 +68,7 @@ interface Candidate {
   filePath: string
   mtimeMs: number
   agentKind: AgentKind
+  instanceId?: string
 }
 
 /**
@@ -101,9 +111,9 @@ async function sweep(): Promise<void> {
   for (const alert of tracker.alerts(snapshots)) {
     deliverNotification(
       {
-        title: titleFor(alert.session),
+        title: await titleFor(alert.session),
         body: alert.reason === "permission" ? "Needs your attention" : "Waiting for your input",
-        nav: { sessionId: alert.session.sessionId, dirName: alert.session.dirName },
+        nav: { sessionId: alert.session.urlId, dirName: alert.session.dirName },
       },
       alert.reason,
     )
@@ -125,6 +135,7 @@ async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]>
           filePath: file.filePath,
           mtimeMs: file.mtimeMs,
           agentKind: store.kind,
+          instanceId: store.instanceId,
         })
       }
     } catch (err) {
@@ -147,7 +158,7 @@ async function snapshotCandidate(candidate: Candidate): Promise<SessionSnapshot 
   return snapshot
 }
 
-async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | null> {
+export async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | null> {
   try {
     const { meta, status } = await getOrLoadSessionMeta(candidate.filePath, candidate.mtimeMs, async () => {
       const [meta, status] = await Promise.all([
@@ -163,23 +174,36 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
     let projectName: string
     if (dirName === null) {
       if (meta.isSubagent || !meta.cwd) return null
-      dirName = projectDirNameFor(candidate.agentKind, meta.cwd)
+      dirName = instanceDirName(candidate.instanceId ?? "default", projectDirNameFor(candidate.agentKind, meta.cwd))
       projectName = shortNameFromPath(meta.cwd)
     } else {
       projectName = projectDirToReadableName(dirName).shortName
     }
 
+    const urlId = descriptorFor(candidate.agentKind).sessionFile.urlId(candidate.fileName)
+    const sessionId = instanceSessionId(candidate.instanceId ?? "default", urlId)
+    const threadId = meta.sessionId ? instanceSessionId(candidate.instanceId ?? "default", splitInstanceSessionId(meta.sessionId).nativeId) : null
+    const parents = await sessionParents()
+    const crewId = [threadId, sessionId].find((id) => id && parents.has(id))
+    const link = crewId ? parents.get(crewId) : undefined
     const snapshot: SessionSnapshot = {
-      // Nav must carry the id the URL scheme uses for this transcript, which
-      // is not necessarily meta.sessionId.
-      sessionId: descriptorFor(candidate.agentKind).sessionFile.urlId(candidate.fileName),
+      sessionId,
+      urlId,
       dirName,
       agentKind: candidate.agentKind,
+      instanceId: candidate.instanceId,
       cwd: meta.cwd ?? null,
       projectName,
-      threadId: meta.sessionId || null,
+      threadId,
       status: status.status,
       isTeammate: Boolean(meta.teamName && meta.agentName),
+      ...(crewId && link && {
+        reportsToLead: true,
+        crew: {
+          name: link.name || meta.customTitle || (meta.cwd ? shortNameFromPath(meta.cwd) : projectName),
+          rootId: crewRootOf(crewId, parents),
+        },
+      }),
     }
     snapshot.isActiveTurn = isActiveTurn(snapshot)
     return snapshot
@@ -192,9 +216,38 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
 function isActiveTurn(snapshot: SessionSnapshot): boolean {
   if (!snapshot.threadId) return false
   if (descriptorFor(snapshot.agentKind).capabilities.turnLiveness !== "runtime") return false
-  return runtimeFor(snapshot.agentKind).activity(snapshot.threadId).running
+  return runtimeFor(snapshot.agentKind, snapshot.instanceId).activity(snapshot.threadId).running
 }
 
-function titleFor(session: SessionSnapshot): string {
+const rootTitles = new Map<string, string>()
+
+/** What a crew's root is called, read once per root; null when its transcript cannot be read. */
+async function rootTitle(rootId: string): Promise<string | null> {
+  const known = rootTitles.get(rootId)
+  if (known) return known
+  try {
+    const filePath = await findJsonlPath(rootId)
+    if (!filePath) return null
+    const meta = await getSessionMeta(filePath)
+    const title = (meta.customTitle || meta.aiTitle || meta.firstUserMessage || "").split("\n")[0]?.trim().slice(0, 60)
+    if (!title) return null
+    rootTitles.set(rootId, title)
+    return title
+  } catch {
+    return null
+  }
+}
+
+/**
+ * "<agent> — project", or for a crew member "w3-rooftop · Wave 3 coordinator".
+ * A notification reaches whoever may see the member, and with accounts that
+ * can include someone who may not see its root, so only an install without
+ * accounts names the root.
+ */
+export async function titleFor(session: Pick<SessionSnapshot, "crew" | "agentKind" | "projectName">): Promise<string> {
+  if (session.crew) {
+    const root = editionModule().auth ? null : await rootTitle(session.crew.rootId)
+    return root ? `${session.crew.name} · ${root}` : session.crew.name
+  }
   return `${descriptorFor(session.agentKind).displayName} — ${session.projectName}`
 }

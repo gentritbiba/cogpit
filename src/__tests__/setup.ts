@@ -1,5 +1,21 @@
 import "@testing-library/jest-dom/vitest"
-import { vi } from "vitest"
+import { afterAll, beforeEach, vi } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+const orchestrationRoots = new Set<string>()
+const initialOrchestrationRoot = mkdtempSync(join(tmpdir(), "cogpit-vitest-orchestration-"))
+orchestrationRoots.add(initialOrchestrationRoot)
+process.env.COGPIT_ORCHESTRATION_ROOT = initialOrchestrationRoot
+beforeEach(() => { const root = mkdtempSync(join(tmpdir(), "cogpit-vitest-orchestration-")); orchestrationRoots.add(root); process.env.COGPIT_ORCHESTRATION_ROOT = root })
+afterAll(async () => {
+  if (typeof window === "undefined") {
+    const { closeOrchestrationStore } = await import("../../server/orchestration/storage")
+    closeOrchestrationStore()
+  }
+  for (const root of orchestrationRoots) rmSync(root, { recursive: true, force: true })
+})
 
 // No power fails under test, and a real flush costs milliseconds per durable
 // write on macOS. The suites that check what reaches the disk unmock it.

@@ -9,7 +9,9 @@ import {
   extractCommandName,
   parseTaskNotifications,
   stripSystemTags,
+  taskWakeupSummary,
 } from "@/lib/userMessageContent"
+import { useSessionNamer } from "@/hooks/useSessionNamer"
 
 interface StickyPromptBannerProps {
   session: ParsedSession
@@ -27,7 +29,9 @@ const POSITION_EPSILON = 1
 const PROMPT_HEIGHT_FALLBACK = 120
 const PREVIEW_LENGTH = 180
 
-function promptPreview(turn: Turn): string | null {
+type SessionNamer = (sessionId: string) => string | undefined
+
+function promptPreview(turn: Turn, nameOf: SessionNamer): string | null {
   if (!turn.userMessage) return null
 
   const raw = getUserMessageText(turn.userMessage)
@@ -36,6 +40,8 @@ function promptPreview(turn: Turn): string | null {
   // space belongs to what the reader typed, so the report comes off first.
   const { remainingText } = parseTaskNotifications(unwrapped)
   const clean = stripSystemTags(remainingText)
+  const wakeup = taskWakeupSummary(clean, nameOf)
+  if (wakeup) return wakeup
 
   if (!clean) {
     const command = extractCommandName(raw)
@@ -50,11 +56,11 @@ function promptPreview(turn: Turn): string | null {
     : firstLine
 }
 
-function findPrompt(turns: Turn[], startIndex: number): { index: number; text: string } | null {
+function findPrompt(turns: Turn[], startIndex: number, nameOf: SessionNamer): { index: number; text: string } | null {
   for (let index = startIndex; index >= 0; index--) {
     const turn = turns[index]
     if (!turn) continue
-    const text = promptPreview(turn)
+    const text = promptPreview(turn, nameOf)
     if (text) return { index, text }
   }
   return null
@@ -128,10 +134,11 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     }
   }, [scrollContainerRef, session.sessionId])
 
+  const nameOf = useSessionNamer()
   const prompt = useMemo(() => {
     if (!stickyTurn || stickyTurn.sessionId !== session.sessionId) return null
-    return findPrompt(session.turns, stickyTurn.index)
-  }, [session.sessionId, session.turns, stickyTurn])
+    return findPrompt(session.turns, stickyTurn.index, nameOf)
+  }, [session.sessionId, session.turns, stickyTurn, nameOf])
 
   if (!prompt) return null
 

@@ -353,3 +353,11 @@ cogpit-memory index rebuild
 | Index rebuild | `cogpit-memory index rebuild` |
 
 **Default to Layer 1 only. Drill into Layer 2/3 only when you have a specific reason.**
+
+## Provider account identities
+
+Sessions from configured Cogpit provider accounts use account-qualified IDs. Pass
+the full ID to context and search commands. Cogpit supplies
+`COGPIT_ORCHESTRATION_ROOT` to discover these profiles; set it to the app data root
+when running the memory CLI independently. Inside a provider worker, introspection
+uses that account’s own transcript store. ACP transcripts are supported.
