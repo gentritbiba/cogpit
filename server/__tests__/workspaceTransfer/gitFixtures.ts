@@ -20,7 +20,11 @@ export async function tempDir(prefix: string): Promise<string> {
 }
 
 export async function cleanupTempDirs(): Promise<void> {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+  while (temporaryDirectories.length) {
+    const path = temporaryDirectories[temporaryDirectories.length - 1]
+    await rm(path, { recursive: true, force: true })
+    temporaryDirectories.pop()
+  }
 }
 
 export async function writeFiles(root: string, files: Record<string, string>): Promise<void> {

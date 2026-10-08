@@ -152,7 +152,7 @@ export async function snapshotWorkspace(cwd: string): Promise<WorkspaceSnapshot>
     if (error instanceof GitCommandError) throw invalid(`${cwd} is not inside a git repository`)
     throw error
   }
-  const repoRoot = location[0].trim()
+  const repoRoot = resolve(location[0].trim())
   const subdir = (location[1] ?? "").trim().replace(/\/+$/, "")
 
   const head = await optionalGit(repoRoot, ["rev-parse", "--verify", "-q", "HEAD^{commit}"])
