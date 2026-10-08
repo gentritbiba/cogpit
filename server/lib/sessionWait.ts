@@ -4,6 +4,8 @@ import { storeForPath } from "../agents"
 import { runtimeFor, runtimeForSession } from "../agents/runtimes"
 import { findJsonlPath } from "../sessionPaths"
 import type { SessionStatusInfo } from "../../shared/session/types"
+import type { WorkspaceEnvironment, WorkspaceRunContext } from "../../shared/contracts/workspaces"
+import { workspaceDetailsForCwd } from "../workspaceTransfer/status"
 
 /**
  * One answer to "is that session done?" for agents driving other sessions.
@@ -25,6 +27,8 @@ export interface SessionState extends Partial<SessionStatusInfo> {
   running: boolean
   waiting: PendingInput[]
   error?: string
+  environment?: WorkspaceEnvironment
+  run?: WorkspaceRunContext
 }
 
 const IN_FLIGHT_STATUSES = new Set(["thinking", "tool_use", "processing", "compacting", "awaiting_agents"])
@@ -56,6 +60,8 @@ export async function readSessionState(sessionId: string): Promise<SessionState>
   const activity = runtime.activity(sessionId)
   const statusInfo = filePath ? await getSessionStatus(filePath) : undefined
   const waiting = listPendingInput(sessionId)
+  const identity = filePath && store?.readIdentity ? await store.readIdentity(filePath).catch(() => null) : null
+  const workspace = identity?.cwd ? await workspaceDetailsForCwd(identity.cwd) : {}
   const error = turnErrors.get(sessionId) ?? statusInfo?.terminalReason
 
   let outcome: SessionOutcome
@@ -74,6 +80,7 @@ export async function readSessionState(sessionId: string): Promise<SessionState>
     ...activity,
     ...statusInfo,
     waiting,
+    ...workspace,
     ...(error && outcome === "error" ? { error } : {}),
   }
 }

@@ -1,6 +1,7 @@
 import { LEGACY_SESSION_LINEAGE_FILE, SESSION_ORIGINS_FILE } from "./sessionConfigDir"
 import { SessionConfigFile } from "./sessionConfigFile"
 import type { Handoff } from "../workspaceTransfer/handoff"
+import { environmentFrom, runContextFrom } from "../workspaceTransfer/status"
 
 /**
  * How Cogpit came to start a session through the session CLI or
@@ -44,7 +45,10 @@ function handoffFrom(value: unknown): Handoff | undefined {
   const base = optionalString(entry?.base)
   const workspaceId = optionalString(entry?.workspaceId)
   const branch = optionalString(entry?.branch)
-  return repoRoot && base && workspaceId && branch ? { repoRoot, base, workspaceId, branch } : undefined
+  if (!repoRoot || !base || !workspaceId || !branch) return undefined
+  const environment = environmentFrom(entry?.environment)
+  const run = runContextFrom(entry?.run)
+  return { repoRoot, base, workspaceId, branch, ...(environment ? { environment } : {}), ...(run ? { run } : {}), ...(entry?.remoteCwd ? { remoteCwd: optionalString(entry.remoteCwd) } : {}) }
 }
 
 const file = new SessionConfigFile(SESSION_ORIGINS_FILE, {

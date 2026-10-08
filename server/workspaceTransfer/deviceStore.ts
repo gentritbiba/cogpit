@@ -1,5 +1,4 @@
-import { mkdir, realpath, rm, stat } from "node:fs/promises"
-import { homedir } from "node:os"
+import { lstat, mkdir, readFile, realpath, rm, stat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { ErrorCodes, RouteError } from "../lib/routeError"
 import { serialQueue, type SerialQueue } from "../lib/serialQueue"
@@ -7,6 +6,13 @@ import { isWithinDir } from "../pathSafety"
 import { createBundle, fetchBundle, type TransferBundle } from "./bundle"
 import { git, GitCommandError, gitSucceeds, GIT_TRANSFER_TIMEOUT_MS } from "./git"
 import { COMMIT_SHA_RE, REPO_KEY_RE, snapshotWorkspace } from "./snapshot"
+import type { RepositoryIdentity, WorkspaceEnvironment, WorkspaceEnvironmentMode, WorkspaceImportResponse, WorkspaceProbeResponse } from "../../shared/contracts/workspaces"
+import { checkoutCandidates, findCheckout, parseIdentity } from "./projects"
+import { decodeEnvironment, environmentError, installEnvironment, parseEnvPatterns, selectEnvironment, validEnvironmentPath } from "./environment"
+import { withRunContext } from "./runContext"
+import { writeOwnerOnlyJson } from "../atomicJsonFile"
+import { workspacesRoot, workspaceRecordPath as recordPath } from "./status"
+export { workspacesRoot } from "./status"
 
 /** Starts alphanumeric or `_`, so no task name is hidden, an option, or a dot segment. */
 export const TASK_NAME_RE = /^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/
@@ -23,16 +29,19 @@ export interface ImportWorkspaceInput {
   task: string
   /** posix path relative to the repository root, "" for the root. */
   subdir: string
+  identity?: RepositoryIdentity
+  targetCheckout?: string
+  environmentMode?: WorkspaceEnvironmentMode
+  environmentBytes?: Buffer
+  envFiles?: string[]
 }
 
-export interface ImportedWorkspace {
-  /** `<repoKey>/<task>` */
-  workspaceId: string
-  /** The worktree root. */
-  path: string
-  /** path + subdir, where the agent should start. */
-  cwd: string
-  branch: string
+export type ImportedWorkspace = WorkspaceImportResponse
+
+interface WorkspaceRecord extends ImportedWorkspace { repoDir: string; base: string }
+
+async function workspaceRecord(repoKey: string, task: string): Promise<WorkspaceRecord | null> {
+  return readFile(recordPath(repoKey, task), "utf8").then((text) => JSON.parse(text) as WorkspaceRecord, () => null)
 }
 
 export interface ExportedWorkspace {
@@ -40,10 +49,6 @@ export interface ExportedWorkspace {
   dirty: boolean
   /** null when the receiver already has `tip`. */
   bundle: TransferBundle | null
-}
-
-export function workspacesRoot(): string {
-  return process.env.COGPIT_WORKSPACES_DIR || join(homedir(), ".cogpit", "workspaces")
 }
 
 function invalid(message: string): RouteError {
@@ -126,12 +131,18 @@ function queueFor(repoKey: string): SerialQueue {
 }
 
 /** Every ref tip in the device's copy of the repository, for the sender to exclude. */
-export async function knownCommits(repoKey: string): Promise<string[]> {
+export async function knownCommits(repoKey: string, repoDir = repoDirFor(repoKey)): Promise<string[]> {
   if (!REPO_KEY_RE.test(repoKey)) throw invalid("Invalid repoKey")
-  const repoDir = repoDirFor(repoKey)
   if (!(await exists(repoDir))) return []
   const output = await git(repoDir, ["for-each-ref", "--format=%(objectname)"])
   return [...new Set(output.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+export async function probeWorkspace(repoKey: string, identity?: RepositoryIdentity, targetCheckout?: string): Promise<WorkspaceProbeResponse> {
+  if (!REPO_KEY_RE.test(repoKey)) throw invalid("Invalid repoKey")
+  if (!identity) return { commits: await knownCommits(repoKey) }
+  const match = await findCheckout(identity, targetCheckout ? [] : await checkoutCandidates(workspacesRoot()), targetCheckout)
+  return { ...match, commits: await knownCommits(repoKey, match.checkout ?? repoDirFor(repoKey)) }
 }
 
 async function claimTaskName(repoDir: string, taskRoot: string, base: string): Promise<string> {
@@ -153,12 +164,22 @@ export async function importWorkspace(input: ImportWorkspaceInput): Promise<Impo
   if (!COMMIT_SHA_RE.test(snapshot)) throw invalid("snapshot must be a commit sha")
   if (!isValidSubdir(subdir)) throw invalid("subdir must be a relative path inside the repository")
   if (bundlePath && (!bundleRef || !isValidBundleRef(bundleRef))) throw invalid("Invalid bundleRef")
+  const identity = parseIdentity(input.identity)
+  const mode = input.environmentMode ?? "auto"
+  if (!["auto", "target", "caller", "none"].includes(mode)) throw invalid("Invalid environmentMode")
+  if ((input.environmentMode || input.environmentBytes || input.envFiles || input.targetCheckout) && !identity) throw invalid("Repository identity is required for environment provisioning")
+  if ((mode === "caller") !== !!input.environmentBytes) throw environmentError()
+  const envFiles = parseEnvPatterns(input.envFiles)
 
   return queueFor(repoKey).run(async () => {
     const taskRoot = join(workspacesRoot(), repoKey)
-    const repoDir = repoDirFor(repoKey)
+    const match = identity
+      ? await findCheckout(identity, input.targetCheckout ? [] : await checkoutCandidates(workspacesRoot()), input.targetCheckout)
+      : { match: "none" as const }
+    if (mode === "target" && !match.checkout) throw new RouteError(409, ErrorCodes.CONFLICT, "No unique target checkout matched; use --target-checkout to select one, --env caller, or --env none")
+    const repoDir = match.checkout ?? repoDirFor(repoKey)
+    await mkdir(taskRoot, { recursive: true, mode: 0o700 })
     if (!(await exists(repoDir))) {
-      await mkdir(taskRoot, { recursive: true })
       await git(taskRoot, ["init", "--quiet", "--bare", BARE_REPO_DIR])
     }
 
@@ -169,7 +190,7 @@ export async function importWorkspace(input: ImportWorkspaceInput): Promise<Impo
 
     if (bundlePath && bundleRef) {
       await fetchBundle(repoDir, bundlePath, bundleRef, importRef).catch((error: unknown) => {
-        if (error instanceof GitCommandError) throw invalid(`Could not read the bundle: ${error.stderr}`)
+        if (error instanceof GitCommandError) throw invalid("Could not read the workspace bundle")
         throw error
       })
     }
@@ -190,9 +211,43 @@ export async function importWorkspace(input: ImportWorkspaceInput): Promise<Impo
       throw error
     }
 
-    const cwd = subdir ? join(path, ...subdir.split("/")) : path
-    await mkdir(cwd, { recursive: true })
-    return { workspaceId: `${repoKey}/${task}`, path, cwd, branch }
+    try {
+      let cwd = path
+      for (const segment of subdir ? subdir.split("/") : []) {
+        cwd = join(cwd, segment)
+        const existing = await lstat(cwd).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null
+          throw error
+        })
+        if (existing && !existing.isDirectory()) throw invalid("Session cwd must use directories inside the worktree")
+        if (!existing) await mkdir(cwd)
+      }
+      const environment: WorkspaceEnvironment = { source: "none", files: [], ...(match.checkout ? { checkout: match.checkout } : {}) }
+      if (mode === "caller") {
+        if (!input.environmentBytes) throw environmentError()
+        environment.files = await installEnvironment(path, decodeEnvironment(input.environmentBytes))
+        environment.source = "caller"
+      } else if (mode !== "none" && match.checkout) {
+        environment.files = await installEnvironment(path, await selectEnvironment(match.checkout, envFiles))
+        environment.source = "target-checkout"
+      } else if (match.match === "ambiguous") {
+        environment.note = "Several checkouts matched; use --target-checkout to select one"
+      } else if (mode !== "none") {
+        environment.note = "No target checkout matched; use --env caller to send ignored env files explicitly"
+      }
+      const save = async (details: Pick<ImportedWorkspace, "environment" | "run">) => {
+        const result: ImportedWorkspace = { workspaceId: `${repoKey}/${task}`, path, cwd, branch, ...details }
+        await writeOwnerOnlyJson(recordPath(repoKey, task), { ...result, repoDir, base: snapshot } satisfies WorkspaceRecord)
+        return result
+      }
+      return identity ? await withRunContext(workspacesRoot(), `${repoKey}/${task}`, (run) => save({ environment, run })) : await save({})
+    } catch (error) {
+      await git(repoDir, ["worktree", "remove", "--force", path]).catch(() => rm(path, { recursive: true, force: true }))
+      await git(repoDir, ["branch", "-D", branch]).catch(() => undefined)
+      await git(repoDir, ["update-ref", "-d", importRef]).catch(() => undefined)
+      await rm(recordPath(repoKey, task), { force: true })
+      throw error
+    }
   })
 }
 
@@ -215,25 +270,39 @@ async function isWorktreeRoot(path: string): Promise<boolean> {
  * the `exclude` commits the receiver already has. The caller owns the bundle.
  */
 export async function exportWorkspace(workspaceId: string, exclude: readonly string[]): Promise<ExportedWorkspace> {
-  const { path } = locateWorkspace(workspaceId)
+  const { path, repoKey, task } = locateWorkspace(workspaceId)
   if (exclude.some((sha) => !COMMIT_SHA_RE.test(sha))) throw invalid("exclude must list commit shas")
   if (!(await isWorktreeRoot(path))) throw new RouteError(404, ErrorCodes.NOT_FOUND, "Workspace not found")
 
-  const snapshot = await snapshotWorkspace(path)
+  const record = await workspaceRecord(repoKey, task)
+  const secrets = record?.environment?.files ?? []
+  if (!secrets.every(validEnvironmentPath)) throw environmentError()
+  if (secrets.length && record) {
+    // Refuse even a later deletion: its ancestor commit would leak in the bundle.
+    const touched = await git(path, ["log", "--full-history", "--format=%H", `${record.base}..HEAD`, "--", ...secrets.map((name) => `:(literal)${name}`)])
+    if (touched) throw new RouteError(409, ErrorCodes.CONFLICT, "Environment files were committed in this workspace. Remove those commits before returning work; secret bytes were not exported")
+  }
+  const snapshot = await snapshotWorkspace(path, secrets)
   const bundle = await createBundle(snapshot.repoRoot, snapshot.snapshot, exclude)
   return { tip: snapshot.snapshot, dirty: snapshot.dirty, bundle }
 }
 
 /** Remove a workspace's worktree, branch and import ref. Missing pieces are fine. */
 export async function removeWorkspace(workspaceId: string): Promise<void> {
-  const { repoKey, task, path, repoDir } = locateWorkspace(workspaceId)
-  if (!(await exists(repoDir))) return
+  const { repoKey, task, path, repoDir: fallback } = locateWorkspace(workspaceId)
   await queueFor(repoKey).run(async () => {
+    const repoDir = (await workspaceRecord(repoKey, task))?.repoDir ?? fallback
+    if (!(await exists(repoDir))) {
+      await rm(path, { recursive: true, force: true })
+      await rm(recordPath(repoKey, task), { force: true })
+      return
+    }
     if (await exists(path)) {
       await git(repoDir, ["worktree", "remove", "--force", path]).catch(() => rm(path, { recursive: true, force: true }))
     }
     await git(repoDir, ["worktree", "prune"])
     await git(repoDir, ["branch", "-D", `cogpit/${task}`]).catch(() => undefined)
     await git(repoDir, ["update-ref", "-d", `refs/cogpit/imports/${task}`]).catch(() => undefined)
+    await rm(recordPath(repoKey, task), { force: true })
   })
 }

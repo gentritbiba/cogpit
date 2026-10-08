@@ -133,6 +133,27 @@ beforeEach(() => {
 })
 
 describe("parsed target authorization", () => {
+  it("passes explicit env selections and checkout to the handoff; status exposes names", async () => {
+    const environment = { source: "caller", files: [".env.local"] }
+    const runContext = { port: 41234, composeProjectName: "cogpit-0123456789abcdef" }
+    mocks.sendWorkspace.mockResolvedValue({ handoff: { ...handoff, environment, run: runContext }, remoteCwd: "/remote/worktree", remoteBranch: "cogpit/fix", environment, run: runContext })
+    const created = await run(["new", "test", "--device", "agentbox", "--env", "caller", "--env-files", ".env.local,apps/web/.dev.vars", "--target-checkout", "/remote/app"], { invocationId: "env-options-1" })
+    expect(mocks.sendWorkspace).toHaveBeenCalledWith("dev_1", "agentbox", "/work/app", "test", "local:env-options-1", { environmentMode: "caller", envFiles: [".env.local", "apps/web/.dev.vars"], targetCheckout: "/remote/app" })
+    expect(out(created).workspace).toMatchObject({ environment, run: runContext })
+    mocks.sessionOrigin.mockResolvedValue({ handoff: { ...handoff, environment, run: runContext } })
+    mocks.remote.state.mockResolvedValue(state("r-child", "running"))
+    expect(out(await run(["status", "r-child"]))).toMatchObject({ environment, run: runContext })
+    mocks.sessionOrigin.mockResolvedValue(null)
+    mocks.local.state.mockResolvedValue(state("child-1", "running", { environment, run: runContext }))
+    expect(out(await run(["status", "child-1"]))).toMatchObject({ environment, run: runContext })
+  })
+
+  it("rejects env options for local sessions and remote --cwd", async () => {
+    for (const args of [["new", "x", "--env", "caller"], ["new", "x", "--device", "agentbox", "--cwd", "/x", "--env", "caller"], ["new", "x", "--device", "agentbox", "--env", "typo"]]) {
+      expect((await run(args)).exitCode).toBe(EXIT.error)
+    }
+    expect(mocks.sendWorkspace).not.toHaveBeenCalled()
+  })
   it.each([
     ["result", "--text", "private-session"],
     ["approve", "--request", "permission-1", "private-session"],
@@ -225,7 +246,7 @@ describe("new", () => {
     })
     const output = await run(["new", "fix", "the", "parser", "--device", "agentbox"], { invocationId: "handoff-1" })
     expect(mocks.ensureSessionApi).toHaveBeenCalledWith("dev_1")
-    expect(mocks.sendWorkspace).toHaveBeenCalledWith("dev_1", "agentbox", "/work/app", "fix the parser", "local:handoff-1")
+    expect(mocks.sendWorkspace).toHaveBeenCalledWith("dev_1", "agentbox", "/work/app", "fix the parser", "local:handoff-1", { environmentMode: "auto" })
     expect(mocks.remote.create).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/home/dev/.cogpit/workspaces/app-1234567890/fix",
       message: "[Cogpit] Handed over from mac.\n\nfix the parser",

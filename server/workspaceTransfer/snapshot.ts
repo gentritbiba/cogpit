@@ -3,6 +3,7 @@ import { copyFile, rm, stat, utimes } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 import { ErrorCodes, RouteError } from "../lib/routeError"
 import { COGPIT_GIT_IDENTITY, git, GitCommandError } from "./git"
+import type { RepositoryIdentity } from "../../shared/contracts/workspaces"
 
 /** HEAD plus every uncommitted change of a repository, frozen as one commit. */
 export interface WorkspaceSnapshot {
@@ -17,6 +18,7 @@ export interface WorkspaceSnapshot {
   dirty: boolean
   repoKey: string
   repoName: string
+  identity: RepositoryIdentity
 }
 
 /** `<repoName>-<10 hex>`; the name starts alphanumeric so a key is always a safe directory name. */
@@ -43,9 +45,10 @@ export function normalizeRemoteUrl(url: string): string {
     try {
       const parsed = new URL(trimmed)
       host = parsed.hostname.toLowerCase()
+      if (parsed.port && !((parsed.protocol === "ssh:" || parsed.protocol === "git+ssh:") && parsed.port === "22")) host += `:${parsed.port}`
       path = decodeURIComponent(parsed.pathname)
     } catch {
-      path = trimmed.slice(scheme[0].length)
+      return ""
     }
   } else {
     const scpLike = /^(?:[^@/]+@)?([^:/]+):(.*)$/.exec(trimmed)
@@ -54,8 +57,13 @@ export function normalizeRemoteUrl(url: string): string {
       path = scpLike[2]
     }
   }
-  path = path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "")
+  path = path.replace(/[?#].*$/, "").replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "")
   return host ? `${host}/${path}` : path
+}
+
+export function portableRemoteIdentity(url: string | null): string | undefined {
+  return url && /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:[^@/]+@)?[^:/]+:)/i.test(url) && !url.startsWith("file://")
+    ? normalizeRemoteUrl(url) || undefined : undefined
 }
 
 export function sanitizeRepoName(name: string): string {
@@ -103,7 +111,7 @@ async function optionalGit(cwd: string, args: string[]): Promise<string | null> 
  * the index was written, and a fresh mtime would skip a same-size edit made in
  * that same second.
  */
-async function writeWorkingTree(repoRoot: string): Promise<string> {
+async function writeWorkingTree(repoRoot: string, excludedPaths: readonly string[]): Promise<string> {
   const indexPath = resolve(repoRoot, (await git(repoRoot, ["rev-parse", "--git-path", "index"])).trim())
   const scratchIndex = `${indexPath}.cogpit-${randomBytes(6).toString("hex")}`
   const env = { GIT_INDEX_FILE: scratchIndex }
@@ -117,6 +125,7 @@ async function writeWorkingTree(repoRoot: string): Promise<string> {
       await git(repoRoot, ["read-tree", "HEAD"], { env })
     }
     await git(repoRoot, ["add", "-A"], { env, timeout: 10 * 60_000 })
+    if (excludedPaths.length) await git(repoRoot, ["update-index", "--force-remove", "--", ...excludedPaths], { env })
     return (await git(repoRoot, ["write-tree"], { env })).trim()
   } finally {
     await Promise.all([rm(scratchIndex, { force: true }), rm(`${scratchIndex}.lock`, { force: true })])
@@ -141,7 +150,7 @@ async function snapshotCommit(repoRoot: string, tree: string, head: string): Pro
  * Capture HEAD plus staged, unstaged and untracked-but-not-ignored changes as
  * one commit, without touching the index or the working tree.
  */
-export async function snapshotWorkspace(cwd: string): Promise<WorkspaceSnapshot> {
+export async function snapshotWorkspace(cwd: string, excludedPaths: readonly string[] = []): Promise<WorkspaceSnapshot> {
   const directory = await stat(cwd).catch(() => null)
   if (!directory?.isDirectory()) throw invalid(`${cwd} is not an existing directory`)
 
@@ -163,11 +172,12 @@ export async function snapshotWorkspace(cwd: string): Promise<WorkspaceSnapshot>
     optionalGit(repoRoot, ["symbolic-ref", "-q", "--short", "HEAD"]),
     optionalGit(repoRoot, ["remote", "get-url", "origin"]),
     git(repoRoot, ["rev-parse", `${head}^{tree}`]).then((output) => output.trim()),
-    writeWorkingTree(repoRoot),
+    writeWorkingTree(repoRoot, excludedPaths),
   ])
 
   const dirty = tree !== headTree
   const snapshot = dirty ? await snapshotCommit(repoRoot, tree, head) : head
+  const portableOrigin = portableRemoteIdentity(origin)
 
   return {
     repoRoot,
@@ -177,5 +187,9 @@ export async function snapshotWorkspace(cwd: string): Promise<WorkspaceSnapshot>
     snapshot,
     dirty,
     ...(await identifyRepo(repoRoot, origin || null)),
+    identity: {
+      ...(portableOrigin ? { origin: portableOrigin } : {}),
+      roots: (await git(repoRoot, ["rev-list", "--max-parents=0", "HEAD"])).trim().split("\n").sort(),
+    },
   }
 }

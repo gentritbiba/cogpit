@@ -68,6 +68,14 @@ describe("sessionOrigins", () => {
     expect(await sessionOrigin("remote")).toEqual({ parentSessionId: "parent", deviceId: "dev_1", createdAt: 100 })
   })
 
+  it("persists only environment metadata across reloads", async () => {
+    const handoff = { repoRoot: "/repo", base: "a".repeat(40), workspaceId: "repo-0123456789/task", branch: "cogpit/box/task", remoteCwd: "/remote/task", environment: { source: "caller" as const, files: [".env.local"] }, run: { port: 40001, composeProjectName: "cogpit-0123456789abcdef" } }
+    await recordSessionOrigin("remote-env", { deviceId: "dev_1", handoff })
+    __resetSessionOriginsForTest()
+    expect((await sessionOrigin("remote-env"))?.handoff).toEqual(handoff)
+    expect(await readFile(filePath(), "utf8")).toContain('".env.local"')
+  })
+
   it("keeps whether the user answers a session's questions", async () => {
     await recordSessionOrigin("asks", { asksUser: true }, 100)
     __resetSessionOriginsForTest()

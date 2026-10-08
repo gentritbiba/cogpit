@@ -90,8 +90,9 @@ cogpit-session new "Run the GPU benchmarks and fix the slow kernel" --device age
 
 - Your repository goes with it: HEAD plus your uncommitted changes, including
   new files git does not ignore, become a fresh worktree on that machine.
-  Ignored files (`.env`, dependencies, build output) stay here; the session is
-  told to recreate what it needs.
+  On capable devices, Cogpit reuses a matching target clone and copies its
+  ignored env files into the task worktree. No caller secrets travel by default.
+  Install dependencies separately inside the worktree.
 - When the session finishes, `wait` brings its work back as a local branch
   (`returned.branch`) and prints the commands to review or apply it. Your
   working tree is never touched, and a branch you checked out or committed to
@@ -108,6 +109,50 @@ cogpit-session new "Run the GPU benchmarks and fix the slow kernel" --device age
   your repository; `cogpit-session projects --device agentbox` lists them.
 - Session ids work everywhere: `wait`, `send`, `status`, `approve`, `stop` and
   `children` find the machine each session runs on.
+
+### Choose a runnable environment
+
+```bash
+cogpit-session new "Run the app and do browser QA" --device omarchy
+cogpit-session new "Require the target env" --device omarchy --env target
+cogpit-session new "Test with my ignored env" --device omarchy --env caller
+cogpit-session new "Lint only" --device agentbox --env none
+```
+
+- `--env auto` is the default: copy target env from a unique matching checkout,
+  otherwise use no env. `target` requires a match. `caller` explicitly transfers
+  your ignored env instead, including when there is a target checkout. `none`
+  skips env. Every transferred task still has an isolated worktree and returns
+  its work as `cogpit/<device>/<task>`.
+- Match uses credential-free normalized origin, or identical root commit sets
+  when an origin is absent. Different origins do not match as forks. Several
+  matching checkouts are ambiguous; choose with
+  `--target-checkout /remote/project`. This path must match repository identity.
+  Discovery covers Cogpit's known projects and retained transfer worktrees.
+- Defaults: ignored regular `**/.env*`, `**/.dev.vars`, `**/.dev.vars.*` files.
+  `.cogpit/workspace.json` can set `{ "envFiles": [".env.local", "config/secrets.json"] }`.
+  `--env-files '.env.local,apps/web/.dev.vars'` overrides its glob allowlist.
+  Target mode reads target config; caller mode reads caller config. Config never
+  authorizes sending caller secrets. Tracked/nonignored files are not env uploads.
+- `new` reports `workspace.environment.source` (`target-checkout`, `caller`,
+  `none`), `files` (names only) and `workspace.run`; `status`/`wait` report
+  `environment` and `run`. Never print env contents or secrets in tool output,
+  logs, transcripts or commits. Copies are private, mode 0600, and deleted on
+  discard. Force-committing env blocks export; remove those commits before fetch.
+- The briefing supplies a suggested distinct `PORT` and `COMPOSE_PROJECT_NAME`.
+  Set them on dev/Compose commands, use the framework's port flag when needed,
+  and check the port is still free. Keep mutable build caches/dependencies inside
+  each worktree. Stop your dev server and Compose services before discard.
+  External services, fixed container names/ports and external volumes are still
+  shared unless the project isolates them.
+- These flags require `--device` without `--cwd`. Old devices lacking
+  `workspaceEnvironment: 1` keep legacy Git-only transfers for auto/none;
+  explicit provisioning fails before sending secrets. Caller env transfer also
+  requires a password-authenticated device registration. Update both servers only
+  with the user's approval. Do not restart servers with sessions running.
+
+Full selection, security and parallel-testing details: `docs/remote-workspaces.md`
+in the Cogpit source repository.
 
 ## Answering a blocked session
 

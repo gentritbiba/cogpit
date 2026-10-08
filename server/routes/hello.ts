@@ -77,6 +77,7 @@ export function registerHelloRoutes(use: UseFn, opts: { mode: HubMode }) {
       hubApi: 1,
       // The session endpoints a hub drives remote sessions through.
       sessionApi: 2,
+      workspaceEnvironment: 1,
       mode: opts.mode,
       edition: running.edition,
       signIn,

@@ -2,6 +2,7 @@ import { authorizeSession } from "../edition"
 import { sendJson, singlePathParam, type UseFn } from "../http"
 import { sendHostError } from "./agentErrors"
 import { hostForSession, SESSION_SCOPE_HEADER } from "../sessionHosts"
+import { sessionOrigin } from "../lib/sessionOrigins"
 
 /**
  * GET /api/session-status/:sessionId — cheap per-session poll for external
@@ -28,7 +29,8 @@ export function registerSessionStatusRoutes(use: UseFn) {
         sendJson(res, 404, { error: "Session not found" })
         return
       }
-      sendJson(res, 200, state)
+      const handoff = (await sessionOrigin(sessionId))?.handoff
+      sendJson(res, 200, { ...state, ...(handoff?.environment ? { environment: handoff.environment, run: handoff.run } : {}) })
     } catch (error) {
       sendHostError(res, error, "Failed to read the session's status")
     }

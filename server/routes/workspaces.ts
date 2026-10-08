@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs"
+import { readFile, stat } from "node:fs/promises"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { pipeline } from "node:stream/promises"
 import {
@@ -15,10 +16,13 @@ import { ErrorCodes, RouteError, sendError } from "../lib/routeError"
 import {
   exportWorkspace,
   importWorkspace,
-  knownCommits,
+  probeWorkspace,
   removeWorkspace,
   type ImportedWorkspace,
 } from "../workspaceTransfer/deviceStore"
+import { parseIdentity } from "../workspaceTransfer/projects"
+import { environmentError, MAX_ENVIRONMENT_BYTES, parseEnvPatterns } from "../workspaceTransfer/environment"
+import type { WorkspaceEnvironmentMode } from "../../shared/contracts/workspaces"
 import { COMMIT_SHA_RE } from "../workspaceTransfer/snapshot"
 import {
   appendUpload,
@@ -71,7 +75,7 @@ async function readChunk(req: IncomingMessage): Promise<Buffer> {
 
 async function handleProbe(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readObject(req)
-  const response: WorkspaceProbeResponse = { commits: await knownCommits(requireString(body, "repoKey")) }
+  const response: WorkspaceProbeResponse = await probeWorkspace(requireString(body, "repoKey"), parseIdentity(body.identity), optionalString(body, "targetCheckout") ?? undefined)
   sendJson(res, 200, response)
 }
 
@@ -96,6 +100,13 @@ async function handleImport(req: IncomingMessage, res: ServerResponse): Promise<
   const uploadId = optionalString(body, "uploadId")
   const bundleRef = optionalString(body, "bundleRef")
   const requestId = optionalString(body, "requestId")
+  const environmentUploadId = optionalString(body, "environmentUploadId")
+  const identity = parseIdentity(body.identity)
+  const environmentMode = optionalString(body, "environmentMode") ?? undefined
+  if (environmentMode && !["auto", "target", "caller", "none"].includes(environmentMode)) throw invalid("Invalid environmentMode")
+  if ((environmentMode || environmentUploadId || body.targetCheckout || body.envFiles) && !identity) throw invalid("Repository identity is required for environment provisioning")
+  if ((environmentMode === "caller") !== !!environmentUploadId) throw invalid("caller mode requires an environment upload; other modes cannot receive one")
+  const envFiles = parseEnvPatterns(body.envFiles)
   if (uploadId && !bundleRef) throw invalid("bundleRef is required with uploadId")
   if (requestId !== null && !REQUEST_ID_RE.test(requestId)) throw invalid("requestId is malformed")
 
@@ -106,14 +117,32 @@ async function handleImport(req: IncomingMessage, res: ServerResponse): Promise<
     sendJson(res, 200, await earlier.result satisfies WorkspaceImportResponse)
     return
   }
-  const result = (async () => importWorkspace({
-    repoKey: requireString(body, "repoKey"),
-    bundlePath: uploadId ? await uploadedBundlePath(uploadId) : null,
-    bundleRef,
-    snapshot: requireString(body, "snapshot"),
-    task: requireString(body, "task"),
-    subdir: requireString(body, "subdir"),
-  }))()
+  const result = (async () => {
+    let environmentBytes: Buffer | undefined
+    try {
+      if (environmentUploadId) {
+        const file = await uploadedBundlePath(environmentUploadId)
+        if ((await stat(file)).size > MAX_ENVIRONMENT_BYTES) throw environmentError()
+        environmentBytes = await readFile(file)
+      }
+      return await importWorkspace({
+        repoKey: requireString(body, "repoKey"),
+        bundlePath: uploadId ? await uploadedBundlePath(uploadId) : null,
+        bundleRef,
+        snapshot: requireString(body, "snapshot"),
+        task: requireString(body, "task"),
+        subdir: requireString(body, "subdir"),
+        identity,
+        targetCheckout: optionalString(body, "targetCheckout") ?? undefined,
+        environmentMode: environmentMode as WorkspaceEnvironmentMode | undefined,
+        environmentBytes,
+        envFiles,
+      })
+    } finally {
+      // Secrets are never retained for a failed import; the caller can re-upload.
+      if (environmentUploadId) await deleteUpload(environmentUploadId)
+    }
+  })()
   if (requestId) importsByRequest.set(requestId, { at: now, result })
   let imported: ImportedWorkspace
   try {
@@ -193,6 +222,11 @@ export function registerWorkspaceRoutes(use: UseFn) {
         return
       }
       if (method === "PUT" && resource === "uploads" && id) return await handleAppend(req, res, id, url)
+      if (method === "DELETE" && resource === "uploads" && id) {
+        await deleteUpload(id)
+        sendJson(res, 200, { removed: true })
+        return
+      }
       if (method === "POST" && resource === "import" && !id) return await handleImport(req, res)
       if (method === "POST" && resource === "export" && !id) return await handleExport(req, res)
       if (method === "POST" && resource === "remove" && !id) return await handleRemove(req, res)
@@ -200,7 +234,7 @@ export function registerWorkspaceRoutes(use: UseFn) {
       return next()
     } catch (error) {
       if (error instanceof RouteError) return sendError(res, error)
-      sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, error instanceof Error ? error.message : String(error)))
+      sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Workspace operation failed"))
     }
   })
 }

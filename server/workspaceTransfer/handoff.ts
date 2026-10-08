@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { pipeline } from "node:stream/promises"
 import { DeviceUnreachableError } from "../hub/device-client"
 import { callDevice, DeviceRequestError, deviceJson, openDeviceStream } from "../hub/deviceRequest"
+import { getDevice } from "../hub/registry"
 import {
   WORKSPACE_BUNDLE_REF_HEADER,
   WORKSPACE_UPLOAD_CHUNK_BYTES,
@@ -14,11 +15,15 @@ import {
   type WorkspaceProbeResponse,
   type WorkspaceUploadCreated,
   type WorkspaceUploadProgress,
+  type WorkspaceEnvironment,
+  type WorkspaceEnvironmentMode,
+  type WorkspaceRunContext,
 } from "../../shared/contracts/workspaces"
 import { createBundle, fetchBundle } from "./bundle"
 import { isValidBundleRef, sanitizeTaskName } from "./deviceStore"
 import { git, GIT_TRANSFER_TIMEOUT_MS } from "./git"
 import { COMMIT_SHA_RE, snapshotWorkspace, type WorkspaceSnapshot } from "./snapshot"
+import { encodeEnvironment, selectEnvironment } from "./environment"
 
 /**
  * The hub's half of handing a task to another machine: send a repository —
@@ -35,6 +40,9 @@ export interface Handoff {
   workspaceId: string
   /** The local branch the device's work comes back to. */
   branch: string
+  environment?: WorkspaceEnvironment
+  run?: WorkspaceRunContext
+  remoteCwd?: string
 }
 
 export interface SentWorkspace {
@@ -43,6 +51,14 @@ export interface SentWorkspace {
   /** Where the session starts on the device. */
   remoteCwd: string
   remoteBranch: string
+  environment?: WorkspaceEnvironment
+  run?: WorkspaceRunContext
+}
+
+export interface WorkspaceSendOptions {
+  environmentMode?: WorkspaceEnvironmentMode
+  targetCheckout?: string
+  envFiles?: string[]
 }
 
 export interface ReturnedWork {
@@ -109,6 +125,27 @@ async function upload(deviceId: string, path: string): Promise<string> {
   }
 }
 
+async function uploadEnvironment(deviceId: string, bytes: Buffer): Promise<string> {
+  const { uploadId } = await deviceJson<WorkspaceUploadCreated>(deviceId, "POST", "/api/workspaces/uploads")
+  try {
+    for (let offset = 0; offset < bytes.length; offset += WORKSPACE_UPLOAD_CHUNK_BYTES) {
+      const chunk = bytes.subarray(offset, offset + WORKSPACE_UPLOAD_CHUNK_BYTES)
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await callDevice(deviceId, { method: "PUT", path: `/api/workspaces/uploads/${uploadId}?offset=${offset}`, body: chunk, contentType: "application/octet-stream" })
+          break
+        } catch (error) {
+          if (!(error instanceof DeviceUnreachableError) || attempt >= UPLOAD_ATTEMPTS) throw error
+        }
+      }
+    }
+    return uploadId
+  } catch {
+    await deviceJson(deviceId, "DELETE", `/api/workspaces/uploads/${uploadId}`).catch(() => undefined)
+    throw new Error("Could not transfer workspace environment")
+  }
+}
+
 /** A short lowercase branch-safe name from a device name or a task's first words. */
 function slug(label: string, maxLength = 40): string {
   return sanitizeTaskName(label.toLowerCase().slice(0, maxLength))
@@ -122,15 +159,29 @@ export async function sendWorkspace(
   task: string,
   /** Stable across retries, so the device imports the workspace once. */
   requestId: string,
+  options: WorkspaceSendOptions = {},
 ): Promise<SentWorkspace> {
+  const mode = options.environmentMode ?? "auto"
+  const hello = await deviceJson<{ workspaceEnvironment?: number }>(deviceId, "GET", "/api/hello")
+  const provision = (hello.workspaceEnvironment ?? 0) >= 1
+  if (!provision && (mode === "target" || mode === "caller" || options.targetCheckout || options.envFiles)) {
+    throw new DeviceRequestError(deviceId, 426, `Update ${deviceName} to support checkout and environment provisioning. No env files were sent.`, "DEVICE_TOO_OLD")
+  }
+  if (mode === "caller" && getDevice(deviceId)?.auth !== "password") {
+    throw new DeviceRequestError(deviceId, 400, "Caller env transfer requires a password-authenticated device. No env files were sent.", "DEVICE_AUTH_REQUIRED")
+  }
   const snapshot = await snapshotWorkspace(cwd)
-  const { commits } = await deviceJson<WorkspaceProbeResponse>(deviceId, "POST", "/api/workspaces/probe", {
+  const probe = await deviceJson<WorkspaceProbeResponse>(deviceId, "POST", "/api/workspaces/probe", {
     repoKey: snapshot.repoKey,
+    ...(provision ? { identity: snapshot.identity, targetCheckout: options.targetCheckout } : {}),
   })
-  const bundle = await createBundle(snapshot.repoRoot, snapshot.snapshot, commits)
+  if (mode === "target" && !probe.checkout) throw new Error("No unique target checkout matched; use --target-checkout to select one, --env caller, or --env none")
+  const bundle = await createBundle(snapshot.repoRoot, snapshot.snapshot, probe.commits)
   let imported: WorkspaceImportResponse
+  let environmentUploadId: string | undefined
   try {
     const uploadId = bundle ? await upload(deviceId, bundle.path) : undefined
+    if (provision && mode === "caller") environmentUploadId = await uploadEnvironment(deviceId, encodeEnvironment(await selectEnvironment(snapshot.repoRoot, options.envFiles)))
     imported = await deviceJson<WorkspaceImportResponse>(deviceId, "POST", "/api/workspaces/import", {
       repoKey: snapshot.repoKey,
       ...(bundle ? { uploadId, bundleRef: bundle.ref } : {}),
@@ -138,9 +189,17 @@ export async function sendWorkspace(
       task: slug(task),
       subdir: snapshot.subdir,
       requestId,
+      ...(provision ? {
+        identity: snapshot.identity,
+        targetCheckout: probe.checkout ?? options.targetCheckout,
+        environmentMode: mode,
+        environmentUploadId,
+        envFiles: options.envFiles,
+      } : {}),
     }, { timeoutMs: GIT_TRANSFER_TIMEOUT_MS })
   } finally {
     if (bundle) await rm(bundle.path, { force: true })
+    if (environmentUploadId) await deviceJson(deviceId, "DELETE", `/api/workspaces/uploads/${environmentUploadId}`).catch(() => undefined)
   }
 
   const remoteTask = imported.workspaceId.split("/").pop()!
@@ -149,6 +208,9 @@ export async function sendWorkspace(
     base: snapshot.snapshot,
     workspaceId: imported.workspaceId,
     branch: `cogpit/${slug(deviceName)}/${remoteTask}`,
+    remoteCwd: imported.cwd,
+    environment: imported.environment ?? { source: "none", files: [], note: "Device uses legacy transfer; ignored env files were not sent" },
+    ...(imported.run ? { run: imported.run } : {}),
   }
   await git(snapshot.repoRoot, ["update-ref", handoffRefs(handoff).base, snapshot.snapshot])
   return {
@@ -156,6 +218,8 @@ export async function sendWorkspace(
     snapshot,
     remoteCwd: imported.cwd,
     remoteBranch: imported.branch,
+    environment: handoff.environment,
+    run: imported.run,
   }
 }
 
@@ -272,7 +336,9 @@ export function handoffBriefing(sent: SentWorkspace, from: string): string {
     `[Cogpit] This task was handed over from ${from}. You are in a git worktree of ${snapshot.repoName} on branch ${sent.remoteBranch}, created from ${source}${
       snapshot.dirty ? `, with the user's uncommitted changes committed on top as ${snapshot.snapshot.slice(0, 12)}` : ""
     }.`,
-    "Files git ignores (typically .env files, dependencies and build output) were not copied; install or recreate what you need.",
+    `Environment source: ${sent.environment?.source ?? "none"}. Env file names: ${sent.environment?.files.join(", ") || "none"}. ${sent.environment?.note ?? ""} Never print env contents or secrets in tools, logs, replies or commits.`,
+    "Install dependencies in this worktree; do not share node_modules or build output with other tasks.",
+    ...(sent.run ? [`For testing use PORT=${sent.run.port} and COMPOSE_PROJECT_NAME=${sent.run.composeProjectName}. Pass the port explicitly if the app ignores PORT; check it is still available before starting. Use worktree-local build caches. Stop your dev servers/Compose services before discard.`] : []),
     `When you finish, everything in this worktree, committed or not, is sent back to ${from}. Leave it in the state you want returned.`,
   ].join(" ")
 }

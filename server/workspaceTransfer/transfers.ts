@@ -42,10 +42,10 @@ export const MAX_OPEN_UPLOADS = 8
 
 export function createUpload(): Promise<string | null> {
   return uploadQueue.run(async () => {
-    await mkdir(uploadsDir(), { recursive: true })
+    await mkdir(uploadsDir(), { recursive: true, mode: 0o700 })
     if ((await readdir(uploadsDir())).length >= MAX_OPEN_UPLOADS) return null
     const id = newTransferId()
-    await writeFile(transferFile(uploadsDir(), id), "")
+    await writeFile(transferFile(uploadsDir(), id), "", { mode: 0o600, flag: "wx" })
     return id
   })
 }

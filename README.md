@@ -149,6 +149,7 @@ React, TypeScript, Vite, Electron, Tailwind CSS, and Express. [Architecture](ARC
 - [Browser panel](docs/browser.md): shared browsing, persistent logins, and setup.
 - [Self-hosting](docs/self-hosting.md): headless servers, HTTPS, and authentication.
 - [Integrations and plugins](docs/plugins.md): GitHub, ClickUp, Vercel, Cloudflare, and custom panels.
+- [Remote workspaces](docs/remote-workspaces.md): isolated cross-device tasks with target or explicitly transferred env files.
 - [cogpit-memory](packages/cogpit-memory/README.md): search and inspect agent sessions from the command line.
 
 ## License

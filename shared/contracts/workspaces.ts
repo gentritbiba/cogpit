@@ -11,14 +11,39 @@ export const WORKSPACE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
 /** Response header of GET /api/workspaces/downloads/:downloadId naming the ref inside the bundle. */
 export const WORKSPACE_BUNDLE_REF_HEADER = "X-Cogpit-Bundle-Ref"
 
+export type WorkspaceEnvironmentMode = "auto" | "target" | "caller" | "none"
+
+export interface RepositoryIdentity {
+  /** Credential-free normalized origin; omitted for repositories without one. */
+  origin?: string
+  roots: string[]
+}
+
+export interface WorkspaceEnvironment {
+  source: "target-checkout" | "caller" | "none"
+  files: string[]
+  checkout?: string
+  note?: string
+}
+
+export interface WorkspaceRunContext {
+  /** Available when provisioned, and unique among retained Cogpit workspaces. */
+  port: number
+  composeProjectName: string
+}
+
 /** POST /api/workspaces/probe */
 export interface WorkspaceProbeRequest {
   repoKey: string
+  identity?: RepositoryIdentity
+  targetCheckout?: string
 }
 
 export interface WorkspaceProbeResponse {
   /** Commits the device already has, for the sender to exclude from its bundle. */
   commits: string[]
+  checkout?: string
+  match?: "origin" | "roots" | "none" | "ambiguous"
 }
 
 /** POST /api/workspaces/uploads */
@@ -46,6 +71,12 @@ export interface WorkspaceImportRequest {
   subdir: string
   /** Makes a retried import return the workspace the first one made. */
   requestId?: string
+  identity?: RepositoryIdentity
+  targetCheckout?: string
+  environmentMode?: WorkspaceEnvironmentMode
+  /** Opaque binary upload, kept outside Git. Only valid with caller mode. */
+  environmentUploadId?: string
+  envFiles?: string[]
 }
 
 export interface WorkspaceImportResponse {
@@ -56,6 +87,8 @@ export interface WorkspaceImportResponse {
   /** Where a session should start: path + subdir. */
   cwd: string
   branch: string
+  environment?: WorkspaceEnvironment
+  run?: WorkspaceRunContext
 }
 
 /** POST /api/workspaces/remove — delete a workspace's worktree and branch. */

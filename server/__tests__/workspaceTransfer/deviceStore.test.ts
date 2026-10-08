@@ -11,6 +11,7 @@ import {
   sanitizeTaskName,
 } from "../../workspaceTransfer/deviceStore"
 import { snapshotWorkspace } from "../../workspaceTransfer/snapshot"
+import { encodeEnvironment } from "../../workspaceTransfer/environment"
 import { cleanupTempDirs, commitAll, gitOut, makeRepo, repoState, tempDir, writeFiles } from "./gitFixtures"
 
 const bundles: TransferBundle[] = []
@@ -72,6 +73,22 @@ describe("createBundle", () => {
 })
 
 describe("device workspace store", () => {
+  it("cleans up a failed env install without changing the reused checkout", async () => {
+    const repo = await makeRepo({ ".env.local": "tracked example", "app.ts": "v1" })
+    const sent = await snapshotWorkspace(repo)
+    await expect(importWorkspace({ repoKey: sent.repoKey, bundlePath: null, bundleRef: null, snapshot: sent.snapshot, task: "failed-env", subdir: "", identity: sent.identity, targetCheckout: repo, environmentMode: "caller", environmentBytes: encodeEnvironment([{ path: ".env.local", bytes: Buffer.from("PRIVATE_FIXTURE") }]) })).rejects.toThrow("Could not provision")
+    await expect(stat(join(workspacesDir, sent.repoKey, "failed-env"))).rejects.toThrow()
+    expect(await gitOut(repo, ["for-each-ref", "refs/heads/cogpit", "refs/cogpit"])).toBe("")
+    expect(await readFile(join(repo, ".env.local"), "utf8")).toBe("tracked example")
+  })
+
+  it("refuses an env copy exposed by a gitignore exception and removes the failed workspace", async () => {
+    const repo = await makeRepo({ ".gitignore": "!.env.local\n", "app.ts": "v1" })
+    const sent = await snapshotWorkspace(repo)
+    await expect(importWorkspace({ repoKey: sent.repoKey, bundlePath: null, bundleRef: null, snapshot: sent.snapshot, task: "ignore-exception", subdir: "", identity: sent.identity, targetCheckout: repo, environmentMode: "caller", environmentBytes: encodeEnvironment([{ path: ".env.local", bytes: Buffer.from("PRIVATE_FIXTURE") }]) })).rejects.toThrow("Could not provision")
+    await expect(stat(join(workspacesDir, sent.repoKey, "ignore-exception", ".env.local"))).rejects.toThrow()
+    expect(await gitOut(repo, ["for-each-ref", "refs/heads/cogpit", "refs/cogpit"])).toBe("")
+  })
   it("round-trips a dirty hub repo through a device worktree and back", async () => {
     const hub = await hubRepo()
     const hubBefore = await repoState(hub)

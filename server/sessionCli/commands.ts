@@ -35,7 +35,10 @@ import {
   sendWorkspace,
   type Handoff,
   type SentWorkspace,
+  type WorkspaceSendOptions,
 } from "../workspaceTransfer/handoff"
+import type { WorkspaceEnvironmentMode } from "../../shared/contracts/workspaces"
+import { parseEnvPatterns } from "../workspaceTransfer/environment"
 
 /**
  * The `cogpit-session` CLI, run on the server. The script Cogpit installs in
@@ -81,6 +84,7 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
 
   new MESSAGE [--device NAME] [--cwd DIR] [--agent ${AGENT_KINDS.join("|")}] [--instance ID] [--model M]
       [--effort E] [--mode MODE] [--worktree NAME] [--name TITLE] [--questions user|agent]
+      [--env auto|target|caller|none] [--env-files GLOBS] [--target-checkout DIR]
       [--wait] [--timeout SECS]
         Start a session in DIR (default: your working directory). Runs with
         --mode bypassPermissions for default CLI accounts; configured instances
@@ -89,6 +93,14 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
         uncommitted changes) is sent there as a fresh worktree, and when the
         session finishes its work comes back as a local branch. Pass --cwd with
         a path on that machine to use a folder already there instead.
+        --env auto (default) copies ignored env files from a matching target
+        checkout, or uses no env. --env target requires a matching checkout.
+        --env caller explicitly sends your ignored env files; --env none skips
+        env provisioning. --env-files is a comma-separated glob allowlist,
+        overriding .cogpit/workspace.json. --target-checkout selects a matching
+        clone when discovery is ambiguous. These flags require --device without
+        --cwd. Older devices keep legacy behavior for auto/none; explicit
+        provisioning requires workspaceEnvironment capability 1.
         --questions says who answers what it asks: you (agent, the default) or
         the user in Cogpit (user, the default with --device); wait keeps
         waiting while the user has it.
@@ -264,6 +276,7 @@ async function describe(
     ...(state.status ? { status: state.status } : {}),
     ...(state.toolName ? { toolName: state.toolName } : {}),
     ...(state.error ? { error: state.error } : {}),
+    ...((handoff?.handoff.environment ?? state.environment) ? { environment: handoff?.handoff.environment ?? state.environment, run: handoff?.handoff.run ?? state.run } : {}),
   }
   if (state.outcome === "running" || state.outcome === "unreachable") {
     if (state.pendingAgentDescriptions?.length) report.pendingAgents = state.pendingAgentDescriptions
@@ -343,14 +356,14 @@ const sentWorkspaces = new Map<string, { sent: Promise<SentWorkspace>; at: numbe
 const SENT_WORKSPACE_TTL_MS = 60 * 60 * 1000
 
 /** Joins a retry to the send already under way; a failed send may be tried again. */
-function sendOnce(inv: CliInvocation, host: SessionHost, task: string): Promise<SentWorkspace> {
+function sendOnce(inv: CliInvocation, host: SessionHost, task: string, options: WorkspaceSendOptions): Promise<SentWorkspace> {
   const key = `${inv.scope}:${inv.invocationId}`
   const now = Date.now()
   for (const [cached, { at }] of sentWorkspaces) if (now - at > SENT_WORKSPACE_TTL_MS) sentWorkspaces.delete(cached)
   const cached = sentWorkspaces.get(key)
   if (cached) return cached.sent
   // The device keys its import by the same id, so even a hub restart between retries imports once.
-  const sent = sendWorkspace(host.id, host.name, inv.cwd, task, `${inv.scope}:${inv.invocationId}`)
+  const sent = sendWorkspace(host.id, host.name, inv.cwd, task, `${inv.scope}:${inv.invocationId}`, options)
   sentWorkspaces.set(key, { sent, at: now })
   sent.catch(() => sentWorkspaces.delete(key))
   return sent
@@ -363,7 +376,7 @@ function localCwd(inv: CliInvocation, cwdFlag: string | undefined): string {
 async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput> {
   const args = parseArgs(
     rest,
-    ["device", "cwd", "agent", "instance", "model", "effort", "mode", "worktree", "name", "questions", "timeout"],
+    ["device", "cwd", "agent", "instance", "model", "effort", "mode", "worktree", "name", "questions", "timeout", "env", "env-files", "target-checkout"],
     ["wait"],
   )
   const message = messageArg(args, "new")
@@ -382,6 +395,14 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
   if (questionsFor !== "user" && questionsFor !== "agent") throw new UsageError("--questions must be user or agent")
 
   const handingOver = host.remote && cwdFlag === undefined
+  const environmentMode = args.values.get("env") ?? "auto"
+  if (!["auto", "target", "caller", "none"].includes(environmentMode)) throw new UsageError("--env must be auto, target, caller or none")
+  if (!handingOver && ["env", "env-files", "target-checkout"].some((key) => args.values.has(key))) throw new UsageError("Environment options require --device without --cwd")
+  const sendOptions: WorkspaceSendOptions = {
+    environmentMode: environmentMode as WorkspaceEnvironmentMode,
+    ...(args.values.has("env-files") ? { envFiles: parseEnvPatterns(args.values.get("env-files")!.split(",")) } : {}),
+    ...(args.values.has("target-checkout") ? { targetCheckout: args.values.get("target-checkout") } : {}),
+  }
   if (handingOver && args.values.has("worktree")) {
     throw new UsageError("--worktree cannot be combined with sending your repository; it already runs in its own worktree")
   }
@@ -389,7 +410,7 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
     requireAdmin(inv, "send a repository to another machine")
     await ensureSessionApi(host.id)
   }
-  const sent = handingOver ? await sendOnce(inv, host, args.values.get("name") ?? message) : undefined
+  const sent = handingOver ? await sendOnce(inv, host, args.values.get("name") ?? message, sendOptions) : undefined
   const started = await host.create({
     cwd: sent?.remoteCwd ?? (host.remote ? cwdFlag! : localCwd(inv, cwdFlag)),
     agent: agent as AgentKind | undefined,
@@ -440,7 +461,7 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
     sessionId: started.sessionId,
     ...deviceField(host),
     dirName: started.dirName,
-    ...(sent ? { workspace: { cwd: sent.remoteCwd, branch: sent.remoteBranch, returnsTo: sent.handoff.branch } } : {}),
+    ...(sent ? { workspace: { cwd: sent.remoteCwd, branch: sent.remoteBranch, returnsTo: sent.handoff.branch, environment: sent.environment, run: sent.run } } : {}),
     next: `${CLI_NAME} wait ${started.sessionId}`,
   })
 }
@@ -482,12 +503,14 @@ async function statusCommand(inv: CliInvocation, rest: string[]): Promise<CliOut
   await requireSessionAccess(inv, sessionId)
   const host = await hostForSession(sessionId)
   const state = await host.state(sessionId)
+  const origin = await sessionOrigin(sessionId)
   const report: Record<string, unknown> = {
     sessionId: state.sessionId,
     ...deviceField(host),
     outcome: state.outcome,
     live: state.live,
     running: state.running,
+    ...((origin?.handoff?.environment ?? state.environment) ? { environment: origin?.handoff?.environment ?? state.environment, run: origin?.handoff?.run ?? state.run } : {}),
     ...(state.status ? { status: state.status } : {}),
     ...(state.toolName ? { toolName: state.toolName } : {}),
     ...(state.error ? { error: state.error } : {}),

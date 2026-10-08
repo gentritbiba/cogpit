@@ -13,6 +13,7 @@ import type { Middleware, UseFn } from "../../helpers"
 import { registerWorkspaceRoutes } from "../../routes/workspaces"
 import { createBundle, fetchBundle } from "../../workspaceTransfer/bundle"
 import { snapshotWorkspace } from "../../workspaceTransfer/snapshot"
+import { encodeEnvironment } from "../../workspaceTransfer/environment"
 import { MAX_OPEN_UPLOADS, sweepExpiredTransfers } from "../../workspaceTransfer/transfers"
 import { cleanupTempDirs, commitAll, gitOut, makeRepo, tempDir, writeFiles } from "../workspaceTransfer/gitFixtures"
 
@@ -98,6 +99,18 @@ function uploadFile(uploadId: string): string {
 }
 
 describe("workspace upload chunks", () => {
+  it("stages uploads owner-only and deletes secret uploads after failed import without echoing bytes", async () => {
+    const repo = await makeRepo({ ".gitignore": ".env*\n", "app.ts": "v1" })
+    const snapshot = await snapshotWorkspace(repo)
+    const uploadId = await newUpload()
+    expect((await stat(uploadFile(uploadId))).mode & 0o777).toBe(0o600)
+    const secret = "SENTINEL_NEVER_IN_RESPONSE"
+    await put(uploadId, 0, encodeEnvironment([{ path: ".env", bytes: Buffer.from(secret) }]))
+    const imported = await post("/import", { repoKey: snapshot.repoKey, snapshot: "f".repeat(40), task: "broken", subdir: "", identity: snapshot.identity, targetCheckout: repo, environmentMode: "caller", environmentUploadId: uploadId })
+    expect(imported.status).toBe(409)
+    expect(JSON.stringify(imported)).not.toContain(secret)
+    await expect(stat(uploadFile(uploadId))).rejects.toThrow()
+  })
   it("appends at the current size, accepts retries, and reports mismatches with the stored size", async () => {
     const uploadId = await newUpload()
     const bytes = Buffer.from("0123456789")

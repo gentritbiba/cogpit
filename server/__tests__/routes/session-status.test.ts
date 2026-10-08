@@ -11,6 +11,11 @@ const mockGetActiveTurnId = vi.hoisted(() => vi.fn())
 const mockIsCopilotSessionActive = vi.hoisted(() => vi.fn())
 const mockIsCopilotTurnActive = vi.hoisted(() => vi.fn())
 const mockListPendingInput = vi.hoisted(() => vi.fn())
+const mockSessionOrigin = vi.hoisted(() => vi.fn())
+vi.mock("../../lib/sessionOrigins", () => ({ sessionOrigin: mockSessionOrigin }))
+const mockReadIdentity = vi.hoisted(() => vi.fn())
+const mockWorkspaceDetails = vi.hoisted(() => vi.fn())
+vi.mock("../../workspaceTransfer/status", () => ({ workspaceDetailsForCwd: mockWorkspaceDetails }))
 
 vi.mock("../../helpers", () => ({
   getSessionStatus: mockGetSessionStatus,
@@ -52,7 +57,7 @@ vi.mock("../../agents", () => ({
   storeForPath: (filePath: string | null) => {
     if (!filePath) return null
     const kind = Object.keys(ROOTS).find((key) => filePath.startsWith(`${ROOTS[key]}/`))
-    return kind ? { kind } : null
+    return kind ? { kind, readIdentity: mockReadIdentity } : null
   },
 }))
 
@@ -118,6 +123,9 @@ async function request(method: string, url: string) {
 describe("GET /api/session-status/:sessionId", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSessionOrigin.mockResolvedValue(null)
+    mockReadIdentity.mockResolvedValue(null)
+    mockWorkspaceDetails.mockResolvedValue({})
     mockPersistentSessions.clear()
     mockActiveProcesses.clear()
     mockSdkSessions.clear()
@@ -128,6 +136,21 @@ describe("GET /api/session-status/:sessionId", () => {
     mockIsCopilotSessionActive.mockReturnValue(false)
     mockIsCopilotTurnActive.mockReturnValue(false)
     mockListPendingInput.mockReturnValue([])
+  })
+
+  it("reports environment names and run context from the persisted handoff", async () => {
+    const environment = { source: "caller", files: [".env.local"] }
+    const run = { port: 40123, composeProjectName: "cogpit-0123456789abcdef" }
+    mockSessionOrigin.mockResolvedValue({ handoff: { environment, run } })
+    expect((await request("GET", "/abc")).json()).toMatchObject({ environment, run })
+  })
+
+  it("reports device-local workspace metadata without a hub origin", async () => {
+    const details = { environment: { source: "target-checkout", files: [".env"] }, run: { port: 40123, composeProjectName: "cogpit-0123456789abcdef" } }
+    mockReadIdentity.mockResolvedValue({ cwd: "/remote/workspaces/app/task" })
+    mockWorkspaceDetails.mockResolvedValue(details)
+    expect((await request("GET", "/abc")).json()).toMatchObject(details)
+    expect(mockWorkspaceDetails).toHaveBeenCalledWith("/remote/workspaces/app/task")
   })
 
   it("delegates non-GET requests and nested paths to next()", async () => {
