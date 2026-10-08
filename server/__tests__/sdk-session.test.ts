@@ -569,6 +569,27 @@ describe("sdk-session send resilience", () => {
 })
 
 describe("sdk-session silent turn failures", () => {
+  it("reports initialization in the actual worktree while the turn is still running", async () => {
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [{ type: "system", subtype: "init", cwd: "/tmp/project/.claude/worktrees/worker" }]
+    holdQueryAfterMessages = true
+    const state = createSDKSession({ sessionId: "worktree-start", cwd: "/tmp/project", message: "hi" })
+    const onInit = vi.fn()
+    state.onInit = onInit
+    await waitUntil(() => onInit.mock.calls.length > 0)
+    expect(state.cwd).toBe("/tmp/project/.claude/worktrees/worker")
+    expect(state.running).toBe(true)
+    expect(state.onInit).toBeNull()
+    releaseQueryAfterMessages?.()
+    await captured[0].completed
+  })
+  it("keeps internal diagnostics out of failed-turn explanations", async () => {
+    const { describeErrorResult } = await loadModule()
+    const diagnostic = "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"
+    expect(describeErrorResult({ errors: [diagnostic] })).toBe("The agent stopped before completing this turn. You can continue the conversation.")
+    expect(describeErrorResult({ result: diagnostic })).toBe("The agent stopped before completing this turn. You can continue the conversation.")
+    expect(describeErrorResult({ errors: ["The working directory no longer exists.", diagnostic] })).toBe("The working directory no longer exists.")
+  })
   it("reports a failed turn over the stream bus when no HTTP response is waiting", async () => {
     // The enqueue path (every message after the first on a live query) answers
     // 200 the moment the message is queued and parks no onResult, so a turn

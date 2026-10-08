@@ -134,7 +134,7 @@ export async function createSession(
   const started = retry
     ? await creationRequests.run(retry.scope, retry.requestId, startRequest, run)
     : await run()
-  orchestrationStore().ensureConversation(await nativeBinding(started.sessionId, kind, started.filePath, cwd))
+  orchestrationStore().ensureConversation(await nativeBinding(started.sessionId, kind, started.filePath, started.cwd ?? cwd))
   if (parentSessionId) await recordSessionOrigin(started.sessionId, { parentSessionId, ...(request.name ? { name: request.name } : {}) })
   return started
 }

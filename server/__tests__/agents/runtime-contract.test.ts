@@ -72,6 +72,7 @@ vi.mock("../../sdk-session", () => ({
   sendSDKMessage: vi.fn(),
   attachSubagentWatcher: vi.fn(),
   claudeCliPath: vi.fn(() => undefined),
+  describeErrorResult: (result: Record<string, unknown>) => String(result.result),
 }))
 vi.mock("../../agents/codexAppServer", () => ({
   codexAppServer: codex,
@@ -117,6 +118,7 @@ import { allRuntimes, isSessionActive, runtimeFor, runtimeForDirName, runtimeFor
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(createSDKSession).mockReset()
   sdk.sdkSessions.clear()
   registry.activeProcesses.clear()
   registry.persistentSessions.clear()
@@ -203,7 +205,11 @@ describe.each<AgentKind>(["claude", "codex", "copilot"])("%s runtime", (kind) =>
 describe("reporting a new session's id", () => {
   it("tells a Claude caller the id before the SDK query is spawned", async () => {
     const onSessionId = vi.fn()
-    vi.mocked(createSDKSession).mockReturnValueOnce({} as SDKSessionState)
+    vi.mocked(createSDKSession).mockImplementationOnce((opts) => {
+      const state = { cwd: opts.cwd } as SDKSessionState
+      queueMicrotask(() => state.onInit?.())
+      return state
+    })
 
     const started = await runtimeFor("claude").start({
       dirName: "-tmp-project",
@@ -232,7 +238,11 @@ describe("reporting a new session's id", () => {
   })
 
   it.each<AgentKind>(["claude", "copilot"])("still starts a %s session when the caller's onSessionId throws", async (kind) => {
-    vi.mocked(createSDKSession).mockReturnValueOnce({} as SDKSessionState)
+    vi.mocked(createSDKSession).mockImplementationOnce((opts) => {
+      const state = { cwd: opts.cwd } as SDKSessionState
+      queueMicrotask(() => state.onInit?.())
+      return state
+    })
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
     try {
       const started = await runtimeFor(kind).start({
@@ -246,6 +256,36 @@ describe("reporting a new session's id", () => {
     } finally {
       logged.mockRestore()
     }
+  })
+})
+
+describe("SDK startup", () => {
+  it("returns the worktree transcript at initialization before the first turn ends", async () => {
+    const runtime = runtimeForDirName("-tmp-project")
+    const cwd = "/tmp/project/.claude/worktrees/worker"
+    const state = { cwd, running: true } as SDKSessionState
+    vi.mocked(createSDKSession).mockReturnValueOnce(state)
+    let returned = false
+    const pending = runtime.start({ dirName: runtime.descriptor.dirName.encode("/tmp/project"), cwd: "/tmp/project", message: "hi", worktreeName: "worker" })
+      .then((value) => { returned = true; return value })
+    expect(returned).toBe(false)
+    state.onInit?.()
+    const started = await pending
+    expect(started.dirName).toBe(runtime.descriptor.dirName.encode(cwd))
+    expect(started.filePath).toBe(`/tmp/projects/${started.dirName}/${started.fileName}`)
+    expect(state.jsonlPath).toBe(started.filePath)
+    expect(state.running).toBe(true)
+    expect(state.onResult).toBeNull()
+  })
+
+  it("rejects a startup failure before initialization", async () => {
+    const runtime = runtimeForDirName("-tmp-project")
+    const state = { cwd: "/tmp/project" } as SDKSessionState
+    vi.mocked(createSDKSession).mockReturnValueOnce(state)
+    const pending = runtime.start({ dirName: runtime.descriptor.dirName.encode(state.cwd), cwd: state.cwd, message: "hi" })
+    state.onResult?.({ is_error: true, result: "Worktree creation failed" })
+    await expect(pending).rejects.toMatchObject({ code: "SPAWN_FAILED", message: "Worktree creation failed" })
+    expect(state.onInit).toBeNull()
   })
 })
 

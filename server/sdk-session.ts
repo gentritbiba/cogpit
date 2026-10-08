@@ -17,6 +17,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import type { PermissionRequest } from "../shared/contracts/permissions"
+import { presentTurnError } from "../shared/session/agent-errors"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { claudeCliPath } from "./agents/claudeExecutable"
 import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
@@ -111,6 +112,7 @@ export interface SDKSessionState {
     close: () => void
   } | null
   onResult: ((msg: Record<string, unknown>) => void) | null
+  onInit: (() => void) | null
   jsonlPath: string | null
   pendingTaskCalls: Map<string, string>
   /** Watches sub-agent JSONL files and synthesizes progress into parent JSONL */
@@ -460,18 +462,24 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 
 /** Human-readable text for an errored `result` message. */
 export function describeErrorResult(result: Record<string, unknown>): string {
-  if (result.result != null) return String(result.result)
+  if (result.result != null) return presentTurnError(String(result.result))
   // Error results carry no `result` text; the cause, a startup failure's
   // stderr included, is listed in `errors`.
   const errors = Array.isArray(result.errors)
     ? result.errors.filter((error): error is string => typeof error === "string" && error.trim() !== "")
     : []
-  if (errors.length > 0) return errors.join("\n")
+  if (errors.length > 0) return presentTurnError(errors.join("\n"))
   const subtype = result.subtype
   return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`
 }
 
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
+  if (msg.type === "system" && msg.subtype === "init") {
+    state.cwd = msg.cwd
+    const onInit = state.onInit
+    state.onInit = null
+    onInit?.()
+  }
   if (msg.type === "result") {
     // A result is a turn boundary, not necessarily the end of the SDK query.
     // Background agents/workflows can outlive it, and the persistent input
@@ -816,6 +824,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     activeQuery: null,
     messageStream: null,
     onResult: null,
+    onInit: null,
     jsonlPath: null,
     pendingTaskCalls: new Map(),
     subagentWatcher: null,

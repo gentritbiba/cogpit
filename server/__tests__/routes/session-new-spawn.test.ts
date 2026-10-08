@@ -157,14 +157,19 @@ const CODEX_DIR_NAME = descriptorFor("codex").dirName.encode("/tmp/myproject")
 const COPILOT_DIR_NAME = descriptorFor("copilot").dirName.encode("/tmp/copilot-project")
 
 vi.mock("../../sdk-session", () => ({
-  createSDKSession: vi.fn(() => ({
-    sessionId: "test-session-uuid",
-    jsonlPath: null,
-    onResult: null,
-    cwd: "/tmp/test",
-    proc: { kill: vi.fn() },
-    dead: false,
-  })),
+  createSDKSession: vi.fn((opts) => {
+    const state = {
+      sessionId: "test-session-uuid",
+      jsonlPath: null,
+      onResult: null,
+      onInit: null as (() => void) | null,
+      cwd: opts.cwd,
+      proc: { kill: vi.fn() },
+      dead: false,
+    }
+    queueMicrotask(() => state.onInit?.())
+    return state
+  }),
   attachSubagentWatcher: vi.fn(),
 }))
 

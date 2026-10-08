@@ -20,6 +20,9 @@ becomes `unknown`. Inspect native history before confirming completion, failure,
 or an explicit resend. Unknown deliveries are never replayed automatically.
 Definitive model rejection before a Codex turn is accepted can trigger one default
 model retry while the conversation is open; timeouts and partial turns cannot.
+Failed-turn notices can be dismissed from the composer. Dismissals persist in
+the browser per conversation, account and device; the command history remains
+available. Uncertain deliveries still require reconciliation before the queue resumes.
 
 Async questions survive turn completion and app restart. Each answer has its own
 receipt. An answer rejected before native delivery reopens its question. A later
@@ -41,6 +44,9 @@ same native session.
 
 ## Delegation and tools
 
+`cogpit-session new` returns after startup, records the child in its parent's crew,
+and lets the parent continue while the child runs. SDK worktree sessions use the
+initialized worktree address rather than waiting in the original project folder.
 `cogpit-session new --wait` returns and acknowledges a completed child result.
 A timeout leaves the child running. Eventual completion is persisted and queues
 one parent notification under a stable command ID. An abandoned blocking wait

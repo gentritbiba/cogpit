@@ -12,6 +12,7 @@ vi.mock("../../lib/sessionOrigins", () => ({ recordSessionOrigin }))
 vi.mock("../../lib/folders", () => ({ sessionFolderProblem: async () => null }))
 
 import { createSession } from "../../lib/sessionCreate"
+import { orchestrationStore } from "../../orchestration/storage"
 
 const defaultKind = agentKindForDirName(undefined)
 const otherKind = AGENT_KINDS.find((kind) => kind !== defaultKind && !descriptorFor(kind).cli.requiresConfiguration)!
@@ -54,6 +55,13 @@ describe("createSession", () => {
   it("records the name a spawned session was given", async () => {
     await createSession({ cwd: "/work/my-app", message: "hi", parentSessionId: "parent-1", name: "w3-rooftop" })
     expect(recordSessionOrigin).toHaveBeenCalledWith("child-1", { parentSessionId: "parent-1", name: "w3-rooftop" })
+  })
+
+  it("binds the conversation to the initialized worktree directory", async () => {
+    const cwd = "/work/my-app/.claude/worktrees/worker"
+    start.mockResolvedValueOnce({ sessionId: "worktree-child", dirName: descriptorFor(defaultKind).dirName.encode(cwd), cwd, fileName: "worktree-child.jsonl", filePath: "/tmp/worktree-child.jsonl" })
+    await createSession({ cwd: "/work/my-app", message: "hi", worktreeName: "worker" })
+    expect(orchestrationStore().findConversation({ hostId: "local", agent: defaultKind, instanceId: "default", sessionId: "worktree-child" })?.binding.cwd).toBe(cwd)
   })
 
   it("refuses a request with neither a project nor an absolute cwd", async () => {

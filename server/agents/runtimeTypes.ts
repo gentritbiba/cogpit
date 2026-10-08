@@ -73,6 +73,8 @@ export interface StartSessionRequest extends AgentTurnSettings {
 export interface StartedSession {
   sessionId: string
   dirName: string
+  /** The initialized directory when the runtime creates a worktree. */
+  cwd?: string
   /** Transcript path relative to the agent's sessions root. */
   fileName: string
   filePath: string

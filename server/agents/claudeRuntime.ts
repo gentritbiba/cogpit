@@ -4,7 +4,6 @@ import {
   join,
   randomUUID,
   readFile,
-  stat,
   unlink,
 } from "../helpers"
 import { fetchClaudeModels } from "./claudeModels"
@@ -52,8 +51,6 @@ import {
 /** Claude Code, driven through the Anthropic Agent SDK in `../sdk-session`. */
 
 const descriptor = descriptorFor("claude")
-const TRANSCRIPT_POLL_ATTEMPTS = 150
-const TRANSCRIPT_POLL_INTERVAL_MS = 100
 const RUNTIME_CACHE_TTL_MS = 5 * 60 * 1000
 const CONTROL_TIMEOUT_MS = 20_000
 
@@ -75,24 +72,6 @@ function transcriptPath(dirName: string, sessionId: string): {
 function turnResultFrom(result: Record<string, unknown>): TurnResult {
   if (!result.is_error) return { isError: false }
   return { isError: true, message: describeErrorResult(result) }
-}
-
-/** Wait for the SDK to materialise the transcript it names by session id. */
-async function awaitTranscript(
-  filePath: string,
-  isSettled: () => boolean,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < TRANSCRIPT_POLL_ATTEMPTS; attempt++) {
-    if (isSettled()) return false
-    try {
-      await stat(filePath)
-      return true
-    } catch {
-      // Keep polling: the CLI writes the file a moment after it starts.
-    }
-    await new Promise((resolve) => setTimeout(resolve, TRANSCRIPT_POLL_INTERVAL_MS))
-  }
-  return false
 }
 
 /** Bind the sub-agent watcher as soon as the transcript path is known. */
@@ -122,10 +101,9 @@ function sdkResumeOptions(req: SendRequest) {
   }
 }
 
-/** Open a long-lived SDK query and report as soon as its transcript exists. */
+/** Open a long-lived SDK query and report when the CLI initializes it. */
 function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
   const sessionId = randomUUID()
-  const { fileName, filePath } = transcriptPath(req.dirName, sessionId)
   reportSessionId(req, sessionId)
 
   const state = createSDKSession({
@@ -146,32 +124,33 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
     const succeed = async () => {
       if (settled) return
       settled = true
+      state.onInit = null
+      state.onResult = null
+      const dirName = descriptor.dirName.encode(state.cwd)
+      const { fileName, filePath } = transcriptPath(dirName, sessionId)
+      watchSubagentsFor(state, filePath)
       let initialContent: string | undefined
       try {
         initialContent = await readFile(filePath, "utf-8")
       } catch {
         // The client polls for it; an unreadable file is not a failed spawn.
       }
-      resolve({ sessionId, dirName: req.dirName, fileName, filePath, initialContent })
+      resolve({ sessionId, dirName, cwd: state.cwd, fileName, filePath, initialContent })
     }
     const fail = (message: string) => {
       if (settled) return
       settled = true
+      state.onInit = null
+      state.onResult = null
       reject(new AgentRuntimeError(500, "SPAWN_FAILED", message))
     }
 
-    void awaitTranscript(filePath, () => settled).then((exists) => {
-      if (!exists) return
-      watchSubagentsFor(state, filePath)
-      void succeed()
-    })
-
+    state.onInit = () => { void succeed() }
     state.onResult = (result) => {
       state.onResult = null
       const outcome = turnResultFrom(result)
       if (outcome.isError) fail(outcome.message ?? "Claude returned an error")
       else void succeed()
-      if (!state.jsonlPath) watchSubagentsFor(state, null)
     }
   })
 }

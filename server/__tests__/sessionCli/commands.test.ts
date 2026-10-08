@@ -178,6 +178,8 @@ describe("new", () => {
       scope: "local",
     }))
     expect(mocks.recordSessionOrigin).toHaveBeenCalledWith("child-1", { parentSessionId: "parent-1" })
+    expect(mocks.waitAcrossHosts).not.toHaveBeenCalled()
+    expect(orchestrationStore().tasks("local", "parent-1")).toEqual([expect.objectContaining({ childSessionId: "child-1", state: "running", deliveryDisposition: "async" })])
     expect(out(output)).toEqual({ sessionId: "child-1", dirName: "-work-app", next: "cogpit-session wait child-1" })
   })
 
