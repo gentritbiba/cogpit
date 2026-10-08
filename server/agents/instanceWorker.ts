@@ -28,9 +28,10 @@ function watch(id: string) {
   streamSubscriptions.set(id, streamBus.subscribe(id, (event) => send({ type: "stream", sessionId: id, event })))
 }
 function unwatch(id: string) { watched.delete(id); streamSubscriptions.get(id)?.(); streamSubscriptions.delete(id); streamBus.clear(id) }
-const poll = setInterval(() => {
+function publishSnapshot() {
   send({ type: "snapshot", value: { ...snapshot(), activity: Object.fromEntries([...watched].map((id) => [id, runtime.activity(id)])) } })
-}, 300)
+}
+const poll = setInterval(publishSnapshot, 300)
 poll.unref()
 process.on("message", (message: unknown) => {
   if (!isRecord(message) || typeof message.id !== "number" || typeof message.method !== "string" || !methods.has(message.method) || !Array.isArray(message.args)) return
@@ -54,7 +55,13 @@ process.on("message", (message: unknown) => {
       let completion = result.completion as Promise<unknown> | undefined
       if (!completion && typeof result.turnId === "string" && runtime.waitForCompletion) completion = runtime.waitForCompletion(String(args[0]), result.turnId)
       if (completion) {
-        void completion.then((value) => send({ type: "completion", id, value }), (error: unknown) => send({ type: "completion", id, error: error instanceof Error ? error.message : "Turn completion unavailable" }))
+        void completion.then((value) => {
+          publishSnapshot()
+          send({ type: "completion", id, value })
+        }, (error: unknown) => {
+          publishSnapshot()
+          send({ type: "completion", id, error: error instanceof Error ? error.message : "Turn completion unavailable" })
+        })
       }
       return { ...result, completion: undefined, hasCompletion: Boolean(completion) }
     }

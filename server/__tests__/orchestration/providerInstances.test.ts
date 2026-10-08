@@ -107,9 +107,12 @@ describe("provider instances and ACP", () => {
     const sending = await account.runtime.send(started.sessionId, { message: "permission" })
     await until(() => account.runtime.listPendingApprovals(started.sessionId).length === 1)
     const pending = account.runtime.listPendingApprovals(started.sessionId)[0]!
+    expect(account.runtime.activity(started.sessionId).running).toBe(true)
     expect(pending.toolUseId).toBe("native-tool-42")
     expect(await account.runtime.respondToApproval(started.sessionId, pending.requestId, "allow")).toBe(true)
     await sending.completion
+    expect(account.runtime.activity(started.sessionId).running).toBe(false)
+    expect(account.runtime.listPendingApprovals(started.sessionId)).toEqual([])
     expect(await readFile(started.filePath, "utf8")).toContain("native-allow-42")
     const waiting = await account.runtime.send(started.sessionId, { message: "wait" })
     await until(() => account.runtime.activity(started.sessionId).running)

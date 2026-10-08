@@ -58,6 +58,8 @@ The provider account dialog creates a separate home, settings, history and worke
 process. Existing credentials are not copied. It shows the environment and command
 for signing in through the provider's own CLI. Removing an instance retires it;
 history and login files stay available. Busy instances cannot be retired.
+Workers publish current activity and pending requests before reporting a turn's
+completion, so completed turns cannot leave the parent displaying stale busy state.
 
 ACP instances accept an executable and argument array and speak the official
 stable v1 protocol through `@agentclientprotocol/sdk` 1.7.0. The adapter negotiates
