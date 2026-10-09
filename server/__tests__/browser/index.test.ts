@@ -193,13 +193,13 @@ describe("initBrowserSupport", () => {
     await support.shutdown()
   })
 
-  it("leaves every agent CLI's global config untouched", async () => {
+  it("leaves global skill installation to the separate session CLI startup hook", async () => {
     giveTheUserEveryCli()
 
     const support = initBrowserSupport(alwaysDead)
 
     expect(skillTargets().length).toBeGreaterThan(1)
-    // The user keeps these directories; starting Cogpit must not add a file to one.
+    // Browser initialization writes only the runtime plugin, not global skills.
     for (const { configRoot } of skillTargets()) expect(readdirSync(configRoot)).toEqual([])
     expect(errors).toEqual([])
 

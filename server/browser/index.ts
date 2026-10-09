@@ -4,10 +4,8 @@
  * to the sessions Cogpit starts, and the sweeper that reaps daemons a finished
  * session left behind.
  *
- * Every path here stays inside Cogpit's own tree. Copying the skill into an
- * agent CLI's global config is the user's call, made through the panel or
- * `POST /api/browser/skill/install` — starting the server never edits a
- * directory the user owns.
+ * This module writes inside Cogpit's own tree. The session CLI startup hook
+ * separately refreshes the bundled skills in existing agent config roots.
  *
  * Each step stands alone. A read-only home, or a machine without agent-browser,
  * costs the Browser panel and nothing else — the server still starts.
@@ -40,7 +38,7 @@ export function initBrowserSupport(isCogpitSessionLive: (id: string) => boolean)
   attempt("installing the agent-browser shim", () => {
     ensureShim(findRealAgentBrowser(), { visibleBrowser: findVisibleBrowser() })
   })
-  attempt("writing the browser skill plugin", () => {
+  attempt("writing the bundled skills plugin", () => {
     ensurePlugin()
   })
   attempt("starting the daemon sweeper", () => {

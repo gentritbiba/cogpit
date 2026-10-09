@@ -15,6 +15,7 @@ import {
   SKILL_NAME,
   skillTargets,
 } from "../../browser/skill"
+import { BUNDLED_SKILLS } from "../../agents/bundledSkills"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 
 let root = ""
@@ -46,13 +47,15 @@ function manifestFile(): string {
 
 const AGE = new Date(Date.now() - 60_000)
 
+const browserGuide = COGPIT_BROWSER_SKILL + BUNDLED_SKILLS[SKILL_NAME]["references/advanced.md"]
+
 describe("COGPIT_BROWSER_SKILL", () => {
   it("teaches request reuse and a fresh human handoff when clearance expires", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain("/api/browser/sessions/default/request")
-    expect(COGPIT_BROWSER_SKILL).toContain("state: challenge-required")
-    expect(COGPIT_BROWSER_SKILL).toContain("Wait for their confirmation before retrying")
-    expect(COGPIT_BROWSER_SKILL).toContain("Subagents must not use this")
-    expect(COGPIT_BROWSER_SKILL).toContain("Never export clearance cookies")
+    expect(browserGuide).toContain("/api/browser/sessions/default/request")
+    expect(browserGuide).toContain("state: challenge-required")
+    expect(browserGuide).toContain("Wait for their confirmation before retrying")
+    expect(browserGuide).toContain("Subagents must not use this")
+    expect(browserGuide).toContain("Never export clearance cookies")
   })
   it("declares the skill in frontmatter with a description", () => {
     const lines = COGPIT_BROWSER_SKILL.split("\n")
@@ -63,52 +66,52 @@ describe("COGPIT_BROWSER_SKILL", () => {
   })
 
   it("makes the throwaway rule for subagents explicit", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain("--session tmp-")
-    expect(COGPIT_BROWSER_SKILL).toMatch(/subagent, you MUST use `--session tmp-/)
-    expect(COGPIT_BROWSER_SKILL).toMatch(/Never touch `default` or a named browser from a subagent/)
-    expect(COGPIT_BROWSER_SKILL).toContain("close")
+    expect(browserGuide).toContain("--session tmp-")
+    expect(COGPIT_BROWSER_SKILL).toContain("If you are a subagent, use `--session tmp-<unique>`")
+    expect(browserGuide).toMatch(/Never touch `default` or a named browser from a subagent/)
+    expect(browserGuide).toContain("close")
   })
 
   it("explains redirection and the limits of hook coverage", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain("In SDK sessions Cogpit redirects recognized subagent browser calls")
-    expect(COGPIT_BROWSER_SKILL).toContain("outside this hook's coverage")
-    expect(COGPIT_BROWSER_SKILL).toMatch(/rewritten onto a `tmp-` browser before/)
+    expect(COGPIT_BROWSER_SKILL).toContain("Recognized SDK subagent")
+    expect(COGPIT_BROWSER_SKILL).toContain("outside hook coverage")
+    expect(COGPIT_BROWSER_SKILL).toContain("calls are redirected")
   })
 
   it("lists the flags Cogpit owns", () => {
     for (const flag of ["--profile", "--state", "--session-name", "--args", "--headed", "--cdp"]) {
-      expect(COGPIT_BROWSER_SKILL).toContain(flag)
+      expect(browserGuide).toContain(flag)
     }
   })
 
   it("resolves the server port the way the sessions skill does", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain('PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"')
-    expect(COGPIT_BROWSER_SKILL).toContain('curl -s "$BASE/api/browser"')
-    expect(COGPIT_BROWSER_SKILL).toContain("PATCH")
+    expect(browserGuide).toContain('PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"')
+    expect(browserGuide).toContain('curl -s "$BASE/api/browser"')
+    expect(browserGuide).toContain("PATCH")
   })
 
   it("warns that the panel drives the page viewport", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain("Opening or resizing the Browser panel sets the page's viewport")
-    expect(COGPIT_BROWSER_SKILL).toContain("agent-browser set viewport <w> <h>")
+    expect(COGPIT_BROWSER_SKILL).toContain("The Browser panel can change the viewport")
+    expect(browserGuide).toContain("agent-browser set viewport <w> <h>")
   })
 
   it("keeps browsers headless and reserves a window for a bot check the user must pass", () => {
-    expect(COGPIT_BROWSER_SKILL).toMatch(/## Headless by default/)
-    expect(COGPIT_BROWSER_SKILL).toContain("COGPIT_BROWSER_HEADED=1 agent-browser --session <name> open <url>")
-    expect(COGPIT_BROWSER_SKILL).toContain("Verify you are human")
-    expect(COGPIT_BROWSER_SKILL).toMatch(/close that browser so the next task starts\s+headless/)
-    expect(COGPIT_BROWSER_SKILL).toMatch(/only honoured on the call that launches the browser/)
+    expect(browserGuide).toMatch(/## Headless by default/)
+    expect(browserGuide).toContain("COGPIT_BROWSER_HEADED=1 agent-browser --session <name> open <url>")
+    expect(browserGuide).toContain("Verify you are human")
+    expect(browserGuide).toMatch(/close that browser so the next task starts\s+headless/)
+    expect(browserGuide).toMatch(/only honoured on the call that launches the browser/)
   })
 
   it("shows how to mark up a screenshot and clean the overlay up afterwards", () => {
-    expect(COGPIT_BROWSER_SKILL).toMatch(/## Marking up screenshots/)
-    expect(COGPIT_BROWSER_SKILL).toContain("agent-browser eval --stdin")
-    expect(COGPIT_BROWSER_SKILL).toContain("window.__markup?.svg.remove()")
+    expect(browserGuide).toMatch(/## Marking up screenshots/)
+    expect(browserGuide).toContain("agent-browser eval --stdin")
+    expect(browserGuide).toContain("window.__markup?.svg.remove()")
   })
 
   it("tells the agent to name the browser and to hand logins to the user", () => {
-    expect(COGPIT_BROWSER_SKILL).toContain("open the Browser panel to watch")
-    expect(COGPIT_BROWSER_SKILL).toMatch(/log in inside the Browser panel/)
+    expect(browserGuide).toContain("open the Browser panel to watch")
+    expect(browserGuide).toMatch(/log in inside the Browser panel/)
   })
 })
 
@@ -199,6 +202,15 @@ describe("skillTargets", () => {
     expect(skillTargets()[0].installed).toBe(false)
   })
 
+  it("requires the reference files as well as the entrypoint", () => {
+    const [first] = skillTargets()
+    const dir = installSkill(first.kind)
+    rmSync(join(dir, "references"), { recursive: true })
+    expect(skillTargets()[0].installed).toBe(false)
+    installSkill(first.kind)
+    expect(skillTargets()[0].installed).toBe(true)
+  })
+
   it("marks the CLIs the plugin Cogpit writes already reaches", () => {
     const manifest = manifestFile()
 
@@ -209,6 +221,11 @@ describe("skillTargets", () => {
       )
     }
     expect(skillTargets().some((target) => target.automatic)).toBe(true)
+  })
+
+  it("marks every existing CLI config as receiving the startup refresh", () => {
+    for (const target of skillTargets()) mkdirSync(target.configRoot, { recursive: true })
+    expect(skillTargets().every((target) => target.automatic)).toBe(true)
   })
 })
 

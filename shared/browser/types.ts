@@ -61,8 +61,7 @@ export interface BrowserSkillTarget {
   installed: boolean
   /**
    * Cogpit already hands the skill to the sessions it starts for this CLI,
-   * through the local plugin it writes inside its own tree. Installing is then
-   * only for runs Cogpit does not own.
+   * through its local plugin or startup refresh of an existing config root.
    */
   automatic: boolean
 }

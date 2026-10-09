@@ -44,6 +44,13 @@ same native session.
 
 ## Delegation and tools
 
+Cogpit bundles short skills for sessions, memory, browser work and conversation output.
+`sync-cogpit-skill` generates their embedded contents from the Markdown sources.
+Every server launch refreshes them in existing agent config roots; provider workers
+refresh their own account home before starting. The runtime plugin carries the same
+skills and references. The first launch after installation or an update needs no
+manual skill install or network fetch. Full command details remain in CLI help.
+
 `cogpit-session new` returns after startup, records the child in its parent's crew,
 and lets the parent continue while the child runs. SDK worktree sessions use the
 initialized worktree address rather than waiting in the original project folder.

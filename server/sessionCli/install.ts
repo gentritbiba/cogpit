@@ -1,3 +1,4 @@
+import { installBundledSkills } from "../agents/skills"
 import { join } from "node:path"
 import { writeIfChanged } from "../browser/files"
 import { binDir } from "../browser/paths"
@@ -133,4 +134,5 @@ export function installSessionCli(): void {
   } catch (error) {
     console.error(`[${CLI_NAME}] install failed; agents cannot use it until the next start.`, error)
   }
+  installBundledSkills()
 }

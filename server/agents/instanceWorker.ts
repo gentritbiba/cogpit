@@ -4,6 +4,7 @@ import { runtimeFor } from "./runtimes"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import { isRecord } from "../../shared/objects"
 import * as streamBus from "../lib/streamBus"
+import { installBundledSkills } from "./skills"
 
 const kind = process.env.COGPIT_WORKER_AGENT as AgentKind
 const dataRoot = process.env.COGPIT_WORKER_DATA_ROOT
@@ -12,6 +13,7 @@ setDataRoot(dataRoot)
 setConfigPath(process.env.COGPIT_WORKER_CONFIG_PATH ?? "")
 await loadConfig()
 refreshDirs()
+installBundledSkills([kind])
 const runtime = runtimeFor(kind)
 const answers = new Map<string, () => void>()
 const methods = new Set(["start", "send", "interrupt", "stop", "stopAll", "deleteSession", "respondToApproval", "respondToAllApprovals", "respondToPlan", "answerQuestion", "describeRuntime", "listModels", "liveUsageRecords", "fork", "shutdown", "snapshot", "commitAnswer"])

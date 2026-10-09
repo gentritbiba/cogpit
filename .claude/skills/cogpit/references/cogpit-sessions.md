@@ -1,378 +1,119 @@
 <!-- Generated from .claude/skills/cogpit-sessions/SKILL.md by scripts/sync-cogpit-skill.ts. Edit the source, then run `bun run sync-cogpit-skill`. -->
 
-# Driving other sessions with Cogpit
+# Cogpit sessions
 
-Use the `cogpit-session` CLI. It resolves the server, retries safely, blocks
-until a session is done, and prints JSON with the final reply. You rarely need
-the HTTP API below.
+Use `cogpit-session`; it is on PATH inside Cogpit. Outside Cogpit, use
+`~/.cogpit/bin/cogpit-session`. The server must be running. Run
+`cogpit-session help` for flags and advanced commands.
 
-## Where the CLI is
+Cogpit sets `COGPIT_SESSION_ID` and `COGPIT_PORT`. Keep them: new sessions are
+recorded as your children, and commands go to your local server.
 
-- **Inside a session Cogpit started:** `cogpit-session` is on your PATH, and
-  `COGPIT_PORT` and `COGPIT_SESSION_ID` are set. Sessions you create are
-  recorded as your children.
-- **Anywhere else on the same machine:** run `~/.cogpit/bin/cogpit-session`.
-  Cogpit rewrites it on every start. It finds the server through
-  `$COGPIT_PORT`, then `~/.cogpit/port`, then `19384`.
-- Run `cogpit-session help` for the full usage.
-
-## Delegate and wait
+## Start and collect
 
 ```bash
-cogpit-session new "Fix the failing tests in src/parser and summarize the cause" --wait --timeout 300
+cogpit-session new "Fix the parser and report what changed" --wait --timeout 90
 ```
 
-```json
-{ "sessionId": "…", "outcome": "completed", "reply": "Fixed: …", "filesChanged": [{ "path": "…", "type": "edit", "additions": 4, "deletions": 1 }] }
-```
-
-- The session runs in your working directory. Use `--cwd DIR` for another
-  project and `--worktree NAME` to isolate its edits in a git worktree.
-- `--agent claude|codex|copilot|acp`, `--model`, `--effort` and `--name` pick how
-  it runs.
-- A long message can come from stdin: `cogpit-session new - --wait < task.md`.
-- **Permissions:** new sessions run with `--mode bypassPermissions` so nothing
-  stalls. Pass `--mode default` (or `acceptEdits`, `plan`) to supervise it
-  yourself instead (see "Answering a blocked session").
-
-Follow up in the same session, which keeps its context:
+For independent tasks, start children without `--wait`, save each returned
+`sessionId`, then wait on them together. Use distinct `--worktree NAME` values
+when children will edit the same repository.
 
 ```bash
-cogpit-session send "$ID" "Now add a regression test" --wait
-cogpit-session send "$ID" "Stop, use the other approach" --interrupt   # cut the current turn first
+A=$(cogpit-session new "Fix the parser" --worktree parser | jq -r .sessionId)
+B=$(cogpit-session new "Fix the renderer" --worktree renderer | jq -r .sessionId)
+cogpit-session wait "$A" "$B" --timeout 90
+cogpit-session children
 ```
 
-## Outcomes and exit codes
+`--cwd DIR` chooses a project. `--agent`, `--instance`, `--model`, `--effort`
+and `--name` select how it runs. Long prompts can come from stdin:
+`cogpit-session new - --wait < task.md`.
 
-Every report carries an `outcome`:
+Default CLI accounts use `bypassPermissions`; configured provider instances
+and ACP default to supervised mode. Use `--mode default` when approval is needed.
+A skill does not grant permission beyond the user's task.
 
-| outcome | meaning | exit code |
-| --- | --- | --- |
-| `completed` | turn finished; `reply` and `filesChanged` are included | 0 |
-| `needs_input` | blocked on a permission prompt, question or plan; see `waiting` and `next` | 2 |
-| `running` | still working when `--timeout` ran out; run the `next` command to keep waiting | 3 |
-| `error` | the turn failed; see `error` | 1 |
-| `not_found` | no such session | 1 |
-| `unreachable` | its machine did not answer; it may still be working | 1 (3 in `wait`) |
-
-`wait` defaults to a 90-second timeout, below the two-minute limit of most
-shell tools. For longer work, pass a larger `--timeout` (and raise your shell
-tool's timeout to match), or wait in a loop:
+## Follow up and inspect
 
 ```bash
-until cogpit-session wait "$ID" --timeout 90 > /tmp/report.json; [ $? -ne 3 ]; do :; done
-cat /tmp/report.json
+cogpit-session send "$ID" "Now add a regression test" --command-id parser-tests-001
+cogpit-session receipt parser-tests-001 --session "$ID" --wait --timeout 90
+cogpit-session wait "$ID" --timeout 90
+cogpit-session status "$ID"
+cogpit-session result "$ID" --text
 ```
 
-A session whose turn ended while background agents still run stays `running`
-until it finishes for real.
+`send --wait` waits for its delivery receipt; `wait` returns the session's final
+reply and changed files. Reuse the same command ID and message after a lost
+response. `queued` means accepted, not finished. For `unknown` delivery, inspect
+native history before reconciling; do not resend blindly. `held` needs queue review.
+Use `--steer` to join a supported running turn, or `--interrupt` to restart it.
 
-## Fan out, then collect
+Timeout leaves the child running. Continue with `wait`; do not spawn a duplicate.
+Eventual completion is saved and notifies the parent. Read it with
+`cogpit-session tasks`, then acknowledge it with `tasks --ack TASK_ID`.
+A successful `new --wait` already acknowledges its result.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Completed successfully |
+| 2 | Needs an answer or approval; inspect `waiting` and `next` |
+| 3 | Still running or timed out; keep waiting |
+| 1 | Error, missing session or unreachable device; inspect the response |
+
+## Another computer
 
 ```bash
-A=$(cogpit-session new "Audit the API routes for missing auth" --worktree audit-api | jq -r .sessionId)
-B=$(cogpit-session new "Audit the React forms for XSS" --worktree audit-ui | jq -r .sessionId)
-cogpit-session wait "$A" "$B" --timeout 600      # all of them; add --any to return on the first
-cogpit-session children                          # everything you started, with its outcome
+cogpit-session devices
+cogpit-session new "Run the Linux checks and report findings" --device Omarchy --wait --timeout 90
 ```
 
-`new` returns as soon as the session exists (5–15 s) unless you pass `--wait`.
+The device must be registered, reachable and authenticated, with its agent
+installed and signed in. Basic remote control needs `sessionApi: 1`; durable
+follow-ups, answers and provider handoffs need `sessionApi: 2`. Update an old device.
 
-## Hand a task to another machine
+Without `--cwd`, Cogpit sends your Git repository's HEAD plus staged, unstaged
+and non-ignored new files into an isolated remote worktree. Capable devices
+reuse a matching target checkout and copy its ignored env files by default;
+caller secrets never travel automatically. Install dependencies in the worktree.
+Git submodule contents and LFS objects are not bundled. Repository transfer
+requires host-wide/admin access.
 
-When Cogpit has other machines registered as devices (Settings → Devices),
-run the task on one of them:
+Choose `--env target` to require the target's env, `--env caller` to explicitly
+send your ignored env, or `--env none` for Git-only work. Default `auto` uses
+target env when one checkout matches, otherwise none. Use `--target-checkout`
+to select an ambiguous checkout; `--env-files` overrides the file allowlist.
+These options require `--device` without `--cwd` and `workspaceEnvironment: 1`;
+old devices retain Git-only auto/none. Caller env needs authenticated registration.
+
+`new`, `status` and `wait` report the env source and file names, never contents.
+Use the briefing's `PORT` and `COMPOSE_PROJECT_NAME` for parallel tests. Env copies
+are private and removed on discard; never print or commit secrets. Read
+`references/remote-workspaces.md` for matching, selection, safety and rollout.
+
+`wait` on completion or `fetch ID` returns work to `cogpit/<device>/<task>`;
+inspect `returned`, `returnError` and the review/apply instructions. Your working
+files are not automatically merged. Async result notifications do not fetch files.
+`--cwd /absolute/remote/path` uses an existing remote folder instead, with no
+repository transfer or automatic file return. `projects --device NAME` lists folders.
+
+IDs route automatically for `send`, `wait`, `status`, `result`, answers and stops.
+Remote requests go to the user in Cogpit by default. Use `--questions agent` to
+handle them yourself; local children default to agent handling.
+
+## Answer and clean up
 
 ```bash
-cogpit-session devices                     # which machines, and whether they are online
-cogpit-session new "Run the GPU benchmarks and fix the slow kernel" --device agentbox --wait --timeout 900
+cogpit-session approve "$ID" --request "$REQUEST"
+cogpit-session deny "$ID" --request "$REQUEST" --feedback "Use the smaller change"
+cogpit-session answer "$ID" "Blue" --request "$REQUEST"
+cogpit-session interrupt "$ID"   # stop the turn, retain the session
+cogpit-session stop "$ID"        # stop the session
+cogpit-session discard "$ID"     # fetch remote work once more, then remove its worktree
 ```
 
-- Your repository goes with it: HEAD plus your uncommitted changes, including
-  new files git does not ignore, become a fresh worktree on that machine.
-  On capable devices, Cogpit reuses a matching target clone and copies its
-  ignored env files into the task worktree. No caller secrets travel by default.
-  Install dependencies separately inside the worktree.
-- When the session finishes, `wait` brings its work back as a local branch
-  (`returned.branch`) and prints the commands to review or apply it. Your
-  working tree is never touched, and a branch you checked out or committed to
-  is left alone (the work is then at `returned.ref`, as the note says).
-  `cogpit-session fetch ID` brings it back at any other time.
-- `cogpit-session discard ID` ends it: it stops the session, brings the work
-  back one last time and deletes the worktree on that machine.
-- `--worktree` does not combine with sending your repository, which already
-  gets its own worktree.
-- Questions and approvals from that session go to the user in Cogpit, shown on
-  your own session, and `wait` keeps waiting while the user has them
-  (`askedUser: true`). Pass `--questions agent` to answer them yourself.
-- `--cwd /path/on/that/machine` uses a folder already there instead of sending
-  your repository; `cogpit-session projects --device agentbox` lists them.
-- Session ids work everywhere: `wait`, `send`, `status`, `approve`, `stop` and
-  `children` find the machine each session runs on.
-
-### Choose a runnable environment
-
-```bash
-cogpit-session new "Run the app and do browser QA" --device omarchy
-cogpit-session new "Require the target env" --device omarchy --env target
-cogpit-session new "Test with my ignored env" --device omarchy --env caller
-cogpit-session new "Lint only" --device agentbox --env none
-```
-
-- `--env auto` is the default: copy target env from a unique matching checkout,
-  otherwise use no env. `target` requires a match. `caller` explicitly transfers
-  your ignored env instead, including when there is a target checkout. `none`
-  skips env. Every transferred task still has an isolated worktree and returns
-  its work as `cogpit/<device>/<task>`.
-- Match uses credential-free normalized origin, or identical root commit sets
-  when an origin is absent. Different origins do not match as forks. Several
-  matching checkouts are ambiguous; choose with
-  `--target-checkout /remote/project`. This path must match repository identity.
-  Discovery covers Cogpit's known projects and retained transfer worktrees.
-- Defaults: ignored regular `**/.env*`, `**/.dev.vars`, `**/.dev.vars.*` files.
-  `.cogpit/workspace.json` can set `{ "envFiles": [".env.local", "config/secrets.json"] }`.
-  `--env-files '.env.local,apps/web/.dev.vars'` overrides its glob allowlist.
-  Target mode reads target config; caller mode reads caller config. Config never
-  authorizes sending caller secrets. Tracked/nonignored files are not env uploads.
-- `new` reports `workspace.environment.source` (`target-checkout`, `caller`,
-  `none`), `files` (names only) and `workspace.run`; `status`/`wait` report
-  `environment` and `run`. Never print env contents or secrets in tool output,
-  logs, transcripts or commits. Copies are private, mode 0600, and deleted on
-  discard. Force-committing env blocks export; remove those commits before fetch.
-- The briefing supplies a suggested distinct `PORT` and `COMPOSE_PROJECT_NAME`.
-  Set them on dev/Compose commands, use the framework's port flag when needed,
-  and check the port is still free. Keep mutable build caches/dependencies inside
-  each worktree. Stop your dev server and Compose services before discard.
-  External services, fixed container names/ports and external volumes are still
-  shared unless the project isolates them.
-- These flags require `--device` without `--cwd`. Old devices lacking
-  `workspaceEnvironment: 1` keep legacy Git-only transfers for auto/none;
-  explicit provisioning fails before sending secrets. Caller env transfer also
-  requires a password-authenticated device registration. Update both servers only
-  with the user's approval. Do not restart servers with sessions running.
-
-Full selection, security and parallel-testing details: `docs/remote-workspaces.md`
-in the Cogpit source repository.
-
-## Answering a blocked session
-
-When `outcome` is `needs_input`, `waiting` lists each request, and `next`
-lists the command that answers it:
-
-```json
-{
-  "outcome": "needs_input",
-  "waiting": [{ "kind": "permission", "requestId": "toolu_…", "toolName": "Bash", "summary": "rm -rf build", "availableDecisions": ["allow", "allow_always", "deny"] }],
-  "next": ["cogpit-session approve ID --request toolu_…  |  cogpit-session deny ID --request toolu_…"]
-}
-```
-
-```bash
-cogpit-session approve "$ID"                    # the only pending permission or plan
-cogpit-session approve "$ID" --always           # also allow it for the rest of the session
-cogpit-session deny "$ID" --request REQ         # pick one when several are pending
-cogpit-session deny "$ID" --feedback "Smaller steps please"   # reject a plan with feedback
-cogpit-session answer "$ID" "Blue"              # a question: one answer per question, in order
-cogpit-session answer "$ID" --json '{"Which color?":"Blue"}'
-```
-
-Then `wait` again. `--request` is optional when exactly one matching request is
-pending.
-
-## Reporting to the user
-
-When you run a crew, the user follows it in Cogpit's Crew panel, so do not
-re-list what every session is doing. Report what changed and what you need:
-show progress with a `cogpit-status` block, ask for several decisions at once
-with a `cogpit-decisions` block, and lay out plans with `cogpit-checklist`.
-The `cogpit` skill describes the three blocks.
-
-## Reading and cleaning up
-
-```bash
-cogpit-session status "$ID"          # outcome, current tool, anything blocking it
-cogpit-session result "$ID"          # reply of the last turn, files changed, tokens
-cogpit-session result "$ID" --turn 0 --text   # just the reply text of turn 0
-cogpit-session interrupt "$ID"       # stop the turn, keep the session
-cogpit-session stop "$ID"            # end it
-cogpit-session stop --children       # end every session you started
-```
-
-For full turns, tool calls and subagents, read the transcript with
-`GET /api/session-context/:sessionId` (below) or the cogpit-memory CLI.
-
-## HTTP API
-
-Use the API when you cannot run a shell command. All endpoints take and return
-JSON. Requests from 127.0.0.1/::1 skip authentication.
-
-```bash
-PORT="${COGPIT_PORT:-$(cat ~/.cogpit/port 2>/dev/null || echo 19384)}"
-BASE="http://localhost:$PORT"
-```
-
-### POST /api/create-and-send
-
-Creates a session and sends the first message. Responds in 5–15 s, once the
-transcript exists; use `--max-time 30`.
-
-```json
-{
-  "cwd": "/abs/project (or dirName)",
-  "dirName": "project dirName from /api/projects (or cwd)",
-  "agent": "claude | codex | copilot (only with cwd; default claude)",
-  "message": "string (required unless images)",
-  "images": [{ "data": "base64", "mediaType": "image/png" }],
-  "permissions": { "mode": "bypassPermissions" },
-  "model": "string ('' = provider default; GET /api/models lists options)",
-  "effort": "low | medium | high | xhigh | max",
-  "fastMode": false,
-  "ultracode": false,
-  "worktreeName": "run in a git worktree with this name",
-  "mcpConfig": "JSON-encoded mcpServers config",
-  "name": "session title",
-  "parentSessionId": "$COGPIT_SESSION_ID, your own session id",
-  "requestId": "8–128 of [A-Za-z0-9_-]; reuse on retries"
-}
-```
-
-Response: `{ success, requestId?, dirName, fileName, sessionId, initialContent? }`.
-
-- **Pass `parentSessionId` whenever `COGPIT_SESSION_ID` is set.** It is how
-  Cogpit knows you started the session: it lists the session under yours, in
-  your crew, and in `session-children`. Without it the session shows up on its
-  own as if the user had started it. The CLI sets it for you.
-- **Always pass `permissions.mode`.** The server default, `default`, gates each
-  tool call on an approval. Nothing answers it unless you do (see
-  `/api/session-respond`). `bypassPermissions` runs everything. The old
-  `{ "allow", "deny" }` shape is silently ignored.
-- **Retries:** keep one `requestId` per intended session and resend the same
-  payload after a timeout or dropped connection. The server returns the
-  original session instead of starting another. `409 CONFLICT` means the ID
-  was reused with a different payload, or the outcome is still unknown. Do not
-  start a new copy blindly. The CLI does this for you.
-- A Claude `dirName` is the path with every non-alphanumeric character replaced
-  by `-`; Codex and Copilot use their own prefixes. Prefer `cwd`.
-
-### POST /api/send-message
-
-`{ sessionId, message, images?, permissions?, model?, effort?, fastMode?, ultracode?, mcpConfig?, cwd? }`
-
-Returns `{ success: true }` right away when the session is live. When the
-session has to be resumed, the response waits for the whole turn. Either way,
-wait with `/api/session-wait` afterwards.
-
-### GET /api/session-wait/:sessionId?timeout=90 · POST /api/session-wait
-
-Long-polls until the session settles (`outcome` other than `running`) or the
-timeout (seconds, default 90, max 3600) passes. The GET form returns
-`{ timedOut, ...state }`. The POST form waits on several sessions:
-`{ "sessionIds": [...], "mode": "all" | "any", "timeout": 600 }` →
-`{ timedOut, sessions: [state...] }`.
-
-### GET /api/session-status/:sessionId
-
-The same `state` without waiting:
-
-```json
-{ "sessionId": "…", "outcome": "running", "live": true, "running": true, "status": "tool_use", "toolName": "Bash", "waiting": [], "pendingQueue": 0 }
-```
-
-- `outcome`: `running | needs_input | completed | error | not_found` (404).
-- `waiting`: pending requests: `{ kind: "permission", requestId, toolName, summary, availableDecisions }`,
-  `{ kind: "question", requestId, questions: [{ question, multiSelect, options }] }`,
-  `{ kind: "plan", requestId, summary, actions, recommendedAction }`.
-- `running`: a turn is in flight. `live`: a connection is held that takes follow-ups without a resume.
-- `status`: the transcript tail (`idle | thinking | tool_use | processing | completed | compacting | deferred | awaiting_agents`), plus `terminalReason`, `pendingAgents` and `pendingAgentDescriptions` when they apply.
-- `error`: why the last turn failed.
-
-### POST /api/session-send
-
-`{ sessionId, message, interrupt? }` → `{ delivery }`. Delivers a follow-up and
-answers at once, even when the session has to be resumed; wait with
-`/api/session-wait`.
-
-### POST /api/session-respond
-
-Answers one entry of `waiting`:
-`{ sessionId, requestId, decision: "allow" | "allow_always" | "deny" }` for a permission,
-`{ sessionId, requestId, answers: "Blue" | ["Blue", "Large"] | { "Which color?": "Blue" } }` for a question,
-`{ sessionId, requestId, approved: true | false, action?, feedback? }` for a plan.
-Returns `{ success, answered }`; 404 when it was already answered.
-
-### GET /api/session-result/:sessionId?turn=N
-
-`{ sessionId, cwd, model, turnCount, turn: { index, userMessage, reply, toolCalls, toolErrors, durationMs }, filesChanged: [{ path, type, additions, deletions }], tokens: { input, output } }`.
-`turn` defaults to the last one; `reply` is the last text the agent wrote in it.
-
-### GET /api/session-children/:sessionId
-
-`{ sessionId, children: [state...] }` for the sessions created with this `parentSessionId`, oldest first; a child on another machine carries `device: { id, name }`.
-
-### Sessions on other machines
-
-The session endpoints above accept ids of sessions on registered devices and
-answer from that device. Starting a session on a device, with the repository
-handoff, is CLI-only (`cogpit-session new --device`).
-
-### Other endpoints
-
-- `POST /api/interrupt-session` `{ sessionId }`: stop the turn, keep the session.
-- `POST /api/stop-session` `{ sessionId }`: end it. `POST /api/kill-all` ends every one.
-- `POST /api/delete-session` `{ dirName, fileName }`: end it and delete its transcript.
-- `POST /api/archive-sessions` `{ sessionIds: [...], archived: true | false }`: hide from or restore to the sidebar; the transcript is untouched. Idle sessions auto-archive after 14 days unless restored, and new activity unarchives them.
-- `GET /api/projects`: `[{ dirName, path, shortName, sessionCount, lastModified }]`.
-- `GET /api/sessions/:dirName?page=1&limit=20`: a project's sessions, newest first.
-- `GET /api/active-sessions?search=&project=&limit=&archived=include`: recent sessions across projects. `search` also matches pull requests (`#157`, `repo#157`, a PR URL); while the PR index builds, poll until `X-Cogpit-PR-Index-Pending` is `0`.
-- `GET /api/session-context/:sessionId`: parsed overview of every turn; drill into `/turn/:i` and `/agent/:agentId`.
-- `GET /api/sessions/:dirName/:fileName`: raw transcript JSONL (`?tail=N`, `?before=<byteOffset>&count=N` to page).
-- `GET /api/find-session/:sessionId`: `{ dirName, fileName }`.
-- `GET /api/running-processes`: agent processes with PID, memory and CPU.
-- `GET /api/agent-executable/claude`: which Claude Code binary Cogpit spawns.
-
-## Notes
-
-- The Cogpit app (or `bun run dev` in the agent-window repo) must be running.
-- Sessions stay alive between messages, so follow-ups have no cold start.
-- Claude transcripts live in `~/.claude/projects/<dirName>/`; Codex and Copilot
-  transcripts stay in their own trees but go through the same endpoints.
-
-## Durable delivery, results and provider instances
-
-New sessions accept `--instance ID` for a configured provider account. Those
-instances default to supervised permissions; ACP requires a configured executable.
-Every account has its own home and native history.
-
-```bash
-cogpit-session send "$ID" "Next task" --command-id task-followup-001
-cogpit-session receipt task-followup-001 --session "$ID" --wait --timeout 30
-cogpit-session tasks "$COGPIT_SESSION_ID"
-cogpit-session tasks "$COGPIT_SESSION_ID" --ack "$TASK_ID"
-```
-
-Reuse a command ID and identical content after an interrupted response. `queued`
-means accepted by Cogpit; `completed` means the provider reported completion.
-`held` requires reviewing and resuming the queue. `unknown` requires inspecting
-native history before confirming or explicitly resending; never retry it blindly.
-`--steer` joins a supported running turn; `--interrupt` restarts the turn.
-
-A successful `new --wait` acknowledges its returned child result. A timeout leaves
-the child running and preserves its eventual result; Cogpit sends one durable
-notification to the parent. Use `tasks --cancel TASK_ID` to cancel a running child.
-
-The conversation controls expose compatible native resume and a bounded text
-context handoff across providers. The CLI equivalent is:
-
-```bash
-cogpit-session transition "$ID" --agent codex --revision 1 --mode handoff --command-id handoff-001
-cogpit-session transition "$ID" --resolve --command-id handoff-001 --target "$NATIVE_ID"
-```
-
-Keep the original handoff ID when resolving an uncertain creation.
-`--confirm-not-created` is only for a native-history check that confirms no session
-was created. Durable remote operations require the device's `sessionApi: 2`.
-
-`POST /api/session-mcp` offers the same session operations as stateless MCP tools
-(version `2025-03-26`). Each tool takes `argv` without the CLI command name, optional
-`cwd` and `callerSessionId`, and a stable `commandId` for a mutation. Authorization
-is the same as the session CLI; tools cannot access hidden sessions.
+Omit `--request` when exactly one matching request is pending. After answering,
+wait again. Stop only children you own. `stop` keeps a transferred worktree;
+`discard` removes it after preserving its work. For full transcript drill-down,
+use `cogpit-memory`.
