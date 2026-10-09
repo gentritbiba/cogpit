@@ -103,7 +103,7 @@ describe("workspace upload chunks", () => {
     const repo = await makeRepo({ ".gitignore": ".env*\n", "app.ts": "v1" })
     const snapshot = await snapshotWorkspace(repo)
     const uploadId = await newUpload()
-    expect((await stat(uploadFile(uploadId))).mode & 0o777).toBe(0o600)
+    if (process.platform !== "win32") expect((await stat(uploadFile(uploadId))).mode & 0o777).toBe(0o600)
     const secret = "SENTINEL_NEVER_IN_RESPONSE"
     await put(uploadId, 0, encodeEnvironment([{ path: ".env", bytes: Buffer.from(secret) }]))
     const imported = await post("/import", { repoKey: snapshot.repoKey, snapshot: "f".repeat(40), task: "broken", subdir: "", identity: snapshot.identity, targetCheckout: repo, environmentMode: "caller", environmentUploadId: uploadId })

@@ -43,7 +43,7 @@ describe("ignored environment selection", () => {
     const files = decodeEnvironment(encoded)
     expect(await installEnvironment(repo, files)).toEqual(["packages/app/.env.local"])
     expect(await readFile(join(repo, files[0].path))).toEqual(bytes)
-    expect((await stat(join(repo, files[0].path))).mode & 0o777).toBe(0o600)
+    if (process.platform !== "win32") expect((await stat(join(repo, files[0].path))).mode & 0o777).toBe(0o600)
     expect(await gitOut(repo, ["status", "--porcelain"])).toBe("")
     for (const malformed of [encoded.subarray(0, -1), Buffer.from("SECRET"), encodeEnvironment([{ path: "../escape", bytes }])]) {
       expect(() => decodeEnvironment(malformed)).toThrow("Could not provision workspace environment")
