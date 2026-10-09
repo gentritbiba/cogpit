@@ -26,6 +26,9 @@ const REPOSITORY_OVERRIDES = [
   "GIT_PREFIX",
 ]
 
+/** Git may exit before closing stdin finishes; Node then destroys the pipe. */
+const CLOSED_STDIN_CODES = new Set(["EPIPE", "ERR_STREAM_DESTROYED"])
+
 export interface GitOptions {
   env?: Record<string, string>
   /** Written to stdin; stdin is closed either way. */
@@ -64,7 +67,7 @@ export async function git(cwd: string, args: string[], options: GitOptions = {})
     const stdin = pending.child.stdin
     if (!stdin) return resolve()
     const finished = (error?: NodeJS.ErrnoException | null) => {
-      if (!error || (error.code === "EPIPE" && !options.input)) resolve()
+      if (!error || (CLOSED_STDIN_CODES.has(error.code ?? "") && !options.input)) resolve()
       else reject(error)
     }
     stdin.on("error", finished)

@@ -27,6 +27,11 @@ describe("Git input pipe closure", () => {
   it("accepts an early pipe close when the command has no input", async () => {
     await expect(git("/repo", ["rev-parse", "HEAD"])).resolves.toBe("result")
   })
+  it("accepts stdin destroyed by an early exit when the command has no input", async () => {
+    mocks.inputError = "ERR_STREAM_DESTROYED"
+    mocks.callbackFirst = true
+    await expect(git("/repo", ["update-ref", "refs/x", "abc"])).resolves.toBe("result")
+  })
   it("still reports the command's exit failure when its unused input pipe closes", async () => {
     mocks.commandError = true
     await expect(git("/repo", ["rev-parse", "HEAD"])).rejects.toMatchObject({ exitCode: 128, stderr: "not a repository" })
@@ -35,6 +40,11 @@ describe("Git input pipe closure", () => {
     await expect(git("/repo", ["commit-tree", "tree"], { input: "Message" })).rejects.toBeInstanceOf(GitCommandError)
   })
   it("refuses payload loss when the end callback precedes the stream error", async () => {
+    mocks.callbackFirst = true
+    await expect(git("/repo", ["commit-tree", "tree"], { input: "Message" })).rejects.toBeInstanceOf(GitCommandError)
+  })
+  it("refuses stdin destroyed before requested input was written", async () => {
+    mocks.inputError = "ERR_STREAM_DESTROYED"
     mocks.callbackFirst = true
     await expect(git("/repo", ["commit-tree", "tree"], { input: "Message" })).rejects.toBeInstanceOf(GitCommandError)
   })
