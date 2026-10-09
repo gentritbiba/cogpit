@@ -5,6 +5,12 @@ Historical reference only. Use [deployments.md](deployments.md) for current reso
 Earlier Cogpit history is also retained in the [global deployment log](/Users/gentritbiba/project-manager/deployments-logs.md).
 
 
+## workspaceEnvironment rollout, 2026-10-08 (030fd7a)
+
+Owner-approved; source archive SHA-256 `c59925c1…1370` verified. agentbox: idle (no agent processes, unit cgroup server-only) → drop-in switched from `~/cogpit-server-next` (2.7.5, instance `4f33a0a5089420db`) to `~/cogpit-server-030fd7a` (instance `87fd0c5996774da8`). Omarchy: only a completed idle session process (its caffeinate inhibitor is in a separate Hyprland scope and survived) → AUR app 3.1.0 (instance `480f870ac93473b9`) SIGTERMed, user copy `~/.local/opt/cogpit-030fd7a` with rebuilt `app.asar` (SHA-256 `e81630c8…de19`) relaunched (instance `ed3143573a63e751`). Both report version 3.1.0, sessionApi 2, workspaceEnvironment 1 via loopback and authenticated Mac hub proxy. Mac not restarted (many running sessions); staged build waits for Cmd+Q.
+
+E2E: isolated 030fd7a caller on the Mac (temp HOME/data dir, port 19396) ran `cogpit-session new --device omarchy --env auto --target-checkout <disposable clone>` with a read-only prompt. Result: completed; environment `target-checkout`, files `.env` (name only); run port 33765 / Compose `cogpit-2c06a976b82e9821`; fixture health `envLoaded: true`; branch `cogpit/omarchy/rollout-env-test-2026-10-08` returned; discard succeeded and kept the target `.env`. Discard left an empty `~/.cogpit/workspaces/envtest-…` directory (removed manually). Fixtures and QA caller deleted. Evidence JSON: `/private/tmp/cogpit-workspace-rollout-2026-10-08/e2e-*.json`.
+
 ## Registry before cleanup, 2026-10-08 (cdab7ba23f87)
 
 Documentation snapshot only; no infrastructure revalidation. Statements below retain their original dates and may be superseded. Original SHA-256: `cdab7ba23f877997ef08e68d088a0678dd80863791c1b4f22896e24320d79e2d`.
