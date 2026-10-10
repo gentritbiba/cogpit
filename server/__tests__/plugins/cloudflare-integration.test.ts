@@ -204,7 +204,7 @@ describe("Wrangler command runner", () => {
     } finally {
       abort.abort()
       if (childPid) { try { process.kill(childPid, "SIGKILL") } catch { /* The signal already terminated the child. */ } }
-      await rm(directory, { recursive: true, force: true })
+      await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   })
 })
