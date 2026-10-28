@@ -94,6 +94,7 @@ function touchThread(state: SlackState, thread: { bot: string; channel: string; 
 export class SlackService {
   private readonly connections = new Map<string, SlackConnection>()
   private readonly watchers = new Map<string, AbortController>()
+  private readonly finishing = new Set<Promise<void>>()
   private readonly seenEvents = new Set<string>()
   private readonly ignored: Array<{ bot: string; at: number; reason: string; channel?: string; user?: string; ts?: string }> = []
   private pumping: Promise<void> | null = null
@@ -120,16 +121,18 @@ export class SlackService {
     void this.pump()
   }
 
-  /** Close the connections; resolves once any delivery under way has been recorded. */
+  /** Close the connections; resolves once any delivery or finished turn under way has been recorded. */
   async stop(): Promise<void> {
     this.started = false
     for (const connection of this.connections.values()) connection.stop()
     this.connections.clear()
-    for (const watcher of this.watchers.values()) watcher.abort()
-    this.watchers.clear()
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
+    // The delivery pass first: it may be about to watch a message, which no longer starts once stopped.
     await this.pumping
+    for (const watcher of this.watchers.values()) watcher.abort()
+    this.watchers.clear()
+    await Promise.all(this.finishing)
   }
 
   // ── Bots ───────────────────────────────────────────────────────────────
@@ -377,7 +380,13 @@ export class SlackService {
         this.pumpAgain = false
         await this.deliverPending()
       } while (this.pumpAgain && this.started)
-    })().finally(() => { this.pumping = null })
+    })()
+      .catch((error: unknown) => {
+        // The inbox is on disk, so a later pass picks up whatever this one could not record.
+        this.log(`Delivery pass failed: ${errorText(error)}`)
+        this.retryIn(this.backoff(1))
+      })
+      .finally(() => { this.pumping = null })
     return this.pumping
   }
 
@@ -440,47 +449,57 @@ export class SlackService {
     this.retryTimer.unref?.()
   }
 
-  /** When the turn a message joined ends: post its answer if the link says so, and clear the thread's status. */
   private watch(message: InboundMessage): void {
-    if (this.watchers.has(message.key)) return
+    // A message not watched stays awaitingTurn on disk, and the next start checks it again.
+    if (!this.started || this.watchers.has(message.key)) return
     const controller = new AbortController()
     this.watchers.set(message.key, controller)
-    void (async () => {
-      const ended = await this.deps.turnEnded(message.sessionId, message.commandId, inboundHeader(message), controller.signal).catch(() => null)
-      if (controller.signal.aborted) return
-      if (ended && "held" in ended) {
-        // The queue held it after all: back to the inbox, whose delivery releases it.
-        const attempts = await this.deps.store.update((next) => {
-          const stored = next.inbox.find((entry) => entry.key === message.key)
-          if (stored) { stored.status = "pending"; stored.attempts++ }
-          return stored?.attempts ?? 1
-        })
-        this.retryIn(this.backoff(attempts))
-        return
-      }
-      if (ended && "uncertain" in ended) {
-        this.log(`${message.key}: ${UNCERTAIN}`)
-        await this.deps.store.update((next) => {
-          const stored = next.inbox.find((entry) => entry.key === message.key)
-          if (stored) { stored.lastError = UNCERTAIN; delete stored.awaitingTurn }
-        })
-      }
-      const state = await this.deps.store.read()
-      const link = state.links[message.sessionId]
-      const bot = link && await this.deps.store.bot(link.bot)
-      if (link && bot) {
-        const answered = state.sent.some((record) => record.bot === link.bot && record.channel === message.channel && record.threadTs === message.threadTs && record.at >= message.receivedAt)
-        if (link.autoPost && ended && "reply" in ended && ended.reply && !answered) {
-          await this.post(link, { channel: message.channel, threadTs: message.threadTs, text: ended.reply }).catch((error: unknown) => {
-            this.log(`Automatic post to ${message.channel} failed: ${errorText(error)}`)
-          })
-        }
-        await this.setStatus(bot, message, "")
-      }
+    void this.deps.turnEnded(message.sessionId, message.commandId, inboundHeader(message), controller.signal)
+      .catch(() => null)
+      .then((ended) => {
+        if (controller.signal.aborted) return
+        // Waiting stops with the service; what follows a turn that ended runs to completion, and stop() waits for it.
+        const finishing = this.finishTurn(message, ended).catch((error: unknown) => this.log(`Could not finish ${message.key}: ${errorText(error)}`))
+        this.finishing.add(finishing)
+        return finishing.finally(() => this.finishing.delete(finishing))
+      })
+      .finally(() => this.watchers.delete(message.key))
+  }
+
+  /** When the turn a message joined ends: post its answer if the link says so, and clear the thread's status. */
+  private async finishTurn(message: InboundMessage, ended: TurnEnd | null): Promise<void> {
+    if (ended && "held" in ended) {
+      // The queue held it after all: back to the inbox, whose delivery releases it.
+      const attempts = await this.deps.store.update((next) => {
+        const stored = next.inbox.find((entry) => entry.key === message.key)
+        if (stored) { stored.status = "pending"; stored.attempts++ }
+        return stored?.attempts ?? 1
+      })
+      this.retryIn(this.backoff(attempts))
+      return
+    }
+    if (ended && "uncertain" in ended) {
+      this.log(`${message.key}: ${UNCERTAIN}`)
       await this.deps.store.update((next) => {
         const stored = next.inbox.find((entry) => entry.key === message.key)
-        if (stored) delete stored.awaitingTurn
+        if (stored) { stored.lastError = UNCERTAIN; delete stored.awaitingTurn }
       })
-    })().finally(() => this.watchers.delete(message.key))
+    }
+    const state = await this.deps.store.read()
+    const link = state.links[message.sessionId]
+    const bot = link && await this.deps.store.bot(link.bot)
+    if (link && bot) {
+      const answered = state.sent.some((record) => record.bot === link.bot && record.channel === message.channel && record.threadTs === message.threadTs && record.at >= message.receivedAt)
+      if (link.autoPost && ended && "reply" in ended && ended.reply && !answered) {
+        await this.post(link, { channel: message.channel, threadTs: message.threadTs, text: ended.reply }).catch((error: unknown) => {
+          this.log(`Automatic post to ${message.channel} failed: ${errorText(error)}`)
+        })
+      }
+      await this.setStatus(bot, message, "")
+    }
+    await this.deps.store.update((next) => {
+      const stored = next.inbox.find((entry) => entry.key === message.key)
+      if (stored) delete stored.awaitingTurn
+    })
   }
 }

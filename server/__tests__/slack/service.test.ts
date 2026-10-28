@@ -330,6 +330,50 @@ describe("SlackService", () => {
     await expect(h.service.update("s2", { autoPost: true })).rejects.toThrow("not linked")
     expect((await new SlackStore(dir).read()).links.s1).toMatchObject({ autoPost: true, dailyCap: 5 })
   })
+
+  it("waits for a finished turn's follow-up that is under way before stopping", async () => {
+    let release!: () => void
+    const clearing = new Promise<void>((resolve) => { release = resolve })
+    let cleared = false
+    const h = harness({ api: () => async (method, body = {}) => {
+      if (method === "auth.test") return { ok: true, user_id: BOT_USER, team_id: "T1" }
+      if (method === "conversations.open") return { ok: true, channel: { id: DM } }
+      if (method === "assistant.threads.setStatus" && body.status === "") { cleared = true; await clearing }
+      return { ok: true }
+    } })
+    await linked(h)
+    await h.service.receive("odyssey", dmEvent("100.1"))
+    await settle(h)
+    h.endTurn({ reply: "done" })
+    await vi.waitFor(() => expect(cleared).toBe(true))
+    let stopped = false
+    const stopping = h.service.stop().then(() => { stopped = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(stopped).toBe(false)
+    release()
+    await stopping
+    expect((await new SlackStore(dir).read()).inbox[0].awaitingTurn).toBeUndefined()
+  })
+
+  it("starts no watcher once stopping, even for a delivery that finishes during the stop", async () => {
+    let release!: () => void
+    const thinking = new Promise<void>((resolve) => { release = resolve })
+    let blocked = false
+    const h = harness({ api: () => async (method, body = {}) => {
+      if (method === "auth.test") return { ok: true, user_id: BOT_USER, team_id: "T1" }
+      if (method === "conversations.open") return { ok: true, channel: { id: DM } }
+      if (method === "assistant.threads.setStatus" && body.status !== "") { blocked = true; await thinking }
+      return { ok: true }
+    } })
+    await linked(h)
+    await h.service.receive("odyssey", dmEvent("100.1"))
+    await vi.waitFor(() => expect(blocked).toBe(true))
+    const stopping = h.service.stop()
+    release()
+    await stopping
+    expect(h.turnEnded).not.toHaveBeenCalled()
+    expect((await new SlackStore(dir).read()).inbox[0]).toMatchObject({ status: "admitted", awaitingTurn: true })
+  })
 })
 
 describe("successorOf", () => {
