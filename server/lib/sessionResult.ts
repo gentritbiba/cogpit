@@ -46,6 +46,34 @@ function finalReply(turn: Turn): string | null {
   return null
 }
 
+/**
+ * What a turn wrote in answer to one message: its last text after the
+ * message and before any later message was steered in, whether the message
+ * started the turn or joined it. Null when no turn holds it, or none answered.
+ */
+export function replyTo(turns: readonly Turn[], needle: string): string | null {
+  for (let t = turns.length - 1; t >= 0; t--) {
+    const turn = turns[t]
+    const blocks = turn.contentBlocks
+    const steered = blocks.findIndex((block) => block.kind === "queued_prompt" && block.content.includes(needle))
+    if (steered === -1 && !userText(turn)?.includes(needle)) continue
+    let end = blocks.findIndex((block, i) => i > steered && block.kind === "queued_prompt")
+    if (end === -1) end = blocks.length
+    for (let i = end - 1; i > steered; i--) {
+      const block = blocks[i]
+      if (block.kind === "text" && block.text.length > 0) return block.text.join("\n\n")
+    }
+    return null
+  }
+  return null
+}
+
+export async function readReplyTo(sessionId: string, needle: string): Promise<string | null> {
+  const filePath = await findJsonlPath(sessionId)
+  if (!filePath) return null
+  return replyTo(parseSession(await readTranscriptText(filePath)).turns, needle)
+}
+
 /** Null when the session does not exist; `turnIndex` defaults to the last turn. */
 export async function readSessionResult(
   sessionId: string,

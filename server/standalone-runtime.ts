@@ -17,6 +17,7 @@ import {
 import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "./sessionHosts/delegatedRequests"
+import { startSlack, stopSlack } from "./slack"
 import {
   defaultDataDir,
   hasUsableNetworkCredentials,
@@ -154,6 +155,9 @@ export async function startStandaloneServer({
   if (publishPort) writePortFile(boundPort)
   startSessionActivityMonitor()
   startDelegatedRequestWatcher()
+  // A second server on the same Slack store would open a second Socket Mode connection and split the events.
+  const slack = publishPort || !!process.env.COGPIT_SLACK_DIR
+  if (slack) startSlack()
 
   const urlHost = host.includes(":") ? `[${host}]` : host
   let disposed = false
@@ -168,6 +172,7 @@ export async function startStandaloneServer({
       if (disposed) return
       disposed = true
       if (publishPort) removePortFile()
+      if (slack) await stopSlack()
       await composition.dispose()
     },
   }

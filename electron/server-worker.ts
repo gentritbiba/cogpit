@@ -10,6 +10,7 @@ import { removePortFile, setServerPort, writePortFile } from "../server/lib/port
 import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "../server/sessionHosts/delegatedRequests"
+import { startSlack } from "../server/slack"
 import { LOCAL_READER, markNotificationsRead } from "../server/lib/notificationHistory"
 import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
@@ -56,6 +57,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     console.log(`[server-worker] Cogpit server listening on http://${listenHost}:${port}`)
     startSessionActivityMonitor()
     startDelegatedRequestWatcher()
+    startSlack()
     process.parentPort.postMessage({ type: "ready", port })
   } catch (err) {
     console.error("[server-worker] Failed to start server:", err)

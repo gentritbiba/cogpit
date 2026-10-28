@@ -12,7 +12,6 @@ import { AGENT_KINDS, agentKindForDirName, descriptorFor, type AgentKind } from 
 import { resolveSessionAgent } from "../agents/runtimes"
 import { sessionEffort } from "../lib/sessionSettings"
 import type { PendingInput, PendingInputResponse } from "../agents/pendingInput"
-import type { VisibilityCheck } from "../edition"
 import { deviceJson } from "../hub/deviceRequest"
 import { clearSessionHandoff, recordSessionOrigin, sessionChildren, sessionOrigin } from "../lib/sessionOrigins"
 import { DEFAULT_WAIT_SECONDS, isSettled, parseWaitSeconds, type SessionState } from "../lib/sessionWait"
@@ -44,42 +43,16 @@ import type { WorkspaceEnvironmentMode } from "../../shared/contracts/workspaces
 import { parseEnvPatterns } from "../workspaceTransfer/environment"
 import { crewChatContext, postCrewChat, readCrewChat, setCrewChatListening } from "../lib/crewChat"
 import { answerHints, CLI_NAME } from "./hints"
+import { EXIT, json, parseArgs, UsageError, type CliInvocation, type CliOutput, type ParsedArgs } from "./args"
+import { SLACK_USAGE, slackCommand } from "./slack"
+
+export { EXIT, type CliInvocation, type CliOutput } from "./args"
 
 /**
  * The `cogpit-session` CLI, run on the server. The script Cogpit installs in
  * `~/.cogpit/bin` only forwards argv here and prints what comes back, so the
  * commands can change with the server without the script going stale.
  */
-
-export interface CliInvocation {
-  argv: string[]
-  /** The caller's working directory, the default project for `new`. */
-  cwd: string
-  /** The calling agent's own session, from `COGPIT_SESSION_ID`. */
-  callerSessionId?: string
-  /** Stable across the script's retries of one invocation. */
-  invocationId: string
-  /** Who the create-once guarantee is scoped to. */
-  scope: string
-  /**
-   * Whether the caller may move repositories between machines. Workspace
-   * transfers run with the hub's own device credentials, so a team member who
-   * could not call the workspace routes must not reach them through here.
-   */
-  admin: boolean
-  /** Which sessions the caller may see, and so which projects it may list. */
-  visible: VisibilityCheck
-  signal?: AbortSignal
-  req?: IncomingMessage
-}
-
-export interface CliOutput {
-  exitCode: number
-  stdout: string
-  stderr: string
-}
-
-export const EXIT = { ok: 0, error: 1, needsInput: 2, timedOut: 3 } as const
 
 export const USAGE = `Usage: ${CLI_NAME} <command> [args]
 
@@ -163,6 +136,7 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
   chat listen on|off        Change your listening setting. --member ID changes
                             another member; --crew ID selects the crew.
                             Tagged members receive full messages even when off.
+${SLACK_USAGE}
   devices                   Machines this Cogpit can run sessions on.
   projects [--device NAME]  Project folders on this machine or a device.
 
@@ -173,43 +147,8 @@ MESSAGE may be several words, or "-" to read it from stdin.
 Outcomes: running | needs_input | completed | error | not_found | unreachable
 Exit codes: 0 done, 1 error, 2 needs input, 3 still running after --timeout.`
 
-class UsageError extends Error {}
-
 function requireAdmin(inv: CliInvocation, action: string): void {
   if (!inv.admin) throw new Error(`Only an admin can ${action}`)
-}
-
-interface ParsedArgs {
-  positionals: string[]
-  values: Map<string, string>
-  switches: Set<string>
-}
-
-function parseArgs(args: string[], valueFlags: readonly string[], switchFlags: readonly string[]): ParsedArgs {
-  const parsed: ParsedArgs = { positionals: [], values: new Map(), switches: new Set() }
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (!arg.startsWith("--") || arg === "--") {
-      parsed.positionals.push(arg)
-      continue
-    }
-    const eq = arg.indexOf("=")
-    const name = arg.slice(2, eq === -1 ? undefined : eq)
-    if (switchFlags.includes(name) && eq === -1) {
-      parsed.switches.add(name)
-    } else if (valueFlags.includes(name)) {
-      const value = eq === -1 ? args[++i] : arg.slice(eq + 1)
-      if (value === undefined) throw new UsageError(`--${name} needs a value`)
-      parsed.values.set(name, value)
-    } else {
-      throw new UsageError(`Unknown option --${name}`)
-    }
-  }
-  return parsed
-}
-
-function json(value: unknown, exitCode: number = EXIT.ok): CliOutput {
-  return { exitCode, stdout: `${JSON.stringify(value, null, 2)}\n`, stderr: "" }
 }
 
 function sessionIdArg(args: ParsedArgs, command: string): string {
@@ -965,6 +904,7 @@ const COMMANDS: Record<string, (inv: CliInvocation, rest: string[]) => Promise<C
   children: childrenCommand,
   board: boardCommand,
   chat: chatCommand,
+  slack: slackCommand,
   fetch: fetchCommand,
   discard: discardCommand,
   devices: devicesCommand,
