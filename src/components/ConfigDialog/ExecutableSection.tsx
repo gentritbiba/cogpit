@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Cpu } from "lucide-react"
+import { Cpu } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 
 import {
   Field,
@@ -26,6 +21,7 @@ import type {
 import { DETECTED_EXECUTABLE_SOURCES } from "../../../shared/contracts/agentExecutable"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../../shared/session/types"
+import { SectionTrigger } from "./SectionTrigger"
 
 const SOURCE_LABELS: Record<ExecutableChoice["source"], string> = {
   auto: "Automatic",
@@ -128,24 +124,7 @@ export function ExecutableSection({ kind, value, onChange, disabled, reportVersi
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-2">
-      <CollapsibleTrigger
-        render={(
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-auto w-full justify-between px-0 font-medium hover:bg-transparent"
-          />
-        )}
-      >
-        <span className="flex items-center gap-2">
-          <Cpu data-icon="inline-start" className="size-4 text-muted-foreground" />
-          {displayName} executable
-        </span>
-        <span className="flex min-w-0 items-center gap-1 text-xs font-normal text-muted-foreground">
-          <span className="truncate">{summary}</span>
-          {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
-        </span>
-      </CollapsibleTrigger>
+      <SectionTrigger icon={Cpu} title={`${displayName} executable`} summary={summary} open={open} />
 
       <CollapsibleContent>
         <Field>

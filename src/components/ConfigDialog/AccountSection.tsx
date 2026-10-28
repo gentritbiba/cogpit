@@ -1,19 +1,16 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Loader2, Users } from "lucide-react"
+import { Loader2, Users } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { Field, FieldDescription } from "@/components/ui/field"
 import { useAgentAccounts, type AccountSwitchOutcome } from "@/hooks/useAgentAccounts"
 import { cn } from "@/lib/utils"
 import type { AccountUsageWindow, AgentAccount } from "../../../shared/contracts/agentAccounts"
 import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../../shared/session/types"
+import { SectionTrigger } from "./SectionTrigger"
 
 interface AccountSectionProps {
   kind: AgentKind
@@ -93,24 +90,7 @@ export function AccountSection({ kind, disabled }: AccountSectionProps) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-2">
-      <CollapsibleTrigger
-        render={(
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-auto w-full justify-between px-0 font-medium hover:bg-transparent"
-          />
-        )}
-      >
-        <span className="flex items-center gap-2">
-          <Users data-icon="inline-start" className="size-4 text-muted-foreground" />
-          {displayName} accounts
-        </span>
-        <span className="flex min-w-0 items-center gap-1 text-xs font-normal text-muted-foreground">
-          <span className="truncate">{summary}</span>
-          {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
-        </span>
-      </CollapsibleTrigger>
+      <SectionTrigger icon={Users} title={`${displayName} accounts`} summary={summary} open={open} />
 
       <CollapsibleContent>
         <Field>

@@ -30,6 +30,7 @@ import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 import { ExecutableSection } from "./ExecutableSection"
 import { AccountSection } from "./AccountSection"
+import { SlackSection } from "./SlackSection"
 import {
   DEFAULT_EXECUTABLE_CHOICE,
   parseExecutableChoice,
@@ -331,6 +332,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           {ACCOUNT_SWITCHING_KINDS.map((kind) => (
             <AccountSection key={kind} kind={kind} disabled={!canWriteConfig} />
           ))}
+
+          <SlackSection disabled={!canWriteConfig} />
 
           {/* Network Access — hidden for remote devices: changing it through the
               proxy would revoke the very sessions this hub depends on. Hidden

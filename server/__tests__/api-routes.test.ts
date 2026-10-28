@@ -62,6 +62,7 @@ const CANONICAL_ROUTE_IDS = [
   "git-diff",
   "mcp",
   "notifications",
+  "slack",
   "scripts",
   "permissions",
   "mission-control",

@@ -319,6 +319,17 @@ describe("SlackService", () => {
     await settle(h)
     expect(h.delivered.map((entry) => entry.text.match(/ts (\S+)\)/)?.[1])).toEqual(["100.1"])
   })
+
+  it("changes a link's settings without re-linking it", async () => {
+    const h = harness()
+    await linked(h)
+    const opened = h.calls.filter((call) => call.method === "conversations.open").length
+    expect(await h.service.update("s1", { autoPost: true, dailyCap: 5 })).toMatchObject({ autoPost: true, dailyCap: 5, dms: [DM] })
+    expect(h.calls.filter((call) => call.method === "conversations.open")).toHaveLength(opened)
+    await expect(h.service.update("s1", { dailyCap: 0 })).rejects.toThrow("1 to 500")
+    await expect(h.service.update("s2", { autoPost: true })).rejects.toThrow("not linked")
+    expect((await new SlackStore(dir).read()).links.s1).toMatchObject({ autoPost: true, dailyCap: 5 })
+  })
 })
 
 describe("successorOf", () => {

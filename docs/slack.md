@@ -27,6 +27,13 @@ DM the bot cannot open itself), `--channel C1,C2` (channels it may also post
 in), `--auto-post on|off` (default off) and `--daily-cap N` (default 20).
 Linking again changes only the options given.
 
+**Settings → Slack links** lists each link with its session, bot, connection
+state, who it listens to, where it may post and today's posts, plus messages
+still waiting or left uncertain by a restart. From there you can switch
+auto-post or unlink a session. Adding bots and linking stay in the CLI, so
+tokens are read from files on the host and never pass through the browser.
+`GET`/`POST /api/slack` serve it, for host administrators only.
+
 Inside the linked session:
 
 ```bash
@@ -107,5 +114,7 @@ its link are allowed.
 posting, the watcher that ends a turn), `socket.ts` (Socket Mode),
 `outbound.ts` (post policy), `mrkdwn.ts`, `prompt.ts` (what the session
 reads), `store.ts`, `api.ts`, and `index.ts`, which wires it to the local
-session host. The CLI is in `server/sessionCli/slack.ts`. Tests are in
+session host. The CLI is in `server/sessionCli/slack.ts`, the settings route in
+`server/routes/slack.ts`, the UI in `src/components/ConfigDialog/SlackSection.tsx`,
+and the shared report type in `shared/contracts/slack.ts`. Tests are in
 `server/__tests__/slack/`.

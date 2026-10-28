@@ -1,34 +1,13 @@
+import type { SlackBotSummary, SlackLink } from "../../shared/contracts/slack"
+
+export type { SlackBotSummary, SlackLink }
+
 /** A Slack app Cogpit connects to over Socket Mode. Holds secrets: never log or return it whole. */
-export interface SlackBot {
-  name: string
+export interface SlackBot extends SlackBotSummary {
   /** xoxb- token: Web API calls. */
   botToken: string
   /** xapp- token with connections:write: the Socket Mode connection. */
   appToken: string
-  botUserId: string
-  teamId: string
-  teamName?: string
-  addedAt: number
-}
-
-/** What may be shown about a bot. */
-export type SlackBotSummary = Omit<SlackBot, "botToken" | "appToken">
-
-/** A session listening to a bot. One session per bot, one bot per session. */
-export interface SlackLink {
-  sessionId: string
-  bot: string
-  /** Slack users whose messages reach the session. */
-  allow: string[]
-  /** Direct-message channels of allowlisted users with the bot: always postable. */
-  dms: string[]
-  /** Channels the session may also read mentions in and post to. Empty unless listed. */
-  channels: string[]
-  /** Post the turn's final answer into the thread the turn came from. */
-  autoPost: boolean
-  /** Posts per UTC day, replies and automatic posts together. */
-  dailyCap: number
-  createdAt: number
 }
 
 export type InboundKind = "dm" | "assistant" | "thread" | "mention"

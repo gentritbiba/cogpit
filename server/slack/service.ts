@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from "node:crypto"
+import type { SlackConnectionState, SlackLinkStatus } from "../../shared/contracts/slack"
 import type { SlackCall } from "./api"
 import { chunkMessage, toMrkdwn } from "./mrkdwn"
 import { checkPost, DEFAULT_DAILY_CAP, utcDay } from "./outbound"
 import { formatInbound, inboundHeader } from "./prompt"
 import { routeEvent, threadKey, type SlackEvent } from "./routing"
-import type { SocketModeEnvelope, SocketState } from "./socket"
+import type { SocketModeEnvelope } from "./socket"
 import { summarizeBot, type SlackStore } from "./store"
-import type { InboundMessage, SlackBot, SlackLink, SlackState } from "./types"
+import type { InboundMessage, SlackBot, SlackBotSummary, SlackLink, SlackState } from "./types"
 
 export interface SlackConnection {
-  state: SocketState
+  state: SlackConnectionState
   lastError?: string
   connectedAt?: number
   start(): void
@@ -200,6 +201,18 @@ export class SlackService {
     return link
   }
 
+  /** Change a link's settings without touching who it listens to or where it may post. */
+  async update(sessionId: string, settings: { autoPost?: boolean; dailyCap?: number }): Promise<SlackLink> {
+    if (settings.dailyCap !== undefined && !(Number.isInteger(settings.dailyCap) && settings.dailyCap >= 1 && settings.dailyCap <= 500)) throw new SlackLinkError("The daily cap is a whole number from 1 to 500")
+    return this.deps.store.update((state) => {
+      const link = state.links[sessionId]
+      if (!link) throw new SlackLinkError(`Session ${sessionId} is not linked to Slack`)
+      if (settings.autoPost !== undefined) link.autoPost = settings.autoPost
+      if (settings.dailyCap !== undefined) link.dailyCap = settings.dailyCap
+      return link
+    })
+  }
+
   async unlink(sessionId: string): Promise<{ unlinked: boolean; droppedPending: number }> {
     const result = await this.deps.store.update((state) => {
       const link = state.links[sessionId]
@@ -213,7 +226,7 @@ export class SlackService {
     return { unlinked: result.unlinked, droppedPending: result.droppedPending }
   }
 
-  async status(sessionId?: string) {
+  async status(sessionId?: string): Promise<{ links: SlackLinkStatus[]; bots: SlackBotSummary[] }> {
     const state = await this.deps.store.read()
     const today = utcDay(this.now())
     const links = Object.values(state.links)
@@ -223,7 +236,7 @@ export class SlackService {
         const inbox = state.inbox.filter((message) => message.sessionId === link.sessionId)
         return {
           ...link,
-          connection: connection ? { state: connection.state, ...(connection.lastError && { lastError: connection.lastError }), ...(connection.connectedAt && { connectedAt: new Date(connection.connectedAt).toISOString() }) } : { state: "stopped" },
+          connection: connection ? { state: connection.state, ...(connection.lastError && { lastError: connection.lastError }), ...(connection.connectedAt && { connectedAt: new Date(connection.connectedAt).toISOString() }) } : { state: "stopped" as const },
           pending: inbox.filter((message) => message.status === "pending").map(({ key, attempts, lastError }) => ({ key, attempts, lastError })),
           awaitingTurn: inbox.filter((message) => message.awaitingTurn).length,
           uncertain: inbox.filter((message) => message.status === "admitted" && message.lastError).map(({ key, commandId, lastError }) => ({ key, commandId, lastError })),

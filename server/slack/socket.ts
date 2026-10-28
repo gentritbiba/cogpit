@@ -1,4 +1,5 @@
 import WebSocket from "ws"
+import type { SlackConnectionState } from "../../shared/contracts/slack"
 import { SlackApiError, type SlackCall } from "./api"
 
 /** The part of a WebSocket the client uses, so tests can drive one by hand. */
@@ -19,8 +20,6 @@ export interface SocketModeEnvelope {
   payload?: Record<string, unknown>
   retry_attempt?: number
 }
-
-export type SocketState = "connecting" | "connected" | "reconnecting" | "stopped" | "failed"
 
 export interface SocketModeOptions {
   /** apps.connections.open, called with the app token. */
@@ -43,7 +42,7 @@ const FATAL = new Set(["invalid_auth", "not_authed", "account_inactive", "token_
  * that has gone silent, and only acknowledges an event once it is safe.
  */
 export class SocketModeClient {
-  state: SocketState = "stopped"
+  state: SlackConnectionState = "stopped"
   lastError?: string
   connectedAt?: number
   private socket: SocketLike | null = null

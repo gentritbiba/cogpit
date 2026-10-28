@@ -53,6 +53,7 @@ import { registerCrewChatRoutes } from "./routes/crew-chat"
 import { registerSessionStatusRoutes } from "./routes/session-status"
 import { registerShareGuestRoutes } from "./routes/share-guest"
 import { registerShareRoutes } from "./routes/shares"
+import { registerSlackRoutes } from "./routes/slack"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerTeamSessionRoutes } from "./routes/team-session"
 import { registerTeamRoutes } from "./routes/teams"
@@ -147,6 +148,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("git-diff", registerGitDiffRoutes),
   apiRoute("mcp", registerMcpRoutes),
   apiRoute("notifications", registerNotificationRoutes),
+  apiRoute("slack", registerSlackRoutes),
   apiRoute("scripts", registerScriptRoutes),
   apiRoute("permissions", registerPermissionRoutes),
   apiRoute("mission-control", registerMissionControlRoutes),
