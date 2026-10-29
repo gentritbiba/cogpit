@@ -27,6 +27,7 @@ interface Job {
   key: string
   input: RenderInput
   bytes: number
+  workerAllowed: boolean
   waiters: Set<Waiter>
   controller: AbortController
 }
@@ -55,9 +56,7 @@ export class RenderWorkService {
   }
 
   diff(oldString: string, newString: string, signal?: AbortSignal): Promise<DiffLine[] | null> {
-    // Oversized inputs never enter the cache or worker queue; keep exact semantics
-    // through the same algorithm's cancellable, cooperative recovery path.
-    if ((oldString.length + newString.length) * 2 > RENDER_LIMITS.jobBytes / 2) return computeDiffDeferred(oldString, newString, signal)
+    if ((oldString.length + newString.length) * 2 > RENDER_LIMITS.jobBytes / 2) return this.oversizedDiff(oldString, newString, signal)
     return this.request({ kind: "diff", oldString, newString }, signal) as Promise<DiffLine[] | null>
   }
 
@@ -66,7 +65,7 @@ export class RenderWorkService {
     const key = JSON.stringify(input)
     const bytes = key.length * 2 + (input.kind === "diff" ? input.oldString.length + input.newString.length : input.code.length) * 2 + 256
     if (bytes > RENDER_LIMITS.jobBytes || bytes > RENDER_LIMITS.queueBytes) {
-      return input.kind === "diff" ? computeDiffDeferred(input.oldString, input.newString, signal) : Promise.resolve(null)
+      return input.kind === "diff" ? this.oversizedDiff(input.oldString, input.newString, signal) : Promise.resolve(null)
     }
     const cached = this.cache.get(key)
     if (cached) {
@@ -79,12 +78,32 @@ export class RenderWorkService {
     if (!job) {
       // Saturation leaves highlighting plain and asks diff consumers to retry.
       if (this.queue.length >= RENDER_LIMITS.queueEntries || (this.active && this.queuedBytes + bytes > RENDER_LIMITS.queueBytes)) return Promise.resolve(null)
-      job = { id: ++this.nextId, key, input, bytes, waiters: new Set(), controller: new AbortController() }
+      job = { id: ++this.nextId, key, input, bytes, workerAllowed: true, waiters: new Set(), controller: new AbortController() }
       this.jobs.set(key, job)
       this.queue.push(job)
       this.queuedBytes += bytes
     }
-    const target = job
+    return this.subscribe(job, signal)
+  }
+
+  private oversizedDiff(oldString: string, newString: string, signal?: AbortSignal): Promise<DiffLine[] | null> {
+    if (signal?.aborted) return Promise.reject(aborted())
+    const current = this.active
+    if (current && !current.workerAllowed && current.input.kind === "diff" && current.input.oldString === oldString && current.input.newString === newString) {
+      return this.subscribe(current, signal) as Promise<DiffLine[]>
+    }
+    // Borrow oversized sources without stringifying/copying or queuing them.
+    // Only one cooperative recovery runs, sharing the normal service's lane.
+    if (current || this.queue.length) return Promise.resolve(null)
+    const id = ++this.nextId
+    const job: Job = { id, key: `oversized:${id}`, input: { kind: "diff", oldString, newString }, bytes: 256, workerAllowed: false, waiters: new Set(), controller: new AbortController() }
+    this.jobs.set(job.key, job)
+    this.queue.push(job)
+    this.queuedBytes += job.bytes
+    return this.subscribe(job, signal) as Promise<DiffLine[]>
+  }
+
+  private subscribe(target: Job, signal?: AbortSignal): Promise<RenderOutput> {
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         target.waiters.delete(waiter)
@@ -106,6 +125,7 @@ export class RenderWorkService {
     if (!job) { this.scheduleIdle(); return }
     this.queuedBytes -= job.bytes
     this.active = job
+    if (!job.workerAllowed) { this.fallback(job); return }
     if (!this.worker && Date.now() >= this.retryAfter) {
       try {
         const worker = this.createWorker()
@@ -145,7 +165,7 @@ export class RenderWorkService {
 
   private finish(job: Job, value: RenderOutput): void {
     if (this.active !== job) return
-    const bytes = job.key.length * 2 + outputBytes(value) + 128
+    const bytes = job.workerAllowed ? job.key.length * 2 + outputBytes(value) + 128 : Infinity
     if (value && bytes <= RENDER_LIMITS.cacheBytes) {
       while (this.cache.size >= RENDER_LIMITS.cacheEntries || this.cacheBytes + bytes > RENDER_LIMITS.cacheBytes) {
         const oldest = this.cache.entries().next().value!

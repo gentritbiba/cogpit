@@ -172,6 +172,37 @@ describe("shared render work service", () => {
     expect(service.stats()).toMatchObject({ cachedEntries: 0, cacheBytes: 0, queuedEntries: 0, queuedBytes: 0 })
   })
 
+  it("serializes oversized recovery, coalesces subscribers and bounds all other admission", async () => {
+    const { service, workers } = setup()
+    const source = "x".repeat(RENDER_LIMITS.jobBytes / 4 + 1)
+    const controller = new AbortController()
+    const first = service.diff("", source, controller.signal).catch(error => error.name)
+    const shared = service.diff("", source)
+    expect(await service.diff("", source + "different")).toBeNull()
+    expect(service.stats()).toMatchObject({ active: true, queuedEntries: 0, queuedBytes: 0 })
+    const next = service.highlight("normal", "tsx", true)
+    expect(service.stats().queuedEntries).toBe(1)
+    controller.abort()
+    expect(await first).toBe("AbortError")
+    expect(await shared).toEqual([{ type: "added", text: source, newIdx: 0 }])
+    expect(workers).toHaveLength(1)
+    workers[0].reply(tokens)
+    await next
+    expect(service.stats()).toMatchObject({ active: false, queuedEntries: 0 })
+  })
+
+  it("recovers synchronous postMessage failure without leaving pending work", async () => {
+    const worker = new FakeWorker()
+    worker.postMessage = () => { throw new Error("DataCloneError") }
+    const service = new RenderWorkService(() => worker)
+    services.push(service)
+    expect(await service.diff("old", "new")).toEqual([
+      { type: "removed", text: "old", oldIdx: 0 }, { type: "added", text: "new", newIdx: 0 },
+    ])
+    expect(worker.terminate).toHaveBeenCalledOnce()
+    expect(service.stats()).toMatchObject({ active: false, queuedEntries: 0, worker: false })
+  })
+
   it("skips oversized highlighting before acquiring a worker", async () => {
     const { service, factory } = setup()
     expect(await service.highlight("x".repeat(200_001), "tsx", true)).toBeNull()
