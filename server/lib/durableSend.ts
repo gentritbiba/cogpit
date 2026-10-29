@@ -124,6 +124,14 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
       if (!await mayDeliver(request, command)) throw new OrchestrationError(403, "Session access changed")
       const refusal = await triggerRefusal(command)
       if (refusal) throw new DeliveryRefused(refusal.disposition, refusal.reason)
+      // Read again at the handoff, after the guard's and the edition's awaits: nothing has reached the agent yet.
+      const authorizeHandoff = async () => {
+        const late = await triggerRefusal(command)
+        if (late) throw new DeliveryRefused(late.disposition, late.reason)
+        const current = await deliveryRequest(command, runtime, authentication, scope)
+        if (!(current instanceof IncomingMessage)) throw new DeliveryRefused(current.disposition, current.reason, current.code)
+        if (!await mayDeliver(current, command)) throw new DeliveryRefused("held", "Session access changed before delivery")
+      }
       const assertCurrent = () => { if (!currentAttempt()) throw new OrchestrationError(409, "Dispatcher ownership changed before provider delivery") }
       assertCurrent()
       if (command.receipt.intent === "restart") await runtime.interrupt(command.receipt.sessionId)
@@ -134,9 +142,7 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
         ...(typeof command.payload.questionId === "string" ? { toolUseId: command.payload.questionId } : {}),
       }
       const fencedRuntime = { ...runtime, send: async (id: string, input: SendRequest) => {
-        // The edition may await before handing over; the guard is read again at the last moment.
-        const late = await triggerRefusal(command)
-        if (late) throw new DeliveryRefused(late.disposition, late.reason)
+        await authorizeHandoff()
         assertCurrent()
         return runtime.send(id, input)
       } }

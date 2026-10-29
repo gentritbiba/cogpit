@@ -372,3 +372,80 @@ describe("a trigger's delivery guard", () => {
     } finally { unguard(); unregister() }
   })
 })
+
+describe("the final handoff of a guarded trigger command", () => {
+  function handoffHarness() {
+    const send = vi.fn(async (_sessionId: string, _input: Record<string, unknown>) => ({ delivery: "started" as const, turnId: "turn-1" }))
+    const runtime = { kind: "claude", instanceId: "default", descriptor: descriptorFor("claude"), activity: () => ({ live: true, running: false }), send } as unknown as AgentRuntime
+    const h = harness({
+      send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({ sessionId: prepared.target.sessionId, request: prepared.request, req, claim, lease, intent: "queue", runtime, binding, ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}) }),
+    })
+    return { ...h, send }
+  }
+  /** A guard that allows, and on its last call (inside the fenced send) first runs `during`. */
+  function guardRunningLast(during: () => Promise<void> | void) {
+    let calls = 0
+    return registerTriggerDeliveryGuard("test", async () => {
+      calls++
+      if (calls === 4) await during()
+      return { allow: true }
+    })
+  }
+
+  it("holds for reauthorization when the grant is revoked while the final guard runs", async () => {
+    const { dispatcher, store, send, unregister } = handoffHarness()
+    const grant = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+    const unguard = guardRunningLast(() => revokeExecutionGrant(grant.id, "Revoked mid-handoff"))
+    try {
+      const { occurrence } = store.recordOccurrence("local", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {}, guarded: true })
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "held", hold: "reauthorize", reason: expect.stringMatching(/Revoked mid-handoff/) })
+      })
+      expect(send).not.toHaveBeenCalled()
+      expect(store.command("local", occurrence.commandId)!.receipt.state).toBe("held")
+    } finally { unguard(); unregister() }
+  })
+
+  it("holds when session access is lost while the final guard runs", async () => {
+    let allowed = true
+    installFakeEdition({ access: { ...PERSONAL_EDITION.access, levelOf: async () => allowed ? "own" : null } })
+    const { dispatcher, store, send, unregister } = handoffHarness()
+    const grant = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+    const unguard = guardRunningLast(() => { allowed = false })
+    try {
+      const { occurrence } = store.recordOccurrence("local", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {}, guarded: true })
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "held", hold: "review", reason: "Session access changed before delivery" })
+      })
+      expect(send).not.toHaveBeenCalled()
+    } finally { unguard(); unregister() }
+  })
+
+  it("holds for reauthorization when the live sign-in that reauthorized it ends while the final guard runs", async () => {
+    useAccountSignIn()
+    const token = createSessionToken("127.0.0.1", undefined, principal)
+    const { dispatcher, store, runner, send, unregister } = handoffHarness()
+    const grant = await issueExecutionGrant(signedIn(token), { actions: ["session.send"], target, label: "x" }, "user-1")
+    let armed = false
+    let calls = 0
+    const unguard = registerTriggerDeliveryGuard("test", async () => {
+      if (armed && ++calls === 4) await revokeSessionToken(token)
+      return { allow: true }
+    })
+    try {
+      const { occurrence } = store.recordOccurrence("user-1", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {}, guarded: true })
+      await dispatcher.tick()
+      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.hold).toBe("reauthorize"))
+      armed = true
+      runner.reauthorizeLive(signedIn(token), "user-1", occurrence.id)
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("user-1", occurrence.id)).toMatchObject({ state: "held", hold: "reauthorize", reason: expect.stringMatching(/expired/) })
+      })
+      expect(send).not.toHaveBeenCalled()
+      expect(store.command("user-1", occurrence.commandId)).not.toBeNull()
+    } finally { unguard(); unregister() }
+  })
+})
