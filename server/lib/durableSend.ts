@@ -14,7 +14,7 @@ import { CommandDispatcher } from "../orchestration/dispatcher"
 import { beforeOrchestrationClose, orchestrationStore } from "../orchestration/storage"
 import { checkTriggerDelivery, DeliveryRefused } from "../orchestration/deliveryGuards"
 import type { DispatchRefusal } from "../orchestration/dispatcher"
-import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type StoredCommand } from "../orchestration/store"
+import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type OrchestrationStore, type StoredCommand } from "../orchestration/store"
 import { isTerminalOccurrence, type GrantRef } from "../../shared/contracts/triggers"
 import { setSessionsArchived } from "./sessionArchive"
 import { liveAuthority, resolveExecution } from "./triggers/authority"
@@ -80,12 +80,12 @@ export const REAUTHORIZE = "REAUTHORIZE"
  * occurrence's grant can be renewed while the command and its fingerprint
  * stay the same.
  */
-async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, authentication: RequestAuthentication | null, scope: string): Promise<IncomingMessage | DispatchRefusal> {
+async function deliveryRequest(store: OrchestrationStore, command: StoredCommand, runtime: AgentRuntime, authentication: RequestAuthentication | null, scope: string): Promise<IncomingMessage | DispatchRefusal> {
   const trigger = command.payload.trigger as { occurrenceId?: unknown } | undefined
   if (typeof trigger?.occurrenceId !== "string") return executionRequest(authentication, scope) ?? { disposition: "held", reason: "Sign in with access to this session, then resume its queue." }
   const refusal = (reason: string): DispatchRefusal => ({ disposition: "held", reason, code: REAUTHORIZE })
   // A run cancelled, settled or deleted takes its message with it, whatever revived the message.
-  const occurrence = commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId)
+  const occurrence = store.occurrence(command.scope, trigger.occurrenceId)
   if (!occurrence || isTerminalOccurrence(occurrence.state)) return { disposition: "cancelled", reason: "The run this message belongs to is no longer active" }
   const live = liveAuthority(command.scope, trigger.occurrenceId)
   if (live !== undefined) return executionRequest(live, scope) ?? refusal("The sign-in that reauthorized this run expired; reauthorize it again")
@@ -96,10 +96,10 @@ async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, au
 }
 
 /** A trigger command's consumer guard, read against the occurrence as it stands now. */
-async function triggerRefusal(command: StoredCommand): Promise<DispatchRefusal | null> {
+async function triggerRefusal(store: OrchestrationStore, command: StoredCommand): Promise<DispatchRefusal | null> {
   const trigger = command.payload.trigger as { occurrenceId?: unknown } | undefined
   if (typeof trigger?.occurrenceId !== "string") return null
-  const verdict = await checkTriggerDelivery(commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId), command)
+  const verdict = await checkTriggerDelivery(store.occurrence(command.scope, trigger.occurrenceId), command)
   return verdict.allow ? null : { disposition: verdict.disposition, reason: verdict.reason }
 }
 
@@ -107,31 +107,32 @@ async function triggerRefusal(command: StoredCommand): Promise<DispatchRefusal |
  * Lets the dispatcher deliver a conversation's commands. `req` is the live
  * sign-in its own commands deliver as; a command admitted under a grant
  * delivers as that grant whichever authority is attached. `ifMissing` keeps
- * an authority someone attached live.
+ * an authority someone attached live. Everything the authority reads goes
+ * through `dispatcher`, so one closed meanwhile is never replaced by it.
  */
-export function attachCommandAuthority(scope: string, conversationId: string, runtime: AgentRuntime, req?: IncomingMessage, ifMissing = false): void {
+export function attachCommandAuthority(scope: string, conversationId: string, runtime: AgentRuntime, req?: IncomingMessage, ifMissing = false, dispatcher = commandDispatcher()): void {
   const authentication = req ? getRequestAuthentication(req) : null
-  const dispatcher = commandDispatcher()
-  if (ifMissing && dispatcher.hasAuthority(scope, conversationId)) return
+  if (dispatcher.signal.aborted || (ifMissing && dispatcher.hasAuthority(scope, conversationId))) return
+  const { store } = dispatcher
   dispatcher.attach(scope, conversationId, {
     async authorize(command) {
-      const request = await deliveryRequest(command, runtime, authentication, scope)
+      const request = await deliveryRequest(store, command, runtime, authentication, scope)
       if (!(request instanceof IncomingMessage)) return request
       if (!await mayDeliver(request, command)) return false
-      return await triggerRefusal(command) ?? true
+      return await triggerRefusal(store, command) ?? true
     },
     async deliver(command, currentAttempt) {
       if (command.receipt.intent === "steer" && !runtime.descriptor.capabilities.midTurnSteering && !(command.payload.notification && runtime.descriptor.capabilities.activeNotifications)) throw new OrchestrationError(400, "This provider does not support steering a running turn")
-      const request = await deliveryRequest(command, runtime, authentication, scope)
+      const request = await deliveryRequest(store, command, runtime, authentication, scope)
       if (!(request instanceof IncomingMessage)) throw new DeliveryRefused(request.disposition, request.reason, request.code)
       if (!await mayDeliver(request, command)) throw new OrchestrationError(403, "Session access changed")
-      const refusal = await triggerRefusal(command)
+      const refusal = await triggerRefusal(store, command)
       if (refusal) throw new DeliveryRefused(refusal.disposition, refusal.reason)
       // Read again at the handoff, after the guard's and the edition's awaits: nothing has reached the agent yet.
       const authorizeHandoff = async () => {
-        const late = await triggerRefusal(command)
+        const late = await triggerRefusal(store, command)
         if (late) throw new DeliveryRefused(late.disposition, late.reason)
-        const current = await deliveryRequest(command, runtime, authentication, scope)
+        const current = await deliveryRequest(store, command, runtime, authentication, scope)
         if (!(current instanceof IncomingMessage)) throw new DeliveryRefused(current.disposition, current.reason, current.code)
         if (!await mayDeliver(current, command)) throw new DeliveryRefused("held", "Session access changed before delivery")
       }
@@ -165,13 +166,16 @@ interface CommandTarget {
   req?: IncomingMessage
   binding?: NativeBinding
   runtime?: AgentRuntime
+  /** The dispatcher a trigger execution runs on, rather than whichever is current when this resumes. */
+  dispatcher?: CommandDispatcher
 }
 
 async function commandConversation(options: CommandTarget, extra: Record<string, unknown>, executionGrant?: GrantRef) {
   const { sessionId, request, req } = options
   const resolved = options.runtime ? { kind: options.runtime.kind, instanceId: options.runtime.instanceId, filePath: request.filePath } : await resolveSessionAgent(sessionId)
   const runtime = options.runtime ?? runtimeFor(resolved.kind, resolved.instanceId)
-  const dispatcher = commandDispatcher()
+  const dispatcher = options.dispatcher ?? commandDispatcher()
+  if (dispatcher.signal.aborted) throw new OrchestrationError(503, "The host is shutting down; this message was not queued")
   const scope = commandScope(req)
   if (req) {
     const level = await accessLevelOf(req, sessionId)
@@ -180,8 +184,8 @@ async function commandConversation(options: CommandTarget, extra: Record<string,
   const binding = options.binding ?? await nativeBinding(sessionId, resolved.kind, resolved.filePath, request.cwd)
   const conversation = dispatcher.store.ensureConversation(binding)
   if (conversation.binding.sessionId !== sessionId) throw new OrchestrationError(409, "This conversation moved to another native session; open its current binding")
-  if (executionGrant) attachCommandAuthority(scope, conversation.id, runtime, undefined, true)
-  else attachCommandAuthority(scope, conversation.id, runtime, req)
+  if (executionGrant) attachCommandAuthority(scope, conversation.id, runtime, undefined, true, dispatcher)
+  else attachCommandAuthority(scope, conversation.id, runtime, req, false, dispatcher)
   const payload: Record<string, unknown> = { ...request, filePath: resolved.filePath ?? binding.filePath, ...extra, ...(executionGrant ? { executionGrant } : {}) }
   return { dispatcher, store: dispatcher.store, scope, conversation, payload }
 }
@@ -207,14 +211,14 @@ export async function admitOccurrenceCommand(options: CommandTarget & {
   return receipt
 }
 
-/** Attaches delivery authority for trigger commands waiting without one: after a restart, or once reauthorized. */
-export async function attachGrantAuthorities(): Promise<void> {
-  const dispatcher = commandDispatcher()
+/** Attaches delivery authority for trigger commands waiting on `dispatcher` without one: after a restart, or once reauthorized. */
+export async function attachGrantAuthorities(dispatcher: CommandDispatcher): Promise<void> {
   for (const command of dispatcher.store.queued()) {
+    if (dispatcher.signal.aborted) return
     if (!command.payload.trigger || dispatcher.hasAuthority(command.scope, command.receipt.conversationId)) continue
     try {
       const resolved = await resolveSessionAgent(command.receipt.sessionId)
-      attachCommandAuthority(command.scope, command.receipt.conversationId, runtimeFor(resolved.kind, resolved.instanceId), undefined, true)
+      attachCommandAuthority(command.scope, command.receipt.conversationId, runtimeFor(resolved.kind, resolved.instanceId), undefined, true, dispatcher)
     } catch { /* The session is gone; its command stays queued for review. */ }
   }
 }

@@ -354,6 +354,8 @@ export class OrchestrationStore {
   /** Gives the lease up for good: nothing the released owner still has in flight can write under it. */
   release(lease: DispatcherLease): void { this.db.prepare("UPDATE dispatcher SET owner='',expires_at=0 WHERE id=1 AND owner=? AND epoch=?").run(lease.owner, lease.epoch) }
   private owns(lease: DispatcherLease): boolean { return Boolean(this.db.prepare("SELECT 1 FROM dispatcher WHERE id=1 AND owner=? AND epoch=?").get(lease.owner, lease.epoch)) }
+  /** Whether `lease` is still the one held: released and taken-over leases are not. */
+  ownsLease(lease: DispatcherLease): boolean { return this.owns(lease) }
   currentAttempt(command: StoredCommand, lease: DispatcherLease): boolean {
     const current = this.command(command.scope, command.receipt.id)
     return this.owns(lease) && Boolean(current && current.attempt === command.attempt && current.epoch === lease.epoch && ["dispatching", "delivered"].includes(current.receipt.state))

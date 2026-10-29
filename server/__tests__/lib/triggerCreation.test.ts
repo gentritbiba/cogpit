@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { mkdtemp, mkdir, realpath, rm } from "node:fs/promises"
+import { access, mkdtemp, mkdir, realpath, rm } from "node:fs/promises"
 import { IncomingMessage } from "node:http"
 import { Socket } from "node:net"
 import { tmpdir } from "node:os"
@@ -38,7 +38,10 @@ import { setRequestPrincipal } from "../../requestPrincipal"
 import { __resetSessionsForTest, createSessionToken } from "../../security"
 import { gitOutput } from "../../worktreeSetup/project"
 import { worktreeSetupService } from "../../worktreeSetup/service"
-import { useAccountSignIn } from "../edition/fakeEdition"
+import { installFakeEdition, useAccountSignIn } from "../edition/fakeEdition"
+import { fakeEditionAuth } from "../edition/fakeAuth"
+import { worktreeSetupStore } from "../../worktreeSetup/store"
+import { ALL_CAPABILITIES } from "../../../shared/contracts/identity"
 
 let root: string
 let project: string
@@ -138,6 +141,71 @@ describe("the default trigger creator", () => {
       await revokeExecutionGrant(grant.id, "Owner revoked it")
       release()
       await vi.waitFor(() => expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "unknown" }), { timeout: 10_000 })
+      expect(provider.firstInput).not.toHaveBeenCalled()
+    } finally { unregister() }
+  }, 20_000)
+})
+
+describe("a trigger creation that would run the project's setup recipe", () => {
+  async function signedInEdition(capabilities: { allowed: boolean }) {
+    const principal = { userId: "user-1", username: "ada", role: "member" }
+    installFakeEdition({
+      auth: fakeEditionAuth(),
+      me: () => ({ authenticated: true, edition: "team" as const, user: null, capabilities: { ...ALL_CAPABILITIES, hostFiles: capabilities.allowed, terminal: capabilities.allowed } }),
+    })
+    const token = createSessionToken("127.0.0.1", undefined, principal)
+    const req = new IncomingMessage(new Socket())
+    setRequestPrincipal(req, principal)
+    setRequestAuthentication(req, { kind: "session", token, principal })
+    const saved = await worktreeSetupStore.project("user-1", project)
+    await worktreeSetupStore.configure(saved, { command: "printf ran > recipe-marker", trusted: true })
+    return req
+  }
+
+  async function run(req: IncomingMessage, provider: ReturnType<typeof fakeProvider>) {
+    const unregister = registerTriggerHandler("test", { prepare: async () => ({ action: "session.create", target: target(), input: { dirName: dirName(), cwd: project, worktreeName: "nightly", message: "nightly review" } }) })
+    const { dispatcher, store, runner: scheduler } = runner()
+    const grant = await issueExecutionGrant(req, { actions: ["session.create"], target: target(), label: "Nightly" }, "user-1")
+    const { occurrence } = store.recordOccurrence("user-1", { triggerId: "task-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.create", grant: { grantId: grant.id, revision: 1 }, request: {} })
+    await dispatcher.tick()
+    await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.hold).toBe("reauthorize"))
+    scheduler.reauthorizeLive(req, "user-1", occurrence.id)
+    return { store, occurrence, unregister, provider }
+  }
+  const markerRan = () => access(join(root, "worktree-nightly", "recipe-marker")).then(() => true, () => false)
+
+  it("runs the recipe and the first input while the account may run setup commands", async () => {
+    const req = await signedInEdition({ allowed: true })
+    const { store, occurrence, unregister, provider } = await run(req, fakeProvider())
+    try {
+      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.state).toBe("completed"), { timeout: 10_000 })
+      expect(await markerRan()).toBe(true)
+      expect(provider.firstInput).toHaveBeenCalledTimes(1)
+    } finally { unregister() }
+  }, 20_000)
+
+  it("starts nothing when the account lost host-file or terminal access before it was reauthorized", async () => {
+    const req = await signedInEdition({ allowed: false })
+    const { store, occurrence, unregister, provider } = await run(req, fakeProvider())
+    try {
+      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)).toMatchObject({ state: "held", hold: "reauthorize", reason: expect.stringMatching(/host-file and terminal access/) }), { timeout: 10_000 })
+      expect(provider.started).not.toHaveBeenCalled()
+      expect(provider.firstInput).not.toHaveBeenCalled()
+      expect(store.operation("user-1", occurrence.creationId)).toBeNull()
+    } finally { unregister() }
+  }, 20_000)
+
+  it("withholds the recipe and the first input when access is withdrawn while the session initializes", async () => {
+    const capabilities = { allowed: true }
+    const req = await signedInEdition(capabilities)
+    let release!: () => void
+    const { store, occurrence, unregister, provider } = await run(req, fakeProvider(new Promise((resolve) => { release = resolve })))
+    try {
+      await vi.waitFor(() => expect(provider.started).toHaveBeenCalled(), { timeout: 10_000 })
+      capabilities.allowed = false
+      release()
+      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.state).toBe("unknown"), { timeout: 10_000 })
+      expect(await markerRan()).toBe(false)
       expect(provider.firstInput).not.toHaveBeenCalled()
     } finally { unregister() }
   }, 20_000)

@@ -9,6 +9,7 @@ import { admitOccurrenceCommand, closeCommandDispatcher, commandDispatcher } fro
 import { __resetLiveAuthoritiesForTest, issueExecutionGrant, resolveExecution, revokeExecutionGrant, targetWithin } from "../../lib/triggers/authority"
 import { defaultExecutor, registerTriggerHandler, TriggerRunner, triggerExecutionsSettled, type Prepared, type TriggerExecutor } from "../../lib/triggers/runner"
 import { OrchestrationError } from "../../orchestration/store"
+import { CommandDispatcher } from "../../orchestration/dispatcher"
 import { registerTriggerDeliveryGuard, type DeliveryVerdict } from "../../orchestration/deliveryGuards"
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { setRequestPrincipal } from "../../requestPrincipal"
@@ -527,6 +528,41 @@ describe("trigger executions and the dispatcher's lifetime", () => {
       await next.tick()
       expect(next.store.occurrence("local", inPrepare.id)!.attempt).toBeGreaterThanOrEqual(1)
       expect(next.store.occurrence("local", inCreation.id)).toMatchObject({ state: "unknown" })
+    } finally { unregister() }
+  })
+})
+
+describe("a scheduler pass across shutdown", () => {
+  it("does not revive a dispatcher or attach authority when a deferred record resumes after close", async () => {
+    let release!: () => void
+    const recording = new Promise<void>((resolve) => { release = resolve })
+    let recordCalls = 0
+    let currentAfterClose: boolean | null = null
+    const dispatcher = commandDispatcher()
+    const store = dispatcher.store
+    const runner = new TriggerRunner(dispatcher, defaultExecutor)
+    dispatcher.onTick((lease) => runner.tick(lease))
+    const unregister = registerTriggerHandler("test", { record: async (_store, lifetime) => { recordCalls++; await recording; currentAfterClose = lifetime.current() }, prepare: async () => ({ skip: "unused" }) })
+    try {
+      const grant = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+      const conversation = store.ensureConversation(binding)
+      store.recordOccurrence("local", { triggerId: "trigger-0001", kind: "other", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {} })
+      store.admit("local", "trg-queued-0001", conversation.id, { message: "queued", executionGrant: { grantId: grant.id, revision: 1 }, trigger: { occurrenceId: "occ-none" } })
+      const ticking = dispatcher.tick()
+      await vi.waitFor(() => expect(recordCalls).toBe(1))
+      closeCommandDispatcher()
+      await triggerExecutionsSettled(10)
+      const start = vi.spyOn(CommandDispatcher.prototype, "start")
+      release()
+      await ticking
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(start).not.toHaveBeenCalled()
+      expect(currentAfterClose).toBe(false)
+      expect(dispatcher.hasAuthority("local", conversation.id)).toBe(false)
+      // Nobody holds the lease the closed dispatcher released.
+      expect(store.acquire("after-close")).not.toBeNull()
+      expect(store.command("local", "trg-queued-0001")!.receipt.state).not.toBe("delivered")
+      start.mockRestore()
     } finally { unregister() }
   })
 })

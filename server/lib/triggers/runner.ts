@@ -10,6 +10,7 @@ import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type 
 import { admitOccurrenceCommand, attachGrantAuthorities, commandDispatcher, commandScope, executionRequestFor, refreshExecutionRequest } from "../durableSend"
 import { RouteError } from "../routeError"
 import { createSession, type CreateSessionInput } from "../sessionCreate"
+import { assertSetupCapabilities } from "../../worktreeSetup/authorization"
 import { forgetSettledLiveAuthorities, liveAuthority, resolveExecution, setLiveAuthority, type ResolvedExecution } from "./authority"
 
 /**
@@ -24,9 +25,19 @@ export type PreparedExecution =
   | { action: "session.create"; target: ExecutionTarget; input: Omit<CreateSessionInput, "retry"> }
 export type Prepared = PreparedExecution | { skip: string } | { hold: OccurrenceHold; reason: string }
 
+/** Whether the dispatcher a handler runs on is still the one holding the lease; check it after every await, before writing. */
+export interface RecordLifetime {
+  signal: AbortSignal
+  current: () => boolean
+}
+
 export interface TriggerHandler {
-  /** Records the occurrences its definitions are due for. Runs on every tick this host holds the lease. */
-  record?(store: OrchestrationStore): Promise<void> | void
+  /**
+   * Records the occurrences its definitions are due for. Runs on every tick
+   * this host holds the lease; work it awaits must check `lifetime.current()`
+   * before it writes.
+   */
+  record?(store: OrchestrationStore, lifetime: RecordLifetime): Promise<void> | void
   /** What a claimed occurrence runs, read from its definition when it runs rather than when it was recorded. */
   prepare(occurrence: TriggerOccurrence): Promise<Prepared>
 }
@@ -39,7 +50,7 @@ export interface CreationLifecycle {
 }
 
 export interface TriggerExecutor {
-  send(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.send" }>, req: IncomingMessage, durable: boolean): Promise<CommandReceipt | null>
+  send(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.send" }>, req: IncomingMessage, durable: boolean, dispatcher: CommandDispatcher): Promise<CommandReceipt | null>
   create(claim: ClaimedOccurrence, prepared: Extract<PreparedExecution, { action: "session.create" }>, req: IncomingMessage, lifecycle: CreationLifecycle): Promise<StartedSession>
   /** Grant resolution; replaced in tests. */
   resolve: typeof resolveExecution
@@ -58,7 +69,8 @@ function statusOf(error: unknown): number { return error instanceof Orchestratio
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : "The run failed" }
 
 export const defaultExecutor: TriggerExecutor = {
-  send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({
+  send: (claim, lease, prepared, req, durable, dispatcher) => admitOccurrenceCommand({
+    dispatcher,
     sessionId: prepared.target.sessionId,
     request: prepared.request,
     req,
@@ -109,11 +121,25 @@ export class TriggerRunner {
 
   get store(): OrchestrationStore { return this.dispatcher.store }
 
+  /** One scheduler pass, tracked like an execution so shutdown waits for it, and stopped at every await once the dispatcher closed. */
   async tick(lease: DispatcherLease): Promise<void> {
-    for (const handler of handlers.values()) await handler.record?.(this.store)
+    const running = this.pass(lease)
+    inFlight.add(running)
+    try { await running } finally { inFlight.delete(running) }
+  }
+
+  private async pass(lease: DispatcherLease): Promise<void> {
+    const { signal } = this.dispatcher
+    const lifetime: RecordLifetime = { signal, current: () => !signal.aborted && this.store.ownsLease(lease) }
+    for (const handler of handlers.values()) {
+      if (!lifetime.current()) return
+      await handler.record?.(this.store, lifetime)
+    }
+    if (!lifetime.current()) return
     this.store.settleAdmittedOccurrences()
     forgetSettledLiveAuthorities(this.store)
-    await attachGrantAuthorities()
+    await attachGrantAuthorities(this.dispatcher)
+    if (!lifetime.current()) return
     for (const claim of this.store.claimOccurrences(lease, [...handlers.keys()])) {
       const running = this.execute(claim, lease).catch((error: unknown) => { console.error("[orchestration] trigger execution failed", error) })
       inFlight.add(running)
@@ -176,7 +202,7 @@ export class TriggerRunner {
   private async send(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.send" }>, req: IncomingMessage, durable: boolean, finish: (state: TriggerOccurrence["state"], details?: { reason?: string; hold?: OccurrenceHold; dueAt?: number }) => boolean): Promise<void> {
     try {
       // Null: the store settled it instead (fenced, binding moved, lease lost).
-      await this.executor.send(claim, lease, prepared, req, durable)
+      await this.executor.send(claim, lease, prepared, req, durable, this.dispatcher)
     } catch (error) {
       // Nothing was admitted, so a retry cannot duplicate a delivery.
       const status = statusOf(error)
@@ -201,6 +227,10 @@ export class TriggerRunner {
       const occurrence = this.store.occurrence(claim.occurrence.scope, claim.occurrence.id) ?? claim.occurrence
       const resolved = await this.authority(occurrence, { ...prepared, target })
       if ("hold" in resolved) throw new StartupRefused(resolved.hold, true)
+      // A worktree start may run the project's setup commands: the interactive policy applies to the account as it stands now.
+      if (prepared.input.worktreeName) {
+        try { assertSetupCapabilities(resolved.req) } catch (error) { throw new StartupRefused(messageOf(error), true) }
+      }
       if (!this.live(claim, lease)) throw new StartupRefused("The run stopped before its session started", false)
     }
   }

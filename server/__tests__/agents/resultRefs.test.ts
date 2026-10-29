@@ -161,7 +161,7 @@ describe("result projection v1", () => {
     ]
     const lines = toJsonl(claudeParts.flatMap((content, i) => [
       toolUseAssistant("Bash", { command: `part ${i}` }, `p${i}`),
-      userMsg([{ type: "tool_result", tool_use_id: `p${i}`, content }]),
+      userMsg([{ type: "tool_result", tool_use_id: `p${i}`, content }] as Parameters<typeof userMsg>[0]),
     ])).split("\n")
     const file = join(root, "parts.jsonl")
     writeFileSync(file, lines.join("\n") + "\n")
