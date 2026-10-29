@@ -350,11 +350,11 @@ export default function App() {
 
   // Live session streaming — wrapped in startTransition so React can
   // interrupt these low-priority renders to process user interactions (clicks).
-  // On reconnect after disconnect, reload the full session to catch missed messages.
+  // After a reconnect or a failed parse, reload the session to catch missed messages.
   // state.session is passed as `initialSession` so the hook can skip the
   // duplicate worker parse on every source change (the session was already
   // parsed by useSessionActions / useNewSession before dispatch).
-  const reconnectHandlerRef = useRef<(() => void) | null>(null)
+  const resyncHandlerRef = useRef<(() => void) | null>(null)
   const {
     isLive, sseState, isCompacting, streamingOverlayStore, turnError, agentProgress, promptSuggestion, rateLimit,
   } = useLiveSession(
@@ -366,7 +366,7 @@ export default function App() {
     },
     workerParse,
     workerAppend,
-    () => reconnectHandlerRef.current?.(),
+    () => resyncHandlerRef.current?.(),
     state.session,
   )
 
@@ -696,14 +696,14 @@ export default function App() {
     }
   }, [mcpData.loaded, mcpHasRestrictions, hasSettingsChanges, handleApplySettings, state.session?.sessionId])
 
-  // Wire the reconnect bridge after reloadSession is available. Layout timing
+  // Wire the resync bridge after reloadSession is available. Layout timing
   // guarantees useLiveSession's passive EventSource effect observes the latest
   // committed handler, without leaking a discarded render through the ref.
   useLayoutEffect(() => {
-    reconnectHandlerRef.current = handlers.reloadSession
+    resyncHandlerRef.current = handlers.reloadSession
     return () => {
-      if (reconnectHandlerRef.current === handlers.reloadSession) {
-        reconnectHandlerRef.current = null
+      if (resyncHandlerRef.current === handlers.reloadSession) {
+        resyncHandlerRef.current = null
       }
     }
   }, [handlers.reloadSession])

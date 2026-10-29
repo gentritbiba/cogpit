@@ -1,7 +1,7 @@
 import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useLiveSession } from "../useLiveSession"
+import { RESYNC_COOLDOWN_MS, useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
 import type { ParsedSession } from "../../../shared/session/types"
 import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
@@ -565,6 +565,56 @@ describe("useLiveSession", () => {
     })
 
     expect(workerAppend).toHaveBeenCalled()
+  })
+
+  describe("when a batch fails to parse", () => {
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const settle = () => act(async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+    const sendLine = (line: string) => act(() => {
+      getLastEventSource().simulateMessage({ type: "lines", lines: [line] })
+    })
+
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {})
+    })
+
+    it("asks for a resync and retries the kept lines with the next batch", async () => {
+      const onResync = vi.fn()
+      workerAppend.mockRejectedValueOnce(new Error("Worker did not answer"))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+
+      sendLine('{"n":1}')
+      await settle()
+      expect(onResync).toHaveBeenCalledTimes(1)
+      expect(workerAppend).toHaveBeenCalledTimes(1)
+
+      sendLine('{"n":2}')
+      await settle()
+      expect(workerAppend).toHaveBeenLastCalledWith(mockParsedSession, '{"n":1}\n{"n":2}\n')
+      act(() => { flushRAF() })
+      expect(onUpdate).toHaveBeenCalledWith(mockParsedSession)
+    })
+
+    it("resyncs at most once per cooldown", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      const onResync = vi.fn()
+      workerAppend.mockRejectedValue(new Error("boom"))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+
+      sendLine('{"n":1}')
+      await settle()
+      sendLine('{"n":2}')
+      await settle()
+      expect(workerAppend).toHaveBeenCalledTimes(2)
+      expect(onResync).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(RESYNC_COOLDOWN_MS)
+      sendLine('{"n":3}')
+      await settle()
+      expect(onResync).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("ignores lines messages with empty lines array", async () => {

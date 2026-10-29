@@ -29,12 +29,16 @@ export type SseConnectionState = "connecting" | "connected" | "disconnected"
 /** Shared empty map so an unchanged "no progress" state never re-renders consumers. */
 const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
 
+/** A parse that keeps failing would otherwise reload the session on every batch. */
+export const RESYNC_COOLDOWN_MS = 10_000
+
 export function useLiveSession(
   source: SessionSource | null,
   onUpdate: (session: ParsedSession) => void,
   workerParse: (text: string) => Promise<ParsedSession>,
   workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
-  onReconnect?: () => void,
+  /** Reload the session from disk: after a reconnect, or when a batch failed to parse. */
+  onResync?: () => void,
   /**
    * Optional already-parsed session matching `source.rawText`. When provided,
    * `useLiveSession` seeds its internal `sessionRef` synchronously instead of
@@ -70,8 +74,8 @@ export function useLiveSession(
   const sseStateRef = useRef<SseConnectionState>("disconnected")
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
-  const onReconnectRef = useRef(onReconnect)
-  onReconnectRef.current = onReconnect
+  const onResyncRef = useRef(onResync)
+  onResyncRef.current = onResync
   const workerParseRef = useRef(workerParse)
   workerParseRef.current = workerParse
   const workerAppendRef = useRef(workerAppend)
@@ -81,6 +85,7 @@ export function useLiveSession(
   const initialSessionRef = useRef(initialSession ?? null)
   initialSessionRef.current = initialSession ?? null
   const wasDisconnectedRef = useRef(false)
+  const lastResyncAtRef = useRef(0)
 
   const dirName = source?.dirName ?? null
   const fileName = source?.fileName ?? null
@@ -229,6 +234,7 @@ export function useLiveSession(
       const parsePromise = base
         ? workerAppendRef.current(base, toFlush)
         : workerParseRef.current(textRef.current)
+      let failed = false
 
       parsePromise
         .then((parsedResult) => {
@@ -245,15 +251,27 @@ export function useLiveSession(
             })
           }
           scheduleUpdate()
+        }, (err) => {
+          console.error("[useLiveSession] worker parse failed:", err)
+          if (closed) return
+          // Keep the lines: the next batch retries them, or the resync
+          // replaces this stream with one that starts after them.
+          failed = true
+          pendingText = toFlush + pendingText
+          const now = Date.now()
+          if (onResyncRef.current && now - lastResyncAtRef.current >= RESYNC_COOLDOWN_MS) {
+            lastResyncAtRef.current = now
+            onResyncRef.current()
+          }
         })
         .catch((err) => {
-          console.error("[useLiveSession] worker parse failed:", err)
+          console.error("[useLiveSession] live update failed:", err)
         })
         .finally(() => {
           workerBusy = false
           // Drain anything that accumulated while the worker was busy — this
           // is where the O(1) burst compression happens.
-          if (!closed && pendingText) flushToWorker()
+          if (!closed && !failed && pendingText) flushToWorker()
         })
     }
 
@@ -264,7 +282,7 @@ export function useLiveSession(
         sseStateRef.current = "connected"
         setSseState("connected")
         if (wasDisconnected) {
-          onReconnectRef.current?.()
+          onResyncRef.current?.()
         }
       }
     }
