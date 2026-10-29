@@ -264,6 +264,17 @@ describe("Codex prompts", () => {
     expect(meta.turnCount).toBe(2)
   })
 
+  it("skips the AGENTS.md preamble Codex 0.163 writes without a path", async () => {
+    const meta = await getSessionMeta(await writeSession([
+      header[0],
+      codexUserItem("# AGENTS.md instructions\n\n<INSTRUCTIONS>never mention zebras</INSTRUCTIONS>", "2026-10-18T10:00:00Z"),
+      ...currentRollout.slice(header.length),
+    ]))
+
+    expect(meta.firstUserMessage).toBe("rename the billing module")
+    expect(meta.turnCount).toBe(2)
+  })
+
   it("counts an older rollout's echoed prompts once", async () => {
     const meta = await getSessionMeta(await writeSession([
       ...header,

@@ -8,8 +8,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useAppContext } from "@/contexts/AppContext"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { useDevices } from "@/hooks/useDevices"
 import { useShares } from "@/hooks/useShare"
-import { sharePathFor } from "@/lib/sharePath"
+import { LOCAL_DEVICE_ID } from "@/lib/device"
+import { shareUrlFor } from "@/lib/sharePath"
 import { cn } from "@/lib/utils"
 
 /** How often the open popover re-reads the guest count. */
@@ -37,6 +39,7 @@ function guestLabel(guests: number): string {
 export function ShareButton({ sessionId }: ShareButtonProps) {
   const { config: { networkAccessDisabled } } = useAppContext()
   const { shares, error, refresh, create, regenerate, revoke } = useShares()
+  const { activeDeviceId, activeDevice } = useDevices()
   const [open, setOpen] = useState(false)
   const [passphrase, setPassphrase] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -44,7 +47,10 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
   const [bothCopied, copyBoth] = useCopyWithFeedback()
 
   const share = shares.find((candidate) => candidate.sessionId === sessionId) ?? null
-  const url = `${window.location.origin}${sharePathFor(sessionId)}`
+  const onDevice = activeDeviceId !== LOCAL_DEVICE_ID
+  // Until the device list loads, a device's link would fall back to this
+  // window's origin, which is the wrong machine.
+  const url = onDevice && !activeDevice ? null : shareUrlFor(sessionId, activeDevice)
 
   // A different session is a different share; the old passphrase must not
   // linger on screen next to the new session's link.
@@ -66,11 +72,18 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
     }
   }
 
-  const localOnlyNote = networkAccessDisabled && (
-    <p className="text-xs text-muted-foreground">
-      Network access is off, so this link only works on this machine.
-    </p>
-  )
+  const reachNote = onDevice
+    ? activeDevice && !activeDevice.tls && (
+      <p className="text-xs text-muted-foreground">
+        Guests sign in over HTTPS only, and {activeDevice.name} is connected over plain HTTP.
+        Connect to it through an HTTPS address for this link to work.
+      </p>
+    )
+    : networkAccessDisabled && (
+      <p className="text-xs text-muted-foreground">
+        Network access is off, so this link only works on this machine.
+      </p>
+    )
 
   return (
     <DropdownMenu
@@ -101,13 +114,14 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center gap-1.5">
               <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-[11px]">
-                {url}
+                {url ?? "…"}
               </code>
               <Button
                 variant="ghost"
                 size="icon-xs"
                 aria-label="Copy link"
-                onClick={() => copyLink(url)}
+                disabled={!url}
+                onClick={() => url && copyLink(url)}
               >
                 {linkCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
               </Button>
@@ -134,7 +148,8 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
               <Button
                 variant="secondary"
                 size="xs"
-                onClick={() => copyBoth(`${url}\nPassphrase: ${passphrase}`)}
+                disabled={!url}
+                onClick={() => url && copyBoth(`${url}\nPassphrase: ${passphrase}`)}
               >
                 {bothCopied ? "Copied" : "Copy link & passphrase"}
               </Button>
@@ -144,7 +159,7 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
               </p>
             )}
 
-            {localOnlyNote}
+            {reachNote}
             {error && <p className="text-xs text-destructive">{error}</p>}
 
             <div className="flex items-center justify-between gap-2 border-t pt-2">
@@ -168,7 +183,7 @@ export function ShareButton({ sessionId }: ShareButtonProps) {
             <p className="text-xs text-muted-foreground">
               Anyone with the link and passphrase can read and join this session.
             </p>
-            {localOnlyNote}
+            {reachNote}
             {error && <p className="text-xs text-destructive">{error}</p>}
             <Button
               size="xs"

@@ -465,7 +465,7 @@ describe("FloatingChrome", () => {
   // offering the control anywhere else just produced a 400 on click.
   it.each([
     ["-Users-me-proj", true],
-    ["codex__L3RtcC9wcm9qZWN0", false],
+    ["codex__L3RtcC9wcm9qZWN0", true],
     ["copilot__L3RtcC9wcm9qZWN0", false],
   ])("offers the share control in %s only when the agent can be shared", (dirName, shareable) => {
     mocks.sessionSource = { dirName, fileName: "s.jsonl", rawText: "" }

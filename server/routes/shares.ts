@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { basename, dirname } from "node:path"
 import {
   canIssueBrowserSession,
   getSessionMeta,
@@ -59,7 +58,8 @@ function stringField(body: unknown, key: string): string {
 
 type ShareTarget =
   | { shareable: true; dirName: string; fileName: string }
-  | { shareable: false; reason: "not-found" | "codex" | "copilot" }
+  | { shareable: false; reason: "not-found" }
+  | { shareable: false; reason: "unsupported"; agentName: string }
 
 /**
  * Resolve what a sessionId may be shared as. The client sends only the
@@ -70,22 +70,20 @@ type ShareTarget =
  */
 async function resolveShareTarget(sessionId: string): Promise<ShareTarget> {
   const filePath = await findJsonlPath(sessionId)
-  if (!filePath) return { shareable: false, reason: "not-found" }
-  // A Codex rollout is addressed by a nested path under the rollout root, and
-  // the guest allowlist compares exactly two identity segments — so a Codex
-  // record would hand out a passphrase for a transcript that 403s on every
-  // read. Refused here rather than fixed by widening the allowlist: this
-  // function shipped a traversal bug once already.
-  const agentKind = storeForPath(filePath)?.kind
-  if (agentKind === "codex" || agentKind === "copilot") {
-    return { shareable: false, reason: agentKind }
+  const store = storeForPath(filePath)
+  if (!filePath || !store) return { shareable: false, reason: "not-found" }
+  if (!store.descriptor.capabilities.sharing) {
+    return { shareable: false, reason: "unsupported", agentName: store.descriptor.displayName }
   }
 
-  const dirName = basename(dirname(filePath))
-  const fileName = basename(filePath)
-  const resolved = await resolveSessionFilePath(dirName, fileName)
+  const address = await store.sessionAddress(filePath)
+  if (!address) return { shareable: false, reason: "not-found" }
+  // The guest allowlist compares exactly two identity segments, so a transcript
+  // nested under dated folders is addressed by its session id instead.
+  const fileName = address.fileName.includes("/") ? `${sessionId}.jsonl` : address.fileName
+  const resolved = await resolveSessionFilePath(address.dirName, fileName)
   if (resolved !== filePath) return { shareable: false, reason: "not-found" }
-  return { shareable: true, dirName, fileName }
+  return { shareable: true, dirName: address.dirName, fileName }
 }
 
 /** Human label for a shared session, empty when the transcript cannot be read. */
@@ -122,12 +120,8 @@ async function handleCreate(req: IncomingMessage, res: ServerResponse): Promise<
 
     const target = await resolveShareTarget(sessionId)
     if (!target.shareable) {
-      if (target.reason === "codex") {
-        sendJson(res, 400, { error: "Sharing Codex sessions isn't supported yet" })
-        return
-      }
-      if (target.reason === "copilot") {
-        sendJson(res, 400, { error: "Sharing Copilot sessions isn't supported yet" })
+      if (target.reason === "unsupported") {
+        sendJson(res, 400, { error: `Sharing ${target.agentName} sessions isn't supported yet` })
         return
       }
       sendJson(res, 404, { error: "Session not found" })

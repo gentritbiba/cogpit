@@ -45,7 +45,7 @@ export interface AgentCapabilities {
    * session, so listing the root's children already yields the whole tree.
    */
   readonly nestedSubagents: boolean
-  /** Sessions can be published as read-only shares. */
+  /** Sessions can be shared with a guest through a passphrase link. */
   readonly sharing: boolean
   /**
    * How a long-running goal is tracked: read back from the transcript and set
@@ -847,7 +847,7 @@ const codex: AgentDescriptor = {
     agentTeams: false,
     subagentTranscripts: true,
     nestedSubagents: true,
-    sharing: false,
+    sharing: true,
     goals: "thread-api",
     undo: true,
     redo: true,

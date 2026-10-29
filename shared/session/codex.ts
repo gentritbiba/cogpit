@@ -71,7 +71,7 @@ interface CodexMetadata {
 }
 
 const SKIP_PROMPT_PREFIXES = [
-  "# AGENTS.md instructions for ",
+  "# AGENTS.md instructions",
   "<recommended_plugins>",
   "<environment_context>",
   "<permissions instructions>",

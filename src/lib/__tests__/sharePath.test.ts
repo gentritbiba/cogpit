@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isSharedPath, sharePathFor, sharedSessionId } from "@/lib/sharePath"
+import { isSharedPath, sharePathFor, sharedSessionId, shareUrlFor } from "@/lib/sharePath"
 
 describe("isSharedPath", () => {
   it("matches the guest route", () => {
@@ -72,5 +72,26 @@ describe("sharePathFor", () => {
   it("encodes separators so a crafted id cannot escape the route", () => {
     expect(sharePathFor("../../api/projects")).toBe("/shared/..%2F..%2Fapi%2Fprojects")
     expect(isSharedPath(sharePathFor("../../api/projects"))).toBe(true)
+  })
+})
+
+describe("shareUrlFor", () => {
+  it("uses this window's origin for a local session", () => {
+    expect(shareUrlFor("s 1")).toBe(`${window.location.origin}/shared/s%201`)
+  })
+
+  it("points a hub device's share at the device itself", () => {
+    expect(shareUrlFor("s1", { host: "192.168.10.232", port: 19384 }))
+      .toBe("http://192.168.10.232:19384/shared/s1")
+  })
+
+  it("drops the default port of a TLS device", () => {
+    expect(shareUrlFor("s1", { host: "box.cogpit.dev", port: 443, tls: true }))
+      .toBe("https://box.cogpit.dev/shared/s1")
+  })
+
+  it("brackets an IPv6 device host", () => {
+    expect(shareUrlFor("s1", { host: "fd00::5", port: 19384 }))
+      .toBe("http://[fd00::5]:19384/shared/s1")
   })
 })

@@ -8,9 +8,14 @@ const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
   copyToClipboard: vi.fn(),
   networkAccessDisabled: false,
+  devices: {
+    activeDeviceId: "local",
+    activeDevice: undefined as { name: string; host: string; port: number; tls?: boolean } | undefined,
+  },
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/hooks/useDevices", () => ({ useDevices: () => mocks.devices }))
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ config: { networkAccessDisabled: mocks.networkAccessDisabled } }),
 }))
@@ -63,6 +68,7 @@ describe("ShareButton", () => {
     server.shares = []
     server.refusesToShare = false
     mocks.networkAccessDisabled = false
+    mocks.devices = { activeDeviceId: "local", activeDevice: undefined }
     mocks.copyToClipboard.mockResolvedValue(true)
     mocks.authFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET"
@@ -189,5 +195,45 @@ describe("ShareButton", () => {
     await openPopover(user)
 
     expect(await screen.findByText(/2 guests connected/i)).toBeInTheDocument()
+  })
+
+  it("links a hub device's share to the device itself", async () => {
+    mocks.devices = {
+      activeDeviceId: "dev_1",
+      activeDevice: { name: "omarchy", host: "omarchy.cogpit.dev", port: 443, tls: true },
+    }
+    const user = userEvent.setup()
+    render(<ShareButton sessionId="s1" />)
+
+    await openPopover(user)
+    await enableSharing(user)
+
+    expect(screen.getByText("https://omarchy.cogpit.dev/shared/s1")).toBeInTheDocument()
+    expect(screen.queryByText(/plain HTTP/)).not.toBeInTheDocument()
+  })
+
+  it("warns that a plain-HTTP device link cannot sign guests in", async () => {
+    mocks.devices = {
+      activeDeviceId: "dev_1",
+      activeDevice: { name: "agentbox", host: "192.168.10.232", port: 19384 },
+    }
+    const user = userEvent.setup()
+    render(<ShareButton sessionId="s1" />)
+
+    await openPopover(user)
+
+    expect(await screen.findByText(/agentbox is connected over plain HTTP/)).toBeInTheDocument()
+  })
+
+  it("withholds a device's link until the device list has loaded", async () => {
+    mocks.devices = { activeDeviceId: "dev_1", activeDevice: undefined }
+    const user = userEvent.setup()
+    render(<ShareButton sessionId="s1" />)
+
+    await openPopover(user)
+    await enableSharing(user)
+
+    expect(screen.queryByText(shareUrl())).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled()
   })
 })

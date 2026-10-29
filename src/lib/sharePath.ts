@@ -30,10 +30,25 @@ export function isSharedPath(pathname: string): boolean {
   return sharedSessionId(pathname) !== null
 }
 
-/**
- * The path a guest opens for `sessionId`, the inverse of `sharedSessionId`.
- * Relative, because only the browser knows the origin to put in front of it.
- */
+/** The path a guest opens for `sessionId`, the inverse of `sharedSessionId`. */
 export function sharePathFor(sessionId: string): string {
   return `/shared/${encodeURIComponent(sessionId)}`
+}
+
+/** Where the hub reaches a device, as its registry stores it. */
+export interface DeviceAddress {
+  host: string
+  port: number
+  tls?: boolean
+}
+
+/**
+ * The link a guest opens for `sessionId`. A share lives on the machine running
+ * the session, so a hub device's share points at that device's own address.
+ */
+export function shareUrlFor(sessionId: string, device?: DeviceAddress): string {
+  const origin = device
+    ? new URL(`${device.tls ? "https" : "http"}://${device.host.includes(":") ? `[${device.host}]` : device.host}:${device.port}`).origin
+    : window.location.origin
+  return `${origin}${sharePathFor(sessionId)}`
 }

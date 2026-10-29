@@ -37,11 +37,13 @@ vi.mock("../../sessionPaths", async (importOriginal) => ({
 
 import type { Middleware, UseFn } from "../../helpers"
 import { storeFor } from "../../agents"
+import { dirs } from "../../dirs"
 
 const CODEX_SESSIONS_DIR = storeFor("codex").sessionsRoot() as string
 const COPILOT_SESSIONS_DIR = storeFor("copilot").sessionsRoot() as string
 import { verifyPassword } from "../../password-utils"
 import { registerShareRoutes } from "../../routes/shares"
+import { shareRequestAllowed } from "../../share/allowlist"
 import {
   createShareToken,
   validateShareToken,
@@ -56,9 +58,11 @@ import {
 const SESSION_ID = "sess-1"
 const DIR_NAME = "-Users-me-proj"
 const FILE_NAME = "sess-1.jsonl"
-const FILE_PATH = `/Users/me/.claude/projects/${DIR_NAME}/${FILE_NAME}`
+const PROJECTS_DIR = "/Users/me/.claude/projects"
+const FILE_PATH = `${PROJECTS_DIR}/${DIR_NAME}/${FILE_NAME}`
 
 let registryRoot: string
+let previousProjectsDir: string
 
 function handlers(): Map<string, Middleware> {
   const collected = new Map<string, Middleware>()
@@ -129,7 +133,10 @@ async function call(mount: string, options: CallOptions) {
 }
 
 beforeEach(async () => {
+  vi.restoreAllMocks()
   vi.clearAllMocks()
+  previousProjectsDir = dirs.PROJECTS_DIR
+  dirs.PROJECTS_DIR = PROJECTS_DIR
   registryRoot = await mkdtemp(join(tmpdir(), "cogpit-shares-route-"))
   await initShareRegistry(registryRoot)
   __resetShareTokensForTest()
@@ -140,30 +147,53 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  dirs.PROJECTS_DIR = previousProjectsDir
   await rm(registryRoot, { recursive: true, force: true })
 })
 
 describe("POST /api/shares", () => {
-  it("refuses a Codex session outright, and stores nothing", async () => {
-    // A Codex rollout is addressed by a nested path
-    // (2026/08/25/rollout-<ts>-<uuid>.jsonl). The share allowlist compares
-    // identity segment by segment and requires exactly two, so a Codex record
-    // would mint a passphrase for a share that 403s on every read. The
-    // allowlist is not widened to fit: this function already shipped a
-    // traversal bug once, and a looser segment rule reopens that surface.
-    mockFindJsonlPath.mockResolvedValue(
-      `${CODEX_SESSIONS_DIR}/2026/08/25/rollout-2026-08-25T10-00-00-codex-uuid.jsonl`,
-    )
+  it("shares a Codex session under its session id, which fits the guest allowlist", async () => {
+    const uuid = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b"
+    const rollout = `${CODEX_SESSIONS_DIR}/2026/08/25/rollout-2026-08-25T10-00-00-${uuid}.jsonl`
+    const codexDir = storeFor("codex").descriptor.dirName.encode("/Users/me/proj")
+    mockFindJsonlPath.mockResolvedValue(rollout)
+    mockResolveSessionFilePath.mockImplementation(async (dirName: string, fileName: string) =>
+      dirName === codexDir && fileName === `${uuid}.jsonl` ? rollout : null)
+    vi.spyOn(storeFor("codex"), "sessionAddress").mockResolvedValue({
+      dirName: codexDir,
+      fileName: `2026/08/25/rollout-2026-08-25T10-00-00-${uuid}.jsonl`,
+    })
 
     const result = await call("/api/shares", {
       method: "POST",
-      body: { sessionId: "codex-uuid" },
+      body: { sessionId: uuid },
     })
 
-    expect(result.res.statusCode).toBe(400)
-    expect(result.json().error).toBe("Sharing Codex sessions isn't supported yet")
+    expect(result.res.statusCode).toBe(200)
+    expect(getShareWithHash(uuid)).toMatchObject({ dirName: codexDir, fileName: `${uuid}.jsonl` })
+    expect(shareRequestAllowed("GET", `/api/sessions/${codexDir}/${uuid}.jsonl`, {
+      sessionId: uuid,
+      dirName: codexDir,
+      fileName: `${uuid}.jsonl`,
+    })).toBe(true)
+  })
+
+  it("refuses a Codex session whose id does not lead back to the same rollout", async () => {
+    const uuid = "019a1b2c-3d4e-7f60-8a9b-0c1d2e3f4a5b"
+    mockFindJsonlPath.mockResolvedValue(`${CODEX_SESSIONS_DIR}/2026/08/25/rollout-2026-08-25T10-00-00-${uuid}.jsonl`)
+    mockResolveSessionFilePath.mockResolvedValue(`${CODEX_SESSIONS_DIR}/2026/08/26/rollout-other-${uuid}.jsonl`)
+    vi.spyOn(storeFor("codex"), "sessionAddress").mockResolvedValue({
+      dirName: storeFor("codex").descriptor.dirName.encode("/Users/me/proj"),
+      fileName: `2026/08/25/rollout-2026-08-25T10-00-00-${uuid}.jsonl`,
+    })
+
+    const result = await call("/api/shares", {
+      method: "POST",
+      body: { sessionId: uuid },
+    })
+
+    expect(result.res.statusCode).toBe(404)
     expect(listShares()).toEqual([])
-    expect(getShareWithHash("codex-uuid")).toBeUndefined()
   })
 
   it("refuses a Copilot session explicitly, and stores nothing", async () => {
@@ -177,7 +207,7 @@ describe("POST /api/shares", () => {
     })
 
     expect(result.res.statusCode).toBe(400)
-    expect(result.json().error).toBe("Sharing Copilot sessions isn't supported yet")
+    expect(result.json().error).toBe("Sharing GitHub Copilot CLI sessions isn't supported yet")
     expect(listShares()).toEqual([])
   })
 
