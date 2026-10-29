@@ -492,10 +492,8 @@ export function claudeTurnBoundaries(
 
 // ── Result projection ───────────────────────────────────────────────────────
 
-/** `toolUseResult` keys whose text a reader shows or interprets as it is. */
+/** `toolUseResult` keys a reader shows or interprets as they are, structured diffs included: they travel whole. */
 const KEPT_TOOL_USE_RESULT_KEYS = new Set(["bashEditDiff", "structuredPatch", "prompt", "summary", "description", "status"])
-/** A Bash call's structured diff keeps whole files up to this many bytes; the rest are counted. */
-const BASH_DIFF_BUDGET_BYTES = 64 * 1024
 
 function visitStrings(holder: Record<string, unknown>, visit: ResultVisitor, depth: number): boolean {
   let changed = false
@@ -508,29 +506,12 @@ function visitStrings(holder: Record<string, unknown>, visit: ResultVisitor, dep
   return changed
 }
 
-/** Keeps the files of a large structured diff that fit the budget, counting the rest as more files. */
-function boundBashEditDiff(result: Record<string, unknown>, visit: ResultVisitor): boolean {
-  const diff = result.bashEditDiff
-  if (!isPlainObject(diff) || !Array.isArray(diff.files)) return false
-  const text = JSON.stringify(diff)
-  if (visit(text, "text") === text) return false
-  const files: unknown[] = []
-  let bytes = 0
-  for (const file of diff.files) {
-    bytes += JSON.stringify(file).length
-    if (bytes > BASH_DIFF_BUDGET_BYTES && files.length > 0) break
-    files.push(file)
-  }
-  const dropped = diff.files.length - files.length
-  const more = typeof diff.moreFiles === "number" ? diff.moreFiles : 0
-  result.bashEditDiff = { ...diff, files, ...(dropped > 0 ? { moreFiles: more + dropped } : {}) }
-  return dropped > 0
-}
-
 /**
  * Tool-result bodies in a Claude Code record: each `tool_result` block's text
  * and image data, then the long strings of `toolUseResult` other than the
- * ones a reader interprets. A sub-agent's result keeps its summary whole.
+ * ones a reader interprets. A sub-agent's result keeps its summary whole,
+ * and a structured diff (`bashEditDiff`, `structuredPatch`) keeps every file:
+ * the timeline reviews and undoes from it.
  */
 export function projectClaudeResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
   if (record.type !== "user") return false
@@ -553,7 +534,6 @@ export function projectClaudeResults(record: Record<string, unknown>, visit: Res
   if (typeof result === "string") changed = visitField(record, "toolUseResult", visit) || changed
   else if (isPlainObject(result) && !result.agentId) {
     changed = visitStrings(result, visit, 0) || changed
-    changed = boundBashEditDiff(result, visit) || changed
   }
   return changed
 }

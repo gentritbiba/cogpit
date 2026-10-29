@@ -25,11 +25,11 @@ function project(kind: AgentKind, lines: string[]): { projected: string[]; offse
   return { projected: lines.map((line, i) => projectLine(formatFor(kind), line, address, offsets[i]!)), offsets }
 }
 function calls(session: ParsedSession): ToolCall[] { return session.turns.flatMap((turn) => turn.toolCalls) }
-/** Everything the timeline reads from a session apart from result bodies (and how a bounded diff splits its files). */
+/** Everything the timeline reads from a session apart from result bodies. */
 function semantics(session: ParsedSession) {
   return {
     turns: session.turns.map((turn) => ({ blocks: turn.contentBlocks.map((block) => block.kind) })),
-    calls: calls(session).map((call) => ({ id: call.id, name: call.name, isError: call.isError, pending: call.result === null, images: call.resultImages?.length ?? 0, awaitingReview: call.awaitingReview, diffFiles: (call.fileDiffs?.length ?? 0) + (call.additionalFileDiffs ?? 0) })),
+    calls: calls(session).map((call) => ({ id: call.id, name: call.name, isError: call.isError, pending: call.result === null, images: call.resultImages?.length ?? 0, awaitingReview: call.awaitingReview, fileDiffs: call.fileDiffs, additionalFileDiffs: call.additionalFileDiffs })),
   }
 }
 
@@ -65,14 +65,16 @@ describe("result projection v1", () => {
     expect(readElided(JSON.parse(projected[4]!).message.content[0].content[1].source.data)?.stub).toMatchObject({ kind: "image", bytes: BIG_IMAGE.length })
     expect(small).toMatchObject({ result: "small output" })
     expect(small!.resultRef).toBeUndefined()
-    // A large structured diff keeps what fits and counts the rest.
+    // A structured diff over 64 KB across many files keeps every file and hunk the timeline reviews from.
+    expect(JSON.stringify(bashDiff).length).toBeGreaterThan(200_000)
     expect(native.turns[0]!.toolCalls[0]!.fileDiffs).toHaveLength(40)
-    expect(light.turns[0]!.toolCalls[0]!.fileDiffs!.length).toBeLessThan(40)
-    expect(light.turns[0]!.toolCalls[0]!.fileDiffs!.length + light.turns[0]!.toolCalls[0]!.additionalFileDiffs!).toBe(40)
-    // Lines without heavy bodies travel byte for byte; what remains is mostly the 64 KB of diff kept for review.
+    expect(light.turns[0]!.toolCalls[0]!.fileDiffs).toEqual(native.turns[0]!.toolCalls[0]!.fileDiffs)
+    expect(light.turns[0]!.toolCalls[0]!.additionalFileDiffs).toBeUndefined()
+    expect(JSON.parse(projected[2]!).toolUseResult.bashEditDiff).toEqual(bashDiff)
+    // Lines without heavy bodies travel byte for byte; the rest is mostly the diff kept for review.
     expect(projected.filter((line, i) => line !== lines[i])).toHaveLength(2)
     expect(lines.join("\n").length).toBeGreaterThan(690_000)
-    expect(projected.join("\n").length).toBeLessThan(80_000)
+    expect(projected.join("\n").length).toBeLessThan(lines.join("\n").length / 2)
   })
 
   it("keeps a Codex output's exit status, refusing an elision its reader would read differently", () => {
