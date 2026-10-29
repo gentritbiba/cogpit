@@ -132,7 +132,7 @@ export async function recoveryStatus(req: IncomingMessage, sessionId: string): P
   }
   return {
     offer,
-    run: !offer && run ? { id: run.id, block: identity(consent!).offer.block, state: run.state, dueAt: identity(consent!).offer.dueAt, hold: run.hold, reason: run.reason, command: run.command } : null,
+    run: !offer && run ? { id: run.id, block: identity(consent!).offer.block, state: run.state, dueAt: run.dueAt, hold: run.hold, reason: run.reason, command: run.command } : null,
     support: unattendedSupport(), message: RECOVERY_MESSAGE,
   }
 }

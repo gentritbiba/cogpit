@@ -451,3 +451,16 @@ it("holds the same command when its grant is revoked during the final native gua
   expect(store.command("local", run.commandId)?.receipt.error).toMatch(/Revoked during final native scan/)
   expect(mocks.send).not.toHaveBeenCalled()
 })
+
+it("reports the durable retry due time while retaining the provider reset", async () => {
+  const scheduled = await consent()
+  installFakeEdition({ access: { ...PERSONAL_EDITION.access, levelOf: async () => { throw new Error("Temporary authorization service failure") } } })
+  await due()
+  await vi.waitFor(async () => {
+    const run = orchestrationStore().occurrence("local", scheduled.run!.id)!
+    expect(run.state).toBe("scheduled")
+    expect(run.dueAt).toBeGreaterThan(Date.now())
+    expect((await recoveryStatus(request, SESSION)).run).toMatchObject({ dueAt: run.dueAt, block: { resetsAt: scheduled.run!.block.resetsAt } })
+  })
+  expect(mocks.send).not.toHaveBeenCalled()
+})
