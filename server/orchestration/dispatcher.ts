@@ -24,6 +24,7 @@ export class CommandDispatcher {
   private ticking = false
   private closed = false
   private readonly waiters = new Set<() => void>()
+  private readonly tickHooks = new Set<(lease: DispatcherLease) => Promise<void>>()
 
   constructor(readonly store: OrchestrationStore) {}
   start(): boolean {
@@ -34,6 +35,9 @@ export class CommandDispatcher {
   }
   attach(scope: string, conversationId: string, authority: DispatchAuthority): void { this.authorities.set(JSON.stringify([scope, conversationId]), authority) }
   detach(scope: string, conversationId: string): void { this.authorities.delete(JSON.stringify([scope, conversationId])) }
+  hasAuthority(scope: string, conversationId: string): boolean { return this.authorities.has(JSON.stringify([scope, conversationId])) }
+  /** Runs `hook` on every tick this dispatcher holds the lease, before queued commands are claimed: the one scheduler clock. */
+  onTick(hook: (lease: DispatcherLease) => Promise<void>): () => void { this.tickHooks.add(hook); return () => this.tickHooks.delete(hook) }
   async tick(): Promise<void> {
     if (this.ticking || this.closed) return
     this.ticking = true
@@ -41,6 +45,9 @@ export class CommandDispatcher {
       this.lease = this.store.acquire(this.owner)
       const lease = this.lease
       if (!lease) { this.active.clear(); return }
+      for (const hook of this.tickHooks) {
+        try { await hook(lease) } catch (error) { if (!this.closed) console.error("[orchestration] scheduled work failed", error) }
+      }
       for (const [key, command] of this.active) {
         const authority = this.authorities.get(JSON.stringify([command.scope, command.receipt.conversationId]))
         if (!authority) continue
@@ -124,6 +131,6 @@ export class CommandDispatcher {
     this.closed = true
     if (this.timer) clearInterval(this.timer)
     if (this.lease) this.store.release(this.lease)
-    this.authorities.clear(); this.active.clear()
+    this.authorities.clear(); this.active.clear(); this.tickHooks.clear()
   }
 }

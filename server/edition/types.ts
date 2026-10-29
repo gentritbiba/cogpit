@@ -3,6 +3,7 @@ import type { NetworkInterfaceInfo } from "node:os"
 import type { CogpitEdition, MeResponse } from "../../shared/contracts/identity"
 import type { ListedAccess, ListScope, SessionAccessLevel } from "../../shared/contracts/sessionAccess"
 import type { SessionSettingField } from "../../shared/contracts/sessionSettings"
+import type { ExecutionTarget, GrantRef, UnattendedAction } from "../../shared/contracts/triggers"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import type { TrustedLineage } from "../agents/lineage"
 import type {
@@ -345,6 +346,40 @@ export interface EditionBrowsers {
   accountOf(name: string): string | null
 }
 
+// ── Unattended execution ─────────────────────────────────────────────
+
+/** What a caller asks to let run without them: these actions, on exactly this target. */
+export interface UnattendedGrantRequest {
+  actions: readonly UnattendedAction[]
+  target: ExecutionTarget
+  /** What it is for, as the grant's owner will see it listed. */
+  label: string
+}
+
+/** One execution under a grant core holds, re-checked as it runs. */
+export interface UnattendedExecution extends GrantRef {
+  action: UnattendedAction
+  target: ExecutionTarget
+}
+
+/**
+ * Durable authority for work that runs while nobody is signed in: a
+ * schedule, a webhook, a continuation after a usage limit. An edition that
+ * signs accounts in and cannot vouch for an absent account leaves this out,
+ * and core holds that work until someone reauthorizes it live.
+ */
+export interface EditionUnattended {
+  /** A grant for the caller over `request` alone, or null when they may not have one. */
+  issue(req: IncomingMessage, request: UnattendedGrantRequest): Promise<GrantRef | null>
+  /**
+   * A request acting as the grant's account for this one execution, or null
+   * once the grant, the account or its access no longer allows it. The
+   * request carries a principal, never a cookie or a session token.
+   */
+  resolve(execution: UnattendedExecution): Promise<IncomingMessage | null>
+  revoke(grantId: string): Promise<void>
+}
+
 // ── The edition module ───────────────────────────────────────────────
 
 export interface EditionBootContext {
@@ -393,4 +428,10 @@ export interface EditionModule {
   readonly turns: EditionTurns
   readonly sessionSettings: EditionSessionSettings
   readonly notificationRetention: NotificationRetention
+  /**
+   * Optional, so an edition built before it loads unchanged. Personal edition
+   * needs none: its grants are core's own. Absent where `auth` is set means
+   * the edition cannot authorize unattended work.
+   */
+  readonly unattended?: EditionUnattended
 }

@@ -12,8 +12,10 @@ import { isSessionTokenActive } from "../security"
 import { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS } from "../sessionConstants"
 import { CommandDispatcher } from "../orchestration/dispatcher"
 import { beforeOrchestrationClose, orchestrationStore } from "../orchestration/storage"
-import { OrchestrationError, type StoredCommand } from "../orchestration/store"
+import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type StoredCommand } from "../orchestration/store"
+import type { GrantRef } from "../../shared/contracts/triggers"
 import { setSessionsArchived } from "./sessionArchive"
+import { resolveExecution } from "./triggers/authority"
 
 let active: { store: ReturnType<typeof orchestrationStore>; dispatcher: CommandDispatcher } | undefined
 export function commandDispatcher(): CommandDispatcher {
@@ -64,18 +66,33 @@ async function mayDeliver(request: IncomingMessage, command: StoredCommand): Pro
   return true
 }
 
-export function attachCommandAuthority(scope: string, conversationId: string, runtime: AgentRuntime, req?: IncomingMessage): void {
+/** The request a command is delivered as: its grant's, re-checked now, or the live sign-in it was admitted under. */
+async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, authentication: RequestAuthentication | null, scope: string): Promise<IncomingMessage | null> {
+  const grant = command.payload.executionGrant as GrantRef | undefined
+  if (!grant) return executionRequest(authentication, scope)
+  const resolved = await resolveExecution(grant, "session.send", { agent: runtime.kind, instanceId: runtime.instanceId ?? "default", sessionId: command.receipt.sessionId, bindingRevision: command.receipt.bindingRevision }, scope)
+  return "req" in resolved ? resolved.req : null
+}
+
+/**
+ * Lets the dispatcher deliver a conversation's commands. `req` is the live
+ * sign-in its own commands deliver as; a command admitted under a grant
+ * delivers as that grant whichever authority is attached. `ifMissing` keeps
+ * an authority someone attached live.
+ */
+export function attachCommandAuthority(scope: string, conversationId: string, runtime: AgentRuntime, req?: IncomingMessage, ifMissing = false): void {
   const authentication = req ? getRequestAuthentication(req) : null
   const dispatcher = commandDispatcher()
+  if (ifMissing && dispatcher.hasAuthority(scope, conversationId)) return
   dispatcher.attach(scope, conversationId, {
     async authorize(command) {
-      const request = executionRequest(authentication, scope)
+      const request = await deliveryRequest(command, runtime, authentication, scope)
       return request !== null && await mayDeliver(request, command)
     },
     async deliver(command, currentAttempt) {
       if (command.receipt.intent === "steer" && !runtime.descriptor.capabilities.midTurnSteering && !(command.payload.notification && runtime.descriptor.capabilities.activeNotifications)) throw new OrchestrationError(400, "This provider does not support steering a running turn")
-      const request = executionRequest(authentication, scope)
-      if (!request) throw new OrchestrationError(403, "Sign in again before delivering queued work")
+      const request = await deliveryRequest(command, runtime, authentication, scope)
+      if (!request) throw new OrchestrationError(403, command.payload.executionGrant ? "This task's authorization no longer allows delivery; reauthorize it" : "Sign in again before delivering queued work")
       if (!await mayDeliver(request, command)) throw new OrchestrationError(403, "Session access changed")
       const assertCurrent = () => { if (!currentAttempt()) throw new OrchestrationError(409, "Dispatcher ownership changed before provider delivery") }
       assertCurrent()
@@ -87,7 +104,8 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
         ...(typeof command.payload.questionId === "string" ? { toolUseId: command.payload.questionId } : {}),
       }
       const fencedRuntime = { ...runtime, send: (id: string, input: SendRequest) => { assertCurrent(); return runtime.send(id, input) } }
-      const outcome = await sendTurn(request, fencedRuntime, command.receipt.sessionId, { ...command.payload, deliveryIntent: command.receipt.intent, commandId: command.receipt.nativeMessageId } as SendRequest, context)
+      const { executionGrant: _grant, trigger: _trigger, ...payload } = command.payload
+      const outcome = await sendTurn(request, fencedRuntime, command.receipt.sessionId, { ...payload, deliveryIntent: command.receipt.intent, commandId: command.receipt.nativeMessageId } as SendRequest, context)
       if (outcome.delivery !== "busy" && outcome.turnId && !outcome.completion && runtime.waitForCompletion) outcome.completion = runtime.waitForCompletion(command.receipt.sessionId, outcome.turnId)
       if (outcome.delivery !== "busy") void setSessionsArchived([command.receipt.sessionId], false).catch(() => {})
       return outcome
@@ -96,11 +114,68 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
   })
 }
 
-export async function admitSessionCommand(options: {
+interface CommandTarget {
   sessionId: string
-  commandId: string
   request: SendRequest
   req?: IncomingMessage
+  binding?: NativeBinding
+  runtime?: AgentRuntime
+}
+
+async function commandConversation(options: CommandTarget, extra: Record<string, unknown>, executionGrant?: GrantRef) {
+  const { sessionId, request, req } = options
+  const resolved = options.runtime ? { kind: options.runtime.kind, instanceId: options.runtime.instanceId, filePath: request.filePath } : await resolveSessionAgent(sessionId)
+  const runtime = options.runtime ?? runtimeFor(resolved.kind, resolved.instanceId)
+  const dispatcher = commandDispatcher()
+  const scope = commandScope(req)
+  if (req) {
+    const level = await accessLevelOf(req, sessionId)
+    if (level === null || !accessAtLeast(level, "interact")) throw new OrchestrationError(403, "Session access is required before queueing a message")
+  }
+  const binding = options.binding ?? await nativeBinding(sessionId, resolved.kind, resolved.filePath, request.cwd)
+  const conversation = dispatcher.store.ensureConversation(binding)
+  if (conversation.binding.sessionId !== sessionId) throw new OrchestrationError(409, "This conversation moved to another native session; open its current binding")
+  if (executionGrant) attachCommandAuthority(scope, conversation.id, runtime, undefined, true)
+  else attachCommandAuthority(scope, conversation.id, runtime, req)
+  const payload: Record<string, unknown> = { ...request, filePath: resolved.filePath ?? binding.filePath, ...extra, ...(executionGrant ? { executionGrant } : {}) }
+  return { dispatcher, store: dispatcher.store, scope, conversation, payload }
+}
+
+/**
+ * Admits a claimed trigger occurrence's message as one durable command, in
+ * the transaction that records it admitted. `req` is the grant's execution
+ * request; delivery re-checks the grant itself. Null when the occurrence was
+ * settled instead (fenced by user activity, moved binding, lost lease).
+ */
+export async function admitOccurrenceCommand(options: CommandTarget & {
+  req: IncomingMessage
+  claim: ClaimedOccurrence
+  lease: DispatcherLease
+  intent: CommandIntent
+  executionGrant?: GrantRef
+  expectedBindingRevision?: number
+}): Promise<CommandReceipt | null> {
+  const { dispatcher, store, scope, conversation, payload } = await commandConversation(options, {}, options.executionGrant)
+  if (scope !== options.claim.occurrence.scope) throw new OrchestrationError(403, "A task runs only as the account that owns it")
+  const receipt = store.admitForOccurrence(options.claim, options.lease, conversation.id, payload, options.intent, options.expectedBindingRevision)
+  if (receipt) void dispatcher.tick()
+  return receipt
+}
+
+/** Re-attaches delivery authority for grant-admitted commands still queued after a restart. */
+export async function attachGrantAuthorities(): Promise<void> {
+  const dispatcher = commandDispatcher()
+  for (const command of dispatcher.store.queued()) {
+    if (!command.payload.executionGrant || dispatcher.hasAuthority(command.scope, command.receipt.conversationId)) continue
+    try {
+      const resolved = await resolveSessionAgent(command.receipt.sessionId)
+      attachCommandAuthority(command.scope, command.receipt.conversationId, runtimeFor(resolved.kind, resolved.instanceId), undefined, true)
+    } catch { /* The session is gone; its command stays queued for review. */ }
+  }
+}
+
+export async function admitSessionCommand(options: CommandTarget & {
+  commandId: string
   intent?: CommandIntent
   /** The intent when the caller names none; a retry keeps the one its command was first admitted with. */
   defaultIntent?: CommandIntent
@@ -108,24 +183,9 @@ export async function admitSessionCommand(options: {
   leadSessionId?: string
   answer?: AcceptedAnswer
   answerInput?: unknown
-  binding?: NativeBinding
-  runtime?: AgentRuntime
 }): Promise<CommandReceipt> {
-  const { sessionId, commandId, request, req, answer } = options
-  const resolved = options.runtime ? { kind: options.runtime.kind, instanceId: options.runtime.instanceId, filePath: request.filePath } : await resolveSessionAgent(sessionId)
-  const runtime = options.runtime ?? runtimeFor(resolved.kind, resolved.instanceId)
-  const dispatcher = commandDispatcher()
-  const store = dispatcher.store
-  const scope = commandScope(req)
-  if (req) {
-    const level = await accessLevelOf(req, sessionId)
-    if (level === null || !accessAtLeast(level, "interact")) throw new OrchestrationError(403, "Session access is required before queueing a message")
-  }
-  const binding = options.binding ?? await nativeBinding(sessionId, resolved.kind, resolved.filePath, request.cwd)
-  const conversation = store.ensureConversation(binding)
-  if (conversation.binding.sessionId !== sessionId) throw new OrchestrationError(409, "This conversation moved to another native session; open its current binding")
-  attachCommandAuthority(scope, conversation.id, runtime, req)
-  const payload: Record<string, unknown> = { ...request, filePath: resolved.filePath ?? binding.filePath, ...(options.leadSessionId ? { leadSessionId: options.leadSessionId } : {}) }
+  const { commandId, answer } = options
+  const { dispatcher, store, scope, conversation, payload } = await commandConversation(options, options.leadSessionId ? { leadSessionId: options.leadSessionId } : {})
   let receipt: CommandReceipt
   if (answer?.durableQuestion) {
     const { instanceId, sessionId: questionSessionId, requestId } = answer.durableQuestion

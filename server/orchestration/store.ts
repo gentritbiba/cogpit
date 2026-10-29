@@ -4,6 +4,7 @@ import { dirname } from "node:path"
 import { openDatabase, type SqliteDatabase } from "./database"
 import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
 import type { CrewChatAuthor, CrewChatDelivery, CrewChatMessage } from "../../shared/contracts/crewChat"
+import { isTerminalOccurrence, occurrenceCommandId, occurrenceCreationId, type ExecutionGrant, type GrantRef, type OccurrenceHold, type OccurrenceInput, type OccurrenceState, type TriggerOccurrence, type TriggerRecord, type UnattendedAction } from "../../shared/contracts/triggers"
 
 type Row = Record<string, unknown>
 export interface StoredCommand {
@@ -16,6 +17,29 @@ export interface StoredCommand {
 }
 export interface DispatcherLease { owner: string; epoch: number }
 export interface StoredQuestion { sessionId: string; requestId: string; instanceId: string; data: unknown; answerCommandId?: string }
+/** An occurrence a dispatcher claimed: its writes count only while this attempt and lease are current. */
+export interface ClaimedOccurrence { occurrence: TriggerOccurrence; attempt: number; epoch: number }
+export interface OccurrenceRecord {
+  triggerId: string
+  kind: string
+  key: string
+  dueAt: number
+  action: UnattendedAction
+  grant: GrantRef | null
+  request: Record<string, unknown>
+  input?: Omit<OccurrenceInput, "key" | "receivedAt">
+  /** Cancel it once someone else messages this conversation after it was recorded. */
+  fence?: { conversationId: string }
+  /** Fold into the newest still-scheduled occurrence recorded within `windowMs`, up to `maxInputs`. */
+  coalesce?: { windowMs: number; maxInputs: number }
+  /** Refuse once this many of the trigger's occurrences are still waiting. */
+  backlog?: number
+}
+export type RecordedOccurrence = { occurrence: TriggerOccurrence; outcome: "created" | "duplicate" | "coalesced" }
+type TriggerListener = (change: { type: "trigger" | "occurrence"; scope: string; triggerId: string; id: string }) => void
+const OCCURRENCE_REQUEST_LIMIT = 256 * 1024
+const OCCURRENCE_INPUTS_LIMIT = 1024 * 1024
+const ACTIVE_OCCURRENCE = "('admitting','creating')"
 
 export class OrchestrationError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = "OrchestrationError" }
@@ -39,7 +63,9 @@ export function settlesOnDelivery(delivery: string | undefined, payload: Record<
 export class OrchestrationStore {
   private readonly db: SqliteDatabase
   private readonly listeners = new Set<(event: ConversationEvent) => void>()
+  private readonly triggerListeners = new Set<TriggerListener>()
   private pendingEvents: ConversationEvent[] | null = null
+  private pendingTriggerEvents: Parameters<TriggerListener>[0][] = []
 
   constructor(readonly path: string, private readonly now: () => number = Date.now) {
     if (path !== ":memory:") {
@@ -50,7 +76,7 @@ export class OrchestrationStore {
     try {
       this.db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
       const version = Number((this.db.prepare("PRAGMA user_version").get() as Row).user_version)
-      if (version > 4) throw new Error("Orchestration database was created by a newer Cogpit; upgrade before opening it")
+      if (version > 5) throw new Error("Orchestration database was created by a newer Cogpit; upgrade before opening it")
       this.transaction(() => {
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, native_key TEXT UNIQUE NOT NULL, data TEXT NOT NULL);
@@ -72,6 +98,15 @@ export class OrchestrationStore {
           CREATE TABLE IF NOT EXISTS crew_chat_listeners(root_id TEXT NOT NULL,session_id TEXT NOT NULL,listening INTEGER NOT NULL DEFAULT 1,cursor INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(root_id,session_id));
           CREATE TABLE IF NOT EXISTS crew_chat_deliveries(sequence INTEGER NOT NULL REFERENCES crew_chat_messages(sequence) ON DELETE CASCADE,session_id TEXT NOT NULL,scope TEXT NOT NULL,kind TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',error TEXT,PRIMARY KEY(sequence,session_id));
           CREATE INDEX IF NOT EXISTS crew_chat_pending ON crew_chat_deliveries(scope,state,sequence);
+          CREATE TABLE IF NOT EXISTS execution_grants(id TEXT PRIMARY KEY,scope TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,revoked_at INTEGER);
+          CREATE TABLE IF NOT EXISTS triggers(scope TEXT NOT NULL,id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,state TEXT NOT NULL,next_due_at INTEGER,data TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(scope,id));
+          CREATE INDEX IF NOT EXISTS trigger_due ON triggers(kind,state,next_due_at);
+          CREATE TABLE IF NOT EXISTS trigger_secrets(scope TEXT NOT NULL,trigger_id TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,created_at INTEGER NOT NULL,retired_at INTEGER,PRIMARY KEY(scope,trigger_id,id));
+          CREATE TABLE IF NOT EXISTS trigger_occurrences(scope TEXT NOT NULL,id TEXT NOT NULL,trigger_id TEXT NOT NULL,kind TEXT NOT NULL,state TEXT NOT NULL,due_at INTEGER NOT NULL,attempt INTEGER NOT NULL DEFAULT 0,epoch INTEGER NOT NULL DEFAULT 0,fence_conversation TEXT,fence_position INTEGER,data TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(scope,id));
+          CREATE INDEX IF NOT EXISTS occurrence_due ON trigger_occurrences(state,due_at);
+          CREATE INDEX IF NOT EXISTS occurrence_trigger ON trigger_occurrences(scope,trigger_id,created_at);
+          CREATE INDEX IF NOT EXISTS occurrence_fence ON trigger_occurrences(fence_conversation,state);
+          CREATE TABLE IF NOT EXISTS trigger_keys(scope TEXT NOT NULL,trigger_id TEXT NOT NULL,key TEXT NOT NULL,occurrence_id TEXT NOT NULL,fingerprint TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(scope,trigger_id,key));
         `)
         if (!(this.db.prepare("PRAGMA table_info(events)").all() as Row[]).some((row) => row.name === "scope")) this.db.exec("ALTER TABLE events ADD COLUMN scope TEXT")
         if (!(this.db.prepare("PRAGMA table_info(operations)").all() as Row[]).some((row) => row.name === "updated_at")) this.db.exec("ALTER TABLE operations ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
@@ -80,7 +115,7 @@ export class OrchestrationStore {
           this.db.exec("ALTER TABLE transitions ADD COLUMN scope TEXT")
           this.db.exec("UPDATE transitions SET scope=(SELECT scope FROM operations WHERE id=transitions.operation_id) WHERE (SELECT COUNT(*) FROM operations WHERE id=transitions.operation_id)=1")
         }
-        this.db.exec("PRAGMA user_version=4")
+        this.db.exec("PRAGMA user_version=5")
       })
       this.protectFiles()
     } catch (error) { this.db.close(); throw error }
@@ -101,16 +136,19 @@ export class OrchestrationStore {
       result = operation()
       this.db.exec("COMMIT")
       events = this.pendingEvents
-    } catch (error) { this.db.exec("ROLLBACK"); throw error }
+    } catch (error) { this.db.exec("ROLLBACK"); this.pendingTriggerEvents = []; throw error }
     finally { this.pendingEvents = null }
     this.protectFiles()
     for (const event of events) for (const listener of this.listeners) {
       try { listener(event) } catch { /* Committed state remains available through replay. */ }
     }
+    for (const change of this.pendingTriggerEvents.splice(0)) for (const listener of this.triggerListeners) {
+      try { listener(change) } catch { /* Readers re-read committed state. */ }
+    }
     return result
   }
 
-  close(): void { this.listeners.clear(); this.db.close() }
+  close(): void { this.listeners.clear(); this.triggerListeners.clear(); this.db.close() }
   chatListener(rootId: string, sessionId: string): { listening: boolean; cursor: number } {
     const row = this.db.prepare("SELECT listening,cursor FROM crew_chat_listeners WHERE root_id=? AND session_id=?").get(rootId, sessionId) as Row | undefined
     return { listening: row ? Boolean(row.listening) : true, cursor: Number(row?.cursor ?? 0) }
@@ -272,6 +310,7 @@ export class OrchestrationStore {
       const accepted: CommandReceipt = { id, nativeMessageId, conversationId, sessionId: conversation.binding.sessionId, bindingRevision: conversation.revision, state: "queued", intent, message: typeof payload.message === "string" ? payload.message : undefined, questionId: typeof payload.questionId === "string" ? payload.questionId : undefined, createdAt: this.now(), updatedAt: this.now(), position, replaces }
       this.db.prepare("INSERT INTO commands(scope,id,conversation_id,fingerprint,payload,receipt,state,position,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(scope, id, conversationId, hash, JSON.stringify(payload), JSON.stringify(accepted), accepted.state, position, accepted.updatedAt)
       this.event(conversationId, "command", accepted, scope)
+      if (!payload.trigger && payload.notification !== true) this.cancelFenced(conversationId, "Someone messaged the session after this was scheduled")
       return accepted
     })
   }
@@ -303,8 +342,10 @@ export class OrchestrationStore {
       for (const command of this.pending()) {
         if (["delivered", "unknown"].includes(command.receipt.state) && settlesOnDelivery(command.receipt.delivery, command.payload)) this.update(command, "completed", { error: undefined })
         else if (command.receipt.state === "dispatching" || command.receipt.state === "delivered") this.update(command, "unknown", { error: "Host stopped during delivery. Inspect native history before resolving or resending." })
-        else if (command.receipt.state === "queued") this.update(command, "held", { error: "Host restarted; resume this queue after reviewing it." })
+        // A grant outlives the host, so work admitted under one stays queued and is re-authorized when it is claimed.
+        else if (command.receipt.state === "queued" && !command.payload.executionGrant) this.update(command, "held", { error: "Host restarted; resume this queue after reviewing it." })
       }
+      this.reconcileOccurrences(epoch)
       return { owner, epoch }
     })
   }
@@ -382,6 +423,7 @@ export class OrchestrationStore {
       const waiting = (this.db.prepare("SELECT scope,id FROM commands WHERE conversation_id=? AND state IN ('queued','held')").all(conversationId) as Row[])
         .map((row) => this.command(String(row.scope), String(row.id))!)
       for (const command of waiting) this.update(command, "cancelled", { error: "The session was stopped" })
+      this.cancelFenced(conversationId, "The session was stopped")
       return waiting.length
     })
   }
@@ -517,6 +559,7 @@ export class OrchestrationStore {
       this.db.prepare("DELETE FROM crew_chat_messages WHERE root_id=?").run(sessionId)
       this.db.prepare("DELETE FROM crew_chat_listeners WHERE root_id=? OR session_id=?").run(sessionId, sessionId)
       this.db.prepare("DELETE FROM crew_chat_deliveries WHERE session_id=?").run(sessionId)
+      for (const row of this.db.prepare("SELECT scope,id FROM trigger_occurrences WHERE json_extract(data,'$.sessionId')=? AND state NOT IN ('completed','failed','cancelled','skipped')").all(sessionId) as Row[]) this.settleOccurrence(String(row.scope), String(row.id), "cancelled", { reason: "The session was deleted" })
       this.db.prepare("DELETE FROM commands WHERE json_extract(receipt,'$.sessionId')=?").run(sessionId)
       for (const row of this.db.prepare("SELECT native_key,conversation_id,data FROM bindings").all() as Row[]) {
         if (decode<NativeBinding>(row.data).sessionId !== sessionId) continue
@@ -557,6 +600,10 @@ export class OrchestrationStore {
         const task = decode<DelegatedTask>(row.data)
         if (task.acknowledgedAt && task.acknowledgedAt < cutoff) this.db.prepare("UPDATE tasks SET data=? WHERE id=?").run(JSON.stringify({ ...task, result: undefined }), String(row.id))
       }
+      this.db.prepare("DELETE FROM trigger_occurrences WHERE updated_at<? AND state IN ('completed','failed','cancelled','skipped')").run(cutoff)
+      this.db.prepare("DELETE FROM trigger_keys WHERE created_at<? AND occurrence_id NOT IN (SELECT id FROM trigger_occurrences)").run(cutoff)
+      this.db.prepare("DELETE FROM trigger_secrets WHERE retired_at IS NOT NULL AND retired_at<?").run(cutoff)
+      this.db.prepare("DELETE FROM execution_grants WHERE revoked_at IS NOT NULL AND revoked_at<?").run(cutoff)
     })
   }
   instances(): ProviderInstance[] { return (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
@@ -591,5 +638,348 @@ export class OrchestrationStore {
   }
   finishOperation(scope: string, id: string, result: unknown): void {
     this.transaction(() => { this.db.prepare("UPDATE operations SET result=?,updated_at=? WHERE scope=? AND id=? AND result IS NULL").run(JSON.stringify(result), this.now(), scope, id) })
+  }
+
+  // ── Unattended execution grants ──────────────────────────────────
+  putGrant(grant: ExecutionGrant): ExecutionGrant {
+    return this.transaction(() => {
+      this.db.prepare("INSERT INTO execution_grants(id,scope,revision,data,revoked_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,data=excluded.data,revoked_at=excluded.revoked_at").run(grant.id, grant.scope, grant.revision, JSON.stringify(grant), grant.revokedAt ?? null)
+      return grant
+    })
+  }
+  grant(id: string): ExecutionGrant | null {
+    const row = this.db.prepare("SELECT data FROM execution_grants WHERE id=?").get(id) as Row | undefined
+    return row ? decode<ExecutionGrant>(row.data) : null
+  }
+  grants(scope: string): ExecutionGrant[] { return (this.db.prepare("SELECT data FROM execution_grants WHERE scope=? ORDER BY id").all(scope) as Row[]).map((row) => decode<ExecutionGrant>(row.data)) }
+  /** Revokes a grant for good; work it admitted is held for reauthorization as soon as it is next claimed. */
+  revokeGrant(id: string, reason: string): ExecutionGrant | null {
+    return this.transaction(() => {
+      const grant = this.grant(id)
+      if (!grant || grant.revokedAt) return grant
+      return this.putGrant({ ...grant, revision: grant.revision + 1, revokedAt: this.now(), revokedReason: reason, updatedAt: this.now() })
+    })
+  }
+
+  // ── Trigger definitions ──────────────────────────────────────────
+  /** Whether any definition is active or any occurrence is still open, so the scheduler must run. */
+  hasTriggerWork(): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM triggers WHERE state='active' UNION ALL SELECT 1 FROM trigger_occurrences WHERE state NOT IN ('completed','failed','cancelled','skipped') LIMIT 1").get())
+  }
+  subscribeTriggers(listener: TriggerListener): () => void { this.triggerListeners.add(listener); return () => this.triggerListeners.delete(listener) }
+  private triggerEvent(type: "trigger" | "occurrence", scope: string, triggerId: string, id: string): void { this.pendingTriggerEvents.push({ type, scope, triggerId, id }) }
+  private triggerRecord(row: Row): TriggerRecord {
+    const data = decode<{ grant: GrantRef | null; data: Record<string, unknown> }>(row.data)
+    return { id: String(row.id), scope: String(row.scope), kind: String(row.kind), revision: Number(row.revision), state: row.state as TriggerRecord["state"], grant: data.grant, nextDueAt: row.next_due_at === null ? null : Number(row.next_due_at), data: data.data, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }
+  }
+  trigger(scope: string, id: string): TriggerRecord | null {
+    const row = this.db.prepare("SELECT * FROM triggers WHERE scope=? AND id=?").get(scope, id) as Row | undefined
+    return row ? this.triggerRecord(row) : null
+  }
+  triggers(scope: string | null, kind: string): TriggerRecord[] {
+    const rows = scope === null ? this.db.prepare("SELECT * FROM triggers WHERE kind=? ORDER BY created_at,id").all(kind) : this.db.prepare("SELECT * FROM triggers WHERE scope=? AND kind=? ORDER BY created_at,id").all(scope, kind)
+    return (rows as Row[]).map((row) => this.triggerRecord(row))
+  }
+  /** Active definitions of `kind` whose consumer asked to be woken by now. */
+  dueTriggers(kind: string): TriggerRecord[] {
+    return (this.db.prepare("SELECT * FROM triggers WHERE kind=? AND state='active' AND next_due_at IS NOT NULL AND next_due_at<=? ORDER BY next_due_at").all(kind, this.now()) as Row[]).map((row) => this.triggerRecord(row))
+  }
+  /** Creates a definition, or replaces it when `expectedRevision` is the stored one. */
+  putTrigger(scope: string, input: Pick<TriggerRecord, "id" | "kind" | "state" | "grant" | "nextDueAt" | "data">, expectedRevision?: number): TriggerRecord {
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(input.id)) throw new OrchestrationError(400, "Trigger ids must contain 8–128 letters, digits, underscores or hyphens")
+    if (JSON.stringify(input.data).length > OCCURRENCE_REQUEST_LIMIT) throw new OrchestrationError(413, "Trigger definition is too large")
+    return this.transaction(() => {
+      const old = this.trigger(scope, input.id)
+      if (old && old.kind !== input.kind) throw new OrchestrationError(409, "Trigger id already belongs to another kind")
+      if (old && expectedRevision === undefined) throw new OrchestrationError(409, "Trigger already exists")
+      if (expectedRevision !== undefined && old?.revision !== expectedRevision) throw new OrchestrationError(409, "Trigger changed; refresh before saving")
+      const revision = (old?.revision ?? 0) + 1
+      const data = JSON.stringify({ grant: input.grant, data: input.data })
+      this.db.prepare("INSERT INTO triggers(scope,id,kind,revision,state,next_due_at,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(scope,id) DO UPDATE SET revision=excluded.revision,state=excluded.state,next_due_at=excluded.next_due_at,data=excluded.data,updated_at=excluded.updated_at").run(scope, input.id, input.kind, revision, input.state, input.nextDueAt, data, old?.createdAt ?? this.now(), this.now())
+      this.triggerEvent("trigger", scope, input.id, input.id)
+      return this.trigger(scope, input.id)!
+    })
+  }
+  /** Moves a definition's next wake-up without counting as an edit, unless it changed since `revision`. */
+  setTriggerDue(scope: string, id: string, revision: number, nextDueAt: number | null): boolean {
+    return this.transaction(() => {
+      const changed = Number(this.db.prepare("UPDATE triggers SET next_due_at=? WHERE scope=? AND id=? AND revision=?").run(nextDueAt, scope, id, revision).changes) > 0
+      if (changed) this.triggerEvent("trigger", scope, id, id)
+      return changed
+    })
+  }
+  /** Deletes a definition with its secrets, cancels what it still has waiting, and revokes a grant nothing else uses. */
+  deleteTrigger(scope: string, id: string): void {
+    this.transaction(() => {
+      const trigger = this.trigger(scope, id)
+      if (!trigger) return
+      for (const row of this.db.prepare(`SELECT id FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state IN ('scheduled','held')`).all(scope, id) as Row[]) this.cancelOccurrence(scope, String(row.id), "The task was deleted")
+      this.db.prepare("DELETE FROM trigger_secrets WHERE scope=? AND trigger_id=?").run(scope, id)
+      this.db.prepare("DELETE FROM triggers WHERE scope=? AND id=?").run(scope, id)
+      const grantId = trigger.grant?.grantId
+      if (grantId && !this.db.prepare("SELECT 1 FROM triggers WHERE json_extract(data,'$.grant.grantId')=? LIMIT 1").get(grantId)) this.revokeGrant(grantId, "Its task was deleted")
+      this.triggerEvent("trigger", scope, id, id)
+    })
+  }
+  /** Key material a consumer verifies deliveries with. Never part of a definition, a list or a log. */
+  putTriggerSecret(scope: string, triggerId: string, id: string, data: Record<string, unknown>): void {
+    this.transaction(() => { this.db.prepare("INSERT INTO trigger_secrets(scope,trigger_id,id,data,created_at) VALUES(?,?,?,?,?)").run(scope, triggerId, id, JSON.stringify(data), this.now()) })
+  }
+  /** Retires every secret but `keep`, which stay valid for `graceMs` so a rotation does not drop deliveries already in flight. */
+  retireTriggerSecrets(scope: string, triggerId: string, keep: string, graceMs: number): void {
+    this.transaction(() => { this.db.prepare("UPDATE trigger_secrets SET retired_at=? WHERE scope=? AND trigger_id=? AND id<>? AND retired_at IS NULL").run(this.now() + graceMs, scope, triggerId, keep) })
+  }
+  triggerSecrets(scope: string, triggerId: string): Array<{ id: string; data: Record<string, unknown>; createdAt: number }> {
+    return (this.db.prepare("SELECT id,data,created_at FROM trigger_secrets WHERE scope=? AND trigger_id=? AND (retired_at IS NULL OR retired_at>?) ORDER BY created_at DESC").all(scope, triggerId, this.now()) as Row[])
+      .map((row) => ({ id: String(row.id), data: decode<Record<string, unknown>>(row.data), createdAt: Number(row.created_at) }))
+  }
+
+  // ── Trigger occurrences ──────────────────────────────────────────
+  private occurrenceRow(row: Row): TriggerOccurrence {
+    const data = decode<Omit<TriggerOccurrence, "id" | "scope" | "triggerId" | "kind" | "state" | "dueAt" | "attempt" | "createdAt" | "updatedAt" | "command">>(row.data)
+    const command = this.command(String(row.scope), data.commandId)?.receipt
+    return { ...data, id: String(row.id), scope: String(row.scope), triggerId: String(row.trigger_id), kind: String(row.kind), state: row.state as OccurrenceState, dueAt: Number(row.due_at), attempt: Number(row.attempt), createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), ...(command ? { command } : {}) }
+  }
+  occurrence(scope: string, id: string): TriggerOccurrence | null {
+    const row = this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND id=?").get(scope, id) as Row | undefined
+    return row ? this.occurrenceRow(row) : null
+  }
+  /** A trigger's occurrences, newest first. */
+  occurrences(scope: string, triggerId: string, options: { before?: number; limit?: number } = {}): TriggerOccurrence[] {
+    const limit = Math.min(200, Math.max(1, options.limit ?? 50))
+    return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND created_at<? ORDER BY created_at DESC,id DESC LIMIT ?").all(scope, triggerId, options.before ?? Number.MAX_SAFE_INTEGER, limit) as Row[]).map((row) => this.occurrenceRow(row))
+  }
+  /** Occurrences of a trigger not yet settled: waiting, running, held or awaiting reconciliation. */
+  openOccurrences(scope: string, triggerId: string): TriggerOccurrence[] {
+    return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state NOT IN ('completed','failed','cancelled','skipped') ORDER BY created_at").all(scope, triggerId) as Row[]).map((row) => this.occurrenceRow(row))
+  }
+  private writeOccurrence(occurrence: TriggerOccurrence, patch: Partial<TriggerOccurrence>, state: OccurrenceState = occurrence.state, dueAt = occurrence.dueAt): void {
+    const old = decode<Record<string, unknown>>((this.db.prepare("SELECT data FROM trigger_occurrences WHERE scope=? AND id=?").get(occurrence.scope, occurrence.id) as Row).data)
+    const terminal = isTerminalOccurrence(state)
+    const data = { ...old, ...patch, ...(terminal && !old.finishedAt ? { finishedAt: this.now() } : {}) }
+    this.db.prepare("UPDATE trigger_occurrences SET state=?,due_at=?,data=?,updated_at=? WHERE scope=? AND id=?").run(state, dueAt, JSON.stringify(data), this.now(), occurrence.scope, occurrence.id)
+    this.triggerEvent("occurrence", occurrence.scope, occurrence.triggerId, occurrence.id)
+  }
+  /**
+   * Records one due event. A key already recorded returns the occurrence it
+   * made (a replayed delivery or a slot computed twice); different content
+   * under the same key is refused. A burst can fold into the newest
+   * occurrence still waiting instead of starting another run.
+   */
+  recordOccurrence(scope: string, input: OccurrenceRecord): RecordedOccurrence {
+    if (!input.key || input.key.length > 256) throw new OrchestrationError(400, "Occurrence keys must contain 1–256 characters")
+    if (JSON.stringify(input.request).length > OCCURRENCE_REQUEST_LIMIT) throw new OrchestrationError(413, "Occurrence request is too large")
+    const hash = fingerprint({ request: input.request, data: input.input?.data ?? null, action: input.action })
+    return this.transaction(() => {
+      const seen = this.db.prepare("SELECT occurrence_id,fingerprint FROM trigger_keys WHERE scope=? AND trigger_id=? AND key=?").get(scope, input.triggerId, input.key) as Row | undefined
+      if (seen) {
+        if (seen.fingerprint !== hash) throw new OrchestrationError(409, "This delivery id was already recorded with different content")
+        const existing = this.occurrence(scope, String(seen.occurrence_id))
+        if (existing) return { occurrence: existing, outcome: "duplicate" }
+        throw new OrchestrationError(409, "This delivery id was already recorded")
+      }
+      const received: OccurrenceInput | undefined = input.input ? { key: input.key, receivedAt: this.now(), data: input.input.data } : undefined
+      if (input.coalesce && received) {
+        const row = this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state='scheduled' AND created_at>=? ORDER BY created_at DESC LIMIT 1").get(scope, input.triggerId, this.now() - input.coalesce.windowMs) as Row | undefined
+        const target = row && this.occurrenceRow(row)
+        if (target && target.inputs.length < input.coalesce.maxInputs && JSON.stringify([...target.inputs, received]).length <= OCCURRENCE_INPUTS_LIMIT) {
+          this.writeOccurrence(target, { inputs: [...target.inputs, received] })
+          this.db.prepare("INSERT INTO trigger_keys VALUES(?,?,?,?,?,?)").run(scope, input.triggerId, input.key, target.id, hash, this.now())
+          return { occurrence: this.occurrence(scope, target.id)!, outcome: "coalesced" }
+        }
+      }
+      if (received && JSON.stringify(received).length > OCCURRENCE_INPUTS_LIMIT) throw new OrchestrationError(413, "Occurrence input is too large")
+      const waiting = Number((this.db.prepare("SELECT COUNT(*) AS n FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state IN ('scheduled','held')").get(scope, input.triggerId) as Row).n)
+      if (waiting >= (input.backlog ?? 100)) throw new OrchestrationError(429, "Too many runs of this task are already waiting")
+      const id = `occ-${fingerprint([scope, input.triggerId, input.key]).slice(0, 32)}`
+      const fencePosition = input.fence ? Number((this.db.prepare("SELECT COALESCE(MAX(position),0) AS n FROM commands WHERE conversation_id=?").get(input.fence.conversationId) as Row).n) : null
+      const data = { key: input.key, action: input.action, grant: input.grant, request: input.request, inputs: received ? [received] : [], commandId: occurrenceCommandId(id), creationId: occurrenceCreationId(id) }
+      this.db.prepare("INSERT INTO trigger_occurrences(scope,id,trigger_id,kind,state,due_at,fence_conversation,fence_position,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(scope, id, input.triggerId, input.kind, "scheduled", input.dueAt, input.fence?.conversationId ?? null, fencePosition, JSON.stringify(data), this.now(), this.now())
+      this.db.prepare("INSERT INTO trigger_keys VALUES(?,?,?,?,?,?)").run(scope, input.triggerId, input.key, id, hash, this.now())
+      this.triggerEvent("occurrence", scope, input.triggerId, id)
+      return { occurrence: this.occurrence(scope, id)!, outcome: "created" }
+    })
+  }
+  /**
+   * Claims due occurrences of `kinds` for this lease, one at a time per
+   * trigger: a trigger with an occurrence still being admitted or created
+   * waits for it.
+   */
+  claimOccurrences(lease: DispatcherLease, kinds: readonly string[], limit = 20): ClaimedOccurrence[] {
+    if (!kinds.length) return []
+    return this.transaction(() => {
+      if (!this.owns(lease)) return []
+      const rows = this.db.prepare(`SELECT * FROM trigger_occurrences o WHERE state='scheduled' AND due_at<=? AND kind IN (${kinds.map(() => "?").join(",")}) AND NOT EXISTS (SELECT 1 FROM trigger_occurrences a WHERE a.scope=o.scope AND a.trigger_id=o.trigger_id AND a.state IN ${ACTIVE_OCCURRENCE}) ORDER BY due_at,created_at LIMIT ?`).all(this.now(), ...kinds, limit) as Row[]
+      const claimed: ClaimedOccurrence[] = []
+      const triggers = new Set<string>()
+      for (const row of rows) {
+        const key = JSON.stringify([row.scope, row.trigger_id])
+        if (triggers.has(key)) continue
+        triggers.add(key)
+        this.db.prepare("UPDATE trigger_occurrences SET state='admitting',attempt=attempt+1,epoch=?,updated_at=? WHERE scope=? AND id=?").run(lease.epoch, this.now(), String(row.scope), String(row.id))
+        this.triggerEvent("occurrence", String(row.scope), String(row.trigger_id), String(row.id))
+        const occurrence = this.occurrence(String(row.scope), String(row.id))!
+        claimed.push({ occurrence, attempt: occurrence.attempt, epoch: lease.epoch })
+      }
+      return claimed
+    })
+  }
+  private claimCurrent(claim: ClaimedOccurrence, lease: DispatcherLease, states: readonly OccurrenceState[]): TriggerOccurrence | null {
+    if (!this.owns(lease) || lease.epoch !== claim.epoch) return null
+    const row = this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND id=? AND attempt=? AND epoch=?").get(claim.occurrence.scope, claim.occurrence.id, claim.attempt, claim.epoch) as Row | undefined
+    const occurrence = row && this.occurrenceRow(row)
+    return occurrence && states.includes(occurrence.state) ? occurrence : null
+  }
+  /** Whether a claim still owns its occurrence; every write a claimed execution makes checks it first. */
+  occurrenceCurrent(claim: ClaimedOccurrence, lease: DispatcherLease): boolean { return this.claimCurrent(claim, lease, ["admitting", "creating"]) !== null }
+  /** Settles a claimed occurrence; false when another attempt or host owns it now. */
+  finishOccurrence(claim: ClaimedOccurrence, lease: DispatcherLease, state: OccurrenceState, details: { reason?: string; hold?: OccurrenceHold; sessionId?: string; dueAt?: number } = {}): boolean {
+    return this.transaction(() => {
+      const current = this.claimCurrent(claim, lease, ["admitting", "creating"])
+      if (!current) return false
+      const { dueAt, ...patch } = details
+      this.writeOccurrence(current, { hold: undefined, reason: undefined, ...patch }, state, dueAt ?? current.dueAt)
+      return true
+    })
+  }
+  /**
+   * Marks a claimed occurrence as creating a session. From here a crash
+   * leaves its creation operation to say what happened: no operation means
+   * nothing started, one without a result means the outcome is unknown.
+   */
+  beginOccurrenceCreation(claim: ClaimedOccurrence, lease: DispatcherLease): boolean {
+    return this.transaction(() => {
+      const current = this.claimCurrent(claim, lease, ["admitting"])
+      if (!current) return false
+      this.writeOccurrence(current, {}, "creating")
+      return true
+    })
+  }
+  /**
+   * Admits a claimed occurrence's durable command in the same transaction that
+   * records it, so a crash leaves either both or neither. Refuses, cancelling
+   * the occurrence, when someone else messaged its fenced conversation since
+   * it was recorded.
+   */
+  admitForOccurrence(claim: ClaimedOccurrence, lease: DispatcherLease, conversationId: string, payload: Record<string, unknown>, intent: CommandIntent, expectedRevision?: number): CommandReceipt | null {
+    return this.transaction(() => {
+      const current = this.claimCurrent(claim, lease, ["admitting"])
+      if (!current) return null
+      const row = this.db.prepare("SELECT fence_conversation,fence_position FROM trigger_occurrences WHERE scope=? AND id=?").get(current.scope, current.id) as Row
+      if (row.fence_conversation && this.intervened(String(row.fence_conversation), Number(row.fence_position))) {
+        this.writeOccurrence(current, { reason: "Someone messaged the session after this was scheduled" }, "cancelled")
+        return null
+      }
+      const conversation = this.conversation(conversationId)
+      if (expectedRevision !== undefined && conversation?.revision !== expectedRevision) {
+        this.writeOccurrence(current, { hold: "binding", reason: "The session moved to another provider binding; review this run before resuming it" }, "held")
+        return null
+      }
+      const receipt = this.admit(current.scope, current.commandId, conversationId, { ...payload, trigger: { occurrenceId: current.id } }, intent)
+      this.writeOccurrence(current, { sessionId: receipt.sessionId, hold: undefined, reason: undefined }, "admitted")
+      return receipt
+    })
+  }
+  private intervened(conversationId: string, position: number): boolean {
+    return (this.db.prepare("SELECT payload FROM commands WHERE conversation_id=? AND position>?").all(conversationId, position) as Row[])
+      .some((row) => { const payload = decode<Record<string, unknown>>(row.payload); return !payload.trigger && payload.notification !== true })
+  }
+  private cancelFenced(conversationId: string, reason: string): void {
+    for (const row of this.db.prepare("SELECT scope,id FROM trigger_occurrences WHERE fence_conversation=? AND state IN ('scheduled','held','admitting')").all(conversationId) as Row[]) this.settleOccurrence(String(row.scope), String(row.id), "cancelled", { reason })
+  }
+  private settleOccurrence(scope: string, id: string, state: OccurrenceState, patch: Partial<TriggerOccurrence>): void {
+    const occurrence = this.occurrence(scope, id)
+    if (occurrence) this.writeOccurrence(occurrence, patch, state)
+  }
+  /** Follows admitted occurrences' commands: a settled command settles its occurrence. */
+  settleAdmittedOccurrences(): number {
+    return this.transaction(() => {
+      let settled = 0
+      for (const row of this.db.prepare("SELECT * FROM trigger_occurrences WHERE state='admitted'").all() as Row[]) {
+        const occurrence = this.occurrenceRow(row)
+        const state = occurrence.command?.state
+        const next: OccurrenceState | null = !occurrence.command ? "cancelled" : state === "completed" || state === "failed" || state === "cancelled" ? state : null
+        if (!next) continue
+        this.writeOccurrence(occurrence, { ...(occurrence.command ? {} : { reason: "Its command no longer exists" }), ...(occurrence.command?.error ? { reason: occurrence.command.error } : {}) }, next)
+        settled++
+      }
+      return settled
+    })
+  }
+  /**
+   * After another host's lease lapsed, reads what its claims left behind:
+   * an admission either committed its command or never happened, and a
+   * creation's operation says whether a session may exist.
+   */
+  private reconcileOccurrences(epoch: number): void {
+    for (const row of this.db.prepare(`SELECT * FROM trigger_occurrences WHERE state IN ${ACTIVE_OCCURRENCE} AND epoch<?`).all(epoch) as Row[]) {
+      const occurrence = this.occurrenceRow(row)
+      if (occurrence.state === "admitting") {
+        if (occurrence.command) this.writeOccurrence(occurrence, { sessionId: occurrence.command.sessionId }, "admitted")
+        else this.writeOccurrence(occurrence, {}, "scheduled")
+        continue
+      }
+      const operation = this.operation(occurrence.scope, occurrence.creationId)
+      const sessionId = (operation?.result as { sessionId?: unknown } | undefined)?.sessionId
+      if (!operation) this.writeOccurrence(occurrence, {}, "scheduled")
+      else if (typeof sessionId === "string") this.writeOccurrence(occurrence, { sessionId }, "completed")
+      else this.writeOccurrence(occurrence, { reason: "The host stopped while this run was starting a session. Check the project's sessions before marking it." }, "unknown")
+    }
+  }
+  /** Cancels an occurrence that has not reached an agent yet, with its waiting command. */
+  cancelOccurrence(scope: string, id: string, reason = "Cancelled"): TriggerOccurrence {
+    return this.transaction(() => {
+      const occurrence = this.occurrence(scope, id)
+      if (!occurrence) throw new OrchestrationError(404, "Run not found")
+      if (isTerminalOccurrence(occurrence.state)) return occurrence
+      if (occurrence.state === "admitting" || occurrence.state === "creating") throw new OrchestrationError(409, "This run is being started; wait for it to settle")
+      if (occurrence.state === "unknown") throw new OrchestrationError(409, "Resolve this run's unknown outcome instead")
+      if (occurrence.state === "admitted") {
+        const command = occurrence.command
+        if (command && !["queued", "held"].includes(command.state)) throw new OrchestrationError(409, "Delivery has begun; stop the session's turn instead")
+        if (command) this.cancel(scope, command.id)
+      }
+      this.writeOccurrence(occurrence, { hold: undefined, reason }, "cancelled")
+      return this.occurrence(scope, id)!
+    })
+  }
+  /** Returns a held occurrence to the schedule, due now, optionally under a renewed grant. */
+  requeueOccurrence(scope: string, id: string, grant?: GrantRef): TriggerOccurrence {
+    return this.transaction(() => {
+      const occurrence = this.occurrence(scope, id)
+      if (!occurrence) throw new OrchestrationError(404, "Run not found")
+      if (occurrence.state !== "held") throw new OrchestrationError(409, "Only a held run can be resumed")
+      this.writeOccurrence(occurrence, { hold: undefined, reason: undefined, ...(grant ? { grant } : {}) }, "scheduled", Math.min(occurrence.dueAt, this.now()))
+      return this.occurrence(scope, id)!
+    })
+  }
+  /** Holds a scheduled occurrence for review, such as one a missed-run policy will not start by itself. */
+  holdOccurrence(scope: string, id: string, hold: OccurrenceHold, reason: string): TriggerOccurrence {
+    return this.transaction(() => {
+      const occurrence = this.occurrence(scope, id)
+      if (!occurrence) throw new OrchestrationError(404, "Run not found")
+      if (occurrence.state !== "scheduled") throw new OrchestrationError(409, "Only a waiting run can be held")
+      this.writeOccurrence(occurrence, { hold, reason }, "held")
+      return this.occurrence(scope, id)!
+    })
+  }
+  /** Marks a scheduled occurrence skipped, such as a missed slot or an overlapping run. */
+  skipOccurrence(scope: string, id: string, reason: string): TriggerOccurrence {
+    return this.transaction(() => {
+      const occurrence = this.occurrence(scope, id)
+      if (!occurrence) throw new OrchestrationError(404, "Run not found")
+      if (occurrence.state !== "scheduled") throw new OrchestrationError(409, "Only a waiting run can be skipped")
+      this.writeOccurrence(occurrence, { reason }, "skipped")
+      return this.occurrence(scope, id)!
+    })
+  }
+  /** The user's answer to an occurrence whose session creation outcome is unknown. */
+  resolveOccurrence(scope: string, id: string, disposition: "completed" | "failed", sessionId?: string): TriggerOccurrence {
+    return this.transaction(() => {
+      const occurrence = this.occurrence(scope, id)
+      if (!occurrence || occurrence.state !== "unknown") throw new OrchestrationError(409, "Run is not awaiting reconciliation")
+      this.writeOccurrence(occurrence, { reason: disposition === "failed" ? "Marked as not started" : "Marked as started", ...(sessionId ? { sessionId } : {}) }, disposition)
+      return this.occurrence(scope, id)!
+    })
   }
 }

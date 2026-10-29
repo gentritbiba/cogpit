@@ -6,6 +6,7 @@ import type {
   EditionSessionAccess,
   EditionSessionSettings,
   EditionTurns,
+  EditionUnattended,
   NotificationRetention,
   PersistentSessionStore,
 } from "./types"
@@ -80,7 +81,13 @@ const BROWSERS = {
   accountOf: "function",
 } as const satisfies Record<keyof EditionBrowsers, Member>
 
-/** `edition` is how the loader picks a module, and `auth` may be null. */
+const UNATTENDED = {
+  issue: "function",
+  resolve: "function",
+  revoke: "function",
+} as const satisfies Record<keyof EditionUnattended, Member>
+
+/** `edition` is how the loader picks a module, `auth` may be null and `unattended` may be absent. */
 const MODULE = {
   boot: "function",
   flush: "function",
@@ -97,7 +104,7 @@ const MODULE = {
   turns: TURNS,
   sessionSettings: SESSION_SETTINGS,
   notificationRetention: NOTIFICATION_RETENTION,
-} as const satisfies Record<Exclude<keyof EditionModule, "edition" | "auth">, Member>
+} as const satisfies Record<Exclude<keyof EditionModule, "edition" | "auth" | "unattended">, Member>
 
 function isStringList(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
@@ -119,5 +126,6 @@ function missingMembers(value: unknown, shape: { readonly [name: string]: Member
 export function missingEditionMembers(candidate: object): string[] {
   const missing = missingMembers(candidate, MODULE, "")
   if (!("auth" in candidate)) return [...missing, "auth"]
-  return candidate.auth === null ? missing : [...missing, ...missingMembers(candidate.auth, AUTH, "auth")]
+  const unattended = "unattended" in candidate && candidate.unattended !== undefined ? missingMembers(candidate.unattended, UNATTENDED, "unattended") : []
+  return candidate.auth === null ? [...missing, ...unattended] : [...missing, ...unattended, ...missingMembers(candidate.auth, AUTH, "auth")]
 }
