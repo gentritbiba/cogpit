@@ -351,7 +351,8 @@ export class OrchestrationStore {
       return { owner, epoch }
     })
   }
-  release(lease: DispatcherLease): void { this.db.prepare("UPDATE dispatcher SET expires_at=0 WHERE id=1 AND owner=? AND epoch=?").run(lease.owner, lease.epoch) }
+  /** Gives the lease up for good: nothing the released owner still has in flight can write under it. */
+  release(lease: DispatcherLease): void { this.db.prepare("UPDATE dispatcher SET owner='',expires_at=0 WHERE id=1 AND owner=? AND epoch=?").run(lease.owner, lease.epoch) }
   private owns(lease: DispatcherLease): boolean { return Boolean(this.db.prepare("SELECT 1 FROM dispatcher WHERE id=1 AND owner=? AND epoch=?").get(lease.owner, lease.epoch)) }
   currentAttempt(command: StoredCommand, lease: DispatcherLease): boolean {
     const current = this.command(command.scope, command.receipt.id)
@@ -637,6 +638,10 @@ export class OrchestrationStore {
       this.db.prepare("INSERT INTO operations(scope,id,fingerprint,input,result,updated_at) VALUES(?,?,?,?,?,?)").run(scope, id, hash, JSON.stringify(input), importedResult === undefined ? null : JSON.stringify(importedResult), this.now())
       return { fresh: importedResult === undefined, ...(importedResult === undefined ? {} : { result: importedResult }) }
     })
+  }
+  /** Forgets a creation claim that provably started nothing, so the same identity can start it later. */
+  abandonOperation(scope: string, id: string): void {
+    this.transaction(() => { this.db.prepare("DELETE FROM operations WHERE scope=? AND id=? AND result IS NULL").run(scope, id) })
   }
   finishOperation(scope: string, id: string, result: unknown): void {
     this.transaction(() => { this.db.prepare("UPDATE operations SET result=?,updated_at=? WHERE scope=? AND id=? AND result IS NULL").run(JSON.stringify(result), this.now(), scope, id) })
@@ -948,11 +953,10 @@ export class OrchestrationStore {
       if (isTerminalOccurrence(occurrence.state)) return occurrence
       if (occurrence.state === "admitting" || occurrence.state === "creating") throw new OrchestrationError(409, "This run is being started; wait for it to settle")
       if (occurrence.state === "unknown") throw new OrchestrationError(409, "Resolve this run's unknown outcome instead")
-      if (occurrence.state === "admitted") {
-        const command = occurrence.command
-        if (command && !["queued", "held"].includes(command.state)) throw new OrchestrationError(409, "Delivery has begun; stop the session's turn instead")
-        if (command) this.cancel(scope, command.id)
-      }
+      // Whatever the occurrence shows, a message it admitted that has not reached the agent goes with it.
+      const command = occurrence.command
+      if (command && ["dispatching", "delivered", "unknown"].includes(command.state)) throw new OrchestrationError(409, "Delivery has begun; stop the session's turn instead")
+      if (command && ["queued", "held"].includes(command.state)) this.cancel(scope, command.id)
       this.writeOccurrence(occurrence, { hold: undefined, reason }, "cancelled")
       return this.occurrence(scope, id)!
     })

@@ -282,3 +282,60 @@ describe("trigger definitions", () => {
     expect(seen).toEqual(["occurrence:trigger-0001"])
   })
 })
+
+describe("cancelling a run whose message is held", () => {
+  it("cancels the held message with it, so the conversation's Resume cannot revive it", () => {
+    const store = open()
+    const lease = store.acquire("host")!
+    const conversation = store.ensureConversation(binding)
+    store.putTrigger("local", { id: "task-00001", kind: "test", state: "active", grant: null, nextDueAt: null, data: {} })
+    for (const key of ["cancelled", "deleted"]) store.recordOccurrence("local", record({ key, triggerId: key === "deleted" ? "task-00001" : "trigger-0001" }))
+    const ids: string[] = []
+    const other = store.ensureConversation({ ...binding, sessionId: "native-other" })
+    for (const claim of store.claimOccurrences(lease, ["test"])) {
+      store.admitForOccurrence(claim, lease, claim.occurrence.key === "deleted" ? other.id : conversation.id, { message: claim.occurrence.key }, "queue")
+      const command = store.claim("local", claim.occurrence.commandId, lease)!
+      store.finish(command, lease, "held", { error: "Agent is busy" })
+      ids.push(claim.occurrence.id)
+    }
+    store.settleAdmittedOccurrences()
+    expect(ids.map((id) => store.occurrence("local", id)!.state)).toEqual(["held", "held"])
+    const [cancelled, deleted] = ids.map((id) => store.occurrence("local", id)!)
+    store.cancelOccurrence("local", cancelled!.id, "Not needed")
+    store.deleteTrigger("local", "task-00001")
+    store.resume("local", conversation.id)
+    store.resume("local", other.id)
+    for (const occurrence of [cancelled!, deleted!]) {
+      expect(store.occurrence("local", occurrence.id)!.state).toBe("cancelled")
+      expect(store.command("local", occurrence.commandId)!.receipt.state).toBe("cancelled")
+    }
+    expect(store.queued()).toEqual([])
+  })
+
+  it("refuses while its message is being delivered", () => {
+    const store = open()
+    const lease = store.acquire("host")!
+    const conversation = store.ensureConversation(binding)
+    store.recordOccurrence("local", record())
+    const [claim] = store.claimOccurrences(lease, ["test"])
+    store.admitForOccurrence(claim!, lease, conversation.id, { message: "x" }, "queue")
+    store.claim("local", claim!.occurrence.commandId, lease)
+    expect(() => store.cancelOccurrence("local", claim!.occurrence.id)).toThrow(/Delivery has begun/)
+  })
+})
+
+describe("a released lease", () => {
+  it("fences every write of the owner that released it", () => {
+    const store = open()
+    const lease = store.acquire("host")!
+    store.recordOccurrence("local", record())
+    const [claim] = store.claimOccurrences(lease, ["test"])
+    store.release(lease)
+    expect(store.occurrenceCurrent(claim!, lease)).toBe(false)
+    expect(store.beginOccurrenceCreation(claim!, lease)).toBe(false)
+    expect(store.finishOccurrence(claim!, lease, "completed")).toBe(false)
+    const next = store.acquire("next-host")!
+    expect(next.epoch).toBe(lease.epoch + 1)
+    expect(store.occurrence("local", claim!.occurrence.id)!.state).toBe("scheduled")
+  })
+})

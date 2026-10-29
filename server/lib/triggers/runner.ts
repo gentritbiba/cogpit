@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http"
 import type { CommandIntent, CommandReceipt } from "../../../shared/contracts/orchestration"
 import type { ExecutionTarget, OccurrenceHold, TriggerOccurrence } from "../../../shared/contracts/triggers"
 import type { SendRequest, StartedSession } from "../../agents/runtimeTypes"
+import type { StartupAuthorizationContext } from "../../../shared/contracts/worktreeSetup"
 import { startTurn } from "../../edition"
 import type { CommandDispatcher } from "../../orchestration/dispatcher"
 import { orchestrationStore } from "../../orchestration/storage"
@@ -30,9 +31,16 @@ export interface TriggerHandler {
   prepare(occurrence: TriggerOccurrence): Promise<Prepared>
 }
 
+/** What a creation runs under: the dispatcher's lifetime, a fresh authority check before setup and first input, and a mark once a runtime start began. */
+export interface CreationLifecycle {
+  signal: AbortSignal
+  authorizeStartup: (context: StartupAuthorizationContext) => Promise<void>
+  onStart: () => void
+}
+
 export interface TriggerExecutor {
   send(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.send" }>, req: IncomingMessage, durable: boolean): Promise<CommandReceipt | null>
-  create(claim: ClaimedOccurrence, prepared: Extract<PreparedExecution, { action: "session.create" }>, req: IncomingMessage): Promise<StartedSession>
+  create(claim: ClaimedOccurrence, prepared: Extract<PreparedExecution, { action: "session.create" }>, req: IncomingMessage, lifecycle: CreationLifecycle): Promise<StartedSession>
   /** Grant resolution; replaced in tests. */
   resolve: typeof resolveExecution
 }
@@ -60,15 +68,44 @@ export const defaultExecutor: TriggerExecutor = {
     ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}),
     ...(prepared.target.bindingRevision !== undefined ? { expectedBindingRevision: prepared.target.bindingRevision } : {}),
   }),
-  create: (claim, prepared, req) => createSession(
-    { ...prepared.input, retry: { scope: claim.occurrence.scope, requestId: claim.occurrence.creationId } },
-    (runtime, request) => startTurn(req, Date.now(), runtime, request),
+  create: (claim, prepared, req, lifecycle) => createSession(
+    {
+      ...prepared.input,
+      retry: { scope: claim.occurrence.scope, requestId: claim.occurrence.creationId },
+      setupScope: claim.occurrence.scope,
+      signal: lifecycle.signal,
+      authorizeStartup: lifecycle.authorizeStartup,
+    },
+    (runtime, request) => {
+      lifecycle.onStart()
+      return startTurn(req, Date.now(), runtime, request)
+    },
   ),
   resolve: resolveExecution,
 }
 
+/** Refused before a session's setup or first input; `reauthorize` when its authority is what changed. */
+class StartupRefused extends Error {
+  constructor(message: string, readonly reauthorize: boolean) { super(message); this.name = "StartupRefused" }
+}
+
+/** Executions in flight on any runner, so shutdown can let them stop before storage closes. */
+const inFlight = new Set<Promise<void>>()
+/** Resolves once every trigger execution has stopped, or after `timeoutMs`. */
+export async function triggerExecutionsSettled(timeoutMs = 5_000): Promise<void> {
+  if (inFlight.size === 0) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([Promise.allSettled([...inFlight]), new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs) })])
+  clearTimeout(timer)
+}
+
 export class TriggerRunner {
   constructor(private readonly dispatcher: CommandDispatcher, private readonly executor: TriggerExecutor = defaultExecutor) {}
+
+  /** False once the dispatcher closed or another attempt or host owns the claim: nothing further may start. */
+  private live(claim: ClaimedOccurrence, lease: DispatcherLease): boolean {
+    return !this.dispatcher.signal.aborted && this.store.occurrenceCurrent(claim, lease)
+  }
 
   get store(): OrchestrationStore { return this.dispatcher.store }
 
@@ -77,7 +114,11 @@ export class TriggerRunner {
     this.store.settleAdmittedOccurrences()
     forgetSettledLiveAuthorities(this.store)
     await attachGrantAuthorities()
-    for (const claim of this.store.claimOccurrences(lease, [...handlers.keys()])) void this.execute(claim, lease)
+    for (const claim of this.store.claimOccurrences(lease, [...handlers.keys()])) {
+      const running = this.execute(claim, lease).catch((error: unknown) => { console.error("[orchestration] trigger execution failed", error) })
+      inFlight.add(running)
+      void running.finally(() => inFlight.delete(running))
+    }
   }
 
   /** Runs due work now rather than at the next heartbeat. */
@@ -110,7 +151,8 @@ export class TriggerRunner {
 
   private async execute(claim: ClaimedOccurrence, lease: DispatcherLease): Promise<void> {
     const { occurrence } = claim
-    const finish = (state: Parameters<OrchestrationStore["finishOccurrence"]>[2], details?: Parameters<OrchestrationStore["finishOccurrence"]>[3]) => this.store.finishOccurrence(claim, lease, state, details)
+    // After the dispatcher closed, storage is left alone: the next host reconciles the claim.
+    const finish = (state: Parameters<OrchestrationStore["finishOccurrence"]>[2], details?: Parameters<OrchestrationStore["finishOccurrence"]>[3]) => !this.dispatcher.signal.aborted && this.store.finishOccurrence(claim, lease, state, details)
     let prepared: Prepared
     try {
       const handler = handlers.get(occurrence.kind)
@@ -120,11 +162,13 @@ export class TriggerRunner {
       finish("failed", { reason: messageOf(error) })
       return
     }
+    if (this.dispatcher.signal.aborted) return
     if ("skip" in prepared) { finish("skipped", { reason: prepared.skip }); return }
     if ("hold" in prepared) { finish("held", { hold: prepared.hold, reason: prepared.reason }); return }
     const authority = await this.authority(occurrence, prepared).catch((error: unknown) => ({ hold: messageOf(error) }))
+    if (this.dispatcher.signal.aborted) return
     if ("hold" in authority) { finish("held", { hold: "reauthorize", reason: authority.hold }); return }
-    if (!this.store.occurrenceCurrent(claim, lease)) return
+    if (!this.live(claim, lease)) return
     if (prepared.action === "session.send") await this.send(claim, lease, prepared, authority.req, authority.durable === true, finish)
     else await this.create(claim, lease, prepared, authority.req, finish)
   }
@@ -144,14 +188,45 @@ export class TriggerRunner {
     }
   }
 
+  /**
+   * The check a creation runs before its worktree setup and again before the
+   * session's first input: the dispatcher still open, this attempt still the
+   * claim's, and the occurrence's authority — live sign-in or current grant —
+   * still allowing this target in the project the session actually starts in.
+   */
+  private startupCheck(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.create" }>): (context: StartupAuthorizationContext) => Promise<void> {
+    return async (context) => {
+      if (!this.live(claim, lease)) throw new StartupRefused("The run stopped before its session started", false)
+      const target = prepared.target.cwd !== undefined ? { ...prepared.target, cwd: context.projectCwd } : prepared.target
+      const occurrence = this.store.occurrence(claim.occurrence.scope, claim.occurrence.id) ?? claim.occurrence
+      const resolved = await this.authority(occurrence, { ...prepared, target })
+      if ("hold" in resolved) throw new StartupRefused(resolved.hold, true)
+      if (!this.live(claim, lease)) throw new StartupRefused("The run stopped before its session started", false)
+    }
+  }
+
   private async create(claim: ClaimedOccurrence, lease: DispatcherLease, prepared: Extract<PreparedExecution, { action: "session.create" }>, req: IncomingMessage, finish: (state: TriggerOccurrence["state"], details?: { reason?: string; hold?: OccurrenceHold; sessionId?: string }) => boolean): Promise<void> {
     if (!this.store.beginOccurrenceCreation(claim, lease)) return
+    let started = false
     try {
-      const started = await this.executor.create(claim, prepared, req)
-      finish("completed", { sessionId: started.sessionId })
+      const session = await this.executor.create(claim, prepared, req, {
+        signal: this.dispatcher.signal,
+        authorizeStartup: this.startupCheck(claim, lease, prepared),
+        onStart: () => { started = true },
+      })
+      finish("completed", { sessionId: session.sessionId })
     } catch (error) {
-      // The creation operation, not the error, says whether a session may exist.
-      const operation = this.store.operation(claim.occurrence.scope, claim.occurrence.creationId)
+      if (this.dispatcher.signal.aborted) return
+      const { scope, creationId } = claim.occurrence
+      // Refused before any runtime started: nothing exists, so the claim can be forgotten and run again once reauthorized.
+      if (!started && this.store.occurrenceCurrent(claim, lease)) {
+        this.store.abandonOperation(scope, creationId)
+        if (error instanceof StartupRefused || statusOf(error) === 403) finish("held", { hold: "reauthorize", reason: messageOf(error) })
+        else finish("failed", { reason: messageOf(error) })
+        return
+      }
+      // Otherwise the creation operation, not the error, says whether a session may exist.
+      const operation = this.store.operation(scope, creationId)
       const sessionId = (operation?.result as { sessionId?: unknown } | undefined)?.sessionId
       if (typeof sessionId === "string") finish("completed", { sessionId })
       else if (operation) finish("unknown", { reason: `${messageOf(error)}. A session may have started; check the project's sessions before marking this run.` })

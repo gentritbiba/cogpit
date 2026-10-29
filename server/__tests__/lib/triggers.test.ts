@@ -7,7 +7,7 @@ import { installFakeEdition, useAccountSignIn } from "../edition/fakeEdition"
 import { fakeEditionAuth } from "../edition/fakeAuth"
 import { admitOccurrenceCommand, closeCommandDispatcher, commandDispatcher } from "../../lib/durableSend"
 import { __resetLiveAuthoritiesForTest, issueExecutionGrant, resolveExecution, revokeExecutionGrant, targetWithin } from "../../lib/triggers/authority"
-import { defaultExecutor, registerTriggerHandler, TriggerRunner, type Prepared, type TriggerExecutor } from "../../lib/triggers/runner"
+import { defaultExecutor, registerTriggerHandler, TriggerRunner, triggerExecutionsSettled, type Prepared, type TriggerExecutor } from "../../lib/triggers/runner"
 import { OrchestrationError } from "../../orchestration/store"
 import { registerTriggerDeliveryGuard, type DeliveryVerdict } from "../../orchestration/deliveryGuards"
 import { setRequestAuthentication } from "../../requestAuthentication"
@@ -172,10 +172,11 @@ describe("the trigger runner", () => {
   it("settles session creation from its operation: started, unknown after it began, or failed before", async () => {
     const outcomes = ["started", "began-then-crashed", "refused"]
     const { dispatcher, store, unregister } = harness({
-      create: async (claim) => {
+      create: async (claim, _prepared, _req, lifecycle) => {
         const outcome = outcomes.shift()
         if (outcome === "refused") throw new OrchestrationError(400, "Project folder is missing")
         dispatcher.store.beginOperation(claim.occurrence.scope, claim.occurrence.creationId, "hash", {})
+        lifecycle.onStart()
         if (outcome === "began-then-crashed") throw new Error("agent exited")
         dispatcher.store.finishOperation(claim.occurrence.scope, claim.occurrence.creationId, { sessionId: "created-1" })
         return { sessionId: "created-1", dirName: "proj", fileName: "created-1.jsonl", filePath: "/p/created-1.jsonl" }
@@ -447,5 +448,85 @@ describe("the final handoff of a guarded trigger command", () => {
       expect(send).not.toHaveBeenCalled()
       expect(store.command("user-1", occurrence.commandId)).not.toBeNull()
     } finally { unguard(); unregister() }
+  })
+})
+
+describe("a trigger command whose run is over", () => {
+  it("is cancelled, never delivered, when a queue operation revives it after its run ended", async () => {
+    const send = vi.fn(async (_sessionId: string, _input: Record<string, unknown>) => ({ delivery: "started" as const, turnId: "turn-1" }))
+    let busy = true
+    const runtime = { kind: "claude", instanceId: "default", descriptor: descriptorFor("claude"), activity: () => ({ live: true, running: busy }), send } as unknown as AgentRuntime
+    const { dispatcher, store, unregister } = harness({
+      send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({ sessionId: prepared.target.sessionId, request: prepared.request, req, claim, lease, intent: "queue", runtime, binding, ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}) }),
+    })
+    try {
+      const grant = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+      const { occurrence } = store.recordOccurrence("local", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {} })
+      await dispatcher.tick()
+      await vi.waitFor(() => expect(store.occurrence("local", occurrence.id)!.state).toBe("admitted"))
+      // An older host, or a hand edit, left the run settled with its message still queued.
+      ;(store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db.prepare("UPDATE trigger_occurrences SET state='cancelled' WHERE id=?").run(occurrence.id)
+      busy = false
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.command("local", occurrence.commandId)!.receipt).toMatchObject({ state: "cancelled", error: expect.stringMatching(/no longer active/) })
+      })
+      expect(send).not.toHaveBeenCalled()
+    } finally { unregister() }
+  })
+})
+
+describe("trigger executions and the dispatcher's lifetime", () => {
+  function deferred<T = void>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => { resolve = done })
+    return { promise, resolve }
+  }
+  const createTarget = { agent: "claude" as const, instanceId: "default", dirName: "proj" }
+
+  it("starts nothing and writes nothing once the dispatcher closed during prepare, authority or creation", async () => {
+    const prepare = deferred()
+    const resolveGate = deferred()
+    const creating = deferred()
+    const create = vi.fn<TriggerExecutor["create"]>(async (claim, _prepared, _req, lifecycle) => {
+      commandDispatcher().store.beginOperation(claim.occurrence.scope, claim.occurrence.creationId, "hash", {})
+      lifecycle.onStart()
+      creating.resolve()
+      await new Promise((_resolve, reject) => lifecycle.signal.addEventListener("abort", () => reject(lifecycle.signal.reason), { once: true }))
+      throw new Error("unreachable")
+    })
+    let preparing = 0
+    const { dispatcher, store, unregister } = harness({
+      create,
+      resolve: async (...args) => { if (args[0].grantId === "gate") { await resolveGate.promise } return resolveExecution(...args) },
+    }, async (occurrence) => {
+      if (occurrence.key === "prepare") { preparing++; await prepare.promise }
+      return { action: "session.create", target: createTarget, input: { dirName: "proj", message: "nightly" } }
+    })
+    try {
+      const grant = await issueExecutionGrant(localRequest(), { actions: ["session.create"], target: createTarget, label: "x" }, "local")
+      store.putGrant({ ...grant, id: "gate" })
+      const record = (key: string, grantId: string) => store.recordOccurrence("local", { triggerId: `trigger-${key}`, kind: "test", key, dueAt: Date.now(), action: "session.create", grant: { grantId, revision: 1 }, request: {} }).occurrence
+      const inPrepare = record("prepare", grant.id)
+      const inAuthority = record("authority", "gate")
+      const inCreation = record("creation", grant.id)
+      await dispatcher.tick()
+      await vi.waitFor(() => expect(preparing).toBe(1))
+      await creating.promise
+      closeCommandDispatcher()
+      prepare.resolve()
+      resolveGate.resolve()
+      await triggerExecutionsSettled()
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(create.mock.calls[0]![3].signal.aborted).toBe(true)
+      expect([inPrepare, inAuthority, inCreation].map((o) => store.occurrence("local", o.id)!.state)).toEqual(["admitting", "admitting", "creating"])
+
+      // The next host reconciles: nothing started for two of them, and the third may have started a session.
+      const next = commandDispatcher()
+      expect(next).not.toBe(dispatcher)
+      await next.tick()
+      expect(next.store.occurrence("local", inPrepare.id)!.attempt).toBeGreaterThanOrEqual(1)
+      expect(next.store.occurrence("local", inCreation.id)).toMatchObject({ state: "unknown" })
+    } finally { unregister() }
   })
 })

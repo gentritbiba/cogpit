@@ -29,6 +29,9 @@ export class CommandDispatcher {
   private closed = false
   private readonly waiters = new Set<() => void>()
   private readonly tickHooks = new Set<(lease: DispatcherLease) => Promise<void>>()
+  private readonly lifetime = new AbortController()
+  /** Aborted when the dispatcher closes: work it started stops before any further I/O. */
+  get signal(): AbortSignal { return this.lifetime.signal }
 
   constructor(readonly store: OrchestrationStore) {}
   start(): boolean {
@@ -140,6 +143,7 @@ export class CommandDispatcher {
   close(): void {
     for (const finish of this.waiters) finish()
     this.closed = true
+    this.lifetime.abort(new Error("The command dispatcher closed"))
     if (this.timer) clearInterval(this.timer)
     if (this.lease) this.store.release(this.lease)
     this.authorities.clear(); this.active.clear(); this.tickHooks.clear()

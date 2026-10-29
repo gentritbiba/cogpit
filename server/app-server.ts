@@ -39,7 +39,7 @@ import { allRuntimes, isSessionActive } from "./agents/runtimes"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
-import { startTriggerScheduler } from "./lib/triggers/runner"
+import { startTriggerScheduler, triggerExecutionsSettled } from "./lib/triggers/runner"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
@@ -279,7 +279,7 @@ export async function createServerComposition(
 
   httpServer.on("close", () => {
     closeCommandDispatcher()
-    void cleanupRuntime().finally(closeOrchestrationStore)
+    void cleanupRuntime().then(() => triggerExecutionsSettled()).finally(closeOrchestrationStore)
   })
 
   const dispose = async (): Promise<void> => {
@@ -301,6 +301,7 @@ export async function createServerComposition(
     // a login/config mutation that completed during runtime cleanup cannot be
     // acknowledged without its durable session state reaching disk.
     await settleThenFlushEdition([cleanupRuntime(), serverClosed])
+    await triggerExecutionsSettled()
     closeOrchestrationStore()
   }
 

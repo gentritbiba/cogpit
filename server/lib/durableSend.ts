@@ -15,7 +15,7 @@ import { beforeOrchestrationClose, orchestrationStore } from "../orchestration/s
 import { checkTriggerDelivery, DeliveryRefused } from "../orchestration/deliveryGuards"
 import type { DispatchRefusal } from "../orchestration/dispatcher"
 import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type StoredCommand } from "../orchestration/store"
-import type { GrantRef } from "../../shared/contracts/triggers"
+import { isTerminalOccurrence, type GrantRef } from "../../shared/contracts/triggers"
 import { setSessionsArchived } from "./sessionArchive"
 import { liveAuthority, resolveExecution } from "./triggers/authority"
 
@@ -84,9 +84,12 @@ async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, au
   const trigger = command.payload.trigger as { occurrenceId?: unknown } | undefined
   if (typeof trigger?.occurrenceId !== "string") return executionRequest(authentication, scope) ?? { disposition: "held", reason: "Sign in with access to this session, then resume its queue." }
   const refusal = (reason: string): DispatchRefusal => ({ disposition: "held", reason, code: REAUTHORIZE })
+  // A run cancelled, settled or deleted takes its message with it, whatever revived the message.
+  const occurrence = commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId)
+  if (!occurrence || isTerminalOccurrence(occurrence.state)) return { disposition: "cancelled", reason: "The run this message belongs to is no longer active" }
   const live = liveAuthority(command.scope, trigger.occurrenceId)
   if (live !== undefined) return executionRequest(live, scope) ?? refusal("The sign-in that reauthorized this run expired; reauthorize it again")
-  const grant = commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId)?.grant
+  const grant = occurrence.grant
   if (!grant || !command.payload.executionGrant) return refusal("This run needs to be reauthorized by its owner")
   const resolved = await resolveExecution(grant, "session.send", { agent: runtime.kind, instanceId: runtime.instanceId ?? "default", sessionId: command.receipt.sessionId, bindingRevision: command.receipt.bindingRevision }, scope)
   return "req" in resolved ? resolved.req : refusal(resolved.hold)
