@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CrewMember, SessionCrew } from "../../../../shared/contracts/crew"
 import type { WorkspacePanelContext } from "@/plugin-api"
@@ -121,5 +122,78 @@ describe("CrewPanel", () => {
     const sessions = await screen.findByRole("region", { name: "Sessions" })
     fireEvent.click(within(sessions).getByRole("radio", { name: "Need you" }))
     expect(within(sessions).getAllByRole("listitem").map((item) => item.getAttribute("data-crew-row"))).toEqual(["rooftop"])
+  })
+
+  function nestedCrew() {
+    mocks.crew = {
+      ...crew,
+      members: [
+        ...crew.members,
+        member("branch", { parentId: "lane", startedAt: 40 }),
+        member("helper", { parentId: "branch", startedAt: 50, outcome: "needs_input" }),
+      ],
+    }
+  }
+
+  it("folds every descendant without opening the parent, preserving nested folds and siblings", async () => {
+    nestedCrew()
+    const { openSession } = renderPanel()
+    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    expect(within(sessions).queryByRole("button", { name: /Collapse theories/ })).not.toBeInTheDocument()
+    fireEvent.click(within(sessions).getByRole("button", { name: "Collapse branch's child sessions" }))
+    fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
+    expect(openSession).not.toHaveBeenCalled()
+    expect(within(sessions).queryByRole("button", { name: "branch, Finished" })).not.toBeInTheDocument()
+    expect(within(sessions).queryByRole("button", { name: "helper, Plan to review" })).not.toBeInTheDocument()
+    expect(within(sessions).getByRole("button", { name: "theories, Finished · result unread" })).toBeInTheDocument()
+    expect(within(sessions).getByRole("button", { name: "Expand lane's child sessions" })).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(within(sessions).getByRole("button", { name: "Expand lane's child sessions" }))
+    expect(within(sessions).getByRole("button", { name: "branch, Finished" })).toBeInTheDocument()
+    expect(within(sessions).queryByRole("button", { name: "helper, Plan to review" })).not.toBeInTheDocument()
+    fireEvent.click(within(sessions).getByRole("button", { name: "Expand branch's child sessions" }))
+    fireEvent.click(within(sessions).getByRole("button", { name: "helper, Plan to review" }))
+    expect(openSession).toHaveBeenCalledWith("-helper", "helper.jsonl")
+  })
+
+  it("reveals matching descendants in status filters and restores folds on All", async () => {
+    nestedCrew()
+    renderPanel()
+    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
+    fireEvent.click(within(sessions).getByRole("radio", { name: "Need you" }))
+    expect(within(sessions).getByRole("button", { name: "helper, Plan to review" })).toBeInTheDocument()
+    fireEvent.click(within(sessions).getByRole("radio", { name: "All" }))
+    expect(within(sessions).queryByRole("button", { name: "helper, Plan to review" })).not.toBeInTheDocument()
+  })
+
+  it("supports keyboard folding", async () => {
+    nestedCrew()
+    const user = userEvent.setup()
+    renderPanel()
+    const toggle = await screen.findByRole("button", { name: "Collapse lane's child sessions" })
+    toggle.focus()
+    await user.keyboard("{Enter}")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await user.keyboard(" ")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("unfolds ancestors when a hidden member is selected from the summary strip", async () => {
+    nestedCrew()
+    const scroll = vi.fn()
+    const previous = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scroll
+    try {
+      renderPanel()
+      const sessions = await screen.findByRole("region", { name: "Sessions" })
+      fireEvent.click(within(sessions).getByRole("button", { name: "Collapse branch's child sessions" }))
+      fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
+      fireEvent.click(screen.getByRole("listitem", { name: "helper: Plan to review" }))
+      expect(within(sessions).getByRole("button", { name: "helper, Plan to review" })).toBeInTheDocument()
+      await waitFor(() => expect(scroll).toHaveBeenCalled())
+    } finally {
+      Element.prototype.scrollIntoView = previous
+    }
   })
 })

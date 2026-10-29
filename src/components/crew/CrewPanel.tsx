@@ -57,6 +57,7 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
   const { crew, error, busy, respond, markRead, stop } = useSessionCrew(sessionId)
   const { names } = useSessionNames()
   const [tab, setTab] = useState("overview")
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const mapControls = useCrewMapControls(crew?.rootId ?? "")
   const byId = useMemo(() => new Map((crew?.members ?? []).map((member) => [member.sessionId, member])), [crew])
   const kinds = useMemo(() => new Map((crew?.members ?? []).flatMap((member) => member.address ? [[member.sessionId, agentKindForDirName(member.address.dirName)] as const] : [])), [crew])
@@ -65,6 +66,25 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
     if (member.address && member.device) revealSessionPath(sessionPath(member.address.dirName, member.address.fileName, member.device.id))
     else if (member.address && context.openSession) context.openSession(member.address.dirName, member.address.fileName)
     else void revealSessionById(member.sessionId)
+  }
+  const toggle = (sessionId: string) => setCollapsed((previous) => {
+    const next = new Set(previous)
+    if (!next.delete(sessionId)) next.add(sessionId)
+    return next
+  })
+  const reveal = (member: CrewMember) => {
+    setCollapsed((previous) => {
+      const next = new Set(previous)
+      const seen = new Set<string>()
+      let parentId = member.parentId
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId)
+        next.delete(parentId)
+        parentId = byId.get(parentId)?.parentId ?? null
+      }
+      return next
+    })
+    requestAnimationFrame(() => document.querySelector(`[data-crew-row="${member.sessionId}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
   }
 
   return (
@@ -89,7 +109,7 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
           </TabsList>
           <TabsContent value="overview" className="min-h-0">
             <ScrollArea className="h-full min-h-0">
-              <CrewRoll crew={crew} hereId={sessionId} nameOf={nameOf} onOpen={open} />
+              <CrewRoll crew={crew} hereId={sessionId} nameOf={nameOf} onOpen={open} onReveal={reveal} />
               <NeedsYou crew={crew} busy={busy} nameOf={nameOf} onOpen={open} onRespond={respond} />
               <CrewSessions
                 crew={crew}
@@ -99,6 +119,8 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
                 onOpen={open}
                 onMarkRead={markRead}
                 onStop={stop}
+                collapsed={collapsed}
+                onToggle={toggle}
               />
             </ScrollArea>
           </TabsContent>
@@ -120,7 +142,7 @@ interface CrewSectionProps {
   onOpen: (member: CrewMember) => void
 }
 
-function CrewRoll({ crew, hereId, nameOf, onOpen }: CrewSectionProps & { hereId: string | null }) {
+function CrewRoll({ crew, hereId, nameOf, onOpen, onReveal }: CrewSectionProps & { hereId: string | null; onReveal: (member: CrewMember) => void }) {
   const root = crew.members.find((member) => member.sessionId === crew.rootId)
   const members = crew.members.filter((member) => member.parentId !== null)
   const tally = crewTally(crew)
@@ -155,7 +177,7 @@ function CrewRoll({ crew, hereId, nameOf, onOpen }: CrewSectionProps & { hereId:
                 data-crew-cell={state}
                 title={`${nameOf(member)}: ${memberActivity(member)}`}
                 aria-label={`${nameOf(member)}: ${memberActivity(member)}`}
-                onClick={() => document.querySelector(`[data-crew-row="${member.sessionId}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })}
+                onClick={() => onReveal(member)}
                 className={cn(
                   "h-2.5 rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   CELL[state],
@@ -265,17 +287,26 @@ function CrewSessions({
   onOpen,
   onMarkRead,
   onStop,
+  collapsed,
+  onToggle,
 }: CrewSectionProps & {
   hereId: string | null
   busy: ReadonlySet<string>
   onMarkRead: (parentId: string, taskId: string) => Promise<void>
   onStop: (member: CrewMember) => Promise<void>
+  collapsed: ReadonlySet<string>
+  onToggle: (sessionId: string) => void
 }) {
   const [filter, setFilter] = useState<Filter>("all")
-  const rows = crewTree(crew).filter(({ member }) => {
-    if (filter === "all") return true
-    const state = memberCellState(member)
-    return filter === "done" ? state !== "working" && state !== "needs-you" : state === filter
+  let hiddenBelow: number | null = null
+  const rows = crewTree(crew).filter(({ member, depth }) => {
+    if (filter !== "all") {
+      const state = memberCellState(member)
+      return filter === "done" ? state !== "working" && state !== "needs-you" : state === filter
+    }
+    if (hiddenBelow !== null && depth > hiddenBelow) return false
+    hiddenBelow = collapsed.has(member.sessionId) ? depth : null
+    return true
   })
   return (
     <section aria-label="Sessions" className="px-1.5 py-2.5">
@@ -314,6 +345,8 @@ function CrewSessions({
               onOpen={onOpen}
               onMarkRead={onMarkRead}
               onStop={onStop}
+              collapsed={filter === "all" ? collapsed.has(row.member.sessionId) : undefined}
+              onToggle={() => onToggle(row.member.sessionId)}
             />
           ))}
         </ul>
@@ -330,6 +363,8 @@ function CrewRow({
   onOpen,
   onMarkRead,
   onStop,
+  collapsed,
+  onToggle,
 }: {
   row: CrewTreeRow
   here: boolean
@@ -338,6 +373,8 @@ function CrewRow({
   onOpen: (member: CrewMember) => void
   onMarkRead: (parentId: string, taskId: string) => Promise<void>
   onStop: (member: CrewMember) => Promise<void>
+  collapsed?: boolean
+  onToggle: () => void
 }) {
   const state = memberCellState(member)
   const activity = memberActivity(member)
@@ -348,15 +385,28 @@ function CrewRow({
   return (
     <li
       data-crew-row={member.sessionId}
-      className={cn("group/crew relative rounded-md", here ? "bg-accent" : "hover:bg-accent/60", depth > 0 && "border-l border-border/70")}
+      className={cn("group/crew relative flex items-start rounded-md", here ? "bg-accent" : "hover:bg-accent/60", depth > 0 && "border-l border-border/70")}
       style={{ marginLeft: depth > 0 ? 6 + (depth - 1) * 14 : 0 }}
     >
+      <span className="mt-1.5 flex w-6 shrink-0 justify-center">
+        {children > 0 && collapsed !== undefined && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${name}'s child sessions`}
+            aria-expanded={!collapsed}
+            onClick={onToggle}
+          >
+            <ChevronRight data-icon="inline-start" className={cn("transition-transform", !collapsed && "rotate-90")} />
+          </Button>
+        )}
+      </span>
       <button
         type="button"
         onClick={() => onOpen(member)}
         aria-current={here ? "true" : undefined}
         aria-label={`${name}, ${activity}`}
-        className="grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="grid min-w-0 flex-1 grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className={cn("size-1.5 justify-self-center rounded-full", CREW_DOT[state])} aria-hidden="true" />
         <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium">
