@@ -23,10 +23,10 @@ Application baseline: `f2f4c21f`. Implementation branches start at `6567fc30`, w
 | ID | Items / scope | Base | Model | Status |
 | --- | --- | --- | --- | --- |
 | REVIEW | Adversarial read-only plan and source review | `6567fc30` | GPT 6.1 Sol / high | Complete; findings incorporated |
-| FOUNDATION | Shared trigger admission/authority and cross-package contracts | Integration plan baseline | Opus 5.5 / high | Ready |
-| RENDER | 1, 3: diff/highlighting workers and streaming Markdown | Integration plan baseline | GPT 6.1 Sol / high | Pending review |
-| OUTPUT | 2: demand-loaded tool results and bounded live output | Integration plan baseline | Opus 5.5 / high | Pending review |
-| WORKTREE | 5: setup recipes, lifecycle and progress | Integration plan baseline | GPT 6.1 Sol / high | Pending review |
+| FOUNDATION | Shared trigger admission/authority and cross-package contracts | `34b0585c` | Opus 5.5 / high | Running |
+| RENDER | 1, 3: diff/highlighting workers and streaming Markdown | `34b0585c` | GPT 6.1 Sol / high | Running |
+| OUTPUT | 2: demand-loaded tool results and bounded live output | FOUNDATION checkpoint | Same Opus 5.5 / high session | Queued in Opus session |
+| WORKTREE | 5: setup recipes, lifecycle and progress | `34b0585c` | GPT 6.1 Sol / high | Running |
 | RECOVERY | 7: opt-in allowance-reset continuation | FOUNDATION integrated | GPT 6.1 Sol / high | Waiting for FOUNDATION |
 | CONTEXT | 4: typed composer context and citations | OUTPUT integrated | Same Opus 5.5 / high session | Waiting for OUTPUT |
 | STASH | 6: stash, attachment restoration and prompt recall | CONTEXT integrated | GPT 6.1 Sol / high | Waiting for CONTEXT |
@@ -66,4 +66,5 @@ The focused review was performed by session `01a18984-9425-7c90-9736-97368750a79
 - Live model catalogs resolve `opus` to `claude-opus-5-5` and the Codex default to `gpt-6.1-sol`; both advertise `high` effort.
 - Baseline root suite: 646 test files, 9,787 passed and 3 skipped. Separate cogpit-memory suite: 9 files, 110 passed. Bun 1.4.3; no SQLite teardown crash observed.
 - Independent preflight returned CHANGES_NEEDED for contract/dependency detail; all material findings were incorporated above before implementation workers started. All nine approved outcomes remain in scope.
+- Plan/reference commit: `34b0585c`. Opus implementation session: `49aca81c-c8ef-4635-ae9b-d595b2929e95`; RENDER session: `01a18989-0927-7d61-89e9-d113cb3c2822`; WORKTREE session: `01a18989-0927-7d61-89e9-d0ec19ccdc9f`. Each session uses a distinct worktree and the requested high effort.
 - Implementation, test results, review findings and final commit IDs will be recorded here as packages land.
