@@ -93,8 +93,13 @@ export interface ComposerDraft {
 
 export const EMPTY_DRAFT: ComposerDraft = Object.freeze({ v: 1, text: "", context: [], attachments: [] }) as ComposerDraft
 
-/** Bounds a draft's context: more would crowd out the conversation. */
-export const CONTEXT_LIMITS = Object.freeze({ items: 12, itemChars: 20_000, totalChars: 100_000, noteChars: 2_000 })
+/**
+ * Bounds a draft's context: more would crowd out the conversation. A body
+ * (with a review comment) is bounded by `itemChars`, every other field by
+ * `metadataChars`, and everything the message carries for its context — as
+ * serialized, escaping included — by `totalChars`.
+ */
+export const CONTEXT_LIMITS = Object.freeze({ items: 12, itemChars: 20_000, metadataChars: 2_000, totalChars: 100_000, noteChars: 2_000 })
 
 const ID_RE = /^ctx-[a-z0-9]{8,32}$/
 
@@ -115,13 +120,36 @@ function itemChars(item: ComposerContextItem): number {
   return item.kind === "browser" ? item.note.length : item.kind === "file" ? (item.text?.length ?? 0) + (item.comment?.length ?? 0) : item.text.length
 }
 
+/** Why one item is out of bounds on its own, or null. */
+function itemRefusal(item: ComposerContextItem): string | null {
+  if (!ID_RE.test(item.id)) return "This context has no valid id"
+  if (itemChars(item) > CONTEXT_LIMITS.itemChars) return `This context is longer than ${CONTEXT_LIMITS.itemChars.toLocaleString("en-US")} characters`
+  if (item.kind === "browser" && item.note.length > CONTEXT_LIMITS.noteChars) return `An annotation note is limited to ${CONTEXT_LIMITS.noteChars.toLocaleString("en-US")} characters`
+  const metadata = attributes(item).filter(([key]) => key !== "comment")
+  if (metadata.some(([, value]) => value.length > CONTEXT_LIMITS.metadataChars)) return `This context's ${metadata.find(([, value]) => value.length > CONTEXT_LIMITS.metadataChars)![0]} is longer than ${CONTEXT_LIMITS.metadataChars.toLocaleString("en-US")} characters`
+  return null
+}
+
 /** Why `item` cannot join `context`, or null when it fits. */
 export function contextRefusal(context: readonly ComposerContextItem[], item: ComposerContextItem): string | null {
   if (context.some((existing) => existing.id === item.id)) return null
   if (context.length >= CONTEXT_LIMITS.items) return `A message holds at most ${CONTEXT_LIMITS.items} context items`
-  if (itemChars(item) > CONTEXT_LIMITS.itemChars) return `This context is longer than ${CONTEXT_LIMITS.itemChars.toLocaleString("en-US")} characters`
-  const total = context.reduce((sum, existing) => sum + itemChars(existing), 0) + itemChars(item)
+  const refusal = itemRefusal(item)
+  if (refusal) return refusal
+  const total = [...context, item].reduce((sum, existing) => sum + renderContextItem(existing).length, 0)
   if (total > CONTEXT_LIMITS.totalChars) return `The message's context would exceed ${CONTEXT_LIMITS.totalChars.toLocaleString("en-US")} characters`
+  return null
+}
+
+/** Why a whole list of context — restored, imported or about to be sent — is out of bounds, or null. */
+export function validateContext(context: readonly ComposerContextItem[]): string | null {
+  const accepted: ComposerContextItem[] = []
+  for (const item of context) {
+    if (accepted.some((existing) => existing.id === item.id)) return "The same context appears twice"
+    const refusal = contextRefusal(accepted, item)
+    if (refusal) return refusal
+    accepted.push(item)
+  }
   return null
 }
 
@@ -268,7 +296,9 @@ export function parseComposerMessage(message: string): { context: ComposerContex
     context.push(item)
     rest = rest.slice(end + CLOSE.length + 1).replace(/^\n{1,2}/, "")
   }
-  return context.length > 0 ? { context, text: rest.trim() } : null
+  // Text that merely looks like an envelope, past the bounds a composer could have written, stays plain text.
+  if (context.length === 0 || validateContext(context)) return null
+  return { context, text: rest.trim() }
 }
 
 /** What the author typed, without the context blocks: for titles, previews and search snippets. */

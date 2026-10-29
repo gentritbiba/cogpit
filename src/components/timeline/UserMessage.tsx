@@ -79,11 +79,16 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const [standaloneViewer, setStandaloneViewer] = useState<{ index: number; open: boolean } | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
-  const commandName = useMemo(() => extractCommandName(rawText), [rawText])
-  const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
+  // Context the composer attached is read first and kept exactly as saved: the
+  // cleanup below is for what agents inject, and runs on the typed text alone.
+  const composed = useMemo(() => parseComposerMessage(rawText), [rawText])
+  const outerText = composed?.text ?? rawText
+  const openQuoteSource = useSessionContextOptional()?.actions.handleOpenQuoteSource
+  const commandName = useMemo(() => extractCommandName(outerText), [outerText])
+  const commandArgs = useMemo(() => extractCommandArgs(outerText), [outerText])
   const { sender: teammateId, body: unwrappedText, matched: isTeammate } = useMemo(
-    () => parseAgentEnvelope(rawText),
-    [rawText],
+    () => parseAgentEnvelope(outerText),
+    [outerText],
   )
   const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
   const wakeup = useMemo(() => parseTaskWakeup(cleanText), [cleanText])
@@ -95,9 +100,6 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(textAfterBanner), [textAfterBanner])
   const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
   const { interrupts, remainingText: textAfterInterrupts } = useMemo(() => parseInterrupts(textAfterOutputs), [textAfterOutputs])
-  // Context the composer attached reads back as the same chips, read-only.
-  const composed = useMemo(() => parseComposerMessage(textAfterInterrupts), [textAfterInterrupts])
-  const openQuoteSource = useSessionContextOptional()?.actions.handleOpenQuoteSource
 
   const handleCommandOpenChange = useCallback(async (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -138,10 +140,10 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   // hidden. The agent envelope and the notification banner are genuinely
   // hidden, so they still count.
   const hasTags = useMemo(
-    () => hasSystemTags(rawText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null || composed !== null,
-    [rawText, isSystemNotification, isTeammate, wakeup, crewDelivery, composed],
+    () => hasSystemTags(outerText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null || composed !== null,
+    [outerText, isSystemNotification, isTeammate, wakeup, crewDelivery, composed],
   )
-  const displayText = showRaw ? rawText : wakeup || crewDelivery ? "" : composed?.text ?? textAfterInterrupts
+  const displayText = showRaw ? rawText : wakeup || crewDelivery ? "" : textAfterInterrupts
   const contextImages = useMemo(() => images.map((image, index) => ({
     id: `message-attachment-${index}`,
     mediaType: image.source.media_type,

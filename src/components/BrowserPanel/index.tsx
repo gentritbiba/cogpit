@@ -135,10 +135,19 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
   const openPage = useCallback((url: string) => send({ type: "launch", url }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
-  const { frame, page, tabs, followed } = socket
+  const { frame, page, tabs, lastFrameAt } = socket
+  // When the page last changed (navigation or another tab), so a frame drawn before it is never labelled as it.
+  const pageChangedAt = useRef(0)
+  useEffect(() => { pageChangedAt.current = Date.now() }, [page?.targetId, page?.url])
   const annotate = useCallback(() => {
-    if (!frame || !page) return
-    const tab = tabs.find((candidate) => candidate.targetId === followed)
+    if (!page) return
+    // The annotation describes the frame it freezes: its tab, its page and the moment it was drawn.
+    const settled = frame && frame.header.targetId === page.targetId && lastFrameAt !== null && lastFrameAt >= pageChangedAt.current
+    if (!frame || !settled) {
+      setActionError("The page is still drawing; try again in a moment")
+      return
+    }
+    const tab = tabs.find((candidate) => candidate.targetId === frame.header.targetId)
     const copy = freezeFrame(frame.bitmap, {
       deviceWidth: frame.header.deviceWidth,
       deviceHeight: frame.header.deviceHeight,
@@ -146,11 +155,11 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
       title: page.title,
       browser: selected,
       ...(tab ? { tab: tab.title || tab.url } : {}),
-      capturedAt: new Date().toISOString(),
+      capturedAt: new Date(frame.header.ts).toISOString(),
     })
     if (copy) setFrozen(copy)
-    else setActionError("The page has not drawn a frame yet; try again in a moment")
-  }, [frame, page, tabs, followed, selected])
+    else setActionError("The page is still drawing; try again in a moment")
+  }, [frame, page, tabs, lastFrameAt, selected])
   const state = socket.state?.state ?? null
   const notInstalled = status?.installed === false || state === "not-installed"
   const live = !notInstalled && state === "live"

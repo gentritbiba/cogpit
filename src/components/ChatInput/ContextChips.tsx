@@ -22,7 +22,7 @@ function Details({ item, image, onOpenQuoteSource }: { item: ComposerContextItem
           {item.path}{item.startLine !== undefined && ` · ${item.startLine === item.endLine ? `line ${item.startLine}` : `lines ${item.startLine}–${item.endLine}`}`}
         </p>
       )}
-      {item.kind === "file" && item.comment && <p><span className="text-muted-foreground">Review comment: </span>{item.comment}</p>}
+      {item.kind === "file" && item.comment && <p className="whitespace-pre-wrap"><span className="text-muted-foreground">Review comment: </span>{item.comment}</p>}
       {item.kind === "browser" && (
         <>
           <p className="break-all text-muted-foreground">{item.title ? `${item.title} · ` : ""}{item.url}</p>

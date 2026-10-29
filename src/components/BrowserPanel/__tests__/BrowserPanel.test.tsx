@@ -62,6 +62,7 @@ let listRead = true
 let lastFrameAt: number | null = null
 let frame: BrowserFrame | null = null
 let tabs: BrowserTab[] = []
+let page: UseBrowserSocket["page"] = null
 let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
@@ -85,7 +86,7 @@ function socketDouble(session: string | null): UseBrowserSocket {
   return {
     status: session === null ? "idle" : socketStatus,
     state: session === null ? null : { type: "status", state: socketState, session },
-    page: null,
+    page,
     tabs,
     followed: null,
     frame,
@@ -213,6 +214,7 @@ beforeEach(() => {
   lastFrameAt = Date.now()
   frame = null
   tabs = []
+  page = null
   sessionBarRenders = 0
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -510,5 +512,49 @@ describe("BrowserPanel for a caller with an account of their own", () => {
 
     await waitFor(() => expect(selectedName()).toContain("Alice's browser"))
     expect(socketSessions).toContain("user-u_alice")
+  })
+})
+
+describe("BrowserPanel annotation", () => {
+  const frozen = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }))
+  vi.mock("@/components/BrowserPanel/BrowserAnnotator", async (importOriginal) => ({
+    ...await importOriginal<typeof import("../BrowserAnnotator")>(),
+    freezeFrame: (_bitmap: ImageBitmap, provenance: Record<string, unknown>) => ({ ...provenance, canvas: document.createElement("canvas") }),
+    BrowserAnnotator: (props: { frame: Record<string, unknown> }) => { frozen.props = props.frame; return <div>annotating</div> },
+  }))
+
+  function annotatingPanel() {
+    return render(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
+  }
+
+  it("labels the frozen frame with its own tab, page and draw time", async () => {
+    const user = userEvent.setup()
+    frame = frameOf(Date.parse("2026-10-29T12:00:00.000Z"))
+    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }, { targetId: "target-2", url: "https://b.test/", title: "Page B" }]
+    page = { type: "page", targetId: "target-1", url: "https://a.test/", title: "Page A", canGoBack: false, canGoForward: false }
+    lastFrameAt = Date.now() + 1000
+    annotatingPanel()
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toMatchObject({ url: "https://a.test/", title: "Page A", tab: "Page A", capturedAt: "2026-10-29T12:00:00.000Z", deviceWidth: 1280 })
+  })
+
+  it("refuses while the frame on screen belongs to another tab or predates the page", async () => {
+    const user = userEvent.setup()
+    frozen.props = null
+    frame = frameOf(Date.now())
+    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }, { targetId: "target-2", url: "https://b.test/new", title: "Page B" }]
+    page = { type: "page", targetId: "target-2", url: "https://b.test/new", title: "Page B", canGoBack: false, canGoForward: false }
+    lastFrameAt = Date.now() + 1000
+    const { rerender } = annotatingPanel()
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toBeNull()
+    expect(screen.getByText(/still drawing/)).toBeInTheDocument()
+
+    // Same tab, but the page navigated after the last frame was drawn.
+    page = { type: "page", targetId: "target-1", url: "https://a.test/next", title: "Next", canGoBack: true, canGoForward: false }
+    lastFrameAt = Date.now() - 60_000
+    rerender(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toBeNull()
   })
 })

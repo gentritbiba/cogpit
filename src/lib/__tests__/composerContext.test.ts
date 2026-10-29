@@ -8,6 +8,8 @@ import {
   newContextId,
   parseComposerMessage,
   renderComposerMessage,
+  renderContextItem,
+  validateContext,
   type ComposerContextItem,
 } from "../../../shared/session/composerContext"
 
@@ -54,5 +56,25 @@ describe("composer envelope v1", () => {
     expect(newContextId()).toMatch(/^ctx-[a-z0-9]{8,32}$/)
     expect(isDraftEmpty({ v: 1, text: " ", context: [], attachments: [] })).toBe(true)
     expect(isDraftEmpty({ v: 1, text: "", context: [terminal], attachments: [] })).toBe(false)
+  })
+})
+
+describe("composer envelope bounds", () => {
+  it("bounds metadata and the serialized size, at add, import and restore alike", () => {
+    expect(contextRefusal([], { ...terminal, label: "x".repeat(200_000) })).toMatch(/label is longer than/)
+    expect(contextRefusal([], { ...browser, url: `https://e.test/${"a".repeat(3_000)}` })).toMatch(/url is longer than/)
+    expect(contextRefusal([], { ...quote, source: { ...quote.source, dirName: "d".repeat(3_000) } })).toMatch(/dir is longer than/)
+    // Escaping counts: a title of quotes serializes six times longer than it reads.
+    const quoted = Array.from({ length: 11 }, (_, i) => ({ ...browser, id: `ctx-quoted${String(i).padStart(4, "0")}`, title: '"'.repeat(1_900), note: "n".repeat(1_900) }))
+    expect(validateContext(quoted)).toMatch(/exceed/)
+    expect(validateContext([terminal, terminal])).toMatch(/twice/)
+    expect(validateContext([file, terminal, quote, browser])).toBeNull()
+  })
+
+  it("leaves text past the bounds as plain text instead of importing it", () => {
+    const oversized = renderContextItem({ ...terminal, label: "x".repeat(3_000) })
+    expect(parseComposerMessage(`${oversized}\n\nhi`)).toBeNull()
+    const many = Array.from({ length: CONTEXT_LIMITS.items + 1 }, (_, i) => renderContextItem({ ...terminal, id: `ctx-many${String(i).padStart(4, "0")}` })).join("\n\n")
+    expect(parseComposerMessage(many)).toBeNull()
   })
 })
