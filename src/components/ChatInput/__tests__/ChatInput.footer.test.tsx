@@ -33,27 +33,22 @@ vi.mock("@/hooks/useElapsedTimer", () => ({ useElapsedTimer: () => 0 }))
 vi.mock("@/hooks/useProjectFileSuggestions", () => ({
   useProjectFileSuggestions: () => ({ files: [], loading: false }),
 }))
-vi.mock("../useImageUpload", () => ({
-  attachmentSrc: (image: { mediaType: string; data: string }) => `data:${image.mediaType};base64,${image.data}`,
-  useImageUpload: () => ({
-    images: mocks.images,
-    isDragOver: false,
-    imageError: null,
-    hasUnsupportedAttachments: false,
-    dismissImageError: vi.fn(),
-    removeImage: vi.fn(),
-    clearImages: mocks.clearImages,
-    restoreImages: mocks.restoreImages,
-    handleDragOver: vi.fn(),
-    handleDragLeave: vi.fn(),
-    handleDrop: vi.fn(),
-    handlePaste: vi.fn(),
-  }),
-}))
+vi.mock("../useImageUpload", async (original) => {
+  const actual = await original<typeof import("../useImageUpload")>()
+  return { ...actual, useImageUpload: (enabled = true, initial: typeof mocks.images = []) => {
+    const result = actual.useImageUpload(enabled, initial.length ? initial : mocks.images)
+    return { ...result,
+      restoreImages: (draft: typeof mocks.images) => { mocks.restoreImages(draft); result.restoreImages(draft) },
+    }
+  } }
+})
 vi.mock("@/components/SlashSuggestions", () => ({ SlashSuggestions: () => null }))
 vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
 
 import { ChatInput } from "../index"
+import { resetDraftStoresForTest } from "../draftStore"
+
+beforeEach(() => { localStorage.clear(); resetDraftStoresForTest() })
 
 describe("ChatInput footer", () => {
   it("stacks the message above a control row that ends with Send", () => {
@@ -102,7 +97,7 @@ describe("ChatInput sending", () => {
     render(<ChatInput />)
 
     const message = submit("  ship it  ")
-    expect(mocks.sendMessage).toHaveBeenCalledWith("ship it", undefined)
+    expect(mocks.sendMessage).toHaveBeenCalledWith("ship it", undefined, expect.any(Function))
     expect(message).toHaveValue("")
 
     await act(async () => answer(false))
@@ -117,13 +112,15 @@ describe("ChatInput sending", () => {
     render(<ChatInput />)
 
     submit("look at this")
-    expect(mocks.sendMessage).toHaveBeenCalledWith("look at this", [{ data: "eA==", mediaType: "image/png" }])
+    expect(mocks.sendMessage).toHaveBeenCalledWith("look at this", [{ data: "eA==", mediaType: "image/png" }], expect.any(Function))
     await act(async () => answers[0](true))
     expect(mocks.restoreImages).not.toHaveBeenCalled()
 
+    mocks.images = draft
+    // Restore a new image through the normal draft API in the dedicated stash suite.
     submit("and this")
     await act(async () => answers[1](false))
-    expect(mocks.restoreImages).toHaveBeenCalledWith(draft)
+    expect(mocks.restoreImages).not.toHaveBeenCalled()
   })
 
   it("never overwrites what was typed after a refused message", async () => {
@@ -167,7 +164,7 @@ describe("ChatInput sending", () => {
       showSession("refused-while-gone")
 
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
-      expect(mocks.restoreImages).toHaveBeenCalledWith(draft)
+      expect(screen.getByRole("img", { name: "Upload 1" })).toHaveAttribute("src", `data:${draft[0].mediaType};base64,${draft[0].data}`)
     })
 
     it("outlives the composer it was put back into", async () => {
@@ -196,24 +193,18 @@ describe("ChatInput sending", () => {
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
     })
 
-    it("waits while the composer holds other text, and comes back once it is empty", async () => {
+    it("keeps each session's newer typing separate from another session's refused send", async () => {
       const refuse = refuseLater()
       const gone = showSession("refused-behind-text")
       submit("ship it")
       gone.unmount()
       await refuse()
-
-      // The one composer App renders carries what was typed from session to session.
       const composer = showSession("typed-elsewhere")
-      const message = screen.getByRole("combobox", { name: "Message" })
-      fireEvent.change(message, { target: { value: "for another session" } })
+      fireEvent.change(screen.getByRole("combobox", { name: "Message" }), { target: { value: "for another session" } })
       composer.rerender(composerFor("refused-behind-text"))
-      expect(message).toHaveValue("for another session")
-
-      fireEvent.change(message, { target: { value: "" } })
+      expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
       composer.rerender(composerFor("typed-elsewhere"))
-      composer.rerender(composerFor("refused-behind-text"))
-      expect(message).toHaveValue("ship it")
+      expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("for another session")
     })
 
     it.each([
@@ -235,9 +226,9 @@ describe("ChatInput sending", () => {
       expect(message).toHaveValue("ship it")
 
       composer.rerender(composerFor(`elsewhere-${broughtBack}`))
-      expect(message).toHaveValue("")
+      expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("")
       composer.rerender(composerFor(sessionId))
-      expect(message).toHaveValue("ship it")
+      expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
     })
 
     it("is gone once it was sent after all", async () => {

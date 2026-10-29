@@ -1,3 +1,4 @@
+import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -20,7 +21,8 @@ export interface ChatState {
   /** Resolves false when the message was not sent because the session may not be driven here. */
   sendMessage: (
     text: string,
-    images?: Array<{ data: string; mediaType: string }>
+    images?: Array<{ data: string; mediaType: string }>,
+    onCreated?: ComposerCreated,
   ) => Promise<boolean>
   interrupt: () => void
   stopAgent: () => void

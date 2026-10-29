@@ -1,3 +1,4 @@
+import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { PermissionsConfig } from "@/lib/permissions"
@@ -35,7 +36,8 @@ interface UsePtyChatOpts {
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
   onCreateSession?: (
     message: string,
-    images?: Array<{ data: string; mediaType: string }>
+    images?: Array<{ data: string; mediaType: string }>,
+    onCreated?: ComposerCreated,
   ) => Promise<string | null>
 }
 
@@ -110,7 +112,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
    * the composer can keep it.
    */
   const sendMessage = useCallback(
-    async (text: string, images?: Array<{ data: string; mediaType: string }>): Promise<boolean> => {
+    async (text: string, images?: Array<{ data: string; mediaType: string }>, onCreated?: ComposerCreated): Promise<boolean> => {
       if (readOnly) return false
       // If there's no sessionId yet, this is a pending session — create it first
       if (!sessionId && onCreateSession) {
@@ -121,13 +123,13 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         onPermissionsApplied?.()
 
         try {
-          const newSessionId = await onCreateSession(text, images)
+          const newSessionId = await (onCreated ? onCreateSession(text, images, onCreated) : onCreateSession(text, images))
           if (!newSessionId) {
             // createAndSend handles its own error state; just reset ours
             creatingRef.current = false
             setStatus("idle")
             setPendingMessages([])
-            return true
+            return false
           }
           // Session was created and first message was sent.
           // Don't clear pendingMessages — useChatScroll will consume them
@@ -138,11 +140,12 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           setError(err instanceof Error ? err.message : "Failed to create session")
           setStatus("error")
           setPendingMessages([])
+          return false
         }
         return true
       }
 
-      if (!sessionId) return true
+      if (!sessionId) return false
 
       setPendingMessages(prev => [...prev, text])
       setStatus("connected")
@@ -208,8 +211,8 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       } catch (err: unknown) {
         deliveryControllers.current.delete(abortController)
         if (err instanceof Error && err.name === "AbortError") {
-          // Intentionally stopped — don't set error
-          return true
+          // Cancellation cannot confirm delivery; keep the composer journal recoverable.
+          return false
         }
         if (activeAbortRef.current === abortController) {
           setError(err instanceof Error ? err.message : "Unknown error")

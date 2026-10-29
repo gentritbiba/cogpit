@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import { MAX_ATTACHMENT_BYTES } from "./draftStore"
 import type { ComposerAttachment } from "../../../shared/session/composerContext"
 
 /** An attached image as the draft holds it: its bytes, so the draft can be kept and restored. */
@@ -11,7 +12,7 @@ export function attachmentSrc(image: Pick<ComposerAttachment, "mediaType" | "dat
 
 const MAX_DIMENSION = 1568
 const JPEG_QUALITY = 0.85
-const MAX_BYTES = 3_500_000 // ~3.5MB base64 limit
+const MAX_BYTES = MAX_ATTACHMENT_BYTES
 
 function compressImage(img: HTMLImageElement, sourceType: string): { base64: string; mediaType: string } {
   let { width, height } = img
@@ -46,8 +47,12 @@ function compressImage(img: HTMLImageElement, sourceType: string): { base64: str
   return { base64, mediaType: outputType }
 }
 
-export function useImageUpload(enabled = true) {
-  const [images, setImages] = useState<UploadedImage[]>([])
+export function useImageUpload(enabled = true, initial: UploadedImage[] = []) {
+  const [images, setImages] = useState<UploadedImage[]>(initial)
+  const [uploading, setUploading] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const generation = useRef(0)
+  useEffect(() => () => { generation.current++ }, [])
   const [isDragOver, setIsDragOver] = useState(false)
   const [unsupportedAttempt, setUnsupportedAttempt] = useState(false)
   const enabledRef = useRef(enabled)
@@ -63,30 +68,47 @@ export function useImageUpload(enabled = true) {
       return
     }
     setUnsupportedAttempt(false)
+    const token = generation.current
+    setUploading((count) => count + imageFiles.length)
     for (const file of imageFiles) {
+      let completed = false
+      const finish = (message?: string) => {
+        if (completed || token !== generation.current) return
+        completed = true
+        setUploading((count) => Math.max(0, count - 1))
+        if (message) setUploadError(message)
+      }
       const reader = new FileReader()
       reader.onload = () => {
+        if (token !== generation.current) return
         if (!enabledRef.current) {
           setUnsupportedAttempt(true)
+          finish("Image loading stopped because this model does not accept images. Reattach it after switching models.")
           return
         }
         const dataUrl = reader.result as string
         const img = new Image()
         img.onload = () => {
+          if (token !== generation.current) return
           if (!enabledRef.current) {
             setUnsupportedAttempt(true)
+            finish("Image loading stopped because this model does not accept images. Reattach it after switching models.")
             return
           }
-          const compressed = compressImage(img, file.type)
+          let compressed: ReturnType<typeof compressImage>
+          try { compressed = compressImage(img, file.type) } catch { finish(`Could not process ${file.name}. Reattach the image.`); return }
+          if (compressed.base64.length > MAX_BYTES) { finish(`${file.name} is too large after compression (maximum 3.5 MB encoded). Use a smaller image.`); return }
           setImages((prev) => [
             ...prev,
             { id: crypto.randomUUID(), data: compressed.base64, mediaType: compressed.mediaType },
           ])
+          finish()
         }
+        img.onerror = () => finish(`Could not decode ${file.name}. Reattach a supported image.`)
         img.src = dataUrl
       }
       reader.onerror = () => {
-        console.warn(`Failed to read image file: ${file.name}`)
+        finish(`Could not read ${file.name}. Reattach the image.`)
       }
       reader.readAsDataURL(file)
     }
@@ -98,6 +120,9 @@ export function useImageUpload(enabled = true) {
   }, [])
 
   const clearImages = useCallback(() => {
+    generation.current++
+    setUploading(0)
+    setUploadError(null)
     setImages([])
     setUnsupportedAttempt(false)
   }, [])
@@ -122,7 +147,7 @@ export function useImageUpload(enabled = true) {
     setImages((current) => current.filter((image) => image.contextId !== contextId))
   }, [])
 
-  const dismissImageError = useCallback(() => setUnsupportedAttempt(false), [])
+  const dismissImageError = useCallback(() => { setUnsupportedAttempt(false); setUploadError(null) }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -162,12 +187,13 @@ export function useImageUpload(enabled = true) {
 
   return {
     images,
+    uploading: uploading > 0,
     isDragOver,
-    imageError: !enabled && images.length > 0
+    imageError: uploadError ?? (uploading > 0 ? "Loading images… Wait before sending or stashing." : null) ?? (!enabled && images.length > 0
       ? "The selected model does not accept images. Switch models or remove the attachments."
       : !enabled && unsupportedAttempt
         ? "The selected model does not accept the image you tried to add."
-        : null,
+        : null),
     hasUnsupportedAttachments: !enabled && images.length > 0,
     dismissImageError,
     removeImage,

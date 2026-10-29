@@ -1195,6 +1195,7 @@ export default function App() {
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
+        composerIdentity={state.pendingDirName}
         footer={chatInputSettingsNode}
       />
     </div>
@@ -1230,6 +1231,7 @@ export default function App() {
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
+        composerIdentity={state.pendingDirName}
         footer={previewChatInputSettingsNode}
       />
     </div>

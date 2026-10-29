@@ -1,3 +1,4 @@
+import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
@@ -284,7 +285,8 @@ export function useNewSession({
   const createAndSend = useCallback(
     async (
       message: string,
-      images?: Array<{ data: string; mediaType: string }>
+      images?: Array<{ data: string; mediaType: string }>,
+      onCreated?: ComposerCreated,
     ): Promise<string | null> => {
       const dirName = pendingDirNameRef.current
       if (!dirName) return null
@@ -306,7 +308,10 @@ export function useNewSession({
         pendingDirNameRef.current = null
         pendingCwdRef.current = null
         rememberCreatedSession(created.sessionId)
-        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, onSessionFinalized)
+        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, (parsed, source) => {
+          onCreated?.({ sessionId: parsed.sessionId, cwd: parsed.cwd, dirName: source.dirName })
+          onSessionFinalized(parsed, source)
+        })
         // Auto-store the derived session name so it appears in sidebar/lists
         if (sessionName && sessionId) renameSession(sessionId, sessionName)
         return sessionId
