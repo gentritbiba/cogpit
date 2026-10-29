@@ -158,7 +158,7 @@ describe("SharedSessionView", () => {
     expect(await screen.findByText("hi from the agent")).toBeInTheDocument()
     const load = findCall("/api/sessions/")
     expect(load?.url).toBe(
-      "/api/sessions/-Users-me-proj/sess-1.jsonl?tail=30",
+      "/api/sessions/-Users-me-proj/sess-1.jsonl?tail=30&projection=results-v1",
     )
   })
 

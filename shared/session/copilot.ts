@@ -3,6 +3,7 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
+import { visitField, type ResultVisitor } from "./resultProjection"
 import type {
   ContentBlock,
   ImageBlock,
@@ -1164,4 +1165,24 @@ export function copilotTurnBoundaries(
     boundaries.push(index)
   }
   return boundaries
+}
+
+// ── Result projection ───────────────────────────────────────────────────────
+
+/** A completed tool's result text in each place `extractToolResult` reads it; success and error stay apart. */
+export function projectCopilotResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
+  if (record.type !== "tool.execution_complete" || !isObject(record.data)) return false
+  const data = record.data
+  if (typeof data.result === "string") return visitField(data, "result", visit)
+  if (!isObject(data.result)) return false
+  const result = data.result
+  let changed = visitField(result, "detailedContent", visit)
+  changed = visitField(result, "content", visit) || changed
+  if (Array.isArray(result.contents)) {
+    for (const part of result.contents) {
+      if (!isObject(part)) continue
+      for (const key of ["text", "content", "output"]) changed = visitField(part, key, visit) || changed
+    }
+  }
+  return changed
 }

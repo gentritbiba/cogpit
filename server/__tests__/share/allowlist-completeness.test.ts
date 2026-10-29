@@ -81,6 +81,10 @@ function mountedPaths(): string[] {
 const SHARE_REACHABLE = new Set([
   "/api/sessions/",
   "/api/watch/",
+  // An elided tool result of the shared transcript, which pages and the watch
+  // stream already let the guest read; the server-signed reference names the
+  // transcript and must equal the path's.
+  "/api/tool-result/",
   "/api/session-status/",
   "/api/session-file-changes/",
   "/api/session-config/",
@@ -119,6 +123,11 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
   {
     mount: "/api/watch/",
     url: `/api/watch/${SHARE.dirName}/${SHARE.fileName}`,
+    methods: ["GET"],
+  },
+  {
+    mount: "/api/tool-result/",
+    url: `/api/tool-result/${SHARE.dirName}/${SHARE.fileName}`,
     methods: ["GET"],
   },
   {

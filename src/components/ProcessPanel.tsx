@@ -24,12 +24,16 @@ const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
 )
 
+/** Output a process tab keeps, and asks the server for no more than. */
+const OUTPUT_LIMIT_CHARS = 100_000
+
 function ProcessOutput({
   process,
 }: {
   process: ProcessEntry
 }) {
   const [output, setOutput] = useState("")
+  const [omitted, setOmitted] = useState(false)
   const [connected, setConnected] = useState(false)
   const outputRef = useRef<HTMLPreElement>(null)
 
@@ -37,9 +41,11 @@ function ProcessOutput({
     if (process.type !== "task" || !process.outputPath) return
 
     setOutput("")
+    setOmitted(false)
     setConnected(false)
 
-    const stream = openSessionStream(`/api/task-output?path=${encodeURIComponent(process.outputPath)}`)
+    let kept = ""
+    const stream = openSessionStream(`/api/task-output?path=${encodeURIComponent(process.outputPath)}&tail=${OUTPUT_LIMIT_CHARS}`)
     const es = stream.source
 
     es.onopen = () => setConnected(true)
@@ -47,13 +53,16 @@ function ProcessOutput({
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
-        if (data.type === "output" && data.text) {
-          const cleaned = stripAnsi(data.text)
+        if (data.type === "output") {
+          if (typeof data.omittedBytes === "number" && data.omittedBytes > 0) setOmitted(true)
+          const cleaned = data.text ? stripAnsi(data.text) : ""
           if (cleaned) {
-            setOutput((prev) => {
-              const next = prev + cleaned
-              return next.length > 100_000 ? next.slice(-100_000) : next
-            })
+            kept += cleaned
+            if (kept.length > OUTPUT_LIMIT_CHARS) {
+              kept = kept.slice(-OUTPUT_LIMIT_CHARS)
+              setOmitted(true)
+            }
+            setOutput(kept)
           }
         }
       } catch {
@@ -76,6 +85,7 @@ function ProcessOutput({
       ref={outputRef}
       className="flex-1 overflow-auto bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words"
     >
+      {omitted && <span className="block text-muted-foreground">… earlier output omitted</span>}
       {output || (
         <span className="text-muted-foreground">
           {connected ? "Waiting for output..." : "Connecting..."}

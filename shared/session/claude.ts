@@ -15,6 +15,7 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { isAssistantMessage } from "./messageTypeGuards"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
+import { isPlainObject, visitField, type ResultVisitor } from "./resultProjection"
 import type {
   ParseSessionOptions,
   ParsedSession,
@@ -487,4 +488,72 @@ export function claudeTurnBoundaries(
   // `<task-notification>` wake-ups as new turns, while `buildTurns` folds them
   // into the turn in flight, so every boundary after one was off by a turn.
   return buildTurnsWithStarts(records as unknown as RawMessage[]).turnStartIndices
+}
+
+// ── Result projection ───────────────────────────────────────────────────────
+
+/** `toolUseResult` keys whose text a reader shows or interprets as it is. */
+const KEPT_TOOL_USE_RESULT_KEYS = new Set(["bashEditDiff", "structuredPatch", "prompt", "summary", "description", "status"])
+/** A Bash call's structured diff keeps whole files up to this many bytes; the rest are counted. */
+const BASH_DIFF_BUDGET_BYTES = 64 * 1024
+
+function visitStrings(holder: Record<string, unknown>, visit: ResultVisitor, depth: number): boolean {
+  let changed = false
+  for (const key of Object.keys(holder)) {
+    if (KEPT_TOOL_USE_RESULT_KEYS.has(key)) continue
+    const value = holder[key]
+    if (typeof value === "string") changed = visitField(holder, key, visit) || changed
+    else if (isPlainObject(value) && depth < 3) changed = visitStrings(value, visit, depth + 1) || changed
+  }
+  return changed
+}
+
+/** Keeps the files of a large structured diff that fit the budget, counting the rest as more files. */
+function boundBashEditDiff(result: Record<string, unknown>, visit: ResultVisitor): boolean {
+  const diff = result.bashEditDiff
+  if (!isPlainObject(diff) || !Array.isArray(diff.files)) return false
+  const text = JSON.stringify(diff)
+  if (visit(text, "text") === text) return false
+  const files: unknown[] = []
+  let bytes = 0
+  for (const file of diff.files) {
+    bytes += JSON.stringify(file).length
+    if (bytes > BASH_DIFF_BUDGET_BYTES && files.length > 0) break
+    files.push(file)
+  }
+  const dropped = diff.files.length - files.length
+  const more = typeof diff.moreFiles === "number" ? diff.moreFiles : 0
+  result.bashEditDiff = { ...diff, files, ...(dropped > 0 ? { moreFiles: more + dropped } : {}) }
+  return dropped > 0
+}
+
+/**
+ * Tool-result bodies in a Claude Code record: each `tool_result` block's text
+ * and image data, then the long strings of `toolUseResult` other than the
+ * ones a reader interprets. A sub-agent's result keeps its summary whole.
+ */
+export function projectClaudeResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
+  if (record.type !== "user") return false
+  const message = isPlainObject(record.message) ? record.message : null
+  let changed = false
+  if (message && Array.isArray(message.content)) {
+    for (const block of message.content) {
+      if (!isPlainObject(block) || block.type !== "tool_result") continue
+      if (typeof block.content === "string") changed = visitField(block, "content", visit) || changed
+      else if (Array.isArray(block.content)) {
+        for (const item of block.content) {
+          if (!isPlainObject(item)) continue
+          if (item.type === "text") changed = visitField(item, "text", visit) || changed
+          else if (item.type === "image" && isPlainObject(item.source)) changed = visitField(item.source, "data", visit, "image") || changed
+        }
+      }
+    }
+  }
+  const result = record.toolUseResult
+  if (typeof result === "string") changed = visitField(record, "toolUseResult", visit) || changed
+  else if (isPlainObject(result) && !result.agentId) {
+    changed = visitStrings(result, visit, 0) || changed
+    changed = boundBashEditDiff(result, visit) || changed
+  }
+  return changed
 }

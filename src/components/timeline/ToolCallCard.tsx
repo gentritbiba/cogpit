@@ -10,6 +10,8 @@ import { EditDiffView } from "./EditDiffView"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
 import { LocalImage } from "./LocalImage"
+import { ElidedResultImage } from "./ElidedResultImage"
+import { readElided } from "../../../shared/session/resultProjection"
 import { isLocalImagePath } from "./localMedia"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -242,16 +244,27 @@ export const ToolCallCard = memo(function ToolCallCard({
         />
       )}
 
-      {toolCall.resultImages?.map((image, index) => (
-        <LocalImage
-          key={`${image.source.media_type}-${image.source.data.length}-${image.source.data.slice(0, 32)}-${image.source.data.slice(-32)}`}
-          src={`data:${image.source.media_type};base64,${image.source.data}`}
-          alt={`Tool result image ${index + 1}`}
-          id={`tool-result-image:${toolCall.id}:${index}`}
-          className="my-1.5"
-          thumbnailClassName="max-h-40"
-        />
-      ))}
+      {toolCall.resultImages?.map((image, index) => {
+        const elided = readElided(image.source.data)
+        return elided ? (
+          <ElidedResultImage
+            key={elided.stub.ref}
+            stub={elided.stub}
+            mediaType={image.source.media_type}
+            alt={`Tool result image ${index + 1}`}
+            id={`tool-result-image:${toolCall.id}:${index}`}
+          />
+        ) : (
+          <LocalImage
+            key={`${image.source.media_type}-${image.source.data.length}-${image.source.data.slice(0, 32)}-${image.source.data.slice(-32)}`}
+            src={`data:${image.source.media_type};base64,${image.source.data}`}
+            alt={`Tool result image ${index + 1}`}
+            id={`tool-result-image:${toolCall.id}:${index}`}
+            className="my-1.5"
+            thumbnailClassName="max-h-40"
+          />
+        )
+      })}
 
       {skillMeta && (
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
@@ -290,6 +303,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             {showResult && (
               <ToolResultPanel
                 result={toolCall.result ?? ""}
+                resultRef={toolCall.resultRef}
                 isError={toolCall.isError}
                 filePath={toolCall.name === "Read" && typeof toolCall.input.file_path === "string" ? toolCall.input.file_path : undefined}
               />

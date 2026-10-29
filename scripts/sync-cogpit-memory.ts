@@ -34,6 +34,8 @@ const FILES = [
   "sessionStats.ts",
   "turnContent.ts",
   "toolResults.ts",
+  "resultProjection.ts",
+  "codex-results.ts",
   "sessionStatus.ts",
   "backgroundAgents.ts",
   "interactiveState.ts",

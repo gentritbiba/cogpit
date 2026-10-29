@@ -17,6 +17,7 @@ import { sessionCache } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
+import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 
 export interface TailResponse {
   headerLines: string[]
@@ -45,7 +46,7 @@ export async function fetchTailAndParse(
   { background = false }: TailLoadOptions = {},
 ): Promise<LoadedSessionTail> {
   const res = await authFetch(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`,
+    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30&projection=${RESULT_PROJECTION}`,
     { background },
   )
   if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)

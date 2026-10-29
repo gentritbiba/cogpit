@@ -100,3 +100,52 @@ describe("useParserWorker", () => {
     expect(FakeWorker.instances).toHaveLength(1)
   })
 })
+
+describe("useParserWorker appends", () => {
+  beforeEach(() => {
+    FakeWorker.instances = []
+    vi.stubGlobal("Worker", FakeWorker)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const session = (id: string) => ({ sessionId: id, turns: [] as ParsedSession["turns"] }) as unknown as ParsedSession
+  const answer = async (session: ParsedSession) => {
+    await vi.waitFor(() => expect(latest().posted.length).toBeGreaterThan(0))
+    latest().answer(session)
+  }
+
+  it("sends only the new text once the worker keeps the session it answered with", async () => {
+    const { result } = renderHook(() => useParserWorker())
+    const loaded = session("loaded")
+    const first = result.current.append(loaded, "a\n")
+    expect(latest().posted[0]).toMatchObject({ type: "append", existing: loaded, newText: "a\n", keep: { handle: 0, version: 1 } })
+    const afterFirst = session("first")
+    latest().answer(afterFirst)
+    await expect(first).resolves.toBe(afterFirst)
+
+    // A scoped copy shares its turns, so it still names the kept version.
+    const scoped = { ...afterFirst, sessionId: "instance:first" }
+    const second = result.current.append(scoped, "b\n")
+    expect(latest().posted[1]).toEqual({ type: "append", id: 1, base: { handle: 0, version: 1 }, newText: "b\n", keep: { handle: 0, version: 2 } })
+    expect(latest().posted[1]).not.toHaveProperty("existing")
+    const afterSecond = session("second")
+    latest().answer(afterSecond)
+    await expect(second).resolves.toBe(afterSecond)
+  })
+
+  it("resends the whole session when the worker no longer holds the version named", async () => {
+    const { result } = renderHook(() => useParserWorker())
+    const first = result.current.append(session("loaded"), "a\n")
+    const afterFirst = session("first")
+    await answer(afterFirst)
+    await first
+    const second = result.current.append(afterFirst, "b\n")
+    const worker = latest()
+    worker.onmessage?.({ data: { type: "missing", id: worker.posted[1]!.id } } as MessageEvent)
+    await vi.waitFor(() => expect(worker.posted).toHaveLength(3))
+    expect(worker.posted[2]).toMatchObject({ type: "append", existing: afterFirst, newText: "b\n" })
+    const afterSecond = session("second")
+    worker.answer(afterSecond)
+    await expect(second).resolves.toBe(afterSecond)
+  })
+})
