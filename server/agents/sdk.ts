@@ -9,6 +9,17 @@
 import { query, type Options, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import { claudeCliPath } from "./claudeExecutable"
 
+// The SDK warns on every query that bypass mode and allow rules shadow
+// canUseTool. Cogpit registers it anyway, because AskUserQuestion answers
+// arrive through it in every mode.
+const CAN_USE_TOOL_SHADOWED = "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED"
+const emitWarning = process.emitWarning.bind(process)
+process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+  const options = rest[0]
+  if (typeof options === "object" && options !== null && (options as { code?: unknown }).code === CAN_USE_TOOL_SHADOWED) return
+  ;(emitWarning as (...args: unknown[]) => void)(warning, ...rest)
+}) as typeof process.emitWarning
+
 /** A callback the CLI runs before or after an event, e.g. a tool call. */
 export type { HookCallback } from "@anthropic-ai/claude-agent-sdk"
 

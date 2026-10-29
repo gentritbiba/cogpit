@@ -39,3 +39,19 @@ describe("appendToSystemPrompt", () => {
     })
   })
 })
+
+describe("SDK warnings", () => {
+  it("drops the canUseTool shadowing warning and keeps the rest", async () => {
+    const seen: string[] = []
+    const onWarning = (warning: Error & { code?: string }) => seen.push(warning.code ?? "")
+    process.on("warning", onWarning)
+    try {
+      process.emitWarning("shadowed", { code: "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED" })
+      process.emitWarning("other", { code: "COGPIT_TEST_WARNING" })
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      process.off("warning", onWarning)
+    }
+    expect(seen).toEqual(["COGPIT_TEST_WARNING"])
+  })
+})
