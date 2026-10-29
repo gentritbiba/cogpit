@@ -15,7 +15,7 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { isAssistantMessage } from "./messageTypeGuards"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
-import { isPlainObject, visitField, type ResultVisitor } from "./resultProjection"
+import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 import type {
   ParseSessionOptions,
   ParsedSession,
@@ -522,10 +522,11 @@ export function projectClaudeResults(record: Record<string, unknown>, visit: Res
       if (!isPlainObject(block) || block.type !== "tool_result") continue
       if (typeof block.content === "string") changed = visitField(block, "content", visit) || changed
       else if (Array.isArray(block.content)) {
-        for (const item of block.content) {
-          if (!isPlainObject(item)) continue
-          if (item.type === "text") changed = visitField(item, "text", visit) || changed
-          else if (item.type === "image" && isPlainObject(item.source)) changed = visitField(item.source, "data", visit, "image") || changed
+        // The parser joins the text parts with newlines into one result: they travel as that one body.
+        const joined = visitJoinedText(block.content, (item) => isPlainObject(item) && item.type === "text" && typeof item.text === "string" ? item.text : undefined, "\n", (item, text) => ({ ...(item as object), text }), visit)
+        if (joined) { block.content = joined; changed = true }
+        for (const item of block.content as unknown[]) {
+          if (isPlainObject(item) && item.type === "image" && isPlainObject(item.source)) changed = visitField(item.source, "data", visit, "image") || changed
         }
       }
     }

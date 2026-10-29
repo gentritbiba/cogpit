@@ -85,14 +85,13 @@ export function projectLine(format: Pick<AgentFormat, "projectResults">, line: s
   let field = 0
   let hash: string | undefined
   const length = Buffer.byteLength(line, "utf8")
-  const visit: ResultVisitor = (value, kind, keeps) => {
+  const visit: ResultVisitor = (value, kind) => {
     const index = field++
     const bytes = Buffer.byteLength(value, "utf8")
     if (bytes < ELISION_THRESHOLD_BYTES) return value
     hash ??= lineHash(line)
     const stub: ElidedResult = { ref: encodeRef({ ...address, offset, length, hash, field: index }), bytes, lines: kind === "text" ? countLines(value) : 0, kind, source: { dirName: address.dirName, fileName: address.fileName } }
-    const replacement = elidedText(stub, kind === "text" ? previewOf(value) : "")
-    return keeps && !keeps(replacement) ? value : replacement
+    return elidedText(stub, kind === "text" ? previewOf(value) : "")
   }
   return format.projectResults(record, visit) ? JSON.stringify(record) : line
 }

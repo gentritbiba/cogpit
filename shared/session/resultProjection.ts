@@ -62,12 +62,8 @@ export function countLines(text: string): number {
   return lines
 }
 
-/**
- * Called once per candidate body, in a fixed order; returns what the line
- * should carry. `keeps` lets a format refuse a replacement its own reader
- * would interpret differently (an exit status read from the body).
- */
-export type ResultVisitor = (value: string, kind: ElidedResult["kind"], keeps?: (replacement: string) => boolean) => string
+/** Called once per candidate body, in a fixed order; returns what the line should carry. */
+export type ResultVisitor = (value: string, kind: ElidedResult["kind"]) => string
 
 /** Walks a record's result candidates and writes back what the visitor returns; true when anything changed. */
 export type ResultProjector = (record: Record<string, unknown>, visit: ResultVisitor) => boolean
@@ -77,13 +73,36 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 }
 
 /** Visits `holder[key]` when it is a string, writing back a replacement; true when it changed. */
-export function visitField(holder: Record<string, unknown>, key: string, visit: ResultVisitor, kind: ElidedResult["kind"] = "text", keeps?: (replacement: string) => boolean): boolean {
+export function visitField(holder: Record<string, unknown>, key: string, visit: ResultVisitor, kind: ElidedResult["kind"] = "text"): boolean {
   const value = holder[key]
   if (typeof value !== "string") return false
-  const next = visit(value, kind, keeps)
+  const next = visit(value, kind)
   if (next === value) return false
   holder[key] = next
   return true
+}
+
+/**
+ * Visits the text parts of a multi-part result as the one body its reader
+ * joins them into (with `separator`, skipping parts `textOf` finds none in),
+ * so expanding it restores every part. When replaced, the first text part
+ * carries the elided body and the other text parts go; every other part
+ * keeps its place. Null when nothing changed.
+ */
+export function visitJoinedText(
+  parts: readonly unknown[],
+  textOf: (part: unknown) => string | undefined,
+  separator: string,
+  withText: (part: unknown, text: string) => unknown,
+  visit: ResultVisitor,
+): unknown[] | null {
+  const texts = parts.map(textOf)
+  const first = texts.findIndex((text) => text !== undefined)
+  if (first < 0) return null
+  const joined = texts.filter((text): text is string => Boolean(text)).join(separator)
+  const replacement = visit(joined, "text")
+  if (replacement === joined) return null
+  return parts.flatMap((part, index) => index === first ? [withText(part, replacement)] : texts[index] === undefined ? [part] : [])
 }
 
 function liftCalls(calls: readonly ToolCall[]): void {

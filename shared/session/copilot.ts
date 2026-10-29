@@ -3,7 +3,7 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
-import { visitField, type ResultVisitor } from "./resultProjection"
+import { visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 import type {
   ContentBlock,
   ImageBlock,
@@ -1179,10 +1179,10 @@ export function projectCopilotResults(record: Record<string, unknown>, visit: Re
   let changed = visitField(result, "detailedContent", visit)
   changed = visitField(result, "content", visit) || changed
   if (Array.isArray(result.contents)) {
-    for (const part of result.contents) {
-      if (!isObject(part)) continue
-      for (const key of ["text", "content", "output"]) changed = visitField(part, key, visit) || changed
-    }
+    // `extractToolResult` joins the parts' text with newlines into one result: they travel as that one body.
+    const textOf = (part: unknown) => (typeof part === "string" ? part : isObject(part) ? readString(part.text, part.content, part.output) : "") || undefined
+    const joined = visitJoinedText(result.contents, textOf, "\n", (part, text) => typeof part === "string" ? text : { ...(part as object), text }, visit)
+    if (joined) { result.contents = joined; changed = true }
   }
   return changed
 }

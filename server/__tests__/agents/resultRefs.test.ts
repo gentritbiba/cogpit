@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { formatFor, type AgentKind } from "../../../shared/session/agents"
-import { ELISION_THRESHOLD_BYTES, liftElidedResults, previewOf, readElided } from "../../../shared/session/resultProjection"
+import { ELIDED_MARK, ELISION_THRESHOLD_BYTES, liftElidedResults, previewOf, readElided } from "../../../shared/session/resultProjection"
 import type { ParsedSession, ToolCall } from "../../../shared/session/types"
 import { decodeRef, projectLine, readResultBody } from "../../agents/resultRefs"
 import { setDataRoot } from "../../config"
@@ -148,6 +148,67 @@ describe("result projection v1", () => {
     expect(decodeRef(`${version}.${body}.${mac!.replace(/.$/, (c) => c === "A" ? "B" : "A")}`)).toBeNull()
     setDataRoot(tempDir())
     expect(decodeRef(refs[0]!)).toBeNull()
+  })
+
+  it("carries a multi-part text result as the one body its reader joins, for every format", async () => {
+    const root = tempDir()
+    setDataRoot(root)
+    const heavy = (tag: string) => `${tag}\n${"y".repeat(24_000)}`
+    const claudeParts = [
+      [{ type: "text", text: "Heading" }, { type: "text", text: heavy("A") }],
+      [{ type: "text", text: heavy("B") }, { type: "text", text: "MIDDLE-IMPORTANT" }],
+      [{ type: "text", text: heavy("C") }, { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBO" } }, { type: "text", text: heavy("D") }],
+    ]
+    const lines = toJsonl(claudeParts.flatMap((content, i) => [
+      toolUseAssistant("Bash", { command: `part ${i}` }, `p${i}`),
+      userMsg([{ type: "tool_result", tool_use_id: `p${i}`, content }]),
+    ])).split("\n")
+    const file = join(root, "parts.jsonl")
+    writeFileSync(file, lines.join("\n") + "\n")
+    const { native, light } = expectEquivalent("claude", lines)
+    for (const [index, call] of calls(light).entries()) {
+      const nativeResult = calls(native)[index]!.result!
+      expect(call.result).not.toContain(ELIDED_MARK)
+      expect(call.resultRef).toMatchObject({ bytes: Buffer.byteLength(nativeResult) })
+      await expect(readResultBody(formatFor("claude"), file, decodeRef(call.resultRef!.ref)!)).resolves.toEqual({ status: "ok", kind: "text", body: nativeResult })
+    }
+
+    const copilotLines = [
+      JSON.stringify({ type: "session.start", data: { sessionId: "cs", copilotVersion: "1", selectedModel: "m", context: { cwd: "/repo" } }, id: "s", timestamp: "2026-08-01T12:00:00.000Z" }),
+      JSON.stringify({ type: "user.message", data: { content: "go" }, id: "u", timestamp: "2026-08-01T12:00:00.000Z" }),
+      JSON.stringify({ type: "tool.execution_start", data: { toolCallId: "c1", toolName: "bash", arguments: {} }, id: "a", timestamp: "2026-08-01T12:00:00.000Z" }),
+      JSON.stringify({ type: "tool.execution_complete", data: { toolCallId: "c1", success: true, result: { contents: ["short", { type: "text", text: heavy("E") }, { type: "image", data: "aGk=", mimeType: "image/png" }] } }, id: "b", timestamp: "2026-08-01T12:00:00.000Z" }),
+    ]
+    const copilot = expectEquivalent("copilot", copilotLines)
+    expect(calls(copilot.light)[0]!.resultRef).toMatchObject({ bytes: Buffer.byteLength(calls(copilot.native)[0]!.result!) })
+    expect(calls(copilot.light)[0]!.resultImages).toEqual(calls(copilot.native)[0]!.resultImages)
+  })
+
+  it("keeps a Codex output's failure and images whatever shape the output has", () => {
+    setDataRoot(tempDir())
+    const call = (id: string) => JSON.stringify({ type: "response_item", payload: { type: "function_call", call_id: id, name: "exec", arguments: "{}" } })
+    const output = (id: string, value: unknown) => JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: id, output: value } })
+    const failed = `Script failed\n${BIG}`
+    const lines = [
+      JSON.stringify({ type: "session_meta", payload: { id: "codex-session", cli_version: "1", cwd: "/repo" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "go" } }),
+      call("array"), output("array", [{ type: "input_text", text: failed }]),
+      call("nested"), output("nested", JSON.stringify({ output: [{ type: "input_text", text: failed }] })),
+      call("chunks"), output("chunks", [{ type: "input_text", text: "Script completed" }, { type: "input_text", text: JSON.stringify({ exit_code: 3 }) }, { type: "input_text", text: BIG }]),
+      call("joined"), output("joined", [{ type: "input_text", text: "short " }, { type: "input_text", text: BIG }, { type: "input_image", image_url: `data:image/png;base64,${BIG_IMAGE}` }]),
+    ]
+    const { native, light } = expectEquivalent("codex", lines)
+    const [array, nested, chunks, joined] = calls(light)
+    // Parity with the native reading is the contract, whatever that reading is (a status inside an envelope is not one).
+    expect(calls(native).map((c) => c.isError)).toEqual([true, false, true, false])
+    expect(nested!.isError).toBe(false)
+    // Elision would hide the status the parser reads, so these travel whole.
+    for (const [index, kept] of [[0, array], [2, chunks]] as const) {
+      expect(kept!.resultRef).toBeUndefined()
+      expect(kept!.result).toBe(calls(native)[index]!.result)
+    }
+    expect(joined!.resultRef).toMatchObject({ bytes: Buffer.byteLength(calls(native)[3]!.result!) })
+    expect(readElided(joined!.resultImages![0]!.source.data)?.stub.kind).toBe("image")
   })
 
   it("leaves lines under the threshold untouched, byte for byte", () => {

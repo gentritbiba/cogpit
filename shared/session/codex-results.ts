@@ -5,7 +5,7 @@
  * and the output copies of `exec_command_end` events no reader parses.
  */
 import { parseCustomToolOutput } from "./codex-tool-normalization"
-import { isPlainObject, visitField, type ResultVisitor } from "./resultProjection"
+import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 
 const OUTPUT_ITEMS = new Set(["function_call_output", "custom_tool_call_output"])
 const EXEC_OUTPUT_KEYS = ["aggregated_output", "formatted_output", "stdout", "stderr"]
@@ -16,45 +16,55 @@ function semantics(output: unknown): string {
   return JSON.stringify([parsed.isError, parsed.images?.length ?? 0])
 }
 
-function visitImage(block: Record<string, unknown>, visit: ResultVisitor): boolean {
-  const source = isPlainObject(block.source) ? block.source : null
-  if (source) return visitField(source, "data", visit, "image")
-  if (typeof block.image_url !== "string") return false
+function visitImage(block: Record<string, unknown>, visit: ResultVisitor): Record<string, unknown> {
+  const source = isPlainObject(block.source) ? { ...block.source } : null
+  if (source) return visitField(source, "data", visit, "image") ? { ...block, source } : block
+  if (typeof block.image_url !== "string") return block
   const match = /^(data:image\/[^;,]+;base64,)(.+)$/is.exec(block.image_url)
-  if (!match) return false
-  const next = visit(match[2], "image")
-  if (next === match[2]) return false
-  block.image_url = match[1] + next
-  return true
+  if (!match) return block
+  const next = visit(match[2]!, "image")
+  return next === match[2] ? block : { ...block, image_url: match[1] + next }
 }
 
-function visitBlocks(blocks: unknown[], visit: ResultVisitor): boolean {
-  let changed = false
-  for (const block of blocks) {
-    if (!isPlainObject(block)) continue
-    if (typeof block.text === "string") changed = visitField(block, "text", visit) || changed
-    else changed = visitImage(block, visit) || changed
-  }
-  return changed
+/** A block array as the parser reads it: its text parts joined without a separator into one body, its images one by one. */
+function projectBlocks(blocks: readonly unknown[], visit: ResultVisitor): unknown[] {
+  const joined = visitJoinedText(blocks, (block) => isPlainObject(block) && typeof block.text === "string" ? block.text : undefined, "", (block, text) => ({ ...(block as object), text }), visit) ?? blocks
+  let changed = joined !== blocks
+  const next = joined.map((block) => {
+    if (!isPlainObject(block) || typeof block.text === "string") return block
+    const projected = visitImage(block, visit)
+    if (projected !== block) changed = true
+    return projected
+  })
+  return changed ? next : blocks as unknown[]
 }
 
-/** Projects a tool output string: its envelope's text when it has one, else the string itself. */
-function projectOutput(payload: Record<string, unknown>, visit: ResultVisitor): boolean {
-  const output = payload.output
-  if (Array.isArray(output)) return visitBlocks(output, visit)
-  if (typeof output !== "string") return false
-  const expected = semantics(output)
+/** An output value with its bodies elided: a block array, a JSON envelope around text or blocks, or plain text. */
+function projectValue(output: unknown, visit: ResultVisitor): unknown {
+  if (Array.isArray(output)) return projectBlocks(output, visit)
+  if (typeof output !== "string") return output
   let envelope: unknown = null
   try { envelope = JSON.parse(output) } catch { /* Plain text. */ }
   if (isPlainObject(envelope) && ("output" in envelope || "content" in envelope)) {
-    const key = "output" in envelope ? "output" : "content"
+    const key = envelope.output !== undefined && envelope.output !== null ? "output" : "content"
     const inner = envelope[key]
-    const keeps = (replacement: string) => semantics(JSON.stringify({ ...envelope as object, [key]: replacement })) === expected
-    const changed = typeof inner === "string" ? visitField(envelope, key, visit, "text", keeps) : Array.isArray(inner) && visitBlocks(inner, visit)
-    if (changed) payload.output = JSON.stringify(envelope)
-    return changed
+    const projected = typeof inner === "string" ? visit(inner, "text") : Array.isArray(inner) ? projectValue(inner, visit) : inner
+    return projected === inner ? output : JSON.stringify({ ...envelope, [key]: projected })
   }
-  return visitField(payload, "output", visit, "text", (replacement) => semantics(replacement) === expected)
+  return visit(output, "text")
+}
+
+/**
+ * Projects a tool output whatever its shape, then keeps the projection only
+ * when the parser reads the same failure and images from it as from the
+ * native output; otherwise the output travels whole.
+ */
+function projectOutput(payload: Record<string, unknown>, visit: ResultVisitor): boolean {
+  const output = payload.output
+  const next = projectValue(output, visit)
+  if (next === output || semantics(next) !== semantics(output)) return false
+  payload.output = next
+  return true
 }
 
 export function projectCodexResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
