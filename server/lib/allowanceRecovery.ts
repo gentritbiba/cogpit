@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
+import type { CommandReceipt } from "../../shared/contracts/orchestration"
 import type { IncomingMessage } from "node:http"
 import { RECOVERY_MESSAGE, recoveryDueAt, type RecoveryOffer, type RecoveryStatus } from "../../shared/contracts/recovery"
 import { isTerminalOccurrence } from "../../shared/contracts/triggers"
@@ -30,6 +31,7 @@ interface BlockIdentity extends Record<string, unknown> {
   nativeIdentity: string
   filePath: string
   eventCursor: number
+  blockedCommands?: Array<Pick<CommandReceipt, "id" | "nativeMessageId">>
   consent?: "authorizing" | "enabled" | "dismissed" | "denied"
 }
 const consentRequests = new Map<string, Promise<RecoveryStatus>>()
@@ -60,7 +62,7 @@ function invalidateSession(sessionId: string, reason: string, block?: RateLimitB
   }
 }
 
-async function observe(sessionId: string, block: RateLimitBlock | null, eventCursor: number): Promise<void> {
+async function observe(sessionId: string, block: RateLimitBlock | null, eventCursor: number, blockedCommands: BlockIdentity["blockedCommands"]): Promise<void> {
   const store = orchestrationStore()
   const old = observation(sessionId)
   if (!block || recoveryDueAt(block) === null) {
@@ -77,7 +79,7 @@ async function observe(sessionId: string, block: RateLimitBlock | null, eventCur
   const data: BlockIdentity = {
     offer: { id: randomUUID(), block, dueAt },
     target: { agent: resolved.kind, instanceId: resolved.instanceId ?? "default", sessionId, bindingRevision: conversation.revision },
-    conversationId: conversation.id, nativeIdentity, filePath: resolved.filePath, eventCursor,
+    conversationId: conversation.id, nativeIdentity, filePath: resolved.filePath, eventCursor, blockedCommands,
   }
   const current = observation(sessionId)
   store.putTrigger(OBSERVATIONS, { id: idFor(sessionId), kind: OBSERVATION_KIND, state: "active", grant: null, nextDueAt: null, data }, current?.revision)
@@ -93,7 +95,11 @@ function conversationReason(data: BlockIdentity, allowedCommandId?: string): str
   const current = store.conversation(data.conversationId)
   if (!current || current.revision !== data.target.bindingRevision || current.binding.sessionId !== data.target.sessionId || current.binding.agent !== data.target.agent || current.binding.instanceId !== data.target.instanceId) return "The session's provider binding changed"
   const events = store.events(data.conversationId, data.eventCursor)
-  if (events.reset || events.hasMore || events.events.some((event) => event.type === "command" && (event.data as { id?: string }).id !== allowedCommandId)) return "New conversation activity replaced the blocked turn"
+  if (events.reset || events.hasMore || events.events.some((event) => {
+    if (event.type !== "command") return false
+    const receipt = event.data as CommandReceipt
+    return receipt.id !== allowedCommandId && !data.blockedCommands?.some((command) => command.id === receipt.id && command.nativeMessageId && command.nativeMessageId === receipt.nativeMessageId)
+  })) return "New conversation activity replaced the blocked turn"
   if (store.pending().some((command) => command.receipt.conversationId === data.conversationId && command.receipt.id !== allowedCommandId && ["held", "unknown"].includes(command.receipt.state))) return "Review held or uncertain delivery in the session queue"
   return null
 }
@@ -262,9 +268,11 @@ export function initializeAllowanceRecovery(): void {
     const observed = observation(sessionId)
     if (observed?.state === "active") orchestrationStore().putTrigger(OBSERVATIONS, { ...observed, state: "paused" }, observed.revision)
     // Event cursors are global, even when the queried conversation has no rows.
-    const eventCursor = orchestrationStore().events("", 0).cursor
+    const store = orchestrationStore()
+    const eventCursor = store.events("", 0).cursor
+    const blockedCommands = store.pending().filter((command) => command.receipt.sessionId === sessionId && ["dispatching", "delivered"].includes(command.receipt.state)).map(({ receipt }) => ({ id: receipt.id, nativeMessageId: receipt.nativeMessageId }))
     const previous = pending.get(sessionId) ?? Promise.resolve()
-    const next = previous.then(() => observe(sessionId, block, eventCursor)).catch(() => { /* Missing/deleted sessions cannot offer recovery. */ })
+    const next = previous.then(() => observe(sessionId, block, eventCursor, blockedCommands)).catch(() => { /* Missing/deleted sessions cannot offer recovery. */ })
     pending.set(sessionId, next)
     void next.finally(() => { if (pending.get(sessionId) === next) pending.delete(sessionId) })
   })

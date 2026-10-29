@@ -464,3 +464,168 @@ it("reports the durable retry due time while retaining the provider reset", asyn
   })
   expect(mocks.send).not.toHaveBeenCalled()
 })
+
+function originalBlockedCommand() {
+  const store = orchestrationStore()
+  const conversation = store.ensureConversation({ hostId: "local", agent: "claude", instanceId: "default", sessionId: SESSION, filePath: mocks.filePath })
+  const lease = store.acquire("blocked-original")!
+  store.admit("local", "original-blocked-command", conversation.id, { message: "Finish the task" })
+  const command = store.claim("local", "original-blocked-command", lease)!
+  expect(command).not.toBeNull()
+  return { store, conversation, lease, command }
+}
+
+it.each(["failed", "completed"] as const)("keeps the same recovery offer when the original durable command settles %s", async (state) => {
+  const { store, lease, command } = originalBlockedCommand()
+  publishRateLimit(SESSION, block())
+  const before = await recoveryStatus(request, SESSION)
+  expect(before.offer).not.toBeNull()
+  store.finish(command, lease, state)
+  const after = await recoveryStatus(request, SESSION)
+  expect(after.offer?.id).toBe(before.offer!.id)
+  expect(after.run).toBeNull()
+  store.release(lease)
+  await optInRecovery(request, SESSION, after.offer!.id)
+  await due(); await runState("completed")
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+})
+
+it.each(["failed", "completed"] as const)("preserves consent accepted before the blocked command's %s settlement", async (state) => {
+  const { store, lease, command } = originalBlockedCommand()
+  const scheduled = await consent()
+  store.finish(command, lease, state)
+  store.release(lease)
+  await commandDispatcher().tick()
+  expect((await recoveryStatus(request, SESSION)).run).toMatchObject({ id: scheduled.run!.id, state: "scheduled" })
+  await due(); await runState("completed")
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+})
+
+it("captures the blocked command before asynchronous observation and permits its immediate settlement", async () => {
+  const { store, lease, command } = originalBlockedCommand()
+  publishRateLimit(SESSION, block())
+  store.finish(command, lease, "failed")
+  store.release(lease)
+  expect((await recoveryStatus(request, SESSION)).offer).not.toBeNull()
+})
+
+it.each([false, true])("still invalidates distinct new commands after original settlement (consent=%s)", async (withConsent) => {
+  const { store, lease, command, conversation } = originalBlockedCommand()
+  publishRateLimit(SESSION, block())
+  const offered = await recoveryStatus(request, SESSION)
+  if (withConsent) await optInRecovery(request, SESSION, offered.offer!.id)
+  store.finish(command, lease, "failed")
+  store.admit("local", "distinct-new-command", conversation.id, { message: "New task" })
+  store.release(lease)
+  const after = await recoveryStatus(request, SESSION)
+  expect(after.offer).toBeNull()
+  if (withConsent) expect(after.run?.state).toBe("cancelled")
+  await due()
+  expect(mocks.send.mock.calls.some(([, input]) => input.message === RECOVERY_MESSAGE)).toBe(false)
+})
+
+it("does not mistake the same command id from another account for the blocked command", async () => {
+  const { store, lease, command, conversation } = originalBlockedCommand()
+  publishRateLimit(SESSION, block())
+  expect((await recoveryStatus(request, SESSION)).offer).not.toBeNull()
+  store.finish(command, lease, "completed")
+  store.admit("another-account", command.receipt.id, conversation.id, { message: "Another account's new work" })
+  store.release(lease)
+  expect((await recoveryStatus(request, SESSION)).offer).toBeNull()
+})
+
+const codexImage = { type: "input_image", image_url: "data:image/png;base64,c3ludGhldGlj" }
+const codexAudio = { type: "input_audio", audio_url: "data:audio/wav;base64,c3ludGhldGlj" }
+const nativeLines = (...records: unknown[]) => records.map((record) => JSON.stringify(record)).join("\n") + "\n"
+const codexUser = (content: unknown[]) => ({ type: "response_item", payload: { type: "message", role: "user", content } })
+const codexDone = [
+  { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Stopped" }] } },
+  { type: "event_msg", payload: { type: "task_complete" } },
+]
+async function codexSession(content: unknown[] = [{ type: "input_text", text: "Original task" }]) {
+  mocks.runtime = { ...mocks.runtime, kind: "codex", descriptor: descriptorFor("codex") }
+  mocks.resolve.mockImplementation(async () => ({ kind: "codex", instanceId: "default", filePath: mocks.filePath }))
+  await writeFile(mocks.filePath, nativeLines(codexUser(content)))
+}
+
+it.each([codexImage, codexAudio])("cancels scheduled recovery after completed attachment-only native input %j", async (attachment) => {
+  await codexSession()
+  await consent()
+  await appendFile(mocks.filePath, nativeLines(...codexDone, codexUser([attachment]), ...codexDone))
+  expect(mocks.runtime.activity(SESSION).running).toBe(false)
+  await due()
+  await vi.waitFor(async () => expect(["cancelled", "skipped"]).toContain((await recoveryStatus(request, SESSION)).run?.state))
+  expect(mocks.send).not.toHaveBeenCalled()
+})
+
+it.each([codexImage, codexAudio])("guards an admitted continuation against completed attachment-only native input %j", async (attachment) => {
+  await codexSession()
+  const { store, run } = await admitted()
+  await appendFile(mocks.filePath, nativeLines(...codexDone, codexUser([attachment]), ...codexDone))
+  triggerScheduler(); await runState("cancelled")
+  expect(store.occurrence("local", run.id)?.command?.state).toBe("cancelled")
+  expect(mocks.send).not.toHaveBeenCalled()
+})
+
+it.each([codexImage, codexAudio])("guards attachment-only blocked turns after native undo %j", async (attachment) => {
+  await codexSession([attachment])
+  const { store, run } = await admitted()
+  await writeFile(mocks.filePath, nativeLines(...codexDone))
+  await expect(recoveryDeliveryGuard(store.occurrence("local", run.id)!)).resolves.toMatchObject({ allow: false, disposition: "cancelled", reason: expect.stringMatching(/native history/) })
+  triggerScheduler(); await runState("cancelled")
+  expect(mocks.send).not.toHaveBeenCalled()
+})
+
+it("permits the continuation after a Codex echo, injected context, tool output and completion", async () => {
+  await codexSession()
+  await consent()
+  await appendFile(mocks.filePath, nativeLines(
+    { type: "event_msg", payload: { type: "user_message", message: "Original task" } },
+    ...codexDone,
+    codexUser([{ type: "input_text", text: "<environment_context>Injected environment</environment_context>" }]),
+    { type: "response_item", payload: { type: "function_call_output", call_id: "tool-1", output: "Trailing tool result" } },
+  ))
+  await due(); await runState("completed")
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+})
+
+it("still rejects new work during original-command consent authorization", async () => {
+  const { store, lease, command, conversation } = originalBlockedCommand()
+  publishRateLimit(SESSION, block())
+  const offered = await recoveryStatus(request, SESSION)
+  let allow: (value: "interact") => void = () => {}
+  installFakeEdition({ access: { ...PERSONAL_EDITION.access, levelOf: () => new Promise((resolve) => { allow = resolve }) } })
+  const enabling = optInRecovery(request, SESSION, offered.offer!.id)
+  await vi.waitFor(() => expect(store.triggers("local", "recovery")[0]?.data.consent).toBe("authorizing"))
+  store.finish(command, lease, "failed")
+  store.admit("local", "new-during-consent", conversation.id, { message: "New task" })
+  allow("interact")
+  await expect(enabling).rejects.toMatchObject({ status: 409 })
+  store.release(lease)
+  expect((await recoveryStatus(request, SESSION)).offer).toBeNull()
+  expect(mocks.send).not.toHaveBeenCalled()
+})
+
+it("persists the original-command settlement exception with consent across restart", async () => {
+  const { store, lease, command } = originalBlockedCommand()
+  const scheduled = await consent()
+  store.finish(command, lease, "failed")
+  store.release(lease)
+  closeOrchestrationStore()
+  await due(); await runState("completed")
+  expect((await recoveryStatus(request, SESSION)).run?.id).toBe(scheduled.run!.id)
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+})
+
+it("rejects distinct work admitted while the blocked command is being observed", async () => {
+  const { store, lease, command, conversation } = originalBlockedCommand()
+  let release: (value: unknown) => void = () => {}
+  mocks.resolve.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+  publishRateLimit(SESSION, block())
+  await vi.waitFor(() => expect(mocks.resolve).toHaveBeenCalled())
+  store.finish(command, lease, "failed")
+  store.admit("local", "new-during-observation", conversation.id, { message: "New task" })
+  release({ kind: "claude", instanceId: "default", filePath: mocks.filePath })
+  store.release(lease)
+  expect((await recoveryStatus(request, SESSION)).offer).toBeNull()
+})

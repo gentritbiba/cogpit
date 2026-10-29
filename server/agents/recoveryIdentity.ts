@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import { createInterface } from "node:readline"
 import { stat } from "node:fs/promises"
 import { transcriptReadStream } from "./transcriptFile"
+import { isRecord } from "../../shared/objects"
+import { createCodexPromptReader } from "../../shared/session/codex"
 import { userMessageTextFromLine } from "./recordReaders"
 import { formatFor } from "../../shared/session/agents"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
@@ -32,12 +34,32 @@ async function fingerprint(filePath: string, kind: AgentKind): Promise<string> {
   const input = transcriptReadStream(filePath)
   const lines = createInterface({ input, crlfDelay: Infinity })
   const format = formatFor(kind)
+  const readPrompt = kind === "codex" ? createCodexPromptReader() : null
+  let responseEchoPending = false
   try {
     for await (const line of lines) {
-      if (userMessageTextFromLine(line) === null) continue
       let record: unknown
       try { record = JSON.parse(line) } catch { continue }
-      if (record && typeof record === "object" && !Array.isArray(record) && format.turnBoundaries([...seedPrompts[kind], record as Record<string, unknown>]).includes(seedPrompts[kind].length)) hash.update(line).update("\n")
+      if (!isRecord(record)) continue
+      if (readPrompt) {
+        const prompt = readPrompt(record)
+        const payload = isRecord(record.payload) ? record.payload : null
+        if (record.type === "response_item") {
+          responseEchoPending = false
+          if (payload?.type !== "message" || payload.role !== "user" || !format.turnBoundaries([record]).includes(0)) continue
+          responseEchoPending = true
+        } else if (record.type === "event_msg" && payload?.type === "user_message" && typeof payload.message === "string") {
+          const echo = responseEchoPending
+          responseEchoPending = false
+          if (echo) continue
+          if (!prompt) {
+            if (payload.message.trim()) continue
+            const content = format.parse(line).turns[0]?.userMessage
+            if (typeof content === "string" ? !content.trim() : !content?.length) continue
+          }
+        } else continue
+      } else if (userMessageTextFromLine(line) === null) continue
+      if (format.turnBoundaries([...seedPrompts[kind], record]).includes(seedPrompts[kind].length)) hash.update(line).update("\n")
     }
     return hash.digest("hex")
   } finally { lines.close(); input.destroy() }
