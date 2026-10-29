@@ -12,6 +12,7 @@ vi.mock("@/contexts/AppContext", () => ({
 }))
 
 vi.mock("@/contexts/SessionContext", () => ({
+  useSessionContextOptional: () => null,
   useSessionContext: () => ({
     session: { turns: [], rawMessages: [], cwd: "/tmp" },
     isLive: true,

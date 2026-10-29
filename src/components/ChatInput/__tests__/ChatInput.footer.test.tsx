@@ -34,6 +34,7 @@ vi.mock("@/hooks/useProjectFileSuggestions", () => ({
   useProjectFileSuggestions: () => ({ files: [], loading: false }),
 }))
 vi.mock("../useImageUpload", () => ({
+  attachmentSrc: (image: { mediaType: string; data: string }) => `data:${image.mediaType};base64,${image.data}`,
   useImageUpload: () => ({
     images: mocks.images,
     isDragOver: false,

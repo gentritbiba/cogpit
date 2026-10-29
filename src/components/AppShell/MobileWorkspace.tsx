@@ -11,7 +11,7 @@ import { RuntimePluginContributions } from "@/plugins/RuntimePluginContributions
 import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
 import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
 import { useCapability } from "@/hooks/useCapability"
-import { formatProjectPromptContext } from "./desktopView"
+import { projectContextItem } from "./desktopView"
 import { LazyViewFallback, MissionControlView } from "./SharedAppViews"
 import type { MobileAppShellProps } from "./mobileTypes"
 
@@ -74,7 +74,19 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
       projectFilesRequest: project.projectFilesRequest,
       backgroundAgents: project.backgroundAgents,
       searchInputRef: sessionView.searchInputRef,
-      addProjectContext: (value) => composePrompt(formatProjectPromptContext(value)),
+      addProjectContext: (value) => {
+        const item = projectContextItem(value)
+        if (!item) return composePrompt(`@${value.path}`)
+        sessionView.chatInputRef.current?.addContext(item)
+        navigation.actions.handleMobileTabChange("chat")
+      },
+      addComposerContext: (item, attachments) => {
+        const input = sessionView.chatInputRef.current
+        if (!input) return "Open a session or start a new one to add context"
+        const refusal = input.addContext(item, attachments)
+        navigation.actions.handleMobileTabChange("chat")
+        return refusal
+      },
       jumpToTurn: navigation.handlers.handleMobileJumpToTurn,
       toggleServer: (...args) => {
         project.processPanel.handleToggleServer(...args)

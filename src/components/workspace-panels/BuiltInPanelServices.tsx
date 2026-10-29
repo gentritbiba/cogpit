@@ -3,6 +3,7 @@ import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useWorktrees } from "@/hooks/useWorktrees"
 import type { BuiltInEditorRequest } from "@/lib/fileOpener"
 import type { ProjectPromptContext } from "@/plugin-api"
+import type { ComposerAttachment, ComposerContextItem } from "../../../shared/session/composerContext"
 import type { WorktreeSessionRef } from "../../../shared/contracts/worktrees"
 
 export interface BuiltInPanelServices {
@@ -11,6 +12,8 @@ export interface BuiltInPanelServices {
   backgroundAgents: BgAgent[]
   searchInputRef: RefObject<HTMLInputElement | null>
   addProjectContext: (context: ProjectPromptContext) => void
+  /** Add typed context, with the images it brings, to the composer; returns why it could not, or null. */
+  addComposerContext: (item: ComposerContextItem, attachments?: ComposerAttachment[]) => string | null
   jumpToTurn: (turnIndex: number, toolCallId?: string) => void
   toggleServer: (id: string, outputPath: string, title: string) => void
   serversChanged: (servers: { id: string; outputPath: string; title: string }[]) => void

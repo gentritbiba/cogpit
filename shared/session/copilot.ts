@@ -4,6 +4,7 @@ import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
 import { visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
+import { composerPromptText } from "./composerContext"
 import type {
   ContentBlock,
   ImageBlock,
@@ -193,7 +194,7 @@ function extractMetadata(events: CopilotEvent[]): CopilotMetadata {
     if (event.type !== "user.message") continue
     metadata.turnCount++
     metadata.timestamp ||= timestamp
-    const content = readString(data.content).trim()
+    const content = composerPromptText(readString(data.content)).trim()
     if (!content) continue
     metadata.firstUserMessage ||= content
     metadata.lastUserMessage = content

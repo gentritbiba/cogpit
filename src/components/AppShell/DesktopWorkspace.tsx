@@ -24,6 +24,7 @@ import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { ProjectPromptContext, WorkspacePanelContext } from "@/plugin-api"
+import type { ComposerAttachment, ComposerContextItem } from "../../../shared/session/composerContext"
 import { useRuntimePlugins } from "@/plugins/useRuntimePlugins"
 import { RuntimePluginContributions } from "@/plugins/RuntimePluginContributions"
 import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
@@ -36,7 +37,7 @@ import {
   MissionControlView,
 } from "./SharedAppViews"
 import {
-  formatProjectPromptContext,
+  projectContextItem,
   resolveDesktopMainView,
   resolveDesktopProjectPath,
 } from "./desktopView"
@@ -254,14 +255,22 @@ export function DesktopWorkspace({
     sessionView.chatInputRef.current?.focus()
   }
 
-  function addProjectContext({
-    path,
-    text,
-    startLine,
-    endLine,
-    comment,
-  }: ProjectPromptContext): void {
-    composePrompt(formatProjectPromptContext({ path, text, startLine, endLine, comment }))
+  function addProjectContext(value: ProjectPromptContext): void {
+    const item = projectContextItem(value)
+    if (!item) {
+      composePrompt(`@${value.path}`)
+      return
+    }
+    sessionView.chatInputRef.current?.addContext(item)
+    sessionView.chatInputRef.current?.focus()
+  }
+
+  function addComposerContext(item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null {
+    const input = sessionView.chatInputRef.current
+    if (!input) return "Open a session or start a new one to add context"
+    const refusal = input.addContext(item, attachments)
+    input.focus()
+    return refusal
   }
 
   const view = resolveDesktopMainView({
@@ -363,6 +372,7 @@ export function DesktopWorkspace({
           backgroundAgents: project.backgroundAgents,
           searchInputRef: sessionView.searchInputRef,
           addProjectContext,
+          addComposerContext,
           jumpToTurn: navigation.actions.handleJumpToTurn,
           toggleServer: project.processPanel.handleToggleServer,
           serversChanged: project.processPanel.handleServersChanged,

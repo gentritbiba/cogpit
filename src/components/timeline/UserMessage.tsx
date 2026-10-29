@@ -5,6 +5,9 @@ import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "../../../shared/session/types"
 import { getUserMessageText, getUserMessageImages } from "../../../shared/session/parser"
 import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
+import { parseComposerMessage } from "../../../shared/session/composerContext"
+import { ContextChips } from "@/components/ChatInput/ContextChips"
+import { useSessionContextOptional } from "@/contexts/SessionContext"
 import {
   extractCommandArgs,
   extractCommandName,
@@ -92,6 +95,9 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(textAfterBanner), [textAfterBanner])
   const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
   const { interrupts, remainingText: textAfterInterrupts } = useMemo(() => parseInterrupts(textAfterOutputs), [textAfterOutputs])
+  // Context the composer attached reads back as the same chips, read-only.
+  const composed = useMemo(() => parseComposerMessage(textAfterInterrupts), [textAfterInterrupts])
+  const openQuoteSource = useSessionContextOptional()?.actions.handleOpenQuoteSource
 
   const handleCommandOpenChange = useCallback(async (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -132,10 +138,16 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   // hidden. The agent envelope and the notification banner are genuinely
   // hidden, so they still count.
   const hasTags = useMemo(
-    () => hasSystemTags(rawText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null,
-    [rawText, isSystemNotification, isTeammate, wakeup, crewDelivery],
+    () => hasSystemTags(rawText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null || composed !== null,
+    [rawText, isSystemNotification, isTeammate, wakeup, crewDelivery, composed],
   )
-  const displayText = showRaw ? rawText : wakeup || crewDelivery ? "" : textAfterInterrupts
+  const displayText = showRaw ? rawText : wakeup || crewDelivery ? "" : composed?.text ?? textAfterInterrupts
+  const contextImages = useMemo(() => images.map((image, index) => ({
+    id: `message-attachment-${index}`,
+    mediaType: image.source.media_type,
+    data: image.source.data,
+    contextId: composed?.context.find((item) => item.kind === "browser" && item.image === index + 1)?.id,
+  })), [images, composed])
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
@@ -304,6 +316,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             ))}
           </div>
         )}
+
+        {!showRaw && composed && <ContextChips items={composed.context} attachments={contextImages} onOpenQuoteSource={openQuoteSource} className="mb-2" />}
 
         {visibleText && (
           <div className="max-w-none overflow-hidden break-words text-sm leading-relaxed">

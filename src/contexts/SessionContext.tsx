@@ -8,6 +8,7 @@ import type { PendingInteraction } from "../../shared/session/parser"
 import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 import type { SessionActionPermissions } from "@/lib/sessionAccessPermissions"
+import type { ComposerAttachment, ComposerContextItem, QuoteSource } from "../../shared/session/composerContext"
 
 // ── Chat (pty) ──────────────────────────────────────────────────────────────
 
@@ -86,6 +87,10 @@ export interface SessionContextValue {
     /** Load a session (or sub-agent session) by dirName + fileName — matches the sidebar behavior. */
     handleLoadSession: (dirName: string, fileName: string) => void
     handleProviderHandoff?: () => void
+    /** Add typed context to the open composer; returns why it could not be added, or null. */
+    handleAddComposerContext?: (item: ComposerContextItem, attachments?: ComposerAttachment[]) => string | null
+    /** Jump to a quoted reply's source; false when it can no longer be found. */
+    handleOpenQuoteSource?: (source: QuoteSource, text: string) => Promise<boolean>
   }
 }
 

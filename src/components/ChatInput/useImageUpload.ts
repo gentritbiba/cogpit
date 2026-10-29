@@ -1,18 +1,19 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import type { ComposerAttachment } from "../../../shared/session/composerContext"
 
-export interface UploadedImage {
-  id: string
-  file: File
-  preview: string
-  data: string
-  mediaType: string
+/** An attached image as the draft holds it: its bytes, so the draft can be kept and restored. */
+export type UploadedImage = ComposerAttachment
+
+/** Where an attachment's thumbnail reads its bytes from. */
+export function attachmentSrc(image: Pick<ComposerAttachment, "mediaType" | "data">): string {
+  return `data:${image.mediaType};base64,${image.data}`
 }
 
 const MAX_DIMENSION = 1568
 const JPEG_QUALITY = 0.85
 const MAX_BYTES = 3_500_000 // ~3.5MB base64 limit
 
-function compressImage(img: HTMLImageElement, sourceType: string): { dataUrl: string; base64: string; mediaType: string } {
+function compressImage(img: HTMLImageElement, sourceType: string): { base64: string; mediaType: string } {
   let { width, height } = img
   const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height))
   width = Math.round(width * scale)
@@ -39,10 +40,10 @@ function compressImage(img: HTMLImageElement, sourceType: string): { dataUrl: st
       base64 = dataUrl.split(",")[1]
       quality -= 0.1
     }
-    return { dataUrl, base64, mediaType: "image/jpeg" }
+    return { base64, mediaType: "image/jpeg" }
   }
 
-  return { dataUrl, base64, mediaType: outputType }
+  return { base64, mediaType: outputType }
 }
 
 export function useImageUpload(enabled = true) {
@@ -79,7 +80,7 @@ export function useImageUpload(enabled = true) {
           const compressed = compressImage(img, file.type)
           setImages((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), file, preview: compressed.dataUrl, data: compressed.base64, mediaType: compressed.mediaType },
+            { id: crypto.randomUUID(), data: compressed.base64, mediaType: compressed.mediaType },
           ])
         }
         img.src = dataUrl
@@ -104,6 +105,21 @@ export function useImageUpload(enabled = true) {
   /** Puts back the images of a send the session refused, unless others were attached since. */
   const restoreImages = useCallback((draft: UploadedImage[]) => {
     setImages((current) => current.length > 0 ? current : draft)
+  }, [])
+
+  /** Attaches images that come with a context item, such as a browser capture. */
+  const attachImages = useCallback((attachments: UploadedImage[]) => {
+    if (attachments.length === 0) return
+    if (!enabledRef.current) {
+      setUnsupportedAttempt(true)
+      return
+    }
+    setImages((current) => [...current.filter((image) => !attachments.some((added) => added.id === image.id)), ...attachments])
+  }, [])
+
+  /** Drops the images a removed context item brought. */
+  const removeContextImages = useCallback((contextId: string) => {
+    setImages((current) => current.filter((image) => image.contextId !== contextId))
   }, [])
 
   const dismissImageError = useCallback(() => setUnsupportedAttempt(false), [])
@@ -157,6 +173,8 @@ export function useImageUpload(enabled = true) {
     removeImage,
     clearImages,
     restoreImages,
+    attachImages,
+    removeContextImages,
     handleDragOver,
     handleDragLeave,
     handleDrop,

@@ -1,11 +1,8 @@
 import { deviceScopedKey } from "@/lib/device"
-import type { UploadedImage } from "./useImageUpload"
+import type { ComposerDraft } from "../../../shared/session/composerContext"
 
 /** A message a session refused, as the composer held it. */
-export interface RefusedDraft {
-  text: string
-  images: UploadedImage[]
-}
+export type RefusedDraft = ComposerDraft
 
 /**
  * Refused messages whose composer went away or moved on to another session,

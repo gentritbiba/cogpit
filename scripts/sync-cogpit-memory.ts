@@ -36,6 +36,7 @@ const FILES = [
   "toolResults.ts",
   "resultProjection.ts",
   "codex-results.ts",
+  "composerContext.ts",
   "sessionStatus.ts",
   "backgroundAgents.ts",
   "interactiveState.ts",

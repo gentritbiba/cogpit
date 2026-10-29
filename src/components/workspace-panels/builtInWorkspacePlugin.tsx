@@ -79,9 +79,10 @@ function SessionInfoWorkspacePanel() {
 }
 
 function BrowserWorkspacePanel(props: WorkspacePanelProps) {
+  const services = useBuiltInPanelServices()
   return (
     <Suspense fallback={<PanelFallback />}>
-      <BrowserPanel {...props} />
+      <BrowserPanel {...props} onAnnotate={props.context.composePrompt ? (item, image) => services.addComposerContext(item, [image]) : undefined} />
     </Suspense>
   )
 }

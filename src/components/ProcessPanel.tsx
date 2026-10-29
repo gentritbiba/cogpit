@@ -181,7 +181,8 @@ interface ProcessPanelProps {
   onRemove: (id: string) => void
   onToggleCollapse: () => void
   onRequestTerminal?: () => void
-  onAddTerminalContext?: (text: string) => void
+  /** A terminal selection to add to the composer, with the tab it came from. */
+  onAddTerminalContext?: (text: string, label?: string) => void
   onUpdateStatus?: (id: string, status: ProcessEntry["status"]) => void
   projectDir?: string | null
   onProcessStarted?: (entry: ProcessEntry) => void
@@ -356,7 +357,7 @@ export const ProcessPanel = memo(function ProcessPanel({
                         autoFocus
                         onRequestNew={onRequestTerminal}
                         onRequestClose={() => handleClose(process)}
-                        onAddContext={onAddTerminalContext}
+                        onAddContext={onAddTerminalContext && ((text) => onAddTerminalContext(text, process.name))}
                       />
                     </Suspense>
                   )}

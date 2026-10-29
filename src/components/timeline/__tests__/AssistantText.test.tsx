@@ -48,3 +48,26 @@ describe("AssistantText", () => {
     expect(screen.queryByText("xhigh")).not.toBeInTheDocument()
   })
 })
+
+describe("AssistantText quoting", () => {
+  it("quotes the selected part of the reply, or the whole reply without a selection", async () => {
+    const user = userEvent.setup()
+    const onQuote = vi.fn()
+    render(<AssistantText text="First sentence. Second sentence." model={null} onQuote={onQuote} />)
+    await user.click(screen.getByRole("button", { name: /Quote in reply/ }))
+    expect(onQuote).toHaveBeenLastCalledWith("First sentence. Second sentence.")
+    const paragraph = screen.getByText("First sentence. Second sentence.")
+    const range = document.createRange()
+    range.setStart(paragraph.firstChild!, 0)
+    range.setEnd(paragraph.firstChild!, "First sentence.".length)
+    window.getSelection()!.removeAllRanges()
+    window.getSelection()!.addRange(range)
+    screen.getByRole("button", { name: /Quote in reply/ }).click()
+    expect(onQuote).toHaveBeenLastCalledWith("First sentence.")
+  })
+
+  it("offers no quote action without a composer to quote into", () => {
+    render(<AssistantText text="hi" model={null} />)
+    expect(screen.queryByRole("button", { name: /Quote in reply/ })).toBeNull()
+  })
+})
