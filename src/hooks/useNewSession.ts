@@ -37,6 +37,7 @@ interface CreateSessionResponse {
   dirName: string
   fileName: string
   sessionId: string
+  cwd?: string
   initialContent?: string
 }
 
@@ -84,7 +85,7 @@ function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession
     sessionId: response.sessionId,
     version: "",
     gitBranch: "",
-    cwd: "",
+    cwd: response.cwd ?? "",
     slug: "",
     name: "",
     model: "",
@@ -349,7 +350,7 @@ export function useNewSession({
         if (!res.ok) {
           // An unconfirmed start is one the server refused to hand over, so a
           // recent session of the caller's would be the wrong one.
-          if (agentKind === "codex" && errorCode !== "SESSION_UNCONFIRMED") {
+          if (agentKind === "codex" && !worktreeEnabled && errorCode !== "SESSION_UNCONFIRMED") {
             const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
             if (recovered) return await adoptCreatedSession(recovered)
           }

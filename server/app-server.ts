@@ -1,3 +1,4 @@
+import { worktreeSetupService } from "./worktreeSetup/service"
 import express from "express"
 import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
@@ -268,6 +269,7 @@ export async function createServerComposition(
         new Promise<void>((resolve) => wss.close(() => resolve())),
         new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),
+        worktreeSetupService.close(),
         browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
       ])

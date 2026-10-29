@@ -700,6 +700,8 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   worktreeName?: string
   mcpConfig?: string | null
   images?: ImageAttachment[]
+  beforeFirstTurn?: (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => Promise<void>
+  onStartupError?: (error: unknown) => void
 }, pluginInstructions?: string, preparation?: AbortController): void {
   if (pluginInstructions === undefined) {
     const loading = pluginSkillContext(state.cwd)
@@ -731,7 +733,28 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   const messageStream = new SDKMessageStream()
   const first = buildUserMessage(prompt, opts.images)
   inputTurns.set(state, { sent: [first.uuid!], completed: 0, taken: null })
-  messageStream.enqueue(first)
+  if (opts.beforeFirstTurn) {
+    let readiness: Promise<void> | undefined
+    queryOpts.hooks = {
+      ...queryOpts.hooks,
+      SessionStart: [{ timeout: 86400, hooks: [async (input) => {
+        try {
+          await (readiness ??= (async () => {
+            state.cwd = input.cwd
+            await opts.beforeFirstTurn!({ sessionId: state.sessionId, cwd: input.cwd })
+            state.abort?.signal.throwIfAborted()
+            messageStream.enqueue(first)
+          })())
+          return {}
+        } catch (error) {
+          opts.onStartupError?.(error)
+          messageStream.close()
+          state.abort?.abort()
+          return { continue: false, decision: "block", reason: "Worktree startup did not complete" }
+        }
+      }] }],
+    }
+  } else messageStream.enqueue(first)
   state.messageStream = messageStream
 
   // Streaming input keeps one SDK/CLI process alive across turns. This is
@@ -871,6 +894,8 @@ interface SDKSessionInitOpts {
   name?: string
   worktreeName?: string
   mcpConfig?: string | null
+  beforeFirstTurn?: (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => Promise<void>
+  onStartupError?: (error: unknown) => void
 }
 
 function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
@@ -909,6 +934,8 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
   runQuery(state, opts.message, {
     name: opts.name,
     worktreeName: opts.worktreeName,
+    beforeFirstTurn: opts.beforeFirstTurn,
+    onStartupError: opts.onStartupError,
     mcpConfig: opts.mcpConfig,
     images: opts.images,
   })

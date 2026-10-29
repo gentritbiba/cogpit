@@ -1,3 +1,4 @@
+import { WorktreeSetupPanel } from "@/components/WorktreeSetupPanel"
 import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
 import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
@@ -179,6 +180,7 @@ function DesktopMainView({
             }}
           />
         )}
+        {hasPendingTurns && <WorktreeSetupPanel projectCwd={pendingPath} progressOnly />}
         <SessionInputFooter>{sessionView.pendingComposer}</SessionInputFooter>
         {!hasPendingTurns && (
           <div className="flex items-center justify-center gap-2">

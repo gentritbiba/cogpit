@@ -25,6 +25,50 @@ async function instance(label: string, args: string[] = []) {
 }
 async function until(predicate: () => boolean, timeout = 10000) { const deadline = Date.now() + timeout; while (!predicate()) { if (Date.now() > deadline) throw new Error("Provider state did not arrive"); await new Promise((resolve) => setTimeout(resolve, 20)) } }
 describe("provider instances and ACP", () => {
+
+  it("awaits the parent readiness gate before a worker receives its first prompt", async () => {
+    const account = await instance("Readiness")
+    const cwd = process.env.COGPIT_ORCHESTRATION_ROOT!
+    let release!: () => void
+    let entered = false
+    let identity: { cwd: string; sessionId?: string } | undefined
+    const pending = account.runtime.start({ cwd, dirName: descriptorFor("acp").dirName.encode(cwd), message: "first gated prompt", beforeFirstTurn: (value) => { identity = value; entered = true; return new Promise<void>(resolve => { release = resolve }) } })
+    await until(() => entered)
+    expect(identity?.cwd).toBe(cwd)
+    expect(identity?.sessionId).toContain(account.configuration.id)
+    const files = await account.store.listSessionFiles()
+    expect(files).toHaveLength(1)
+    expect(await readFile(files[0]!.filePath, "utf8")).not.toContain("first gated prompt")
+    release()
+    const started = await pending
+    expect(started.cwd).toBe(cwd)
+    expect(started.sessionId).toBe(identity?.sessionId)
+    expect(await readFile(started.filePath, "utf8")).toContain("first gated prompt")
+  }, 20000)
+
+  it("retains the original authority rejection from a worker readiness callback", async () => {
+    const account = await instance("Revoked readiness")
+    const cwd = process.env.COGPIT_ORCHESTRATION_ROOT!
+    const rejected = new Error("Execution grant was revoked")
+    await expect(account.runtime.start({ cwd, dirName: descriptorFor("acp").dirName.encode(cwd), message: "must never send", beforeFirstTurn: async () => { throw rejected } })).rejects.toBe(rejected)
+    const files = await account.store.listSessionFiles()
+    expect(await readFile(files[0]!.filePath, "utf8")).not.toContain("must never send")
+  }, 20000)
+
+  it("cancels worker startup while the parent readiness gate is pending", async () => {
+    const account = await instance("Cancelled readiness")
+    const cwd = process.env.COGPIT_ORCHESTRATION_ROOT!
+    const controller = new AbortController()
+    let entered = false
+    const pending = account.runtime.start({ cwd, dirName: descriptorFor("acp").dirName.encode(cwd), signal: controller.signal, message: "cancelled first prompt", beforeFirstTurn: () => { entered = true; return new Promise<void>((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true })) } })
+    const rejected = expect(pending).rejects.toThrow("cancelled")
+    await until(() => entered)
+    controller.abort(new Error("startup cancelled"))
+    await rejected
+    const files = await account.store.listSessionFiles()
+    expect(await readFile(files[0]!.filePath, "utf8")).not.toContain("cancelled first prompt")
+  }, 20000)
+
   it.each(["interrupt", "stop"] as const)("does not submit a prompt when %s arrives during plugin skill loading", async action => {
     const account = await instance("Canceled preparation")
     const cwd = process.env.COGPIT_ORCHESTRATION_ROOT!
