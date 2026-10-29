@@ -169,9 +169,11 @@ end on their own when the session is deleted or when you point Cogpit at a diffe
 directory, and turning network access off disconnects every guest while keeping the records, so
 turning it back on does not silently re-admit anyone.
 
-What sharing does not do yet: Codex sessions cannot be shared because a rollout's nested file
-path does not fit the guest path rules, and Cogpit also rejects Copilot sessions. Shares are not
-proxied through the multi-device hub, so a guest connects to the machine directly; a guest sees
+Claude Code and Codex sessions can be shared. A session on a hub device is shared from that
+device, and its link points at the device's own address, because shares are not proxied through
+the hub. Register the device by its HTTPS address, or the guest cannot sign in.
+
+What sharing does not do yet: Cogpit rejects Copilot sessions, and a guest sees
 the main transcript but not sub-agent transcripts, and the panel says so rather than sitting
 empty. At most eight guests can hold one session at a time, and a guest login expires on the
 same schedule as any other browser session — 30 minutes idle, 8 hours absolute — and does not

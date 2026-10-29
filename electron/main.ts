@@ -206,12 +206,8 @@ app.whenReady().then(async () => {
     },
   ]))
 
+  initUpdater()
   await createWindow(port)
-
-  // Initialize auto-updater / update notifications
-  if (mainWindow) {
-    initUpdater(mainWindow)
-  }
 
   // macOS: re-create window when dock icon clicked
   app.on("activate", () => {

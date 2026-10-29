@@ -1,14 +1,15 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 contextBridge.exposeInMainWorld("electronUpdater", {
-  onUpdateAvailable: (cb: (info: { version: string; url: string; platform: string }) => void) => {
-    ipcRenderer.on("update-available", (_event, info) => cb(info))
+  getState: () => ipcRenderer.invoke("update:get-state"),
+  onState: (cb: (state: unknown) => void) => {
+    const listener = (_event: unknown, state: unknown) => cb(state)
+    ipcRenderer.on("update:state", listener)
+    return () => { ipcRenderer.removeListener("update:state", listener) }
   },
-  onUpdateDownloaded: (cb: (info: { version: string }) => void) => {
-    ipcRenderer.on("update-downloaded", (_event, info) => cb(info))
-  },
+  install: () => ipcRenderer.invoke("update:install"),
   dismissVersion: (version: string) => {
-    ipcRenderer.send("dismiss-update", version)
+    ipcRenderer.send("update:dismiss", version)
   },
 })
 

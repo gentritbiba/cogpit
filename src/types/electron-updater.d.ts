@@ -1,6 +1,13 @@
+type ElectronUpdateState =
+  | { status: "idle" }
+  | { status: "available"; version: string; url: string; via: "download" | "package-manager" }
+  | { status: "ready"; version: string; asksForPassword: boolean }
+  | { status: "failed"; version: string; message: string; url: string }
+
 interface ElectronUpdaterAPI {
-  onUpdateAvailable: (cb: (info: { version: string; url: string; platform: string }) => void) => void
-  onUpdateDownloaded: (cb: (info: { version: string }) => void) => void
+  getState: () => Promise<ElectronUpdateState>
+  onState: (cb: (state: ElectronUpdateState) => void) => () => void
+  install: () => Promise<void>
   dismissVersion: (version: string) => void
 }
 

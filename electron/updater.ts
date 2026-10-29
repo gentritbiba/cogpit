@@ -1,128 +1,162 @@
-import { app, BrowserWindow, ipcMain } from "electron"
+import { app, BrowserWindow, ipcMain, net } from "electron"
 import pkg from "electron-updater"
 const { autoUpdater } = pkg
 import { join } from "node:path"
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { DEFAULT_FEED_URL, fetchFeed, isNewer, pickMacArchive } from "./updateFeed.ts"
+import { replaceableAppPath, stageMacUpdate, swapAfterExit, type StagedMacUpdate } from "./macBundleUpdate.ts"
 
+export type UpdateState =
+  | { status: "idle" }
+  | { status: "available"; version: string; url: string; via: "download" | "package-manager" }
+  | { status: "ready"; version: string; asksForPassword: boolean }
+  | { status: "failed"; version: string; message: string; url: string }
+
+/**
+ * - mac: Cogpit's own bundle swap (see macBundleUpdate.ts)
+ * - nsis, appimage, pacman: electron-updater; pacman installs through `pkexec pacman -U`
+ * - notify: a Linux install Cogpit cannot replace, so it only points at the release
+ */
+type Installer = "mac" | "nsis" | "appimage" | "pacman" | "notify"
+
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+const RELEASES_URL = "https://github.com/gentritbiba/cogpit/releases"
 const PREFS_FILE = "update-preferences.json"
 
-interface UpdatePrefs {
-  dismissedVersion: string | null
+let state: UpdateState = { status: "idle" }
+
+function setState(next: UpdateState): void {
+  state = next
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("update:state", state)
 }
 
-function getPrefsPath(): string {
+function prefsPath(): string {
   return join(app.getPath("userData"), PREFS_FILE)
 }
 
-function readPrefs(): UpdatePrefs {
-  const path = getPrefsPath()
-  if (!existsSync(path)) return { dismissedVersion: null }
+function dismissedVersion(): string | null {
+  if (!existsSync(prefsPath())) return null
   try {
-    return JSON.parse(readFileSync(path, "utf-8"))
-  } catch {
-    return { dismissedVersion: null }
-  }
-}
-
-function writePrefs(prefs: UpdatePrefs): void {
-  writeFileSync(getPrefsPath(), JSON.stringify(prefs, null, 2))
-}
-
-/** "auto-download" is every target electron-updater can install itself: NSIS and AppImage. */
-type UpdatePlatform = "auto-download" | "mac-notification" | "linux-notification"
-
-function getUpdatePlatform(): UpdatePlatform {
-  if (process.platform === "darwin") return "mac-notification"
-  if (process.platform === "win32") return "auto-download"
-  if (process.env.APPIMAGE) return "auto-download"
-  return "linux-notification"
-}
-
-async function checkGitHubRelease(): Promise<{ version: string; url: string } | null> {
-  try {
-    const res = await fetch("https://api.github.com/repos/gentritbiba/cogpit/releases/latest", {
-      headers: { "User-Agent": "Cogpit-Updater" },
-    })
-    if (!res.ok) return null
-    const release = await res.json() as { tag_name?: unknown; html_url?: unknown } | null
-    const tag = typeof release?.tag_name === "string" ? release.tag_name : ""
-    const url = typeof release?.html_url === "string" ? release.html_url : ""
-    const version = tag.replace(/^v/, "")
-    // The banner hands this url to shell.openExternal, which honours any
-    // scheme. Pin it to the release host so a compromised or spoofed response
-    // cannot open something else.
-    if (!version || !url.startsWith("https://github.com/")) return null
-    return { version, url }
+    return JSON.parse(readFileSync(prefsPath(), "utf-8")).dismissedVersion ?? null
   } catch {
     return null
   }
 }
 
-function isNewer(remote: string, local: string): boolean {
-  const r = remote.split(".").map(Number)
-  const l = local.split(".").map(Number)
-  for (let i = 0; i < 3; i++) {
-    if ((r[i] ?? 0) > (l[i] ?? 0)) return true
-    if ((r[i] ?? 0) < (l[i] ?? 0)) return false
-  }
-  return false
+function installerFor(): Installer {
+  if (process.platform === "darwin") return "mac"
+  if (process.platform === "win32") return "nsis"
+  if (process.env.APPIMAGE) return "appimage"
+  // electron-builder writes this file into fpm packages (pacman, deb, rpm).
+  const packageType = join(process.resourcesPath, "package-type")
+  if (existsSync(packageType) && readFileSync(packageType, "utf8").trim() === "pacman") return "pacman"
+  return "notify"
 }
 
-export function initUpdater(mainWindow: BrowserWindow): void {
-  const platform = getUpdatePlatform()
+function releaseUrl(version: string): string {
+  return `${RELEASES_URL}/tag/v${version}`
+}
 
-  // How often to re-check for updates while the app stays open. A one-shot
-  // check at startup never surfaces releases published during a long-lived
-  // session, so we also poll on this interval.
-  const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+function announce(version: string, via: "download" | "package-manager"): void {
+  if (dismissedVersion() === version) return
+  setState({ status: "available", version, url: releaseUrl(version), via })
+}
 
-  // Listen for dismiss from renderer
-  ipcMain.on("dismiss-update", (_event, version: string) => {
-    writePrefs({ dismissedVersion: version })
+function startElectronUpdater(installer: "nsis" | "appimage" | "pacman", feedUrl: string | undefined): () => Promise<unknown> {
+  autoUpdater.logger = null
+  autoUpdater.autoDownload = true
+  // pacman asks for a password, which must not appear unprompted while quitting.
+  autoUpdater.autoInstallOnAppQuit = installer !== "pacman"
+  if (feedUrl) autoUpdater.setFeedURL({ provider: "generic", url: feedUrl })
+  autoUpdater.on("update-downloaded", (info) => {
+    setState({ status: "ready", version: info.version, asksForPassword: installer === "pacman" })
+  })
+  // Linux installers run synchronously inside quitAndInstall and report failure through this event.
+  let installing = false
+  autoUpdater.on("error", (error) => {
+    if (installing && state.status === "ready") setState({ status: "failed", version: state.version, message: error.message, url: releaseUrl(state.version) })
+  })
+  ipcMain.handle("update:install", () => {
+    if (state.status !== "ready") return
+    installing = true
+    try {
+      autoUpdater.quitAndInstall(true, true)
+    } finally {
+      installing = false
+    }
+  })
+  return () => autoUpdater.checkForUpdates()
+}
+
+function startMacUpdater(feedUrl: string): () => Promise<unknown> {
+  const appPath = replaceableAppPath(process.execPath, process.resourcesPath)
+  let staged: StagedMacUpdate | null = null
+  let relaunch = false
+
+  app.on("will-quit", () => {
+    if (!staged) return
+    swapAfterExit(staged, relaunch)
+    staged = null
+  })
+  ipcMain.handle("update:install", () => {
+    if (!staged) return
+    relaunch = true
+    app.quit()
   })
 
-  if (platform === "auto-download") {
-    // Silent auto-update via electron-updater
-    autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
-    autoUpdater.logger = null
-
-    autoUpdater.on("update-downloaded", (info) => {
-      mainWindow.webContents.send("update-downloaded", {
-        version: info.version,
-      })
-    })
-
-    // Check shortly after launch, then periodically for long-running instances.
-    const check = () => autoUpdater.checkForUpdates().catch(() => {})
-    setTimeout(check, 5000)
-    const interval = setInterval(check, UPDATE_CHECK_INTERVAL_MS)
-    app.on("before-quit", () => clearInterval(interval))
-  } else {
-    // macOS or Linux system package: check GitHub API shortly after launch,
-    // then periodically so a long-running instance still surfaces new releases.
-    const checkForUpdate = async () => {
-      if (mainWindow.isDestroyed()) return
-
-      const release = await checkGitHubRelease()
-      if (!release) return
-
-      const currentVersion = app.getVersion()
-      if (!isNewer(release.version, currentVersion)) return
-
-      const prefs = readPrefs()
-      if (prefs.dismissedVersion === release.version) return
-
-      if (mainWindow.isDestroyed()) return
-      mainWindow.webContents.send("update-available", {
-        version: release.version,
-        url: release.url,
-        platform: platform === "mac-notification" ? "mac" : "linux-pkg",
-      })
+  return async () => {
+    const feed = await fetchFeed(net.fetch, feedUrl, "latest-mac.yml")
+    if (!isNewer(feed.version, app.getVersion()) || staged?.version === feed.version) return
+    const archive = pickMacArchive(feed, process.arch)
+    if (!appPath || !archive) return announce(feed.version, "download")
+    // Staging replaces whatever an earlier check staged.
+    staged = null
+    try {
+      staged = await stageMacUpdate(net.fetch, appPath, feed.version, new URL(archive.url, feedUrl).href, archive)
+    } catch (error) {
+      announce(feed.version, "download")
+      throw error
     }
-
-    setTimeout(checkForUpdate, 5000)
-    const interval = setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS)
-    app.on("before-quit", () => clearInterval(interval))
+    setState({ status: "ready", version: feed.version, asksForPassword: false })
   }
+}
+
+function startNotifier(feedUrl: string): () => Promise<unknown> {
+  return async () => {
+    const feed = await fetchFeed(net.fetch, feedUrl, "latest-linux.yml")
+    if (isNewer(feed.version, app.getVersion())) announce(feed.version, "package-manager")
+  }
+}
+
+export function initUpdater(): void {
+  ipcMain.handle("update:get-state", () => state)
+  ipcMain.on("update:dismiss", (_event, version: string) => {
+    writeFileSync(prefsPath(), JSON.stringify({ dismissedVersion: version }, null, 2))
+  })
+  if (!app.isPackaged) return
+
+  // Points every installer at a generic feed instead of the GitHub release, e.g. a mirror or a local QA server.
+  const feedOverride = process.env.COGPIT_UPDATE_FEED_URL
+  const feedUrl = feedOverride ?? DEFAULT_FEED_URL
+  const installer = installerFor()
+  const check = installer === "mac" ? startMacUpdater(feedUrl)
+    : installer === "notify" ? startNotifier(feedUrl)
+    : startElectronUpdater(installer, feedOverride)
+
+  let checking = false
+  const run = async () => {
+    if (checking) return
+    checking = true
+    try {
+      await check()
+    } catch (error) {
+      // Usually offline or a release without manifests; the next interval retries.
+      console.warn("[updater] Update check failed:", error)
+    } finally {
+      checking = false
+    }
+  }
+  setTimeout(run, 5000)
+  const interval = setInterval(run, CHECK_INTERVAL_MS)
+  app.on("before-quit", () => clearInterval(interval))
 }

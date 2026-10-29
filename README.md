@@ -48,6 +48,8 @@ Get the installer from the [latest release](https://github.com/gentritbiba/cogpi
 | Windows, x64 | `Cogpit-<version>-setup.exe` |
 | Linux | `.AppImage` or `.pacman` |
 
+The app updates itself: it downloads new releases in the background and installs them when you restart or quit. A pacman install updates when you choose **Restart now** and enter your password. Other Linux packages show a notice instead. On macOS, the app needs write access to the folder it runs from (usually `/Applications`). Otherwise it links to the download.
+
 The Windows installer is unsigned and Windows support has had less testing. SmartScreen may show an unknown-publisher prompt. Use **More info → Run anyway** to open the installer.
 
 ### Run in your browser

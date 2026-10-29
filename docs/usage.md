@@ -118,7 +118,7 @@ COGPIT_HOST=0.0.0.0 COGPIT_NETWORK_PASSWORD='your-long-passphrase' bun server/st
 
 Put HTTPS in front of it for remote browser access. Local-only actions such as revealing a folder or opening an external terminal are hidden when viewing a remote machine.
 
-Claude Code sessions can be shared with a guest through a passphrase-protected link. The guest gets access to that session. Manage active shares in **Configuration → Network**.
+Claude Code and Codex sessions can be shared with a guest through a passphrase-protected link, including sessions on a hub device. The guest gets access to that session. Manage active shares in **Configuration → Network**.
 
 ## Configuration, integrations, and shortcuts
 

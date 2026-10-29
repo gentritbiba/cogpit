@@ -99,22 +99,37 @@ jobs:
           # `bun run <script> -- <args>` appends to the END of the whole script
           # string, so the target flags used to land on a trailing command
           # instead of electron-builder. Invoke electron-builder directly.
+          # Each pattern also carries the update manifest (latest*.yml) and the
+          # files the in-app updater downloads: the mac zips, the Windows
+          # blockmap for differential downloads.
           - os: macos-latest
             name: macOS
             cmd: bun run electron:build && bunx electron-builder --mac --arm64 --x64 --publish never
-            pattern: "release/*.dmg"
+            pattern: |
+              release/*.dmg
+              release/*-mac.zip
+              release/latest-mac.yml
           - os: ubuntu-latest
             name: Linux (AppImage)
             cmd: bun run electron:build && bunx electron-builder --linux AppImage --x64 --publish never
-            pattern: "release/*.AppImage"
+            manifest: latest-linux-appimage.yml
+            pattern: |
+              release/*.AppImage
+              release/latest-linux-appimage.yml
           - os: ubuntu-latest
             name: Linux (pacman)
             cmd: bun run electron:build && bunx electron-builder --linux pacman --x64 --publish never
-            pattern: "release/*.pacman"
+            manifest: latest-linux-pacman.yml
+            pattern: |
+              release/*.pacman
+              release/latest-linux-pacman.yml
           - os: windows-latest
             name: Windows
             cmd: bun run electron:build && bunx electron-builder --win nsis --x64 --publish never
-            pattern: "release/*.exe"
+            pattern: |
+              release/*-setup.exe
+              release/*-setup.exe.blockmap
+              release/latest.yml
 
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -167,6 +182,11 @@ jobs:
           COGPIT_EXPECT_EDITION_UI: present
         run: ${{ matrix.cmd }}
 
+      # Both Linux jobs write latest-linux.yml; publish merges the two.
+      - name: Name the Linux update manifest
+        if: matrix.manifest
+        run: mv release/latest-linux.yml "release/${{ matrix.manifest }}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -192,27 +212,67 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | head -20
 
-      - name: Verify release artifact manifest
+      # electron-updater on Linux reads one latest-linux.yml for both the
+      # AppImage and the pacman package and picks its file by extension.
+      # The AppImage goes last so the legacy top-level path describes it.
+      - name: Merge the Linux update manifests
         shell: bash
+        working-directory: artifacts
         run: |
           set -euo pipefail
-          for extension in dmg AppImage pacman exe; do
-            if ! find artifacts -maxdepth 1 -type f -name "*.${extension}" -print -quit | grep -q .; then
-              echo "Missing required .${extension} release artifact" >&2
+          if [ "$(yq -N '.version' latest-linux-pacman.yml latest-linux-appimage.yml | sort -u | wc -l)" -ne 1 ]; then
+            echo "The Linux update manifests disagree on the version" >&2
+            exit 1
+          fi
+          yq eval-all '. as $m ireduce ({}; . *+ $m)' latest-linux-pacman.yml latest-linux-appimage.yml > latest-linux.yml
+          rm latest-linux-pacman.yml latest-linux-appimage.yml
+          cat latest-linux.yml
+
+      - name: Verify release artifact manifest
+        shell: bash
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          for pattern in "*.dmg" "*.AppImage" "*.pacman" "*-setup.exe" latest-mac.yml latest-linux.yml latest.yml; do
+            if ! find . -maxdepth 1 -type f -name "$pattern" -print -quit | grep -q .; then
+              echo "Missing required release artifact: $pattern" >&2
               exit 1
             fi
           done
 
-          if find artifacts -maxdepth 1 -type f \
+          if find . -maxdepth 1 -type f \
             ! -name "*.dmg" \
+            ! -name "*-mac.zip" \
             ! -name "*.AppImage" \
             ! -name "*.pacman" \
-            ! -name "*.exe" \
+            ! -name "*-setup.exe" \
+            ! -name "*-setup.exe.blockmap" \
+            ! -name "latest*.yml" \
             -print -quit | grep -q .; then
             echo "Release artifact manifest contains an unexpected file type" >&2
-            find artifacts -maxdepth 1 -type f -print >&2
+            find . -maxdepth 1 -type f -print >&2
             exit 1
           fi
+
+          # Every installed build must find its own update file in a manifest,
+          # and every file a manifest lists must ship with the release.
+          expect() {
+            if [ "$(yq "[.files[].url | select(test(\"$2\"))] | length" "$1")" -ne 1 ]; then
+              echo "$1 does not list exactly one file matching $2" >&2
+              exit 1
+            fi
+          }
+          expect latest-mac.yml '-arm64-mac\.zip$'
+          expect latest-mac.yml '\.[0-9]+-mac\.zip$'
+          expect latest-linux.yml '\.AppImage$'
+          expect latest-linux.yml '\.pacman$'
+          expect latest.yml '-setup\.exe$'
+          for file in $(yq -N '.files[].url' latest-mac.yml latest-linux.yml latest.yml); do
+            if [ ! -f "$file" ]; then
+              echo "An update manifest lists $file, which is not in the release" >&2
+              exit 1
+            fi
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
