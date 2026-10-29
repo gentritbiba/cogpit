@@ -430,3 +430,24 @@ it.each(["optout", "approval", "binding", "manual"])("rechecks %s changing durin
   await expect(checking).resolves.toMatchObject({ allow: false, disposition: "cancelled" })
   expect(mocks.send).not.toHaveBeenCalled()
 })
+
+it("holds the same command when its grant is revoked during the final native guard", async () => {
+  const { store, run } = await admitted()
+  let finalHandoff = false
+  let revoked = false
+  installFakeEdition({ turns: {
+    ...PERSONAL_EDITION.turns,
+    send: (_req, runtime, sessionId, input) => { finalHandoff = true; return runtime.send(sessionId, input) },
+  } })
+  const readIdentity = nativeIdentity.recoveryIdentity
+  vi.spyOn(nativeIdentity, "recoveryIdentity").mockImplementation(async (...args) => {
+    const fingerprint = await readIdentity(...args)
+    if (finalHandoff && !revoked) { revoked = true; await revokeExecutionGrant(run.grant!.grantId, "Revoked during final native scan") }
+    return fingerprint
+  })
+  triggerScheduler(); await runState("held")
+  expect(revoked).toBe(true)
+  expect((await recoveryStatus(request, SESSION)).run).toMatchObject({ id: run.id, hold: "reauthorize", command: { id: run.commandId, state: "held" } })
+  expect(store.command("local", run.commandId)?.receipt.error).toMatch(/Revoked during final native scan/)
+  expect(mocks.send).not.toHaveBeenCalled()
+})
