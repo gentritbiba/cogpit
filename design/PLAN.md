@@ -18,6 +18,10 @@ Application baseline: `f2f4c21f`. Implementation branches start at `6567fc30`, w
 | 8 | Scheduled and webhook-triggered tasks | Durable recurring tasks and authenticated webhook tasks select a project/provider/workspace, expose execution history and controls, and handle duplicate deliveries and burst coalescing. |
 | 9 | PR review workspace | Review changed files and draft inline comments in the existing GitHub workflow, start an agent in a PR worktree, and provide optional generated review guides. External writes require an explicit user action. |
 
+## Current delivery scope
+
+The user requested a quick wrap-up with less token spend on 2026-10-29. This delivery is being bounded to items 1–7; scheduled/webhook tasks (8) and PR review (9) stay queued in this reference and are not complete. Automation sketches already begun are preserved separately in the Opus worktree. Additional review rounds and new sessions have stopped; required integration checks remain.
+
 ## Packages and dependency order
 
 | ID | Items / scope | Base | Model | Status |
@@ -25,14 +29,14 @@ Application baseline: `f2f4c21f`. Implementation branches start at `6567fc30`, w
 | REVIEW | Adversarial read-only plan and source review | `6567fc30` | GPT 6.1 Sol / high | Complete; findings incorporated |
 | FOUNDATION | Shared trigger admission/authority and cross-package contracts | `34b0585c` | Opus 5.5 / high | Integrated with review corrections; independent original and follow-up repro checks approved |
 | RENDER | 1, 3: diff/highlighting workers and streaming Markdown | `34b0585c` | GPT 6.1 Sol / high | Integrated: `96fa2530`, `69e81a01`, `bc40d802`; 116 focused tests passed |
-| OUTPUT | 2: demand-loaded tool results and bounded live output | FOUNDATION checkpoint `0b5fa539` | Same Opus 5.5 / high session | Integrated as `585994e1`, parity correction `f0bdc421`; independent review 2 fixes in progress |
+| OUTPUT | 2: demand-loaded tool results and bounded live output | FOUNDATION checkpoint `0b5fa539` | Same Opus 5.5 / high session | Integrated as `585994e1`, parity correction `f0bdc421`; copy and multipart/status corrections integrated; supplied-fix rechecks approved |
 | WORKTREE | 5: setup recipes, lifecycle and progress | `34b0585c` | GPT 6.1 Sol / high | Integrated as `f8359463`; shared startup review corrections approved |
-| RECOVERY | 7: opt-in allowance-reset continuation | FOUNDATION integrated `c59ab6ac` | GPT 6.1 Sol / high | Integrated with review correction `c8b90671`; independent recheck pending |
-| CONTEXT | 4: typed composer context and citations | OUTPUT integrated | Same Opus 5.5 / high session | Stable checkpoint `c6cabe8a` integrated; annotation tests/QA and independent review underway |
-| STASH | 6: stash, attachment restoration and prompt recall | CONTEXT integrated `c6cabe8a` | GPT 6.1 Sol / high | Running |
-| AUTOMATION | 8: durable schedules, webhooks and history | FOUNDATION, RECOVERY and WORKTREE integrated | Same Opus 5.5 / high session | Waiting for dependencies |
-| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Waiting for dependencies |
-| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | Waiting for implementation |
+| RECOVERY | 7: opt-in allowance-reset continuation | FOUNDATION integrated `c59ab6ac` | GPT 6.1 Sol / high | Integrated with review correction `c8b90671`; independent recheck approved |
+| CONTEXT | 4: typed composer context and citations | OUTPUT integrated | Same Opus 5.5 / high session | Integrated with corrections `4e699654`, `b121df11`, `9f27f3da`; full-app QA passed; draft-boundary corrections owned by STASH |
+| STASH | 6: stash, attachment restoration and prompt recall | CONTEXT integrated `c6cabe8a` | GPT 6.1 Sol / high | Integrated; final combined checks running |
+| AUTOMATION | 8: durable schedules, webhooks and history | FOUNDATION, RECOVERY and WORKTREE integrated | Same Opus 5.5 / high session | Deferred for requested quick wrap-up |
+| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Deferred for requested quick wrap-up |
+| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | Lead final checks; extra review sessions stopped for cost |
 
 The Opus worker implements FOUNDATION, OUTPUT, CONTEXT, AUTOMATION and REVIEW-UI sequentially and reports a separate commit for each. Other workers own distinct worktrees and bounded file areas. Opus is the sole writer of shared scheduling/storage/authority contracts; the lead reviews and integrates those contracts, shared configuration edits and final verification. No worker pushes, creates issues/comments/PRs, merges into the owner's checkout, deploys, sends Slack messages or changes provider credentials.
 
@@ -91,3 +95,10 @@ The focused review was performed by session `01a18984-9425-7c90-9736-97368750a79
 - CONTEXT stable checkpoint `821bb68e` integrated as `c6cabe8a`: serializable ComposerDraft v1, ordered file/terminal/quote/browser items, attachment bytes, readable reversible native message text, source navigation and context chips. Integration passed 126 focused tests plus app production/test types. Annotation tests and real-browser QA remain Opus-owned; the independent context review is running.
 - STASH session `01a189ce-cb65-77d3-b7b4-25b136f036b6` launched with GPT 6.1 Sol/high on `c6cabe8a` in its own checkout. It owns scoped durable draft/stash/recall and refused-draft consolidation, using the exact context contract.
 - RECOVERY review correction `6d9d6078` integrated as `c8b90671` captures original in-flight durable identities without advancing the observation cursor, and recognizes canonical image/audio-only native input. Worker focused service/API/identity suite passed 90 tests, with server types/lint and clean shutdown. Lead integration and independent reproduction checks are pending.
+
+- Final scope steering: the user asked to wrap quickly and limit tokens. Extra review loops stopped. Items8/9 remain explicitly queued rather than being reported complete; automation drafts remain uncommitted in the isolated Opus checkout.
+- Latest combined checkpoint at `6e12d815`: normal/public each669files /10,067 passed +3skipped; memory110 passed; full production/test types passed. Later context/copy focused suite66 passed, quote-navigation suite26 passed, memory25-module sync and full lint/architecture/agents/duplicates passed. Final stash-inclusive gates remain outstanding.
+- RECOVERY independently approved at `6e12d815`:12 receipt scenarios, six native attachment/undo probes, two delivery guards and104 focused tests. OUTPUT copy independently approved at `cd18c323`, including a9Mi-character final suffix plus accurate partial/failure notices.
+- CONTEXT follow-ups: `1ec57d97` integrated as `4e699654` preserves literal snapshots and bounds serialized metadata; `918000ef` as `b121df11` finds quote sources with bounded older-page loading; `66927acd` as `9f27f3da` binds browser frame page/generation before asynchronous bitmap decoding. Opus focused browser/socket148 tests and types/lint pass. STASH owns atomic refused-draft restoration and actual restore/send/paste validation.
+
+- STASH worker `e31e0189` is integrated: scoped durable byte-preserving drafts/stashes, explicit swap/merge, accepted user-prompt recall and exact creation handoff. Old refusedDrafts storage is removed; atomic refusal and restored/pasted context validation corrections are included. Worker178 focused tests plus app/test types, lint and sync passed; full-app private browser QA and cleanup passed. Final combined checks are running.
