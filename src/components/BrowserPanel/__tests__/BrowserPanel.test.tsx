@@ -63,6 +63,7 @@ let lastFrameAt: number | null = null
 let frame: BrowserFrame | null = null
 let tabs: BrowserTab[] = []
 let page: UseBrowserSocket["page"] = null
+let pageGeneration = 0
 let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
@@ -91,13 +92,16 @@ function socketDouble(session: string | null): UseBrowserSocket {
     followed: null,
     frame,
     lastFrameAt,
+    pageGeneration,
     error: socketError,
     send,
   }
 }
 
-function frameOf(ts: number): BrowserFrame {
+function frameOf(ts: number, drawnFor: UseBrowserSocket["page"] = null, generation = 0): BrowserFrame {
   return {
+    page: drawnFor,
+    pageGeneration: generation,
     bitmap: { close: () => {} } as unknown as ImageBitmap,
     header: {
       deviceWidth: 1280,
@@ -215,6 +219,7 @@ beforeEach(() => {
   frame = null
   tabs = []
   page = null
+  pageGeneration = 0
   sessionBarRenders = 0
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -527,32 +532,34 @@ describe("BrowserPanel annotation", () => {
     return render(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
   }
 
-  it("labels the frozen frame with its own tab, page and draw time", async () => {
+  const pageA = { type: "page" as const, targetId: "target-1", url: "https://a.test/", title: "Page A", canGoBack: false, canGoForward: false }
+
+  it("labels the frozen frame with the page it was drawn for, its tab and its draw time", async () => {
     const user = userEvent.setup()
-    frame = frameOf(Date.parse("2026-10-29T12:00:00.000Z"))
     tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }, { targetId: "target-2", url: "https://b.test/", title: "Page B" }]
-    page = { type: "page", targetId: "target-1", url: "https://a.test/", title: "Page A", canGoBack: false, canGoForward: false }
-    lastFrameAt = Date.now() + 1000
+    page = pageA
+    pageGeneration = 3
+    frame = frameOf(Date.parse("2026-10-29T12:00:00.000Z"), pageA, 3)
     annotatingPanel()
     await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
     expect(frozen.props).toMatchObject({ url: "https://a.test/", title: "Page A", tab: "Page A", capturedAt: "2026-10-29T12:00:00.000Z", deviceWidth: 1280 })
   })
 
-  it("refuses while the frame on screen belongs to another tab or predates the page", async () => {
+  it("refuses a frame drawn before the page changed, or for another tab", async () => {
     const user = userEvent.setup()
     frozen.props = null
-    frame = frameOf(Date.now())
-    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }, { targetId: "target-2", url: "https://b.test/new", title: "Page B" }]
-    page = { type: "page", targetId: "target-2", url: "https://b.test/new", title: "Page B", canGoBack: false, canGoForward: false }
-    lastFrameAt = Date.now() + 1000
+    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }]
+    // Same tab, but the page navigated after the frame arrived (it may still have been decoding).
+    page = { ...pageA, url: "https://a.test/next", title: "Next" }
+    pageGeneration = 4
+    frame = frameOf(Date.now(), pageA, 3)
     const { rerender } = annotatingPanel()
     await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
     expect(frozen.props).toBeNull()
     expect(screen.getByText(/still drawing/)).toBeInTheDocument()
 
-    // Same tab, but the page navigated after the last frame was drawn.
-    page = { type: "page", targetId: "target-1", url: "https://a.test/next", title: "Next", canGoBack: true, canGoForward: false }
-    lastFrameAt = Date.now() - 60_000
+    // The frame's tab is not the tab its page report names.
+    frame = frameOf(Date.now(), { ...pageA, targetId: "target-2" }, 4)
     rerender(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
     await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
     expect(frozen.props).toBeNull()

@@ -135,15 +135,14 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
   const openPage = useCallback((url: string) => send({ type: "launch", url }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
-  const { frame, page, tabs, lastFrameAt } = socket
-  // When the page last changed (navigation or another tab), so a frame drawn before it is never labelled as it.
-  const pageChangedAt = useRef(0)
-  useEffect(() => { pageChangedAt.current = Date.now() }, [page?.targetId, page?.url])
+  const { frame, page, tabs, pageGeneration } = socket
   const annotate = useCallback(() => {
     if (!page) return
-    // The annotation describes the frame it freezes: its tab, its page and the moment it was drawn.
-    const settled = frame && frame.header.targetId === page.targetId && lastFrameAt !== null && lastFrameAt >= pageChangedAt.current
-    if (!frame || !settled) {
+    // The annotation describes the frame it freezes: the page it was drawn
+    // for, its tab and the moment it was drawn. A frame that arrived before the
+    // page last changed, or for another tab, is not labelled as the page now.
+    const drawnFor = frame?.page
+    if (!frame || !drawnFor || frame.pageGeneration !== pageGeneration || frame.header.targetId !== drawnFor.targetId) {
       setActionError("The page is still drawing; try again in a moment")
       return
     }
@@ -151,15 +150,15 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
     const copy = freezeFrame(frame.bitmap, {
       deviceWidth: frame.header.deviceWidth,
       deviceHeight: frame.header.deviceHeight,
-      url: page.url,
-      title: page.title,
+      url: drawnFor.url,
+      title: drawnFor.title,
       browser: selected,
       ...(tab ? { tab: tab.title || tab.url } : {}),
       capturedAt: new Date(frame.header.ts).toISOString(),
     })
     if (copy) setFrozen(copy)
     else setActionError("The page is still drawing; try again in a moment")
-  }, [frame, page, tabs, lastFrameAt, selected])
+  }, [frame, page, tabs, pageGeneration, selected])
   const state = socket.state?.state ?? null
   const notInstalled = status?.installed === false || state === "not-installed"
   const live = !notInstalled && state === "live"

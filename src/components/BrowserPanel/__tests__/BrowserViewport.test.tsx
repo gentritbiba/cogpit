@@ -36,6 +36,8 @@ function frameOf(
 ): BrowserFrame {
   return {
     bitmap,
+    page: null,
+    pageGeneration: 0,
     header: {
       deviceWidth,
       deviceHeight,
