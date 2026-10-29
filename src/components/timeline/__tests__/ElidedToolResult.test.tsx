@@ -8,7 +8,7 @@ vi.mock("@/lib/shiki", () => ({ getLangFromPath: () => null, highlightCode: vi.f
 
 import { ToolResultPanel } from "../ToolCallResult"
 import { ElidedResultImage } from "../ElidedResultImage"
-import { __resetToolResultBodiesForTest, BODY_CACHE_CHARS, cachedBodyChars, fetchBodyChunk } from "@/lib/toolResultBodies"
+import { __resetToolResultBodiesForTest, BODY_CACHE_CHARS, cachedBodyChars, fetchBodyChunk, fetchFullBody } from "@/lib/toolResultBodies"
 import type { ElidedResult } from "../../../../shared/session/types"
 
 const stub = (ref = "r1.body.mac", bytes = 120_000): ElidedResult => ({ ref, bytes, lines: 4000, kind: "text", source: { dirName: "proj a", fileName: "s.jsonl" } })
@@ -87,5 +87,36 @@ describe("the body cache", () => {
     expect(authFetch).toHaveBeenCalledTimes(2)
     await fetchBodyChunk(stub("r1.one.x"), 0)
     expect(authFetch).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe("copying an elided result", () => {
+  it("copies a body longer than the cache budget whole, without letting the cache grow past it", async () => {
+    const total = BODY_CACHE_CHARS + 1_048_576
+    authFetch.mockImplementation(async (url: string) => {
+      const start = Number(new URL(url, "http://x").searchParams.get("start"))
+      const text = "z".repeat(Math.min(1_048_576, total - start))
+      return ok(text, total, start)
+    })
+    const full = await fetchFullBody(stub())
+    expect(full).toMatchObject({ complete: true, total })
+    expect(full.text.length).toBe(total)
+    expect(cachedBodyChars()).toBe(0)
+  })
+
+  it("says when a copy holds only the start, or only the preview", async () => {
+    authFetch.mockImplementation(async (url: string) => {
+      const start = Number(new URL(url, "http://x").searchParams.get("start"))
+      return ok("a".repeat(1_000), 3_000, start)
+    })
+    await expect(fetchFullBody(stub(), 2_000)).resolves.toMatchObject({ complete: false, total: 3_000, text: "a".repeat(2_000) })
+
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    authFetch.mockReset().mockResolvedValue(new Response(JSON.stringify({ state: "stale" }), { status: 410 }))
+    render(<ToolResultPanel result="saved preview" resultRef={stub("r1.copy.x")} />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy result" }))
+    expect(await screen.findByText(/Copied the saved preview only/)).toBeInTheDocument()
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("saved preview"))
   })
 })

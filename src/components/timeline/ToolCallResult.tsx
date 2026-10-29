@@ -190,7 +190,20 @@ export function ToolResultPanel({
   const preview = useMemo(() => previewToolResult(formatted), [formatted])
   const visible = expanded ? formatted : preview.text
   const truncated = preview.truncated || Boolean(resultRef)
-  const copyFull = async () => copyResult(resultRef ? await fetchFullBody(resultRef).catch(() => text) : result)
+  // A copy says when it holds less than the whole output, never passing a part off as all of it.
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const copyFull = async () => {
+    setCopyNotice(null)
+    if (!resultRef) return copyResult(result)
+    try {
+      const full = await fetchFullBody(resultRef)
+      copyResult(full.text)
+      if (!full.complete) setCopyNotice(`Copied the first ${full.text.length.toLocaleString()} of ${full.total.toLocaleString()} characters: the output is too large to copy whole.`)
+    } catch (error) {
+      copyResult(text)
+      setCopyNotice(`Copied the saved preview only. ${error instanceof Error ? error.message : "The full output could not be loaded."}`)
+    }
+  }
 
   return (
     <section className="mt-3 min-w-0" aria-label="Result">
@@ -221,6 +234,7 @@ export function ToolResultPanel({
           </pre>
         )}
       </div>
+      {copyNotice && <p role="status" className="mt-1 text-xs text-warning">{copyNotice}</p>}
       {resultRef && expanded && <ElidedBodyStatus body={body} stub={resultRef} />}
       {truncated && (
         <Button

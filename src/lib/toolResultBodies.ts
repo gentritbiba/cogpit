@@ -49,8 +49,8 @@ function unavailable(status: number, state: unknown): BodyUnavailable {
   return new BodyUnavailable("error", "The output could not be loaded.")
 }
 
-/** One chunk of a body, from the cache or the server. */
-export async function fetchBodyChunk(stub: ElidedResult, start: number, signal?: AbortSignal): Promise<BodyChunk> {
+/** One chunk of a body, from the cache or the server; `cache: false` reads the cache but leaves it as it is. */
+export async function fetchBodyChunk(stub: ElidedResult, start: number, signal?: AbortSignal, { cache: keep = true }: { cache?: boolean } = {}): Promise<BodyChunk> {
   const key = cacheKey(stub.ref, start)
   const cached = cache.get(key)
   if (cached) {
@@ -64,17 +64,29 @@ export async function fetchBodyChunk(stub: ElidedResult, start: number, signal?:
     throw unavailable(response.status, body.state)
   }
   const chunk = await response.json() as BodyChunk
-  if (cacheKey(stub.ref, start) === key) remember(key, chunk)
+  if (keep && cacheKey(stub.ref, start) === key) remember(key, chunk)
   return chunk
 }
 
-/** A whole body, chunk after chunk, for copying; stops at `limitChars`. */
-export async function fetchFullBody(stub: ElidedResult, limitChars = BODY_CACHE_CHARS): Promise<string> {
+/** The most of one body a copy carries; a larger body copies this much and says so. Independent of the cache's budget. */
+export const COPY_LIMIT_CHARS = 32 * 1024 * 1024
+
+export interface FullBody {
+  text: string
+  /** False when the body was longer than the copy limit and `text` is its start. */
+  complete: boolean
+  total: number
+}
+
+/** A whole body, chunk after chunk, for copying. Its chunks bypass the cache, which keeps what a reader expands. */
+export async function fetchFullBody(stub: ElidedResult, limitChars = COPY_LIMIT_CHARS): Promise<FullBody> {
   let text = ""
   for (;;) {
-    const chunk = await fetchBodyChunk(stub, text.length)
+    const chunk = await fetchBodyChunk(stub, text.length, undefined, { cache: false })
     text += chunk.text
-    if (chunk.end >= chunk.total || !chunk.text || text.length >= limitChars) return text
+    if (chunk.end >= chunk.total) return { text, complete: true, total: chunk.total }
+    if (!chunk.text) throw new BodyUnavailable("error", "The output ended before the size the server reported.")
+    if (text.length >= limitChars) return { text: text.slice(0, limitChars), complete: false, total: chunk.total }
   }
 }
 
