@@ -9,6 +9,7 @@ import { admitOccurrenceCommand, closeCommandDispatcher, commandDispatcher } fro
 import { issueExecutionGrant, resolveExecution, revokeExecutionGrant, targetWithin } from "../../lib/triggers/authority"
 import { defaultExecutor, registerTriggerHandler, TriggerRunner, type Prepared, type TriggerExecutor } from "../../lib/triggers/runner"
 import { OrchestrationError } from "../../orchestration/store"
+import { registerTriggerDeliveryGuard, type DeliveryVerdict } from "../../orchestration/deliveryGuards"
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { setRequestPrincipal } from "../../requestPrincipal"
 import { __resetSessionsForTest, createSessionToken, revokeSessionToken } from "../../security"
@@ -98,7 +99,7 @@ function harness(executor: Partial<TriggerExecutor> = {}, prepare: (occurrence: 
 describe("the trigger runner", () => {
   it("sends due work under its grant through the durable queue, without the grant reaching the agent", async () => {
     let running = false
-    const send = vi.fn(async () => { running = true; return { delivery: "started" as const, turnId: "turn-1" } })
+    const send = vi.fn(async (_sessionId: string, _input: Record<string, unknown>) => { running = true; return { delivery: "started" as const, turnId: "turn-1" } })
     const runtime = { kind: "claude", instanceId: "default", descriptor: descriptorFor("claude"), activity: () => ({ live: true, running }), send } as unknown as AgentRuntime
     const { dispatcher, store, unregister } = harness({
       send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({ sessionId: prepared.target.sessionId, request: prepared.request, req, claim, lease, intent: "queue", runtime, binding, ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}) }),
@@ -228,5 +229,74 @@ describe("the trigger runner", () => {
       await vi.waitFor(() => expect(store.occurrence("user-1", second.id)).toMatchObject({ state: "held", reason: expect.stringMatching(/expired/) }))
       expect(sent).toHaveBeenCalledTimes(1)
     } finally { unregister() }
+  })
+})
+
+describe("a trigger's delivery guard", () => {
+  function guardedHarness(running: () => boolean) {
+    const send = vi.fn(async (_sessionId: string, _input: Record<string, unknown>) => ({ delivery: "started" as const, turnId: "turn-1" }))
+    const runtime = { kind: "claude", instanceId: "default", descriptor: descriptorFor("claude"), activity: () => ({ live: true, running: running() }), send } as unknown as AgentRuntime
+    const h = harness({
+      send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({ sessionId: prepared.target.sessionId, request: prepared.request, req, claim, lease, intent: "queue", runtime, binding, ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}) }),
+    })
+    return { ...h, send }
+  }
+  async function record(store: ReturnType<typeof commandDispatcher>["store"], key = "slot-1") {
+    const grant = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+    return store.recordOccurrence("local", { triggerId: `trigger-${key}`, kind: "test", key, dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {}, guarded: true }).occurrence
+  }
+
+  it("cancels a queued command once native activity appears after admission, with the guard's reason", async () => {
+    let busy = true
+    let verdict: DeliveryVerdict = { allow: true }
+    const unguard = registerTriggerDeliveryGuard("test", async () => verdict)
+    const { dispatcher, store, send, unregister } = guardedHarness(() => busy)
+    try {
+      const occurrence = await record(store)
+      await dispatcher.tick()
+      await vi.waitFor(() => expect(store.occurrence("local", occurrence.id)!.state).toBe("admitted"))
+      verdict = { allow: false, disposition: "cancelled", reason: "The session started work outside Cogpit" }
+      busy = false
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "cancelled", reason: "The session started work outside Cogpit" })
+      })
+      expect(send).not.toHaveBeenCalled()
+    } finally { unguard(); unregister() }
+  })
+
+  it("holds while no guard is registered for the kind, and resumes the same message once one is", async () => {
+    const { dispatcher, store, send, unregister } = guardedHarness(() => false)
+    let unguard = () => {}
+    try {
+      const occurrence = await record(store)
+      await dispatcher.tick()
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "held", hold: "review", reason: expect.stringMatching(/delivery check is not available/) })
+      })
+      unguard = registerTriggerDeliveryGuard("test", async () => ({ allow: true }))
+      expect(store.requeueOccurrence("local", occurrence.id)).toMatchObject({ state: "admitted" })
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(send).toHaveBeenCalledTimes(1)
+      })
+      expect(store.command("local", occurrence.commandId)!.receipt.id).toBe(occurrence.commandId)
+    } finally { unguard(); unregister() }
+  })
+
+  it("is asked again just before the agent receives the message", async () => {
+    const answers: DeliveryVerdict[] = [{ allow: true }, { allow: true }, { allow: false, disposition: "held", reason: "The agent is waiting for an answer" }]
+    const unguard = registerTriggerDeliveryGuard("test", async () => answers.shift() ?? { allow: false, disposition: "held", reason: "x" })
+    const { dispatcher, store, send, unregister } = guardedHarness(() => false)
+    try {
+      const occurrence = await record(store)
+      await dispatcher.tick()
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "held", reason: "The agent is waiting for an answer" })
+      })
+      expect(send).not.toHaveBeenCalled()
+    } finally { unguard(); unregister() }
   })
 })

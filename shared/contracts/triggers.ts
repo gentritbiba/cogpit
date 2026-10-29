@@ -131,6 +131,8 @@ export interface TriggerOccurrence {
   command?: CommandReceipt
   hold?: OccurrenceHold
   reason?: string
+  /** Its command passes its kind's delivery guard at authorization and before delivery; held while no guard is registered. */
+  guarded?: boolean
   attempt: number
   createdAt: number
   updatedAt: number

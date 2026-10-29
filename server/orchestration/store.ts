@@ -34,6 +34,8 @@ export interface OccurrenceRecord {
   coalesce?: { windowMs: number; maxInputs: number }
   /** Refuse once this many of the trigger's occurrences are still waiting. */
   backlog?: number
+  /** Its command must pass the kind's delivery guard (see deliveryGuards.ts). */
+  guarded?: boolean
 }
 export type RecordedOccurrence = { occurrence: TriggerOccurrence; outcome: "created" | "duplicate" | "coalesced" }
 type TriggerListener = (change: { type: "trigger" | "occurrence"; scope: string; triggerId: string; id: string }) => void
@@ -793,7 +795,7 @@ export class OrchestrationStore {
       if (waiting >= (input.backlog ?? 100)) throw new OrchestrationError(429, "Too many runs of this task are already waiting")
       const id = `occ-${fingerprint([scope, input.triggerId, input.key]).slice(0, 32)}`
       const fencePosition = input.fence ? Number((this.db.prepare("SELECT COALESCE(MAX(position),0) AS n FROM commands WHERE conversation_id=?").get(input.fence.conversationId) as Row).n) : null
-      const data = { key: input.key, action: input.action, grant: input.grant, request: input.request, inputs: received ? [received] : [], commandId: occurrenceCommandId(id), creationId: occurrenceCreationId(id) }
+      const data = { key: input.key, action: input.action, grant: input.grant, request: input.request, inputs: received ? [received] : [], commandId: occurrenceCommandId(id), creationId: occurrenceCreationId(id), ...(input.guarded ? { guarded: true } : {}) }
       this.db.prepare("INSERT INTO trigger_occurrences(scope,id,trigger_id,kind,state,due_at,fence_conversation,fence_position,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(scope, id, input.triggerId, input.kind, "scheduled", input.dueAt, input.fence?.conversationId ?? null, fencePosition, JSON.stringify(data), this.now(), this.now())
       this.db.prepare("INSERT INTO trigger_keys VALUES(?,?,?,?,?,?)").run(scope, input.triggerId, input.key, id, hash, this.now())
       this.triggerEvent("occurrence", scope, input.triggerId, id)
@@ -891,19 +893,30 @@ export class OrchestrationStore {
     const occurrence = this.occurrence(scope, id)
     if (occurrence) this.writeOccurrence(occurrence, patch, state)
   }
-  /** Follows admitted occurrences' commands: a settled command settles its occurrence. */
+  /**
+   * Mirrors admitted occurrences' commands: a settled command settles its
+   * occurrence, a held or uncertain one holds it or marks it unknown with the
+   * command's reason, and one resumed from the queue makes it admitted again.
+   */
   settleAdmittedOccurrences(): number {
     return this.transaction(() => {
-      let settled = 0
-      for (const row of this.db.prepare("SELECT * FROM trigger_occurrences WHERE state='admitted'").all() as Row[]) {
+      let changed = 0
+      for (const row of this.db.prepare("SELECT * FROM trigger_occurrences WHERE state IN ('admitted','held','unknown')").all() as Row[]) {
         const occurrence = this.occurrenceRow(row)
-        const state = occurrence.command?.state
-        const next: OccurrenceState | null = !occurrence.command ? "cancelled" : state === "completed" || state === "failed" || state === "cancelled" ? state : null
-        if (!next) continue
-        this.writeOccurrence(occurrence, { ...(occurrence.command ? {} : { reason: "Its command no longer exists" }), ...(occurrence.command?.error ? { reason: occurrence.command.error } : {}) }, next)
-        settled++
+        const command = occurrence.command
+        if (!command) {
+          if (occurrence.state !== "admitted") continue
+          this.writeOccurrence(occurrence, { reason: "Its command no longer exists" }, "cancelled")
+          changed++
+          continue
+        }
+        const next: OccurrenceState = command.state === "completed" || command.state === "failed" || command.state === "cancelled" || command.state === "unknown" ? command.state
+          : command.state === "held" ? "held" : "admitted"
+        if (next === occurrence.state) continue
+        this.writeOccurrence(occurrence, next === "admitted" ? { hold: undefined, reason: undefined } : { ...(next === "held" ? { hold: "review" as const } : {}), ...(command.error ? { reason: command.error } : {}) }, next)
+        changed++
       }
-      return settled
+      return changed
     })
   }
   /**
@@ -949,6 +962,15 @@ export class OrchestrationStore {
       const occurrence = this.occurrence(scope, id)
       if (!occurrence) throw new OrchestrationError(404, "Run not found")
       if (occurrence.state !== "held") throw new OrchestrationError(409, "Only a held run can be resumed")
+      const command = occurrence.command && this.command(scope, occurrence.command.id)
+      if (command) {
+        // Its message is already queued once; resuming releases that message rather than admitting another.
+        if (command.receipt.state !== "held") throw new OrchestrationError(409, "This run's message is not held")
+        if (this.conversation(command.receipt.conversationId)?.revision !== command.receipt.bindingRevision) throw new OrchestrationError(409, "The session moved to another provider binding; cancel this run instead")
+        this.update(command, "queued", { error: undefined })
+        this.writeOccurrence(occurrence, { hold: undefined, reason: undefined }, "admitted")
+        return this.occurrence(scope, id)!
+      }
       this.writeOccurrence(occurrence, { hold: undefined, reason: undefined, ...(grant ? { grant } : {}) }, "scheduled", Math.min(occurrence.dueAt, this.now()))
       return this.occurrence(scope, id)!
     })

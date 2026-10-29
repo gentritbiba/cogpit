@@ -12,6 +12,8 @@ import { isSessionTokenActive } from "../security"
 import { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS } from "../sessionConstants"
 import { CommandDispatcher } from "../orchestration/dispatcher"
 import { beforeOrchestrationClose, orchestrationStore } from "../orchestration/storage"
+import { checkTriggerDelivery, DeliveryRefused } from "../orchestration/deliveryGuards"
+import type { DispatchRefusal } from "../orchestration/dispatcher"
 import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type StoredCommand } from "../orchestration/store"
 import type { GrantRef } from "../../shared/contracts/triggers"
 import { setSessionsArchived } from "./sessionArchive"
@@ -74,6 +76,14 @@ async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, au
   return "req" in resolved ? resolved.req : null
 }
 
+/** A trigger command's consumer guard, read against the occurrence as it stands now. */
+async function triggerRefusal(command: StoredCommand): Promise<DispatchRefusal | null> {
+  const trigger = command.payload.trigger as { occurrenceId?: unknown } | undefined
+  if (typeof trigger?.occurrenceId !== "string") return null
+  const verdict = await checkTriggerDelivery(commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId), command)
+  return verdict.allow ? null : { disposition: verdict.disposition, reason: verdict.reason }
+}
+
 /**
  * Lets the dispatcher deliver a conversation's commands. `req` is the live
  * sign-in its own commands deliver as; a command admitted under a grant
@@ -87,13 +97,16 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
   dispatcher.attach(scope, conversationId, {
     async authorize(command) {
       const request = await deliveryRequest(command, runtime, authentication, scope)
-      return request !== null && await mayDeliver(request, command)
+      if (request === null || !await mayDeliver(request, command)) return false
+      return await triggerRefusal(command) ?? true
     },
     async deliver(command, currentAttempt) {
       if (command.receipt.intent === "steer" && !runtime.descriptor.capabilities.midTurnSteering && !(command.payload.notification && runtime.descriptor.capabilities.activeNotifications)) throw new OrchestrationError(400, "This provider does not support steering a running turn")
       const request = await deliveryRequest(command, runtime, authentication, scope)
       if (!request) throw new OrchestrationError(403, command.payload.executionGrant ? "This task's authorization no longer allows delivery; reauthorize it" : "Sign in again before delivering queued work")
       if (!await mayDeliver(request, command)) throw new OrchestrationError(403, "Session access changed")
+      const refusal = await triggerRefusal(command)
+      if (refusal) throw new DeliveryRefused(refusal.disposition, refusal.reason)
       const assertCurrent = () => { if (!currentAttempt()) throw new OrchestrationError(409, "Dispatcher ownership changed before provider delivery") }
       assertCurrent()
       if (command.receipt.intent === "restart") await runtime.interrupt(command.receipt.sessionId)
@@ -103,7 +116,13 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
         session: { sessionId: command.receipt.sessionId, agent: runtime.kind },
         ...(typeof command.payload.questionId === "string" ? { toolUseId: command.payload.questionId } : {}),
       }
-      const fencedRuntime = { ...runtime, send: (id: string, input: SendRequest) => { assertCurrent(); return runtime.send(id, input) } }
+      const fencedRuntime = { ...runtime, send: async (id: string, input: SendRequest) => {
+        // The edition may await before handing over; the guard is read again at the last moment.
+        const late = await triggerRefusal(command)
+        if (late) throw new DeliveryRefused(late.disposition, late.reason)
+        assertCurrent()
+        return runtime.send(id, input)
+      } }
       const { executionGrant: _grant, trigger: _trigger, ...payload } = command.payload
       const outcome = await sendTurn(request, fencedRuntime, command.receipt.sessionId, { ...payload, deliveryIntent: command.receipt.intent, commandId: command.receipt.nativeMessageId } as SendRequest, context)
       if (outcome.delivery !== "busy" && outcome.turnId && !outcome.completion && runtime.waitForCompletion) outcome.completion = runtime.waitForCompletion(command.receipt.sessionId, outcome.turnId)

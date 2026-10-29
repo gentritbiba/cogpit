@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { CommandReceipt } from "../../shared/contracts/orchestration"
+import { DeliveryRefused } from "./deliveryGuards"
 import { OrchestrationStore, settlesOnDelivery, type DispatcherLease, type StoredCommand } from "./store"
 
 const SETTLED = { isError: false, message: undefined }
@@ -9,8 +10,11 @@ export interface DispatchDelivery {
   turnId?: string
   completion?: Promise<{ isError: boolean; message?: string }>
 }
+/** A refusal that names how the command settles and why, instead of the generic hold. */
+export interface DispatchRefusal { disposition: "held" | "cancelled"; reason: string }
+
 export interface DispatchAuthority {
-  authorize(command: StoredCommand): Promise<boolean>
+  authorize(command: StoredCommand): Promise<boolean | DispatchRefusal>
   deliver(command: StoredCommand, currentAttempt: () => boolean): Promise<DispatchDelivery>
   activity(command: StoredCommand): { live: boolean; running: boolean }
 }
@@ -64,9 +68,10 @@ export class CommandDispatcher {
       for (const candidate of this.store.queued()) {
         const authority = this.authorities.get(JSON.stringify([candidate.scope, candidate.receipt.conversationId]))
         if (!authority) continue
-        if (!await authority.authorize(candidate).catch(() => false)) {
+        const verdict = await authority.authorize(candidate).catch(() => false)
+        if (verdict !== true) {
           const claimed = this.store.claim(candidate.scope, candidate.receipt.id, lease)
-          if (claimed) this.store.finish(claimed, lease, "held", { error: "Sign in with access to this session, then resume its queue." })
+          if (claimed) this.store.finish(claimed, lease, verdict ? verdict.disposition : "held", { error: verdict ? verdict.reason : "Sign in with access to this session, then resume its queue." })
           continue
         }
         const activity = authority.activity(candidate)
@@ -80,7 +85,8 @@ export class CommandDispatcher {
   }
   private async dispatch(command: StoredCommand, lease: DispatcherLease, authority: DispatchAuthority): Promise<void> {
     try {
-      if (!await authority.authorize(command).catch(() => false)) { this.store.finish(command, lease, "held", { error: "Access changed before delivery" }); return }
+      const verdict = await authority.authorize(command).catch(() => false)
+      if (verdict !== true) { this.store.finish(command, lease, verdict ? verdict.disposition : "held", { error: verdict ? verdict.reason : "Access changed before delivery" }); return }
       const currentAttempt = () => !this.closed && this.store.currentAttempt(command, lease)
       if (!currentAttempt()) return
       if (command.payload.onlyWhileRunning && !authority.activity(command).running) {
@@ -105,6 +111,11 @@ export class CommandDispatcher {
       } else this.active.set(JSON.stringify([command.scope, command.receipt.id]), { ...command, receipt: { ...command.receipt, delivery: outcome.delivery } })
     } catch (error) {
       if (this.closed) return
+      if (error instanceof DeliveryRefused) {
+        this.store.finish(command, lease, error.disposition, { error: error.message })
+        void this.tick()
+        return
+      }
       const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 0
       const errorCode = status === 400 && typeof error === "object" && error && "code" in error && error.code === "MODEL_REJECTED" ? "MODEL_REJECTED" : undefined
       this.store.finish(command, lease, [400, 403, 404].includes(status) ? "failed" : "unknown", { error: error instanceof Error ? error.message : "Agent delivery failed", errorCode })
