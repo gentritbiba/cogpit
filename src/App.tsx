@@ -66,7 +66,8 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
 import type { ParsedSession, Turn } from "../shared/session/types"
-import { newContextId, type ComposerAttachment, type ComposerContextItem, type QuoteSource } from "../shared/session/composerContext"
+import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
+import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
 import { hasEditToolCalls } from "../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
@@ -864,33 +865,17 @@ export default function App() {
     return refusal
   }, [isMobile, dispatch])
 
-  // A quote names its turn by id; a turn the parser renumbered is found by the quoted text instead.
-  const pendingQuoteRef = useRef<{ source: QuoteSource; text: string } | null>(null)
-  const { handleJumpToTurn } = actions
-  const jumpToQuote = useCallback((session: ParsedSession, source: QuoteSource, text: string): boolean => {
-    const probe = text.slice(0, 200)
-    let index = session.turns.findIndex((turn) => turn.id === source.turnId)
-    if (index < 0) index = session.turns.findIndex((turn) => turn.assistantText.some((reply) => reply.includes(probe)))
-    if (index < 0) return false
-    if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-    handleJumpToTurn(index)
-    return true
-  }, [handleJumpToTurn, isMobile, dispatch])
-  const handleLoadSessionForQuote = handlers.handleLoadSessionScrollAware
-  const handleOpenQuoteSource = useCallback(async (source: QuoteSource, text: string): Promise<boolean> => {
-    const open = state.sessionSource
-    if (open && open.dirName === source.dirName && open.fileName === source.fileName && state.session) return jumpToQuote(state.session, source, text)
-    pendingQuoteRef.current = { source, text }
-    handleLoadSessionForQuote(source.dirName, source.fileName)
-    return true
-  }, [state.session, state.sessionSource, jumpToQuote, handleLoadSessionForQuote])
-  useEffect(() => {
-    const pending = pendingQuoteRef.current
-    const open = state.sessionSource
-    if (!pending || !state.session || !open || open.dirName !== pending.source.dirName || open.fileName !== pending.source.fileName) return
-    pendingQuoteRef.current = null
-    jumpToQuote(state.session, pending.source, pending.text)
-  }, [state.session, state.sessionSource, jumpToQuote])
+  const handleOpenQuoteSource = useQuoteNavigation({
+    session: state.session,
+    sessionSource: state.sessionSource,
+    loadSession: handlers.handleLoadSessionScrollAware,
+    jumpToTurn: useCallback((index: number) => {
+      if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
+      actions.handleJumpToTurn(index)
+    }, [actions, isMobile, dispatch]),
+    hasMore: chunkedSession.hasMore,
+    loadMore: chunkedSession.loadMore,
+  })
 
   const sessionContextValue = useMemo<SessionContextValue>(() => ({
     session: state.session,
