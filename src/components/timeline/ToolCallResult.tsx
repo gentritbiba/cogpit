@@ -1,10 +1,11 @@
-import { useEffect, useId, useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { cn } from "@/lib/utils"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
-import { getLangFromPath, highlightCode } from "@/lib/shiki"
+import { getLangFromPath } from "@/lib/shiki"
+import { useHighlightedTokens } from "@/hooks/useHighlightedTokens"
 
 export type TokenLine = Array<{ content: string; color?: string }>
 
@@ -14,32 +15,6 @@ const BOXED_CODE_BLOCK_CLASS =
   "min-w-0 max-h-96 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed text-foreground/85"
 export const TOOL_RESULT_CLASS =
   "min-w-0 max-h-96 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-muted p-3 font-mono text-xs leading-relaxed text-foreground/85"
-
-export function useHighlightedTokens(
-  code: string,
-  lang: string | null,
-  isDark: boolean,
-): TokenLine[] | null {
-  const [highlighted, setHighlighted] = useState<{
-    code: string
-    lang: string
-    isDark: boolean
-    tokens: TokenLine[] | null
-  } | null>(null)
-
-  useEffect(() => {
-    if (!lang) return
-    let cancelled = false
-    void highlightCode(code, lang, isDark).then((tokens) => {
-      if (!cancelled) setHighlighted({ code, lang, isDark, tokens })
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [code, lang, isDark])
-
-  return highlighted?.code === code && highlighted.lang === lang && highlighted.isDark === isDark
-    ? highlighted.tokens
-    : null
-}
 
 function HighlightedCodeBlock({
   lines,

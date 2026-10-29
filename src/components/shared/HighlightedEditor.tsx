@@ -1,13 +1,8 @@
-import { useState, useEffect, useCallback, useRef, type RefObject } from "react"
+import { useCallback, useRef, type RefObject } from "react"
 import { cn } from "@/lib/utils"
-import { highlightCode, getLangFromPath, type ThemedToken } from "@/lib/shiki"
+import { getLangFromPath } from "@/lib/shiki"
+import { useHighlightedTokens } from "@/hooks/useHighlightedTokens"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
-
-/**
- * Tokenizing runs on every (debounced) keystroke, so past this size the cost
- * outweighs the benefit and the editor falls back to plain monospace text.
- */
-const MAX_HIGHLIGHT_CHARS = 200_000
 
 interface HighlightedEditorProps {
   value: string
@@ -31,27 +26,11 @@ export function HighlightedEditor({
   onSelect,
 }: HighlightedEditorProps) {
   const isDark = useIsDarkMode()
-  const [tokens, setTokens] = useState<ThemedToken[][] | null>(null)
   const innerRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
 
-  const lang = getLangFromPath(filePath) ?? "markdown"
-  const tooLargeToHighlight = value.length > MAX_HIGHLIGHT_CHARS
-
-  // Highlight with debounce
-  useEffect(() => {
-    if (tooLargeToHighlight) {
-      setTokens(null)
-      return
-    }
-    let cancelled = false
-    const timer = setTimeout(() => {
-      highlightCode(value, lang, isDark).then((result) => {
-        if (!cancelled) setTokens(result)
-      })
-    }, 80)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [value, lang, isDark, tooLargeToHighlight])
+  const lang = getLangFromPath(filePath)
+  const tokens = useHighlightedTokens(value, lang, isDark, 80)
 
   // Sync scroll between textarea and highlighted pre
   const handleScroll = useCallback(() => {
