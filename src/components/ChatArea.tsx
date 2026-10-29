@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/input-group"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
-import { RateLimitBanner } from "@/components/RateLimitBanner"
+import { AllowanceRecovery } from "@/components/AllowanceRecovery"
 import { QueuedTurns } from "@/components/QueuedTurns"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
@@ -84,7 +84,7 @@ export const ChatArea = memo(function ChatArea({
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
-  const rateLimitBanner = rateLimit && sessionSource
+  const rateLimitBanner = sessionSource
     ? { block: rateLimit, dirName: sessionSource.dirName, fileName: sessionSource.fileName }
     : null
   const showTimeline = currentSession.turns.length > 0 || pendingMessages.length === 0
@@ -120,13 +120,14 @@ export const ChatArea = memo(function ChatArea({
       {/* The desktop session chrome floats over the top of this column, so the
           banner clears it the same way the team bar does. */}
       {rateLimitBanner && (
-        <div className={cn("shrink-0", !isMobile && "pt-10")}>
-          <RateLimitBanner
-            {...rateLimitBanner}
-            cwd={currentSession.cwd}
-            terminal={canUseTerminal && permissions.send}
-          />
-        </div>
+        <AllowanceRecovery
+          className={cn("shrink-0", !isMobile && "pt-10")}
+          {...rateLimitBanner}
+          sessionId={currentSession.sessionId}
+          canResume={permissions.send && !isSubAgentView}
+          cwd={currentSession.cwd}
+          terminal={canUseTerminal && permissions.send}
+        />
       )}
 
       {/* Scrollable chat area */}
@@ -143,7 +144,7 @@ export const ChatArea = memo(function ChatArea({
         >
           <div
             ref={observeChatContent}
-            className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimitBanner ? "pt-4" : "pt-14")}
+            className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimit ? "pt-4" : "pt-14")}
             style={isMobile ? undefined : { paddingBottom: `max(var(--session-footer-height, 0px), ${hasTodos ? 12 : 8}rem)` }}
           >
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">

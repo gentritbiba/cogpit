@@ -1,3 +1,4 @@
+import { publishSessionCancellation } from "./sessionCancellation"
 import type { IncomingMessage } from "node:http"
 import { nativeBinding } from "../agents/nativeBindings"
 import { resolveSessionAgent, runtimeFor } from "../agents/runtimes"
@@ -71,6 +72,7 @@ export function applyQueueAction(ctx: QueueContext, sessionId: string, body: Rec
  * start it again.
  */
 export async function cancelWaitingMessages(sessionId: string): Promise<void> {
+  publishSessionCancellation(sessionId)
   const { kind, filePath } = await resolveSessionAgent(sessionId)
   const store = commandDispatcher().store
   store.muteTasksOf(sessionId)

@@ -38,6 +38,12 @@ interface PersistedArchive {
 
 let archived = new Map<string, number>()
 let kept = new Set<string>()
+const archiveListeners = new Set<(sessionIds: readonly string[]) => void>()
+
+export function subscribeSessionArchive(listener: (sessionIds: readonly string[]) => void): () => void {
+  archiveListeners.add(listener)
+  return () => { archiveListeners.delete(listener) }
+}
 
 const file = new SessionConfigFile(SESSION_ARCHIVE_FILE, {
   reset() {
@@ -94,6 +100,7 @@ export async function setSessionsArchived(
     }
   }
   if (changed.length > 0) await file.persist()
+  if (archive) for (const listener of archiveListeners) listener(sessionIds)
   return changed
 }
 

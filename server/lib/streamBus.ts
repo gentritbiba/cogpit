@@ -446,6 +446,14 @@ export function isCompacting(sessionId: string): boolean {
   return sessions.get(sessionId)?.compacting ?? false
 }
 
+const rateLimitListeners = new Set<(sessionId: string, block: RateLimitBlock | null) => void>()
+
+export function subscribeRateLimits(listener: (sessionId: string, block: RateLimitBlock | null) => void): () => void {
+  rateLimitListeners.add(listener)
+  return () => { rateLimitListeners.delete(listener) }
+}
+
+
 /**
  * Raise or lift the rate-limit block on a session.
  *
@@ -455,10 +463,14 @@ export function isCompacting(sessionId: string): boolean {
  * needs to show it. It lifts only when the runtime reports the session served
  * again, which is also what lets an unwatched blocked session be collected.
  */
+
 export function publishRateLimit(sessionId: string, block: RateLimitBlock | null): void {
   const state = block ? getOrCreate(sessionId) : sessions.get(sessionId)
   if (!state || sameBlock(state.rateLimit, block)) return
   state.rateLimit = block
+  for (const listener of rateLimitListeners) {
+    try { listener(sessionId, block) } catch { /* Observers cannot interrupt provider stream delivery. */ }
+  }
   emit(state, { type: "rate_limit", block })
   if (!block) maybeGc(sessionId, state)
 }
