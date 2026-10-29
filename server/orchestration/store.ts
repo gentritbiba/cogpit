@@ -913,7 +913,8 @@ export class OrchestrationStore {
         const next: OccurrenceState = command.state === "completed" || command.state === "failed" || command.state === "cancelled" || command.state === "unknown" ? command.state
           : command.state === "held" ? "held" : "admitted"
         if (next === occurrence.state) continue
-        this.writeOccurrence(occurrence, next === "admitted" ? { hold: undefined, reason: undefined } : { ...(next === "held" ? { hold: "review" as const } : {}), ...(command.error ? { reason: command.error } : {}) }, next)
+        const hold: OccurrenceHold = command.errorCode === "REAUTHORIZE" ? "reauthorize" : "review"
+        this.writeOccurrence(occurrence, next === "admitted" ? { hold: undefined, reason: undefined } : { ...(next === "held" ? { hold } : {}), ...(command.error ? { reason: command.error } : {}) }, next)
         changed++
       }
       return changed
@@ -956,24 +957,43 @@ export class OrchestrationStore {
       return this.occurrence(scope, id)!
     })
   }
-  /** Returns a held occurrence to the schedule, due now, optionally under a renewed grant. */
+  /**
+   * Returns a held occurrence to the schedule, due now, optionally under a
+   * renewed grant. One whose message was already admitted releases that same
+   * message — its payload and fingerprint untouched — with the grant replacing
+   * the occurrence's own, once the grant is checked to be the owner's, live,
+   * and for exactly what the old one allowed.
+   */
   requeueOccurrence(scope: string, id: string, grant?: GrantRef): TriggerOccurrence {
     return this.transaction(() => {
       const occurrence = this.occurrence(scope, id)
       if (!occurrence) throw new OrchestrationError(404, "Run not found")
       if (occurrence.state !== "held") throw new OrchestrationError(409, "Only a held run can be resumed")
+      if (grant) this.checkReplacementGrant(scope, occurrence, grant)
       const command = occurrence.command && this.command(scope, occurrence.command.id)
       if (command) {
-        // Its message is already queued once; resuming releases that message rather than admitting another.
         if (command.receipt.state !== "held") throw new OrchestrationError(409, "This run's message is not held")
         if (this.conversation(command.receipt.conversationId)?.revision !== command.receipt.bindingRevision) throw new OrchestrationError(409, "The session moved to another provider binding; cancel this run instead")
-        this.update(command, "queued", { error: undefined })
-        this.writeOccurrence(occurrence, { hold: undefined, reason: undefined }, "admitted")
+        this.update(command, "queued", { error: undefined, errorCode: undefined })
+        this.writeOccurrence(occurrence, { hold: undefined, reason: undefined, ...(grant ? { grant } : {}) }, "admitted")
         return this.occurrence(scope, id)!
       }
       this.writeOccurrence(occurrence, { hold: undefined, reason: undefined, ...(grant ? { grant } : {}) }, "scheduled", Math.min(occurrence.dueAt, this.now()))
       return this.occurrence(scope, id)!
     })
+  }
+  private checkReplacementGrant(scope: string, occurrence: TriggerOccurrence, ref: GrantRef): void {
+    const grant = this.grant(ref.grantId)
+    if (!grant || grant.revision !== ref.revision) throw new OrchestrationError(404, "Authorization not found")
+    if (grant.scope !== scope) throw new OrchestrationError(403, "That authorization belongs to another account")
+    if (grant.revokedAt || (grant.expiresAt !== undefined && grant.expiresAt <= this.now())) throw new OrchestrationError(409, "That authorization is no longer valid")
+    if (!grant.actions.includes(occurrence.action)) throw new OrchestrationError(409, "That authorization does not allow this run")
+    const previous = occurrence.grant && this.grant(occurrence.grant.grantId)
+    const command = occurrence.command
+    const sameTarget = previous
+      ? fingerprint(previous.target) === fingerprint(grant.target)
+      : !command || (grant.target.sessionId === command.sessionId && (grant.target.bindingRevision === undefined || grant.target.bindingRevision === command.bindingRevision))
+    if (!sameTarget) throw new OrchestrationError(409, "That authorization is for a different target")
   }
   /** Holds a scheduled occurrence for review, such as one a missed-run policy will not start by itself. */
   holdOccurrence(scope: string, id: string, hold: OccurrenceHold, reason: string): TriggerOccurrence {

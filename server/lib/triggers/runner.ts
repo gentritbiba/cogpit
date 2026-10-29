@@ -6,10 +6,10 @@ import { startTurn } from "../../edition"
 import type { CommandDispatcher } from "../../orchestration/dispatcher"
 import { orchestrationStore } from "../../orchestration/storage"
 import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type OrchestrationStore } from "../../orchestration/store"
-import { admitOccurrenceCommand, attachGrantAuthorities, commandDispatcher, commandScope, refreshExecutionRequest } from "../durableSend"
+import { admitOccurrenceCommand, attachGrantAuthorities, commandDispatcher, commandScope, executionRequestFor, refreshExecutionRequest } from "../durableSend"
 import { RouteError } from "../routeError"
 import { createSession, type CreateSessionInput } from "../sessionCreate"
-import { resolveExecution, type ResolvedExecution } from "./authority"
+import { forgetSettledLiveAuthorities, liveAuthority, resolveExecution, setLiveAuthority, type ResolvedExecution } from "./authority"
 
 /**
  * The one scheduler: trigger occurrences run on the command dispatcher's
@@ -68,9 +68,6 @@ export const defaultExecutor: TriggerExecutor = {
 }
 
 export class TriggerRunner {
-  /** Occurrences someone reauthorized live: their next run acts as that sign-in, once. */
-  private readonly live = new Map<string, IncomingMessage>()
-
   constructor(private readonly dispatcher: CommandDispatcher, private readonly executor: TriggerExecutor = defaultExecutor) {}
 
   get store(): OrchestrationStore { return this.dispatcher.store }
@@ -78,6 +75,7 @@ export class TriggerRunner {
   async tick(lease: DispatcherLease): Promise<void> {
     for (const handler of handlers.values()) await handler.record?.(this.store)
     this.store.settleAdmittedOccurrences()
+    forgetSettledLiveAuthorities(this.store)
     await attachGrantAuthorities()
     for (const claim of this.store.claimOccurrences(lease, [...handlers.keys()])) void this.execute(claim, lease)
   }
@@ -86,23 +84,22 @@ export class TriggerRunner {
   wake(): void { void this.dispatcher.tick() }
 
   /**
-   * Returns a held occurrence to the schedule to run once as `req`'s live
-   * sign-in: how an edition without durable grants runs unattended work.
-   * Lost on restart, when the occurrence is held again.
+   * Returns a held occurrence to the schedule to run as `req`'s live sign-in,
+   * admission and delivery alike: how an edition without durable grants runs
+   * unattended work. Kept in memory only, so a restart holds it again.
    */
   reauthorizeLive(req: IncomingMessage, scope: string, occurrenceId: string): TriggerOccurrence {
-    if (commandScope(req) !== scope) throw new OrchestrationError(403, "Only the task's owner can reauthorize it")
+    if (commandScope(req) !== scope || !refreshExecutionRequest(req)) throw new OrchestrationError(403, "Only the task's signed-in owner can reauthorize it")
     const occurrence = this.store.requeueOccurrence(scope, occurrenceId)
-    this.live.set(occurrenceId, req)
+    setLiveAuthority(scope, occurrenceId, req)
     this.wake()
     return occurrence
   }
 
   private async authority(occurrence: TriggerOccurrence, prepared: PreparedExecution): Promise<ResolvedExecution & { durable?: boolean }> {
-    const live = this.live.get(occurrence.id)
-    if (live) {
-      this.live.delete(occurrence.id)
-      const fresh = refreshExecutionRequest(live)
+    const live = liveAuthority(occurrence.scope, occurrence.id)
+    if (live !== undefined) {
+      const fresh = executionRequestFor(live, occurrence.scope)
       if (fresh && commandScope(fresh) === occurrence.scope) return { req: fresh, durable: false }
       return { hold: "The sign-in that reauthorized this run expired; reauthorize it again" }
     }

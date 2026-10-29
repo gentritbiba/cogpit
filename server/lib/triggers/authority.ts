@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { IncomingMessage } from "node:http"
 import { Socket } from "node:net"
-import type { ExecutionGrant, ExecutionTarget, GrantRef, UnattendedAction } from "../../../shared/contracts/triggers"
+import { isTerminalOccurrence, type ExecutionGrant, type ExecutionTarget, type GrantRef, type UnattendedAction } from "../../../shared/contracts/triggers"
 import { accessAtLeast } from "../../../shared/contracts/sessionAccess"
 import { accessLevelOf, editionModule, getRequestPrincipal, type UnattendedGrantRequest } from "../../edition"
 import { orchestrationStore } from "../../orchestration/storage"
-import { OrchestrationError } from "../../orchestration/store"
+import { getRequestAuthentication, type RequestAuthentication } from "../../requestAuthentication"
+import { OrchestrationError, type OrchestrationStore } from "../../orchestration/store"
 
 /**
  * Durable authority for unattended work. A grant is a stored, revocable
@@ -86,3 +87,24 @@ export async function resolveExecution(ref: GrantRef, action: UnattendedAction, 
   if (getRequestPrincipal(req)?.userId !== grant.scope) return { hold: "The edition answered for another account" }
   return { req }
 }
+
+/**
+ * Sign-ins someone reauthorized an occurrence with, for an edition that
+ * cannot vouch for an absent account: memory only, so a restart holds the
+ * occurrence again rather than persisting a session.
+ */
+const liveAuthorities = new Map<string, RequestAuthentication | null>()
+const liveKey = (scope: string, occurrenceId: string) => JSON.stringify([scope, occurrenceId])
+
+export function setLiveAuthority(scope: string, occurrenceId: string, req: IncomingMessage): void { liveAuthorities.set(liveKey(scope, occurrenceId), getRequestAuthentication(req)) }
+/** The sign-in an occurrence was reauthorized with, `undefined` when none; null is a local caller's. */
+export function liveAuthority(scope: string, occurrenceId: string): RequestAuthentication | null | undefined { return liveAuthorities.get(liveKey(scope, occurrenceId)) }
+/** Drops the sign-ins of occurrences that settled, or no longer exist. */
+export function forgetSettledLiveAuthorities(store: OrchestrationStore): void {
+  for (const key of liveAuthorities.keys()) {
+    const [scope, id] = JSON.parse(key) as [string, string]
+    const occurrence = store.occurrence(scope, id)
+    if (!occurrence || isTerminalOccurrence(occurrence.state)) liveAuthorities.delete(key)
+  }
+}
+export function __resetLiveAuthoritiesForTest(): void { liveAuthorities.clear() }

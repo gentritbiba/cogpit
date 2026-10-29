@@ -17,7 +17,7 @@ import type { DispatchRefusal } from "../orchestration/dispatcher"
 import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type StoredCommand } from "../orchestration/store"
 import type { GrantRef } from "../../shared/contracts/triggers"
 import { setSessionsArchived } from "./sessionArchive"
-import { resolveExecution } from "./triggers/authority"
+import { liveAuthority, resolveExecution } from "./triggers/authority"
 
 let active: { store: ReturnType<typeof orchestrationStore>; dispatcher: CommandDispatcher } | undefined
 export function commandDispatcher(): CommandDispatcher {
@@ -57,6 +57,8 @@ function executionRequest(authentication: RequestAuthentication | null, original
 }
 
 export function refreshExecutionRequest(req: IncomingMessage): IncomingMessage | null { return executionRequest(getRequestAuthentication(req), commandScope(req)) }
+/** A request acting as `authentication` again for `scope`, while that sign-in is still active. */
+export function executionRequestFor(authentication: RequestAuthentication | null, scope: string): IncomingMessage | null { return executionRequest(authentication, scope) }
 
 /** The session a command goes to, and the crew lead it speaks for when it carries one. */
 async function mayDeliver(request: IncomingMessage, command: StoredCommand): Promise<boolean> {
@@ -68,12 +70,26 @@ async function mayDeliver(request: IncomingMessage, command: StoredCommand): Pro
   return true
 }
 
-/** The request a command is delivered as: its grant's, re-checked now, or the live sign-in it was admitted under. */
-async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, authentication: RequestAuthentication | null, scope: string): Promise<IncomingMessage | null> {
-  const grant = command.payload.executionGrant as GrantRef | undefined
-  if (!grant) return executionRequest(authentication, scope)
+/** The code a refusal carries when the fix is a fresh authorization rather than a review. */
+export const REAUTHORIZE = "REAUTHORIZE"
+
+/**
+ * The request a command is delivered as: the live sign-in it was admitted
+ * under, or for a trigger's command the authority its occurrence holds now —
+ * the sign-in someone reauthorized it with, else its grant, re-checked. The
+ * occurrence's grant can be renewed while the command and its fingerprint
+ * stay the same.
+ */
+async function deliveryRequest(command: StoredCommand, runtime: AgentRuntime, authentication: RequestAuthentication | null, scope: string): Promise<IncomingMessage | DispatchRefusal> {
+  const trigger = command.payload.trigger as { occurrenceId?: unknown } | undefined
+  if (typeof trigger?.occurrenceId !== "string") return executionRequest(authentication, scope) ?? { disposition: "held", reason: "Sign in with access to this session, then resume its queue." }
+  const refusal = (reason: string): DispatchRefusal => ({ disposition: "held", reason, code: REAUTHORIZE })
+  const live = liveAuthority(command.scope, trigger.occurrenceId)
+  if (live !== undefined) return executionRequest(live, scope) ?? refusal("The sign-in that reauthorized this run expired; reauthorize it again")
+  const grant = commandDispatcher().store.occurrence(command.scope, trigger.occurrenceId)?.grant
+  if (!grant || !command.payload.executionGrant) return refusal("This run needs to be reauthorized by its owner")
   const resolved = await resolveExecution(grant, "session.send", { agent: runtime.kind, instanceId: runtime.instanceId ?? "default", sessionId: command.receipt.sessionId, bindingRevision: command.receipt.bindingRevision }, scope)
-  return "req" in resolved ? resolved.req : null
+  return "req" in resolved ? resolved.req : refusal(resolved.hold)
 }
 
 /** A trigger command's consumer guard, read against the occurrence as it stands now. */
@@ -97,13 +113,14 @@ export function attachCommandAuthority(scope: string, conversationId: string, ru
   dispatcher.attach(scope, conversationId, {
     async authorize(command) {
       const request = await deliveryRequest(command, runtime, authentication, scope)
-      if (request === null || !await mayDeliver(request, command)) return false
+      if (!(request instanceof IncomingMessage)) return request
+      if (!await mayDeliver(request, command)) return false
       return await triggerRefusal(command) ?? true
     },
     async deliver(command, currentAttempt) {
       if (command.receipt.intent === "steer" && !runtime.descriptor.capabilities.midTurnSteering && !(command.payload.notification && runtime.descriptor.capabilities.activeNotifications)) throw new OrchestrationError(400, "This provider does not support steering a running turn")
       const request = await deliveryRequest(command, runtime, authentication, scope)
-      if (!request) throw new OrchestrationError(403, command.payload.executionGrant ? "This task's authorization no longer allows delivery; reauthorize it" : "Sign in again before delivering queued work")
+      if (!(request instanceof IncomingMessage)) throw new DeliveryRefused(request.disposition, request.reason, request.code)
       if (!await mayDeliver(request, command)) throw new OrchestrationError(403, "Session access changed")
       const refusal = await triggerRefusal(command)
       if (refusal) throw new DeliveryRefused(refusal.disposition, refusal.reason)
@@ -181,11 +198,11 @@ export async function admitOccurrenceCommand(options: CommandTarget & {
   return receipt
 }
 
-/** Re-attaches delivery authority for grant-admitted commands still queued after a restart. */
+/** Attaches delivery authority for trigger commands waiting without one: after a restart, or once reauthorized. */
 export async function attachGrantAuthorities(): Promise<void> {
   const dispatcher = commandDispatcher()
   for (const command of dispatcher.store.queued()) {
-    if (!command.payload.executionGrant || dispatcher.hasAuthority(command.scope, command.receipt.conversationId)) continue
+    if (!command.payload.trigger || dispatcher.hasAuthority(command.scope, command.receipt.conversationId)) continue
     try {
       const resolved = await resolveSessionAgent(command.receipt.sessionId)
       attachCommandAuthority(command.scope, command.receipt.conversationId, runtimeFor(resolved.kind, resolved.instanceId), undefined, true)

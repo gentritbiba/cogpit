@@ -11,7 +11,7 @@ export interface DispatchDelivery {
   completion?: Promise<{ isError: boolean; message?: string }>
 }
 /** A refusal that names how the command settles and why, instead of the generic hold. */
-export interface DispatchRefusal { disposition: "held" | "cancelled"; reason: string }
+export interface DispatchRefusal { disposition: "held" | "cancelled"; reason: string; code?: string }
 
 export interface DispatchAuthority {
   authorize(command: StoredCommand): Promise<boolean | DispatchRefusal>
@@ -71,7 +71,7 @@ export class CommandDispatcher {
         const verdict = await authority.authorize(candidate).catch(() => false)
         if (verdict !== true) {
           const claimed = this.store.claim(candidate.scope, candidate.receipt.id, lease)
-          if (claimed) this.store.finish(claimed, lease, verdict ? verdict.disposition : "held", { error: verdict ? verdict.reason : "Sign in with access to this session, then resume its queue." })
+          if (claimed) this.store.finish(claimed, lease, verdict ? verdict.disposition : "held", verdict ? { error: verdict.reason, errorCode: verdict.code } : { error: "Sign in with access to this session, then resume its queue." })
           continue
         }
         const activity = authority.activity(candidate)
@@ -86,7 +86,7 @@ export class CommandDispatcher {
   private async dispatch(command: StoredCommand, lease: DispatcherLease, authority: DispatchAuthority): Promise<void> {
     try {
       const verdict = await authority.authorize(command).catch(() => false)
-      if (verdict !== true) { this.store.finish(command, lease, verdict ? verdict.disposition : "held", { error: verdict ? verdict.reason : "Access changed before delivery" }); return }
+      if (verdict !== true) { this.store.finish(command, lease, verdict ? verdict.disposition : "held", verdict ? { error: verdict.reason, errorCode: verdict.code } : { error: "Access changed before delivery" }); return }
       const currentAttempt = () => !this.closed && this.store.currentAttempt(command, lease)
       if (!currentAttempt()) return
       if (command.payload.onlyWhileRunning && !authority.activity(command).running) {
@@ -112,7 +112,7 @@ export class CommandDispatcher {
     } catch (error) {
       if (this.closed) return
       if (error instanceof DeliveryRefused) {
-        this.store.finish(command, lease, error.disposition, { error: error.message })
+        this.store.finish(command, lease, error.disposition, { error: error.message, errorCode: error.code })
         void this.tick()
         return
       }

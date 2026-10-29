@@ -6,7 +6,7 @@ import { __resetEditionForTest, PERSONAL_EDITION, type EditionUnattended } from 
 import { installFakeEdition, useAccountSignIn } from "../edition/fakeEdition"
 import { fakeEditionAuth } from "../edition/fakeAuth"
 import { admitOccurrenceCommand, closeCommandDispatcher, commandDispatcher } from "../../lib/durableSend"
-import { issueExecutionGrant, resolveExecution, revokeExecutionGrant, targetWithin } from "../../lib/triggers/authority"
+import { __resetLiveAuthoritiesForTest, issueExecutionGrant, resolveExecution, revokeExecutionGrant, targetWithin } from "../../lib/triggers/authority"
 import { defaultExecutor, registerTriggerHandler, TriggerRunner, type Prepared, type TriggerExecutor } from "../../lib/triggers/runner"
 import { OrchestrationError } from "../../orchestration/store"
 import { registerTriggerDeliveryGuard, type DeliveryVerdict } from "../../orchestration/deliveryGuards"
@@ -29,7 +29,7 @@ function signedIn(token: string) {
 }
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(1_800_000_000_000) })
-afterEach(() => { closeCommandDispatcher(); __resetEditionForTest(); __resetSessionsForTest(); vi.useRealTimers() })
+afterEach(() => { closeCommandDispatcher(); __resetEditionForTest(); __resetSessionsForTest(); __resetLiveAuthoritiesForTest(); vi.useRealTimers() })
 
 describe("execution grants", () => {
   it("lets personal edition run exactly what the grant names until it is revoked", async () => {
@@ -206,28 +206,100 @@ describe("the trigger runner", () => {
     } finally { unregister() }
   })
 
-  it("runs a held occurrence once as a live sign-in, and holds it again once that sign-in expired", async () => {
+  it("refuses live reauthorization without an active sign-in of the task's owner", async () => {
     useAccountSignIn()
     const token = createSessionToken("127.0.0.1", undefined, principal)
-    const sent = vi.fn<TriggerExecutor["send"]>(async (claim, lease) => { commandDispatcher().store.finishOccurrence(claim, lease, "completed"); return null })
-    const { dispatcher, store, runner, unregister } = harness({ send: sent })
+    const { dispatcher, store, runner, unregister } = harness()
     try {
       const grant = await issueExecutionGrant(signedIn(token), { actions: ["session.send"], target, label: "x" }, "user-1")
-      const ref = { grantId: grant.id, revision: 1 }
-      const { occurrence } = store.recordOccurrence("user-1", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: ref, request: {} })
+      const { occurrence } = store.recordOccurrence("user-1", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {} })
       await dispatcher.tick()
-      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.state).toBe("held"))
-      expect(() => runner.reauthorizeLive(localRequest(), "user-1", occurrence.id)).toThrow()
-      runner.reauthorizeLive(signedIn(token), "user-1", occurrence.id)
-      await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(1))
-      expect(sent.mock.calls[0]![4]).toBe(false)
-      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)!.state).toBe("completed"))
-      store.holdOccurrence("user-1", store.recordOccurrence("user-1", { triggerId: "trigger-0002", kind: "test", key: "b", dueAt: Date.now() + 3_600_000, action: "session.send", grant: ref, request: {} }).occurrence.id, "reauthorize", "x")
-      const second = store.occurrences("user-1", "trigger-0002")[0]!
+      await vi.waitFor(() => expect(store.occurrence("user-1", occurrence.id)).toMatchObject({ state: "held", hold: "reauthorize" }))
+      expect(() => runner.reauthorizeLive(localRequest(), "user-1", occurrence.id)).toThrow(/signed-in/)
       await revokeSessionToken(token)
-      runner.reauthorizeLive(signedIn(token), "user-1", second.id)
-      await vi.waitFor(() => expect(store.occurrence("user-1", second.id)).toMatchObject({ state: "held", reason: expect.stringMatching(/expired/) }))
-      expect(sent).toHaveBeenCalledTimes(1)
+      expect(() => runner.reauthorizeLive(signedIn(token), "user-1", occurrence.id)).toThrow(/signed-in owner/)
+      expect(store.occurrence("user-1", occurrence.id)!.state).toBe("held")
+    } finally { unregister() }
+  })
+})
+
+describe("reauthorizing a held run", () => {
+  function queuedHarness(running: () => boolean) {
+    const send = vi.fn(async (_sessionId: string, _input: Record<string, unknown>) => ({ delivery: "started" as const, turnId: "turn-1" }))
+    const runtime = { kind: "claude", instanceId: "default", descriptor: descriptorFor("claude"), activity: () => ({ live: true, running: running() }), send } as unknown as AgentRuntime
+    const h = harness({
+      send: (claim, lease, prepared, req, durable) => admitOccurrenceCommand({ sessionId: prepared.target.sessionId, request: prepared.request, req, claim, lease, intent: "queue", runtime, binding, ...(durable && claim.occurrence.grant ? { executionGrant: claim.occurrence.grant } : {}) }),
+    })
+    return { ...h, send }
+  }
+
+  it("renews the grant of the same held message, refusing another account's, a revoked or a differently scoped grant", async () => {
+    let busy = true
+    const { dispatcher, store, send, unregister } = queuedHarness(() => busy)
+    try {
+      const first = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+      const { occurrence } = store.recordOccurrence("local", { triggerId: "trigger-0001", kind: "test", key: "a", dueAt: Date.now(), action: "session.send", grant: { grantId: first.id, revision: 1 }, request: {} })
+      await dispatcher.tick()
+      await vi.waitFor(() => expect(store.occurrence("local", occurrence.id)!.state).toBe("admitted"))
+      const admitted = store.command("local", occurrence.commandId)!
+      await revokeExecutionGrant(first.id, "Owner revoked it")
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("local", occurrence.id)).toMatchObject({ state: "held", hold: "reauthorize", reason: expect.stringMatching(/revoked/) })
+      })
+      const foreign = store.putGrant({ ...first, id: "grant-foreign", scope: "someone", revision: 1, revokedAt: undefined, revokedReason: undefined })
+      const elsewhere = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target: { ...target, sessionId: "native-2" }, label: "x" }, "local")
+      expect(() => store.requeueOccurrence("local", occurrence.id, { grantId: foreign.id, revision: 1 })).toThrow(/another account/)
+      expect(() => store.requeueOccurrence("local", occurrence.id, { grantId: first.id, revision: 2 })).toThrow(/no longer valid/)
+      expect(() => store.requeueOccurrence("local", occurrence.id, { grantId: elsewhere.id, revision: 1 })).toThrow(/different target/)
+      expect(store.occurrence("local", occurrence.id)!.state).toBe("held")
+
+      const renewed = await issueExecutionGrant(localRequest(), { actions: ["session.send"], target, label: "x" }, "local")
+      expect(store.requeueOccurrence("local", occurrence.id, { grantId: renewed.id, revision: 1 })).toMatchObject({ state: "admitted", grant: { grantId: renewed.id } })
+      const released = store.command("local", occurrence.commandId)!
+      expect(released).toMatchObject({ fingerprint: admitted.fingerprint, payload: admitted.payload })
+      expect(released.receipt).toMatchObject({ state: "queued", id: admitted.receipt.id, position: admitted.receipt.position })
+      busy = false
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(send).toHaveBeenCalledTimes(1)
+      })
+    } finally { unregister() }
+  })
+
+  it("runs a held run as its owner's live sign-in where the edition has no grants, holds it once that sign-in expires, and again after a restart", async () => {
+    useAccountSignIn()
+    let busy = true
+    const { dispatcher, store, runner, send, unregister } = queuedHarness(() => busy)
+    try {
+      const token = createSessionToken("127.0.0.1", undefined, principal)
+      const grant = await issueExecutionGrant(signedIn(token), { actions: ["session.send"], target, label: "x" }, "user-1")
+      const record = (key: string) => store.recordOccurrence("user-1", { triggerId: `trigger-${key}`, kind: "test", key, dueAt: Date.now(), action: "session.send", grant: { grantId: grant.id, revision: 1 }, request: {} }).occurrence
+      const expiring = record("expiring")
+      const restarted = record("restarted")
+      await dispatcher.tick()
+      await vi.waitFor(() => expect([expiring, restarted].map((o) => store.occurrence("user-1", o.id)!.hold)).toEqual(["reauthorize", "reauthorize"]))
+      for (const occurrence of [expiring, restarted]) runner.reauthorizeLive(signedIn(token), "user-1", occurrence.id)
+      await vi.waitFor(() => expect([expiring, restarted].map((o) => store.occurrence("user-1", o.id)!.state)).toEqual(["admitted", "admitted"]))
+      expect(store.command("user-1", expiring.commandId)!.payload).not.toHaveProperty("executionGrant")
+      expect(JSON.stringify([store.occurrence("user-1", expiring.id), store.command("user-1", expiring.commandId)])).not.toContain(token)
+
+      // The sign-in lapses while its message waits behind a running turn.
+      await revokeSessionToken(token)
+      busy = false
+      await vi.waitFor(async () => {
+        await dispatcher.tick()
+        expect(store.occurrence("user-1", expiring.id)).toMatchObject({ state: "held", hold: "reauthorize", reason: expect.stringMatching(/expired/) })
+      })
+      expect(send).not.toHaveBeenCalled()
+
+      // A restart forgets live sign-ins: the waiting message is held for review, never sent.
+      __resetLiveAuthoritiesForTest()
+      closeCommandDispatcher()
+      const next = commandDispatcher()
+      next.store.settleAdmittedOccurrences()
+      expect(next.store.occurrence("user-1", restarted.id)).toMatchObject({ state: "held" })
+      expect(send).not.toHaveBeenCalled()
     } finally { unregister() }
   })
 })

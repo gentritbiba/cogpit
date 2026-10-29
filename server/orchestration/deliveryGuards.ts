@@ -14,7 +14,7 @@ export type DeliveryGuard = (occurrence: TriggerOccurrence, command: StoredComma
 
 /** A delivery a guard refused before any provider I/O; the dispatcher settles the command with it. */
 export class DeliveryRefused extends Error {
-  constructor(readonly disposition: "held" | "cancelled", reason: string) { super(reason); this.name = "DeliveryRefused" }
+  constructor(readonly disposition: "held" | "cancelled", reason: string, readonly code?: string) { super(reason); this.name = "DeliveryRefused" }
 }
 
 const guards = new Map<string, DeliveryGuard>()

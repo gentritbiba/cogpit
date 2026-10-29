@@ -221,7 +221,8 @@ describe("controlling occurrences", () => {
   it("holds, requeues under a renewed grant, and skips waiting work", () => {
     const now = clock()
     const store = open(":memory:", now)
-    const held = store.recordOccurrence("local", record({ key: "held", dueAt: now() + 5000 })).occurrence
+    store.putGrant({ id: "grant-2", revision: 1, scope: "local", source: "personal", actions: ["session.send"], target: { agent: "codex", instanceId: "default", sessionId: "native-1" }, label: "x", createdAt: now(), updatedAt: now() })
+    const held = store.recordOccurrence("local", record({ key: "held", dueAt: now() + 5000, grant: null })).occurrence
     store.holdOccurrence("local", held.id, "review", "Missed while the host was off")
     expect(store.requeueOccurrence("local", held.id, { grantId: "grant-2", revision: 1 })).toMatchObject({ state: "scheduled", dueAt: now(), grant: { grantId: "grant-2" } })
     expect(store.occurrence("local", held.id)!.hold).toBeUndefined()
