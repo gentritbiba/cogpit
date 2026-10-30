@@ -108,6 +108,6 @@ In session `01a1891c-89ca-78a1-8495-a51992102e21`, the user explicitly changed i
 | --- | --- | --- | --- | --- |
 | UI | Hide worktree recipe configuration from new-session screen; compact editor dialog elsewhere | `4ebc120c` | Lead | Verified: 15 focused, normal/public10172 + memory110, types/lint/build/architecture, desktop/mobile browser QA |
 | PLATFORM-REVIEW | Verify existing plugin architecture; propose minimal safe installation/lifecycle and draft bridge contracts | `4ebc120c` | Opus5.5/high via Cogpit | Complete; existing trusted host integration and lazy client adapter chosen |
-| PLATFORM | Shared plugin contracts/host integration and optional Worktree setup package | Review contract | Same Opus session | Running; shared checkpoints `0c5ba59f`, `407df8e5`, `2b53e301` ready |
-| DRAFTS | Optional Saved drafts package; clean core composer, preserve legacy bytes and send-refusal safety | Shared contract | GPT6.1/high via Cogpit | Running in Cogpit session `01a18dbb-2465-7760-b3e1-d47b52fc69dc` against shared checkpoint |
-| VERIFY | Integrate, permission/data/disable checks, full/public/memory gates and browser QA | Both packages | Lead | Pending |
+| PLATFORM | Shared plugin contracts/host integration and optional Worktree setup package | Review contract | Same Opus session | Integrated through `9b2a8e66`; frame fix `299c9231` preserves navigation revocation after handshake |
+| DRAFTS | Optional Saved drafts package; clean core composer, preserve legacy bytes and send-refusal safety | Shared contract | GPT6.1/high via Cogpit | Integrated as `6046eedb` from worker `c212e7dd`; 125 focused tests pass |
+| VERIFY | Integrate, permission/data/disable checks, full/public/memory gates and browser QA | Both packages | Lead | Combined verification in progress; legacy text/image stash and trusted recipe preserved in an isolated upgrade fixture |
