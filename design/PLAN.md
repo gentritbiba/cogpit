@@ -20,7 +20,7 @@ Application baseline: `f2f4c21f`. Implementation branches start at `6567fc30`, w
 
 ## Current delivery scope
 
-The user explicitly reaffirmed **Complete all nine** on 2026-10-30 after the seven-item checkpoint. Items8 and9 are resumed; the earlier preference to keep token spend low still applies. Reuse the existing Opus5.5/high session and shared foundations, with focused tests, synthetic QA and one bounded independent review of the remaining security-sensitive work. The release assessment follows completion; no release has been triggered.
+The user explicitly reaffirmed **Complete all nine** on 2026-10-30 after the seven-item checkpoint. All nine implementation checkpoints are now integrated; the earlier preference to keep token spend low still applies. Reuse the existing Opus5.5/high session and shared foundations, with focused tests, synthetic QA and one bounded independent review of the remaining security-sensitive work. The release assessment follows completion; no release has been triggered.
 
 ## Packages and dependency order
 
@@ -35,8 +35,8 @@ The user explicitly reaffirmed **Complete all nine** on 2026-10-30 after the sev
 | CONTEXT | 4: typed composer context and citations | OUTPUT integrated | Same Opus 5.5 / high session | Integrated with corrections `4e699654`, `b121df11`, `9f27f3da`; full-app QA passed; draft-boundary corrections included with STASH `d5c59426` |
 | STASH | 6: stash, attachment restoration and prompt recall | CONTEXT integrated `c6cabe8a` | GPT 6.1 Sol / high | Integrated as `d5c59426`; full-app QA passed |
 | AUTOMATION | 8: durable schedules, webhooks and history | FOUNDATION, RECOVERY and WORKTREE integrated | Same Opus 5.5 / high session | Integrated `2e081612`, corrections `42f2e6aa` / `4e1c7d15`; independent exact-case recheck approved |
-| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Running in the existing Opus session |
-| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | Seven-item checkpoint complete; final all-nine checks pending |
+| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Integrated as `aabfd7db`; correction `ccccecd2` persists immutable submissions, pins bases and keeps blocked guides cancellable |
+| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | All-nine private suite: 773 files / 11,926 tests passed; follow-up corrections focused-tested; final CI tracked in PR #20 |
 
 The Opus worker implements FOUNDATION, OUTPUT, CONTEXT, AUTOMATION and REVIEW-UI sequentially and reports a separate commit for each. Other workers own distinct worktrees and bounded file areas. Opus is the sole writer of shared scheduling/storage/authority contracts; the lead reviews and integrates those contracts, shared configuration edits and final verification. No worker pushes, creates issues/comments/PRs, merges into the owner's checkout, deploys, sends Slack messages or changes provider credentials.
 
@@ -64,7 +64,7 @@ The focused review was performed by session `01a18984-9425-7c90-9736-97368750a79
 - Perform browser QA for changed UI using private `tmp-*` browsers; close task browsers and processes. Keep milestone screenshots under `/dev/tmp` and show useful evidence inline.
 - Before each commit, the staged diff must contain zero CR characters. Before any authorized push, check CR characters and whole-file line-ending flips against the actual trunk. Never discard someone else's uncommitted work.
 
-## Verification and handoff
+## Verified seven-item checkpoint
 
 Verified 2026-10-30. Implementation checkpoint `f75d2ccb`; the final handoff commit changes this reference only. Baseline `6567fc30` remains the public master revision that removed the old comparison documents. Nothing in this delivery restores them.
 
@@ -75,8 +75,8 @@ Verified 2026-10-30. Implementation checkpoint `f75d2ccb`; the final handoff com
 - Output corrections preserve complete structured diffs and multipart text/status. Copying over the cache budget was independently verified, including a 9Mi-character suffix and explicit partial/failure notices. Synthetic initial transcript transfer fell from 1,449,550 to 30,544 bytes with identical native cursors; this is a fixture measurement, not a general app-speed claim.
 - Full-app synthetic browser QA covered trusted worktree success/failure/retry/cancel, context quote/excerpt/browser-region send and reload, and stash image reload/swap/quota recovery/scoped drafts/recall. Recovery's real-server component fixture verified restart plus exactly one due send and cancellation on opt-out/new native work/pending approval.
 - Final context/draft corrections include literal saved snapshots, frame/page generation captured before bitmap decoding, bounded quote-source paging, shared context budget validation, atomic refused drafts and complete rejected-paste retention. Focused browser/socket148 and stash178 tests plus final combined suites passed. Additional independent review rounds stopped at the user's cost request.
-- Task browsers, hosts and completed worker checkouts were cleaned; all workers stopped. The isolated Opus checkout retains uncommitted automation sketches for future work, as required by the no-discard rule. Items8/9 remain deferred.
-- The private edition package was absent; its real implementation/policy could not be tested. Public operation and edition-interface authorization fakes passed. `/dev/tmp` was unavailable on this host, so QA screenshots use the documented `/tmp` fallback.
+- At this seven-item checkpoint task browsers, hosts and completed worker checkouts were cleaned. The later all-nine instruction resumed the preserved automation sketches and the existing Opus session.
+- The private edition package was absent at this checkpoint; it was subsequently checked out and verified in the all-nine suite. Public operation and edition-interface authorization fakes passed. `/dev/tmp` was unavailable on this host, so QA screenshots use the documented `/tmp` fallback.
 
 Implementation references: rendering `96fa2530` / `69e81a01` / `bc40d802`; output `585994e1` / `f0bdc421` / `881c5a23` / `cd18c323`; worktree `f8359463`; foundation `c59ab6ac` / `de950c8d` / `a6392691` / `93064c7d` / `70540625` / `def02918`; context `c6cabe8a` / `4e699654` / `b121df11` / `9f27f3da`; recovery `f28eda50` / `31b207ba` / `f4becf1d` / `c8b90671`; stash `d5c59426`.
 
@@ -87,3 +87,13 @@ The requested model split used one Opus5.5/high session (`49aca81c-c8ef-4635-ae9
 - AUTOMATION item8: worker `32315221` integrated as `2e081612`,342 focused tests and synthetic full-app QA passed. Review corrections `914a9450` / `2a39839f`, integrated as `42f2e6aa` / `4e1c7d15`, authenticate replay identity, check all prior task sessions, separate webhook coalescing and refresh live run history. A bounded independent recheck approved all four exact cases. Item9 is running.
 - Private edition compatibility: commit `46f0de0` was pushed to its `fix/workflow-route-policies` branch before core pointer `c17c9182`. Worktree setup/task administration remain admin-only; result retrieval requires session access; only exact signed-hook ingress bypasses account sign-in, with owner grants still required for execution.100 focused core/private integration tests and app/server production types passed. The private commit must be merged into its main branch before the release workflow's require-merged gate can pass.
 - Windows readiness: `352901d3` replaces the share-guest credential test's one-second polling race with the actual delegation callback;69 tests in the file and30 focused repetitions pass. New Windows CI is still required before a release.
+
+## All-nine integration
+
+The approved list is implemented on `feat/complete-workflow-upgrades`; PR `gentritbiba/cogpit#20` targets the repository default `master`, as authorized in session `01a1891c-89ca-78a1-8495-a51992102e21`. Item8 commits `2e081612`, `42f2e6aa` and `4e1c7d15` passed the independent exact-case recheck. Item9 checkpoint `aabfd7db` adds the PR review workspace. Its bounded review led to `ccccecd2`: persist immutable uncertain submission snapshots, check both base/head across drafts and submission, and keep blocked guide sessions cancellable. The worker correction suite passed 1,357 focused tests.
+
+The private edition dependency is published as `gentritbiba/cogpit-team` commit `09c5c2de`, recorded by core `400a6151`. It adds scoped route policies, the narrow signed webhook ingress exception, and real tool-result access-matrix probes; no private source is copied into core. The private branch must merge before a release.
+
+At `aabfd7db`, the complete private-edition suite passed **773 files / 11,926 tests, 3 skipped**; cogpit-memory passed **110 tests**. Production and test types, lint, architecture, agent vocabulary, duplicate ratchet, protocol, memory/skill sync, audit, private web/Electron builds and external plugin-package contracts passed. The final merge requires a passing clean public-clone gate and GitHub Linux/Windows jobs; their current results are tracked in PR #20. The Windows baseline polling correction `352901d3` retains the original security assertions.
+
+Synthetic browser QA covered scheduled task creation/history, webhook coalescing, review drafts/viewed marks, Ask agent context, explicit review submission, pinned-head work sessions, saved guides, and stale-head display. No real provider or GitHub review write was used. Terminal context has unit coverage; install-review upgrade UI was not browser-tested. Release3.5.3 has not been tagged or published.
