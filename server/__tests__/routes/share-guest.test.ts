@@ -578,16 +578,20 @@ describe("attack surface", () => {
     // The delegated call runs past the guest boundary; a share credential
     // riding along would be a capability leak into host code.
     const seen: Array<Record<string, unknown>> = []
+    let resumed!: () => void
+    const delegated = new Promise<void>((resolve) => { resumed = resolve })
     mocks.sendSDKMessage.mockImplementation(() => ({ running: true }))
     const original = mocks.resumeSDKSession.getMockImplementation()
     mocks.resumeSDKSession.mockImplementation((input: Record<string, unknown>) => {
       seen.push(input)
+      resumed()
       return {}
     })
 
     mocks.sdkSessions.delete(SESSION_A)
     await call("/api/share/send-message", { body: { message: "hello" }, wait: false })
-    await vi.waitFor(() => expect(seen).toHaveLength(1))
+    await delegated
+    expect(seen).toHaveLength(1)
     if (original) mocks.resumeSDKSession.mockImplementation(original)
 
     expect(JSON.stringify(seen[0])).not.toContain("__Host-cogpit_share")

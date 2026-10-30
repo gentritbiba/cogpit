@@ -20,7 +20,7 @@ Application baseline: `f2f4c21f`. Implementation branches start at `6567fc30`, w
 
 ## Current delivery scope
 
-The user requested a quick wrap-up with less token spend on 2026-10-29. This delivery is being bounded to items 1–7; scheduled/webhook tasks (8) and PR review (9) stay queued in this reference and are not complete. Automation sketches already begun are preserved separately in the Opus worktree. Additional review rounds and new sessions have stopped; required integration checks remain.
+The user explicitly reaffirmed **Complete all nine** on 2026-10-30 after the seven-item checkpoint. Items8 and9 are resumed; the earlier preference to keep token spend low still applies. Reuse the existing Opus5.5/high session and shared foundations, with focused tests, synthetic QA and one bounded independent review of the remaining security-sensitive work. The release assessment follows completion; no release has been triggered.
 
 ## Packages and dependency order
 
@@ -34,9 +34,9 @@ The user requested a quick wrap-up with less token spend on 2026-10-29. This del
 | RECOVERY | 7: opt-in allowance-reset continuation | FOUNDATION integrated `c59ab6ac` | GPT 6.1 Sol / high | Integrated with review correction `c8b90671`; independent recheck approved |
 | CONTEXT | 4: typed composer context and citations | OUTPUT integrated | Same Opus 5.5 / high session | Integrated with corrections `4e699654`, `b121df11`, `9f27f3da`; full-app QA passed; draft-boundary corrections included with STASH `d5c59426` |
 | STASH | 6: stash, attachment restoration and prompt recall | CONTEXT integrated `c6cabe8a` | GPT 6.1 Sol / high | Integrated as `d5c59426`; full-app QA passed |
-| AUTOMATION | 8: durable schedules, webhooks and history | FOUNDATION, RECOVERY and WORKTREE integrated | Same Opus 5.5 / high session | Deferred for requested quick wrap-up |
-| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Deferred for requested quick wrap-up |
-| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | Complete for this seven-item delivery; extra review rounds stopped for cost |
+| AUTOMATION | 8: durable schedules, webhooks and history | FOUNDATION, RECOVERY and WORKTREE integrated | Same Opus 5.5 / high session | Resumed; implementation in progress |
+| REVIEW-UI | 9: PR review, local drafts, worktree action and guides | CONTEXT, WORKTREE and RENDER integrated; plugin contracts ready | Same Opus 5.5 / high session | Queued after AUTOMATION |
+| VERIFY | Independent review, full gates and real-browser QA | All packages integrated | GPT 6.1 Sol / high | Seven-item checkpoint complete; final all-nine checks pending |
 
 The Opus worker implements FOUNDATION, OUTPUT, CONTEXT, AUTOMATION and REVIEW-UI sequentially and reports a separate commit for each. Other workers own distinct worktrees and bounded file areas. Opus is the sole writer of shared scheduling/storage/authority contracts; the lead reviews and integrates those contracts, shared configuration edits and final verification. No worker pushes, creates issues/comments/PRs, merges into the owner's checkout, deploys, sends Slack messages or changes provider credentials.
 
@@ -81,3 +81,5 @@ Verified 2026-10-30. Implementation checkpoint `f75d2ccb`; the final handoff com
 Implementation references: rendering `96fa2530` / `69e81a01` / `bc40d802`; output `585994e1` / `f0bdc421` / `881c5a23` / `cd18c323`; worktree `f8359463`; foundation `c59ab6ac` / `de950c8d` / `a6392691` / `93064c7d` / `70540625` / `def02918`; context `c6cabe8a` / `4e699654` / `b121df11` / `9f27f3da`; recovery `f28eda50` / `31b207ba` / `f4becf1d` / `c8b90671`; stash `d5c59426`.
 
 The requested model split used one Opus5.5/high session (`49aca81c-c8ef-4635-ae9b-d595b2929e95`) for the hard packages and GPT6.1Sol/high sessions for rendering, worktree setup, recovery, stash and independent checks. All were launched through Cogpit sessions under parent `01a1891c-89ca-78a1-8495-a51992102e21`. No implementation push, PR, deployment or external comment was made.
+
+- 2026-10-30: user explicitly resumed all nine. Integration branch `feat/complete-workflow-upgrades` starts at verified checkpoint `91c7f07f`; Opus session `49aca81c-c8ef-4635-ae9b-d595b2929e95` resumed with its automation sketches preserved and seven-item code merged. GitHub latest release was `v3.5.1`; app manifest is3.5.1;3.5.3 has not been prepared or triggered. Latest master quality40940642267 has a Windows share-guest test failure to investigate before a release.
