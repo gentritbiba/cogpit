@@ -7,6 +7,7 @@ import { WorktreeSetupStore } from "../../worktreeSetup/store"
 import { WorktreeSetupService } from "../../worktreeSetup/service"
 import { gitOutput } from "../../worktreeSetup/project"
 import { prepareManagedWorktree } from "../../agents/managedWorktree"
+import type { WorktreeSetupOperation } from "../../../shared/contracts/worktreeSetup"
 
 let root: string
 let cwd: string
@@ -29,6 +30,15 @@ async function recipe(directory: string, source: string) {
   const file = `setup-${++recipeId}.cjs`
   await writeFile(join(directory, file), source)
   return `node ${file}`
+}
+function savedOperation(matches: (operation: WorktreeSetupOperation) => boolean): Promise<void> {
+  const save = store.save.bind(store)
+  return new Promise((resolve) => {
+    const observer = vi.spyOn(store, "save").mockImplementation(async (project) => {
+      await save(project)
+      if (matches(project.state.operations[0])) { observer.mockRestore(); resolve() }
+    })
+  })
 }
 
 it("requires explicit user trust, scopes by account/project, and inherits across external worktrees", async () => {
@@ -67,12 +77,14 @@ it("retains partial changes after failure, retries once in the same worktree and
   const current = await project(); const initialized = await worktree()
   await store.configure(current, { command: await recipe(initialized, "require('node:fs').writeFileSync('marker', 'partial'); process.stdout.write('failed'); process.exitCode = 7"), trusted: true })
   const prompt = vi.fn()
+  const failed = savedOperation((operation) => operation.stage === "failed")
   const running = service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => {
     const first = beforeFirstTurn({ cwd: initialized })
     expect(beforeFirstTurn({ cwd: initialized })).toBe(first)
     await first; prompt()
   } })
-  await vi.waitFor(() => expect(current.state.operations[0]).toMatchObject({ stage: "failed", exitCode: 7 }))
+  await failed
+  expect(current.state.operations[0]).toMatchObject({ stage: "failed", exitCode: 7 })
   expect(prompt).not.toHaveBeenCalled()
   expect(await readFile(join(initialized, "marker"), "utf8")).toBe("partial")
   await store.configure(current, { command: await recipe(initialized, "process.stdout.write('retry-ok')"), trusted: true })
@@ -87,9 +99,11 @@ it("cancels failed setup without delivering a prompt or removing its worktree", 
   const current = await project(); const initialized = await worktree()
   await store.configure(current, { command: "exit 2", trusted: true })
   const prompt = vi.fn()
+  const failed = savedOperation((operation) => operation.stage === "failed")
   const running = service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => { await beforeFirstTurn({ cwd: initialized }); prompt() } })
   const rejected = expect(running).rejects.toThrow("cancelled")
-  await vi.waitFor(() => expect(current.state.operations[0].stage).toBe("failed"))
+  await failed
+  expect(current.state.operations[0].stage).toBe("failed")
   service.act(current, current.state.operations[0].id, "cancel")
   await rejected
   expect(prompt).not.toHaveBeenCalled()
@@ -154,10 +168,12 @@ it("creates managed worktrees without reusing or deleting user-owned paths", asy
 it("terminates setup if native creation fails while its readiness callback is running", async () => {
   const current = await project(); const initialized = await worktree()
   await store.configure(current, { command: await recipe(initialized, "process.stdout.write('running'); setInterval(() => {}, 1000)"), trusted: true })
+  const running = savedOperation((operation) => operation.output === "running")
   await expect(service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => {
     const pending = beforeFirstTurn({ cwd: initialized })
     void pending.catch(() => {})
-    await vi.waitFor(() => expect(current.state.operations[0].output).toBe("running"))
+    await running
+    expect(current.state.operations[0].output).toBe("running")
     throw new Error("Native transport disconnected")
   } })).rejects.toThrow("Native transport disconnected")
   expect(current.state.operations[0]).toMatchObject({ stage: "interrupted", error: "Native transport disconnected" })
