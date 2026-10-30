@@ -57,9 +57,13 @@ export function registerComposer(handle: ComposerHandle): () => void {
 }
 export function activeComposer(): ComposerHandle | null { return active }
 
-/** Called by the composer for every lifecycle event; delivers only while the emitting composer is active. */
+/**
+ * Called by the composer for every lifecycle event. `settled` and `created`
+ * finish a send that may outlive its composer, so they are always delivered;
+ * the others only while the emitting composer is active.
+ */
 export function emitComposerEvent(handle: ComposerHandle, event: ComposerEvent): void {
-  if (handle !== active) return
+  if (handle !== active && event.type !== "settled" && event.type !== "created") return
   for (const listener of [...listeners]) {
     try { listener(event) } catch { /* One extension cannot stop another or the composer. */ }
   }

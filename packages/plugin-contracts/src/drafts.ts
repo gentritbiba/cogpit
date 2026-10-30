@@ -8,7 +8,7 @@ export const DRAFT_LIMITS = Object.freeze({ page: 20, previewChars: 2000, contex
 
 export const draftPreviewSchema = z.strictObject({
   id: draftIdSchema,
-  kind: z.enum(["stash", "sent", "refused"]),
+  kind: z.enum(["stash", "sending", "sent", "refused"]),
   savedAt: z.string().min(1).max(64),
   /** At most `previewChars` of the saved text; `textChars` is its full length. */
   text: boundedText(DRAFT_LIMITS.previewChars * 4),
@@ -43,18 +43,18 @@ export const draftParamsSchemas = {
   "drafts.list": z.strictObject({ cursor: z.string().min(1).max(128).optional() }),
   "drafts.capture": z.strictObject({ token: draftTokenSchema, clear: z.boolean() }),
   "drafts.restore": z.strictObject({ token: draftTokenSchema, id: draftIdSchema, mode: draftRestoreModeSchema }),
-  "drafts.remove": z.strictObject({ id: draftIdSchema }),
-  "drafts.backup": z.strictObject({}),
-  "drafts.recover": z.strictObject({ action: draftRecoveryActionSchema }),
+  "drafts.remove": z.strictObject({ token: draftTokenSchema, id: draftIdSchema }),
+  "drafts.backup": z.strictObject({ token: draftTokenSchema }),
+  "drafts.recover": z.strictObject({ token: draftTokenSchema, action: draftRecoveryActionSchema }),
 } as const
 
 export interface DraftMethodMap {
   "drafts.list": { params: { cursor?: string }; result: DraftList }
   "drafts.capture": { params: { token: string; clear: boolean }; result: DraftCaptureResult }
   "drafts.restore": { params: { token: string; id: string; mode: DraftRestoreMode }; result: null }
-  "drafts.remove": { params: { id: string }; result: null }
-  "drafts.backup": { params: Record<string, never>; result: null }
-  "drafts.recover": { params: { action: DraftRecoveryAction }; result: null }
+  "drafts.remove": { params: { token: string; id: string }; result: null }
+  "drafts.backup": { params: { token: string }; result: null }
+  "drafts.recover": { params: { token: string; action: DraftRecoveryAction }; result: null }
 }
 export type DraftMethod = keyof DraftMethodMap
 export const DRAFT_METHODS = Object.freeze(Object.keys(draftParamsSchemas) as DraftMethod[])

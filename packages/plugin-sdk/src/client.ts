@@ -38,10 +38,10 @@ export interface PluginClient {
     list(cursor?: string, options?: RequestOptions): Promise<MethodMap["drafts.list"]["result"]>
     capture(token: string, clear: boolean, options?: RequestOptions): Promise<MethodMap["drafts.capture"]["result"]>
     restore(token: string, id: string, mode: DraftRestoreMode, options?: RequestOptions): Promise<null>
-    remove(id: string, options?: RequestOptions): Promise<null>
+    remove(token: string, id: string, options?: RequestOptions): Promise<null>
     /** Cogpit downloads a backup of every saved draft; the bytes never enter the plugin. */
-    backup(options?: RequestOptions): Promise<null>
-    recover(action: DraftRecoveryAction, options?: RequestOptions): Promise<null>
+    backup(token: string, options?: RequestOptions): Promise<null>
+    recover(token: string, action: DraftRecoveryAction, options?: RequestOptions): Promise<null>
   }
   /** Asks the host to start a pull request review session the user confirms; needs the `start` review permission. */
   review: { start(request: ReviewStartRequest, options?: RequestOptions): Promise<ReviewStartResult> }
@@ -212,9 +212,9 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
       list: (cursor?: string, options?: RequestOptions) => request("drafts.list", cursor === undefined ? {} : { cursor }, options),
       capture: (token: string, clear: boolean, options?: RequestOptions) => request("drafts.capture", { token, clear }, options),
       restore: (token: string, id: string, mode: DraftRestoreMode, options?: RequestOptions) => request("drafts.restore", { token, id, mode }, options),
-      remove: (id: string, options?: RequestOptions) => request("drafts.remove", { id }, options),
-      backup: (options?: RequestOptions) => request("drafts.backup", {}, options),
-      recover: (action: DraftRecoveryAction, options?: RequestOptions) => request("drafts.recover", { action }, options),
+      remove: (token: string, id: string, options?: RequestOptions) => request("drafts.remove", { token, id }, options),
+      backup: (token: string, options?: RequestOptions) => request("drafts.backup", { token }, options),
+      recover: (token: string, action: DraftRecoveryAction, options?: RequestOptions) => request("drafts.recover", { token, action }, options),
     }),
     review: Object.freeze({ start: (input: ReviewStartRequest, options?: RequestOptions) => request("review.start", input, options) }),
     navigation: Object.freeze({
