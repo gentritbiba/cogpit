@@ -6,7 +6,7 @@ dist
 undo-history/
 session-config/
 session-creation-requests/
-worktree-setup/
+/worktree-setup/
 result-refs.key
 usage-model-rates.json
 audit-history/

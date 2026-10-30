@@ -4,6 +4,7 @@ import { boundedText, identifier, label, parseSchema } from "./schema.js"
 import { PROTOCOL_MAJOR } from "./manifest.js"
 import { integrationRequestBytes, integrationRequestSchema, integrationResultSchema, type PluginIntegrationRequest, type PluginIntegrationResult } from "./integrations.js"
 import { parsePluginMedia, type PluginMedia } from "./media.js"
+import { draftCaptureResultSchema, draftListSchema, draftParamsSchemas, draftTokenSchema, type DraftMethodMap } from "./drafts.js"
 
 const json = z.custom<JsonValue>(() => true)
 const empty = z.strictObject({})
@@ -74,6 +75,7 @@ const paramsSchemas = {
   "navigation.openSession": z.strictObject({ handle: identifier }),
   "settings.get": empty,
   "ui.resize": z.strictObject({ height: z.number().int().min(80).max(800) }),
+  ...draftParamsSchemas,
 } as const
 
 const connectionStatusSchema = z.strictObject({
@@ -84,7 +86,7 @@ const connectionStatusSchema = z.strictObject({
 })
 export type PluginConnectionStatus = z.infer<typeof connectionStatusSchema>
 
-export interface MethodMap {
+export interface MethodMap extends DraftMethodMap {
   "lifecycle.ready": { params: Record<string, never>; result: null }
   "connections.request": { params: { handle: string; operationId: string; args: Record<string, string | number | boolean> }; result: JsonValue }
   "connections.media": { params: { handle: string; operationId: string; args: Record<string, string | number | boolean> }; result: PluginMedia }
@@ -110,6 +112,8 @@ export type PluginEvent =
   /** The open chat session changed under a live panel; unlike `context`, in-flight requests stay valid. */
   | { protocol: 1; type: "event"; event: "session"; value: { handle: string } | null }
   | { protocol: 1; type: "event"; event: "dispose"; value: null }
+  /** The composer a `drafts` plugin works with changed; sent only to plugins granted `composer: drafts`. */
+  | { protocol: 1; type: "event"; event: "drafts"; value: { token: string } }
 export type FrameMessage = PluginRequest | PluginEvent
   | { protocol: 1; type: "result"; id: string; value: JsonValue }
   | { protocol: 1; type: "media-result"; id: string; value: PluginMedia }
@@ -122,6 +126,7 @@ const eventSchema = z.discriminatedUnion("event", [
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("visibility"), value: z.boolean() }),
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("session"), value: z.strictObject({ handle: sessionHandle }).nullable() }),
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("dispose"), value: z.null() }),
+  z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("event"), event: z.literal("drafts"), value: z.strictObject({ token: draftTokenSchema }) }),
 ])
 const envelopeSchema = z.union([
   z.strictObject({ protocol: z.literal(PROTOCOL_MAJOR), type: z.literal("request"), id: requestId, method: z.enum(Object.keys(paramsSchemas) as [PluginMethod, ...PluginMethod[]]), params: json }),
@@ -155,6 +160,7 @@ export function parseMethodResult<M extends PluginMethod>(method: M, value: unkn
   if (method === "connections.media") return parsePluginMedia(value) as MethodMap[M]["result"]
   const schema = method === "integrations.request" ? integrationResultSchema : method === "connections.status" ? connectionStatusSchema
     : method === "review.start" ? reviewStartResultSchema
+    : method === "drafts.list" ? draftListSchema : method === "drafts.capture" ? draftCaptureResultSchema
     : method === "connections.request" || method === "storage.get" || method === "settings.get" ? json : z.null()
   return parseSchema(schema, value, CONTRACT_LIMITS.responseBytes, CONTRACT_LIMITS.responseNodes) as MethodMap[M]["result"]
 }

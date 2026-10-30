@@ -44,6 +44,13 @@ Clients that cannot host plugin frames, such as the iOS app, use the same connec
 
 The bundled example targets an OpenAI-compatible speech service and binds synthesis to the voice selected through its authenticated discovery operation. Provider errors that occur after a streaming 200 response can still result in partial audio: the host rejects empty/incomplete HTTP bodies and the card reports browser playback errors, but cannot prove a successfully decoded audio stream contains the entire intended speech. The service should validate parameters before sending response headers.
 
+## Release-owned integrations
+
+Some packages turn on code that ships with Cogpit rather than with the package. The host grants these only to a plugin whose selected package is the exact release-bundled bytes or is signed by a pinned official root (`privilegedPluginIds` in the plugin snapshot); a publisher name alone never qualifies.
+
+- `worktreeSetup` (host): runs a project's trusted setup command before a new worktree's first prompt. See [Worktree setup](worktree-setup.md).
+- `composer.drafts` (client): the `drafts` composer permission lets a plugin list, save and restore composer drafts through `src/clientIntegrations/composer-drafts/`. The browser activates it while the plugin is enabled and granted, whether or not its panel is open, and disposes it, keeping data, on disable or uninstall. Frame requests carry the composer token and are authorized by the host under the frame's lease first. Images never enter the frame.
+
 ClickUp, GitHub, Vercel and Cloudflare render in Cogpit's existing right sidebar. Their panels are separate runtime packages, loaded after installation without rebuilding or restarting Cogpit. The host owns installation, so desktop and remote browser clients share the installed versions and enabled state.
 
 Fresh hosts start with no optional plugins installed. Open Plugins, choose Browse, and review a bundled package's access before installing. Existing hosts migrate the three original panels once to preserve current behavior; Cloudflare is new and is only ever installed on request. Disable keeps settings and connections. Uninstall retains data unless the user explicitly chooses to delete their saved data on that host. An uninstall is remembered across app updates.

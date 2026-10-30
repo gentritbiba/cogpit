@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.worktree-setup",
+  "publisher": "cogpit",
+  "name": "Worktree setup",
+  "version": "1.0.0",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": { "pluginApi": "^1.4.0", "client": ">=3.5.2", "host": ">=3.5.2" },
+  "protocol": 1,
+  "requires": { "client": { "workspace.panel": "^1.0.0" }, "host": { "integrations.worktreeSetup": "^1.0.0" } },
+  "optional": { "client": {}, "host": {} },
+  "browser": ["message-channel", "blob-script", "web-crypto"],
+  "contributes": { "panels": [{ "id": "setup", "title": "Worktree setup", "icon": "assets/icon.png", "order": 50, "defaultSize": "38%", "minSize": "340px", "maxSize": "64%", "when": "project-selected" }] },
+  "permissions": { "context": ["project.identity"], "composer": [], "navigation": [], "connections": [], "integrations": [{ "id": "worktreeSetup", "operations": ["snapshot", "scripts", "propose", "act"] }] },
+  "stateVersion": 1
+}

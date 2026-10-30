@@ -91,6 +91,17 @@ describe("runtime frame controller", () => {
     expect(value.port1.sent.some((message) => (message as { type: string }).type === "cogpit-plugin-load")).toBe(false)
     expect(value.port1.closed).toBe(true)
   })
+  it("reconnects when a blank document loads before the runtime shell answers", async () => {
+    const value = fixture()
+    value.frame.load()
+    const first = value.frame.contentWindow.postMessage.mock.calls[0][0]
+    value.frame.load()
+    const second = value.frame.contentWindow.postMessage.mock.calls[1][0]
+    expect(second.nonce).not.toBe(first.nonce)
+    value.port1.receive({ type: "cogpit-plugin-connected", nonce: second.nonce })
+    await vi.waitFor(() => expect(value.port1.sent.some((message) => (message as { type: string }).type === "cogpit-plugin-load")).toBe(true))
+    expect(value.onError).not.toHaveBeenCalled()
+  })
   it("revokes the frame and aborts outstanding work on reload", async () => {
     let signal: AbortSignal | undefined
     const value = fixture(async (_request, current) => { signal = current; return new Promise(() => {}) })

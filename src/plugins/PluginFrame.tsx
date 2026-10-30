@@ -9,6 +9,8 @@ export interface PluginFrameProps {
   context: PluginContext
   execute: (request: PluginRequest, signal: AbortSignal) => Promise<PluginExecutionResult>
   active?: boolean
+  /** Current composer token for a frame granted composer drafts. */
+  draftsToken?: string | null
   title?: string
   onReady?: () => void
   onError?: (error: Error) => void
@@ -38,6 +40,7 @@ export function PluginFrame(props: PluginFrameProps) {
   }, [props.payload, props.digest, key])
   useLayoutEffect(() => { controller.current?.setActive(props.active ?? true); controller.current?.updateContext(props.context) }, [props.active, props.context])
   const state = status.key === key ? status : { error: null, ready: false }
+  useLayoutEffect(() => { if (props.draftsToken && state.ready) controller.current?.notifyDrafts(props.draftsToken) }, [props.draftsToken, state.ready])
   return (
     <section className="relative h-full min-h-0 w-full" aria-label={props.title ?? "Plugin panel"}>
       {!state.ready && !state.error && <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>}

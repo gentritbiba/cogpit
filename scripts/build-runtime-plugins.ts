@@ -8,7 +8,7 @@ import { inspectPackage, validatePackagePath } from "../server/plugins/package"
 
 const root = resolve(import.meta.dir, "..")
 const app = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string }
-const bundled = ["clickup", "cloudflare", "github", "vercel-deployments", "tts"]
+const bundled = ["clickup", "cloudflare", "github", "vercel-deployments", "tts", "worktree-setup", "saved-drafts"]
 const requested = process.argv.slice(2)
 for (const name of requested) if (!bundled.includes(name)) throw new Error(`Unknown bundled plugin: ${name}`)
 const names = requested.length ? requested : bundled

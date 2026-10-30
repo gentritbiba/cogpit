@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { Cloud, Github, ListChecks, Puzzle, Rocket, type LucideIcon } from "lucide-react"
+import { Archive, Cloud, GitBranchPlus, Github, ListChecks, Puzzle, Rocket, type LucideIcon } from "lucide-react"
 import { evaluateCompatibility } from "@cogpit/plugin-contracts"
 import { workspacePanelId, type RegisteredWorkspacePanel, type WorkspacePanelProps, type WorkspacePanelIndicatorProps } from "@/plugin-api"
 import type { PluginHostStatus, PluginProjectSummary } from "../../shared/contracts/pluginManagement"
@@ -12,7 +12,7 @@ import { browserSafeMode, useBrowserSafeMode } from "./browserSafeMode"
 
 export { resolveRuntimeProject } from "./runtimeProject"
 
-const bundledIcons: Readonly<Record<string, LucideIcon>> = { "cogpit.github": Github, "cogpit.clickup": ListChecks, "cogpit.vercel": Rocket, "cogpit.cloudflare": Cloud }
+const bundledIcons: Readonly<Record<string, LucideIcon>> = { "cogpit.github": Github, "cogpit.clickup": ListChecks, "cogpit.vercel": Rocket, "cogpit.cloudflare": Cloud, "cogpit.worktree-setup": GitBranchPlus, "cogpit.saved-drafts": Archive }
 
 type RuntimeRegistration = Omit<RuntimePluginPanelProps, keyof WorkspacePanelProps>
 function InstalledRuntimePanel({ runtime, ...props }: WorkspacePanelProps & { runtime?: RuntimeRegistration }) {

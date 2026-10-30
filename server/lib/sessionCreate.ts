@@ -1,8 +1,7 @@
 import { finishSessionStartup } from "../agents/runtimeTypes"
 import { editionModule } from "../edition"
-import type { StartupAuthorizationContext } from "../../shared/contracts/worktreeSetup"
-import { worktreeSetupService } from "../worktreeSetup/service"
-import { worktreeSetupStore } from "../worktreeSetup/store"
+import type { StartupAuthorizationContext } from "../../shared/contracts/sessionStartup"
+import { worktreeStartups } from "../sessionStartup/readiness"
 import { nativeBinding } from "../agents/nativeBindings"
 import { isAbsolute } from "node:path"
 import {
@@ -106,7 +105,7 @@ export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" 
   retry?: { requestId: string; scope: string }
   setupScope?: string
   authorizeStartup?: (context: StartupAuthorizationContext) => Promise<void>
-  /** Runs in the initialized worktree before its setup recipe; only with `worktreeName`. */
+  /** Runs in the initialized worktree before any installed setup step; only with `worktreeName`. */
   prepareWorktree?: (cwd: string, signal: AbortSignal) => Promise<void>
 }
 
@@ -159,8 +158,9 @@ export async function createSession(
     if (request.worktreeName) {
       if (editionModule().auth && !authorizeStartup) throw new RouteError(403, ErrorCodes.FORBIDDEN, "Worktree startup requires current execution authority")
       if (!runtime.descriptor.capabilities.worktrees) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "This provider does not support worktrees")
-      return worktreeSetupService.run({
-        project: await worktreeSetupStore.project(setupScope ?? retry?.scope ?? "local", cwd),
+      return worktreeStartups.run({
+        scope: setupScope ?? retry?.scope ?? "local",
+        projectCwd: cwd,
         worktreeName: request.worktreeName,
         signal: request.signal,
         authorize: authorizeStartup,

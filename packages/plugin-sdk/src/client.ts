@@ -1,7 +1,7 @@
 import {
   CONTRACT_LIMITS, ContractValidationError, parseFrameMessage, parseMethodResult, parsePluginContext,
   type ComposerFileContext, type FrameMessage, type JsonValue, type MethodMap, type PluginContext, type PluginError, type PluginMethod, type PluginIntegrationRequest,
-  type ReviewStartRequest, type ReviewStartResult,
+  type ReviewStartRequest, type ReviewStartResult, type DraftRecoveryAction, type DraftRestoreMode,
 } from "@cogpit/plugin-contracts"
 
 export interface RequestOptions { signal?: AbortSignal }
@@ -30,6 +30,19 @@ export interface PluginClient {
     /** Adds a removable file reference with a note; needs the `context` composer permission. */
     appendContext(context: ComposerFileContext, options?: RequestOptions): Promise<null>
   }
+  /**
+   * Saved composer drafts; needs the `drafts` composer permission. `token` comes
+   * from `list` or `onDraftsChange` and names the composer state a write expects.
+   */
+  drafts: {
+    list(cursor?: string, options?: RequestOptions): Promise<MethodMap["drafts.list"]["result"]>
+    capture(token: string, clear: boolean, options?: RequestOptions): Promise<MethodMap["drafts.capture"]["result"]>
+    restore(token: string, id: string, mode: DraftRestoreMode, options?: RequestOptions): Promise<null>
+    remove(token: string, id: string, options?: RequestOptions): Promise<null>
+    /** Cogpit downloads a backup of every saved draft; the bytes never enter the plugin. */
+    backup(token: string, options?: RequestOptions): Promise<null>
+    recover(token: string, action: DraftRecoveryAction, options?: RequestOptions): Promise<null>
+  }
   /** Asks the host to start a pull request review session the user confirms; needs the `start` review permission. */
   review: { start(request: ReviewStartRequest, options?: RequestOptions): Promise<ReviewStartResult> }
   navigation: {
@@ -39,6 +52,8 @@ export interface PluginClient {
   onContextChange(listener: (context: Readonly<PluginContext>) => void): () => void
   onThemeChange(listener: (theme: Readonly<PluginContext["theme"]>) => void): () => void
   onVisibilityChange(listener: (visible: boolean) => void): () => void
+  /** The composer changed; the new token replaces any earlier one. */
+  onDraftsChange(listener: (token: string) => void): () => void
   dispose(): void
 }
 
@@ -70,6 +85,7 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
   const contextListeners = new Set<(value: Readonly<PluginContext>) => void>()
   const themeListeners = new Set<(value: Readonly<PluginContext["theme"]>) => void>()
   const visibilityListeners = new Set<(value: boolean) => void>()
+  const draftListeners = new Set<(value: string) => void>()
   const post = (message: FrameMessage) => port.postMessage(message)
   const cancel = (id: string, error: PluginRequestError) => {
     const request = pending.get(id)
@@ -111,7 +127,7 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
     cancelAll(new PluginRequestError("DISPOSED", "Plugin client is disposed"))
     port.removeEventListener("message", receive)
     port.removeEventListener("messageerror", transportError)
-    contextListeners.clear(); themeListeners.clear(); visibilityListeners.clear()
+    contextListeners.clear(); themeListeners.clear(); visibilityListeners.clear(); draftListeners.clear()
     port.close()
   }
   const notify = <T>(listeners: Set<(value: T) => void>, value: T) => {
@@ -146,6 +162,8 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
     } else if (message.event === "theme") {
       context = immutableContext({ ...context, theme: message.value })
       notify(themeListeners, context.theme)
+    } else if (message.event === "drafts") {
+      notify(draftListeners, message.value.token)
     } else if (message.event === "session") {
       context = immutableContext({ ...context, session: message.value })
       notify(contextListeners, context)
@@ -190,6 +208,14 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
       append: (text: string, options?: RequestOptions) => request("composer.append", { text }, options),
       appendContext: (context: ComposerFileContext, options?: RequestOptions) => request("composer.appendContext", context, options),
     }),
+    drafts: Object.freeze({
+      list: (cursor?: string, options?: RequestOptions) => request("drafts.list", cursor === undefined ? {} : { cursor }, options),
+      capture: (token: string, clear: boolean, options?: RequestOptions) => request("drafts.capture", { token, clear }, options),
+      restore: (token: string, id: string, mode: DraftRestoreMode, options?: RequestOptions) => request("drafts.restore", { token, id, mode }, options),
+      remove: (token: string, id: string, options?: RequestOptions) => request("drafts.remove", { token, id }, options),
+      backup: (token: string, options?: RequestOptions) => request("drafts.backup", { token }, options),
+      recover: (token: string, action: DraftRecoveryAction, options?: RequestOptions) => request("drafts.recover", { token, action }, options),
+    }),
     review: Object.freeze({ start: (input: ReviewStartRequest, options?: RequestOptions) => request("review.start", input, options) }),
     navigation: Object.freeze({
       openExternal: (url: string, options?: RequestOptions) => request("navigation.openExternal", { url }, options),
@@ -198,6 +224,7 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
     onContextChange: (listener: (value: Readonly<PluginContext>) => void) => subscribe(contextListeners, listener),
     onThemeChange: (listener: (value: Readonly<PluginContext["theme"]>) => void) => subscribe(themeListeners, listener),
     onVisibilityChange: (listener: (value: boolean) => void) => subscribe(visibilityListeners, listener),
+    onDraftsChange: (listener: (value: string) => void) => subscribe(draftListeners, listener),
     dispose,
   })
 }

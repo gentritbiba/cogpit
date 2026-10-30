@@ -7,12 +7,10 @@ export interface WorktreeSetupRecipe {
   configuredAt: number
 }
 
+/** One startup as a plugin sees it: no host paths or session ids. */
 export interface WorktreeSetupOperation {
   id: string
-  projectCwd: string
   worktreeName: string
-  cwd?: string
-  sessionId?: string
   stage: WorktreeSetupStage
   command?: string
   attempt: number
@@ -25,18 +23,16 @@ export interface WorktreeSetupOperation {
 }
 
 export interface WorktreeSetupSnapshot {
-  projectCwd: string
   recipe: WorktreeSetupRecipe | null
   operations: WorktreeSetupOperation[]
 }
 
-export interface StartupAuthorizationContext {
-  stage: "setup" | "agent-start"
-  cwd: string
-  projectCwd: string
-  sessionId?: string
-}
+export interface WorktreeSetupScripts { scripts: { name: string; command: string }[] }
 
+/** A recipe change waiting for the user's confirmation in Cogpit's own dialog. */
+export interface WorktreeSetupProposal { proposalId: string }
+
+export const WORKTREE_SETUP_COMMAND_LIMIT = 8000
 export const WORKTREE_SETUP_OUTPUT_LIMIT = 64_000
 export const WORKTREE_SETUP_DEFAULT_TIMEOUT_MS = 10 * 60_000
 export const WORKTREE_SETUP_MAX_TIMEOUT_MS = 60 * 60_000

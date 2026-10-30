@@ -1,0 +1,47 @@
+{
+  "manifestVersion": 1,
+  "id": "cogpit.saved-drafts",
+  "publisher": "cogpit",
+  "name": "Saved drafts",
+  "version": "1.0.0",
+  "runtime": "browser-iife-v1",
+  "entry": "plugin.js",
+  "style": "plugin.css",
+  "engines": {
+    "pluginApi": "^1.4.0",
+    "client": ">=3.5.1",
+    "host": ">=3.5.1"
+  },
+  "requires": {
+    "client": {
+      "workspace.panel": "^1.0.0",
+      "composer.drafts": "^1.0.0"
+    },
+    "host": {}
+  },
+  "browser": [
+    "message-channel",
+    "blob-script",
+    "web-crypto"
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "drafts",
+        "title": "Saved drafts",
+        "order": 60,
+        "defaultSize": "30%",
+        "minSize": "300px",
+        "maxSize": "50%",
+        "when": "project-selected",
+        "icon": "assets/icon.png"
+      }
+    ]
+  },
+  "permissions": {
+    "composer": [
+      "drafts"
+    ]
+  },
+  "stateVersion": 1
+}

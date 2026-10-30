@@ -20,6 +20,7 @@ export const pluginSnapshotSchema = z.strictObject({
   plugins: z.array(installedPluginSchema).max(256), publishers: z.array(publisherSummary).max(256),
   legacyPluginIds: z.array(z.enum(["github", "clickup", "vercel-deployments"])).max(3).optional(),
   availableSeeds: z.array(z.strictObject({ manifest, digest })).max(256).optional(),
+  privilegedPluginIds: z.array(z.string().max(128)).max(256).optional(),
   recoveryCode: z.enum(["STORE_LOCKED", "STORE_VERSION", "STORE_CORRUPT", "STORE_UNAVAILABLE"]).optional(),
 })
 const optionalIssue = z.strictObject({ side: z.enum(["client", "host"]), name: z.string().max(128), required: z.string().max(256), actual: z.string().max(512).nullable() })

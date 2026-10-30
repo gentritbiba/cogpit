@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { IncomingMessage } from "node:http"
-import { CONTRACT_LIMITS, connectionResourceDependencies, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
+import { CONTRACT_LIMITS, connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginScope, PluginStoreSnapshot } from "../../shared/contracts/plugins"
 import type { PluginConnectionSnapshot, PluginConnectionTarget, PluginResourceSelection } from "../../shared/contracts/pluginConnections"
 import { getInstanceId } from "../routes/hello"
@@ -26,6 +26,10 @@ import { executeGitHubIntegration, GitHubRouteError } from "./integrations/githu
 import { executeVercelIntegration, VercelDeploymentsRouteError } from "./integrations/vercel"
 import { CloudflareRouteError, executeCloudflareIntegration } from "./integrations/cloudflare"
 import type { PluginIntegrationExecutor } from "./integrationTypes"
+import { WorktreeSetupService, type WorktreeSetupGrant } from "./integrations/worktreeSetup/service"
+import { registerWorktreeStartupStep } from "../sessionStartup/readiness"
+import { assertWorktreeStartAccess } from "../sessionStartup/authorization"
+import { RouteError } from "../lib/routeError"
 import { PluginSessionNavigation } from "./sessionNavigation"
 import type { GitHubPullSessionsResponse } from "../../shared/contracts/github"
 import { legacyProjectLink, projectForPath, validateLegacyClickUp } from "./legacyClickUp"
@@ -71,6 +75,8 @@ export class PluginManager {
   private readonly legacyRateKeys = new Map<string, string>()
   private readonly root: string
   private unregisterSkills?: () => void
+  private unregisterWorktreeSetup?: () => void
+  readonly worktreeSetup = new WorktreeSetupService({ current: (projectCwd) => this.worktreeSetupGrant(projectCwd) })
 
   constructor(root: string, private readonly options: PluginManagerOptions = {}) {
     this.root = resolve(root)
@@ -86,9 +92,9 @@ export class PluginManager {
         appSeeds: this.options.appSeeds,
         legacyHost: this.options.legacyHost,
         crashHook: this.options.crashHook,
-        beforeChange: async (pluginId) => { this.installationChanges.add(pluginId); this.leases.revokeMatching({ pluginId }); await Promise.all([this.connections?.drain(), this.state?.drain()]) },
+        beforeChange: async (pluginId) => { this.installationChanges.add(pluginId); this.leases.revokeMatching({ pluginId }); this.worktreeSetup.abort(pluginId); await Promise.all([this.connections?.drain(), this.state?.drain()]) },
         afterMutation: () => this.installationChanges.clear(),
-        onCompromised: () => this.leases.revokeMatching({}),
+        onCompromised: () => { this.leases.revokeMatching({}); this.worktreeSetup.abort() },
       })
       if (!this.storeValue.snapshot().available) return
       const compromised = () => { this.error = "Plugin private storage is unavailable"; this.leases.revokeMatching({}) }
@@ -97,6 +103,7 @@ export class PluginManager {
       for (const scope of this.connections.pendingClears()) { await this.state.clear(scope); await this.connections.finishClear(scope) }
       await this.completeDataDeletions()
       this.unregisterSkills = registerPluginSkills(path => this.skillInstructions(path))
+      this.unregisterWorktreeSetup = registerWorktreeStartupStep(this.worktreeSetup.step)
       if (this.connections.legacy()?.automaticFailed) this.reportMigrationIssue(LEGACY_IMPORT_WARNING)
     } catch {
       this.error = "Plugin private storage is unavailable"
@@ -114,6 +121,51 @@ export class PluginManager {
     if (this.error) return { available: false, error: this.error, recoveryCode: "STORE_UNAVAILABLE", revision: 0, plugins: [], publishers: [] }
     const snapshot = this.storeValue?.snapshot() ?? { available: false, error: "Plugin storage is unavailable", revision: 0, plugins: [], publishers: [] }
     return snapshot.available && this.migrationIssue ? { ...snapshot, error: this.migrationIssue } : snapshot
+  }
+  /** Whether the plugin's selected package carries release or official provenance, re-read from the current store. */
+  privileged(pluginId: string): boolean { return this.snapshot().privilegedPluginIds?.includes(pluginId) ?? false }
+
+  private assertPrivileged(pluginId: string): void {
+    if (!this.privileged(pluginId)) throw new PluginDataError("PERMISSION_REQUIRED", "This integration is available only to the package bundled with Cogpit")
+  }
+
+  /**
+   * Saves a setup command the user confirmed in Cogpit's own dialog after the
+   * plugin on this lease proposed it. Only the trusted parent calls this.
+   */
+  async confirmWorktreeSetup(req: IncomingMessage, leaseId: string, proposalId: string, signal?: AbortSignal) {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal }, lease)
+    try {
+      const grant = context.plugin.manifest.permissions.integrations.find(value => value.id === "worktreeSetup")
+      if (!grant?.operations.includes("propose")) throw new PluginDataError("PERMISSION_REQUIRED", "Worktree setup has not been granted")
+      this.assertPrivileged(context.plugin.id)
+      if (!context.workspacePath) throw new PluginDataError("RESOURCE_REQUIRED", "Select a workspace before configuring setup")
+      const workspacePath = context.workspacePath
+      assertWorktreeStartAccess(req)
+      return await this.worktreeSetup.confirm(proposalId, { pluginId: context.plugin.id, principal: context.scope.principalId, workspacePath, request: req, authorize: async () => {
+        await context.guard()
+        if (this.safeMode) throw new PluginDataError("STALE_ACTIVATION", "Plugin execution is disabled on this host")
+        if (await realpath(workspacePath) !== workspacePath) throw new PluginDataError("STALE_ACTIVATION", "The selected workspace is unavailable")
+        this.assertPrivileged(context.plugin.id)
+        assertWorktreeStartAccess(req)
+      } })
+    } finally { context.dispose() }
+  }
+
+  /** Read for every worktree startup and before every setup command; no installed grant means recipes are neither read nor run. */
+  async worktreeSetupGrant(projectCwd: string): Promise<WorktreeSetupGrant | null> {
+    if (this.closed || this.error || this.safeMode) return null
+    const snapshot = this.snapshot()
+    if (!snapshot.available) return null
+    const plugin = snapshot.plugins.find(value => value.enabled && snapshot.privilegedPluginIds?.includes(value.id) && value.manifest.permissions.integrations.some(grant => grant.id === "worktreeSetup"))
+    if (!plugin) return null
+    if (this.installationChanges.has(plugin.id)) throw new PluginDataError("STALE_ACTIVATION", "Worktree setup is being changed; start the session again")
+    if (plugin.scope.type !== "all") {
+      const project = projectForPath(await realpath(projectCwd), await this.projects.list(true))
+      if (!project || !plugin.scope.projectIds.includes(project.id)) return null
+    }
+    return { pluginId: plugin.id, digest: plugin.selectedDigest, name: plugin.manifest.name }
   }
   reportMigrationIssue(message: string): void { this.migrationIssue = message.slice(0, 500) }
   get connectionRevision(): number { try { return this.connections?.revision ?? 0 } catch { return 0 } }
@@ -670,10 +722,11 @@ export class PluginManager {
     } finally { context.dispose() }
   }
 
-  private async integration(context: Awaited<ReturnType<PluginManager["context"]>>, input: PluginIntegrationRequest, executor = this.options.integrationExecutor): Promise<unknown> {
+  private async integration(context: Awaited<ReturnType<PluginManager["context"]>>, input: PluginIntegrationRequest, req: IncomingMessage, executor = this.options.integrationExecutor): Promise<unknown> {
     const request = parseIntegrationRequest(input)
     const grant = context.plugin.manifest.permissions.integrations.find(value => value.id === request.integration)
     if (!grant || !(grant.operations as readonly string[]).includes(request.operation)) throw new PluginDataError("PERMISSION_REQUIRED", "This plugin has not been granted this integration operation")
+    if (request.integration === "worktreeSetup" && !this.privileged(context.plugin.id)) throw new PluginDataError("PERMISSION_REQUIRED", "Worktree setup is available only to the package bundled with Cogpit")
     if (!context.workspacePath) throw new PluginDataError("RESOURCE_REQUIRED", "Select a workspace before using this integration")
     const integrationContext = { workspacePath: context.workspacePath, signal: context.signal, principal: context.scope.principalId, authorize: async () => {
       context.check()
@@ -688,6 +741,7 @@ export class PluginManager {
         case "github": return executeGitHubIntegration(request, integrationContext)
         case "vercel": return executeVercelIntegration(request, integrationContext)
         case "cloudflare": return executeCloudflareIntegration(request, integrationContext)
+        case "worktreeSetup": return this.worktreeSetup.execute(request, { pluginId: context.plugin.id, principal: context.scope.principalId, workspacePath: context.workspacePath!, request: req, authorize: async () => { await integrationContext.authorize(); this.assertPrivileged(context.plugin.id) } })
       }
     })
   }
@@ -699,7 +753,7 @@ export class PluginManager {
       const workspacePath = await this.projects.resolveWorkspace(caller.projectId, caller.projectPath)
       const lease = this.leases.create(binding, { pluginId: input.pluginId, digest: plugin.selectedDigest, projectKey: caller.projectId, workspacePath, contextEpoch: "legacy", grantsRevision: snapshot.revision, connectionRevision: this.connectionRevision })
       const context = await this.context(caller.request, { pluginId: input.pluginId, projectId: caller.projectId }, caller.options, lease)
-      try { return await this.integration(context, request, executor) }
+      try { return await this.integration(context, request, caller.request, executor) }
       finally { context.dispose() }
     })
   }
@@ -757,16 +811,20 @@ export class PluginManager {
       }
       if (request.method === "integrations.request") {
         try {
-          const data = await this.integration(context, request.params)
+          const data = await this.integration(context, request.params, req)
           return parseMethodResult("integrations.request", { ok: true, data: request.params.operation === "pullSessions" ? this.sessionNavigation.present(lease, data as GitHubPullSessionsResponse) : data })
         } catch (error) {
           await context.guard()
-          if (error instanceof GitHubRouteError || error instanceof VercelDeploymentsRouteError || error instanceof CloudflareRouteError) return parseJson({ ok: false, error: { code: error.code, message: error.message.slice(0, 512) } })
+          if (error instanceof GitHubRouteError || error instanceof VercelDeploymentsRouteError || error instanceof CloudflareRouteError || (request.params.integration === "worktreeSetup" && error instanceof RouteError)) return parseJson({ ok: false, error: { code: error.code, message: error.message.slice(0, 512) } })
           throw error
         }
       }
       if (request.method === "composer.append" && context.plugin.manifest.permissions.composer.includes("append")) return null
       if (request.method === "composer.appendContext" && context.plugin.manifest.permissions.composer.includes("context")) return null
+      if (isDraftMethod(request.method) && context.plugin.manifest.permissions.composer.includes("drafts")) {
+        if (!this.privileged(context.plugin.id)) throw new PluginDataError("PERMISSION_REQUIRED", "Saved drafts are available only to the package bundled with Cogpit")
+        return null
+      }
       if (request.method === "review.start" && context.plugin.manifest.permissions.review.includes("start")) return { status: "opened" }
       if (request.method === "navigation.openExternal" && context.plugin.manifest.permissions.navigation.includes("external")) return null
       if (request.method === "connections.request" || request.method === "connections.status") {
@@ -795,6 +853,8 @@ export class PluginManager {
     if (this.closed) return
     this.closed = true
     this.unregisterSkills?.()
+    this.unregisterWorktreeSetup?.()
+    this.worktreeSetup.abort()
     this.leases.dispose()
     this.authorization.dispose()
     await this.connections?.close()

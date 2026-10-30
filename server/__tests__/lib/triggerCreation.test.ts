@@ -36,16 +36,20 @@ import { defaultExecutor, registerTriggerHandler, TriggerRunner } from "../../li
 import { setRequestAuthentication } from "../../requestAuthentication"
 import { setRequestPrincipal } from "../../requestPrincipal"
 import { __resetSessionsForTest, createSessionToken } from "../../security"
-import { gitOutput } from "../../worktreeSetup/project"
-import { worktreeSetupService } from "../../worktreeSetup/service"
+import { gitOutput } from "../../sessionStartup/project"
+import { WorktreeSetupService } from "../../plugins/integrations/worktreeSetup/service"
+import { registerWorktreeStartupStep, worktreeStartups } from "../../sessionStartup/readiness"
 import { installFakeEdition, useAccountSignIn } from "../edition/fakeEdition"
 import { fakeEditionAuth } from "../edition/fakeAuth"
-import { worktreeSetupStore } from "../../worktreeSetup/store"
+import { worktreeSetupStore } from "../../plugins/integrations/worktreeSetup/store"
 import { ALL_CAPABILITIES } from "../../../shared/contracts/identity"
 
 let root: string
 let project: string
+let unregisterSetup: () => void
 beforeEach(async () => {
+  const setup = new WorktreeSetupService({ current: async () => ({ pluginId: "cogpit.worktree-setup", digest: "a".repeat(64), name: "Worktree setup" }) })
+  unregisterSetup = registerWorktreeStartupStep(setup.step)
   root = await realpath(await mkdtemp(join(tmpdir(), "cogpit-trigger-creation-")))
   project = join(root, "project")
   await mkdir(project)
@@ -56,7 +60,8 @@ beforeEach(async () => {
 afterEach(async () => {
   closeCommandDispatcher()
   __resetEditionForTest(); __resetSessionsForTest(); __resetLiveAuthoritiesForTest()
-  await worktreeSetupService.close()
+  await worktreeStartups.close()
+  unregisterSetup()
   await rm(root, { recursive: true, force: true })
 })
 

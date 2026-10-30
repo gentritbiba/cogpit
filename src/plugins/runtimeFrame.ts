@@ -26,6 +26,8 @@ export interface RuntimeFrameController {
   dispose(): void
   setActive(active: boolean): void
   updateContext(context: PluginContext): void
+  /** Tells a frame granted composer drafts which composer token is current. */
+  notifyDrafts(token: string): void
 }
 
 export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameController {
@@ -35,7 +37,6 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
   let context = parsePluginContext(options.context)
   let active = options.active ?? true
   let disposed = false
-  let loaded = false
   let connected = false
   let delivered = false
   let readyRequested = false
@@ -68,12 +69,15 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
     frame.removeEventListener("load", load)
     if (channel) {
       try { channel.port1.postMessage({ protocol: 1, type: "event", event: "dispose", value: null }) } catch { /* Navigation can close the channel first. */ }
-      channel.port1.removeEventListener("message", receive)
-      channel.port1.removeEventListener("messageerror", messageError)
-      channel.port1.close(); channel.port2.close()
+      closeChannel(channel)
     }
     frame.removeAttribute("src")
     options.onDispose?.()
+  }
+  function closeChannel(value: MessageChannel): void {
+    value.port1.removeEventListener("message", receive)
+    value.port1.removeEventListener("messageerror", messageError)
+    value.port1.close(); value.port2.close()
   }
   function fail(error: Error): void {
     if (disposed) return
@@ -90,8 +94,9 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
   }
   function load(): void {
     if (disposed) return
-    if (loaded) { fail(new Error("Plugin frame navigated or reloaded")); return }
-    loaded = true
+    if (connected) { fail(new Error("Plugin frame navigated or reloaded")); return }
+    // A blank document can finish loading before the shell (a reused iframe, StrictMode); nothing was delivered yet, so offer a fresh channel.
+    if (channel) closeChannel(channel)
     if (!frame.contentWindow || !cryptoApi?.subtle) { fail(new Error("Plugin runtime requires a secure browser connection")); return }
     try {
       nonce = Array.from(cryptoApi.getRandomValues(new Uint8Array(32)), (value) => value.toString(16).padStart(2, "0")).join("")
@@ -170,6 +175,9 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
       active = value
       if (!active) cancelAll(false, true)
       if (delivered) post({ protocol: 1, type: "event", event: "visibility", value: active })
+    },
+    notifyDrafts(token) {
+      if (delivered) post({ protocol: 1, type: "event", event: "drafts", value: { token } })
     },
     updateContext(value) {
       if (disposed) return

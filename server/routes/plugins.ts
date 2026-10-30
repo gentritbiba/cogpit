@@ -46,7 +46,7 @@ export function registerPluginRoutes(use: UseFn): void {
       return
     }
     const recognized = ["/session", "/status", "/settings", "/workspace/resolve", "/publishers", "/stage", "/stage-seed", "/leases", "/connections", "/connections/credential", "/connections/options", "/connections/select", "/connections/disconnect", "/connections/clear-data", "/connections/import-legacy"].includes(path)
-      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle|review-session))?$/.test(path)
+      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle|review-session|worktree-setup-confirm))?$/.test(path)
     if (!recognized) { sendJson(res, 404, { code: "NOT_FOUND", error: "Unknown plugin endpoint" }); return }
     const requestAbort = new AbortController()
     const abort = () => requestAbort.abort()
@@ -272,6 +272,13 @@ export function registerPluginRoutes(use: UseFn): void {
           const started = await manager.startReviewSession(req, id, input, requestAbort.signal)
           authorize()
           sendJson(res, 200, { sessionId: started.sessionId, dirName: started.dirName, fileName: started.fileName })
+          return
+        }
+        if (method === "POST" && operation === "worktree-setup-confirm") {
+          const { proposalId } = z.strictObject({ proposalId: z.string().uuid() }).parse(await readJsonBody(req, { maxBytes: 1024 }))
+          const snapshot = await manager.confirmWorktreeSetup(req, id, proposalId, requestAbort.signal)
+          authorize()
+          sendJson(res, 200, snapshot)
           return
         }
         if (method === "POST" && operation === "call") {

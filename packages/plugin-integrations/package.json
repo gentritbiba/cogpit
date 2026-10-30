@@ -34,6 +34,10 @@
     "./cloudflare": {
       "types": "./dist/cloudflare.d.ts",
       "import": "./dist/cloudflare.js"
+    },
+    "./worktreeSetup": {
+      "types": "./dist/worktreeSetup.d.ts",
+      "import": "./dist/worktreeSetup.js"
     }
   },
   "scripts": {

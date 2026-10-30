@@ -1,15 +1,25 @@
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getDataRoot } from "../config"
-import { writeOwnerOnlyJson } from "../atomicJsonFile"
-import { projectIdentity, physicalDirectory } from "./project"
-import { RouteError, ErrorCodes } from "../lib/routeError"
-import { WORKTREE_SETUP_DEFAULT_TIMEOUT_MS, WORKTREE_SETUP_MAX_TIMEOUT_MS, worktreeSetupActive, type WorktreeSetupOperation, type WorktreeSetupRecipe } from "../../shared/contracts/worktreeSetup"
+import { getDataRoot } from "../../../config"
+import { writeOwnerOnlyJson } from "../../../atomicJsonFile"
+import { projectIdentity, physicalDirectory } from "../../../sessionStartup/project"
+import { RouteError, ErrorCodes } from "../../../lib/routeError"
+import { WORKTREE_SETUP_COMMAND_LIMIT, WORKTREE_SETUP_DEFAULT_TIMEOUT_MS, WORKTREE_SETUP_MAX_TIMEOUT_MS, worktreeSetupActive, type WorktreeSetupOperation as PublicOperation, type WorktreeSetupRecipe, type WorktreeSetupSnapshot } from "@cogpit/plugin-integrations"
 
+/** The saved form keeps host paths and the session id; plugins receive `publicSnapshot`. */
+export interface WorktreeSetupOperation extends PublicOperation { projectCwd: string; cwd?: string; sessionId?: string }
 interface ProjectState { recipe: WorktreeSetupRecipe | null; operations: WorktreeSetupOperation[] }
 export interface SetupProject { key: string; cwd: string; scope: string; state: ProjectState }
 
+export function publicSnapshot(project: SetupProject): WorktreeSetupSnapshot {
+  return structuredClone({
+    recipe: project.state.recipe,
+    operations: project.state.operations.map(({ projectCwd: _projectCwd, cwd: _cwd, sessionId: _sessionId, ...operation }) => operation),
+  })
+}
+
+/** Recipes and history stay in `<data>/worktree-setup/`, where earlier releases kept them; disabling or uninstalling the plugin never removes them. */
 export class WorktreeSetupStore {
   private loaded = new Map<string, Promise<SetupProject>>()
   private configurations = new Map<string, Promise<void>>()
@@ -54,7 +64,7 @@ export class WorktreeSetupStore {
   }
 
   async configure(project: SetupProject, input: { command?: unknown; trusted?: unknown; timeoutMs?: unknown }): Promise<void> {
-    if (typeof input.command !== "string" || input.command.length > 8000 || input.command.includes("\0")) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Setup command must be at most 8000 characters")
+    if (typeof input.command !== "string" || input.command.length > WORKTREE_SETUP_COMMAND_LIMIT || input.command.includes("\0")) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Setup command must be at most 8000 characters")
     const command = input.command.trim()
     if (command && input.trusted !== true) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "Explicit trust is required to save a setup command")
     const timeoutMs = input.timeoutMs ?? WORKTREE_SETUP_DEFAULT_TIMEOUT_MS

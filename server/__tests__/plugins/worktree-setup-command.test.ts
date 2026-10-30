@@ -4,7 +4,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
-import { runSetupCommand } from "../../worktreeSetup/command"
+import { runSetupCommand } from "../../plugins/integrations/worktreeSetup/command"
 
 const unix = describe.skipIf(process.platform === "win32")
 unix("setup process lifecycle", () => {

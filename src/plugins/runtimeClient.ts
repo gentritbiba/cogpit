@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { PLUGIN_API_VERSION, PROTOCOL_MAJOR, RUNTIME, MEDIA_LIMIT_BYTES, parsePluginMedia, parseMethodResult, type PluginMedia, type ClientRuntimeDescriptor, type PluginRequest } from "@cogpit/plugin-contracts"
+import { PLUGIN_API_VERSION, PROTOCOL_MAJOR, RUNTIME, MEDIA_LIMIT_BYTES, isDraftMethod, parsePluginMedia, parseMethodResult, type PluginMedia, type ClientRuntimeDescriptor, type PluginRequest } from "@cogpit/plugin-contracts"
 import { pluginSettingsSnapshotSchema } from "../../shared/contracts/pluginSettings"
 import { pluginHostStatusSchema, pluginPreviewSchema, pluginSnapshotSchema, pluginProjectSchema, type PluginHostStatus, type PluginProjectSummary } from "../../shared/contracts/pluginManagement"
 import { pluginConnectionSnapshotSchema, pluginResourceOptionsSchema, type PluginConnectionTarget } from "../../shared/contracts/pluginConnections"
@@ -8,6 +8,8 @@ import { authFetch } from "@/lib/auth"
 import { getActiveDeviceScope, getActiveIdentity, withBase } from "@/lib/device"
 import { version } from "../../package.json"
 import { getPluginBrowserSupport } from "./browserSupport"
+import { browserSafeMode } from "./browserSafeMode"
+import { ClientIntegrationHost, clientIntegrationCapabilities } from "./clientIntegrations"
 
 const sessionSchema = z.strictObject({ sessionId: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: z.number().int().positive() })
 const leaseSchema = z.strictObject({ id: z.string().min(1).max(128), expiresAt: z.number().int().positive() })
@@ -22,7 +24,7 @@ export function clientRuntimeDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
     runtimes: support.supported ? [RUNTIME] : [],
-    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0" } : {},
+    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0", ...clientIntegrationCapabilities() } : {},
     browser: support.browser,
   }
 }
@@ -96,11 +98,15 @@ export class RuntimePluginClient {
   private state = EMPTY_PLUGIN_STATE
   private running = false
 
+  /** Release-owned browser integrations that installed plugins turn on, whether or not their panels are open. */
+  readonly integrations = new ClientIntegrationHost()
+
   getSnapshot = (): RuntimePluginState => this.state
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
   private publish(state: RuntimePluginState): void {
     if (JSON.stringify(this.state) === JSON.stringify(state)) return
     this.state = state
+    this.syncIntegrations()
     for (const listener of this.listeners) listener()
   }
   private assertCurrent(signal?: AbortSignal): void {
@@ -111,6 +117,12 @@ export class RuntimePluginClient {
   }
   private hostChanged = (): void => {
     if (this.scope !== getActiveDeviceScope() || this.identity !== getActiveIdentity()) this.stop()
+    else this.syncIntegrations()
+  }
+  private syncIntegrations(): void {
+    const status = this.state.status
+    const usable = !!status?.store.available && !status.safeMode
+    this.integrations.sync({ plugins: usable ? status.store.plugins : [], privilegedPluginIds: usable ? status.store.privilegedPluginIds ?? [] : [], projects: status?.projects ?? [], platform: status?.runtime.platform ?? "", safeMode: browserSafeMode() })
   }
   start(): void {
     if (this.running) return
@@ -278,6 +290,8 @@ export class RuntimePluginClient {
   async call(id: string, request: PluginRequest, signal: AbortSignal) {
     if (request.method === "connections.media") throw new Error("Use the binary media transport for audio")
     const response = z.strictObject({ value: z.unknown() }).parse(await this.json(`leases/${encodeURIComponent(id)}/call`, request, "POST", signal))
+    // The host only authorizes drafts requests; the client integration produces their result, which the frame validates.
+    if (isDraftMethod(request.method)) return z.null().parse(response.value)
     return parseMethodResult(request.method, response.value)
   }
   async resolveSession(id: string, handle: string, signal: AbortSignal): Promise<{ dirName: string; fileName: string }> {
@@ -286,6 +300,10 @@ export class RuntimePluginClient {
   /** Starts the review session the user confirmed for a plugin's `review.start` request. */
   async startReviewSession(id: string, input: ReviewSessionInput, signal: AbortSignal): Promise<{ sessionId: string; dirName: string; fileName: string }> {
     return z.strictObject({ sessionId: z.string().min(1).max(256), dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await this.json(`leases/${encodeURIComponent(id)}/review-session`, input, "POST", signal))
+  }
+  /** Saves the setup command the user confirmed in Cogpit's dialog; the plugin proposed it under this lease. */
+  async confirmWorktreeSetup(id: string, proposalId: string, signal: AbortSignal): Promise<void> {
+    await this.json(`leases/${encodeURIComponent(id)}/worktree-setup-confirm`, { proposalId }, "POST", signal)
   }
   /** The opaque handle a plugin on this lease sees for the open session. */
   async sessionHandle(id: string, address: { dirName: string; fileName: string }, signal: AbortSignal): Promise<string> {

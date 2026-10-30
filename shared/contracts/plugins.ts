@@ -22,6 +22,8 @@ export interface PluginStoreSnapshot {
   publishers: PluginPublisherSummary[]
   legacyPluginIds?: string[]
   availableSeeds?: { manifest: PluginManifest; digest: string }[]
+  /** Installed plugins whose selected package is the exact one bundled with this release; only they receive release-owned integrations. */
+  privilegedPluginIds?: string[]
   recoveryCode?: "STORE_LOCKED" | "STORE_VERSION" | "STORE_CORRUPT" | "STORE_UNAVAILABLE"
 }
 export interface PluginInstallPreview {

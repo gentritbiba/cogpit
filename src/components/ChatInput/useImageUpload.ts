@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react"
-import { MAX_ATTACHMENT_BYTES } from "./draftStore"
+import { MAX_ATTACHMENT_BYTES } from "./composerEditing"
 import type { ComposerAttachment } from "../../../shared/session/composerContext"
 
 /** An attached image as the draft holds it: its bytes, so the draft can be kept and restored. */
