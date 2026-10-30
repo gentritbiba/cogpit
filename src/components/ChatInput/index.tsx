@@ -11,6 +11,7 @@ import { useImageUpload } from "./useImageUpload"
 import { keepRefusedDraft, takeRefusedDraft } from "./refusedDrafts"
 import { ActionButtons } from "./ActionButtons"
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
+import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
@@ -317,8 +318,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     })
   }, [fileMention, text, updateMultiline])
 
-  const handleSubmit = useCallback(async () => {
-    const trimmed = text.trim()
+  const submitText = useCallback(async (message: string) => {
+    const trimmed = message.trim()
     if (!trimmed && images.length === 0) return
     if (!allowImages && images.length > 0) return
 
@@ -341,7 +342,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     }
 
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
-    const draft = { text, images }
+    const draft = { text: message, images }
     refusedFromRef.current = null
     void onSend(trimmed, imagePayload).then((sent) => {
       if (sent) return
@@ -357,7 +358,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, allowImages, onSend, clearImages, restoreImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId])
+  }, [images, allowImages, onSend, clearImages, restoreImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId])
+  const handleSubmit = useCallback(() => submitText(text), [submitText, text])
+
+  // Spoken text continues the draft; sending it sends the whole draft.
+  const dictation = useComposerDictation(useCallback((spoken: string, send: boolean) => {
+    const draft = textRef.current
+    const next = !draft.trim() ? spoken : /\s$/.test(draft) ? draft + spoken : `${draft} ${spoken}`
+    setText(next)
+    if (send) void submitText(next)
+    else focusComposerAtEnd()
+  }, [submitText, focusComposerAtEnd]))
+  const dictationStatus = dictation?.state.status ?? "idle"
+  const recording = dictationStatus === "recording"
+  const dictating = dictationStatus === "starting" || recording || dictationStatus === "transcribing"
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showFiles && e.key === "Escape") {
@@ -376,9 +390,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = filteredSlashList[slashSelectedIndex]; if (selected) handleSlashSelect(selected); return }
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
+    if (dictationStatus !== "idle" && e.key === "Escape") { e.preventDefault(); dictation?.cancel(); return }
+    if (recording && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); dictation?.finish(true); return }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dictating) void handleSubmit() }
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, dictationStatus, dictating, recording, dictation])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
@@ -538,8 +554,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               getActionRowClass(stacked, isMultiline),
             )}>
               {footer}
-              <RuntimePluginActions />
-              <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
+              {dictation && dictationStatus !== "idle" ? <DictationBar dictation={dictation} /> : <>
+                <RuntimePluginActions />
+                {dictation && <DictationButton dictation={dictation} onStart={() => textareaRef.current?.focus()} />}
+              </>}
+              <ActionButtons hasContent={recording || hasContent && !dictating} onSubmit={recording ? () => dictation?.finish(true) : handleSubmit}
+                submitLabel={recording ? "Transcribe and send" : isSteering ? "Steer active turn" : "Send message"} />
             </div>
           </div>
         </div>

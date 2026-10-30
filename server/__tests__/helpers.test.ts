@@ -278,7 +278,7 @@ describe("securityHeaders", () => {
     expect(headers["X-Content-Type-Options"]).toBe("nosniff")
     expect(headers["X-Frame-Options"]).toBe("DENY")
     expect(headers["Referrer-Policy"]).toBe("no-referrer")
-    expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=()")
+    expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(self), geolocation=()")
     expect(headers["X-XSS-Protection"]).toBe("0")
     expect(headers["Cross-Origin-Opener-Policy"]).toBe("same-origin")
     expect(headers["Cross-Origin-Resource-Policy"]).toBe("same-origin")

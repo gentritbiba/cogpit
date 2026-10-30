@@ -9,7 +9,7 @@ vi.mock("@/contexts/SessionContext", () => ({ useSessionContextOptional: () => s
 vi.mock("../runtimeClient", () => ({ clientRuntimeDescriptor: () => ({ appVersion: "3.3.6", apiVersions: ["1.2.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, browser: [] }) }))
 const manifest = parseManifest({ manifestVersion: 1, id: "example.speech", publisher: "example", name: "Speech", version: "1.0.0", runtime: "browser-iife-v1", engines: { pluginApi: "^1.2.0", client: "*", host: "*" }, requires: { client: {}, host: {} }, permissions: {}, stateVersion: 1,
   contributes: { skills: [{ id: "speech", title: "Speech", description: "Speak", source: "SKILL.md" }], sessionActions: [{ id: "summary", title: "Spoken summary", skill: "speech", prompt: "Summarize this conversation in short spoken prose." }] } })
-function runtime(enabled = true) { return { activation: "host-one", status: { safeMode: false, runtime: { appVersion: "3.3.6", apiVersions: ["1.2.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, platform: "linux", registryRevision: 1 }, store: { available: true, plugins: [{ id: manifest.id, manifest, enabled, scope: { type: "all" } }] } }, project: null } }
+function runtime(enabled = true, plugin = manifest) { return { activation: "host-one", status: { safeMode: false, runtime: { appVersion: "3.3.6", apiVersions: ["1.2.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, platform: "linux", registryRevision: 1 }, store: { available: true, plugins: [{ id: plugin.id, manifest: plugin, enabled, scope: { type: "all" } }] } }, project: null } }
 beforeEach(() => { state.runtime = runtime(); state.session.permissions.send = true; state.session.session.sessionId = "session-one"; state.send.mockReset().mockResolvedValue(true) })
 afterEach(() => { state.runtime = null })
 describe("plugin session actions", () => {
@@ -37,5 +37,14 @@ describe("plugin session actions", () => {
     expect(screen.queryByRole("button")).toBeNull()
     state.runtime = runtime(); state.session.permissions.send = false; view.rerender(<RuntimePluginActions />)
     expect(screen.queryByRole("button")).toBeNull()
+  })
+  it("draws a compact icon button with the action's name when the action declares an icon", async () => {
+    state.runtime = runtime(true, parseManifest({ ...manifest, contributes: { ...manifest.contributes, sessionActions: manifest.contributes.sessionActions!.map(action => ({ ...action, icon: "speaker" })) } }))
+    render(<RuntimePluginActions />)
+    const button = screen.getByRole("button", { name: "Spoken summary" })
+    expect(button).not.toHaveTextContent("Spoken summary")
+    expect(button.querySelector("svg")).not.toBeNull()
+    fireEvent.click(button)
+    await waitFor(() => expect(state.send).toHaveBeenCalledOnce())
   })
 })

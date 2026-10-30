@@ -24,4 +24,20 @@ describe("plugin DTO compatibility", () => {
     expect(canReadConnection(definition, { ...client, apiVersions: ["1.1.0"] })).toBe(false)
     expect(canReadConnection(definition, { ...client, apiVersions: ["1.2.0"] })).toBe(true)
   })
+  it("keeps dictation, icon buttons and recording uploads from clients older than API 1.3", () => {
+    const operation = { audience: "setup", method: "GET", origin: "https://api.example.com", path: [{ literal: "me" }], args: {}, query: {} }
+    const definition = parseConnectionDefinition({ version: 1, id: "speech", label: "Speech", secret: { id: "key", label: "Key" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {},
+      operations: { validate: operation, transcribe: { ...operation, audience: "panel", method: "POST", path: [{ literal: "transcribe" }], upload: { type: "audio", mimeTypes: ["audio/wav"], maxBytes: 1024 } } } })
+    expect(canReadConnection(definition, { ...client, apiVersions: ["1.2.0"] })).toBe(false)
+    expect(canReadConnection(definition, { ...client, apiVersions: ["1.3.0"] })).toBe(true)
+    const skill = { id: "speech", title: "Speech", description: "Speak", source: "SKILL.md" }
+    const dictating = parseManifest({ ...legacy, version: "3.0.0", contributes: { ...legacy.contributes, dictation: { title: "Dictate", connection: "speech", operation: "transcribe", text: "/text" } },
+      permissions: { connections: [{ id: "speech", definition: "speech.json", operations: ["transcribe"] }] } })
+    const iconic = parseManifest({ ...legacy, version: "3.0.0", contributes: { ...legacy.contributes, skills: [skill], sessionActions: [{ id: "summary", title: "Summary", icon: "speaker", skill: "speech", prompt: "Summarize." }] } })
+    for (const manifest of [dictating, iconic]) {
+      const snapshot = { available: true, revision: 1, publishers: [], plugins: [{ id: manifest.id, selectedDigest: latest.digest, manifest, enabled: true, scope: { type: "all" as const }, pinned: false, versions: [{ ...latest, manifest }] }] }
+      expect(pluginSnapshotForClient(snapshot, { ...client, apiVersions: ["1.2.0"] }).plugins).toEqual([])
+      expect(pluginSnapshotForClient(snapshot, { ...client, apiVersions: ["1.3.0"] })).toEqual(snapshot)
+    }
+  })
 })

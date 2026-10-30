@@ -25,6 +25,7 @@ function accessLines(manifest: PluginManifest): string[] {
     ...(manifest.contributes.skills ?? []).map(skill => `Provide agent instructions: ${skill.title}`),
     ...(manifest.contributes.chatBlocks ?? []).map(block => `Render ${block.title} cards and read the text inside their declared chat blocks`),
     ...(manifest.contributes.sessionActions ?? []).map(action => `Add a ${action.title} button that sends an agent request when clicked`),
+    ...(manifest.contributes.dictation ? [`Add a ${manifest.contributes.dictation.title} button that records your microphone only while you dictate, and sends the recording to connection ${manifest.contributes.dictation.connection} to transcribe`] : []),
     ...permissions.connections.flatMap((connection) => connection.operations.map((operation) => `Use connection ${connection.id}: ${operation}`)),
     ...permissions.integrations.flatMap((integration) => integration.operations.map((operation) => integrationLine(integration.id, operation))),
   ]
@@ -56,7 +57,7 @@ export function PluginInstallReview({ preview }: { preview: PluginInstallPreview
       <p className="font-medium">{definition.label}</p>
       <p>Access to {Object.values(definition.resources).map((resource) => resource.label).join(", ") || "the connected account"}.</p>
       <p className="break-all text-muted-foreground">Credential destinations: {[...new Set(Object.values(definition.operations).map((operation) => operation.origin))].join(", ")}</p>
-      {Object.entries(definition.operations).filter(([, operation]) => operation.audience === "panel").map(([id, operation]) => <p key={id} className="text-muted-foreground">{operation.method} {id}{operation.method === "POST" ? " — sends supplied data to this service" : ""}{operation.response ? " · receives audio" : ""}</p>)}
+      {Object.entries(definition.operations).filter(([, operation]) => operation.audience === "panel").map(([id, operation]) => <p key={id} className="text-muted-foreground">{operation.method} {id}{operation.method === "POST" ? " — sends supplied data to this service" : ""}{operation.upload ? " · sends a microphone recording" : ""}{operation.response ? " · receives audio" : ""}</p>)}
     </div>)}
     {!!preview.incompatibleClients?.length && <Alert><AlertTitle>Some connected clients cannot run this version</AlertTitle><AlertDescription>
       {preview.incompatibleClients.join(", ")}. Their plugin panels will be unavailable until those clients are updated. Offline clients are checked when they reconnect.

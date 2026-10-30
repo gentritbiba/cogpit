@@ -186,6 +186,23 @@ describe("authenticated payload inspection", () => {
     expect(result.connections.size).toBe(0)
   })
 
+  it("accepts dictation only through a WAV upload operation without required arguments", () => {
+    const operation = { audience: "setup", method: "GET", origin: "https://speech.example.test", path: [{ literal: "me" }], args: {}, query: {} }
+    const transcribe = { ...operation, audience: "panel", method: "POST", path: [{ literal: "transcribe" }], upload: { type: "audio", mimeTypes: ["audio/wav"], maxBytes: 1024 } }
+    const packaged = (target: Record<string, unknown>) => {
+      const definition = { version: 1, id: "speech", label: "Speech", secret: { id: "key", label: "Key" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {}, operations: { validate: operation, transcribe: target } }
+      const entries = files(json(manifest({ contributes: { panels: [], dictation: { title: "Dictate", connection: "speech", operation: "transcribe", text: "/text" } },
+        permissions: { connections: [{ id: "speech", definition: "speech.json", operations: ["transcribe"] }] } })))
+      entries.push(file("speech.json", "application/json", json(definition)))
+      return archive(entries)
+    }
+    expect(inspectPackage(packaged(transcribe), "fixture").manifest.contributes.dictation?.operation).toBe("transcribe")
+    for (const target of [{ ...transcribe, upload: { ...transcribe.upload, mimeTypes: ["audio/mpeg"] } }, { ...transcribe, upload: undefined },
+      { ...transcribe, path: [{ literal: "transcribe" }, { arg: "language" }], args: { language: { type: "string", required: true, maxLength: 8 } } }]) {
+      expect(() => inspectPackage(packaged(target), "fixture")).toThrow(/Dictation/)
+    }
+  })
+
   it("accepts one declared stylesheet and text notices", () => {
     const entries = files(json(manifest({ style: "dist/plugin.css" })))
     entries.push(file("dist/plugin.css", "text/css", "body { color: white }"), file("LICENSE", "text/plain", "Fixture license"), file("NOTICE.txt", "text/plain", "Fixture notice"))

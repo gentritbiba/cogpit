@@ -145,7 +145,8 @@ export class HubPluginRelay {
       throw new PluginAuthorizationError(403, "PERMISSION_REQUIRED", "Invalid plugin relay route")
     }
     if (pathname === "/api/plugins/events") throw new PluginAuthorizationError(403, "PERMISSION_REQUIRED", "Plugin relay streams are unavailable")
-    if (body.length > 4 * 1024 * 1024) throw new PluginAuthorizationError(429, "RATE_LIMITED", "Plugin upload exceeds its size limit")
+    const uploadLimit = /^\/api\/plugins\/leases\/[a-zA-Z0-9.-]+\/dictation$/.test(pathname) ? MEDIA_LIMIT_BYTES : 4 * 1024 * 1024
+    if (body.length > uploadLimit) throw new PluginAuthorizationError(429, "RATE_LIMITED", "Plugin upload exceeds its size limit")
     const minting = method === "POST" && pathname === "/api/plugins/session"
     const deleting = method === "DELETE" && pathname === "/api/plugins/session"
     const stageHeaders = method === "POST" && pathname === "/api/plugins/stage" ? {

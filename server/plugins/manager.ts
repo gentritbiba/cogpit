@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { IncomingMessage } from "node:http"
-import { connectionResourceDependencies, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
+import { CONTRACT_LIMITS, connectionResourceDependencies, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginScope, PluginStoreSnapshot } from "../../shared/contracts/plugins"
 import type { PluginConnectionSnapshot, PluginConnectionTarget, PluginResourceSelection } from "../../shared/contracts/pluginConnections"
 import { getInstanceId } from "../routes/hello"
@@ -15,7 +15,7 @@ import { inspectPackage } from "./package"
 import { PluginConnectionStore, type PluginDataNamespace, type SavedPluginConnection } from "./connectionStore"
 import { PluginStateStore } from "./stateStore"
 import { PluginDataError, type DataGuard } from "./privateStore"
-import { createConnectionExecutor, type ConnectionTransport, type HostConnection, type ConnectionResult, type ResourceOption } from "./connectionExecutor"
+import { createConnectionExecutor, select, type ConnectionTransport, type HostConnection, type ConnectionResult, type ResourceOption } from "./connectionExecutor"
 import { pluginHttpsTransport } from "./httpsTransport"
 import type { AppPluginSeed } from "./seeds"
 import type { LegacyHostClassification } from "./legacyHost"
@@ -640,6 +640,28 @@ export class PluginManager {
       this.mediaActive++
       try { return await this.provider(context, async () => result(await (await this.executor(context, connection)).media({ operation: request.params.operationId, args: request.params.args }))) }
       finally { this.mediaActive-- }
+    } finally { context.dispose() }
+  }
+
+  /** Sends a recording made by Cogpit's composer to the plugin's declared dictation operation and returns the transcript. */
+  async dictate(req: IncomingMessage, leaseId: string, audio: PluginMedia, options: { signal?: AbortSignal } = {}): Promise<{ text: string }> {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal: options.signal }, lease)
+    try {
+      const dictation = context.plugin.manifest.contributes.dictation
+      if (!dictation) throw new PluginDataError("PERMISSION_REQUIRED", "This plugin does not provide dictation")
+      const connection = this.connection(context, dictation.connection)
+      if (!connection.connection.secret) throw new PluginDataError("CONNECTION_REQUIRED", "Configure this connection in host settings")
+      if (this.mediaActive >= 4) throw new PluginDataError("RATE_LIMITED", "Too many audio requests")
+      this.mediaActive++
+      try {
+        const answer = await this.provider(context, async () => result(await (await this.executor(context, connection)).upload({ operation: dictation.operation, args: {} }, audio)))
+        await context.guard()
+        let text: JsonValue
+        try { text = select(answer, dictation.text) } catch { text = null }
+        if (typeof text !== "string" || text.length > CONTRACT_LIMITS.composerBytes) throw new PluginDataError("INVALID_RESPONSE", "The service did not return a transcript")
+        return { text }
+      } finally { this.mediaActive-- }
     } finally { context.dispose() }
   }
 

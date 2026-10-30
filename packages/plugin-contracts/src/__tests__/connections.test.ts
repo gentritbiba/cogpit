@@ -77,4 +77,14 @@ describe("declarative connection resources", () => {
     input.resources.file = { label: "File" }
     expect(() => parseConnectionDefinition(input)).toThrow()
   })
+  it("accepts recording uploads only as panel POST operations without a JSON body or audio reply", () => {
+    const upload = { type: "audio" as const, mimeTypes: ["audio/wav" as const], maxBytes: 1024 }
+    const transcribe: ConnectionOperation = { ...op([{ literal: "transcribe" }], "panel"), method: "POST", upload }
+    const withOperation = (operation: ConnectionOperation) => ({ ...fixture(), operations: { ...fixture().operations, transcribe: operation } })
+    expect(parseConnectionDefinition(withOperation(transcribe)).operations.transcribe.upload).toEqual(upload)
+    for (const invalid of [{ ...transcribe, method: "GET" as const }, { ...transcribe, audience: "setup" as const }, { ...transcribe, body: { model: { literal: "x" } } },
+      { ...transcribe, response: { ...upload, mimeTypes: ["audio/mpeg" as const] } }, { ...transcribe, upload: { ...upload, maxBytes: 9 * 1024 * 1024 } }]) {
+      expect(() => parseConnectionDefinition(withOperation(invalid))).toThrow()
+    }
+  })
 })

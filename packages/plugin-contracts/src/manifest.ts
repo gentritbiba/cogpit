@@ -3,10 +3,10 @@ import { valid, validRange } from "semver"
 import { CONTRACT_LIMITS } from "./json.js"
 import { canonicalPath, identifier, label, parseSchema } from "./schema.js"
 import { integrationPermissionSchema } from "./integrations.js"
-import { chatBlockContributionSchema, settingsContributionSchema, skillContributionSchema, sessionActionContributionSchema } from "./contributions.js"
+import { chatBlockContributionSchema, dictationContributionSchema, settingsContributionSchema, skillContributionSchema, sessionActionContributionSchema } from "./contributions.js"
 
 export const PROTOCOL_MAJOR = 1 as const
-export const PLUGIN_API_VERSION = "1.2.0"
+export const PLUGIN_API_VERSION = "1.3.0"
 export const RUNTIME = "browser-iife-v1" as const
 export const versionSchema = z.string().max(128).refine((value) => valid(value) === value, "Expected strict SemVer")
 const range = z.string().min(1).max(256).refine((value) => validRange(value) !== null, "Expected a SemVer range")
@@ -42,6 +42,7 @@ export const manifestSchema = z.strictObject({
     skills: z.array(skillContributionSchema).max(16).optional(),
     chatBlocks: z.array(chatBlockContributionSchema).max(8).optional(),
     sessionActions: z.array(sessionActionContributionSchema).max(8).optional(),
+    dictation: dictationContributionSchema.optional(),
   }),
   permissions: z.strictObject({
     context: z.array(z.enum(["project.identity", "session.identity"])).max(2).refine(unique).default([]),
@@ -53,10 +54,12 @@ export const manifestSchema = z.strictObject({
   }),
   stateVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
 }).superRefine((value, context) => {
-  if (!value.contributes.panels.length && !value.contributes.skills?.length && !value.contributes.chatBlocks?.length && !value.contributes.settings) context.addIssue({ code: "custom", path: ["contributes"], message: "At least one contribution is required" })
+  if (!value.contributes.panels.length && !value.contributes.skills?.length && !value.contributes.chatBlocks?.length && !value.contributes.settings && !value.contributes.dictation) context.addIssue({ code: "custom", path: ["contributes"], message: "At least one contribution is required" })
   if ((value.contributes.panels.length || value.contributes.chatBlocks?.length) && !value.entry) context.addIssue({ code: "custom", path: ["entry"], message: "Visual contributions require a JavaScript entry" })
   if (value.style && !value.entry) context.addIssue({ code: "custom", path: ["style"], message: "Styles require a JavaScript entry" })
   for (const action of value.contributes.sessionActions ?? []) if (!value.contributes.skills?.some(skill => skill.id === action.skill)) context.addIssue({ code: "custom", path: ["contributes", "sessionActions"], message: "Session actions must reference a declared skill" })
+  const dictation = value.contributes.dictation
+  if (dictation && !value.permissions.connections.some(grant => grant.id === dictation.connection && grant.operations.includes(dictation.operation))) context.addIssue({ code: "custom", path: ["contributes", "dictation"], message: "Dictation must use a granted connection operation" })
   if (!value.id.startsWith(`${value.publisher}.`)) context.addIssue({ code: "custom", path: ["id"], message: "Plugin ID must belong to its publisher" })
   if (["cogpit.worktrees", "cogpit.project-files", "cogpit.browser", "cogpit.file-changes", "cogpit.session-info"].includes(value.id)) context.addIssue({ code: "custom", path: ["id"], message: "Reserved built-in ID" })
   for (const [key, entries] of [["panels", value.contributes.panels], ["skills", value.contributes.skills ?? []], ["chatBlocks", value.contributes.chatBlocks ?? []], ["sessionActions", value.contributes.sessionActions ?? []], ["connections", value.permissions.connections], ["integrations", value.permissions.integrations]] as const) {
