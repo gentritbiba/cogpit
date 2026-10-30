@@ -380,6 +380,20 @@ describe("/api/send-message Copilot runtime", () => {
     })
   })
 
+  it("carries the speaking rule on a voice-mode message, tagged so transcripts hide it", async () => {
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({ sessionId: "sess-1", message: "how did it go", voice: true }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    const prompt = mockCopilotRuntime.send.mock.calls.at(-1)?.[1].prompt as string
+    expect(prompt.startsWith("how did it go\n\n<cogpit-voice-mode>\n")).toBe(true)
+    expect(prompt).toContain("```cogpit:cogpit.tts:speech")
+    expect(prompt.endsWith("</cogpit-voice-mode>")).toBe(true)
+  })
+
   it("routes a newly created live session before its transcript exists", async () => {
     mockCopilotRuntime.isSessionActive.mockReturnValue(true)
     mockFindJsonlPath.mockResolvedValue(null)

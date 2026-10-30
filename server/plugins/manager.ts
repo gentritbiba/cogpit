@@ -34,7 +34,7 @@ import { registerPluginSkills } from "./skillContext"
 export interface PluginManagerOptions { integrationExecutor?: PluginIntegrationExecutor; transport?: ConnectionTransport; environment?: Readonly<Record<string, string | undefined>>; officialRoots?: ReadonlyMap<string, Buffer>; appSeeds?: readonly AppPluginSeed[]; legacyHost?: LegacyHostClassification; crashHook?: (step: string) => void | Promise<void> }
 export interface PluginAdminOptions { authorize: DataGuard; signal?: AbortSignal }
 export type PluginUninstallInput = { pluginId: string; expectedRevision: number } & ({ deleteData?: false } | { deleteData: true; expectedConnectionRevision: number })
-export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue> }
+export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue>; media: (handle: string, operation: string, args: Record<string, string | number | boolean>) => Promise<PluginMedia> }
 type ConnectionTarget = PluginConnectionTarget & { connectionId: string }
 type ConnectionMutation = ConnectionTarget & { expectedRevision: number }
 const allowed = () => {}
@@ -398,14 +398,18 @@ export class PluginManager {
       await guard()
       await this.maybeImportLegacy(request, { pluginId: plugin.id, projectId }, options)
       await guard()
-      const call = async (operation: string, args: Record<string, string | number | boolean>): Promise<JsonValue> => {
+      const leased = async <R>(run: (leaseId: string) => Promise<R>): Promise<R> => {
         await guard()
         if (this.connections?.changing) throw new PluginDataError("STALE_ACTIVATION", "Plugin configuration is changing")
         const lease = this.leases.create(binding, { pluginId: plugin.id, digest: plugin.selectedDigest, projectKey: projectId, workspacePath: projectPath, contextEpoch: "legacy", grantsRevision: snapshot.revision, connectionRevision: this.connectionRevision })
-        try { const value = await this.call(request, lease.id, { protocol: 1, type: "request", id: "legacy", method: "connections.request", params: { handle: "clickup", operationId: operation, args } }, { signal: input.signal }); await guard(); return value }
+        try { const value = await run(lease.id); await guard(); return value }
         finally { try { this.leases.revoke(binding, lease.id) } catch { /* Revocation may already have canceled the operation. */ } }
       }
-      const value = await operation({ request, projectId, projectPath, options, call })
+      const call = (operation: string, args: Record<string, string | number | boolean>) => leased(leaseId =>
+        this.call(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.request", params: { handle: "clickup", operationId: operation, args } }, { signal: input.signal }))
+      const media = (handle: string, operation: string, args: Record<string, string | number | boolean>) => leased(leaseId =>
+        this.callMedia(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.media", params: { handle, operationId: operation, args } }, { signal: input.signal }))
+      const value = await operation({ request, projectId, projectPath, options, call, media })
       await guard()
       return value
     } finally {

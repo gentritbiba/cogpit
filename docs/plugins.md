@@ -40,6 +40,8 @@ The composer’s Spoken summary action, a speaker icon beside Send, asks the cur
 
 Text to speech 1.1.0 also provides dictation through the same connection and API key: the microphone button records, and the speech service's `POST /v1/transcribe` answers once with the final text of the whole take (Parakeet on Omarchy), rather than streaming partial text the way its live WebSocket does.
 
+Clients that cannot host plugin frames, such as the iOS app, use the same connection, voice and settings through `POST /api/voice/speech {text}`, which returns the audio. Its `503 voice_not_configured` tells the client to use its own voice. The iOS voice mode sends messages with `voice: true` on `/api/send-message`; the server appends a hidden `<cogpit-voice-mode>` instruction asking the agent to announce results and ask questions inside a speech block.
+
 The bundled example targets an OpenAI-compatible speech service and binds synthesis to the voice selected through its authenticated discovery operation. Provider errors that occur after a streaming 200 response can still result in partial audio: the host rejects empty/incomplete HTTP bodies and the card reports browser playback errors, but cannot prove a successfully decoded audio stream contains the entire intended speech. The service should validate parameters before sending response headers.
 
 ClickUp, GitHub, Vercel and Cloudflare render in Cogpit's existing right sidebar. Their panels are separate runtime packages, loaded after installation without rebuilding or restarting Cogpit. The host owns installation, so desktop and remote browser clients share the installed versions and enabled state.
