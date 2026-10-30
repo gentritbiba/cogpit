@@ -16,6 +16,7 @@ import { contextRefusal, validateContext, EMPTY_DRAFT, isDraftEmpty, parseCompos
 import { ActionButtons } from "./ActionButtons"
 import { registerComposer, emitComposerEvent, dispatchComposerKey, type ComposerHandle, type ComposerSnapshot } from "@/plugins/composerBridge"
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
+import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
@@ -394,8 +395,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     })
   }, [fileMention, text, updateMultiline])
 
-  const handleSubmit = useCallback(async () => {
-    const trimmed = text.trim()
+  const submitText = useCallback(async (message: string) => {
+    const trimmed = message.trim()
     if (!trimmed && images.length === 0 && context.length === 0) return
     if ((!allowImages && images.length > 0) || uploading) return
     const refusal = validateContext(context)
@@ -405,7 +406,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     if (textResponse && !trimmed) return
 
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
-    const draft = structuredClone(draftNow())
+    const draft = structuredClone({ ...draftNow(), text: message })
     // A capture names its image by where it lands among the images sent.
     const sentContext = context.map((item) => item.kind === "browser" ? { ...item, image: images.findIndex((image) => image.contextId === item.id) + 1 } : item)
     const entryId = recovery.capture(draft)
@@ -432,7 +433,20 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer])
+  const handleSubmit = useCallback(() => submitText(text), [submitText, text])
+
+  // Spoken text continues the draft; sending it sends the whole draft.
+  const dictation = useComposerDictation(useCallback((spoken: string, send: boolean) => {
+    const draft = textRef.current
+    const next = !draft.trim() ? spoken : /\s$/.test(draft) ? draft + spoken : `${draft} ${spoken}`
+    setText(next)
+    if (send) void submitText(next)
+    else focusComposerAtEnd()
+  }, [submitText, focusComposerAtEnd]))
+  const dictationStatus = dictation?.state.status ?? "idle"
+  const recording = dictationStatus === "recording"
+  const dictating = dictationStatus === "starting" || recording || dictationStatus === "transcribing"
 
   // A copied message with context pastes back as its chips, the same items with the same ids.
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -481,9 +495,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = filteredSlashList[slashSelectedIndex]; if (selected) handleSlashSelect(selected); return }
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
+    if (dictationStatus !== "idle" && e.key === "Escape") { e.preventDefault(); dictation?.cancel(); return }
+    if (recording && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); dictation?.finish(true); return }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer])
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dictating) void handleSubmit() }
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer, dictationStatus, dictating, recording, dictation])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
@@ -666,8 +682,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
               getActionRowClass(stacked, isMultiline),
             )}>
               {footer}
-              <RuntimePluginActions />
-              <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
+              {dictation && dictationStatus !== "idle" ? <DictationBar dictation={dictation} /> : <>
+                <RuntimePluginActions />
+                {dictation && <DictationButton dictation={dictation} onStart={() => textareaRef.current?.focus()} />}
+              </>}
+              <ActionButtons hasContent={recording || hasContent && !dictating} onSubmit={recording ? () => dictation?.finish(true) : handleSubmit}
+                submitLabel={recording ? "Transcribe and send" : isSteering ? "Steer active turn" : "Send message"} />
             </div>
           </div>
         </div>

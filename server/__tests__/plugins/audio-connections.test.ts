@@ -7,9 +7,9 @@ import { createConnectionExecutor } from "../../plugins/connectionExecutor"
 let definition: ConnectionDefinition
 beforeAll(async () => { definition = parseConnectionDefinition(JSON.parse(await readFile(new URL("../../../plugins/tts/connections/speech.json", import.meta.url), "utf8"))) })
 function fixture() {
-  const transport = vi.fn(async () => ({ mimeType: "audio/mpeg", bytes: new Uint8Array([255, 251, 1]).buffer }))
+  const transport = vi.fn<(input: unknown) => Promise<unknown>>(async () => ({ mimeType: "audio/mpeg", bytes: new Uint8Array([255, 251, 1]).buffer }))
   const controller = new AbortController()
-  const executor = createConnectionExecutor(definition, { label: "Speech", secret: "private-fixture-token", selected: { voice: { id: "af_heart", label: "Heart" } } }, { transport, allowedOperations: ["synthesize"], signal: controller.signal })
+  const executor = createConnectionExecutor(definition, { label: "Speech", secret: "private-fixture-token", selected: { voice: { id: "af_heart", label: "Heart" } } }, { transport, allowedOperations: ["synthesize", "transcribe"], signal: controller.signal })
   return { executor, transport, controller }
 }
 const args = { input: "First paragraph.\n\nSecond paragraph.", speed: 0.75, format: "mp3" }
@@ -30,6 +30,19 @@ describe("declared speech connection operations", () => {
     expect(await value.executor.media({ operation: "voices", args: {} })).toEqual({ ok: false, error: "INVALID_REQUEST" })
     value.controller.abort()
     expect(await value.executor.media({ operation: "synthesize", args })).toEqual({ ok: false, error: "CANCELED" })
+    expect(value.transport).not.toHaveBeenCalled()
+  })
+  it("sends a recording as the raw body of the declared upload operation and nowhere else", async () => {
+    const value = fixture()
+    value.transport.mockResolvedValue({ text: "Hello there.", duration: 1.2 })
+    const recording = { mimeType: "audio/wav", bytes: new Uint8Array([82, 73, 70, 70]).buffer }
+    expect(await value.executor.upload({ operation: "transcribe", args: {} }, recording)).toEqual({ ok: true, data: { text: "Hello there.", duration: 1.2 } })
+    expect(value.transport).toHaveBeenCalledWith(expect.objectContaining({ origin: "https://stt.cogpit.dev", path: "/v1/transcribe", method: "POST", upload: recording }))
+    expect(value.transport.mock.calls[0][0]).not.toHaveProperty("body")
+    value.transport.mockClear()
+    expect(await value.executor.request({ operation: "transcribe", args: {} })).toEqual({ ok: false, error: "INVALID_REQUEST" })
+    expect(await value.executor.upload({ operation: "synthesize", args }, recording)).toEqual({ ok: false, error: "INVALID_REQUEST" })
+    expect(await value.executor.upload({ operation: "transcribe", args: {} }, { mimeType: "audio/mpeg", bytes: recording.bytes })).toEqual({ ok: false, error: "INVALID_REQUEST" })
     expect(value.transport).not.toHaveBeenCalled()
   })
 })

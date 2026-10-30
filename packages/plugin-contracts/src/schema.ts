@@ -11,6 +11,9 @@ export const canonicalPath = z.string().min(1).max(256).refine((value) => {
     && !part.endsWith(".") && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/iu.test(part))
 }, "Expected a canonical portable package path")
 
+export const jsonPointer = z.string().max(256).refine((value) => (!value || value.startsWith("/")) && !/~(?![01])/u.test(value)
+  && value.split("/").length <= 9 && !value.split("/").some((key) => ["__proto__", "prototype", "constructor"].includes(key)), "Invalid bounded JSON pointer")
+
 export function parseSchema<T>(schema: z.ZodType<T>, value: unknown, maxBytes: number, maxNodes?: number): T {
   const result = schema.safeParse(parseJson(value, { maxBytes, maxNodes }))
   if (!result.success) throw new ContractValidationError(result.error.issues.map((issue) => ({

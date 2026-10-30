@@ -493,4 +493,21 @@ describe("host-owned plugin connections and state", () => {
     expect(cleared.connections[0]).toMatchObject({ status: "environment", readOnly: true, selected: {} })
     expect(await readFile(join(directory, "runtime-plugin-connections", "connections.json"), "utf8")).not.toContain(preferred)
   })
+
+  it("transcribes a composer recording only through the plugin's declared dictation operation", async () => {
+    const recording = { mimeType: "audio/wav", bytes: Uint8Array.from([82, 73, 70, 70]).buffer }
+    await expect(manager.dictate(req, (await lease()).id, recording)).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
+    const get = (path: string) => ({ audience: "setup", origin: "https://api.example.com", method: "GET", path: [{ literal: path }], args: {}, query: {} })
+    const speech = parseConnectionDefinition({ version: 1, id: "catalog", label: "Speech", secret: { id: "token", label: "Token" }, auth: { header: "Authorization", scheme: "bearer" }, validationOperation: "validate", resources: {},
+      operations: { validate: get("validate"), transcribe: { ...get("transcribe"), audience: "panel", method: "POST", upload: { type: "audio", mimeTypes: ["audio/wav"], maxBytes: 1024 } } } })
+    await install(signedPackage(authority, { version: "1.1.0", metadataVersion: 2, retained: [installed], connection: speech,
+      contributes: { panels: [], dictation: { title: "Dictate", connection: "catalog", operation: "transcribe", text: "/result/text" } } }))
+    await expect(manager.dictate(req, (await lease()).id, recording)).rejects.toMatchObject({ code: "CONNECTION_REQUIRED" })
+    await manager.setCredential(req, { ...mutation(), secret: token }, options)
+    transport.mockImplementation(async input => input.path === "/transcribe" ? { result: { text: "Hello there." } } : response(input.path))
+    expect(await manager.dictate(req, (await lease()).id, recording)).toEqual({ text: "Hello there." })
+    expect(transport).toHaveBeenLastCalledWith(expect.objectContaining({ path: "/transcribe", method: "POST", upload: recording }))
+    transport.mockImplementation(async input => input.path === "/transcribe" ? { result: { words: [] } } : response(input.path))
+    await expect(manager.dictate(req, (await lease()).id, recording)).rejects.toMatchObject({ code: "INVALID_RESPONSE" })
+  })
 })

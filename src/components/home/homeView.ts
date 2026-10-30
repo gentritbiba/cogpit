@@ -73,13 +73,17 @@ export function homeRequestId(request: HomeRequest): string {
   }
 }
 
+export interface HomeCrewMember {
+  member: ActiveSessionInfo
+  state: MemberState
+}
+
 export interface HomeSession {
   session: ActiveSessionInfo
   /** The session's own state, before its crew's. */
   state: MemberState
-  members: ActiveSessionInfo[]
-  /** One state per member, in the order they were started. */
-  cells: Array<MemberStatus["state"]>
+  /** Everyone in its crew: who needs the user, then who is working, then the rest, newest first within each. */
+  crew: HomeCrewMember[]
   counts: CrewCounts | null
   activityAt: string
   /** The newest pull request the session or its crew opened. */
@@ -90,6 +94,7 @@ const WEEK_MS = 7 * 86_400_000
 const MIN_SESSIONS = 3
 const MAX_SESSIONS = 30
 const MAX_MATCHES = 50
+const STATE_ORDER: Record<MemberState, number> = { "needs-you": 0, working: 1, done: 2 }
 
 /** Every session the user started, each with its crew, newest crew activity first. */
 export function homeSessionRows(
@@ -107,8 +112,9 @@ export function homeSessionRows(
     return {
       session,
       state: statusOf(session).state,
-      members,
-      cells: members.map((member) => statusOf(member).state),
+      crew: members
+        .map((member) => ({ member, state: statusOf(member).state }))
+        .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || getSessionRecencyMs(b.member) - getSessionRecencyMs(a.member)),
       counts: members.length ? countCrew(members, statusOf) : null,
       activityAt,
       ...(latest && { landed: { number: latest.pullRequest.number, title: latest.pullRequest.title, url: latest.pullRequest.url, by: latest.by } }),

@@ -24,7 +24,7 @@ export function clientRuntimeDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
     runtimes: support.supported ? [RUNTIME] : [],
-    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", ...clientIntegrationCapabilities() } : {},
+    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0", ...clientIntegrationCapabilities() } : {},
     browser: support.browser,
   }
 }
@@ -247,6 +247,14 @@ export class RuntimePluginClient {
     this.assertCurrent(owner)
     signal?.throwIfAborted()
     return parsePluginMedia({ mimeType: response.headers.get("Content-Type")?.split(";")[0], bytes })
+  }
+  /** Sends a composer recording to the leased plugin's dictation operation; the host answers with the transcript only. */
+  async dictate(leaseId: string, recording: Blob, signal?: AbortSignal): Promise<string> {
+    const owner = this.controller.signal
+    const response = await this.request(`leases/${encodeURIComponent(leaseId)}/dictation`, { method: "POST", body: recording, headers: { "Content-Type": recording.type }, signal })
+    const { text } = z.strictObject({ text: z.string() }).parse(await readResponse(response))
+    this.assertCurrent(owner)
+    return text
   }
   private acceptStore(value: unknown): void {
     const store = pluginSnapshotSchema.parse(value)

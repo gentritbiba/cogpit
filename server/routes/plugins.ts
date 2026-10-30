@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import type { IncomingMessage } from "node:http"
 import { z } from "zod"
-import { parseFrameMessage } from "@cogpit/plugin-contracts"
+import { MEDIA_LIMIT_BYTES, parseFrameMessage, parsePluginMedia, type PluginMedia } from "@cogpit/plugin-contracts"
 import { clientRuntimeSchema, pluginScopeSchema, pluginProjectSchema } from "../../shared/contracts/pluginManagement"
 import { pluginConnectionTargetSchema, pluginConnectionIdentitySchema, pluginConnectionMutationSchema } from "../../shared/contracts/pluginConnections"
 import { HttpBodyError, readBinaryBody, readJsonBody, sendJson, type UseFn } from "../http"
@@ -46,7 +46,7 @@ export function registerPluginRoutes(use: UseFn): void {
       return
     }
     const recognized = ["/session", "/status", "/settings", "/workspace/resolve", "/publishers", "/stage", "/stage-seed", "/leases", "/connections", "/connections/credential", "/connections/options", "/connections/select", "/connections/disconnect", "/connections/clear-data", "/connections/import-legacy"].includes(path)
-      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|session|session-handle|review-session|worktree-setup-confirm))?$/.test(path)
+      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle|review-session|worktree-setup-confirm))?$/.test(path)
     if (!recognized) { sendJson(res, 404, { code: "NOT_FOUND", error: "Unknown plugin endpoint" }); return }
     const requestAbort = new AbortController()
     const abort = () => requestAbort.abort()
@@ -254,6 +254,17 @@ export function registerPluginRoutes(use: UseFn): void {
           const handle = await manager.presentSession(req, id, address, requestAbort.signal)
           authorize()
           sendJson(res, 200, handle)
+          return
+        }
+        if (method === "POST" && operation === "dictation") {
+          const mimeType = req.headers["content-type"]?.split(";")[0].trim().toLowerCase()
+          const bytes = await readBinaryBody(req, { maxBytes: MEDIA_LIMIT_BYTES, tooLargeMessage: "The recording exceeds the 8 MiB limit" })
+          let audio: PluginMedia
+          try { audio = parsePluginMedia({ mimeType, bytes: Uint8Array.from(bytes).buffer }) }
+          catch { throw new HttpBodyError("Expected a non-empty audio recording", 400) }
+          const value = await manager.dictate(req, id, audio, { signal: requestAbort.signal })
+          authorize()
+          sendJson(res, 200, value)
           return
         }
         if (method === "POST" && operation === "review-session") {

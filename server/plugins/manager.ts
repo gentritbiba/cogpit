@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { IncomingMessage } from "node:http"
-import { connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
+import { CONTRACT_LIMITS, connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginScope, PluginStoreSnapshot } from "../../shared/contracts/plugins"
 import type { PluginConnectionSnapshot, PluginConnectionTarget, PluginResourceSelection } from "../../shared/contracts/pluginConnections"
 import { getInstanceId } from "../routes/hello"
@@ -15,7 +15,7 @@ import { inspectPackage } from "./package"
 import { PluginConnectionStore, type PluginDataNamespace, type SavedPluginConnection } from "./connectionStore"
 import { PluginStateStore } from "./stateStore"
 import { PluginDataError, type DataGuard } from "./privateStore"
-import { createConnectionExecutor, type ConnectionTransport, type HostConnection, type ConnectionResult, type ResourceOption } from "./connectionExecutor"
+import { createConnectionExecutor, select, type ConnectionTransport, type HostConnection, type ConnectionResult, type ResourceOption } from "./connectionExecutor"
 import { pluginHttpsTransport } from "./httpsTransport"
 import type { AppPluginSeed } from "./seeds"
 import type { LegacyHostClassification } from "./legacyHost"
@@ -39,7 +39,7 @@ import { startReviewSession, type ReviewSessionRequest } from "../prReview/start
 export interface PluginManagerOptions { integrationExecutor?: PluginIntegrationExecutor; transport?: ConnectionTransport; environment?: Readonly<Record<string, string | undefined>>; officialRoots?: ReadonlyMap<string, Buffer>; appSeeds?: readonly AppPluginSeed[]; legacyHost?: LegacyHostClassification; crashHook?: (step: string) => void | Promise<void> }
 export interface PluginAdminOptions { authorize: DataGuard; signal?: AbortSignal }
 export type PluginUninstallInput = { pluginId: string; expectedRevision: number } & ({ deleteData?: false } | { deleteData: true; expectedConnectionRevision: number })
-export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue> }
+export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue>; media: (handle: string, operation: string, args: Record<string, string | number | boolean>) => Promise<PluginMedia> }
 type ConnectionTarget = PluginConnectionTarget & { connectionId: string }
 type ConnectionMutation = ConnectionTarget & { expectedRevision: number }
 const allowed = () => {}
@@ -451,14 +451,18 @@ export class PluginManager {
       await guard()
       await this.maybeImportLegacy(request, { pluginId: plugin.id, projectId }, options)
       await guard()
-      const call = async (operation: string, args: Record<string, string | number | boolean>): Promise<JsonValue> => {
+      const leased = async <R>(run: (leaseId: string) => Promise<R>): Promise<R> => {
         await guard()
         if (this.connections?.changing) throw new PluginDataError("STALE_ACTIVATION", "Plugin configuration is changing")
         const lease = this.leases.create(binding, { pluginId: plugin.id, digest: plugin.selectedDigest, projectKey: projectId, workspacePath: projectPath, contextEpoch: "legacy", grantsRevision: snapshot.revision, connectionRevision: this.connectionRevision })
-        try { const value = await this.call(request, lease.id, { protocol: 1, type: "request", id: "legacy", method: "connections.request", params: { handle: "clickup", operationId: operation, args } }, { signal: input.signal }); await guard(); return value }
+        try { const value = await run(lease.id); await guard(); return value }
         finally { try { this.leases.revoke(binding, lease.id) } catch { /* Revocation may already have canceled the operation. */ } }
       }
-      const value = await operation({ request, projectId, projectPath, options, call })
+      const call = (operation: string, args: Record<string, string | number | boolean>) => leased(leaseId =>
+        this.call(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.request", params: { handle: "clickup", operationId: operation, args } }, { signal: input.signal }))
+      const media = (handle: string, operation: string, args: Record<string, string | number | boolean>) => leased(leaseId =>
+        this.callMedia(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.media", params: { handle, operationId: operation, args } }, { signal: input.signal }))
+      const value = await operation({ request, projectId, projectPath, options, call, media })
       await guard()
       return value
     } finally {
@@ -693,6 +697,28 @@ export class PluginManager {
       this.mediaActive++
       try { return await this.provider(context, async () => result(await (await this.executor(context, connection)).media({ operation: request.params.operationId, args: request.params.args }))) }
       finally { this.mediaActive-- }
+    } finally { context.dispose() }
+  }
+
+  /** Sends a recording made by Cogpit's composer to the plugin's declared dictation operation and returns the transcript. */
+  async dictate(req: IncomingMessage, leaseId: string, audio: PluginMedia, options: { signal?: AbortSignal } = {}): Promise<{ text: string }> {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal: options.signal }, lease)
+    try {
+      const dictation = context.plugin.manifest.contributes.dictation
+      if (!dictation) throw new PluginDataError("PERMISSION_REQUIRED", "This plugin does not provide dictation")
+      const connection = this.connection(context, dictation.connection)
+      if (!connection.connection.secret) throw new PluginDataError("CONNECTION_REQUIRED", "Configure this connection in host settings")
+      if (this.mediaActive >= 4) throw new PluginDataError("RATE_LIMITED", "Too many audio requests")
+      this.mediaActive++
+      try {
+        const answer = await this.provider(context, async () => result(await (await this.executor(context, connection)).upload({ operation: dictation.operation, args: {} }, audio)))
+        await context.guard()
+        let text: JsonValue
+        try { text = select(answer, dictation.text) } catch { text = null }
+        if (typeof text !== "string" || text.length > CONTRACT_LIMITS.composerBytes) throw new PluginDataError("INVALID_RESPONSE", "The service did not return a transcript")
+        return { text }
+      } finally { this.mediaActive-- }
     } finally { context.dispose() }
   }
 

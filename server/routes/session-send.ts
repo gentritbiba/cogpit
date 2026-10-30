@@ -16,8 +16,9 @@ import {
 } from "../http"
 import type { SendOutcome, SendRequest, TurnResult } from "../agents/runtimes"
 import type { CommandIntent } from "../../shared/contracts/orchestration"
+import { withVoiceModeInstruction } from "../../shared/voiceMode"
 
-type SendBody = Partial<SendRequest> & { sessionId?: string; settingsChange?: unknown; commandId?: unknown; intent?: unknown }
+type SendBody = Partial<SendRequest> & { sessionId?: string; settingsChange?: unknown; commandId?: unknown; intent?: unknown; voice?: unknown }
 
 /**
  * POST /api/send-message — deliver a message to an existing session.
@@ -29,7 +30,8 @@ type SendBody = Partial<SendRequest> & { sessionId?: string; settingsChange?: un
  * turn where the agent supports it, and queues otherwise. A body without a
  * permission mode runs in the session's stored one. The edition may hold the
  * rest to the stored settings too, except the ones the body lists in
- * `settingsChange`.
+ * `settingsChange`. `voice: true` marks a message sent from voice mode, which
+ * asks the agent to reply in a speech block.
  */
 export function registerSessionSendRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -65,7 +67,7 @@ export function registerSessionSendRoutes(use: UseFn) {
         }
         settingsChange = named
         request = {
-          message: parsed.message,
+          message: parsed.voice === true && parsed.message ? withVoiceModeInstruction(parsed.message) : parsed.message,
           images: parsed.images,
           cwd: parsed.cwd,
           permissions: parsed.permissions,

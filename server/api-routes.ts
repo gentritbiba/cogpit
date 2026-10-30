@@ -28,6 +28,7 @@ import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerGitHubRoutes } from "./routes/github"
 import { registerVercelDeploymentRoutes } from "./routes/vercel-deployments"
+import { registerVoiceRoutes } from "./routes/voice"
 import { registerClickUpRoutes } from "./routes/clickup"
 import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
@@ -150,6 +151,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("github", registerGitHubRoutes),
   apiRoute("vercel-deployments", registerVercelDeploymentRoutes),
   apiRoute("clickup", registerClickUpRoutes),
+  apiRoute("voice", registerVoiceRoutes),
   apiRoute("project-icon", registerProjectIconRoutes),
   apiRoute("git-diff", registerGitDiffRoutes),
   apiRoute("mcp", registerMcpRoutes),

@@ -45,4 +45,17 @@ describe("independent plugin contributions", () => {
     expect(parseFrameMessage({ protocol: 1, type: "media-result", id: "r1", value: media })).toMatchObject({ type: "media-result", value: media })
     for (const value of [{ ...media, mimeType: "text/html" }, { ...media, bytes: new ArrayBuffer(0) }, { ...media, bytes: new ArrayBuffer(MEDIA_LIMIT_BYTES + 1) }, { ...media, secret: "forged" }]) expect(() => parsePluginMedia(value)).toThrow()
   })
+  it("accepts Cogpit-drawn icons on session actions only from the declared set", () => {
+    const action = { id: "summary", title: "Spoken summary", skill: "read", prompt: "Give a brief spoken summary.", icon: "speaker" }
+    expect(parseManifest({ ...base, contributes: { skills: [skill], sessionActions: [action] } }).contributes.sessionActions?.[0].icon).toBe("speaker")
+    expect(() => parseManifest({ ...base, contributes: { skills: [skill], sessionActions: [{ ...action, icon: "images/logo.png" }] } })).toThrow()
+  })
+  it("binds dictation to a granted connection operation and a transcript pointer", () => {
+    const permissions = { connections: [{ id: "speech", definition: "connections/speech.json", operations: ["transcribe"] }] }
+    const dictation = { title: "Dictate", connection: "speech", operation: "transcribe", text: "/text" }
+    expect(parseManifest({ ...base, permissions, contributes: { dictation } }).contributes.dictation).toEqual(dictation)
+    expect(() => parseManifest({ ...base, permissions, contributes: { dictation: { ...dictation, operation: "synthesize" } } })).toThrow()
+    expect(() => parseManifest({ ...base, contributes: { dictation } })).toThrow()
+    expect(() => parseManifest({ ...base, permissions, contributes: { dictation: { ...dictation, text: "text" } } })).toThrow()
+  })
 })

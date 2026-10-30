@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { CONTRACT_LIMITS } from "./json.js"
-import { identifier, label, parseSchema } from "./schema.js"
+import { identifier, jsonPointer as pointer, label, parseSchema } from "./schema.js"
 import { audioMimeSchema, MEDIA_LIMIT_BYTES } from "./media.js"
 
 const origin = z.string().max(256).refine((value) => {
@@ -11,8 +11,6 @@ const origin = z.string().max(256).refine((value) => {
       && !/\.(?:localhost|local|internal)$/u.test(url.hostname)
   } catch { return false }
 }, "Expected an exact public HTTPS origin")
-const pointer = z.string().max(256).refine((value) => (!value || value.startsWith("/")) && !/~(?![01])/u.test(value)
-  && value.split("/").length <= 9 && !value.split("/").some((key) => ["__proto__", "prototype", "constructor"].includes(key)), "Invalid bounded JSON pointer")
 const literalSegment = z.string().min(1).max(1024).regex(/^[a-zA-Z0-9._~-]+$/u).refine((value) => value !== "." && value !== "..")
 const argument = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("string"), required: z.boolean().optional(), maxLength: z.number().int().min(1).max(16384), multiline: z.boolean().optional(), enum: z.array(label).min(1).max(64).optional() }),
@@ -28,6 +26,7 @@ const queryValue = z.union([
   z.strictObject({ literal: z.union([z.string().max(1024), z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER), z.boolean()]) }),
   z.strictObject({ arg: identifier }), z.strictObject({ resource: identifier }), z.strictObject({ identity: identifier }),
 ])
+const audioTransfer = z.strictObject({ type: z.literal("audio"), mimeTypes: z.array(audioMimeSchema).min(1).max(6), maxBytes: z.number().int().min(1).max(MEDIA_LIMIT_BYTES) })
 const operation = z.strictObject({
   audience: z.enum(["setup", "panel"]), origin, method: z.enum(["GET", "POST"]),
   path: z.array(segment).min(1).max(16),
@@ -36,7 +35,9 @@ const operation = z.strictObject({
     .refine((value) => !["constructor", "prototype", "__proto__"].includes(value.replace(/\[\]$/u, ""))), queryValue)
     .refine((value) => Object.keys(value).length <= 16),
   body: z.record(identifier, queryValue).refine(value => Object.keys(value).length <= 16).optional(),
-  response: z.strictObject({ type: z.literal("audio"), mimeTypes: z.array(audioMimeSchema).min(1).max(6), maxBytes: z.number().int().min(1).max(MEDIA_LIMIT_BYTES) }).optional(),
+  response: audioTransfer.optional(),
+  /** The request body is a recording supplied by Cogpit's own UI; the operation answers with JSON. */
+  upload: audioTransfer.optional(),
 })
 const optionSource = z.strictObject({ operation: identifier, items: pointer, nested: pointer.optional(), id: pointer, label: pointer })
 const resource = z.strictObject({
@@ -130,6 +131,7 @@ export const connectionDefinitionSchema = definitionShape.superRefine((definitio
   for (const [name, op] of Object.entries(definition.operations)) {
     if (op.audience === "setup" && (op.method !== "GET" || op.response)) issue(["operations", name], "Setup operations must return JSON from GET")
     if (op.body && op.method !== "POST") issue(["operations", name, "body"], "Only POST operations have a body")
+    if (op.upload && (op.method !== "POST" || op.audience !== "panel" || op.body || op.response)) issue(["operations", name, "upload"], "Uploads are panel POST operations without a JSON body that answer with JSON")
     const usedArgs = new Set<string>()
     for (const [key, spec] of Object.entries(op.args)) {
       if (Object.hasOwn(definition.resources, key) || Object.hasOwn(definition.identity ?? {}, key)) issue(["operations", name, "args", key], "Argument shadows a host-owned binding")

@@ -142,5 +142,12 @@ export function inspectPackage(payload: Buffer, publisher: string): InspectedPac
     }
     connections.set(grant.id, parsed)
   }
+  const dictation = manifest.contributes.dictation
+  if (dictation) {
+    const operation = connections.get(dictation.connection)?.operations[dictation.operation]
+    if (!operation?.upload?.mimeTypes.includes("audio/wav") || Object.values(operation.args).some(argument => argument.required)) {
+      throw new Error("Dictation must use an upload operation that accepts WAV recordings without required arguments")
+    }
+  }
   return { manifest, digest: createHash("sha256").update(payload).digest("hex"), files, connections, payload }
 }

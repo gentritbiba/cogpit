@@ -134,6 +134,23 @@ describe("hostile HTTPS responses", () => {
     expect(test.request.mock.calls[0][0]).toMatchObject({ method: "POST", headers: { "Content-Type": "application/json", Accept: "audio/mpeg" } })
     expect(test.outgoing.end).toHaveBeenCalledWith(Buffer.from(JSON.stringify({ input: "Hello\nworld", speed: 0.75 })))
   })
+  it("sends an uploaded recording as the raw body with its own type and reads a JSON answer", async () => {
+    const recording = Uint8Array.from([82, 73, 70, 70, 1, 2]).buffer
+    const test = fixture({ chunks: [Buffer.from('{"text":"Hello."}')] })
+    expect(await test.transport(input({ method: "POST", upload: { mimeType: "audio/wav", bytes: recording } }))).toEqual({ text: "Hello." })
+    expect(test.request.mock.calls[0][0]).toMatchObject({ method: "POST", headers: { "Content-Type": "audio/wav", "Content-Length": 6, Accept: "application/json" } })
+    expect(test.outgoing.end).toHaveBeenCalledWith(Buffer.from(recording))
+  })
+  it.each([
+    { method: "GET" as const, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(2) } },
+    { method: "POST" as const, body: { a: 1 }, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(2) } },
+    { method: "POST" as const, upload: { mimeType: "text/html", bytes: new ArrayBuffer(2) } },
+    { method: "POST" as const, upload: { mimeType: "audio/wav", bytes: new ArrayBuffer(0) } },
+  ])("refuses uploads that are not a lone, non-empty audio POST body", async extra => {
+    const test = fixture()
+    await expect(test.transport(input(extra))).rejects.toMatchObject({ code: "INVALID_REQUEST" })
+    expect(test.request).not.toHaveBeenCalled()
+  })
   it.each([{ type: "text/html", bytes: [1] }, { type: "audio/mpeg", bytes: [] }, { type: "audio/mpeg", bytes: [1, 2, 3] }])("rejects invalid, empty or oversized audio", async value => {
     const test = fixture({ headers: { "content-type": value.type }, chunks: [Buffer.from(value.bytes)] })
     await expect(test.transport(input({ response: { type: "audio", mimeTypes: ["audio/mpeg"], maxBytes: 2 } }))).rejects.toMatchObject({ code: "INVALID_RESPONSE" })

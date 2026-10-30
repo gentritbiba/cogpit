@@ -9,6 +9,7 @@
 import { stripAnsi } from "@/lib/ansi"
 import { isTaskWakeup, parseTaskAttention, parseTaskWakeup } from "../../shared/contracts/taskWakeup"
 import { parseCrewChatDelivery } from "../../shared/contracts/crewChat"
+import { VOICE_MODE_TAG } from "../../shared/voiceMode"
 
 /** Paired blocks that are pure injected context: hidden, with a "show raw" escape hatch. */
 export const SYSTEM_TAG_NAMES = [
@@ -22,6 +23,7 @@ export const SYSTEM_TAG_NAMES = [
   "fast_mode_info",
   "gitStatus",
   "user-prompt-submit-hook",
+  VOICE_MODE_TAG,
 ] as const
 
 const SYSTEM_TAG_ALTERNATION = SYSTEM_TAG_NAMES.join("|")

@@ -61,6 +61,7 @@ const CANONICAL_ROUTE_IDS = [
   "github",
   "vercel-deployments",
   "clickup",
+  "voice",
   "project-icon",
   "git-diff",
   "mcp",

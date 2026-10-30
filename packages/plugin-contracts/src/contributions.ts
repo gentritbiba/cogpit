@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { boundedText, canonicalPath, identifier, label } from "./schema.js"
+import { boundedText, canonicalPath, identifier, jsonPointer, label } from "./schema.js"
 
 const fieldBase = { id: identifier, label, description: boundedText(512).optional() }
 export const settingFieldSchema = z.discriminatedUnion("type", [
@@ -22,7 +22,12 @@ export const chatBlockContributionSchema = z.strictObject({
   height: z.number().int().min(80).max(800).default(240),
 })
 export type PluginSettingField = z.infer<typeof settingFieldSchema>
-export const sessionActionContributionSchema = z.strictObject({ id: identifier, title: label, skill: identifier, prompt: boundedText(4096).refine(value => value.trim().length > 0, "Action prompt is required") })
+/** Icons Cogpit draws itself, so a contribution can be a compact button without shipping artwork. */
+export const contributionIconSchema = z.enum(["speaker"])
+export const sessionActionContributionSchema = z.strictObject({ id: identifier, title: label, icon: contributionIconSchema.optional(), skill: identifier, prompt: boundedText(4096).refine(value => value.trim().length > 0, "Action prompt is required") })
+/** Cogpit records the user's microphone and sends the WAV to `operation`; `text` points at the transcript in its JSON answer. */
+export const dictationContributionSchema = z.strictObject({ title: label, connection: identifier, operation: identifier, text: jsonPointer })
+export type PluginDictationContribution = z.infer<typeof dictationContributionSchema>
 export type PluginSettingsContribution = z.infer<typeof settingsContributionSchema>
 export type PluginSettingsValues = Record<string, string | number | boolean>
 export const SETTINGS_STORAGE_KEY = "cogpit.settings"

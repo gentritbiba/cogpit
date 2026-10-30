@@ -43,7 +43,7 @@ function containsSecret(value: JsonValue, secret: string): boolean {
   if (value === null || typeof value !== "object") return String(value).includes(secret)
   return Object.entries(value).some(([key, child]) => key.includes(secret) || containsSecret(child, secret))
 }
-function select(value: JsonValue, pointer: string): JsonValue {
+export function select(value: JsonValue, pointer: string): JsonValue {
   let selected = value
   for (const encoded of pointer === "" ? [] : pointer.slice(1).split("/")) {
     const key = encoded.replace(/~1/gu, "/").replace(/~0/gu, "~")
@@ -107,12 +107,14 @@ export function createConnectionExecutor(rawDefinition: unknown, rawConnection: 
     for (const parent of connectionResourceDependencies(definition, name)) requireResource(parent)
     return selected
   }
-  function build(call: unknown, audience: "setup" | "panel"): PluginHttpsInput {
+  function build(call: unknown, audience: "setup" | "panel", upload?: PluginMedia): PluginHttpsInput {
     canceled()
     const request = record(parseJson(call, { maxBytes: CONTRACT_LIMITS.messageBytes }), ["operation", "args"])
     if (typeof request.operation !== "string" || !Object.hasOwn(definition.operations, request.operation)) return deny()
     const operation = definition.operations[request.operation]
     if (operation.audience !== audience || (audience === "panel" && !allowed.has(request.operation))) return deny()
+    const accepts: readonly string[] = operation.upload?.mimeTypes ?? []
+    if (!!operation.upload !== !!upload || upload && (!accepts.includes(parsePluginMedia(upload).mimeType) || upload.bytes.byteLength > operation.upload!.maxBytes)) return deny()
     const args = argsFor(operation, request.args)
     const path = operation.path.map((part) => "literal" in part ? part.literal
       : encodeURIComponent(pathValue("arg" in part ? args[part.arg] : requireResource(part.resource).id))).join("/")
@@ -134,13 +136,13 @@ export function createConnectionExecutor(rawDefinition: unknown, rawConnection: 
     const body = operation.body ? Object.fromEntries(Object.entries(operation.body).flatMap(([key, part]) => { const value = bindingValue(part); return value === undefined ? [] : [[key, value]] })) : undefined
     return { origin: operation.origin, path: url.pathname + url.search,
       credential: { header: definition.auth.header, scheme: definition.auth.scheme, secret: connection.secret }, signal,
-      ...(operation.method === "POST" ? { method: "POST" as const } : {}), ...(body ? { body } : {}), ...(operation.response ? { response: operation.response } : {}) }
+      ...(operation.method === "POST" ? { method: "POST" as const } : {}), ...(body ? { body } : {}), ...(upload ? { upload } : {}), ...(operation.response ? { response: operation.response } : {}) }
   }
   function execute(call: unknown, audience: "setup" | "panel", media: true): Promise<ConnectionResult<PluginMedia>>
-  function execute(call: unknown, audience: "setup" | "panel", media?: false): Promise<ConnectionResult>
-  async function execute(call: unknown, audience: "setup" | "panel", media = false): Promise<ConnectionResult<JsonValue | PluginMedia>> {
+  function execute(call: unknown, audience: "setup" | "panel", media?: false, upload?: PluginMedia): Promise<ConnectionResult>
+  async function execute(call: unknown, audience: "setup" | "panel", media = false, upload?: PluginMedia): Promise<ConnectionResult<JsonValue | PluginMedia>> {
     let request: PluginHttpsInput
-    try { request = build(call, audience) } catch (error) { return resultError(error, "INVALID_REQUEST") }
+    try { request = build(call, audience, upload) } catch (error) { return resultError(error, "INVALID_REQUEST") }
     if (!!request.response !== media) return { ok: false, error: "INVALID_REQUEST" }
     let data: unknown
     try {
@@ -242,6 +244,7 @@ export function createConnectionExecutor(rawDefinition: unknown, rawConnection: 
   return Object.freeze({
     request: (call: unknown) => execute(call, "panel"),
     media: (call: unknown) => execute(call, "panel", true),
+    upload: (call: unknown, media: PluginMedia) => execute(call, "panel", false, media),
     async validate(): Promise<ConnectionResult<{ identity: Record<string, string> }>> {
       const result = await execute({ operation: definition.validationOperation, args: {} }, "setup")
       if (!result.ok) return result

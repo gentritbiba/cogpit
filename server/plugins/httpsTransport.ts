@@ -22,6 +22,8 @@ export interface PluginHttpsInput {
   timeoutMs?: number
   method?: "GET" | "POST"
   body?: Record<string, string | number | boolean>
+  /** Sent as the raw request body with its own Content-Type, instead of a JSON body. */
+  upload?: PluginMedia
   response?: { type: "audio"; mimeTypes: string[]; maxBytes: number }
 }
 export interface HttpsTransportDependencies {
@@ -49,7 +51,7 @@ export function isPublicAddress(address: string, family: number): boolean {
 
 function validate(input: PluginHttpsInput): { hostname: string; headerValue: string; maxBytes: number; timeoutMs: number } {
   const invalid = () => { throw new HttpsTransportError("INVALID_REQUEST") }
-  if (!input || Object.keys(input).some((key) => !["origin", "path", "credential", "signal", "maxBytes", "timeoutMs", "method", "body", "response"].includes(key))) invalid()
+  if (!input || Object.keys(input).some((key) => !["origin", "path", "credential", "signal", "maxBytes", "timeoutMs", "method", "body", "upload", "response"].includes(key))) invalid()
   if (typeof input.origin !== "string" || input.origin.length > 256 || typeof input.path !== "string" || input.path.length > 8192 || !/^\/(?!\/)[\x21-\x7e]*$/.test(input.path) || /[#\\]/.test(input.path)) invalid()
   let url: URL
   try {
@@ -77,6 +79,9 @@ function validate(input: PluginHttpsInput): { hostname: string; headerValue: str
   if (input.body !== undefined && (input.method !== "POST" || !input.body || typeof input.body !== "object" || Array.isArray(input.body)
     || Object.keys(input.body).length > 16 || Buffer.byteLength(JSON.stringify(input.body)) > 32768
     || Object.entries(input.body).some(([key, value]) => ["__proto__", "constructor", "prototype"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value)))) invalid()
+  const upload = input.upload
+  if (upload !== undefined && (input.method !== "POST" || input.body !== undefined || input.response !== undefined || !upload || typeof upload !== "object"
+    || !audioMimeSchema.safeParse(upload.mimeType).success || !(upload.bytes instanceof ArrayBuffer) || upload.bytes.byteLength === 0 || upload.bytes.byteLength > MEDIA_LIMIT_BYTES)) invalid()
   const audio = input.response
   if (audio && (audio.type !== "audio" || !Array.isArray(audio.mimeTypes) || !audio.mimeTypes.length || audio.mimeTypes.length > 6 || audio.mimeTypes.some(type => !audioMimeSchema.safeParse(type).success)
     || !Number.isSafeInteger(audio.maxBytes) || audio.maxBytes < 1 || audio.maxBytes > MEDIA_LIMIT_BYTES)) invalid()
@@ -177,11 +182,11 @@ export function createPluginHttpsTransport(dependencies: HttpsTransportDependenc
           if (options.all) callback(null, [{ address: address.address, family: address.family }])
           else callback(null, address.address, address.family)
         }
-        const body = input.body ? Buffer.from(JSON.stringify(input.body)) : undefined
+        const body = input.upload ? Buffer.from(input.upload.bytes) : input.body ? Buffer.from(JSON.stringify(input.body)) : undefined
         const options: RequestOptions & { autoSelectFamily: boolean } = { protocol: "https:", hostname, port: 443, servername: hostname, method: input.method ?? "GET", path,
           agent: false, family: address.family, autoSelectFamily: false, lookup: pinned, rejectUnauthorized: true,
           maxHeaderSize: 16_384, headers: { Accept: input.response?.mimeTypes.join(", ") ?? "application/json", "Accept-Encoding": "identity", [header]: headerValue,
-            ...(body ? { "Content-Type": "application/json", "Content-Length": body.length } : {}) },
+            ...(body ? { "Content-Type": input.upload?.mimeType ?? "application/json", "Content-Length": body.length } : {}) },
         }
         outgoing = request(options, receive)
         outgoing.on("error", () => fail("UPSTREAM_FAILED"))

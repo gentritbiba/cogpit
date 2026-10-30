@@ -57,6 +57,8 @@ mac:
         - x64
         - arm64
   category: public.app-category.developer-tools
+  extendInfo:
+    NSMicrophoneUsageDescription: Cogpit records from the microphone only while you dictate a message.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
 

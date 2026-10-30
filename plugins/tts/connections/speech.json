@@ -23,6 +23,15 @@
       "query": {},
       "body": { "model": { "literal": "tts-1" }, "voice": { "resource": "voice" }, "input": { "arg": "input" }, "speed": { "arg": "speed" }, "response_format": { "arg": "format" } },
       "response": { "type": "audio", "mimeTypes": ["audio/mpeg", "audio/wav"], "maxBytes": 8388608 }
+    },
+    "transcribe": {
+      "audience": "panel",
+      "origin": "https://stt.cogpit.dev",
+      "method": "POST",
+      "path": [{ "literal": "v1" }, { "literal": "transcribe" }],
+      "args": {},
+      "query": {},
+      "upload": { "type": "audio", "mimeTypes": ["audio/wav"], "maxBytes": 8388608 }
     }
   }
 }
