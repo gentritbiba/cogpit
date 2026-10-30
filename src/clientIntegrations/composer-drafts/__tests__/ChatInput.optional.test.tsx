@@ -32,7 +32,7 @@ vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
 vi.mock("@/hooks/useProjectFileSuggestions", () => ({ useProjectFileSuggestions: () => ({ files: [], loading: false }) }))
 vi.mock("@/components/SlashSuggestions", () => ({ SlashSuggestions: () => null }))
 vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
-vi.mock("@/plugins/RuntimePluginActions", () => ({ RuntimePluginActions: () => null }))
+vi.mock("@/plugins/RuntimePluginActions", () => ({ RuntimePluginActions: () => null, useComposerPlugins: () => null }))
 
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { composerScope, draftStore, resetDraftStoresForTest } from "../draftStore"
