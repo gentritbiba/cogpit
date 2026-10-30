@@ -34,6 +34,8 @@ Install Text to speech from Browse, open its Settings, connect the speech servic
 
 The composer’s Spoken summary action asks the current agent for the shortest useful summary in ordinary spoken prose, with no lists, numbered points or headings. Users can also ask directly, or tell the agent to summarize after every turn. The plugin skill explains these choices; it does not add a summary to every reply by default.
 
+Clients that cannot host plugin frames, such as the iOS app, use the same connection, voice and settings through `POST /api/voice/speech {text}`, which returns the audio. Its `503 voice_not_configured` tells the client to use its own voice. The iOS voice mode sends messages with `voice: true` on `/api/send-message`; the server appends a hidden `<cogpit-voice-mode>` instruction asking the agent to announce results and ask questions inside a speech block.
+
 The bundled example targets an OpenAI-compatible speech service and binds synthesis to the voice selected through its authenticated discovery operation. Provider errors that occur after a streaming 200 response can still result in partial audio: the host rejects empty/incomplete HTTP bodies and the card reports browser playback errors, but cannot prove a successfully decoded audio stream contains the entire intended speech. The service should validate parameters before sending response headers.
 
 ClickUp, GitHub, Vercel and Cloudflare render in Cogpit's existing right sidebar. Their panels are separate runtime packages, loaded after installation without rebuilding or restarting Cogpit. The host owns installation, so desktop and remote browser clients share the installed versions and enabled state.

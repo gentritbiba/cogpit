@@ -10,6 +10,7 @@ import {
   stripSystemNotificationPreamble,
   stripSystemTags,
 } from "@/lib/userMessageContent"
+import { withVoiceModeInstruction } from "../../../shared/voiceMode"
 
 describe("stripSystemTags", () => {
   it("removes every injected context block and trims", () => {
@@ -21,6 +22,10 @@ describe("stripSystemTags", () => {
   it("hides user-prompt-submit-hook, which used to leak through as raw text", () => {
     const input = "<user-prompt-submit-hook>hook output</user-prompt-submit-hook>real prompt"
     expect(stripSystemTags(input)).toBe("real prompt")
+  })
+
+  it("shows only what the user said in a voice-mode message", () => {
+    expect(stripSystemTags(withVoiceModeInstruction("how did the deploy go"))).toBe("how did the deploy go")
   })
 
   it("leaves ordinary prose untouched", () => {
