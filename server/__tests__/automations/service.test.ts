@@ -48,7 +48,7 @@ function definition(overrides: Partial<AutomationDefinition> = {}): AutomationDe
 function sign(secret: string, body: string, stamp = Math.floor(Date.now() / 1000), delivery = "d-1") {
   return {
     "x-cogpit-timestamp": String(stamp),
-    "x-cogpit-signature": `sha256=${createHmac("sha256", secret).update(`${stamp}.${body}`).digest("hex")}`,
+    "x-cogpit-signature": `sha256=${createHmac("sha256", secret).update(`${stamp}.${delivery}.${body}`).digest("hex")}`,
     "x-cogpit-delivery": delivery,
     "content-type": "application/json",
   }
@@ -117,6 +117,8 @@ describe("automation webhooks", () => {
     expect(first).toMatchObject({ status: 202, body: { outcome: "created" } })
     expect(ingestDelivery(task.id, sign(webhookSecret!, body), Buffer.from(body))).toMatchObject({ status: 200, body: { outcome: "duplicate", run: first.body.run } })
     expect(ingestDelivery(task.id, sign(webhookSecret!, '{"issue":9}'), Buffer.from('{"issue":9}'))).toMatchObject({ status: 409 })
+    // The delivery id is signed, so renaming a captured delivery does not make it new.
+    expect(ingestDelivery(task.id, { ...sign(webhookSecret!, body), "x-cogpit-delivery": "renamed" }, Buffer.from(body))).toMatchObject({ status: 401 })
     // Deliveries arriving at once (as concurrent requests do, one after another on the host) fold into the same run.
     const burst = ["d-2", "d-3"].map((id) => ingestDelivery(task.id, sign(webhookSecret!, `{"id":"${id}"}`, undefined, id), Buffer.from(`{"id":"${id}"}`)))
     expect(burst.map((result) => result.body.outcome)).toEqual(["coalesced", "coalesced"])
@@ -130,10 +132,23 @@ describe("automation webhooks", () => {
     const { task, webhookSecret } = await createTask(req(), definition({ webhook: { enabled: true, scheme: "github", coalesceSeconds: 0 } }), "active", origin)
     const body = '{"action":"opened"}'
     const headers = { "x-hub-signature-256": `sha256=${createHmac("sha256", webhookSecret!).update(body).digest("hex")}`, "x-github-delivery": "gh-1" }
-    expect(ingestDelivery(task.id, headers, Buffer.from(body))).toMatchObject({ status: 202, body: { outcome: "created" } })
+    const created = ingestDelivery(task.id, headers, Buffer.from(body))
+    expect(created).toMatchObject({ status: 202, body: { outcome: "created" } })
+    // GitHub leaves its delivery header unsigned; the signed body identifies the delivery.
+    expect(ingestDelivery(task.id, { ...headers, "x-github-delivery": "gh-renamed" }, Buffer.from(body))).toMatchObject({ status: 200, body: { outcome: "duplicate", run: created.body.run } })
     const at = (method: string, url: string) => Object.assign(new IncomingMessage(new Socket()), { method, url })
     expect(isAutomationIngress(at("POST", `/api/automation-hooks/${task.id}`))).toBe(true)
     for (const [method, url] of [["GET", `/api/automation-hooks/${task.id}`], ["POST", `/api/automation-hooks/${task.id}/x`], ["POST", "/api/automations"], ["POST", `/api/automation-hooks/../automations`]]) expect(isAutomationIngress(at(method!, url!))).toBe(false)
+  })
+
+  it("never folds a delivery into a manual run", async () => {
+    const { task, webhookSecret } = await createTask(req(), definition(), "active", origin)
+    const manual = runNow(req(), task.id)
+    const body = '{"issue":2}'
+    const delivered = ingestDelivery(task.id, sign(webhookSecret!, body), Buffer.from(body))
+    expect(delivered).toMatchObject({ status: 202, body: { outcome: "created" } })
+    expect(delivered.body.run).not.toBe(manual.id)
+    expect(listRuns(req(), task.id).find((run) => run.id === delivered.body.run)).toMatchObject({ trigger: "webhook", dueAt: Date.now() + 30_000 })
   })
 
   it("puts deliveries after the task's own prompt as fenced, untrusted data", async () => {
@@ -163,6 +178,9 @@ describe("automation runs", () => {
     runtime.busy = true
     const next = store.occurrence("local", runNow(req(), task.id).id)!
     expect(prepareRun(store, next)).toEqual({ skip: "The previous run is still working" })
+    // Skipped runs in between never hide a session that is still working.
+    for (let index = 0; index < 25; index++) store.skipOccurrence("local", runNow(req(), task.id).id, "The previous run is still working")
+    expect(prepareRun(store, store.occurrence("local", runNow(req(), task.id).id)!)).toEqual({ skip: "The previous run is still working" })
     expect(listRuns(req(), task.id).find((view) => view.id === run.id)?.session).toMatchObject({ sessionId: "previous-session", working: true })
     setTaskState(req(), task.id, "paused", origin)
     expect(prepareRun(store, next)).toEqual({ skip: "The task is paused" })

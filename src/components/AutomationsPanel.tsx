@@ -220,13 +220,33 @@ function TaskForm({ task, cwd, onSave, onCancel }: {
   )
 }
 
-function Runs({ task, automations, openSession }: { task: AutomationTask; automations: ReturnType<typeof useAutomations>; openSession?: (dirName: string, fileName: string) => void }) {
+const RUNS_REFRESH_MS = 5_000
+
+function Runs({ task, automations, active, version, openSession }: {
+  task: AutomationTask
+  automations: ReturnType<typeof useAutomations>
+  active: boolean
+  /** Bumped by actions elsewhere in the panel that add runs. */
+  version: number
+  openSession?: (dirName: string, fileName: string) => void
+}) {
   const [runs, setRuns] = useState<AutomationRun[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const load = () => { void automations.runs(task.id).then(setRuns, (failure: unknown) => setError(failure instanceof Error ? failure.message : "Could not load runs")) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [task.id, task.updatedAt])
-  const act = (run: AutomationRun, action: RunAction) => { void automations.actOnRun(task.id, run.id, action).then(load, (failure: unknown) => setError(failure instanceof Error ? failure.message : "Could not update the run")) }
+  const [reload, setReload] = useState(0)
+  const { runs: fetchRuns, actOnRun } = automations
+  useEffect(() => {
+    let live = true
+    const load = () => {
+      void fetchRuns(task.id).then(
+        (next) => { if (live) { setRuns(next); setError(null) } },
+        (failure: unknown) => { if (live) setError(failure instanceof Error ? failure.message : "Could not load runs") },
+      )
+    }
+    load()
+    const timer = active ? setInterval(load, RUNS_REFRESH_MS) : undefined
+    return () => { live = false; clearInterval(timer) }
+  }, [fetchRuns, task.id, task.updatedAt, active, version, reload])
+  const act = (run: AutomationRun, action: RunAction) => { void actOnRun(task.id, run.id, action).then(() => setReload((value) => value + 1), (failure: unknown) => setError(failure instanceof Error ? failure.message : "Could not update the run")) }
   if (error) return <p role="alert" className="text-xs text-destructive">{error}</p>
   if (!runs) return <p role="status" className="text-xs text-muted-foreground">Loading runs…</p>
   if (runs.length === 0) return <p className="text-xs text-muted-foreground">No runs yet.</p>
@@ -266,6 +286,7 @@ function Automations({ context, active }: WorkspacePanelProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [secret, setSecret] = useState<{ taskId: string; value: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [historyVersion, setHistoryVersion] = useState(0)
   const act = (promise: Promise<unknown>) => { void promise.catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : "The request failed")) }
 
   return (
@@ -321,7 +342,7 @@ function Automations({ context, active }: WorkspacePanelProps) {
               </div>
             )}
             <div className="flex flex-wrap gap-1">
-              <Button size="xs" variant="outline" onClick={() => act(automations.act(task.id, "run"))}><Zap data-icon="inline-start" />Run now</Button>
+              <Button size="xs" variant="outline" onClick={() => act(automations.act(task.id, "run").then(() => setHistoryVersion((value) => value + 1)))}><Zap data-icon="inline-start" />Run now</Button>
               {task.state === "active"
                 ? <Button size="xs" variant="ghost" onClick={() => act(automations.act(task.id, "pause"))}><Pause data-icon="inline-start" />Pause</Button>
                 : <Button size="xs" variant="ghost" onClick={() => act(automations.act(task.id, "resume"))}><Play data-icon="inline-start" />Resume</Button>}
@@ -330,7 +351,7 @@ function Automations({ context, active }: WorkspacePanelProps) {
               <Button size="xs" variant="ghost" aria-expanded={expanded === task.id} onClick={() => setExpanded(expanded === task.id ? null : task.id)}>History</Button>
               <Button size="xs" variant="ghost" aria-label={`Delete ${task.name}`} onClick={() => { if (window.confirm(`Delete ${task.name}? Waiting runs are cancelled.`)) act(automations.remove(task.id)) }}><Trash2 data-icon="inline-start" /></Button>
             </div>
-            {expanded === task.id && <Runs task={task} automations={automations} openSession={context.openSession} />}
+            {expanded === task.id && <Runs task={task} automations={automations} active={active} version={historyVersion} openSession={context.openSession} />}
           </li>
         ))}
       </ul>

@@ -1,6 +1,6 @@
 import { AUTOMATION_KIND, type AutomationDefinition } from "../../shared/contracts/automations"
 import type { OccurrenceInput, TriggerOccurrence } from "../../shared/contracts/triggers"
-import { runtimeFor } from "../agents/runtimes"
+import { runtimeFor, runtimeForSession } from "../agents/runtimes"
 import { registerTriggerHandler, type Prepared, type RecordLifetime } from "../lib/triggers/runner"
 import { OrchestrationError, type OrchestrationStore } from "../orchestration/store"
 import { nextDue } from "./schedule"
@@ -62,10 +62,10 @@ export function prepareRun(store: OrchestrationStore, occurrence: TriggerOccurre
   if (task.state !== "active") return { skip: "The task is paused" }
   const definition = task.data as unknown as StoredAutomation
   if (definition.overlap === "skip") {
-    const previous = store.occurrences(occurrence.scope, occurrence.triggerId, { limit: 20 }).find((run) => run.id !== occurrence.id && run.sessionId)
-    let busy = false
-    try { busy = Boolean(previous?.sessionId && runtimeFor(definition.provider.agent, definition.provider.instanceId).activity(previous.sessionId).running) } catch { busy = false }
-    if (busy) return { skip: "The previous run is still working" }
+    const working = (sessionId: string) => {
+      try { return (runtimeForSession(sessionId) ?? runtimeFor(definition.provider.agent, definition.provider.instanceId)).activity(sessionId).running } catch { return false }
+    }
+    if (store.sessionOccurrences(occurrence.scope, occurrence.triggerId).some((run) => run.id !== occurrence.id && working(run.sessionId!))) return { skip: "The previous run is still working" }
   }
   const { provider } = definition
   return {

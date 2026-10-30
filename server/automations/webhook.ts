@@ -28,7 +28,12 @@ function signatureMatches(given: string | undefined, key: string, payload: Buffe
 
 export type VerifiedDelivery = { ok: true; deliveryId: string } | { ok: false; status: 400 | 401; error: string }
 
-/** Checks a delivery against every live secret of its task; `deliveryId` keys replay dedupe. */
+/**
+ * Checks a delivery against every live secret of its task. `deliveryId` keys
+ * replay dedupe, so it is always signed: a `cogpit` delivery signs its id with
+ * the timestamp and body, and a `github` one, whose delivery header GitHub
+ * leaves unsigned, is identified by its body signature.
+ */
 export function verifyDelivery(scheme: AutomationWebhook["scheme"], headers: IncomingHttpHeaders, body: Buffer, secrets: readonly string[], now: number): VerifiedDelivery {
   let signature: string | null = null
   let deliveryId: string | undefined
@@ -36,14 +41,14 @@ export function verifyDelivery(scheme: AutomationWebhook["scheme"], headers: Inc
     const stamp = header(headers, "x-cogpit-timestamp")
     if (!stamp || !/^\d{1,12}$/.test(stamp)) return { ok: false, status: 400, error: "X-Cogpit-Timestamp is required" }
     if (Math.abs(now - Number(stamp) * 1000) > TIMESTAMP_TOLERANCE_MS) return { ok: false, status: 401, error: "The delivery is too old or from the future" }
-    const payload = Buffer.concat([Buffer.from(`${stamp}.`), body])
-    for (const key of secrets) signature ??= signatureMatches(header(headers, "x-cogpit-signature"), key, payload)
     deliveryId = header(headers, "x-cogpit-delivery")
+    if (!deliveryId || !DELIVERY_ID.test(deliveryId)) return { ok: false, status: 400, error: "X-Cogpit-Delivery is required" }
+    const payload = Buffer.concat([Buffer.from(`${stamp}.${deliveryId}.`), body])
+    for (const key of secrets) signature ??= signatureMatches(header(headers, "x-cogpit-signature"), key, payload)
   } else {
     for (const key of secrets) signature ??= signatureMatches(header(headers, "x-hub-signature-256"), key, body)
-    deliveryId = header(headers, "x-github-delivery")
+    deliveryId = signature ? `sig-${signature}` : undefined
   }
-  if (!signature) return { ok: false, status: 401, error: "The signature does not match" }
-  if (deliveryId !== undefined && !DELIVERY_ID.test(deliveryId)) return { ok: false, status: 400, error: "The delivery id is malformed" }
-  return { ok: true, deliveryId: deliveryId ?? `sig-${signature}` }
+  if (!signature || !deliveryId) return { ok: false, status: 401, error: "The signature does not match" }
+  return { ok: true, deliveryId }
 }

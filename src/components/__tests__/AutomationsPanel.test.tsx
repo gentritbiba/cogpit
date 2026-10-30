@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AutomationsPanel } from "../AutomationsPanel"
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   act: vi.fn(),
   actOnRun: vi.fn(),
+  fetchRuns: vi.fn(async () => [] as AutomationRun[]),
 }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => mocks.allowed }))
 vi.mock("@/hooks/useModelOptions", () => ({ useModelOptions: () => [{ value: "sonnet", label: "Sonnet" }] }))
@@ -19,7 +20,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: async () => new Response(JSON.stringif
 vi.mock("@/hooks/useAutomations", () => ({
   useAutomations: () => ({
     tasks: mocks.tasks, error: null, refresh: vi.fn(), save: mocks.save, remove: vi.fn(), act: mocks.act, rotate: vi.fn(),
-    runs: async () => mocks.runs, actOnRun: mocks.actOnRun,
+    runs: mocks.fetchRuns, actOnRun: mocks.actOnRun,
   }),
 }))
 
@@ -34,6 +35,7 @@ const task: AutomationTask = {
 
 beforeEach(() => {
   mocks.allowed = true; mocks.tasks = []; mocks.runs = []
+  mocks.fetchRuns.mockReset().mockImplementation(async () => mocks.runs)
   mocks.save.mockReset().mockResolvedValue({ task, webhookSecret: "whsec_abc" })
   mocks.act.mockReset().mockResolvedValue({}); mocks.actOnRun.mockReset().mockResolvedValue({})
 })
@@ -79,5 +81,23 @@ describe("scheduled tasks panel", () => {
     expect(mocks.actOnRun).toHaveBeenCalledWith(task.id, "occ_held", "reauthorize")
     await user.click(screen.getByRole("button", { name: "It did not start" }))
     expect(mocks.actOnRun).toHaveBeenCalledWith(task.id, "occ_unknown", "mark-not-started")
+  })
+
+  it("keeps open history current while the panel is shown, and after Run now", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.tasks = [task]
+      render(<AutomationsPanel {...props} />)
+      fireEvent.click(screen.getByRole("button", { name: "History" }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByText("No runs yet.")).toBeTruthy()
+      mocks.runs = [{ id: "occ_held", trigger: "schedule", state: "held", hold: "reauthorize", dueAt: 1, createdAt: 1, deliveries: 1 }]
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      expect(screen.getByRole("button", { name: "Reauthorize" })).toBeTruthy()
+      const calls = mocks.fetchRuns.mock.calls.length
+      fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(mocks.fetchRuns.mock.calls.length).toBeGreaterThan(calls)
+    } finally { vi.useRealTimers() }
   })
 })

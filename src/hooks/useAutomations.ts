@@ -29,6 +29,9 @@ export function useAutomations(active: boolean) {
     return () => clearInterval(timer)
   }, [active, refresh])
 
+  const runs = useCallback(async (id: string) => (await read<{ runs: AutomationRun[] }>(await authFetch(`/api/automations/${id}/runs`))).runs, [])
+  const actOnRun = useCallback((id: string, runId: string, action: RunAction) => jsonFetch(`/api/automations/${id}/runs/${runId}/${action}`, {}).then(read), [])
+
   const run = useCallback(async <T,>(request: () => Promise<Response>): Promise<T> => {
     const result = await read<T>(await request())
     void refresh()
@@ -45,7 +48,7 @@ export function useAutomations(active: boolean) {
     remove: (id: string) => run(() => authFetch(`/api/automations/${id}`, { method: "DELETE" })),
     act: (id: string, verb: "pause" | "resume" | "run") => run(() => jsonFetch(`/api/automations/${id}/${verb}`, {})),
     rotate: (id: string) => run<{ webhookSecret: string }>(() => jsonFetch(`/api/automations/${id}/rotate-secret`, {})),
-    runs: async (id: string) => (await read<{ runs: AutomationRun[] }>(await authFetch(`/api/automations/${id}/runs`))).runs,
-    actOnRun: (id: string, runId: string, action: RunAction) => run(() => jsonFetch(`/api/automations/${id}/runs/${runId}/${action}`, {})),
+    runs,
+    actOnRun,
   }
 }

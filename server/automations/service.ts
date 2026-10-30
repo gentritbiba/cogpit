@@ -258,7 +258,7 @@ export function ingestDelivery(id: string, headers: IncomingHttpHeaders, body: B
       triggerId: id, kind: AUTOMATION_KIND, key: `webhook:${verified.deliveryId}`, dueAt: now + window, action: "session.create", grant: record.grant,
       request: { source: "webhook" },
       input: { data: { deliveryId: verified.deliveryId, contentType: String(headers["content-type"] ?? ""), body: body.toString("utf8") } },
-      ...(window > 0 ? { coalesce: { windowMs: window, maxInputs: AUTOMATION_LIMITS.deliveriesPerRun } } : {}),
+      ...(window > 0 ? { coalesce: { group: "webhook", windowMs: window, maxInputs: AUTOMATION_LIMITS.deliveriesPerRun } } : {}),
     })
     triggerScheduler()
     return { status: outcome === "duplicate" ? 200 : 202, body: { accepted: true, outcome, run: occurrence.id } }

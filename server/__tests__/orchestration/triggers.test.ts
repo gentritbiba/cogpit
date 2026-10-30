@@ -57,7 +57,7 @@ describe("recording occurrences", () => {
     const now = clock()
     const store = open(":memory:", now)
     const lease = store.acquire("host")!
-    const burst = (key: string) => store.recordOccurrence("local", record({ key, input: { data: { key } }, coalesce: { windowMs: 60_000, maxInputs: 3 } }))
+    const burst = (key: string) => store.recordOccurrence("local", record({ key, input: { data: { key } }, coalesce: { group: "burst", windowMs: 60_000, maxInputs: 3 } }))
     const first = burst("delivery-1")
     expect(burst("delivery-2").outcome).toBe("coalesced")
     expect(burst("delivery-2").outcome).toBe("duplicate")

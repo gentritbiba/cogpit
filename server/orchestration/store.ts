@@ -30,8 +30,8 @@ export interface OccurrenceRecord {
   input?: Omit<OccurrenceInput, "key" | "receivedAt">
   /** Cancel it once someone else messages this conversation after it was recorded. */
   fence?: { conversationId: string }
-  /** Fold into the newest still-scheduled occurrence recorded within `windowMs`, up to `maxInputs`. */
-  coalesce?: { windowMs: number; maxInputs: number }
+  /** Fold into the newest still-scheduled occurrence of the same `group` recorded within `windowMs`, up to `maxInputs`. */
+  coalesce?: { group: string; windowMs: number; maxInputs: number }
   /** Refuse once this many of the trigger's occurrences are still waiting. */
   backlog?: number
   /** Its command must pass the kind's delivery guard (see deliveryGuards.ts). */
@@ -758,6 +758,10 @@ export class OrchestrationStore {
     const limit = Math.min(200, Math.max(1, options.limit ?? 50))
     return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND created_at<? ORDER BY created_at DESC,id DESC LIMIT ?").all(scope, triggerId, options.before ?? Number.MAX_SAFE_INTEGER, limit) as Row[]).map((row) => this.occurrenceRow(row))
   }
+  /** The newest occurrences of a trigger that started a session, whatever came after them. */
+  sessionOccurrences(scope: string, triggerId: string, limit = 50): TriggerOccurrence[] {
+    return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND json_extract(data,'$.sessionId') IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT ?").all(scope, triggerId, Math.min(200, Math.max(1, limit))) as Row[]).map((row) => this.occurrenceRow(row))
+  }
   /** Occurrences of a trigger not yet settled: waiting, running, held or awaiting reconciliation. */
   openOccurrences(scope: string, triggerId: string): TriggerOccurrence[] {
     return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state NOT IN ('completed','failed','cancelled','skipped') ORDER BY created_at").all(scope, triggerId) as Row[]).map((row) => this.occurrenceRow(row))
@@ -789,7 +793,7 @@ export class OrchestrationStore {
       }
       const received: OccurrenceInput | undefined = input.input ? { key: input.key, receivedAt: this.now(), data: input.input.data } : undefined
       if (input.coalesce && received) {
-        const row = this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state='scheduled' AND created_at>=? ORDER BY created_at DESC LIMIT 1").get(scope, input.triggerId, this.now() - input.coalesce.windowMs) as Row | undefined
+        const row = this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND state='scheduled' AND created_at>=? AND json_extract(data,'$.coalesceGroup')=? ORDER BY created_at DESC LIMIT 1").get(scope, input.triggerId, this.now() - input.coalesce.windowMs, input.coalesce.group) as Row | undefined
         const target = row && this.occurrenceRow(row)
         if (target && target.inputs.length < input.coalesce.maxInputs && JSON.stringify([...target.inputs, received]).length <= OCCURRENCE_INPUTS_LIMIT) {
           this.writeOccurrence(target, { inputs: [...target.inputs, received] })
@@ -802,7 +806,7 @@ export class OrchestrationStore {
       if (waiting >= (input.backlog ?? 100)) throw new OrchestrationError(429, "Too many runs of this task are already waiting")
       const id = `occ-${fingerprint([scope, input.triggerId, input.key]).slice(0, 32)}`
       const fencePosition = input.fence ? Number((this.db.prepare("SELECT COALESCE(MAX(position),0) AS n FROM commands WHERE conversation_id=?").get(input.fence.conversationId) as Row).n) : null
-      const data = { key: input.key, action: input.action, grant: input.grant, request: input.request, inputs: received ? [received] : [], commandId: occurrenceCommandId(id), creationId: occurrenceCreationId(id), ...(input.guarded ? { guarded: true } : {}) }
+      const data = { key: input.key, action: input.action, grant: input.grant, request: input.request, inputs: received ? [received] : [], commandId: occurrenceCommandId(id), creationId: occurrenceCreationId(id), ...(input.guarded ? { guarded: true } : {}), ...(input.coalesce ? { coalesceGroup: input.coalesce.group } : {}) }
       this.db.prepare("INSERT INTO trigger_occurrences(scope,id,trigger_id,kind,state,due_at,fence_conversation,fence_position,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(scope, id, input.triggerId, input.kind, "scheduled", input.dueAt, input.fence?.conversationId ?? null, fencePosition, JSON.stringify(data), this.now(), this.now())
       this.db.prepare("INSERT INTO trigger_keys VALUES(?,?,?,?,?,?)").run(scope, input.triggerId, input.key, id, hash, this.now())
       this.triggerEvent("occurrence", scope, input.triggerId, id)
