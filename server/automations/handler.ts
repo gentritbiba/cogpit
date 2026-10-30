@@ -65,7 +65,7 @@ export function prepareRun(store: OrchestrationStore, occurrence: TriggerOccurre
     const working = (sessionId: string) => {
       try { return (runtimeForSession(sessionId) ?? runtimeFor(definition.provider.agent, definition.provider.instanceId)).activity(sessionId).running } catch { return false }
     }
-    if (store.sessionOccurrences(occurrence.scope, occurrence.triggerId).some((run) => run.id !== occurrence.id && working(run.sessionId!))) return { skip: "The previous run is still working" }
+    if (store.triggerSessionIds(occurrence.scope, occurrence.triggerId, occurrence.id).some(working)) return { skip: "The previous run is still working" }
   }
   const { provider } = definition
   return {

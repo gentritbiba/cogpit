@@ -758,9 +758,9 @@ export class OrchestrationStore {
     const limit = Math.min(200, Math.max(1, options.limit ?? 50))
     return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND created_at<? ORDER BY created_at DESC,id DESC LIMIT ?").all(scope, triggerId, options.before ?? Number.MAX_SAFE_INTEGER, limit) as Row[]).map((row) => this.occurrenceRow(row))
   }
-  /** The newest occurrences of a trigger that started a session, whatever came after them. */
-  sessionOccurrences(scope: string, triggerId: string, limit = 50): TriggerOccurrence[] {
-    return (this.db.prepare("SELECT * FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND json_extract(data,'$.sessionId') IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT ?").all(scope, triggerId, Math.min(200, Math.max(1, limit))) as Row[]).map((row) => this.occurrenceRow(row))
+  /** Every session a trigger's occurrences started, except `exceptId`'s. */
+  triggerSessionIds(scope: string, triggerId: string, exceptId?: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT json_extract(data,'$.sessionId') AS session FROM trigger_occurrences WHERE scope=? AND trigger_id=? AND id<>? AND json_extract(data,'$.sessionId') IS NOT NULL").all(scope, triggerId, exceptId ?? "") as Row[]).map((row) => String(row.session))
   }
   /** Occurrences of a trigger not yet settled: waiting, running, held or awaiting reconciliation. */
   openOccurrences(scope: string, triggerId: string): TriggerOccurrence[] {

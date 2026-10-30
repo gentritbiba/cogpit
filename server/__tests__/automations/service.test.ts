@@ -7,7 +7,7 @@ import { Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const runtime = vi.hoisted(() => ({ busy: false }))
+const runtime = vi.hoisted(() => ({ busy: false as boolean | ((sessionId: string) => boolean) }))
 const edition = vi.hoisted(() => ({ auth: null as null | { signedWebhookIngress?: boolean } }))
 vi.mock("../../edition", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../edition")>()
@@ -15,7 +15,7 @@ vi.mock("../../edition", async (importOriginal) => {
 })
 vi.mock("../../agents/runtimes", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
-  runtimeFor: () => ({ descriptor: { capabilities: { worktrees: true } }, activity: () => ({ live: true, running: runtime.busy }) }),
+  runtimeFor: () => ({ descriptor: { capabilities: { worktrees: true } }, activity: (sessionId: string) => ({ live: true, running: typeof runtime.busy === "function" ? runtime.busy(sessionId) : runtime.busy }) }),
 }))
 
 import { AUTOMATION_KIND, type AutomationDefinition } from "../../../shared/contracts/automations"
@@ -175,13 +175,19 @@ describe("automation runs", () => {
       input: { cwd: task.project.cwd, model: "sonnet", message: "Triage new issues.", worktreeName: expect.stringMatching(/^nightly-triage-/) },
     })
     ;(store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db.prepare("UPDATE trigger_occurrences SET state='completed', data=json_set(data,'$.sessionId','previous-session') WHERE id=?").run(run.id)
-    runtime.busy = true
+    runtime.busy = (sessionId) => sessionId === "previous-session"
     const next = store.occurrence("local", runNow(req(), task.id).id)!
     expect(prepareRun(store, next)).toEqual({ skip: "The previous run is still working" })
+    expect(listRuns(req(), task.id).find((view) => view.id === run.id)?.session).toMatchObject({ sessionId: "previous-session", working: true })
     // Skipped runs in between never hide a session that is still working.
     for (let index = 0; index < 25; index++) store.skipOccurrence("local", runNow(req(), task.id).id, "The previous run is still working")
     expect(prepareRun(store, store.occurrence("local", runNow(req(), task.id).id)!)).toEqual({ skip: "The previous run is still working" })
-    expect(listRuns(req(), task.id).find((view) => view.id === run.id)?.session).toMatchObject({ sessionId: "previous-session", working: true })
+    // Nor do newer runs whose sessions are idle, however many there are.
+    for (let index = 0; index < 51; index++) {
+      const idle = runNow(req(), task.id).id
+      ;(store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db.prepare("UPDATE trigger_occurrences SET state='completed', data=json_set(data,'$.sessionId',?) WHERE id=?").run(`idle-${index}`, idle)
+    }
+    expect(prepareRun(store, store.occurrence("local", runNow(req(), task.id).id)!)).toEqual({ skip: "The previous run is still working" })
     setTaskState(req(), task.id, "paused", origin)
     expect(prepareRun(store, next)).toEqual({ skip: "The task is paused" })
   })
