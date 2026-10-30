@@ -120,8 +120,9 @@ export class RuntimePluginClient {
     else this.syncIntegrations()
   }
   private syncIntegrations(): void {
-    const store = this.state.status?.store
-    this.integrations.sync(store?.available && !this.state.status?.safeMode ? store.plugins : [], store?.privilegedPluginIds ?? [], browserSafeMode())
+    const status = this.state.status
+    const usable = !!status?.store.available && !status.safeMode
+    this.integrations.sync({ plugins: usable ? status.store.plugins : [], privilegedPluginIds: usable ? status.store.privilegedPluginIds ?? [] : [], projects: status?.projects ?? [], platform: status?.runtime.platform ?? "", safeMode: browserSafeMode() })
   }
   start(): void {
     if (this.running) return

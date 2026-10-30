@@ -1,5 +1,7 @@
 import type { DraftMethod, DraftMethodMap } from "@cogpit/plugin-contracts"
 import type { InstalledPlugin } from "../../shared/contracts/plugins"
+import type { PluginProjectSummary } from "../../shared/contracts/pluginManagement"
+import { resolveRuntimeProject } from "./runtimeProject"
 
 /**
  * Release-owned browser code that an installed plugin turns on. Each module
@@ -9,8 +11,10 @@ import type { InstalledPlugin } from "../../shared/contracts/plugins"
  */
 export interface ClientIntegrationContext {
   pluginId: string
-  /** Aborted when the plugin is disabled, uninstalled, loses its grant or provenance, or safe mode starts. */
+  /** Aborted when the plugin is disabled, uninstalled, loses its grant or provenance, or safe mode starts, or the host or signed-in user changes. */
   signal: AbortSignal
+  /** Whether the plugin's current project scope covers a composer directory; re-read on every call. */
+  inScope(cwd: string | null): boolean
 }
 
 export interface DraftsIntegration {
@@ -36,17 +40,21 @@ export function clientIntegrationCapabilities(): Record<string, string> {
 }
 
 interface Activation { key: string; controller: AbortController; integration: DraftsIntegration | null }
+export interface ClientIntegrationState { plugins: readonly InstalledPlugin[]; privilegedPluginIds: readonly string[]; projects: readonly PluginProjectSummary[]; platform: string; safeMode: boolean }
+const EMPTY_STATE: ClientIntegrationState = { plugins: [], privilegedPluginIds: [], projects: [], platform: "", safeMode: false }
 
 export class ClientIntegrationHost {
   private active = new Map<string, Activation>()
   private listeners = new Set<() => void>()
+  private state = EMPTY_STATE
   constructor(private load: (capability: Capability) => (() => Promise<ClientIntegrationModule>) | undefined = loaderFor) {}
 
   /** Activates eligible plugins and disposes the rest; call with every plugin snapshot change. */
-  sync(plugins: readonly InstalledPlugin[], privilegedPluginIds: readonly string[], safeMode: boolean): void {
+  sync(state: ClientIntegrationState): void {
+    this.state = state
     const wanted = new Map<string, InstalledPlugin>()
-    if (!safeMode) for (const plugin of plugins) {
-      if (plugin.enabled && privilegedPluginIds.includes(plugin.id) && CAPABILITIES["composer.drafts"].granted(plugin)) wanted.set(plugin.id, plugin)
+    if (!state.safeMode) for (const plugin of state.plugins) {
+      if (plugin.enabled && state.privilegedPluginIds.includes(plugin.id) && CAPABILITIES["composer.drafts"].granted(plugin)) wanted.set(plugin.id, plugin)
     }
     for (const [id, activation] of this.active) {
       const plugin = wanted.get(id)
@@ -68,9 +76,17 @@ export class ClientIntegrationHost {
     this.active.set(plugin.id, activation)
     void load().then((module) => {
       if (activation.controller.signal.aborted) return
-      activation.integration = module.activate({ pluginId: plugin.id, signal: activation.controller.signal })
+      activation.integration = module.activate({ pluginId: plugin.id, signal: activation.controller.signal, inScope: (cwd) => this.inScope(plugin.id, cwd) })
       this.notify()
     }).catch(() => { if (this.active.get(plugin.id) === activation) this.active.delete(plugin.id) })
+  }
+
+  private inScope(pluginId: string, cwd: string | null): boolean {
+    const plugin = this.state.plugins.find((value) => value.id === pluginId)
+    if (!plugin?.enabled || !this.active.has(pluginId)) return false
+    if (plugin.scope.type === "all") return true
+    const project = resolveRuntimeProject(this.state.projects, cwd, this.state.platform)
+    return !!project && plugin.scope.projectIds.includes(project.id)
   }
 
   private deactivate(id: string): void {
