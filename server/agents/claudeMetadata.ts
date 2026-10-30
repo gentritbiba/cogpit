@@ -170,6 +170,7 @@ export async function readClaudeSessionMeta(
       let foundMessage = false
       let foundTimestamp = false
       let foundAiTitle = false
+      let foundCustomTitle = false
       let foundModel = !!model
       outer: for (let i = 0; i < MAX_CHUNKS && cursor > 0; i++) {
         const readSize = Math.min(CHUNK, cursor)
@@ -203,6 +204,18 @@ export async function readClaudeSessionMeta(
             } catch { /* skip */ }
             continue
           }
+          // Same for the CLI's own title: it is written when the session is
+          // renamed, usually long after the head, and outranks the ai-title
+          if (!foundCustomTitle && line.includes('"custom-title"')) {
+            try {
+              const obj = JSON.parse(line)
+              if (obj.type === "custom-title" && obj.customTitle) {
+                customTitle = obj.customTitle
+                foundCustomTitle = true
+              }
+            } catch { /* skip */ }
+            continue
+          }
           if (!line.includes('"user"')) continue
           try {
             const obj = JSON.parse(line)
@@ -219,7 +232,7 @@ export async function readClaudeSessionMeta(
                 foundMessage = true
               }
             }
-            if (foundMessage && foundTimestamp && foundAiTitle && foundModel) break outer
+            if (foundMessage && foundTimestamp && foundAiTitle && foundCustomTitle && foundModel) break outer
           } catch { continue }
         }
       }

@@ -568,14 +568,20 @@ const claude: AgentDescriptor = {
       typeof dirName === "string"
       && !dirName.startsWith(CODEX_DIR_PREFIX)
       && !dirName.startsWith(COPILOT_DIR_PREFIX),
-    // An absolute path starts with `/` or `\` (`-`) or a drive (`C:\` → `C--`); a drive root alone is `C-`.
+    // An absolute path starts with `/` or `\` (`-`) or a drive (`C:\` → `C--`); a bare drive (`C:`) is `C-`.
     recognizes: (dirName) => /^(?:(?:-|[A-Za-z]--)[A-Za-z0-9-]*|[A-Za-z]-)$/.test(dirName),
     /**
      * Claude Code's own convention: every character outside `[A-Za-z0-9]`
      * becomes `-`, so `/Users/x/proj` and `C:\Users\x\proj` both collapse into a
      * flat name under `~/.claude/projects`.
      */
-    encode: (cwd) => (cwd.replace(/[\\/]+$/, "") || cwd).replace(/[^a-zA-Z0-9]/g, "-"),
+    encode: (cwd) => {
+      const trimmed = cwd.replace(/[\\/]+$/, "")
+      // Stripping the separator of a drive root (`C:\`) would leave `C:`, which
+      // Claude Code does not record: it names that directory `C--`.
+      const isDriveRoot = trimmed !== cwd && /^[A-Za-z]:$/.test(trimmed)
+      return (isDriveRoot ? cwd.slice(0, trimmed.length + 1) : trimmed || cwd).replace(/[^a-zA-Z0-9]/g, "-")
+    },
     /**
      * Best-effort inverse. The encoding is lossy — a literal `-` is
      * indistinguishable from a separator — so a caller that can read the

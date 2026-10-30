@@ -24,6 +24,12 @@ type VisibleCandidate = VisibleItem<TopLevelSessionInfo>
 interface PoolRule {
   limit: number
   perProject?: number
+  /**
+   * Treat `perProject` as a fairness floor rather than a ceiling: once every
+   * project has had its share, the places still free go to the newest
+   * sessions left over, whichever project they belong to.
+   */
+  fill?: boolean
   matches?: (candidate: TopLevelSessionInfo) => boolean
 }
 
@@ -36,6 +42,7 @@ function selectPool(
   // An unparseable per-project cap (NaN) selects nothing, as a slice to it would.
   if (perProject !== undefined && !(perProject > 0)) return Promise.resolve([])
   const taken = new Map<string, number>()
+  if (rule.fill && perProject !== undefined) return takeWithFill(pool, rule.limit, perProject, matches)
   return takeVisible(pool, rule.limit, (candidate) => {
     if (matches && !matches(candidate)) return false
     if (perProject === undefined) return true
@@ -44,6 +51,36 @@ function selectPool(
     taken.set(candidate.dirName, count + 1)
     return true
   })
+}
+
+/**
+ * At most `perProject` candidates of each project, newest first, until `limit`
+ * is reached; the places left over then go to the newest candidates the cap
+ * turned away. Walks the pool to its end only when the cap actually turned
+ * candidates away without the limit being reached.
+ */
+async function takeWithFill(
+  pool: AsyncIterable<VisibleCandidate> | Iterable<VisibleCandidate>,
+  limit: number,
+  perProject: number,
+  matches: PoolRule["matches"],
+): Promise<VisibleCandidate[]> {
+  const taken: VisibleCandidate[] = []
+  const turnedAway: VisibleCandidate[] = []
+  const counts = new Map<string, number>()
+  if (!(limit > 0)) return taken
+  for await (const candidate of pool) {
+    if (matches && !matches(candidate.item)) continue
+    const count = counts.get(candidate.item.dirName) ?? 0
+    if (count >= perProject) {
+      if (turnedAway.length < limit) turnedAway.push(candidate)
+      continue
+    }
+    counts.set(candidate.item.dirName, count + 1)
+    taken.push(candidate)
+    if (taken.length >= limit) return taken
+  }
+  return [...taken, ...turnedAway.slice(0, limit - taken.length)]
 }
 
 interface RecencyRow {
@@ -156,7 +193,9 @@ export async function handleActiveSessions(
       : search ? { limit: SEARCH_POOL }
       // Loading more for a specific project — use totalLimit directly
       : projectFilter ? { limit: totalLimit }
-      : { limit: totalLimit, perProject }
+      // Left unset, the per-project cap only keeps one project from crowding out
+      // the rest; an explicit perProject stays a hard cap.
+      : { limit: totalLimit, perProject, fill: !url.searchParams.has("perProject") }
     const scanPool = [
       ...await selectPool(visibleLive ?? visibleInOrder(live, check, listedSession), rule),
       ...await selectPool(archivedPool, rule),

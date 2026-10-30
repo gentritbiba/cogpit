@@ -348,6 +348,54 @@ describe("getSessionMeta ai-title support", () => {
     const meta = await getSessionMeta(filePath)
     expect(meta.aiTitle).toBe("Long session title")
   })
+
+  describe("custom-title in a large session", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => ({
+      type: "assistant",
+      sessionId: "s1",
+      message: {
+        role: "assistant",
+        model: "claude-fable-5",
+        content: [{ type: "text", text: `filler ${i} ` + "x".repeat(2000) }],
+      },
+    }))
+
+    it("finds a custom-title that only exists past the head window", async () => {
+      const filePath = await writeSession([
+        userLine("kick off a really long session"),
+        ...filler,
+        { type: "custom-title", customTitle: "Renamed late", sessionId: "s1" },
+        userLine("one more message", "2026-06-10T11:00:00Z"),
+      ])
+      const meta = await getSessionMeta(filePath)
+      expect(meta.customTitle).toBe("Renamed late")
+    })
+
+    it("prefers the newest custom-title over the one the head holds", async () => {
+      const filePath = await writeSession([
+        { type: "custom-title", customTitle: "First name", sessionId: "s1" },
+        userLine("kick off a really long session"),
+        ...filler,
+        { type: "custom-title", customTitle: "Second name", sessionId: "s1" },
+        { type: "ai-title", aiTitle: "Generated", sessionId: "s1" },
+        userLine("one more message", "2026-06-10T11:00:00Z"),
+      ])
+      const meta = await getSessionMeta(filePath)
+      expect(meta.customTitle).toBe("Second name")
+      expect(meta.aiTitle).toBe("Generated")
+    })
+
+    it("keeps the head's custom-title when the tail has none", async () => {
+      const filePath = await writeSession([
+        { type: "custom-title", customTitle: "Only name", sessionId: "s1" },
+        userLine("kick off a really long session"),
+        ...filler,
+        userLine("one more message", "2026-06-10T11:00:00Z"),
+      ])
+      const meta = await getSessionMeta(filePath)
+      expect(meta.customTitle).toBe("Only name")
+    })
+  })
 })
 
 describe("getSessionMeta turn count", () => {

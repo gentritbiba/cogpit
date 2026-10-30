@@ -1180,6 +1180,58 @@ describe("project routes", () => {
         ])
       })
 
+      describe("per-project cap", () => {
+        function listProjects(counts: Record<string, number>) {
+          mocks.listTopLevelSessions.claude.mockResolvedValue(
+            Object.entries(counts).flatMap(([dirName, count], projectIndex) =>
+              Array.from({ length: count }, (_, i) =>
+                // Project "proj-a" is the busiest and newest; the others are older.
+                claudeFile(dirName, `${dirName}-${i}.jsonl`, NOW - projectIndex * 1_000_000 - i * 1_000, 500))),
+          )
+          mockedGetSessionMeta.mockImplementation(async (filePath: string) => makeSessionMeta({
+            sessionId: filePath.split("/").at(-1)!.replace(".jsonl", ""),
+            version: "", gitBranch: "main", model: "claude", slug: "", cwd: "/code",
+            firstUserMessage: "hello", lastUserMessage: "bye", timestamp: "", turnCount: 1, lineCount: 2,
+          }))
+          mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+        }
+        const idsOf = (res: { _getData(): string }) =>
+          JSON.parse(res._getData()).map((s: { sessionId: string }) => s.sessionId) as string[]
+
+        it("fills the list with a lone busy project's sessions up to the limit", async () => {
+          listProjects({ "proj-a": 30 })
+          const handler = getRouteHandler(handlers, "/api/active-sessions")
+          const { req, res, next } = createMockReqRes("GET", "/")
+
+          await handler(req, res, next)
+
+          expect(idsOf(res)).toHaveLength(30)
+        })
+
+        it("still reserves room for every project before topping up from the busy one", async () => {
+          listProjects({ "proj-a": 60, "proj-b": 2 })
+          const handler = getRouteHandler(handlers, "/api/active-sessions")
+          const { req, res, next } = createMockReqRes("GET", "/")
+
+          await handler(req, res, next)
+
+          const ids = idsOf(res)
+          expect(ids).toHaveLength(50)
+          expect(ids).toContain("proj-b-0")
+          expect(ids).toContain("proj-b-1")
+        })
+
+        it("keeps an explicit perProject a hard cap", async () => {
+          listProjects({ "proj-a": 30 })
+          const handler = getRouteHandler(handlers, "/api/active-sessions")
+          const { req, res, next } = createMockReqRes("GET", "?perProject=10")
+
+          await handler(req, res, next)
+
+          expect(idsOf(res)).toHaveLength(10)
+        })
+      })
+
       it("brings back a session written well after it was archived", async () => {
         listTwoSessions()
         // Archived ten minutes before its last write: the session was resumed.

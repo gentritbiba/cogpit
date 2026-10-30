@@ -71,6 +71,23 @@ describe("agent registry", () => {
     }
   })
 
+  it("keeps the separator of a drive root, as Claude Code names the directory", () => {
+    const claude = descriptorFor("claude").dirName
+    // `D:\` is `D--` on disk: the colon and the backslash each become a dash.
+    expect(claude.encode("D:\\")).toBe("D--")
+    expect(claude.encode("D:/")).toBe("D--")
+    expect(claude.decode("D--")).toBe("D:\\")
+    expect(claude.decode(claude.encode("D:\\"))).toBe("D:\\")
+    expect(claude.recognizes("D--")).toBe(true)
+    // Only a root keeps its separator; a trailing one elsewhere is still dropped.
+    expect(claude.encode("D:\\work\\proj\\")).toBe("D--work-proj")
+    expect(claude.encode("C:\\work\\proj")).toBe("C--work-proj")
+    // The POSIX root is a bare separator and stays `-`.
+    expect(claude.encode("/")).toBe("-")
+    expect(claude.decode("-")).toBe("/")
+    expect(claude.encode("/tmp/project/")).toBe("-tmp-project")
+  })
+
   it("narrows an arbitrary server string to an agent kind", () => {
     expect(parseAgentKind("codex", "claude")).toBe("codex")
     expect(parseAgentKind("gemini", "claude")).toBe("claude")
