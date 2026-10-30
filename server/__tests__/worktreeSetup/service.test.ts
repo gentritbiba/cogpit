@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { mkdtemp, mkdir, readFile, rm, writeFile, access } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile, access, realpath } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { WorktreeSetupStore } from "../../worktreeSetup/store"
@@ -12,8 +12,10 @@ let root: string
 let cwd: string
 let store: WorktreeSetupStore
 let service: WorktreeSetupService
+let recipeId: number
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "cogpit-setup-test-")); cwd = join(root, "project")
+  root = await realpath(await mkdtemp(join(tmpdir(), "cogpit-setup-test-"))); cwd = join(root, "project")
+  recipeId = 0
   await mkdir(cwd)
   await gitOutput(cwd, ["init"])
   await gitOutput(cwd, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "fixture"])
@@ -23,6 +25,11 @@ beforeEach(async () => {
 afterEach(async () => { await service.close(); await rm(root, { recursive: true, force: true }) })
 async function worktree() { const path = join(root, "external-checkout"); await gitOutput(cwd, ["worktree", "add", "-b", "fixture-worktree", path]); return path }
 async function project(scope = "user-a") { return store.project(scope, cwd) }
+async function recipe(directory: string, source: string) {
+  const file = `setup-${++recipeId}.cjs`
+  await writeFile(join(directory, file), source)
+  return `node ${file}`
+}
 
 it("requires explicit user trust, scopes by account/project, and inherits across external worktrees", async () => {
   const current = await project()
@@ -39,7 +46,7 @@ it("requires explicit user trust, scopes by account/project, and inherits across
 
 it("runs only in initialized cwd and awaits successful setup before the first prompt", async () => {
   const current = await project(); const initialized = await worktree()
-  await store.configure(current, { command: "printf ready > setup-marker; printf setup-output", trusted: true })
+  await store.configure(current, { command: await recipe(initialized, "require('node:fs').writeFileSync('setup-marker', 'ready'); process.stdout.write('setup-output')"), trusted: true })
   const authorization = vi.fn(async () => {})
   let prompt = false
   const result = await service.run({ project: current, worktreeName: "fixture", authorize: authorization, start: async (lifecycle) => {
@@ -58,7 +65,7 @@ it("runs only in initialized cwd and awaits successful setup before the first pr
 
 it("retains partial changes after failure, retries once in the same worktree and deduplicates readiness", async () => {
   const current = await project(); const initialized = await worktree()
-  await store.configure(current, { command: "printf partial > marker; printf failed; exit 7", trusted: true })
+  await store.configure(current, { command: await recipe(initialized, "require('node:fs').writeFileSync('marker', 'partial'); process.stdout.write('failed'); process.exitCode = 7"), trusted: true })
   const prompt = vi.fn()
   const running = service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => {
     const first = beforeFirstTurn({ cwd: initialized })
@@ -68,7 +75,7 @@ it("retains partial changes after failure, retries once in the same worktree and
   await vi.waitFor(() => expect(current.state.operations[0]).toMatchObject({ stage: "failed", exitCode: 7 }))
   expect(prompt).not.toHaveBeenCalled()
   expect(await readFile(join(initialized, "marker"), "utf8")).toBe("partial")
-  await store.configure(current, { command: "printf retry-ok", trusted: true })
+  await store.configure(current, { command: await recipe(initialized, "process.stdout.write('retry-ok')"), trusted: true })
   service.act(current, current.state.operations[0].id, "retry")
   await running
   expect(prompt).toHaveBeenCalledOnce()
@@ -101,7 +108,7 @@ it("never discovers or executes repository-declared commands without a recipe", 
 it("honors native custom hook directories and returns them accurately, while checking their canonical path", async () => {
   const current = await project(); const custom = join(root, "hook-checkout")
   await mkdir(custom)
-  await store.configure(current, { command: "printf hook-ready > marker", trusted: true })
+  await store.configure(current, { command: await recipe(custom, "require('node:fs').writeFileSync('marker', 'hook-ready')"), trusted: true })
   await service.run({ project: current, worktreeName: "custom", start: async ({ beforeFirstTurn }) => beforeFirstTurn({ cwd: custom, nativeWorktree: true }) })
   expect(await readFile(join(custom, "marker"), "utf8")).toBe("hook-ready")
   expect(current.state.operations[0].cwd).toBe(custom)
@@ -125,7 +132,7 @@ it("refuses unrelated cwd before command I/O", async () => {
 
 it("bounds noisy output and persists the newest tail", async () => {
   const current = await project(); const initialized = await worktree()
-  await store.configure(current, { command: "head -c 100000 /dev/zero | tr '\\0' x; printf newest", trusted: true })
+  await store.configure(current, { command: await recipe(initialized, "process.stdout.write('x'.repeat(100000)); process.stdout.write('newest')"), trusted: true })
   await service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => beforeFirstTurn({ cwd: initialized }) })
   const operation = current.state.operations[0]
   expect(operation.output.length).toBeLessThanOrEqual(64000)
@@ -138,7 +145,7 @@ it("creates managed worktrees without reusing or deleting user-owned paths", asy
   const second = await prepareManagedWorktree(request)
   expect(first.cwd).not.toBe(second.cwd)
   expect(first.worktreeName).toBeUndefined()
-  expect(await gitOutput(first.cwd, ["rev-parse", "--show-toplevel"])).toBe(first.cwd)
+  expect(await realpath(await gitOutput(first.cwd, ["rev-parse", "--show-toplevel"]))).toBe(await realpath(first.cwd))
   await writeFile(join(first.cwd, "dirty"), "preserved")
   expect(await readFile(join(first.cwd, "dirty"), "utf8")).toBe("preserved")
 })
@@ -146,7 +153,7 @@ it("creates managed worktrees without reusing or deleting user-owned paths", asy
 
 it("terminates setup if native creation fails while its readiness callback is running", async () => {
   const current = await project(); const initialized = await worktree()
-  await store.configure(current, { command: "printf running; sleep 30", trusted: true })
+  await store.configure(current, { command: await recipe(initialized, "process.stdout.write('running'); setInterval(() => {}, 1000)"), trusted: true })
   await expect(service.run({ project: current, worktreeName: "fixture", start: async ({ beforeFirstTurn }) => {
     const pending = beforeFirstTurn({ cwd: initialized })
     void pending.catch(() => {})
