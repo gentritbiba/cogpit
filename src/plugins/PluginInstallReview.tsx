@@ -5,20 +5,23 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 const integrationNames: Readonly<Record<string, string>> = { github: "GitHub", vercel: "Vercel", cloudflare: "Cloudflare" }
 const integrationLabels: Readonly<Record<string, string>> = {
   actions: "workflow runs", actionJobs: "workflow jobs and steps", pulls: "pull requests", pullFiles: "pull request files",
-  issues: "issues", deployments: "deployments", buildLogs: "build logs", workspace: "Worker configuration and account", version: "version details",
+  issues: "issues", pullReview: "pull request changes and patches", deployments: "deployments", buildLogs: "build logs", workspace: "Worker configuration and account", version: "version details",
 }
 
 function integrationLine(integrationId: string, operation: string): string {
   if (operation === "pullSessions") return "Read related Cogpit sessions for the selected GitHub repository"
   if (operation === "mergePull") return "Merge pull requests in the selected GitHub repository when you confirm, using this host's signed-in CLI"
+  if (operation === "submitReview") return "Post review comments to pull requests in the selected GitHub repository when you submit them, using this host's signed-in CLI"
+  if (operation === "reviewGuide" || operation === "cancelReviewGuide") return "Read and cancel the review guides this host generates for pull requests"
   return `Read ${integrationNames[integrationId]} ${integrationLabels[operation]} using this host's signed-in CLI`
 }
 
 function accessLines(manifest: PluginManifest): string[] {
   const permissions = manifest.permissions
-  return [
+  return [...new Set([
     ...permissions.context.map((kind) => kind === "session.identity" ? "Recognise the open session among related sessions, by handle only" : "Read the selected project's name and plugin identifier"),
-    ...permissions.composer.map(() => "Append text to your draft message"),
+    ...permissions.composer.map((kind) => kind === "context" ? "Add file references with notes to your draft message" : "Append text to your draft message"),
+    ...permissions.review.map(() => "Ask to start a pull request session in a new worktree, which you confirm and choose the provider for"),
     ...permissions.navigation.map((kind) => kind === "external" ? "Ask Cogpit to open HTTPS links" : "Open permitted sessions"),
     ...(permissions.storage ? [`Store up to ${permissions.storage.quotaKiB} KiB of ${permissions.storage.scope} settings`] : []),
     ...(manifest.contributes.settings ? [`Add ${manifest.contributes.settings.fields.length} ${manifest.contributes.settings.scope} settings fields`] : []),
@@ -28,7 +31,7 @@ function accessLines(manifest: PluginManifest): string[] {
     ...(manifest.contributes.dictation ? [`Add a ${manifest.contributes.dictation.title} button that records your microphone only while you dictate, and sends the recording to connection ${manifest.contributes.dictation.connection} to transcribe`] : []),
     ...permissions.connections.flatMap((connection) => connection.operations.map((operation) => `Use connection ${connection.id}: ${operation}`)),
     ...permissions.integrations.flatMap((integration) => integration.operations.map((operation) => integrationLine(integration.id, operation))),
-  ]
+  ])]
 }
 
 export function PluginInstallReview({ preview }: { preview: PluginInstallPreview }) {

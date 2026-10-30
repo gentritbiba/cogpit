@@ -22,9 +22,20 @@ export function clientRuntimeDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
     runtimes: support.supported ? [RUNTIME] : [],
-    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0" } : {},
+    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", "composer.dictation": "1.0.0" } : {},
     browser: support.browser,
   }
+}
+
+export interface ReviewSessionInput {
+  number: number
+  headSha: string
+  purpose: "work" | "guide"
+  agent: string
+  instanceId: string
+  model?: string
+  effort?: string
+  instruction?: string
 }
 
 export class PluginRequestError extends Error {
@@ -271,6 +282,10 @@ export class RuntimePluginClient {
   }
   async resolveSession(id: string, handle: string, signal: AbortSignal): Promise<{ dirName: string; fileName: string }> {
     return z.strictObject({ dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await this.json(`leases/${encodeURIComponent(id)}/session`, { handle }, "POST", signal))
+  }
+  /** Starts the review session the user confirmed for a plugin's `review.start` request. */
+  async startReviewSession(id: string, input: ReviewSessionInput, signal: AbortSignal): Promise<{ sessionId: string; dirName: string; fileName: string }> {
+    return z.strictObject({ sessionId: z.string().min(1).max(256), dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await this.json(`leases/${encodeURIComponent(id)}/review-session`, input, "POST", signal))
   }
   /** The opaque handle a plugin on this lease sees for the open session. */
   async sessionHandle(id: string, address: { dirName: string; fileName: string }, signal: AbortSignal): Promise<string> {

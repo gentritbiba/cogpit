@@ -22,6 +22,13 @@ export type BrowserSocketStatus = "idle" | "connecting" | "connected" | "disconn
 export interface BrowserFrame {
   bitmap: ImageBitmap
   header: FrameHeader
+  /**
+   * The page as last reported when the frame arrived, before it was decoded,
+   * and that report's generation: a frame keeps naming the page it was drawn
+   * for even when the page changes while it decodes.
+   */
+  page: PageMessage | null
+  pageGeneration: number
 }
 
 export interface UseBrowserSocket {
@@ -32,6 +39,8 @@ export interface UseBrowserSocket {
   followed: string | null
   frame: BrowserFrame | null
   lastFrameAt: number | null
+  /** Bumped whenever the reported page's tab or URL changes. */
+  pageGeneration: number
   /** Last `error` message from the transport, cleared by the next status. */
   error: string | null
   send: (message: BrowserClientMessage) => void
@@ -97,7 +106,10 @@ export function useBrowserSocket(
   const [followed, setFollowed] = useState<string | null>(null)
   const [frame, setFrame] = useState<BrowserFrame | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null)
+  const [pageGeneration, setPageGeneration] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  // The page each frame is attributed to, read synchronously as frames arrive.
+  const pageRef = useRef<{ page: PageMessage | null; generation: number }>({ page: null, generation: 0 })
 
   const wsRef = useRef<WebSocket | null>(null)
   const frameRef = useRef<BrowserFrame | null>(null)
@@ -110,6 +122,8 @@ export function useBrowserSocket(
   useEffect(() => {
     setState(null)
     setPage(null)
+    pageRef.current = { page: null, generation: pageRef.current.generation + 1 }
+    setPageGeneration(pageRef.current.generation)
     setTabs(NO_TABS)
     setFollowed(null)
     setError(null)
@@ -151,8 +165,9 @@ export function useBrowserSocket(
         return
       }
       const sequence = ++run.issued
+      const { page: drawnFor, generation } = pageRef.current
       void createImageBitmap(blob).then(
-        (bitmap) => show({ bitmap, header }, sequence),
+        (bitmap) => show({ bitmap, header, page: drawnFor, pageGeneration: generation }, sequence),
         () => undefined,
       )
     }
@@ -165,9 +180,14 @@ export function useBrowserSocket(
           setState((previous) => (previous && sameStatus(previous, message) ? previous : message))
           setError(null)
           break
-        case "page":
-          setPage((previous) => (previous && samePage(previous, message) ? previous : message))
+        case "page": {
+          const previous = pageRef.current.page
+          const moved = !previous || previous.targetId !== message.targetId || previous.url !== message.url
+          pageRef.current = { page: previous && samePage(previous, message) ? previous : message, generation: pageRef.current.generation + (moved ? 1 : 0) }
+          if (moved) setPageGeneration(pageRef.current.generation)
+          setPage((current) => (current && samePage(current, message) ? current : message))
           break
+        }
         case "tabs":
           setTabs((previous) => (sameTabs(previous, message.tabs) ? previous : message.tabs))
           setFollowed(message.followed)
@@ -240,5 +260,5 @@ export function useBrowserSocket(
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message))
   }, [])
 
-  return { status, state, page, tabs, followed, frame, lastFrameAt, error, send }
+  return { status, state, page, tabs, followed, frame, lastFrameAt, pageGeneration, error, send }
 }

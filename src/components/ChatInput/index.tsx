@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
+import { useState, useSyncExternalStore, useLayoutEffect, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
@@ -7,8 +7,11 @@ import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
-import { useImageUpload } from "./useImageUpload"
-import { keepRefusedDraft, takeRefusedDraft } from "./refusedDrafts"
+import { attachmentSrc, useImageUpload, type UploadedImage } from "./useImageUpload"
+import { canRecall, composerScope, draftStore, mergeDrafts } from "./draftStore"
+import { StashControls } from "./StashControls"
+import { ContextChips } from "./ContextChips"
+import { contextRefusal, validateContext, EMPTY_DRAFT, isDraftEmpty, parseComposerMessage, renderComposerMessage, type ComposerAttachment, type ComposerContextItem, type ComposerDraft } from "../../../shared/session/composerContext"
 import { ActionButtons } from "./ActionButtons"
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
@@ -29,6 +32,16 @@ export interface ChatInputHandle {
   getText: () => string
   /** Set the input text (for draft text restoration). */
   setText: (text: string) => void
+  /**
+   * Add a context item, with the images it brings, to the draft. Returns why
+   * it could not be added (a bound was reached), or null. Adding an item whose
+   * id the draft already holds keeps the draft as it is.
+   */
+  addContext: (item: ComposerContextItem, attachments?: ComposerAttachment[]) => string | null
+  /** Everything the composer holds, serializable: text, context and image bytes. */
+  getDraft: () => ComposerDraft
+  /** Replace what the composer holds with `draft`. */
+  setDraft: (draft: ComposerDraft) => void
 }
 
 interface ChatInputProps {
@@ -36,6 +49,8 @@ interface ChatInputProps {
   allowImages?: boolean
   agentKind?: AgentKind | null
   projectCwd?: string | null
+  /** Provider/workspace identity for a pending composer. */
+  composerIdentity?: string | null
   /** Mobile-only control placed at the leading edge of the composer. */
   leadingAccessory?: ReactNode
   /**
@@ -116,7 +131,19 @@ function getActionRowClass(stacked: boolean, isMultiline: boolean): string {
   return "col-start-3 row-start-1 pr-1.5 pb-1.5"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false }, ref) {
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(props, ref) {
+  const { session, sessionSource } = useSessionContext()
+  const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", session?.sessionId ?? "pending"])
+  const scope = composerScope(props.projectCwd ?? session?.cwd, identity)
+  return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
+}))
+
+const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: string }>(function ScopedChatInput({ scope, allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false }, ref) {
+  const store = useMemo(() => draftStore(scope), [scope])
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const initial = useRef(snapshot.record.draft).current
+  const mounted = useRef(true)
+  const recallIndex = useRef<number | null>(null)
   const canAccessHostFiles = useCapability("hostFiles")
   const {
     session,
@@ -135,57 +162,93 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
 
-  const [text, setText] = useState("")
+  const [text, setText] = useState(initial.text)
   const [isMultiline, setIsMultiline] = useState(false)
   const [planResponding, setPlanResponding] = useState(false)
   const [planResponseError, setPlanResponseError] = useState<string | null>(null)
   const planRespondingRequestRef = useRef<string | null>(null)
   const planRequestIdRef = useRef<string | null>(null)
   const isMultilineRef = useRef(false)
-  const textRef = useRef("")
+  const textRef = useRef(initial.text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => { textRef.current = text }, [text])
+  textRef.current = text
 
   const updateMultiline = useCallback((v: boolean) => { isMultilineRef.current = v; setIsMultiline(v) }, [])
 
-  const { images, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, restoreImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(allowImages)
+  const { images, isDragOver, imageError, hasUnsupportedAttachments, uploading, dismissImageError, removeImage, clearImages, restoreImages, attachImages, removeContextImages, handleDragOver, handleDragLeave, handleDrop, handlePaste: handleImagePaste } = useImageUpload(allowImages, initial.attachments)
   const imagesRef = useRef(images)
-  useEffect(() => { imagesRef.current = images }, [images])
+  imagesRef.current = images
+  const [context, setContext] = useState<ComposerContextItem[]>(initial.context)
+  const contextRef = useRef(context)
+  contextRef.current = context
+  const [contextError, setContextError] = useState<string | null>(null)
+  const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
 
-  const sessionId = session?.sessionId ?? null
-  // Which session the composer shows, until it goes away.
-  const shownRef = useRef<{ sessionId: string | null } | null>(null)
-  // The session whose refused message the composer holds.
-  const refusedFromRef = useRef<string | null>(null)
+  const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
+  const applyDraft = useCallback((draft: ComposerDraft) => {
+    textRef.current = draft.text
+    contextRef.current = draft.context
+    imagesRef.current = draft.attachments
+    setText(draft.text)
+    setContext(draft.context)
+    clearImages()
+    if (draft.attachments.length) restoreImages(draft.attachments)
+    setContextError(validateContext(draft.context))
+  }, [clearImages, restoreImages])
 
-  // A refused message comes back to the next empty composer that shows its
-  // session, and one this composer still holds leaves with that session. App
-  // keeps one composer across sessions and the next session's run reads the
-  // refs before the text renders, so they move with the text.
+  const addContext = useCallback((item: ComposerContextItem, attachments: ComposerAttachment[] = []): string | null => {
+    recallIndex.current = null
+    const refusal = attachments.length > 0 && !allowImages
+      ? "The selected model does not accept images, so this capture cannot be attached. Switch models and try again."
+      : contextRefusal(contextRef.current, item)
+    if (refusal) {
+      setContextError(refusal)
+      return refusal
+    }
+    if (contextRef.current.some((existing) => existing.id === item.id)) return null
+    contextRef.current = [...contextRef.current, item]
+    setContext(contextRef.current)
+    attachImages(attachments.map((attachment) => ({ ...attachment, contextId: item.id })))
+    setContextError(null)
+    return null
+  }, [attachImages, allowImages])
+
+  const removeContext = useCallback((id: string) => {
+    recallIndex.current = null
+    contextRef.current = contextRef.current.filter((item) => item.id !== id)
+    setContext(contextRef.current)
+    removeContextImages(id)
+    setContextError(null)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [removeContextImages])
+
+  useLayoutEffect(() => { store.saveDraft(draftNow()) }, [text, context, images, store, draftNow])
+  const wasUploading = useRef(false)
+  useLayoutEffect(() => {
+    if (uploading || wasUploading.current) store.markUpload(Boolean(uploading))
+    wasUploading.current = Boolean(uploading)
+  }, [uploading, store])
   useEffect(() => {
-    const holdsMessage = () => textRef.current.trim() !== "" || imagesRef.current.length > 0
-    shownRef.current = { sessionId }
-    const draft = sessionId && !holdsMessage() ? takeRefusedDraft(sessionId) : undefined
-    if (draft) {
-      refusedFromRef.current = sessionId
-      textRef.current = draft.text
-      imagesRef.current = draft.images
-      setText(draft.text)
-      restoreImages(draft.images)
+    mounted.current = true
+    const unload = (event: BeforeUnloadEvent) => {
+      if (store.getSnapshot().error) { event.preventDefault(); event.returnValue = "" }
     }
-    return () => {
-      shownRef.current = null
-      if (sessionId && refusedFromRef.current === sessionId && holdsMessage()) {
-        keepRefusedDraft(sessionId, { text: textRef.current, images: imagesRef.current })
-        textRef.current = ""
-        imagesRef.current = []
-        setText("")
-        clearImages()
-      }
-      refusedFromRef.current = null
-    }
-  }, [sessionId, restoreImages, clearImages])
+    window.addEventListener("beforeunload", unload)
+    return () => { mounted.current = false; window.removeEventListener("beforeunload", unload) }
+  }, [store])
+
+  const saveStash = useCallback(() => {
+    if (uploading) { setContextError("Wait for images to finish loading before saving."); return }
+    if (!store.save(draftNow())) return
+    recallIndex.current = null
+    applyDraft(EMPTY_DRAFT)
+    textareaRef.current?.focus()
+  }, [store, draftNow, applyDraft, uploading])
+  const restoreStash = useCallback((id: string, mode: "replace" | "swap" | "merge") => {
+    const restored = store.restore(id, mode)
+    if (restored) { recallIndex.current = null; applyDraft(restored); textareaRef.current?.focus() }
+  }, [store, applyDraft])
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
@@ -242,7 +305,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     // The question may no longer be answerable server-side (tool already
     // errored, session restarted, …). Never swallow the user's text — deliver
     // it as a regular message instead so the input can't appear frozen.
-    if (!result.ok) onSend(answer)
+    return result.ok || await onSend(answer)
   }, [pendingInteraction, session?.sessionId, onSend])
 
   const submitPlanResponse = useCallback(async (
@@ -320,45 +383,37 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   const submitText = useCallback(async (message: string) => {
     const trimmed = message.trim()
-    if (!trimmed && images.length === 0) return
-    if (!allowImages && images.length > 0) return
+    if (!trimmed && images.length === 0 && context.length === 0) return
+    if ((!allowImages && images.length > 0) || uploading) return
+    const refusal = validateContext(context)
+    if (refusal) { setContextError(refusal); return }
 
-    if (pendingInteraction?.type === "question") {
-      void submitUserQuestion(trimmed)
-      setText("")
-      updateMultiline(false)
-      if (textareaRef.current) textareaRef.current.style.height = "auto"
-      return
-    }
-
-    if (pendingInteraction?.type === "plan" && pendingInteraction.provider === "copilot") {
-      if (!trimmed) return
-      const submitted = await submitPlanResponse(false, undefined, trimmed)
-      if (!submitted) return
-      setText("")
-      updateMultiline(false)
-      if (textareaRef.current) textareaRef.current.style.height = "auto"
-      return
-    }
+    const textResponse = pendingInteraction?.type === "question" || (pendingInteraction?.type === "plan" && pendingInteraction.provider === "copilot")
+    if (textResponse && !trimmed) return
 
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
-    const draft = { text: message, images }
-    refusedFromRef.current = null
-    void onSend(trimmed, imagePayload).then((sent) => {
-      if (sent) return
-      if (shownRef.current?.sessionId !== sessionId) {
-        if (sessionId) keepRefusedDraft(sessionId, draft)
-        return
-      }
-      refusedFromRef.current = sessionId
-      setText((current) => current || draft.text)
-      restoreImages(draft.images)
-    })
-    setText("")
-    clearImages()
+    const draft: ComposerDraft = { v: 1, text: message, context, attachments: images }
+    // A capture names its image by where it lands among the images sent.
+    const sentContext = context.map((item) => item.kind === "browser" ? { ...item, image: images.findIndex((image) => image.contextId === item.id) + 1 } : item)
+    const entryId = store.save(draft, "sending")
+    if (!entryId) return
+    recallIndex.current = null
+    applyDraft(textResponse ? { ...draft, text: "" } : EMPTY_DRAFT)
+    const settle = (sent: boolean) => {
+      store.settle(entryId, sent)
+      if (mounted.current && !sent && isDraftEmpty(draftNow())) applyDraft(store.getSnapshot().record.draft)
+    }
+    try {
+      const delivery = pendingInteraction?.type === "question"
+        ? submitUserQuestion(trimmed).then(Boolean)
+        : textResponse ? submitPlanResponse(false, undefined, trimmed)
+          : session?.sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
+            : onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload, (identity) => store.created(entryId, identity))
+      void delivery.then(settle, () => settle(false))
+    } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [images, allowImages, onSend, clearImages, restoreImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, store, draftNow, applyDraft])
   const handleSubmit = useCallback(() => submitText(text), [submitText, text])
 
   // Spoken text continues the draft; sending it sends the whole draft.
@@ -373,7 +428,50 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const recording = dictationStatus === "recording"
   const dictating = dictationStatus === "starting" || recording || dictationStatus === "transcribing"
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+  // A copied message with context pastes back as its chips, the same items with the same ids.
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    recallIndex.current = null
+    const pasted = event.clipboardData?.getData("text/plain")
+    const parsed = pasted ? parseComposerMessage(pasted) : null
+    if (parsed && !parsed.context.some((item) => item.kind === "browser")) {
+      event.preventDefault()
+      try {
+        const combined = mergeDrafts(draftNow(), { v: 1, text: "", context: parsed.context, attachments: [] })
+        contextRef.current = combined.context
+        setContext(combined.context)
+      } catch (error) {
+        const persisted = store.retainImport(pasted!)
+        setContextError(`${error instanceof Error ? error.message : "Cannot import context"}. The complete pasted message is kept in Saved prompts${persisted ? "." : " in this tab; download a backup before leaving."}`)
+        return
+      }
+      if (parsed.text) {
+        const element = event.currentTarget
+        const start = element.selectionStart ?? textRef.current.length
+        const end = element.selectionEnd ?? start
+        setText(textRef.current.slice(0, start) + parsed.text + textRef.current.slice(end))
+      }
+      return
+    }
+    handleImagePaste(event)
+  }, [draftNow, store, handleImagePaste])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s") {
+      e.preventDefault(); saveStash(); return
+    }
+    const element = e.currentTarget
+    if (canRecall({ ...e, isComposing: e.nativeEvent.isComposing }, element.selectionStart, element.selectionEnd, draftNow(), recallIndex.current !== null, showSlash || showFiles)) {
+      const history = store.getSnapshot().record.entries.filter((entry) => entry.kind === "sent").reverse()
+      const next = e.key === "ArrowUp" ? Math.min((recallIndex.current ?? -1) + 1, history.length - 1) : Math.max((recallIndex.current ?? 0) - 1, -1)
+      if (history.length && (e.key === "ArrowUp" || recallIndex.current !== null)) {
+        e.preventDefault()
+        recallIndex.current = next < 0 ? null : next
+        applyDraft(history[next]?.draft ?? EMPTY_DRAFT)
+        focusComposerAtEnd()
+        return
+      }
+    }
     if (showFiles && e.key === "Escape") {
       e.preventDefault()
       setFileSuggestionsDismissed(true)
@@ -394,19 +492,29 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     if (recording && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); dictation?.finish(true); return }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dictating) void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, dictationStatus, dictating, recording, dictation])
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, saveStash, draftNow, store, applyDraft, focusComposerAtEnd, dictationStatus, dictating, recording, dictation])
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { recallIndex.current = null; textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
     getText: () => textRef.current,
     setText: (newText: string) => {
+      recallIndex.current = null
+      textRef.current = newText
       setText(newText)
       setFileSuggestionsDismissed(false)
       requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
     },
-  }), [updateMultiline])
+    addContext,
+    getDraft: draftNow,
+    setDraft: (draft: ComposerDraft) => {
+      recallIndex.current = null
+      applyDraft(draft)
+      setFileSuggestionsDismissed(false)
+      requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
+    },
+  }), [updateMultiline, addContext, draftNow, applyDraft])
 
   const isPlanApproval = pendingInteraction?.type === "plan"
   const isUserQuestion = pendingInteraction?.type === "question"
@@ -414,7 +522,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   // With session controls inside the card the message always gets its own
   // row, so the inline single-line grid only applies to the mobile composer.
   const stacked = Boolean(footer)
-  const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
+  const hasContent = (text.trim().length > 0 || images.length > 0 || context.length > 0) && !hasUnsupportedAttachments
   const isSteering = capabilitiesFor(agentKind ?? DEFAULT_AGENT_KIND).midTurnSteering && canInterrupt
   const suggestionListId = showFiles ? "file-suggestions" : showSlash ? "slash-suggestions" : undefined
   const activeSuggestionId = showFiles && fileSuggestions.files[fileSelectedIndex]
@@ -474,12 +582,23 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             no suggestion, which is most turns. */}
         <PromptSuggestionBar suggestion={promptSuggestion} onAccept={applySuggestion} />
 
+        <StashControls store={store} snapshot={snapshot} draft={{ v: 1, text, context, attachments: images }} onSave={saveStash} onRestore={restoreStash} />
+        <ContextChips items={context} attachments={images} onRemove={removeContext} onOpenQuoteSource={openQuoteSource} className="mb-2" />
+        {contextError && (
+          <div role="alert" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">
+            <span className="flex-1">{contextError}</span>
+            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setContextError(null)} className="text-muted-foreground" aria-label="Dismiss context notice">
+              <X data-icon="icon" />
+            </Button>
+          </div>
+        )}
+
         {images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {images.map((img, i) => (
+            {images.map((img: UploadedImage, i) => (
               <div key={img.id} className="motion-list-item relative group/thumb">
-                <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
-                <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeImage(i)} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
+                <img src={attachmentSrc(img)} alt={img.contextId ? `Capture for ${context.find((item) => item.id === img.contextId)?.kind === "browser" ? "browser annotation" : "context"} ${i + 1}` : `Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
+                <Button type="button" variant="ghost" size="icon-xs" onClick={() => { recallIndex.current = null; if (img.contextId) removeContext(img.contextId); else removeImage(i) }} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
                   <X className="size-3" data-icon="icon" />
                 </Button>
               </div>
@@ -571,4 +690,4 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       </div>
     </div>
   )
-}))
+})

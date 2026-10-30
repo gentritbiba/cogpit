@@ -41,7 +41,7 @@ describe("usePtyChat", () => {
     )
 
     await act(async () => {
-      await result.current.sendMessage("hello")
+      expect(await result.current.sendMessage("hello")).toBe(false)
     })
 
     expect(result.current.status).toBe("idle")
@@ -287,7 +287,7 @@ describe("usePtyChat", () => {
     )
 
     await act(async () => {
-      await result.current.sendMessage("hello")
+      expect(await result.current.sendMessage("hello")).toBe(false)
     })
 
     expect(result.current.status).toBe("idle")
@@ -492,7 +492,7 @@ describe("usePtyChat", () => {
     )
 
     await act(async () => {
-      await result.current.sendMessage("hello")
+      expect(await result.current.sendMessage("hello")).toBe(false)
     })
 
     expect(result.current.status).toBe("error")
@@ -656,4 +656,15 @@ describe("usePtyChat", () => {
     // Now status should be "connected"
     expect(result.current.isConnected).toBe(true)
   })
+})
+
+
+it("forwards the exact pending-send destination callback only for that creation", async () => {
+  const created = vi.fn()
+  const identity = { sessionId: "created-a", cwd: "/actual-worktree", dirName: "actual-project" }
+  const onCreateSession = vi.fn(async (_text, _images, callback) => { callback(identity); return identity.sessionId })
+  const { result } = renderHook(() => usePtyChat({ sessionSource: null, onCreateSession }))
+  await act(async () => { expect(await result.current.sendMessage("first", undefined, created)).toBe(true) })
+  expect(onCreateSession).toHaveBeenCalledWith("first", undefined, created)
+  expect(created).toHaveBeenCalledExactlyOnceWith(identity)
 })

@@ -1,3 +1,5 @@
+import { isSessionStarting } from "./runtimeTypes"
+import { beforeFirstTurn } from "./startup"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
@@ -123,6 +125,7 @@ async function load(id: string, request: SendRequest): Promise<LiveSession> {
   return session
 }
 async function send(id: string, request: SendRequest) {
+  if (isSessionStarting(id)) return { delivery: "busy" as const }
   if (request.onlyWhileRunning) return { delivery: "busy" as const }
   if (sending.has(id)) return { delivery: "busy" as const }
   sending.add(id)
@@ -185,6 +188,7 @@ async function respond(sessionId: string, requestId: string, decision: ApprovalD
 export const acpRuntime: AgentRuntime = {
   kind: "acp", descriptor,
   async start(request) {
+    request.signal?.throwIfAborted()
     const connected = await connect()
     const native = await bounded(connected.agent.request("session/new", { cwd: request.cwd, mcpServers: [] }, { cancellationSignal: AbortSignal.timeout(30000) }), 30000)
     const id = randomUUID()
@@ -195,8 +199,9 @@ export const acpRuntime: AgentRuntime = {
     writeFileSync(path.filePath, JSON.stringify({ type: "acp_session", sessionId: id, nativeSessionId: native.sessionId, cwd: request.cwd, timestamp: new Date().toISOString() }) + "\n", { mode: 0o600 })
     sessions.set(id, { nativeId: native.sessionId, cwd: request.cwd, filePath: path.filePath, running: false, configOptions: native.configOptions ?? undefined })
     reportSessionId(request, id)
+    try { await beforeFirstTurn(request, { sessionId: id, cwd: request.cwd }) } catch (error) { sessions.delete(id); throw error }
     if (request.message || request.images?.length) { const outcome = await send(id, request); void outcome.completion?.catch(() => {}) }
-    return { sessionId: id, dirName, ...path, initialContent: readFileSync(path.filePath, "utf8") }
+    return { sessionId: id, dirName, cwd: request.cwd, ...path, initialContent: readFileSync(path.filePath, "utf8") }
   },
   send,
   async interrupt(id) {

@@ -1,5 +1,7 @@
 import type { ServerResponse } from "node:http"
 import type { AgentFormat } from "../../../shared/session/agents"
+import { RESULT_PROJECTION } from "../../../shared/contracts/toolResults"
+import { projectLines, type TranscriptAddress } from "../../agents/resultRefs"
 import { openTranscript, readTranscriptText } from "../../agents/transcriptFile"
 import { sendJson } from "../../http"
 import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
@@ -19,21 +21,26 @@ const MAX_BEFORE_WINDOW_BYTES = 4 * 1024 * 1024
 /** Initial window for reading a transcript's last lines on a `?before=` page. */
 const LAST_LINES_BYTES = 65536
 
+/** Each line's native byte offset; identical lines share the first, which holds the same bytes. */
+type LineOffsets = Map<string, number>
+
 interface TailResult {
   lines: string[]
   byteOffset: number
   totalSize: number
+  offsets: LineOffsets
 }
 
 interface RangeResult {
   lines: string[]
   byteOffset: number
+  offsets: LineOffsets
 }
 
 /** Names the raw lines a transcript's agent writes only for itself. */
 type NoiseTest = (line: string) => boolean
 
-type PageFormat = Pick<AgentFormat, "isNoiseLine" | "pageHeaderLine">
+type PageFormat = Pick<AgentFormat, "isNoiseLine" | "pageHeaderLine" | "projectResults">
 
 const countLines = (lines: readonly string[], isNoise: NoiseTest): number =>
   lines.reduce((count, line) => (isNoise(line) ? count : count + 1), 0)
@@ -41,6 +48,7 @@ const countLines = (lines: readonly string[], isNoise: NoiseTest): number =>
 interface HeaderResult {
   lines: string[]
   bytesRead: number
+  offsets: LineOffsets
 }
 
 const NEWLINE = 0x0a
@@ -58,18 +66,35 @@ function extractCompleteLines(buf: Buffer, readStart: number, truncatedEnd: bool
   let contentStart = 0
   if (readStart > 0) {
     const firstNewline = buf.indexOf(NEWLINE)
-    if (firstNewline === -1) return { lines: [], byteOffset: readStart }
+    if (firstNewline === -1) return { lines: [], byteOffset: readStart, offsets: new Map() }
     contentStart = firstNewline + 1
   }
   let content = buf.subarray(contentStart)
   if (truncatedEnd) {
     const lastNewline = content.lastIndexOf(NEWLINE)
-    if (lastNewline === -1) return { lines: [], byteOffset: readStart }
+    if (lastNewline === -1) return { lines: [], byteOffset: readStart, offsets: new Map() }
     content = content.subarray(0, lastNewline + 1)
   }
-  const lines = content.toString("utf-8").split("\n").filter((l) => l.trim().length > 0)
-  if (lines.length === 0) return { lines: [], byteOffset: readStart }
-  return { lines, byteOffset: readStart + contentStart }
+  const { lines, offsets } = splitLines(content, readStart + contentStart)
+  if (lines.length === 0) return { lines: [], byteOffset: readStart, offsets }
+  return { lines, byteOffset: readStart + contentStart, offsets }
+}
+
+/** Non-blank lines of `content`, with each one's byte offset counted on the raw bytes from `start`. */
+function splitLines(content: Buffer, start: number): { lines: string[]; offsets: LineOffsets } {
+  const lines: string[] = []
+  const offsets: LineOffsets = new Map()
+  for (let from = 0; from < content.length;) {
+    const newline = content.indexOf(NEWLINE, from)
+    const end = newline === -1 ? content.length : newline
+    const line = content.subarray(from, end).toString("utf-8")
+    if (line.trim().length > 0) {
+      lines.push(line)
+      if (!offsets.has(line)) offsets.set(line, start + from)
+    }
+    from = end + 1
+  }
+  return { lines, offsets }
 }
 
 /**
@@ -91,11 +116,11 @@ async function readTail(filePath: string, byteCount: number, minLines: number, i
       const readStart = totalSize - window
       const buf = Buffer.allocUnsafe(window)
       const { bytesRead } = await fh.read(buf, 0, window, readStart)
-      const { lines, byteOffset } = extractCompleteLines(buf.subarray(0, bytesRead), readStart, false)
+      const { lines, byteOffset, offsets } = extractCompleteLines(buf.subarray(0, bytesRead), readStart, false)
 
       const canGrow = readStart > 0 && window < MAX_TAIL_WINDOW_BYTES
       if (!canGrow || countLines(lines, isNoise) >= minLines) {
-        return { lines, byteOffset, totalSize }
+        return { lines, byteOffset, totalSize, offsets }
       }
       window = Math.min(window * 2, MAX_TAIL_WINDOW_BYTES, totalSize)
     }
@@ -127,7 +152,7 @@ async function readRangeBefore(
     const fileStat = await fh.stat()
     const totalSize = fileStat.size
     let end = Math.min(Math.max(endOffset, 0), totalSize)
-    if (end <= 0) return { lines: [], byteOffset: 0 }
+    if (end <= 0) return { lines: [], byteOffset: 0, offsets: new Map() }
 
     let window = Math.min(Math.max(initialWindow, 1), end)
     for (;;) {
@@ -136,7 +161,7 @@ async function readRangeBefore(
       const { bytesRead } = await fh.read(buf, 0, window, readStart)
       const view = buf.subarray(0, bytesRead)
       const truncatedEnd = end < totalSize && view[view.length - 1] !== NEWLINE
-      const { lines, byteOffset } = extractCompleteLines(view, readStart, truncatedEnd)
+      const { lines, byteOffset, offsets } = extractCompleteLines(view, readStart, truncatedEnd)
       const kept = lines.filter((line) => !isNoise(line))
 
       if (readStart > 0 && window < MAX_BEFORE_WINDOW_BYTES && kept.length < minLines) {
@@ -145,7 +170,7 @@ async function readRangeBefore(
         end = byteOffset
         window = Math.min(window, end)
       } else {
-        return { lines: kept, byteOffset }
+        return { lines: kept, byteOffset, offsets }
       }
     }
   } finally {
@@ -175,12 +200,12 @@ export async function readSessionHeader(filePath: string): Promise<HeaderResult>
       if (isWholeFile || text.includes("\n") || readLen >= MAX_HEADER_BYTES) break
       readLen = Math.min(readLen * 4, Math.min(fileStat.size, MAX_HEADER_BYTES))
     }
-    const parts = text.split("\n").filter((l) => l.trim().length > 0)
+    const { lines: parts, offsets } = splitLines(Buffer.from(text, "utf-8"), 0)
     // Drop the last element if we didn't read the whole file — it's likely truncated
     if (bytesRead < fileStat.size && parts.length > 0) {
       parts.pop()
     }
-    return { lines: parts, bytesRead }
+    return { lines: parts, bytesRead, offsets }
   } finally {
     await fh.close()
   }
@@ -214,8 +239,13 @@ export async function serveTranscript(
   filePath: string,
   params: URLSearchParams,
   format: PageFormat,
+  address: TranscriptAddress,
 ): Promise<void> {
   const isNoise = format.isNoiseLine
+  // Opt-in: heavy result bodies stay on the server; offsets and line counts stay native.
+  const project = params.get("projection") === RESULT_PROJECTION
+    ? (lines: string[], ...offsets: LineOffsets[]) => projectLines(format, lines, address, (line) => offsets.find((known) => known.has(line))?.get(line))
+    : (lines: string[]) => lines
   const tailParam = params.get("tail")
   const beforeParam = params.get("before")
   const countParam = params.get("count")
@@ -240,8 +270,8 @@ export async function serveTranscript(
       const forPage = await firstLineForPages(format, header, async () => tail.lines)
 
       sendJson(res, 200, {
-        headerLines: forPage(header.lines, 0).filter((line) => !isNoise(line)),
-        tailLines: forPage(trimmed.lines, trimmed.byteOffset),
+        headerLines: project(forPage(header.lines, 0).filter((line) => !isNoise(line)), header.offsets),
+        tailLines: project(forPage(trimmed.lines, trimmed.byteOffset), tail.offsets, header.offsets),
         byteOffset: trimmed.byteOffset,
         totalSize: tail.totalSize,
         hasMore,
@@ -263,8 +293,8 @@ export async function serveTranscript(
         (await readTail(filePath, LAST_LINES_BYTES, 1, () => false)).lines)
 
       sendJson(res, 200, {
-        headerLines: forPage(header.lines, 0).filter((line) => !isNoise(line)),
-        lines: forPage(range.lines, range.byteOffset),
+        headerLines: project(forPage(header.lines, 0).filter((line) => !isNoise(line)), header.offsets),
+        lines: project(forPage(range.lines, range.byteOffset), range.offsets, header.offsets),
         byteOffset: range.byteOffset,
         hasMore: range.byteOffset > header.bytesRead,
       })

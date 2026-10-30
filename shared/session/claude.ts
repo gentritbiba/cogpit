@@ -15,6 +15,7 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { isAssistantMessage } from "./messageTypeGuards"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
+import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 import type {
   ParseSessionOptions,
   ParsedSession,
@@ -487,4 +488,53 @@ export function claudeTurnBoundaries(
   // `<task-notification>` wake-ups as new turns, while `buildTurns` folds them
   // into the turn in flight, so every boundary after one was off by a turn.
   return buildTurnsWithStarts(records as unknown as RawMessage[]).turnStartIndices
+}
+
+// ── Result projection ───────────────────────────────────────────────────────
+
+/** `toolUseResult` keys a reader shows or interprets as they are, structured diffs included: they travel whole. */
+const KEPT_TOOL_USE_RESULT_KEYS = new Set(["bashEditDiff", "structuredPatch", "prompt", "summary", "description", "status"])
+
+function visitStrings(holder: Record<string, unknown>, visit: ResultVisitor, depth: number): boolean {
+  let changed = false
+  for (const key of Object.keys(holder)) {
+    if (KEPT_TOOL_USE_RESULT_KEYS.has(key)) continue
+    const value = holder[key]
+    if (typeof value === "string") changed = visitField(holder, key, visit) || changed
+    else if (isPlainObject(value) && depth < 3) changed = visitStrings(value, visit, depth + 1) || changed
+  }
+  return changed
+}
+
+/**
+ * Tool-result bodies in a Claude Code record: each `tool_result` block's text
+ * and image data, then the long strings of `toolUseResult` other than the
+ * ones a reader interprets. A sub-agent's result keeps its summary whole,
+ * and a structured diff (`bashEditDiff`, `structuredPatch`) keeps every file:
+ * the timeline reviews and undoes from it.
+ */
+export function projectClaudeResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
+  if (record.type !== "user") return false
+  const message = isPlainObject(record.message) ? record.message : null
+  let changed = false
+  if (message && Array.isArray(message.content)) {
+    for (const block of message.content) {
+      if (!isPlainObject(block) || block.type !== "tool_result") continue
+      if (typeof block.content === "string") changed = visitField(block, "content", visit) || changed
+      else if (Array.isArray(block.content)) {
+        // The parser joins the text parts with newlines into one result: they travel as that one body.
+        const joined = visitJoinedText(block.content, (item) => isPlainObject(item) && item.type === "text" && typeof item.text === "string" ? item.text : undefined, "\n", (item, text) => ({ ...(item as object), text }), visit)
+        if (joined) { block.content = joined; changed = true }
+        for (const item of block.content as unknown[]) {
+          if (isPlainObject(item) && item.type === "image" && isPlainObject(item.source)) changed = visitField(item.source, "data", visit, "image") || changed
+        }
+      }
+    }
+  }
+  const result = record.toolUseResult
+  if (typeof result === "string") changed = visitField(record, "toolUseResult", visit) || changed
+  else if (isPlainObject(result) && !result.agentId) {
+    changed = visitStrings(result, visit, 0) || changed
+  }
+  return changed
 }

@@ -1,3 +1,4 @@
+import { registerWorktreeSetupRoutes } from "./routes/worktree-setup"
 import { compressionMiddleware } from "./compression"
 import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
@@ -19,6 +20,8 @@ import { registerEditionRoutes } from "./routes/edition"
 import { registerEditorRoutes } from "./routes/editor"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerFileWatchRoutes } from "./routes/files-watch"
+import { registerToolResultRoutes } from "./routes/tool-result"
+import { registerAutomationRoutes } from "./routes/automations"
 import { registerFileRoutes } from "./routes/files"
 import { registerFolderRoutes } from "./routes/folders"
 import { registerGitDiffRoutes } from "./routes/git-diff"
@@ -120,6 +123,8 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("undo", registerUndoRoutes),
   apiRoute("files", registerFileRoutes),
   apiRoute("files-watch", registerFileWatchRoutes),
+  apiRoute("tool-result", registerToolResultRoutes),
+  apiRoute("automations", registerAutomationRoutes),
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
   apiRoute("session-access", registerSessionAccessRoutes),
   apiRoute("session-archive", registerSessionArchiveRoutes),
@@ -132,6 +137,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("share-guest", registerShareGuestRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
+  apiRoute("worktree-setup", registerWorktreeSetupRoutes),
   apiRoute("workspaces", registerWorkspaceRoutes),
   apiRoute("usage", registerUsageRoutes),
   apiRoute("usage-cost", registerUsageCostRoutes),

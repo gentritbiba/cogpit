@@ -1,3 +1,5 @@
+import { isSessionStarting } from "./runtimeTypes"
+import { beforeFirstTurn } from "./startup"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import {
   dirs,
@@ -103,9 +105,14 @@ function sdkResumeOptions(req: SendRequest) {
 
 /** Open a long-lived SDK query and report when the CLI initializes it. */
 function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
+  req.signal?.throwIfAborted()
   const sessionId = randomUUID()
   reportSessionId(req, sessionId)
 
+  let readinessComplete = !req.beforeFirstTurn
+  let initialized = false
+  let succeeded: (() => void) | undefined
+  let startupError: ((error: unknown) => void) | undefined
   const state = createSDKSession({
     sessionId,
     // An images-only send has no prompt; the SDK substitutes its own
@@ -117,13 +124,20 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
     ultracode: !!req.ultracode,
     name: req.name,
     worktreeName: req.worktreeName,
+    beforeFirstTurn: req.beforeFirstTurn ? async (identity) => {
+      await beforeFirstTurn(req, { ...identity, nativeWorktree: !!req.worktreeName })
+      readinessComplete = true
+      if (initialized) succeeded?.()
+    } : undefined,
+    onStartupError: (error) => startupError?.(error),
   })
 
   return new Promise<StartedSession>((resolve, reject) => {
     let settled = false
     const succeed = async () => {
-      if (settled) return
+      if (settled || !readinessComplete) return
       settled = true
+      req.signal?.removeEventListener("abort", abort)
       state.onInit = null
       state.onResult = null
       const dirName = descriptor.dirName.encode(state.cwd)
@@ -140,12 +154,29 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
     const fail = (message: string) => {
       if (settled) return
       settled = true
+      req.signal?.removeEventListener("abort", abort)
       state.onInit = null
       state.onResult = null
+      stopSDKSession(sessionId)
       reject(new AgentRuntimeError(500, "SPAWN_FAILED", message))
     }
 
-    state.onInit = () => { void succeed() }
+    const abort = () => {
+      stopSDKSession(sessionId)
+      startupError?.(req.signal?.reason ?? new Error("Session startup cancelled"))
+    }
+    startupError = (error) => {
+      if (settled) return
+      settled = true
+      req.signal?.removeEventListener("abort", abort)
+      state.onInit = null; state.onResult = null
+      stopSDKSession(sessionId)
+      reject(error)
+    }
+    succeeded = () => { void succeed() }
+    state.onInit = () => { initialized = true; void succeed() }
+    req.signal?.addEventListener("abort", abort, { once: true })
+    if (req.signal?.aborted) abort()
     state.onResult = (result) => {
       state.onResult = null
       const outcome = turnResultFrom(result)
@@ -231,6 +262,7 @@ export const claudeRuntime: AgentRuntime = {
   },
 
   async send(sessionId, req: SendRequest): Promise<SendOutcome> {
+    if (isSessionStarting(sessionId)) return { delivery: "busy" }
     const live = sdkSessions.get(sessionId)
     if (live?.pluginSkillLoading) return { delivery: "busy" }
     if (req.onlyWhileRunning && (!isSDKQueryLive(live) || !live.running)) return { delivery: "busy" }

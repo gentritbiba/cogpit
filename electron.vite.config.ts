@@ -38,6 +38,7 @@ export default defineConfig({
     },
   },
   renderer: {
+    worker: { format: "es" },
     root: ".",
     build: {
       outDir: "out/renderer",

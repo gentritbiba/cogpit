@@ -466,11 +466,28 @@ export interface ToolFileDiff {
   hunks: Array<{ oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }>
 }
 
+/** What an elided result body (result projection v1) says about the body it stands for. */
+export interface ElidedResult {
+  /** Opaque, signed by the server that projected it; meaningful only to that server's `/api/tool-result`. */
+  ref: string
+  /** UTF-8 bytes of the original body. */
+  bytes: number
+  /** Lines in the original body. */
+  lines: number
+  /** `image` stands for an image's base64 data. */
+  kind: "text" | "image"
+  /** The transcript address the body is served under, as the reader opened it. */
+  source: { dirName: string; fileName: string }
+}
+
 export interface ToolCall {
   id: string
   name: string
   input: Record<string, unknown>
+  /** The result's text, or its preview while `resultRef` holds the rest on the server. */
   result: string | null
+  /** Set when `result` is a preview of a body the server keeps until a reader expands it. */
+  resultRef?: ElidedResult
   /** Binary images returned by a tool, when the provider persists them. */
   resultImages?: ImageBlock[]
   isError: boolean

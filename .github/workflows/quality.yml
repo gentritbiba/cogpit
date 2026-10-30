@@ -118,9 +118,13 @@ jobs:
   # config sat unbuilt while POSIX assumptions (/tmp, /bin/zsh, "/" joins, bare
   # spawn of .cmd shims) accumulated across the server. This job is deliberately
   # lean: only the checks whose outcome can actually differ by platform.
-  windows:
+  windows-tests:
     runs-on: windows-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -147,11 +151,23 @@ jobs:
         run: bun run typecheck
 
       - name: Test application and server
-        run: bun run test
+        run: bun run test --shard=${{ matrix.shard }}/2
 
       - name: Verify public plugin packages outside the repository
+        if: ${{ matrix.shard == 1 }}
         run: bun run test:contracts:plugins
 
       - name: Test install-free Cogpit CLI
+        if: ${{ matrix.shard == 1 }}
         working-directory: packages/cogpit-cli
         run: bun run test
+
+  windows:
+    if: ${{ always() }}
+    needs: [windows-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both Windows shards
+        env:
+          SHARD_RESULT: ${{ needs.windows-tests.result }}
+        run: test "$SHARD_RESULT" = success

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  formatProjectPromptContext,
+  projectContextItem,
   resolveDesktopMainView,
   resolveDesktopProjectPath,
 } from "../desktopView"
@@ -107,29 +107,14 @@ describe("resolveDesktopProjectPath", () => {
   })
 })
 
-describe("formatProjectPromptContext", () => {
-  it("formats a path-only mention", () => {
-    expect(formatProjectPromptContext({ path: "src/App.tsx" })).toBe("@src/App.tsx")
+describe("projectContextItem", () => {
+  it("leaves a whole file to an @ mention", () => {
+    expect(projectContextItem({ path: "src/App.tsx" })).toBeNull()
   })
 
-  it("formats a commented range and protects nested code fences", () => {
-    expect(formatProjectPromptContext({
-      path: "src/example.ts",
-      text: "const sample = ```nested```",
-      startLine: 3,
-      endLine: 7,
-      comment: "Please simplify",
-    })).toBe(
-      "Review request: Please simplify\nsrc/example.ts (lines 3-7)\n````\nconst sample = ```nested```\n````",
-    )
-  })
-
-  it("uses a singular label for a one-line excerpt", () => {
-    expect(formatProjectPromptContext({
-      path: "src/example.ts",
-      text: "const value = 1",
-      startLine: 4,
-      endLine: 4,
-    })).toContain("(line 4)")
+  it("makes an excerpt typed context with its range and review comment", () => {
+    expect(projectContextItem({ path: "src/example.ts", text: "const sample = ```nested```", startLine: 3, endLine: 7, comment: "Please simplify" })).toEqual({
+      id: expect.stringMatching(/^ctx-[a-z0-9]{8,32}$/), kind: "file", path: "src/example.ts", text: "const sample = ```nested```", startLine: 3, endLine: 7, comment: "Please simplify",
+    })
   })
 })

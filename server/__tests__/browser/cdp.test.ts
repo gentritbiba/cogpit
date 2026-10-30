@@ -487,7 +487,7 @@ describe("BrowserViewer", () => {
     }
     fake.pushFrame(11, sessionFor("t2"))
     await vi.waitFor(() => expect(events.errors).toEqual(["viewer gone"]))
-    expect(last(fake.sent("Page.screencastFrameAck")).params).toEqual({ sessionId: 11 })
+    await vi.waitFor(() => expect(last(fake.sent("Page.screencastFrameAck")).params).toEqual({ sessionId: 11 }))
   })
 
   it("reports a failed screencast start and retries on the next follow", async () => {

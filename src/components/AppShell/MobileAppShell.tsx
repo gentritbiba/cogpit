@@ -1,3 +1,4 @@
+import { WorktreeSetupPanel } from "@/components/WorktreeSetupPanel"
 import { lazy, Suspense, useState, type ReactNode } from "react"
 import { TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -228,6 +229,7 @@ function MobileChat({
         {(session || state.pendingDirName) && (
           <>
             {sessionView.todoProgress}
+            {!session && <WorktreeSetupPanel projectCwd={sessionView.pendingPath} progressOnly />}
             {session ? sessionView.activeComposer : sessionView.pendingComposer}
           </>
         )}

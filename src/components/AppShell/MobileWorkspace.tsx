@@ -11,7 +11,8 @@ import { RuntimePluginContributions } from "@/plugins/RuntimePluginContributions
 import { useRuntimeWorkspacePanels } from "@/plugins/runtimeWorkspacePanels"
 import { resolvePluginPanelPreference } from "@/plugins/panelAliases"
 import { useCapability } from "@/hooks/useCapability"
-import { formatProjectPromptContext } from "./desktopView"
+import { projectContextItem } from "./desktopView"
+import type { ComposerAttachment, ComposerContextItem } from "../../../shared/session/composerContext"
 import { LazyViewFallback, MissionControlView } from "./SharedAppViews"
 import type { MobileAppShellProps } from "./mobileTypes"
 
@@ -45,6 +46,14 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
     setUtility(value)
   }
 
+  function addComposerContext(item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null {
+    const input = sessionView.chatInputRef.current
+    if (!input) return "Open a session or start a new one to add context"
+    const refusal = input.addContext(item, attachments)
+    navigation.actions.handleMobileTabChange("chat")
+    return refusal
+  }
+
   function composePrompt(text: string) {
     const input = sessionView.chatInputRef.current
     const current = input?.getText().trimEnd() ?? ""
@@ -64,6 +73,10 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,
+    addFileContext: (value) => {
+      const item = projectContextItem(value)
+      return item ? addComposerContext(item) : "The reference has no text to add"
+    },
     crew: openCrew,
   }
 
@@ -74,7 +87,13 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
       projectFilesRequest: project.projectFilesRequest,
       backgroundAgents: project.backgroundAgents,
       searchInputRef: sessionView.searchInputRef,
-      addProjectContext: (value) => composePrompt(formatProjectPromptContext(value)),
+      addProjectContext: (value) => {
+        const item = projectContextItem(value)
+        if (!item) return composePrompt(`@${value.path}`)
+        sessionView.chatInputRef.current?.addContext(item)
+        navigation.actions.handleMobileTabChange("chat")
+      },
+      addComposerContext,
       jumpToTurn: navigation.handlers.handleMobileJumpToTurn,
       toggleServer: (...args) => {
         project.processPanel.handleToggleServer(...args)

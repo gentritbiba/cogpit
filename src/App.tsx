@@ -66,6 +66,8 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
 import type { ParsedSession, Turn } from "../shared/session/types"
+import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
+import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
 import { hasEditToolCalls } from "../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
@@ -854,6 +856,27 @@ export default function App() {
 
   // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
   // so timeline components don't re-render when chat status or scroll indicators change.
+  const handleAddComposerContext = useCallback((item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null => {
+    const input = chatInputRef.current
+    if (!input) return "Open a session or start a new one to add context"
+    const refusal = input.addContext(item, attachments)
+    if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
+    requestAnimationFrame(() => chatInputRef.current?.focus())
+    return refusal
+  }, [isMobile, dispatch])
+
+  const handleOpenQuoteSource = useQuoteNavigation({
+    session: state.session,
+    sessionSource: state.sessionSource,
+    loadSession: handlers.handleLoadSessionScrollAware,
+    jumpToTurn: useCallback((index: number) => {
+      if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
+      actions.handleJumpToTurn(index)
+    }, [actions, isMobile, dispatch]),
+    hasMore: chunkedSession.hasMore,
+    loadMore: chunkedSession.loadMore,
+  })
+
   const sessionContextValue = useMemo<SessionContextValue>(() => ({
     session: state.session,
     sessionSource: state.sessionSource,
@@ -883,6 +906,8 @@ export default function App() {
       handleToggleExpandAll,
       handleLoadSession: handlers.handleLoadSessionScrollAware,
       handleProviderHandoff: canHandoff ? handleProviderHandoff : undefined,
+      handleAddComposerContext,
+      handleOpenQuoteSource,
     },
   }), [
     state.session, state.sessionSource,
@@ -893,7 +918,7 @@ export default function App() {
     handlers.handleStopSession, configAdminEnabled, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
     handlers.handleLoadSessionScrollAware,
-    canHandoff, handleProviderHandoff,
+    canHandoff, handleProviderHandoff, handleAddComposerContext, handleOpenQuoteSource,
   ])
 
   // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
@@ -1084,14 +1109,9 @@ export default function App() {
       onRemove={processPanel.removeProcess}
       onToggleCollapse={processPanel.toggleCollapse}
       onRequestTerminal={can("terminal") ? handleNewIntegratedTerminal : undefined}
-      onAddTerminalContext={(selection) => {
+      onAddTerminalContext={(selection: string, label?: string) => {
         const value = selection.trim()
-        if (!value) return
-        const fence = value.includes("```") ? "````" : "```"
-        const context = `${fence}terminal\n${value}\n${fence}`
-        const current = chatInputRef.current?.getText().trimEnd() ?? ""
-        chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
-        chatInputRef.current?.focus()
+        if (value) handleAddComposerContext({ id: newContextId(), kind: "terminal", text: value, ...(label ? { label } : {}) })
       }}
       onUpdateStatus={processPanel.updateProcessStatus}
       projectDir={currentCwd}
@@ -1175,6 +1195,7 @@ export default function App() {
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
+        composerIdentity={state.pendingDirName}
         footer={chatInputSettingsNode}
       />
     </div>
@@ -1210,6 +1231,7 @@ export default function App() {
         allowImages={imageInputAvailable}
         agentKind={currentAgentKind}
         projectCwd={currentCwd}
+        composerIdentity={state.pendingDirName}
         footer={previewChatInputSettingsNode}
       />
     </div>

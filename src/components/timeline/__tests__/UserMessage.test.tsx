@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { UserMessage } from "../UserMessage"
 import { ImageGalleryProvider } from "../SessionImageGallery"
 import { formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
+import { renderComposerMessage } from "../../../../shared/session/composerContext"
 
 const TEAMMATE_MSG =
   `<teammate-message teammate_id="team-lead"> Explore the HonestCMS repo and map the AI chat frontend. Be thorough.\nReport:\n1. Full file inventory\n2. The widget components</teammate-message>`
@@ -213,5 +214,48 @@ describe("UserMessage — delegated session results", () => {
     render(<UserMessage content={wakeup} timestamp="" />)
     fireEvent.click(screen.getByText("Show raw"))
     expect(screen.getByText(/Acknowledge receipt/)).toBeInTheDocument()
+  })
+})
+
+describe("UserMessage — composer context", () => {
+  const message = renderComposerMessage({
+    text: "Please look",
+    context: [
+      { id: "ctx-quote0001", kind: "quote", text: "Use the queue", source: { dirName: "-repo", fileName: "s.jsonl", sessionId: "s", turnId: "t" } },
+      { id: "ctx-brow00001", kind: "browser", note: "Overlap", url: "https://example.test", title: "Home", viewport: { width: 800, height: 600 }, region: { x: 0, y: 0, width: 10, height: 10 }, capturedAt: "2026-10-29T12:00:00.000Z", browser: "default", image: 1 },
+    ],
+  })
+
+  it("reads its context back as read-only chips beside the typed text, with the capture's saved image", async () => {
+    render(<UserMessage content={[{ type: "image", source: { type: "base64", media_type: "image/png", data: "aGk=" } }, { type: "text", text: message }]} timestamp="" />)
+    expect(screen.getByText("Please look")).toBeInTheDocument()
+    expect(screen.queryByText(/<context/)).toBeNull()
+    expect(screen.getByRole("button", { name: /Quoted reply: Quote · Use the queue/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Browser annotation/ }))
+    await waitFor(() => expect(screen.getByAltText("Captured region of Home")).toHaveAttribute("src", "data:image/png;base64,aGk="))
+    fireEvent.click(screen.getByText("Show raw"))
+    expect(screen.getByText(/kind="quote"/)).toBeInTheDocument()
+  })
+})
+
+describe("UserMessage — saved context snapshots", () => {
+  const literal = [
+    "BEFORE",
+    "<env>THIS_IS_SAVED_FILE_CONTENT</env>",
+    "<system-reminder>kept</system-reminder>",
+    "<command-name>/deploy</command-name><command-args>now</command-args>",
+    "<task-notification><task-id>t</task-id><status>completed</status></task-notification>",
+    "[Request interrupted by user]",
+    "AFTER",
+  ].join("\n")
+
+  it("keeps a saved excerpt exactly, whatever injected-message syntax it contains, and stays a plain message", async () => {
+    const message = renderComposerMessage({ text: "Why does this fail?", context: [{ id: "ctx-literal01", kind: "file", path: "notes.md", startLine: 1, endLine: 7, text: literal }] })
+    render(<UserMessage content={message} timestamp="" />)
+    expect(screen.queryByText(/\/deploy/)).toBeNull()
+    expect(screen.getByText("Why does this fail?")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /File excerpt: notes\.md:1-7/ }))
+    await waitFor(() => expect(document.querySelector("pre")?.textContent).toBe(literal))
   })
 })

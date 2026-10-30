@@ -9,9 +9,9 @@ describe("EditDiffView line terminators", () => {
     { oldString: "", newString: "\n", count: "+1", opposite: "-1" },
     { oldString: "\n", newString: "", count: "-1", opposite: "+1" },
     { oldString: "", newString: "line\n", count: "+1", opposite: "-1" },
-  ])("renders $count for $oldString to $newString", ({ oldString, newString, count, opposite }) => {
+  ])("renders $count for $oldString to $newString", async ({ oldString, newString, count, opposite }) => {
     render(<EditDiffView oldString={oldString} newString={newString} filePath="/a" compact={false} />)
-    expect(screen.getByText(count)).toBeVisible()
+    expect(await screen.findByText(count)).toBeVisible()
     expect(screen.queryByText(opposite)).not.toBeInTheDocument()
     expect(screen.queryByText("+2")).not.toBeInTheDocument()
   })

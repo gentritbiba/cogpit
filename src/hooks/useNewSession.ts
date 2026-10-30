@@ -1,3 +1,4 @@
+import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
@@ -37,6 +38,7 @@ interface CreateSessionResponse {
   dirName: string
   fileName: string
   sessionId: string
+  cwd?: string
   initialContent?: string
 }
 
@@ -84,7 +86,7 @@ function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession
     sessionId: response.sessionId,
     version: "",
     gitBranch: "",
-    cwd: "",
+    cwd: response.cwd ?? "",
     slug: "",
     name: "",
     model: "",
@@ -283,7 +285,8 @@ export function useNewSession({
   const createAndSend = useCallback(
     async (
       message: string,
-      images?: Array<{ data: string; mediaType: string }>
+      images?: Array<{ data: string; mediaType: string }>,
+      onCreated?: ComposerCreated,
     ): Promise<string | null> => {
       const dirName = pendingDirNameRef.current
       if (!dirName) return null
@@ -305,7 +308,10 @@ export function useNewSession({
         pendingDirNameRef.current = null
         pendingCwdRef.current = null
         rememberCreatedSession(created.sessionId)
-        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, onSessionFinalized)
+        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, (parsed, source) => {
+          onCreated?.({ sessionId: parsed.sessionId, cwd: parsed.cwd, dirName: source.dirName })
+          onSessionFinalized(parsed, source)
+        })
         // Auto-store the derived session name so it appears in sidebar/lists
         if (sessionName && sessionId) renameSession(sessionId, sessionName)
         return sessionId
@@ -349,7 +355,7 @@ export function useNewSession({
         if (!res.ok) {
           // An unconfirmed start is one the server refused to hand over, so a
           // recent session of the caller's would be the wrong one.
-          if (agentKind === "codex" && errorCode !== "SESSION_UNCONFIRMED") {
+          if (agentKind === "codex" && !worktreeEnabled && errorCode !== "SESSION_UNCONFIRMED") {
             const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
             if (recovered) return await adoptCreatedSession(recovered)
           }

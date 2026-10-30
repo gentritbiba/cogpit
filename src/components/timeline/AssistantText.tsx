@@ -1,5 +1,5 @@
-import { memo, useMemo } from "react"
-import { Check, Copy } from "lucide-react"
+import { memo, useMemo, useRef } from "react"
+import { Check, Copy, MessageSquareQuote } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Button } from "@/components/ui/button"
 import { markdownComponents, markdownPlugins, preprocessMediaPaths } from "./markdown-components"
@@ -18,6 +18,18 @@ interface AssistantTextProps {
   timestamp?: string
   messageKey?: string
   compact?: boolean
+  /** Quote the reply, or the part of it selected, into the composer. */
+  onQuote?: (text: string) => void
+}
+
+/** The text selected inside `root`, or null when the selection is elsewhere or empty. */
+function selectionWithin(root: HTMLElement | null): string | null {
+  const selection = window.getSelection()
+  if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) return null
+  const text = selection.toString().trim()
+  return text || null
 }
 
 export const AssistantText = memo(function AssistantText({
@@ -27,7 +39,9 @@ export const AssistantText = memo(function AssistantText({
   timestamp,
   messageKey,
   compact = false,
+  onQuote,
 }: AssistantTextProps) {
+  const contentRef = useRef<HTMLDivElement>(null)
   const markdownText = useMemo(() => preprocessMediaPaths(text), [text])
   const blockScope = useMemo(() => ({ messageKey: messageKey ?? timestamp ?? `${text.length}:${text.slice(0, 64)}` }), [messageKey, timestamp, text])
   const [copied, copy] = useCopyWithFeedback()
@@ -63,8 +77,20 @@ export const AssistantText = memo(function AssistantText({
         >
           {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
         </Button>
+        {onQuote && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+            onClick={() => onQuote(selectionWithin(contentRef.current) ?? text)}
+            aria-label="Quote in reply (the selected part, or the whole response)"
+            title="Quote in reply"
+          >
+            <MessageSquareQuote data-icon="inline-start" />
+          </Button>
+        )}
       </div>}
-      <div className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
+      <div ref={contentRef} className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
         <CogpitBlockScope.Provider value={blockScope}>
           <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
         </CogpitBlockScope.Provider>

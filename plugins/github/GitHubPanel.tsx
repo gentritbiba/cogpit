@@ -17,6 +17,7 @@ import {
 } from "@cogpit/plugin-ui"
 import { ActionsTab, isActive, type BranchFocus } from "./ActionsTab.js"
 import { IssuesTab } from "./IssuesTab.js"
+import { ReviewLauncher, ReviewWorkspace, useReviewHost } from "./ReviewWorkspace.js"
 import {
   PullRequestsTab,
   SessionPullRequestsTab,
@@ -129,6 +130,8 @@ export function GitHubPanel({ context, active, openExternal }: GitHubPanelProps)
   const [autoSelectedFor, setAutoSelectedFor] = useState<string | null>(null)
   const [picked, setPicked] = useState(false)
   const [focus, setFocus] = useState<BranchFocus | null>(null)
+  const [reviewing, setReviewing] = useState<number | null>(null)
+  const reviewHost = useReviewHost()
   const projectKey = context.projectKey
   const sessionHandle = context.sessionHandle ?? null
   const runs = useGitHubActions(projectKey, active)
@@ -177,8 +180,9 @@ export function GitHubPanel({ context, active, openExternal }: GitHubPanelProps)
   const openPulls = pulls.data ? pulls.data.pulls.filter(isOpen).length : null
   const openIssues = issues.data ? issues.data.issues.filter((issue) => issue.state === "open").length : null
 
+  if (reviewing !== null && reviewHost) return <ReviewWorkspace key={`${projectKey}:${reviewing}`} number={reviewing} onClose={() => setReviewing(null)} />
   return (
-    <GitHubNavigation.Provider value={openExternal}><Tabs
+    <ReviewLauncher.Provider value={reviewHost ? setReviewing : null}><GitHubNavigation.Provider value={openExternal}><Tabs
       value={tab}
       onValueChange={(value) => { if (isTab(value)) choose(value) }}
       className="size-full min-h-0 gap-0"
@@ -285,6 +289,6 @@ export function GitHubPanel({ context, active, openExternal }: GitHubPanelProps)
           </ResourceFrame>
         </TabsContent>
       </div>
-    </Tabs></GitHubNavigation.Provider>
+    </Tabs></GitHubNavigation.Provider></ReviewLauncher.Provider>
   )
 }

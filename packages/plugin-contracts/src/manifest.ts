@@ -46,7 +46,9 @@ export const manifestSchema = z.strictObject({
   }),
   permissions: z.strictObject({
     context: z.array(z.enum(["project.identity", "session.identity"])).max(2).refine(unique).default([]),
-    composer: z.array(z.literal("append")).max(1).default([]),
+    composer: z.array(z.enum(["append", "context"])).max(2).refine(unique).default([]),
+    /** `start` lets the plugin ask the host to start a pull request review session, which the user confirms in a host dialog. */
+    review: z.array(z.literal("start")).max(1).default([]),
     navigation: z.array(z.enum(["external", "session"])).max(2).refine(unique).default([]),
     connections: z.array(z.strictObject({ id: identifier, definition: canonicalPath, operations: names.min(1) })).max(8).default([]),
     integrations: z.array(integrationPermissionSchema).max(2).default([]),

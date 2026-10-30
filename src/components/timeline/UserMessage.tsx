@@ -5,6 +5,9 @@ import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "../../../shared/session/types"
 import { getUserMessageText, getUserMessageImages } from "../../../shared/session/parser"
 import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
+import { parseComposerMessage } from "../../../shared/session/composerContext"
+import { ContextChips } from "@/components/ChatInput/ContextChips"
+import { useSessionContextOptional } from "@/contexts/SessionContext"
 import {
   extractCommandArgs,
   extractCommandName,
@@ -76,11 +79,16 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const [standaloneViewer, setStandaloneViewer] = useState<{ index: number; open: boolean } | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
-  const commandName = useMemo(() => extractCommandName(rawText), [rawText])
-  const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
+  // Context the composer attached is read first and kept exactly as saved: the
+  // cleanup below is for what agents inject, and runs on the typed text alone.
+  const composed = useMemo(() => parseComposerMessage(rawText), [rawText])
+  const outerText = composed?.text ?? rawText
+  const openQuoteSource = useSessionContextOptional()?.actions.handleOpenQuoteSource
+  const commandName = useMemo(() => extractCommandName(outerText), [outerText])
+  const commandArgs = useMemo(() => extractCommandArgs(outerText), [outerText])
   const { sender: teammateId, body: unwrappedText, matched: isTeammate } = useMemo(
-    () => parseAgentEnvelope(rawText),
-    [rawText],
+    () => parseAgentEnvelope(outerText),
+    [outerText],
   )
   const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
   const wakeup = useMemo(() => parseTaskWakeup(cleanText), [cleanText])
@@ -132,10 +140,16 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   // hidden. The agent envelope and the notification banner are genuinely
   // hidden, so they still count.
   const hasTags = useMemo(
-    () => hasSystemTags(rawText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null,
-    [rawText, isSystemNotification, isTeammate, wakeup, crewDelivery],
+    () => hasSystemTags(outerText) || isSystemNotification || isTeammate || wakeup !== null || crewDelivery !== null || composed !== null,
+    [outerText, isSystemNotification, isTeammate, wakeup, crewDelivery, composed],
   )
   const displayText = showRaw ? rawText : wakeup || crewDelivery ? "" : textAfterInterrupts
+  const contextImages = useMemo(() => images.map((image, index) => ({
+    id: `message-attachment-${index}`,
+    mediaType: image.source.media_type,
+    data: image.source.data,
+    contextId: composed?.context.find((item) => item.kind === "browser" && item.image === index + 1)?.id,
+  })), [images, composed])
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
@@ -304,6 +318,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             ))}
           </div>
         )}
+
+        {!showRaw && composed && <ContextChips items={composed.context} attachments={contextImages} onOpenQuoteSource={openQuoteSource} className="mb-2" />}
 
         {visibleText && (
           <div className="max-w-none overflow-hidden break-words text-sm leading-relaxed">

@@ -6,6 +6,7 @@ import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { AgentKind } from "@/lib/agents"
 import { createStreamingOverlayStore } from "@/lib/streamingOverlayStore"
 import { sessionCache } from "@/lib/sessionCache"
+import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 import {
   applyDeltas,
   applySnapshot,
@@ -129,7 +130,7 @@ export function useLiveSession(
 
     setSseState("connecting")
 
-    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?offset=${watchOffset}`
+    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?offset=${watchOffset}&projection=${RESULT_PROJECTION}`
     const stream = openSessionStream(url)
     const es = stream.source
     let staleTimer: ReturnType<typeof setTimeout> | null = null
@@ -350,8 +351,12 @@ export function useLiveSession(
           clearOverlay()
           setIsCompacting(false)
         } else if (data.type === "lines") {
-          // Lines the server left out still moved the file on.
-          if (typeof data.skippedBytes === "number") trackedOffset += data.skippedBytes
+          // A projected stream states the native bytes it covers, since its
+          // lines are lighter; a native one moves the file on by its lines and
+          // the ones it left out.
+          const nativeBytes = typeof data.bytes === "number" ? data.bytes : null
+          if (nativeBytes !== null) trackedOffset += nativeBytes
+          else if (typeof data.skippedBytes === "number") trackedOffset += data.skippedBytes
           if (data.lines.length === 0) return
           setIsLive(true)
           setIsCompacting(false)
@@ -361,7 +366,7 @@ export function useLiveSession(
           setOverlay(reconcileWithLines(overlayRef.current, data.lines))
 
           const newText = data.lines.join("\n") + "\n"
-          trackedOffset += new TextEncoder().encode(newText).byteLength
+          if (nativeBytes === null) trackedOffset += new TextEncoder().encode(newText).byteLength
           textRef.current += newText
           pendingText += newText
           flushToWorker()

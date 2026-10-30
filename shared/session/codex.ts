@@ -3,6 +3,7 @@ import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessio
 import { appendAssistantText } from "./turnContent"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { linkAsyncAnswers } from "./asyncAnswers"
+import { composerPromptText } from "./composerContext"
 import {
   findFailedNestedPatchCallIds,
   parseCodexToolPatches,
@@ -599,7 +600,7 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
       cwd ||= typeof record.payload.cwd === "string" ? record.payload.cwd : ""
     }
 
-    const prompt = readPrompt(record)
+    const prompt = composerPromptText(readPrompt(record))
     if (!prompt) continue
 
     if (!firstUserMessage) firstUserMessage = prompt

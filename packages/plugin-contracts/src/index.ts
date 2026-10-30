@@ -11,6 +11,6 @@ export type { ConnectionDefinition, ConnectionOperation, ConnectionResource, Con
 export { evaluateCompatibility, supportsPluginHost, parseClientRuntimeDescriptor, parseHostRuntimeDescriptor } from "./compatibility.js"
 export type { RuntimeDescriptor, ClientRuntimeDescriptor, HostRuntimeDescriptor, CompatibilityIssue, CompatibilityResult } from "./compatibility.js"
 export { ERROR_CODES, parseFrameMessage, parseMethodResult, parsePluginContext } from "./protocol.js"
-export type { FrameMessage, PluginContext, PluginConnectionStatus, PluginError, PluginEvent, PluginMethod, MethodMap, PluginRequest } from "./protocol.js"
-export { parseIntegrationRequest } from "./integrations.js"
+export type { ComposerFileContext, FrameMessage, PluginContext, PluginConnectionStatus, PluginError, PluginEvent, PluginMethod, MethodMap, PluginRequest, ReviewStartRequest, ReviewStartResult } from "./protocol.js"
+export { REVIEW_LIMITS, parseIntegrationRequest } from "./integrations.js"
 export type { PluginIntegrationRequest, GitHubIntegrationRequest, VercelIntegrationRequest, CloudflareIntegrationRequest, PluginIntegrationResult } from "./integrations.js"

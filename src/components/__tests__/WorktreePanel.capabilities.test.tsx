@@ -8,6 +8,7 @@ import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { WorktreePanel } from "../WorktreePanel"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
+vi.mock("../WorktreeSetupPanel", () => ({ WorktreeSetupPanel: () => null }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 vi.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: ReactNode }) => <div>{children}</div>,

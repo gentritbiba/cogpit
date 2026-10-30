@@ -454,3 +454,31 @@ describe("useBrowserSocket", () => {
     })
   })
 })
+
+describe("useBrowserSocket frame provenance", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = []
+    vi.stubGlobal("WebSocket", MockWebSocket)
+    setLocation("/")
+  })
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it("keeps naming the page a frame arrived for when the page changes while it decodes", async () => {
+    const decodes = stubDeferredBitmaps()
+    const { result } = renderHook(() => useBrowserSocket("default"))
+    const ws = latest()
+    act(() => ws.open())
+    act(() => emitJson(ws, { type: "page", targetId: "T1", url: "https://a.test/", title: "A", canGoBack: false, canGoForward: false }))
+    const generationA = result.current.pageGeneration
+    act(() => ws.emit(frameBuffer(makeHeader({ targetId: "T1" }))))
+    // Same tab, new page, before frame A finished decoding.
+    act(() => emitJson(ws, { type: "page", targetId: "T1", url: "https://b.test/new", title: "B", canGoBack: true, canGoForward: false }))
+    await decodes.settle(0)
+    expect(result.current.frame?.page).toMatchObject({ url: "https://a.test/", title: "A" })
+    expect(result.current.frame?.pageGeneration).toBe(generationA)
+    expect(result.current.pageGeneration).toBe(generationA + 1)
+    // A title change alone is the same page.
+    act(() => emitJson(ws, { type: "page", targetId: "T1", url: "https://b.test/new", title: "B (2)", canGoBack: true, canGoForward: false }))
+    expect(result.current.pageGeneration).toBe(generationA + 1)
+  })
+})

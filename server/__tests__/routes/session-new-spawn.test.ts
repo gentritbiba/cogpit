@@ -146,6 +146,7 @@ vi.mock("../../agents", () => {
       kind,
       sessionsRoot: () => roots[kind],
       listSessionFiles: mockListCodexSessionFiles,
+      readIdentity: mockReadNativeIdentity,
     }),
     storeForPath: (filePath: string | null) => {
       if (!filePath) return null
@@ -154,6 +155,8 @@ vi.mock("../../agents", () => {
     },
   }
 })
+
+const mockReadNativeIdentity = vi.hoisted(() => vi.fn())
 
 const CODEX_DIR_NAME = descriptorFor("codex").dirName.encode("/tmp/myproject")
 const COPILOT_DIR_NAME = descriptorFor("copilot").dirName.encode("/tmp/copilot-project")
@@ -207,6 +210,7 @@ import {
   activeProcesses as mockActiveProcesses,
   persistentSessions as mockPersistentSessions,
 } from "../../processRegistry"
+import { codexRuntime } from "../../agents/codexRuntime"
 import { registerCreateAndSendRoute } from "../../routes/session-new/sessionSpawner"
 
 const mockedCreateSDKSession = vi.mocked(createSDKSession)
@@ -641,13 +645,32 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
         { type: "image", url: "data:image/png;base64,ZmFrZQ==" },
       ],
     }))
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
     expect(res._getData()).toEqual({
       success: true,
       dirName: CODEX_DIR_NAME,
+      cwd: "/tmp/myproject",
       fileName: "2026/07/21/rollout-thread-create-and-send.jsonl",
       sessionId: "thread-create-and-send",
       initialContent: "native create-and-send rollout",
     })
+  })
+
+  it("preserves native worktree flags and returns the reported custom cwd", async () => {
+    const cwd = "/external/native/worktree"
+    mockReadNativeIdentity.mockResolvedValue({ cwd })
+    const child = makeMockChild(4999)
+    mockSpawn.mockReturnValue(child)
+    let line: ((value: string) => void) | undefined
+    mockCreateInterface.mockReturnValue({ on: vi.fn((event: string, callback: (value: string) => void) => { if (event === "line") line = callback }), close: vi.fn() })
+    const pending = codexRuntime.start({ cwd: "/tmp/myproject", dirName: CODEX_DIR_NAME, worktreeName: "native", message: "Native first prompt" })
+    await vi.waitFor(() => expect(line).toBeDefined())
+    line!(JSON.stringify({ type: "session_meta", payload: { id: "native-worktree", timestamp: "2026-07-21T00:00:00Z", cwd } }))
+    const started = await pending
+    expect(started.cwd).toBe(cwd)
+    expect(started.dirName).toBe(descriptorFor("codex").dirName.encode(cwd))
+    expect(mockSpawn.mock.calls[0][1]).toEqual(expect.arrayContaining(["--enable", "worktrees", "--worktree"]))
+    child.emit("close", 0)
   })
 
   // -------------------------------------------------------------------------

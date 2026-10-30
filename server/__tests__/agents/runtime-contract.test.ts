@@ -294,6 +294,40 @@ describe("reporting a new session's id", () => {
 })
 
 describe("SDK startup", () => {
+
+  it("waits for setup even if native init arrives first, and preserves native worktree options", async () => {
+    let release!: () => void
+    const gate = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const nativeCwd = "/external/native-hook/worktree"
+    const state = { cwd: nativeCwd, running: true } as SDKSessionState
+    vi.mocked(createSDKSession).mockReturnValueOnce(state)
+    const runtime = runtimeFor("claude")
+    let returned = false
+    const pending = runtime.start({ dirName: "project", cwd: "/project", worktreeName: "custom", message: "First prompt", beforeFirstTurn: gate }).then((value) => { returned = true; return value })
+    const opts = vi.mocked(createSDKSession).mock.calls[0][0]
+    expect(opts.worktreeName).toBe("custom")
+    state.onInit?.()
+    await Promise.resolve()
+    expect(returned).toBe(false)
+    expect(await runtime.send("generated-uuid", { message: "early bypass" })).toEqual({ delivery: "busy" })
+    const ready = opts.beforeFirstTurn!({ cwd: nativeCwd, sessionId: "generated-uuid" })
+    expect(gate).toHaveBeenCalledWith({ cwd: nativeCwd, sessionId: "generated-uuid", nativeWorktree: true })
+    release(); await ready
+    expect((await pending).cwd).toBe(nativeCwd)
+  })
+
+  it("waits for readiness before the RPC provider prompt", async () => {
+    let release!: () => void
+    const gate = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const pending = runtimeFor("copilot").start({ dirName: "project", cwd: "/project", message: "First prompt", beforeFirstTurn: gate })
+    await vi.waitFor(() => expect(gate).toHaveBeenCalled())
+    expect(copilot.send).not.toHaveBeenCalled()
+    expect(await runtimeFor("copilot").send("generated-uuid", { message: "early bypass" })).toEqual({ delivery: "busy" })
+    expect(copilot.send).not.toHaveBeenCalled()
+    release(); await pending
+    expect(copilot.send).toHaveBeenCalledOnce()
+  })
+
   it("returns the worktree transcript at initialization before the first turn ends", async () => {
     const runtime = runtimeForDirName("-tmp-project")
     const cwd = "/tmp/project/.claude/worktrees/worker"

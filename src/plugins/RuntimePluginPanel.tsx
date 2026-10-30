@@ -9,6 +9,8 @@ import { createRuntimePanelActivation, type RuntimePanelActivation, type Runtime
 import { Button } from "@/components/ui/button"
 import { usePluginExternalLink } from "./PluginExternalLink"
 import { useBrowserSafeMode } from "./browserSafeMode"
+import { ReviewSessionDialog } from "./ReviewSessionDialog"
+import type { ReviewStartRequest } from "@cogpit/plugin-contracts"
 
 export interface RuntimePluginPanelProps extends WorkspacePanelProps {
   client: RuntimePanelClient
@@ -57,7 +59,9 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   const [contextEpoch] = useState(() => Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join(""))
   const currentActive = useRef(active)
   const composePrompt = useRef(context.composePrompt)
+  const addFileContext = useRef(context.addFileContext)
   const openSession = useRef(context.openSession)
+  const [review, setReview] = useState<{ leaseId: string; request: ReviewStartRequest } | null>(null)
   const activation = useRef<RuntimePanelActivation | null>(null)
   const sessionKey = JSON.stringify([context.session?.sessionId, context.sessionChangeKey])
   const [loaded, setLoaded] = useState<{ payload: ArrayBuffer; leaseId: string; runtime: RuntimePanelActivation } | null>(null)
@@ -65,10 +69,13 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   useLayoutEffect(() => { currentActive.current = active; activation.current?.setActive(active) }, [active])
   useLayoutEffect(() => { activation.current?.resetSession() }, [sessionKey])
   useLayoutEffect(() => { composePrompt.current = context.composePrompt }, [context.composePrompt])
+  useLayoutEffect(() => { addFileContext.current = context.addFileContext }, [context.addFileContext])
   useLayoutEffect(() => { openSession.current = context.openSession }, [context.openSession])
   const pluginId = plugin.id, digest = plugin.selectedDigest, projectId = project?.id ?? null
   const canAppend = plugin.manifest.permissions.composer.includes("append") && !!context.composePrompt
   const canOpenSession = plugin.manifest.permissions.navigation.includes("session") && !!context.openSession
+  const canAddContext = plugin.manifest.permissions.composer.includes("context") && !!context.addFileContext
+  const canStartReview = plugin.manifest.permissions.review.includes("start") && !!client.startReviewSession
   const workspacePath = project ? context.projectPath : null
   const canOpenExternal = plugin.manifest.permissions.navigation.includes("external")
   const address = plugin.manifest.permissions.context.includes("session.identity") && client.sessionHandle && workspacePath ? context.sessionAddress ?? null : null
@@ -88,13 +95,19 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
       ...(canAppend ? { appendDraft: (text: string) => composePrompt.current?.(text) } : {}),
       ...(canOpenSession ? { openSession: (dirName: string, fileName: string) => openSession.current?.(dirName, fileName) } : {}),
       ...(canOpenExternal ? { openExternal } : {}),
+      ...(canAddContext ? { addContext: (value) => addFileContext.current?.({ ...value, text: value.text ?? "" }) ?? "The message composer is unavailable" } : {}),
+      ...(canStartReview ? { startReview: (leaseId, request) => setReview({ leaseId, request }) } : {}),
       onLoaded: (payload, leaseId) => setLoaded({ payload, leaseId, runtime }), onError: (failure) => setError(failure.message) })
     activation.current = runtime
     return () => { runtime.dispose(); activation.current = null }
-  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canOpenExternal, openExternal, canOpenSession, workspacePath])
+  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath])
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>
   if (!loaded) return <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>
   return <><PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
     context={pluginPanelContext(plugin.manifest, project, active, presentation, currentHandle)} active={active} title={title ?? plugin.manifest.name}
-    execute={loaded.runtime.execute} onError={loaded.runtime.fail} />{dialog}</>
+    execute={loaded.runtime.execute} onError={loaded.runtime.fail} />{dialog}
+    {review && <ReviewSessionDialog pluginName={plugin.manifest.name} request={review.request} projectPath={workspacePath}
+      start={(input, signal) => client.startReviewSession!(review.leaseId, input, signal)}
+      onStarted={(session) => { if (review.request.purpose === "work") openSession.current?.(session.dirName, session.fileName) }}
+      onClose={() => setReview(null)} />}</>
 }

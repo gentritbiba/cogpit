@@ -49,7 +49,7 @@ describe("prefetchSession", () => {
 
     await prefetchSession("-dir", "sess.jsonl", vi.fn(async () => parsed))
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?tail=30", { background: true })
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?tail=30&projection=results-v1", { background: true })
   })
 })
 

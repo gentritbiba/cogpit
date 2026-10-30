@@ -6,6 +6,9 @@ import { clientRuntimeSchema, pluginScopeSchema, pluginProjectSchema } from "../
 import { pluginConnectionTargetSchema, pluginConnectionIdentitySchema, pluginConnectionMutationSchema } from "../../shared/contracts/pluginConnections"
 import { HttpBodyError, readBinaryBody, readJsonBody, sendJson, type UseFn } from "../http"
 import { PluginAuthorizationError } from "../plugins/authorization"
+import { GitHubRouteError } from "../plugins/integrations/github"
+import { RouteError } from "../lib/routeError"
+import { reviewSessionSchema } from "../prReview/start"
 import { clientImpact } from "../plugins/clientImpact"
 import { getPluginManager } from "../plugins/manager"
 import { PACKAGE_LIMITS } from "../plugins/package"
@@ -43,7 +46,7 @@ export function registerPluginRoutes(use: UseFn): void {
       return
     }
     const recognized = ["/session", "/status", "/settings", "/workspace/resolve", "/publishers", "/stage", "/stage-seed", "/leases", "/connections", "/connections/credential", "/connections/options", "/connections/select", "/connections/disconnect", "/connections/clear-data", "/connections/import-legacy"].includes(path)
-      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle))?$/.test(path)
+      || /^\/(?:transactions|payload|installed|leases)\/[a-zA-Z0-9.-]+(?:\/(?:trial|commit|enabled|scope|pin|rollback|renew|call|dictation|session|session-handle|review-session))?$/.test(path)
     if (!recognized) { sendJson(res, 404, { code: "NOT_FOUND", error: "Unknown plugin endpoint" }); return }
     const requestAbort = new AbortController()
     const abort = () => requestAbort.abort()
@@ -264,6 +267,13 @@ export function registerPluginRoutes(use: UseFn): void {
           sendJson(res, 200, value)
           return
         }
+        if (method === "POST" && operation === "review-session") {
+          const input = reviewSessionSchema.parse(await readJsonBody(req, { maxBytes: 16_384 }))
+          const started = await manager.startReviewSession(req, id, input, requestAbort.signal)
+          authorize()
+          sendJson(res, 200, { sessionId: started.sessionId, dirName: started.dirName, fileName: started.fileName })
+          return
+        }
         if (method === "POST" && operation === "call") {
           const request = parseFrameMessage(await readJsonBody(req))
           if (request.type !== "request") throw new HttpBodyError("Expected a plugin request", 400)
@@ -284,7 +294,7 @@ export function registerPluginRoutes(use: UseFn): void {
       }
       sendJson(res, 405, { code: "METHOD_NOT_ALLOWED", error: "Unsupported plugin action" })
     } catch (error) {
-      const status = error instanceof PluginAuthorizationError ? error.status : error instanceof HttpBodyError ? error.statusCode : 400
+      const status = error instanceof PluginAuthorizationError || error instanceof RouteError || error instanceof GitHubRouteError ? error.status : error instanceof HttpBodyError ? error.statusCode : 400
       const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "INVALID_REQUEST"
       sendJson(res, status, { code, error: (error instanceof Error ? error.message : "Plugin request failed").slice(0, 1000) })
     } finally {

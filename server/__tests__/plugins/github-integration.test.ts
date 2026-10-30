@@ -13,6 +13,7 @@ function fixture() {
     resolveProject: vi.fn().mockResolvedValue({ ok: true, root: "/repo", projectPath: "/repo" }),
     git: vi.fn().mockImplementation(async (_cwd, args) => ({ stdout: args[0] === "remote" ? "git@github.com:acme/app.git" : "main", stderr: "" })),
     githubApi: vi.fn().mockResolvedValue({ workflow_runs: [] }),
+    githubPost: vi.fn(),
     githubMutate: vi.fn().mockResolvedValue({ merged: true, sha: "c".repeat(40), message: "Pull Request successfully merged" }),
     githubGraphql: vi.fn(), pullRequestSessions: vi.fn(),
   }

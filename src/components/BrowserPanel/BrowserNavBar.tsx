@@ -1,5 +1,5 @@
 import { memo, useState, type FormEvent, type KeyboardEvent } from "react"
-import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, SquareDashedMousePointer, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -36,6 +36,8 @@ interface BrowserNavBarProps {
   onBack: () => void
   onForward: () => void
   onReload: () => void
+  /** Freeze the frame on screen to mark a region and note for the message; absent where there is no composer. */
+  onAnnotate?: () => void
   onFollow: (targetId: string) => void
   onCloseTab: (targetId: string) => void
 }
@@ -109,6 +111,7 @@ export const BrowserNavBar = memo(function BrowserNavBar({
   onBack,
   onForward,
   onReload,
+  onAnnotate,
   onFollow,
   onCloseTab,
 }: BrowserNavBarProps) {
@@ -190,6 +193,11 @@ export const BrowserNavBar = memo(function BrowserNavBar({
           </InputGroup>
         </form>
 
+        {onAnnotate && (
+          <Button variant="ghost" size="icon-sm" aria-label="Annotate this frame for the message" title="Annotate for the message" disabled={!page} onClick={onAnnotate}>
+            <SquareDashedMousePointer data-icon="inline-start" />
+          </Button>
+        )}
         {status && <FrameStatus status={status} />}
       </div>
 

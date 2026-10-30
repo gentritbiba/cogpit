@@ -1,22 +1,30 @@
 import { useRef, useEffect, useCallback } from "react"
 import { parseSession, parseSessionAppend } from "../../shared/session/parser"
-import type { ParsedSession } from "../../shared/session/types"
-import type { WorkerRequest, WorkerResponse } from "@/workers/session-parser.worker"
+import { liftElidedResults } from "../../shared/session/resultProjection"
+import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { KeptVersion, WorkerRequest, WorkerResponse } from "@/workers/session-parser.worker"
 
 /** A worker that has not answered by then is treated as dead and replaced. */
 export const WORKER_REQUEST_TIMEOUT_MS = 60_000
 
 type PendingRequest = {
-  resolve: (session: ParsedSession) => void
+  resolve: (session: ParsedSession | null) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
 }
+
+/** What a request resolves with when the worker no longer holds the session an append named. */
+const MISSING = null
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never
 type RequestBody = WithoutId<WorkerRequest>
 
 export function useParserWorker() {
-  const sendRef = useRef<((body: RequestBody) => Promise<ParsedSession>) | null>(null)
+  const sendRef = useRef<((body: RequestBody) => Promise<ParsedSession | null>) | null>(null)
+  // The version the worker keeps each live session under, keyed by its turns,
+  // which an instance-scoped copy of the session shares.
+  const keptRef = useRef(new WeakMap<Turn[], KeptVersion>())
+  const nextHandleRef = useRef(0)
 
   useEffect(() => {
     const pending = new Map<number, PendingRequest>()
@@ -54,6 +62,7 @@ export function useParserWorker() {
         const request = settle(msg.id)
         if (!request) return
         if (msg.type === "result") request.resolve(msg.session)
+        else if (msg.type === "missing") request.resolve(MISSING)
         else request.reject(new Error(msg.error))
       }
       next.onerror = (err) => replace(new Error(`Worker error: ${err.message}`))
@@ -84,15 +93,26 @@ export function useParserWorker() {
 
   const parse = useCallback((text: string): Promise<ParsedSession> => {
     const send = sendRef.current
-    if (!send) return Promise.resolve().then(() => parseSession(text))
-    return send({ type: "parse", text })
+    if (!send) return Promise.resolve().then(() => liftElidedResults(parseSession(text)))
+    return send({ type: "parse", text }).then((session) => session!)
   }, [])
 
+  /**
+   * Appends to a session, sending only `newText` when the worker still holds
+   * `existing` from the append that produced it, and the whole session
+   * otherwise. The result is kept in the worker for the next append.
+   */
   const append = useCallback(
-    (existing: ParsedSession, newText: string): Promise<ParsedSession> => {
+    async (existing: ParsedSession, newText: string): Promise<ParsedSession> => {
       const send = sendRef.current
-      if (!send) return Promise.resolve().then(() => parseSessionAppend(existing, newText))
-      return send({ type: "append", existing, newText })
+      if (!send) return liftElidedResults(parseSessionAppend(existing, newText))
+      const base = keptRef.current.get(existing.turns)
+      const keep: KeptVersion = { handle: base?.handle ?? nextHandleRef.current++, version: (base?.version ?? 0) + 1 }
+      const session = (base && await send({ type: "append", base, newText, keep }))
+        ?? await send({ type: "append", existing, newText, keep })
+      if (!session) throw new Error("Worker lost the session it was appending to")
+      keptRef.current.set(session.turns, keep)
+      return session
     },
     [],
   )

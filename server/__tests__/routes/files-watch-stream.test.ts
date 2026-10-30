@@ -7,6 +7,7 @@
  * on disconnect, and Codex rollout-id routing.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -63,6 +64,9 @@ import { __resetEditionForTest, installEdition, PERSONAL_EDITION, type EditionSe
 import { registerFileWatchRoutes } from "../../routes/files-watch"
 import { resolveSessionFilePath } from "../../sessionPaths"
 import { publish, clear, publishRateLimit, _resetForTests } from "../../lib/streamBus"
+import { setDataRoot } from "../../config"
+import { decodeRef } from "../../agents/resultRefs"
+import { readElided } from "../../../shared/session/resultProjection"
 import type { UseFn, Middleware } from "../../helpers"
 
 function getHandler(path: string): Middleware {
@@ -393,6 +397,31 @@ describe("/api/watch stream-bus forwarding", () => {
     closeConnection()
   })
 
+  it("sends projected lines with every native byte they cover, and references at each line's native offset", async () => {
+    setDataRoot(mkdtempSync(join(tmpdir(), "cogpit-watch-projection-")))
+    const before = '{"type":"user","message":{"role":"user","content":"start"}}\n'
+    const heavy = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "é".repeat(40_000) }] } })
+    const noise = '{"type":"api-request-blob","hash":"h"}'
+    const after = '{"type":"user","message":{"role":"user","content":"next"}}'
+    const text = `${before}${heavy}\n\n${noise}\n${after}\n`
+    mockStat.mockResolvedValue({ size: Buffer.byteLength(text), mtimeMs: Date.now() })
+    mockOpen.mockResolvedValue({
+      read: vi.fn(async (buffer: Buffer, offset: number, length: number, position: number) => ({ bytesRead: Buffer.from(text).copy(buffer, offset, position, position + length) })),
+      close: vi.fn().mockResolvedValue(undefined),
+    })
+
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${Buffer.byteLength(before)}&projection=results-v1`)
+    const events = parseFrames(frames).filter((event) => event.type === "lines")
+    expect(events).toHaveLength(1)
+    const [projected, next] = events[0]!.lines as string[]
+    expect(next).toBe(after)
+    expect(events[0]!.bytes).toBe(Buffer.byteLength(text) - Buffer.byteLength(before) - 1)
+    const elided = readElided(JSON.parse(projected!).message.content[0].content)!
+    expect(decodeRef(elided.stub.ref)).toMatchObject({ offset: Buffer.byteLength(before), length: Buffer.byteLength(heavy) })
+    expect(Buffer.byteLength(projected!)).toBeLessThan(Buffer.byteLength(heavy) / 10)
+    closeConnection()
+  })
+
   it("keeps the original end-of-file baseline when no offset is supplied", async () => {
     const line = '{"existing":true}\n'
     mockStat.mockResolvedValue({ size: Buffer.byteLength(line), mtimeMs: Date.now() })
@@ -455,6 +484,23 @@ describe("/api/task-output streaming", () => {
     installEdition({ ...PERSONAL_EDITION, edition: "team", access: { ...PERSONAL_EDITION.access, authorizeSession, visibilityFor } })
     return authorizeSession
   }
+
+  it("starts a tail-limited reader at the last bytes it keeps, on a character boundary", async () => {
+    const output = `${"a".repeat(1000)}é${"b".repeat(99)}`
+    mockStat.mockResolvedValue({ size: Buffer.byteLength(output), mtimeMs: Date.now() })
+    mockOpen.mockResolvedValue({
+      read: vi.fn(async (buffer: Buffer, offset: number, length: number, position: number) => ({ bytesRead: Buffer.from(output).copy(buffer, offset, position, position + length) })),
+      close: vi.fn().mockResolvedValue(undefined),
+    })
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(`${taskOutputUrl("task.output")}&tail=100`)
+    await handler(harness.req as never, harness.res as never, harness.next)
+    await vi.waitFor(() => expect(parseFrames(harness.frames).some((event) => event.type === "output")).toBe(true))
+    const [first] = parseFrames(harness.frames).filter((event) => event.type === "output")
+    // The 100-byte tail opens inside "é"; its continuation byte is skipped, never sent as a broken character.
+    expect(first).toEqual({ type: "output", text: "b".repeat(99), omittedBytes: Buffer.byteLength(output) - 99 })
+    harness.closeConnection()
+  })
 
   it("requires the output's path", async () => {
     const handler = getHandler("/api/task-output")

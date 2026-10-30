@@ -1,6 +1,7 @@
 import {
   CONTRACT_LIMITS, ContractValidationError, parseFrameMessage, parseMethodResult, parsePluginContext,
-  type FrameMessage, type JsonValue, type MethodMap, type PluginContext, type PluginError, type PluginMethod, type PluginIntegrationRequest,
+  type ComposerFileContext, type FrameMessage, type JsonValue, type MethodMap, type PluginContext, type PluginError, type PluginMethod, type PluginIntegrationRequest,
+  type ReviewStartRequest, type ReviewStartResult,
 } from "@cogpit/plugin-contracts"
 
 export interface RequestOptions { signal?: AbortSignal }
@@ -24,7 +25,13 @@ export interface PluginClient {
     set(key: string, value: JsonValue, options?: RequestOptions): Promise<null>
     delete(key: string, options?: RequestOptions): Promise<null>
   }
-  composer: { append(text: string, options?: RequestOptions): Promise<null> }
+  composer: {
+    append(text: string, options?: RequestOptions): Promise<null>
+    /** Adds a removable file reference with a note; needs the `context` composer permission. */
+    appendContext(context: ComposerFileContext, options?: RequestOptions): Promise<null>
+  }
+  /** Asks the host to start a pull request review session the user confirms; needs the `start` review permission. */
+  review: { start(request: ReviewStartRequest, options?: RequestOptions): Promise<ReviewStartResult> }
   navigation: {
     openExternal(url: string, options?: RequestOptions): Promise<null>
     openSession(handle: string, options?: RequestOptions): Promise<null>
@@ -179,7 +186,11 @@ export function createPluginClient({ port, context: initialContext, timeoutMs = 
       set: (key: string, value: JsonValue, options?: RequestOptions) => request("storage.set", { key, value }, options),
       delete: (key: string, options?: RequestOptions) => request("storage.delete", { key }, options),
     }),
-    composer: Object.freeze({ append: (text: string, options?: RequestOptions) => request("composer.append", { text }, options) }),
+    composer: Object.freeze({
+      append: (text: string, options?: RequestOptions) => request("composer.append", { text }, options),
+      appendContext: (context: ComposerFileContext, options?: RequestOptions) => request("composer.appendContext", context, options),
+    }),
+    review: Object.freeze({ start: (input: ReviewStartRequest, options?: RequestOptions) => request("review.start", input, options) }),
     navigation: Object.freeze({
       openExternal: (url: string, options?: RequestOptions) => request("navigation.openExternal", { url }, options),
       openSession: (handle: string, options?: RequestOptions) => request("navigation.openSession", { handle }, options),

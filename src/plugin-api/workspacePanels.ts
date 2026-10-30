@@ -35,6 +35,8 @@ export interface WorkspacePanelContext {
   openSession?: (dirName: string, fileName: string) => void
   /** Append text to the message composer and focus it; absent where there is no composer. */
   composePrompt?: (text: string) => void
+  /** Add a file excerpt with a note to the composer as removable context; returns why it could not, or null. */
+  addFileContext?: (context: ProjectPromptContext & { text: string }) => string | null
   /** The open session's crew; null or absent when it is in none. */
   crew?: OpenSessionCrew | null
 }

@@ -1,3 +1,4 @@
+import { publishSessionCancellation } from "../lib/sessionCancellation"
 import {
   allRuntimes,
   resolveSessionAgent,
@@ -204,6 +205,7 @@ export function registerSessionManageRoutes(use: UseFn) {
       const session = await interactiveSession(req, res, body)
       if (!session) return
 
+      publishSessionCancellation(session.sessionId)
       // Undo stops a session only to reload it, so its queue stays unless the caller ends the session for good.
       if ((body as { cancelQueued?: unknown }).cancelQueued === true) await cancelWaitingMessages(session.sessionId)
       const stopped = await session.runtime.stop(session.sessionId)
@@ -219,6 +221,7 @@ export function registerSessionManageRoutes(use: UseFn) {
   use("/api/kill-all", (req, res, next) => {
     if (req.method !== "POST") return next()
 
+    publishSessionCancellation(null)
     // Each runtime stops its own work at its own granularity: Codex interrupts
     // turns and keeps the threads, Copilot destroys sessions, Claude closes its
     // queries. Those are not interchangeable, so none of them is flattened into

@@ -33,6 +33,7 @@ describe("HighlightedEditor", () => {
       "const value = 1\n",
       "typescript",
       expect.any(Boolean),
+      expect.any(AbortSignal),
     ))
   })
 
@@ -56,6 +57,6 @@ describe("HighlightedEditor", () => {
     )
 
     await waitFor(() => expect(mocks.highlightCode).toHaveBeenCalledTimes(1))
-    expect(mocks.highlightCode).toHaveBeenCalledWith(small, "typescript", expect.any(Boolean))
+    expect(mocks.highlightCode).toHaveBeenCalledWith(small, "typescript", expect.any(Boolean), expect.any(AbortSignal))
   })
 })

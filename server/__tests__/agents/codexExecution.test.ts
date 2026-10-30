@@ -39,6 +39,25 @@ function client(overrides: Partial<CodexExecutionClient> = {}): CodexExecutionCl
 }
 
 describe("Codex execution mappings", () => {
+
+  it("waits for initialized-cwd readiness before delivering the first turn", async () => {
+    const runtime = client({ startThread: vi.fn().mockResolvedValue({ thread: thread({ cwd: "/native/worktree" }) }) })
+    let release!: () => void
+    const ready = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const started = startCodexExecution(runtime, { cwd: "/project", message: "First prompt", beforeFirstTurn: ready })
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledWith({ cwd: "/native/worktree", sessionId: "thread-1" }))
+    expect(runtime.startTurn).not.toHaveBeenCalled()
+    release(); await started
+    expect(runtime.startTurn).toHaveBeenCalledOnce()
+  })
+
+  it("never delivers the first turn after readiness fails", async () => {
+    const runtime = client()
+    const revoked = new Error("grant revoked")
+    await expect(startCodexExecution(runtime, { cwd: "/work", message: "Never send", beforeFirstTurn: async () => { throw revoked } })).rejects.toBe(revoked)
+    expect(runtime.startTurn).not.toHaveBeenCalled()
+  })
+
   it("never starts or resumes an idle thread for an informational notice", async () => {
     const runtime = client()
     expect(await continueCodexExecution(runtime, "thread-1", { cwd: "/work", message: "Crew notice", onlyWhileRunning: true })).toEqual({ action: "busy", threadId: "thread-1" })
