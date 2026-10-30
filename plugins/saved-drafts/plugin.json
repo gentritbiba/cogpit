@@ -8,7 +8,7 @@
   "entry": "plugin.js",
   "style": "plugin.css",
   "engines": {
-    "pluginApi": "^1.4.0",
+    "pluginApi": "^1.5.0",
     "client": ">=3.5.1",
     "host": ">=3.5.1"
   },
