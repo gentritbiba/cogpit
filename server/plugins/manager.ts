@@ -39,7 +39,7 @@ import { startReviewSession, type ReviewSessionRequest } from "../prReview/start
 export interface PluginManagerOptions { integrationExecutor?: PluginIntegrationExecutor; transport?: ConnectionTransport; environment?: Readonly<Record<string, string | undefined>>; officialRoots?: ReadonlyMap<string, Buffer>; appSeeds?: readonly AppPluginSeed[]; legacyHost?: LegacyHostClassification; crashHook?: (step: string) => void | Promise<void> }
 export interface PluginAdminOptions { authorize: DataGuard; signal?: AbortSignal }
 export type PluginUninstallInput = { pluginId: string; expectedRevision: number } & ({ deleteData?: false } | { deleteData: true; expectedConnectionRevision: number })
-export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue>; media: (handle: string, operation: string, args: Record<string, string | number | boolean>) => Promise<PluginMedia> }
+export interface LegacyPluginCaller { request: IncomingMessage; projectId: string | null; projectPath: string | null; options: PluginAdminOptions; call: (operation: string, args: Record<string, string | number | boolean>) => Promise<JsonValue>; media: (handle: string, operation: string, args: Record<string, string | number | boolean>) => Promise<PluginMedia>; dictate: (audio: PluginMedia) => Promise<{ text: string }> }
 type ConnectionTarget = PluginConnectionTarget & { connectionId: string }
 type ConnectionMutation = ConnectionTarget & { expectedRevision: number }
 const allowed = () => {}
@@ -462,7 +462,8 @@ export class PluginManager {
         this.call(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.request", params: { handle: "clickup", operationId: operation, args } }, { signal: input.signal }))
       const media = (handle: string, operation: string, args: Record<string, string | number | boolean>) => leased(leaseId =>
         this.callMedia(request, leaseId, { protocol: 1, type: "request", id: "legacy", method: "connections.media", params: { handle, operationId: operation, args } }, { signal: input.signal }))
-      const value = await operation({ request, projectId, projectPath, options, call, media })
+      const dictate = (audio: PluginMedia) => leased(leaseId => this.dictate(request, leaseId, audio, { signal: input.signal }))
+      const value = await operation({ request, projectId, projectPath, options, call, media, dictate })
       await guard()
       return value
     } finally {
