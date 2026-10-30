@@ -6,7 +6,7 @@ import { integrationPermissionSchema } from "./integrations.js"
 import { chatBlockContributionSchema, dictationContributionSchema, settingsContributionSchema, skillContributionSchema, sessionActionContributionSchema } from "./contributions.js"
 
 export const PROTOCOL_MAJOR = 1 as const
-export const PLUGIN_API_VERSION = "1.5.0"
+export const PLUGIN_API_VERSION = "1.4.0"
 export const RUNTIME = "browser-iife-v1" as const
 export const versionSchema = z.string().max(128).refine((value) => valid(value) === value, "Expected strict SemVer")
 const range = z.string().min(1).max(256).refine((value) => validRange(value) !== null, "Expected a SemVer range")
