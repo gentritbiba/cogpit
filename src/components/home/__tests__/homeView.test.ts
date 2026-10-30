@@ -55,7 +55,21 @@ describe("homeSessions", () => {
     ]
     const home = homeSessions(homeSessionRows(sessions, statusOf), NOW)
     expect(home.map((entry) => entry.session.sessionId)).toEqual(["lead", "solo", "old"])
-    expect(home[0]).toMatchObject({ state: "done", cells: ["working"], counts: { size: 1, working: 1 }, activityAt: ago(1), landed: { number: 252 } })
+    expect(home[0]).toMatchObject({ state: "done", crew: [{ member: { sessionId: "lane" }, state: "working" }], counts: { size: 1, working: 1 }, activityAt: ago(1), landed: { number: 252 } })
+  })
+
+  it("orders a crew by who needs the user, then who is working, newest first within each", () => {
+    const status = (member: ActiveSessionInfo): MemberStatus => ({
+      state: member.agentStatus === "deferred" ? "needs-you" : member.agentStatus === "tool_use" ? "working" : "done",
+    })
+    const [entry] = homeSessionRows([
+      row("lead"),
+      row("old-done", { crew: crew("lead", 1), lastActivityAt: ago(50) }),
+      row("new-done", { crew: crew("lead", 2), lastActivityAt: ago(5) }),
+      row("worker", { crew: crew("lead", 3), agentStatus: "tool_use", lastActivityAt: ago(40) }),
+      row("asker", { crew: crew("lead", 4), agentStatus: "deferred", lastActivityAt: ago(60) }),
+    ], status)
+    expect(entry!.crew.map(({ member }) => member.sessionId)).toEqual(["asker", "worker", "new-done", "old-done"])
   })
 
   it("offers the newest sessions' projects once each, newest first", () => {

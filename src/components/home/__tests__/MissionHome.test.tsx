@@ -57,8 +57,29 @@ describe("MissionHome", () => {
     fireEvent.click(within(yours).getByRole("button", { name: /^lead/ }))
     expect(onOpenSession).toHaveBeenCalledWith("-workspace", "lead.jsonl")
     expect(screen.getByText("Nothing is waiting on you.")).toBeInTheDocument()
+    fireEvent.click(within(yours).getByRole("button", { name: "Show crew (1)" }))
     fireEvent.click(within(yours).getByRole("button", { name: "Open lane" }))
     expect(onOpenSession).toHaveBeenLastCalledWith("-workspace", "lane.jsonl")
+  })
+
+  it("names the crew members that need the user or are working and lists the rest on demand", () => {
+    const member = (id: string, startedAt: number, overrides: Partial<ActiveSessionInfo> = {}) =>
+      row(id, { crew: { rootId: "lead", parentId: "lead", startedAt }, ...overrides })
+    state.sessions = [
+      row("lead"),
+      ...Array.from({ length: 200 }, (_, index) => member(`done${index}`, index)),
+      member("asker", 300, { lastActivityAt: new Date(Date.now() - 60_000).toISOString() }),
+      member("nested", 301, { crew: { rootId: "lead", parentId: "asker", startedAt: 301 } }),
+    ]
+    state.input.awaitingPermission = new Set(["asker", "nested"])
+    render(<MissionHome onOpenSession={vi.fn()} />)
+    const crew = screen.getByRole("group", { name: "lead crew" })
+    expect(within(crew).getAllByRole("button", { name: /^Open / }).map((chip) => chip.textContent)).toEqual(["nested", "asker"])
+    fireEvent.click(within(crew).getByRole("button", { name: "Show crew (202)" }))
+    const list = screen.getByRole("list", { name: "lead crew members" })
+    expect(within(list).getAllByRole("button")).toHaveLength(202)
+    expect(within(list).getAllByRole("button")[0]).toHaveTextContent("nested · via asker")
+    expect(within(list).getAllByRole("button")[0]).toHaveTextContent("needs you")
   })
 
   it("answers the oldest request in place and protects an in-flight keyboard answer", async () => {

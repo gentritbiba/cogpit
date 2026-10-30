@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
-import { ChevronLeft, ChevronRight, FolderOpen, Pencil, Search, X } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Pencil, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
-import { memberStatus, type CrewPendingInput } from "@/components/LiveSessions/crew"
+import { memberStatus, type CrewPendingInput, type MemberState } from "@/components/LiveSessions/crew"
 import { crewSessionTitle } from "@/components/LiveSessions/crew"
 import { STATUS_DOT } from "@/components/LiveSessions/statusDot"
 import { sessionGroupKey, sessionTitle } from "@/components/LiveSessions/sessionListView"
@@ -22,11 +22,14 @@ import { HomeComposer, type HomeProject, type HomeStart } from "./HomeComposer"
 import { HomeRequestPrompt } from "./HomeRequestPrompt"
 import { homeQueue, homeRequestId, homeSessionRows, homeSessions, recentHomeProjects, searchHomeSessions, type HomeRequest, type HomeSession } from "./homeView"
 
-const CELL: Record<string, string> = {
-  working: "bg-success shadow-[0_0_0_1.5px_color-mix(in_oklch,var(--success)_25%,transparent)]",
-  "needs-you": "bg-warning",
+const MEMBER_DOT: Record<MemberState, string> = {
+  "needs-you": STATUS_DOT.attention,
+  working: STATUS_DOT.working,
   done: "bg-muted-foreground/40",
 }
+const MEMBER_STATE: Record<MemberState, string> = { "needs-you": "needs you", working: "working", done: "done" }
+/** How many working or waiting members a collapsed crew names. */
+const CREW_CHIPS = 3
 
 export interface MissionHomeProps {
   onOpenSession: (dirName: string, fileName: string) => void
@@ -97,7 +100,7 @@ export function MissionHome({ onOpenSession, onBrowseProjects, start }: MissionH
       entry.session.firstUserMessage,
       entry.landed?.title,
       entry.landed && `#${entry.landed.number}`,
-      ...entry.members.map((member) => nameOf(member.sessionId)),
+      ...entry.crew.map(({ member }) => nameOf(member.sessionId)),
     ])
     : homeSessions(rows)
   const recent = recentHomeProjects(rows, (session) => suggestedProject(session, projectNames))
@@ -426,22 +429,6 @@ function SessionRow({
 
   return (
     <li className="group/row relative border-t border-border/70 first:border-t-0">
-      {entry.members.length > 0 && (
-        <div role="group" aria-label={`${title} crew`} className="flex flex-wrap gap-1 px-3 pt-3">
-          {entry.members.map((member, cellIndex) => (
-            <button
-              key={member.sessionId}
-              type="button"
-              aria-label={`Open ${nameOf(member.sessionId) ?? "crew member"}`}
-              title={`${nameOf(member.sessionId)}: ${entry.cells[cellIndex]}`}
-              onClick={() => onOpen(member.sessionId)}
-              className="flex size-5 items-center justify-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className={cn("size-2 rounded-[2px]", CELL[entry.cells[cellIndex]!])} />
-            </button>
-          ))}
-        </div>
-      )}
       {draft === null ? (
         <button
           type="button"
@@ -478,6 +465,7 @@ function SessionRow({
           {details}
         </div>
       )}
+      {entry.crew.length > 0 && <CrewStrip entry={entry} title={title} nameOf={nameOf} onOpen={onOpen} />}
       {draft === null && (
         <Button
           variant="ghost"
@@ -485,14 +473,89 @@ function SessionRow({
           aria-label={`Rename ${title}`}
           title="Rename"
           onClick={() => setDraft(title)}
-          className={cn(
-            "absolute right-2 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100",
-            entry.members.length > 0 ? "top-[42px]" : "top-2.5",
-          )}
+          className="absolute right-2 top-2.5 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
         >
           <Pencil data-icon="icon" />
         </Button>
       )}
     </li>
+  )
+}
+
+/**
+ * A session's crew under its row: the members working or waiting on the user
+ * by name, and the whole crew, however large, one click away.
+ */
+function CrewStrip({
+  entry,
+  title,
+  nameOf,
+  onOpen,
+}: {
+  entry: HomeSession
+  title: string
+  nameOf: (sessionId: string) => string | undefined
+  onOpen: (sessionId: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const live = entry.crew.filter(({ state }) => state !== "done")
+  const named = live.slice(0, CREW_CHIPS)
+  const viaOf = (member: ActiveSessionInfo) => {
+    const parentId = member.crew?.parentId
+    return parentId && parentId !== entry.session.sessionId ? nameOf(parentId) : undefined
+  }
+  return (
+    <div className="-mt-1.5 flex flex-col gap-1.5 px-3 pb-3">
+      <div role="group" aria-label={`${title} crew`} className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {!expanded && named.map(({ member, state }) => (
+          <button
+            key={member.sessionId}
+            type="button"
+            aria-label={`Open ${nameOf(member.sessionId) ?? "crew member"}`}
+            onClick={() => onOpen(member.sessionId)}
+            className="flex max-w-56 items-center gap-1.5 rounded-md border border-border/70 px-2 py-0.5 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className={cn("size-1.5 shrink-0 rounded-full", MEMBER_DOT[state])} aria-hidden="true" />
+            <span className="truncate">{nameOf(member.sessionId) ?? "Crew member"}</span>
+          </button>
+        ))}
+        {!expanded && live.length > named.length && (
+          <span className="text-xs tabular-nums text-muted-foreground">+{live.length - named.length} more</span>
+        )}
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+          className="text-muted-foreground"
+        >
+          <ChevronDown data-icon="inline-start" className={cn("transition-transform", expanded && "rotate-180")} />
+          {expanded ? "Hide crew" : `Show crew (${entry.crew.length})`}
+        </Button>
+      </div>
+      {expanded && (
+        <ul aria-label={`${title} crew members`} className="flex max-h-72 flex-col overflow-y-auto rounded-md border border-border/70">
+          {entry.crew.map(({ member, state }) => (
+            <li key={member.sessionId}>
+              <button
+                type="button"
+                aria-label={`Open ${nameOf(member.sessionId) ?? "crew member"}`}
+                onClick={() => onOpen(member.sessionId)}
+                className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 px-2.5 py-1.5 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent"
+              >
+                <span className={cn("size-1.5 rounded-full", MEMBER_DOT[state])} aria-hidden="true" />
+                <span className="truncate">
+                  {nameOf(member.sessionId) ?? "Crew member"}
+                  {viaOf(member) && <span className="text-muted-foreground"> · via {viaOf(member)}</span>}
+                </span>
+                <span className={cn("tabular-nums text-muted-foreground", state === "needs-you" && "text-warning")}>
+                  {state === "done" ? formatRelativeTime(member.lastActivityAt || member.lastModified) : MEMBER_STATE[state]}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
