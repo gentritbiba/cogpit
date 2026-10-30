@@ -15,6 +15,8 @@ export class WorktreeSetupService {
     worktreeName: string
     signal?: AbortSignal
     authorize?: (context: StartupAuthorizationContext) => Promise<void>
+    /** Readies the initialized worktree, such as checking out a pinned commit, before its setup recipe runs. */
+    prepare?: (cwd: string, signal: AbortSignal) => Promise<void>
     start: (lifecycle: { signal: AbortSignal; beforeFirstTurn: (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => Promise<void> }) => Promise<T>
   }): Promise<T> {
     if (this.active.size >= 64) throw new RouteError(429, ErrorCodes.CONFLICT, "Too many worktree startups")
@@ -53,6 +55,10 @@ export class WorktreeSetupService {
       }
       operation.cwd = await validate()
       operation.sessionId = identity.sessionId
+      if (options.prepare) {
+        await options.prepare(operation.cwd, controller.signal)
+        await validate()
+      }
       for (;;) {
         controller.signal.throwIfAborted()
         const recipe = options.project.state.recipe

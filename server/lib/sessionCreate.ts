@@ -106,6 +106,8 @@ export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" 
   retry?: { requestId: string; scope: string }
   setupScope?: string
   authorizeStartup?: (context: StartupAuthorizationContext) => Promise<void>
+  /** Runs in the initialized worktree before its setup recipe; only with `worktreeName`. */
+  prepareWorktree?: (cwd: string, signal: AbortSignal) => Promise<void>
 }
 
 type StartFn = (runtime: AgentRuntime, request: StartSessionRequest) => Promise<StartedSession>
@@ -120,7 +122,7 @@ export async function createSession(
   input: CreateSessionInput,
   start: StartFn = (runtime, request) => runtime.start(request),
 ): Promise<StartedSession> {
-  const { dirName: requestedDirName, cwd: requestedCwd, agent, instanceId, parentSessionId, retry, setupScope, authorizeStartup, ...request } = input
+  const { dirName: requestedDirName, cwd: requestedCwd, agent, instanceId, parentSessionId, retry, setupScope, authorizeStartup, prepareWorktree, ...request } = input
   if (!requestedDirName && !isUsablePath(requestedCwd)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName or an absolute cwd is required")
   }
@@ -162,6 +164,7 @@ export async function createSession(
         worktreeName: request.worktreeName,
         signal: request.signal,
         authorize: authorizeStartup,
+        prepare: prepareWorktree,
         start: (lifecycle) => launch({ ...lifecycle, beforeFirstTurn: async (identity) => {
           await lifecycle.beforeFirstTurn(identity)
           await request.beforeFirstTurn?.(identity)

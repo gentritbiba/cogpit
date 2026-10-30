@@ -229,6 +229,37 @@ describe("native integration contracts", () => {
     }
     expect(parseManifest({ ...manifestInput(), permissions: { integrations: [{ id: "github", operations: ["pulls", "mergePull"] }] } }).permissions.integrations[0].operations).toEqual(["pulls", "mergePull"])
   })
+  it("bounds an explicit review submission, the one GitHub request larger than ordinary arguments", () => {
+    const comment = { path: "src/a.ts", side: "RIGHT", line: 3, body: "x".repeat(8000) }
+    const submission = { integration: "github", operation: "submitReview", number: 7, headSha: "b".repeat(40), submissionId: "sub_0123456789", body: "", comments: Array.from({ length: 6 }, () => comment) }
+    expect(parseIntegrationRequest(submission)).toEqual(submission)
+    const frame = parseFrameMessage({ protocol: 1, type: "request", id: "submit", method: "integrations.request", params: submission })
+    expect(frame).toMatchObject({ method: "integrations.request", params: { operation: "submitReview" } })
+    for (const invalid of [{ ...submission, comments: [] }, { ...submission, comments: [{ ...comment, side: "BOTH" }] }, { ...submission, comments: [{ ...comment, body: " " }] }, { ...submission, comments: [{ ...comment, body: "x".repeat(8193) }] },
+      { ...submission, comments: Array.from({ length: 51 }, () => ({ ...comment, body: "ok" })) }, { ...submission, submissionId: "short" }, { ...submission, headSha: "b".repeat(7) }, { ...submission, event: "APPROVE" }]) {
+      expect(() => parseIntegrationRequest(invalid)).toThrow(ContractValidationError)
+    }
+    expect(() => parseIntegrationRequest({ integration: "github", operation: "pullFiles", number: 1, padding: "x".repeat(5000) })).toThrow(ContractValidationError)
+    expect(parseIntegrationRequest({ integration: "github", operation: "pullReview", number: 7, page: 30 })).toMatchObject({ page: 30 })
+  })
+  it("carries review sessions and file references as narrow host actions", () => {
+    const start = { number: 7, headSha: "b".repeat(40), purpose: "work" }
+    expect(parseFrameMessage({ protocol: 1, type: "request", id: "start", method: "review.start", params: start })).toMatchObject({ params: start })
+    for (const params of [{ ...start, purpose: "merge" }, { ...start, prompt: "rm -rf /" }, { ...start, agent: "claude" }, { ...start, headSha: undefined }]) {
+      expect(() => parseFrameMessage({ protocol: 1, type: "request", id: "start", method: "review.start", params })).toThrow(ContractValidationError)
+    }
+    expect(parseMethodResult("review.start", { status: "opened" })).toEqual({ status: "opened" })
+    const context = { path: "src/a.ts", startLine: 3, endLine: 4, text: "+ new", comment: "Rename" }
+    expect(parseFrameMessage({ protocol: 1, type: "request", id: "context", method: "composer.appendContext", params: context })).toMatchObject({ params: context })
+    for (const params of [{ ...context, endLine: undefined }, { ...context, startLine: 5 }, { ...context, comment: "x".repeat(2001) }]) {
+      expect(() => parseFrameMessage({ protocol: 1, type: "request", id: "context", method: "composer.appendContext", params })).toThrow(ContractValidationError)
+    }
+    expect(parseManifest({ ...manifestInput(), permissions: { composer: ["append", "context"], review: ["start"] } }).permissions).toMatchObject({ composer: ["append", "context"], review: ["start"] })
+    expect(parseManifest(manifestInput()).permissions.review).toEqual([])
+    for (const permissions of [{ review: ["start", "start"] }, { review: ["post"] }, { composer: ["context", "context"] }]) {
+      expect(() => parseManifest({ ...manifestInput(), permissions })).toThrow(ContractValidationError)
+    }
+  })
   it("accepts read grants and rejects duplicate or unknown grants", () => {
     const input = manifestInput()
     expect(parseManifest(input).permissions.integrations).toEqual([])

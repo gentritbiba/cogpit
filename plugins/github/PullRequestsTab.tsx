@@ -1,5 +1,6 @@
 import { useGitHubNavigation, Description } from "./navigation.js"
-import { useMemo, useState, type ReactNode } from "react"
+import { ReviewLauncher } from "./ReviewWorkspace.js"
+import { useContext, useMemo, useState, type ReactNode } from "react"
 import {
   ArrowRight,
   ArrowUpRight,
@@ -250,6 +251,7 @@ function pullBreakdown(pull: GitHubPullRequest, files: FilesState): LineCountsRo
 }
 
 function PullDetails({ pull, files }: { pull: GitHubPullRequest; files: FilesState }) {
+  const review = useContext(ReviewLauncher)
   const body = pull.body.trim()
   const list = files.data?.files ?? []
   return (
@@ -287,15 +289,21 @@ function PullDetails({ pull, files }: { pull: GitHubPullRequest; files: FilesSta
         )}
       </section>
 
-      <Button
-        variant="outline"
-        size="xs"
-        className="self-start"
-        render={<a href={pull.url} target="_blank" rel="noopener noreferrer" />}
-      >
-        Open pull request on GitHub
-        <ArrowUpRight data-icon="inline-end" />
-      </Button>
+      <div className="flex flex-wrap gap-1">
+        {review && (
+          <Button variant="default" size="xs" onClick={() => review(pull.number)} aria-label={`Review changes of #${pull.number}`}>
+            Review changes
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="xs"
+          render={<a href={pull.url} target="_blank" rel="noopener noreferrer" />}
+        >
+          Open pull request on GitHub
+          <ArrowUpRight data-icon="inline-end" />
+        </Button>
+      </div>
     </div>
   )
 }

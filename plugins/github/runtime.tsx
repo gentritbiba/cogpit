@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import type { GitHubIntegrationRequest } from "@cogpit/plugin-contracts"
 import { createRoot } from "react-dom/client"
 import { createPluginClient, type PluginClient, type PluginContext } from "@cogpit/plugin-sdk"
 import { GitHubPanel } from "./GitHubPanel.js"
 import { createGitHubStore, GitHubStoreProvider, type GitHubStore } from "./githubStore.js"
+import { ReviewHostProvider, type ReviewHost } from "./ReviewWorkspace.js"
 import "./styles.css"
 
 export interface GitHubPluginEntry { port: MessagePort; context: PluginContext; assets: Readonly<Record<string, string>> }
@@ -15,13 +17,25 @@ function RuntimeGitHubPanel({ client, context, store }: { client: PluginClient; 
       setError(message)
     })
   }
-  return <GitHubStoreProvider value={store}>
+  const review = useMemo<ReviewHost>(() => ({
+    async request<T>(input: GitHubIntegrationRequest) {
+      const result = await client.integrations.request(input)
+      if (!result.ok) throw { code: result.error.code, error: result.error.message }
+      return result.data as unknown as T
+    },
+    load: key => client.storage.get(key),
+    save: async (key, value) => { await client.storage.set(key, value) },
+    addContext: async value => { await client.composer.appendContext(value) },
+    start: async request => { await client.review.start(request) },
+    openExternal: url => { void client.navigation.openExternal(url).catch(() => setError("Unable to open that link.")) },
+  }), [client])
+  return <GitHubStoreProvider value={store}><ReviewHostProvider value={review}>
     {error && <p role="alert" className="border-b p-3 text-xs text-destructive">{error}</p>}
     <GitHubPanel active={context.visible} context={{ projectKey: context.project?.id ?? null, sessionHandle: context.session?.handle ?? null,
       openSession: handle => action(() => client.navigation.openSession(handle), "Unable to open that session."),
       composePrompt: text => action(() => client.composer.append(text), "Unable to add this issue to your draft."),
     }} openExternal={url => action(() => client.navigation.openExternal(url), "Unable to open that link.")} />
-  </GitHubStoreProvider>
+  </ReviewHostProvider></GitHubStoreProvider>
 }
 export function mountGitHub({ port, context: initialContext }: GitHubPluginEntry): () => void {
   const client = createPluginClient({ port, context: initialContext })

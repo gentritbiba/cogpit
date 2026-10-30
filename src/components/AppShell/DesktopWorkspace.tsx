@@ -311,6 +311,10 @@ export function DesktopWorkspace({
     supportsWorktrees: project.supportsWorktrees,
     openSession: navigation.handlers.handleLoadSessionScrollAware,
     composePrompt,
+    addFileContext: (value) => {
+      const item = projectContextItem(value)
+      return item ? addComposerContext(item) : "The reference has no text to add"
+    },
     crew: openCrew,
   }
   const visiblePanels = availableWorkspacePanels(workspacePanels, panelContext)

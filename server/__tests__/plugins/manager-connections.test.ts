@@ -343,6 +343,10 @@ describe("host-owned plugin connections and state", () => {
   it("uses signed composer permission and preserves project KV across disable and rollback", async () => {
     let activation = await lease()
     expect(await manager.call(req, activation.id, request("composer.append", { text: "Reviewable draft" }))).toBeNull()
+    const review = { number: 7, headSha: "b".repeat(40), purpose: "work" }
+    await expect(manager.call(req, activation.id, request("composer.appendContext", { path: "src/a.ts", text: "+ new" }))).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
+    await expect(manager.call(req, activation.id, request("review.start", review))).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
+    await expect(manager.startReviewSession(req, activation.id, { ...review, purpose: "work", agent: "claude", instanceId: "default" })).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
     expect(await manager.call(req, activation.id, request("navigation.openExternal", { url: "https://example.com/item" }))).toBeNull()
     await manager.call(req, activation.id, request("storage.set", { key: "setting", value: { value: 7 } }))
     expect(await manager.call(req, activation.id, request("storage.get", { key: "setting" }))).toEqual({ value: 7 })
@@ -354,6 +358,13 @@ describe("host-owned plugin connections and state", () => {
     activation = await lease()
     expect(await manager.call(req, activation.id, request("storage.get", { key: "setting" }))).toEqual({ value: 7 })
     await expect(manager.call(req, activation.id, request("storage.set", { key: "large", value: "x".repeat(1024) }))).rejects.toMatchObject({ code: "RATE_LIMITED" })
+  })
+  it("grants review sessions and file references only to a plugin signed with them, and still needs its GitHub grant to start one", async () => {
+    await install(signedPackage(authority, { connection: definition(), composer: true, review: true, navigation: true, storage: { scope: "project", quotaKiB: 1 }, version: "1.1.0", metadataVersion: 2, retained: [installed] }))
+    const activation = await lease()
+    expect(await manager.call(req, activation.id, request("composer.appendContext", { path: "src/a.ts", startLine: 2, endLine: 2, text: "+ new", comment: "Rename" }))).toBeNull()
+    expect(await manager.call(req, activation.id, request("review.start", { number: 7, headSha: "b".repeat(40), purpose: "guide" }))).toEqual({ status: "opened" })
+    await expect(manager.startReviewSession(req, activation.id, { number: 7, headSha: "b".repeat(40), purpose: "guide", agent: "claude", instanceId: "default" })).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
   })
   it.each([true, false])("blocks activations while old state writes drain and clears the barrier after allowed=%s", async permitted => {
     const activation = await lease()

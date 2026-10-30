@@ -6,7 +6,7 @@ import { createRuntimePanelActivation, type RuntimePanelActivation, type Runtime
 const request: PluginRequest = { protocol: 1, type: "request", id: "r1", method: "storage.get", params: { key: "setting" } }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const running = new Set<RuntimePanelActivation>()
-function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void) {
+function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void, extra: Pick<Parameters<typeof createRuntimePanelActivation>[0], "addContext" | "startReview"> = {}) {
   const client = {
     lease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })),
     payload: vi.fn(async () => new ArrayBuffer(2)),
@@ -15,7 +15,7 @@ function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text:
   }
   const onLoaded = vi.fn(), onError = vi.fn()
   const activation = createRuntimePanelActivation({ client, pluginId: "example.sample", digest: "a".repeat(64), projectId: "p_project",
-    contextEpoch: "epoch-1", active: true, onLoaded, onError, appendDraft })
+    contextEpoch: "epoch-1", active: true, onLoaded, onError, appendDraft, ...extra })
   running.add(activation)
   return { client, onLoaded, onError, activation }
 }
@@ -59,6 +59,28 @@ describe("runtime panel activation", () => {
     value.activation.setActive(false); pending.resolve(null)
     await expect(inflight).rejects.toThrow()
     expect(append).not.toHaveBeenCalled()
+  })
+  it("adds a file reference only after host authorization, and surfaces the composer's refusal", async () => {
+    const addContext = vi.fn<(value: unknown) => string | null>().mockReturnValueOnce(null).mockReturnValueOnce("Open a session or start a new one to add context")
+    const value = setup({}, undefined, { addContext }); await settle()
+    const message: PluginRequest = { protocol: 1, type: "request", id: "context", method: "composer.appendContext", params: { path: "src/a.ts", startLine: 3, endLine: 3, text: "+ new", comment: "Rename" } }
+    await expect(value.activation.execute(message, new AbortController().signal)).resolves.toBeNull()
+    expect(value.client.call).toHaveBeenCalledOnce()
+    expect(addContext).toHaveBeenCalledWith(message.params)
+    vi.spyOn(performance, "now").mockReturnValue(performance.now() + 5_000)
+    await expect(value.activation.execute(message, new AbortController().signal)).rejects.toMatchObject({ code: "RESOURCE_REQUIRED", message: "Open a session or start a new one to add context" })
+    vi.restoreAllMocks()
+  })
+  it("opens the host's review dialog for review.start under the current lease, never starting anything itself", async () => {
+    const startReview = vi.fn()
+    const value = setup({ call: vi.fn(async () => ({ status: "opened" })) }, undefined, { startReview }); await settle()
+    const params = { number: 7, headSha: "b".repeat(40), purpose: "guide" as const }
+    await expect(value.activation.execute({ protocol: 1, type: "request", id: "review", method: "review.start", params }, new AbortController().signal)).resolves.toEqual({ status: "opened" })
+    expect(startReview).toHaveBeenCalledExactlyOnceWith("lease-1", params)
+    const denied = setup({ call: async () => { throw new Error("Review sessions have not been granted") } }, undefined, { startReview: vi.fn() }); await settle()
+    await expect(denied.activation.execute({ protocol: 1, type: "request", id: "review", method: "review.start", params }, new AbortController().signal)).rejects.toThrow("not been granted")
+    const absent = setup(); await settle()
+    await expect(absent.activation.execute({ protocol: 1, type: "request", id: "review", method: "review.start", params }, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" })
   })
   it("refuses draft actions when the workspace has no permitted composer", async () => {
     const value = setup(); await settle()

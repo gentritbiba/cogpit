@@ -30,6 +30,7 @@ import { PluginSessionNavigation } from "./sessionNavigation"
 import type { GitHubPullSessionsResponse } from "../../shared/contracts/github"
 import { legacyProjectLink, projectForPath, validateLegacyClickUp } from "./legacyClickUp"
 import { registerPluginSkills } from "./skillContext"
+import { startReviewSession, type ReviewSessionRequest } from "../prReview/start"
 
 export interface PluginManagerOptions { integrationExecutor?: PluginIntegrationExecutor; transport?: ConnectionTransport; environment?: Readonly<Record<string, string | undefined>>; officialRoots?: ReadonlyMap<string, Buffer>; appSeeds?: readonly AppPluginSeed[]; legacyHost?: LegacyHostClassification; crashHook?: (step: string) => void | Promise<void> }
 export interface PluginAdminOptions { authorize: DataGuard; signal?: AbortSignal }
@@ -648,7 +649,7 @@ export class PluginManager {
     const grant = context.plugin.manifest.permissions.integrations.find(value => value.id === request.integration)
     if (!grant || !(grant.operations as readonly string[]).includes(request.operation)) throw new PluginDataError("PERMISSION_REQUIRED", "This plugin has not been granted this integration operation")
     if (!context.workspacePath) throw new PluginDataError("RESOURCE_REQUIRED", "Select a workspace before using this integration")
-    const integrationContext = { workspacePath: context.workspacePath, signal: context.signal, authorize: async () => {
+    const integrationContext = { workspacePath: context.workspacePath, signal: context.signal, principal: context.scope.principalId, authorize: async () => {
       context.check()
       if (this.safeMode) throw new PluginDataError("STALE_ACTIVATION", "Plugin execution is disabled on this host")
       if (await realpath(context.workspacePath!) !== context.workspacePath) throw new PluginDataError("STALE_ACTIVATION", "The selected workspace is unavailable")
@@ -686,6 +687,27 @@ export class PluginManager {
     } finally { context.dispose() }
   }
 
+  /**
+   * Starts the pull request session the user confirmed in the host dialog a
+   * `review.start` request opened, under the plugin's lease and grants.
+   */
+  async startReviewSession(req: IncomingMessage, leaseId: string, input: ReviewSessionRequest, signal?: AbortSignal) {
+    const lease = this.resolveLease(req, leaseId)
+    const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal }, lease)
+    try {
+      const { permissions } = context.plugin.manifest
+      if (!permissions.review.includes("start") || !permissions.integrations.some((grant) => grant.id === "github")) throw new PluginDataError("PERMISSION_REQUIRED", "Review sessions have not been granted")
+      if (!context.workspacePath) throw new PluginDataError("RESOURCE_REQUIRED", "Select a workspace before starting a review session")
+      const workspacePath = context.workspacePath
+      return await startReviewSession(req, { workspacePath, principal: context.scope.principalId, signal: context.signal, authorize: async () => {
+        context.check()
+        if (this.safeMode) throw new PluginDataError("STALE_ACTIVATION", "Plugin execution is disabled on this host")
+        if (await realpath(workspacePath) !== workspacePath) throw new PluginDataError("STALE_ACTIVATION", "The selected workspace is unavailable")
+        context.check()
+      } }, input)
+    } finally { context.dispose() }
+  }
+
   async presentSession(req: IncomingMessage, leaseId: string, address: { dirName: string; fileName: string }, signal?: AbortSignal): Promise<{ handle: string }> {
     const lease = this.resolveLease(req, leaseId)
     const context = await this.context(req, { pluginId: lease.pluginId, projectId: lease.projectKey }, { authorize: () => { this.resolveLease(req, leaseId) }, signal }, lease)
@@ -718,6 +740,8 @@ export class PluginManager {
         }
       }
       if (request.method === "composer.append" && context.plugin.manifest.permissions.composer.includes("append")) return null
+      if (request.method === "composer.appendContext" && context.plugin.manifest.permissions.composer.includes("context")) return null
+      if (request.method === "review.start" && context.plugin.manifest.permissions.review.includes("start")) return { status: "opened" }
       if (request.method === "navigation.openExternal" && context.plugin.manifest.permissions.navigation.includes("external")) return null
       if (request.method === "connections.request" || request.method === "connections.status") {
         const connection = this.connection(context, request.params.handle)
