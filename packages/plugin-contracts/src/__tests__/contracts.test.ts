@@ -231,12 +231,12 @@ describe("native integration contracts", () => {
   })
   it("bounds an explicit review submission, the one GitHub request larger than ordinary arguments", () => {
     const comment = { path: "src/a.ts", side: "RIGHT", line: 3, body: "x".repeat(8000) }
-    const submission = { integration: "github", operation: "submitReview", number: 7, headSha: "b".repeat(40), submissionId: "sub_0123456789", body: "", comments: Array.from({ length: 6 }, () => comment) }
+    const submission = { integration: "github", operation: "submitReview", number: 7, headSha: "b".repeat(40), baseSha: "a".repeat(40), submissionId: "sub_0123456789", body: "", comments: Array.from({ length: 6 }, () => comment) }
     expect(parseIntegrationRequest(submission)).toEqual(submission)
     const frame = parseFrameMessage({ protocol: 1, type: "request", id: "submit", method: "integrations.request", params: submission })
     expect(frame).toMatchObject({ method: "integrations.request", params: { operation: "submitReview" } })
     for (const invalid of [{ ...submission, comments: [] }, { ...submission, comments: [{ ...comment, side: "BOTH" }] }, { ...submission, comments: [{ ...comment, body: " " }] }, { ...submission, comments: [{ ...comment, body: "x".repeat(8193) }] },
-      { ...submission, comments: Array.from({ length: 51 }, () => ({ ...comment, body: "ok" })) }, { ...submission, submissionId: "short" }, { ...submission, headSha: "b".repeat(7) }, { ...submission, event: "APPROVE" }]) {
+      { ...submission, comments: Array.from({ length: 51 }, () => ({ ...comment, body: "ok" })) }, { ...submission, submissionId: "short" }, { ...submission, headSha: "b".repeat(7) }, { ...submission, baseSha: undefined }, { ...submission, event: "APPROVE" }]) {
       expect(() => parseIntegrationRequest(invalid)).toThrow(ContractValidationError)
     }
     expect(() => parseIntegrationRequest({ integration: "github", operation: "pullFiles", number: 1, padding: "x".repeat(5000) })).toThrow(ContractValidationError)

@@ -131,14 +131,28 @@ export class ReviewGuideStore {
     }
   }
 
+  /**
+   * Waits for the session to finish its turn. A session waiting for an
+   * answer is still generating, so it stays cancellable; one that never
+   * finishes is stopped before the guide is marked failed.
+   */
   private async follow(record: StoredGuide, signal: AbortSignal): Promise<Partial<StoredGuide>> {
     const sessionId = record.sessionId!
-    const { timedOut } = await waitForSessions([sessionId], { mode: "all", timeoutMs: GENERATION_TIMEOUT_MS, signal, pollMs: 2000 })
-    if (signal.aborted) {
-      await runtimeForSession(sessionId)?.stop(sessionId).catch(() => false)
-      return { state: "cancelled" }
+    const stop = () => runtimeForSession(sessionId)?.stop(sessionId).catch(() => false)
+    const deadline = Date.now() + GENERATION_TIMEOUT_MS
+    for (;;) {
+      const { timedOut, sessions } = await waitForSessions([sessionId], { mode: "all", timeoutMs: Math.max(0, deadline - Date.now()), signal, pollMs: 2000 })
+      if (signal.aborted) {
+        await stop()
+        return { state: "cancelled" }
+      }
+      if (timedOut || Date.now() >= deadline) {
+        await stop()
+        return { state: "failed", error: "The review session did not finish within an hour and was stopped" }
+      }
+      if (sessions[0]?.outcome !== "needs_input") break
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
-    if (timedOut) return { state: "failed", error: "The review session did not finish within an hour" }
     const guide = parseGuideReply((await readSessionResult(sessionId))?.turn?.reply ?? null)
     return guide ? { state: "ready", guide } : { state: "failed", error: "The review session did not return a guide" }
   }

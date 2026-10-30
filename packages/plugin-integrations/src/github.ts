@@ -213,13 +213,15 @@ export type GitHubReviewSide = "LEFT" | "RIGHT"
 
 /**
  * `already-submitted` is a review this submission id already created, found
- * before posting again; `stale-head` posts nothing because the branch moved.
+ * before posting again; `stale-head` posts nothing because the head or the
+ * base moved, and carries the current pair.
  */
 export interface GitHubSubmitReviewResponse {
   repository: string
   number: number
   outcome: "submitted" | "already-submitted" | "stale-head"
   headSha: string
+  baseSha: string
   reviewId: number | null
   url: string | null
 }

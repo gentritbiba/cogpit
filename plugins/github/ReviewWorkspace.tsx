@@ -4,8 +4,8 @@ import type { GitHubErrorResponse, GitHubPullReviewResponse, GitHubReviewFile, G
 import type { ComposerFileContext, GitHubIntegrationRequest, JsonValue, ReviewStartRequest } from "@cogpit/plugin-contracts"
 import { Alert, AlertDescription, Button, cn, Spinner } from "@cogpit/plugin-ui"
 import {
-  anchorOf, DRAFT_LIMITS, draftsMarkdown, excerptAround, newId, parsePatch, readReview, reviewKey, sameAnchor, viewedMark,
-  type ReviewDraft, type ReviewState,
+  anchorOf, DRAFT_LIMITS, draftsMarkdown, excerptAround, newId, onPins, parsePatch, readReview, remainingDrafts, reviewKey, sameAnchor, unresolved, viewedMark,
+  type ReviewDraft, type ReviewState, type ReviewSubmission,
 } from "./reviewModel.js"
 
 /**
@@ -58,7 +58,7 @@ function DraftNote({ draft, stale, onEdit, onDelete, onFix }: { draft: ReviewDra
   return <div className={cn("flex flex-col gap-1 border-y px-2 py-1.5 text-xs", stale ? "bg-warning/10" : "bg-primary/5")}>
     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
       <span>Draft · {draft.side === "LEFT" ? "base" : "head"} line {draft.line}</span>
-      {stale && <span className="font-medium text-warning">Stale: written on {draft.headSha.slice(0, 7)}</span>}
+      {stale && <span className="font-medium text-warning">Stale: written on {draft.headSha.slice(0, 7)}{draft.baseSha ? ` over ${draft.baseSha.slice(0, 7)}` : ""}</span>}
       <span className="ml-auto flex gap-1">
         <Button size="xs" variant="ghost" onClick={onFix} aria-label={`Ask the agent to address the draft on line ${draft.line}`}><Wrench data-icon="inline-start" />Ask agent</Button>
         {onEdit && <Button size="xs" variant="ghost" onClick={onEdit}>Edit</Button>}
@@ -69,9 +69,9 @@ function DraftNote({ draft, stale, onEdit, onDelete, onFix }: { draft: ReviewDra
   </div>
 }
 
-function FileDiff({ file, headSha, review, editing, setEditing, viewed, onViewed, onDraft, onDelete, onFix, highlight }: {
+function FileDiff({ file, pins, review, editing, setEditing, viewed, onViewed, onDraft, onDelete, onFix, highlight }: {
   file: GitHubReviewFile
-  headSha: string
+  pins: { headSha: string; baseSha: string }
   review: ReviewState
   editing: { path: string; side: GitHubReviewSide; line: number; id?: string } | null
   setEditing: (value: { path: string; side: GitHubReviewSide; line: number; id?: string } | null) => void
@@ -86,8 +86,8 @@ function FileDiff({ file, headSha, review, editing, setEditing, viewed, onViewed
   const [open, setOpen] = useState(!viewed)
   useEffect(() => { if (highlight) setOpen(true) }, [highlight])
   const drafts = review.drafts.filter((draft) => draft.path === file.path)
-  const current = drafts.filter((draft) => draft.headSha === headSha)
-  const stale = drafts.filter((draft) => draft.headSha !== headSha)
+  const current = drafts.filter((draft) => onPins(draft, pins))
+  const stale = drafts.filter((draft) => !onPins(draft, pins))
   const notice = file.patchState === "binary" ? "Binary file; no patch to show." : file.patchState === "too-large" ? "This patch is too large to show here." : file.patchState === "unavailable" ? "GitHub does not list this file's patch." : rows.length === 0 ? "No content changes." : null
   return <section id={fileAnchor(file.path)} aria-label={file.path} className="rounded-md border">
     <header className="flex items-center gap-2 border-b px-2 py-1 text-xs">
@@ -245,7 +245,7 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
     setLoading(true)
     try {
       const page = await host.request<GitHubPullReviewResponse>({ integration: "github", operation: "pullReview", number, page: nextPage })
-      if (page.headSha !== pull.headSha) { setMoved(true); return }
+      if (page.headSha !== pull.headSha || page.baseSha !== pull.baseSha) { setMoved(true); return }
       setFiles((current) => [...current, ...page.files]); setNextPage(page.nextPage)
     } catch (failure) {
       if (errorCode(failure) === "stale_head") setMoved(true)
@@ -267,7 +267,8 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
     </div>
   }
 
-  const current = review.drafts.filter((draft) => draft.headSha === pull.headSha)
+  const current = review.drafts.filter((draft) => onPins(draft, pull))
+  const pending = unresolved(review.submission) ? review.submission : null
   const staleCount = review.drafts.length - current.length
   const viewedCount = files.filter((file) => { const mark = viewedMark(file.blobSha); return mark !== null && review.viewed.includes(mark) }).length
 
@@ -275,7 +276,7 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
     if (!anchor.id && review.drafts.length >= DRAFT_LIMITS.drafts) { setNotice(`Keep at most ${DRAFT_LIMITS.drafts} drafts; submit or remove some first`); return }
     const drafts = anchor.id
       ? review.drafts.map((draft) => draft.id === anchor.id ? { ...draft, body } : draft)
-      : [...review.drafts, { id: newId(), headSha: pull.headSha, path: anchor.path, side: anchor.side, line: anchor.line, body, excerpt, createdAt: new Date().toISOString() }]
+      : [...review.drafts, { id: newId(), headSha: pull.headSha, baseSha: pull.baseSha, path: anchor.path, side: anchor.side, line: anchor.line, body, excerpt, createdAt: new Date().toISOString() }]
     setEditing(null)
     void persist({ ...review, drafts })
   }
@@ -294,19 +295,24 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
     document.getElementById(fileAnchor(path))?.scrollIntoView({ block: "start" })
   }
 
-  const submit = async (body: string, retry = review.submission?.state === "unknown" ? review.submission : null) => {
-    const submission = retry ?? { id: newId(), headSha: pull.headSha, body, draftIds: current.map((draft) => draft.id), state: "pending" as const, at: new Date().toISOString() }
-    const comments = review.drafts.filter((draft) => submission.draftIds.includes(draft.id)).map(({ path, side, line, body: text }) => ({ path, side, line, body: text }))
+  /** Sends a new submission, or `retry`'s saved snapshot unchanged under its own id. */
+  const submit = async (body: string, retry: ReviewSubmission | null) => {
+    if (!retry && pending) return
+    const submission: ReviewSubmission = retry ? { ...retry, state: "pending" } : {
+      id: newId(), headSha: pull.headSha, baseSha: pull.baseSha, body,
+      comments: current.map(({ path, side, line, body: text }) => ({ path, side, line, body: text })),
+      draftIds: current.map((draft) => draft.id), state: "pending", at: new Date().toISOString(),
+    }
     setSubmitting("posting"); setNotice(null)
     await persist({ ...review, submission })
     try {
-      const result = await host.request<GitHubSubmitReviewResponse>({ integration: "github", operation: "submitReview", number, headSha: submission.headSha, submissionId: submission.id, body: submission.body, comments })
+      const result = await host.request<GitHubSubmitReviewResponse>({ integration: "github", operation: "submitReview", number, headSha: submission.headSha, baseSha: submission.baseSha, submissionId: submission.id, body: submission.body, comments: submission.comments })
       if (result.outcome === "stale-head") {
         await persist({ ...review, submission: { ...submission, state: "stale", error: "The pull request changed; nothing was posted" } })
-        setNotice("The pull request changed before submitting; nothing was posted. Reload to see the new head.")
+        setNotice("The pull request changed before submitting; nothing was posted. Reload to see the new head and base.")
         setMoved(true)
       } else {
-        await persist({ ...review, drafts: review.drafts.filter((draft) => !submission.draftIds.includes(draft.id)), submission: { ...submission, state: "submitted", url: result.url } })
+        await persist({ ...review, drafts: remainingDrafts(review.drafts, submission), submission: { ...submission, state: "submitted", url: result.url } })
         setNotice(result.outcome === "already-submitted" ? "GitHub already had this review; nothing was posted again." : "Review submitted to GitHub.")
       }
       setSubmitting(null)
@@ -332,15 +338,15 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
         <span className="ml-auto flex gap-1">
           <Button size="xs" variant="outline" onClick={() => void host.start({ number, headSha: pull.headSha, purpose: "work" }).catch((failure: unknown) => setNotice(errorText(failure, "Unable to start a session")))}>Work on PR</Button>
           <Button size="xs" variant="ghost" disabled={review.drafts.length === 0} onClick={() => setExported(exported ? null : draftsMarkdown(review, review.drafts))}>Export drafts</Button>
-          <Button size="xs" disabled={current.length === 0 || submitting !== null || moved} onClick={() => setSubmitting("confirm")}><Check data-icon="inline-start" />Submit review…</Button>
+          <Button size="xs" disabled={current.length === 0 || submitting !== null || moved || pending !== null} onClick={() => setSubmitting("confirm")}><Check data-icon="inline-start" />Submit review…</Button>
         </span>
       </div>
     </header>
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
       {moved && <Alert><AlertDescription>The pull request has a new head. <Button size="xs" variant="link" onClick={() => void load()}>Reload</Button> to review it; drafts on the old head stay where they were and are marked stale.</AlertDescription></Alert>}
       {notice && <p role="status" className="text-xs">{notice}</p>}
-      {review.submission?.state === "unknown" && submitting === null && <Alert><AlertDescription>
-        A submission at {new Date(review.submission.at).toLocaleTimeString()} was not confirmed by GitHub. <Button size="xs" variant="link" onClick={() => void submit(review.submission!.body, review.submission)}>Check and finish it</Button>
+      {pending && submitting === null && <Alert><AlertDescription>
+        A submission of {pending.comments.length} comment{pending.comments.length === 1 ? "" : "s"} at {new Date(pending.at).toLocaleTimeString()} was not confirmed by GitHub. Check it before submitting anything else. <Button size="xs" variant="link" onClick={() => void submit(pending.body, pending)}>Check and finish it</Button>
       </AlertDescription></Alert>}
       {review.submission?.state === "submitted" && review.submission.url && <p className="text-xs text-muted-foreground">Last review submitted · <Button size="xs" variant="link" onClick={() => host.openExternal(review.submission!.url!)}>view on GitHub</Button></p>}
       {exported !== null && <textarea aria-label="Drafts as Markdown" readOnly rows={6} className="w-full rounded border bg-background p-1.5 font-mono text-[10px]" value={exported} onFocus={(event) => event.target.select()} />}
@@ -349,7 +355,7 @@ export function ReviewWorkspace({ number, onClose }: { number: number; onClose: 
       <Guide host={host} pull={pull} files={files} onJump={jump} />
       {files.map((file) => {
         const mark = viewedMark(file.blobSha)
-        return <FileDiff key={`${pull.headSha}:${file.path}`} file={file} headSha={pull.headSha} review={review} editing={editing} setEditing={setEditing}
+        return <FileDiff key={`${pull.headSha}:${file.path}`} file={file} pins={pull} review={review} editing={editing} setEditing={setEditing}
           viewed={mark !== null && review.viewed.includes(mark)} onViewed={(viewed) => setViewed(file, viewed)}
           onDraft={saveDraft} onDelete={(id) => void persist({ ...review, drafts: review.drafts.filter((draft) => draft.id !== id) })} onFix={fix}
           highlight={highlight?.path === file.path ? highlight : null} />

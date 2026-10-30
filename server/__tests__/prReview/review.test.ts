@@ -5,10 +5,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const session = vi.hoisted(() => ({ settle: null as null | (() => void), reply: null as string | null, stop: vi.fn(async () => true) }))
+const session = vi.hoisted(() => ({ settle: null as null | ((outcome?: string) => void), reply: null as string | null, stop: vi.fn(async () => true), waits: 0 }))
 vi.mock("../../lib/sessionWait", () => ({
-  waitForSessions: (_ids: string[], { signal }: { signal: AbortSignal }) => new Promise((resolve) => {
-    session.settle = () => resolve({ timedOut: false, sessions: [] })
+  waitForSessions: (ids: string[], { signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+    session.waits++
+    session.settle = (outcome = "completed") => resolve({ timedOut: false, sessions: [{ sessionId: ids[0], outcome }] })
+    if (signal.aborted) resolve({ timedOut: false, sessions: [] })
     signal.addEventListener("abort", () => resolve({ timedOut: false, sessions: [] }), { once: true })
   }),
 }))
@@ -52,6 +54,27 @@ describe("review guides", () => {
     expect(await restarted.get(pull)).toMatchObject({ state: "failed", error: expect.stringMatching(/stopped/) })
     session.settle!()
     await until(async () => (await store.get(pull))?.state !== "generating")
+  })
+
+  it("keeps a generation waiting for an answer active and cancellable, and stops its session on cancel", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] })
+    try {
+      session.stop.mockClear()
+      const store = new ReviewGuideStore(() => join(temp("cogpit-guides-"), "guides.json"))
+      await store.generate(pull, pins, async () => ({ sessionId: "blocked-guide" }))
+      const waits = session.waits
+      session.reply = null
+      session.settle!("needs_input")
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(session.waits).toBe(waits + 1)
+      expect(await store.get(pull)).toMatchObject({ state: "generating" })
+      expect(session.stop).not.toHaveBeenCalled()
+      expect(store.cancel(pull)).toBe(true)
+      await vi.advanceTimersByTimeAsync(0)
+      await until(async () => (await store.get(pull))?.state === "cancelled")
+      expect(session.stop).toHaveBeenCalledWith("blocked-guide")
+    } finally { vi.useRealTimers() }
+    await new Promise((resolve) => setTimeout(resolve, 20))
   })
 
   it("cancels a generation and stops its session, and records a session that returned no guide", async () => {

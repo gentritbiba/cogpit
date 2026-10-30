@@ -6,7 +6,7 @@ import { delimiter, dirname, join } from "node:path"
 import { executeGitHubIntegration, parseReviewFile, runGitHubPost, type GitHubDependencies } from "../../plugins/integrations/github"
 
 const head = "b".repeat(40), base = "a".repeat(40), moved = "c".repeat(40)
-const pull = (headSha = head, changed = 65) => ({ title: "Add review", html_url: "https://github.com/acme/app/pull/7", state: "open", draft: false, merged_at: null, changed_files: changed, head: { sha: headSha, ref: "feature" }, base: { sha: base, ref: "main" } })
+const pull = (headSha = head, changed = 65, baseSha = base) => ({ title: "Add review", html_url: "https://github.com/acme/app/pull/7", state: "open", draft: false, merged_at: null, changed_files: changed, head: { sha: headSha, ref: "feature" }, base: { sha: baseSha, ref: "main" } })
 const file = (index: number, extra: Record<string, unknown> = {}) => ({ filename: `src/file-${index}.ts`, status: "modified", additions: 1, deletions: 1, changes: 2, sha: `${index}`.padStart(40, "f"), patch: `@@ -1 +1 @@\n-old ${index}\n+new ${index}`, ...extra })
 
 function fixture(api: (endpoint: string) => unknown) {
@@ -42,6 +42,12 @@ describe("pull request review pages", () => {
     await expect(executeGitHubIntegration({ integration: "github", operation: "pullReview", number: 7 }, context, deps)).rejects.toMatchObject({ status: 409, code: "stale_head" })
   })
 
+  it("refuses a page read while only the base moved", async () => {
+    let reads = 0
+    const { deps, context } = fixture((endpoint) => endpoint.endsWith("/pulls/7") ? pull(head, 65, reads++ === 0 ? base : moved) : [file(1)])
+    await expect(executeGitHubIntegration({ integration: "github", operation: "pullReview", number: 7 }, context, deps)).rejects.toMatchObject({ status: 409, code: "stale_head" })
+  })
+
   it("says when GitHub caps the listing at 3000 files", async () => {
     const { deps, context } = fixture((endpoint) => endpoint.endsWith("/pulls/7") ? pull(head, 3200) : [file(1)])
     await expect(executeGitHubIntegration({ integration: "github", operation: "pullReview", number: 7, page: 100 }, context, deps)).resolves.toMatchObject({ filesCapped: true, nextPage: null })
@@ -53,7 +59,7 @@ describe("pull request review pages", () => {
 })
 
 describe("explicit review submission", () => {
-  const submission = { integration: "github" as const, operation: "submitReview" as const, number: 7, headSha: head, submissionId: "sub_0123456789", body: "Looks close", comments: [{ path: "src/a.ts", side: "RIGHT" as const, line: 3, body: "Rename this" }] }
+  const submission = { integration: "github" as const, operation: "submitReview" as const, number: 7, headSha: head, baseSha: base, submissionId: "sub_0123456789", body: "Looks close", comments: [{ path: "src/a.ts", side: "RIGHT" as const, line: 3, body: "Rename this" }] }
 
   it("posts one review on the pinned head with a marker, exactly the given comments", async () => {
     const { deps, context } = fixture((endpoint) => endpoint.endsWith("/pulls/7") ? pull() : [])
@@ -67,6 +73,12 @@ describe("explicit review submission", () => {
   it("posts nothing on a moved head", async () => {
     const { deps, context } = fixture((endpoint) => endpoint.endsWith("/pulls/7") ? pull(moved) : [])
     await expect(executeGitHubIntegration(submission, context, deps)).resolves.toMatchObject({ outcome: "stale-head", headSha: moved })
+    expect(deps.githubPost).not.toHaveBeenCalled()
+  })
+
+  it("posts nothing when the base was retargeted under the same head", async () => {
+    const { deps, context } = fixture((endpoint) => endpoint.endsWith("/pulls/7") ? pull(head, 65, moved) : [])
+    await expect(executeGitHubIntegration(submission, context, deps)).resolves.toMatchObject({ outcome: "stale-head", headSha: head, baseSha: moved })
     expect(deps.githubPost).not.toHaveBeenCalled()
   })
 

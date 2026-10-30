@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { GitHubPullReviewResponse, GitHubReviewFile, GitHubReviewGuideRecord } from "@cogpit/plugin-integrations"
 import type { GitHubIntegrationRequest, JsonValue } from "@cogpit/plugin-contracts"
 import { ReviewHostProvider, ReviewWorkspace, type ReviewHost } from "../ReviewWorkspace"
+import { reviewKey } from "../reviewModel"
 
 const head = "b".repeat(40), base = "a".repeat(40), next = "c".repeat(40)
 const file = (path: string, extra: Partial<GitHubReviewFile> = {}): GitHubReviewFile => ({
@@ -11,11 +12,11 @@ const file = (path: string, extra: Partial<GitHubReviewFile> = {}): GitHubReview
   patch: "@@ -1,2 +1,2 @@\n context\n-old line\n+new line", ...extra,
 })
 function page(headSha: string, files: GitHubReviewFile[], nextPage: number | null, pageNumber = 1): GitHubPullReviewResponse {
-  return { repository: "acme/app", host: "github.com", number: 7, title: "Add review", url: "https://github.com/acme/app/pull/7", state: "open", baseSha: base, headSha, baseBranch: "main", headBranch: "feature", totalFiles: 3, filesCapped: false, page: pageNumber, nextPage, files }
+  return { repository: "acme/app", host: "github.com", number: 7, title: "Add review", url: "https://github.com/acme/app/pull/7", state: "open", baseSha: world.base, headSha, baseBranch: "main", headBranch: "feature", totalFiles: 3, filesCapped: false, page: pageNumber, nextPage, files }
 }
 
 const world = vi.hoisted(() => ({
-  head: "", storage: new Map<string, JsonValue>(), guide: null as GitHubReviewGuideRecord | null,
+  head: "", base: "", storage: new Map<string, JsonValue>(), guide: null as GitHubReviewGuideRecord | null,
   submit: [] as Array<Record<string, unknown>>, submitResult: [] as Array<() => unknown>, started: [] as unknown[], contexts: [] as unknown[],
 }))
 const host: ReviewHost = {
@@ -34,7 +35,7 @@ const host: ReviewHost = {
 const show = () => render(<ReviewHostProvider value={host}><ReviewWorkspace number={7} onClose={vi.fn()} /></ReviewHostProvider>)
 
 beforeEach(() => {
-  Object.assign(world, { head, storage: new Map(), guide: null, submit: [], submitResult: [], started: [], contexts: [] })
+  Object.assign(world, { head, base, storage: new Map(), guide: null, submit: [], submitResult: [], started: [], contexts: [] })
   Element.prototype.scrollIntoView = vi.fn()
 })
 
@@ -119,5 +120,60 @@ describe("pull request review workspace", () => {
     show()
     await user.click(await screen.findByRole("button", { name: "Work on PR" }))
     expect(world.started).toEqual([{ number: 7, headSha: head, purpose: "work" }])
+  })
+
+  const seed = async (submission: Record<string, unknown>) => {
+    const draft = { id: "draft-1", headSha: head, baseSha: base, path: "src/a.ts", side: "LEFT", line: 2, body: "original confirmed text", excerpt: "-old line", createdAt: "2026-10-30T00:00:00Z" }
+    world.storage.set(await reviewKey({ host: "github.com", owner: "acme", name: "app", number: 7 }), {
+      host: "github.com", owner: "acme", name: "app", number: 7, viewed: [], drafts: [draft],
+      submission: { id: "original-submission", headSha: head, baseSha: base, body: "summary", comments: [{ path: "src/a.ts", side: "LEFT", line: 2, body: "original confirmed text" }], draftIds: ["draft-1"], at: "2026-10-30T00:00:00Z", ...submission },
+    })
+  }
+
+  it("reads a submission interrupted mid-request as unconfirmed and checks it under its own id before any new one", async () => {
+    const user = userEvent.setup()
+    await seed({ state: "pending" })
+    show()
+    expect(await screen.findByText(/was not confirmed by GitHub/)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Submit review/ }).hasAttribute("disabled")).toBe(true)
+    world.submitResult.push(() => ({ repository: "acme/app", number: 7, outcome: "already-submitted", headSha: head, baseSha: base, reviewId: 41, url: null }))
+    await user.click(screen.getByRole("button", { name: "Check and finish it" }))
+    expect(await screen.findByText(/already had this review/)).toBeTruthy()
+    expect(world.submit).toEqual([expect.objectContaining({ submissionId: "original-submission", headSha: head, baseSha: base, body: "summary" })])
+  })
+
+  it("retries an unconfirmed submission with its saved payload and keeps a draft edited since", async () => {
+    const user = userEvent.setup()
+    await seed({ state: "unknown" })
+    show()
+    const region = await screen.findByRole("region", { name: "src/a.ts" })
+    await user.click(within(region).getByRole("button", { name: "Edit" }))
+    const editor = screen.getByRole("textbox", { name: "Draft comment" })
+    await user.clear(editor); await user.type(editor, "edited after unknown response")
+    await user.click(screen.getByRole("button", { name: "Save draft" }))
+    world.submitResult.push(() => ({ repository: "acme/app", number: 7, outcome: "submitted", headSha: head, baseSha: base, reviewId: 42, url: null }))
+    await user.click(screen.getByRole("button", { name: "Check and finish it" }))
+    expect(await screen.findByText("Review submitted to GitHub.")).toBeTruthy()
+    expect(world.submit).toEqual([expect.objectContaining({ submissionId: "original-submission", comments: [{ path: "src/a.ts", side: "LEFT", line: 2, body: "original confirmed text" }] })])
+    const saved = [...world.storage.values()][0] as { drafts: Array<{ body: string }> }
+    expect(saved.drafts.map((draft) => draft.body)).toEqual(["edited after unknown response"])
+  })
+
+  it("marks drafts stale when only the base was retargeted, and submits the pinned base", async () => {
+    const user = userEvent.setup()
+    await seed({ state: "submitted" })
+    world.base = next
+    show()
+    const region = await screen.findByRole("region", { name: "src/a.ts" })
+    expect(within(region).getByText(/Stale: written on bbbbbbb over aaaaaaa/)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Submit review/ }).hasAttribute("disabled")).toBe(true)
+    await user.click(within(region).getByRole("button", { name: "Comment on head line 2 of src/a.ts" }))
+    await user.type(screen.getByRole("textbox", { name: "Draft comment" }), "New base note")
+    await user.click(screen.getByRole("button", { name: "Save draft" }))
+    await user.click(screen.getByRole("button", { name: /Submit review/ }))
+    world.submitResult.push(() => ({ repository: "acme/app", number: 7, outcome: "submitted", headSha: head, baseSha: next, reviewId: 43, url: null }))
+    await user.click(within(screen.getByRole("region", { name: "Submit review" })).getByRole("button", { name: "Submit review" }))
+    expect(await screen.findByText("Review submitted to GitHub.")).toBeTruthy()
+    expect(world.submit.at(-1)).toMatchObject({ headSha: head, baseSha: next, comments: [{ path: "src/a.ts", side: "RIGHT", line: 2, body: "New base note" }] })
   })
 })

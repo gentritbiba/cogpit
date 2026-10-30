@@ -57,6 +57,7 @@ export interface PullIdentity { host: string; owner: string; name: string; numbe
 export interface ReviewDraft {
   id: string
   headSha: string
+  baseSha: string
   path: string
   side: GitHubReviewSide
   line: number
@@ -67,10 +68,18 @@ export interface ReviewDraft {
 }
 
 export type SubmissionState = "pending" | "submitted" | "unknown" | "failed" | "stale"
+export interface SubmittedComment { path: string; side: GitHubReviewSide; line: number; body: string }
+/**
+ * One submission exactly as it was sent: its id, pins, summary and comments
+ * are saved before the request and reused unchanged on every retry, so
+ * editing a draft afterwards never changes what that id posts.
+ */
 export interface ReviewSubmission {
   id: string
   headSha: string
+  baseSha: string
   body: string
+  comments: SubmittedComment[]
   draftIds: string[]
   state: SubmissionState
   at: string
@@ -101,12 +110,36 @@ export function emptyReview(pull: PullIdentity): ReviewState {
   return { ...pull, drafts: [], viewed: [], submission: null }
 }
 
-/** The saved state when it belongs to exactly this pull request, else a fresh one. */
+/**
+ * The saved state when it belongs to exactly this pull request, else a fresh
+ * one. A submission still pending was interrupted mid-request, so it may
+ * have reached GitHub and is read back as unconfirmed.
+ */
 export function readReview(value: JsonValue, pull: PullIdentity): ReviewState {
   const saved = value as unknown as Partial<ReviewState> | null
   const matches = saved && typeof saved === "object" && saved.host === pull.host && saved.owner === pull.owner && saved.name === pull.name && saved.number === pull.number
   if (!matches || !Array.isArray(saved.drafts) || !Array.isArray(saved.viewed)) return emptyReview(pull)
-  return { ...pull, drafts: saved.drafts, viewed: saved.viewed, submission: saved.submission ?? null }
+  const submission = saved.submission?.state === "pending" ? { ...saved.submission, state: "unknown" as const } : saved.submission ?? null
+  return { ...pull, drafts: saved.drafts, viewed: saved.viewed, submission }
+}
+
+/** A submission that may have posted and must be checked, under its own id, before any other. */
+export function unresolved(submission: ReviewSubmission | null): submission is ReviewSubmission {
+  return submission?.state === "pending" || submission?.state === "unknown"
+}
+
+/** Drafts left once `submission` posted: those it carried, unless edited since it was sent. */
+export function remainingDrafts(drafts: readonly ReviewDraft[], submission: ReviewSubmission): ReviewDraft[] {
+  return drafts.filter((draft) => {
+    const index = submission.draftIds.indexOf(draft.id)
+    const sent = index >= 0 ? submission.comments[index] : undefined
+    return !sent || sent.body !== draft.body || sent.path !== draft.path || sent.side !== draft.side || sent.line !== draft.line
+  })
+}
+
+/** Whether a draft was written on exactly this base and head. */
+export function onPins(draft: Pick<ReviewDraft, "headSha" | "baseSha">, pins: { headSha: string; baseSha: string }): boolean {
+  return draft.headSha === pins.headSha && draft.baseSha === pins.baseSha
 }
 
 export function viewedMark(blobSha: string | null): string | null {

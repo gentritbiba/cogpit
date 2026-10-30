@@ -790,7 +790,7 @@ export async function executeGitHubIntegration(
       const raw = (page - 1) * REVIEW_PAGE_FILES < listed ? await deps.githubApi(repository, `repos/${name}/pulls/${input.number}/files?per_page=${REVIEW_PAGE_FILES}&page=${page}`) : []
       if (!Array.isArray(raw)) throw new GitHubRouteError(502, "invalid_response", "GitHub returned an invalid pull request files response")
       const after = parsePullPins(await deps.githubApi(repository, `repos/${name}/pulls/${input.number}`), input.number)
-      if (after.headSha !== pins.headSha) throw new GitHubRouteError(409, "stale_head", "The pull request changed while its files were read; reload it")
+      if (after.headSha !== pins.headSha || after.baseSha !== pins.baseSha) throw new GitHubRouteError(409, "stale_head", "The pull request changed while its files were read; reload it")
       return {
         repository: name, host: repository.host, number: input.number, title: pins.title, url: pins.url, state: pins.state,
         baseSha: pins.baseSha, headSha: pins.headSha, baseBranch: pins.baseBranch, headBranch: pins.headBranch,
@@ -802,14 +802,14 @@ export async function executeGitHubIntegration(
     case "submitReview": {
       const pins = parsePullPins(await deps.githubApi(repository, `repos/${name}/pulls/${input.number}`), input.number)
       const earlier = await findSubmittedReview(deps, repository, input.number, input.submissionId)
-      if (earlier) return { repository: name, number: input.number, outcome: "already-submitted", headSha: input.headSha, reviewId: earlier.id, url: earlier.url }
-      if (pins.headSha !== input.headSha) return { repository: name, number: input.number, outcome: "stale-head", headSha: pins.headSha, reviewId: null, url: null }
+      if (earlier) return { repository: name, number: input.number, outcome: "already-submitted", headSha: input.headSha, baseSha: input.baseSha, reviewId: earlier.id, url: earlier.url }
+      if (pins.headSha !== input.headSha || pins.baseSha !== input.baseSha) return { repository: name, number: input.number, outcome: "stale-head", headSha: pins.headSha, baseSha: pins.baseSha, reviewId: null, url: null }
       const body = `${input.body.trim()}\n\n${REVIEW_MARKER(input.submissionId)}`.trimStart()
       const posted = record(await deps.githubPost(repository, `repos/${name}/pulls/${input.number}/reviews`, {
         commit_id: input.headSha, event: "COMMENT", body,
         comments: input.comments.map((comment) => ({ path: comment.path, side: comment.side, line: comment.line, body: comment.body })),
       }))
-      return { repository: name, number: input.number, outcome: "submitted", headSha: input.headSha, reviewId: numberValue(posted?.id), url: nullableString(posted?.html_url) }
+      return { repository: name, number: input.number, outcome: "submitted", headSha: input.headSha, baseSha: input.baseSha, reviewId: numberValue(posted?.id), url: nullableString(posted?.html_url) }
     }
     case "reviewGuide":
       return { repository: name, number: input.number, guide: await reviewGuides.get({ principal: context.principal ?? "owner", ...repository, number: input.number }) }

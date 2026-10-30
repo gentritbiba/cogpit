@@ -37,7 +37,7 @@ const githubRequestSchema = z.discriminatedUnion("operation", [
   z.strictObject({ ...github, operation: z.literal("mergePull"), number: positive, method: z.enum(["merge", "squash", "rebase"]), headSha: sha }),
   z.strictObject({ ...github, operation: z.literal("pullReview"), number: positive, page: positive.max(30).optional() }),
   z.strictObject({
-    ...github, operation: z.literal("submitReview"), number: positive, headSha: sha,
+    ...github, operation: z.literal("submitReview"), number: positive, headSha: sha, baseSha: sha,
     submissionId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/), body: reviewText(REVIEW_LIMITS.bodyBytes),
     comments: z.array(reviewComment).max(REVIEW_LIMITS.comments),
   }).refine((value) => value.comments.length > 0 || value.body.trim().length > 0, "A review needs a comment or a summary"),
