@@ -9,7 +9,7 @@ export function pluginRuntimeDescriptor(registryRevision = 0): HostRuntimeDescri
     manifestVersions: [1],
     protocolVersions: [PROTOCOL_MAJOR],
     runtimes: [RUNTIME],
-    capabilities: { "connections.request": "1.0.0", "connections.media": "1.0.0", "settings.fields": "1.0.0", "skills.context": "1.0.0", "storage.json": "1.0.0", "integrations.github": "1.1.0", "integrations.vercel": "1.0.0", "integrations.cloudflare": "1.0.0" },
+    capabilities: { "connections.request": "1.0.0", "connections.media": "1.0.0", "settings.fields": "1.0.0", "skills.context": "1.0.0", "storage.json": "1.0.0", "integrations.github": "1.1.0", "integrations.vercel": "1.0.0", "integrations.cloudflare": "1.0.0", "integrations.worktreeSetup": "1.0.0" },
     platform: process.platform,
     registryRevision,
     instanceId: getInstanceId(),

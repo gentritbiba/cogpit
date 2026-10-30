@@ -1,4 +1,4 @@
-import { registerWorktreeSetupRoutes } from "./routes/worktree-setup"
+import { registerSessionStartupRoutes } from "./routes/session-startups"
 import { compressionMiddleware } from "./compression"
 import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
@@ -136,7 +136,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("share-guest", registerShareGuestRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
-  apiRoute("worktree-setup", registerWorktreeSetupRoutes),
+  apiRoute("session-startups", registerSessionStartupRoutes),
   apiRoute("workspaces", registerWorkspaceRoutes),
   apiRoute("usage", registerUsageRoutes),
   apiRoute("usage-cost", registerUsageCostRoutes),

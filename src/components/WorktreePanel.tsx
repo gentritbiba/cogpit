@@ -1,4 +1,3 @@
-import { WorktreeSetupPanel } from "./WorktreeSetupPanel"
 import { useState } from "react"
 import {
   GitBranch,
@@ -244,7 +243,6 @@ export function WorktreePanel({
         <Separator />
 
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-          <WorktreeSetupPanel dirName={dirName} />
           {!dirName && (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               Select a project to view worktrees

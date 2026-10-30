@@ -1,0 +1,4 @@
+Worktree setup is a Cogpit runtime plugin. Bundled dependencies include React,
+React DOM, lucide-react, the Cogpit plugin SDK, UI and integration packages, and
+their MIT- and ISC-licensed code. Setup commands run on the Cogpit host through
+its release-owned worktree setup integration; no command runner ships in this package.

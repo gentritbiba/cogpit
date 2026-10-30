@@ -1,4 +1,4 @@
-import { assertSetupAccess } from "../../worktreeSetup/authorization"
+import { assertWorktreeStartAccess } from "../../sessionStartup/authorization"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { AGENT_KINDS, type AgentKind } from "../../../shared/session/agent-descriptors"
 import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes"
@@ -103,7 +103,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
       markDecided(req)
       await respondWithSession(req, res, receivedAt, {
         setupScope: commandScope(req),
-        authorizeStartup: worktreeName ? async () => { assertSetupAccess(req) } : undefined,
+        authorizeStartup: worktreeName ? async () => { assertWorktreeStartAccess(req) } : undefined,
         dirName,
         cwd,
         agent,

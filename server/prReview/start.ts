@@ -8,7 +8,7 @@ import { commandScope } from "../lib/durableSend"
 import { ErrorCodes, RouteError } from "../lib/routeError"
 import { runGit } from "../lib/gitProject"
 import { createSession } from "../lib/sessionCreate"
-import { assertSetupAccess } from "../worktreeSetup/authorization"
+import { assertWorktreeStartAccess } from "../sessionStartup/authorization"
 import { defaultDependencies, parsePullPins, repositoryName, resolveRepository, type GitHubDependencies } from "../plugins/integrations/github"
 import { guidePrompt, reviewGuides } from "./guides"
 
@@ -76,7 +76,7 @@ export async function startReviewSession(
     message: input.purpose === "guide" ? guidePrompt({ ...pull, title: pins.title }) : workPrompt(pull, input.instruction),
     worktreeName: `pr-${input.number}-${pins.headSha.slice(0, 8)}-${randomBytes(3).toString("hex")}`,
     setupScope: commandScope(req),
-    authorizeStartup: async () => { await context.authorize(); assertSetupAccess(req) },
+    authorizeStartup: async () => { await context.authorize(); assertWorktreeStartAccess(req) },
     prepareWorktree: prepareReviewWorktree({ ...pins }),
     signal: AbortSignal.any([signal, context.signal]),
   }, (runtime, request) => startTurn(req, Date.now(), runtime, request))

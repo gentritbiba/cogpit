@@ -2,7 +2,7 @@ import { runManagedCommand } from "../lib/managedCommand"
 import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { validateInitializedDirectory } from "../worktreeSetup/project"
+import { validateInitializedDirectory } from "../sessionStartup/project"
 import { AgentRuntimeError, type StartSessionRequest } from "./runtimeTypes"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 

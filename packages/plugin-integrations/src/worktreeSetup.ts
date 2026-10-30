@@ -27,6 +27,8 @@ export interface WorktreeSetupSnapshot {
   operations: WorktreeSetupOperation[]
 }
 
+export interface WorktreeSetupScripts { scripts: { name: string; command: string }[] }
+
 /** A recipe change waiting for the user's confirmation in Cogpit's own dialog. */
 export interface WorktreeSetupProposal { proposalId: string }
 

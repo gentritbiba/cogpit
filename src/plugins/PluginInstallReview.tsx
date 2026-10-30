@@ -8,7 +8,20 @@ const integrationLabels: Readonly<Record<string, string>> = {
   issues: "issues", pullReview: "pull request changes and patches", deployments: "deployments", buildLogs: "build logs", workspace: "Worker configuration and account", version: "version details",
 }
 
+const composerLines: Readonly<Record<string, string>> = {
+  append: "Append text to your draft message",
+  context: "Add file references with notes to your draft message",
+  drafts: "Read, save and restore your composer drafts, including images and sent-message history kept in this browser",
+}
+const worktreeSetupLines: Readonly<Record<string, string>> = {
+  snapshot: "Read this project's worktree setup command and recent setup output",
+  scripts: "Read the script names in this project's root package.json",
+  propose: "Propose a setup command that runs in new worktrees; Cogpit shows the exact command and saves it only when you trust it",
+  act: "Retry or cancel a worktree setup that is waiting before the first prompt",
+}
+
 function integrationLine(integrationId: string, operation: string): string {
+  if (integrationId === "worktreeSetup") return worktreeSetupLines[operation]
   if (operation === "pullSessions") return "Read related Cogpit sessions for the selected GitHub repository"
   if (operation === "mergePull") return "Merge pull requests in the selected GitHub repository when you confirm, using this host's signed-in CLI"
   if (operation === "submitReview") return "Post review comments to pull requests in the selected GitHub repository when you submit them, using this host's signed-in CLI"
@@ -20,7 +33,7 @@ function accessLines(manifest: PluginManifest): string[] {
   const permissions = manifest.permissions
   return [...new Set([
     ...permissions.context.map((kind) => kind === "session.identity" ? "Recognise the open session among related sessions, by handle only" : "Read the selected project's name and plugin identifier"),
-    ...permissions.composer.map((kind) => kind === "context" ? "Add file references with notes to your draft message" : "Append text to your draft message"),
+    ...permissions.composer.map((kind) => composerLines[kind]),
     ...permissions.review.map(() => "Ask to start a pull request session in a new worktree, which you confirm and choose the provider for"),
     ...permissions.navigation.map((kind) => kind === "external" ? "Ask Cogpit to open HTTPS links" : "Open permitted sessions"),
     ...(permissions.storage ? [`Store up to ${permissions.storage.quotaKiB} KiB of ${permissions.storage.scope} settings`] : []),

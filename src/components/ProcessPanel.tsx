@@ -1,4 +1,3 @@
-import { WorktreeSetupPanel } from "./WorktreeSetupPanel"
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "react"
 import { stripAnsi } from "@/lib/ansi"
 import { openSessionStream } from "@/lib/sessionStream"
@@ -319,8 +318,6 @@ export const ProcessPanel = memo(function ProcessPanel({
           </Button>
         )}
       </div>
-
-      {!collapsed && <WorktreeSetupPanel projectCwd={projectDir} compact />}
 
       <Collapsible open={!collapsed} className="min-h-0">
         <CollapsibleContent>

@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http"
 import type { CommandIntent, CommandReceipt } from "../../../shared/contracts/orchestration"
 import type { ExecutionTarget, OccurrenceHold, TriggerOccurrence } from "../../../shared/contracts/triggers"
 import type { SendRequest, StartedSession } from "../../agents/runtimeTypes"
-import type { StartupAuthorizationContext } from "../../../shared/contracts/worktreeSetup"
+import type { StartupAuthorizationContext } from "../../../shared/contracts/sessionStartup"
 import { startTurn } from "../../edition"
 import type { CommandDispatcher } from "../../orchestration/dispatcher"
 import { orchestrationStore } from "../../orchestration/storage"
@@ -10,7 +10,7 @@ import { OrchestrationError, type ClaimedOccurrence, type DispatcherLease, type 
 import { admitOccurrenceCommand, attachGrantAuthorities, commandDispatcher, commandScope, executionRequestFor, refreshExecutionRequest } from "../durableSend"
 import { RouteError } from "../routeError"
 import { createSession, type CreateSessionInput } from "../sessionCreate"
-import { assertSetupCapabilities } from "../../worktreeSetup/authorization"
+import { assertWorktreeStartCapabilities } from "../../sessionStartup/authorization"
 import { forgetSettledLiveAuthorities, liveAuthority, resolveExecution, setLiveAuthority, type ResolvedExecution } from "./authority"
 
 /**
@@ -229,7 +229,7 @@ export class TriggerRunner {
       if ("hold" in resolved) throw new StartupRefused(resolved.hold, true)
       // A worktree start may run the project's setup commands: the interactive policy applies to the account as it stands now.
       if (prepared.input.worktreeName) {
-        try { assertSetupCapabilities(resolved.req) } catch (error) { throw new StartupRefused(messageOf(error), true) }
+        try { assertWorktreeStartCapabilities(resolved.req) } catch (error) { throw new StartupRefused(messageOf(error), true) }
       }
       if (!this.live(claim, lease)) throw new StartupRefused("The run stopped before its session started", false)
     }

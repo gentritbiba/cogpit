@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { usePluginExternalLink } from "./PluginExternalLink"
 import { useBrowserSafeMode } from "./browserSafeMode"
 import { ReviewSessionDialog } from "./ReviewSessionDialog"
+import { WorktreeSetupConfirmDialog, type WorktreeSetupProposal } from "./WorktreeSetupConfirmDialog"
 import type { ReviewStartRequest } from "@cogpit/plugin-contracts"
 
 export interface RuntimePluginPanelProps extends WorkspacePanelProps {
@@ -84,6 +85,8 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   useLayoutEffect(() => { currentDrafts.current = drafts }, [drafts])
   useEffect(() => drafts?.onTokenChange(setDraftsToken), [drafts])
   const canUseDrafts = !!integrations
+  const canConfirmSetup = plugin.manifest.permissions.integrations.some((grant) => grant.id === "worktreeSetup" && (grant.operations as readonly string[]).includes("propose")) && !!client.confirmWorktreeSetup
+  const [setupProposal, setSetupProposal] = useState<{ leaseId: string; proposal: WorktreeSetupProposal } | null>(null)
   const workspacePath = project ? context.projectPath : null
   const canOpenExternal = plugin.manifest.permissions.navigation.includes("external")
   const address = plugin.manifest.permissions.context.includes("session.identity") && client.sessionHandle && workspacePath ? context.sessionAddress ?? null : null
@@ -106,10 +109,11 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
       ...(canAddContext ? { addContext: (value) => addFileContext.current?.({ ...value, text: value.text ?? "" }) ?? "The message composer is unavailable" } : {}),
       ...(canStartReview ? { startReview: (leaseId, request) => setReview({ leaseId, request }) } : {}),
       ...(canUseDrafts ? { drafts: () => currentDrafts.current } : {}),
+      ...(canConfirmSetup ? { confirmWorktreeSetup: (leaseId: string, proposal: WorktreeSetupProposal) => setSetupProposal({ leaseId, proposal }) } : {}),
       onLoaded: (payload, leaseId) => setLoaded({ payload, leaseId, runtime }), onError: (failure) => setError(failure.message) })
     activation.current = runtime
     return () => { runtime.dispose(); activation.current = null }
-  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath, canUseDrafts])
+  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath, canUseDrafts, canConfirmSetup])
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>
   if (!loaded) return <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>
   return <><PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
@@ -118,5 +122,7 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
     {review && <ReviewSessionDialog pluginName={plugin.manifest.name} request={review.request} projectPath={workspacePath}
       start={(input, signal) => client.startReviewSession!(review.leaseId, input, signal)}
       onStarted={(session) => { if (review.request.purpose === "work") openSession.current?.(session.dirName, session.fileName) }}
-      onClose={() => setReview(null)} />}</>
+      onClose={() => setReview(null)} />}
+    {setupProposal && <WorktreeSetupConfirmDialog pluginName={plugin.manifest.name} proposal={setupProposal.proposal} projectPath={workspacePath}
+      save={(proposalId, signal) => client.confirmWorktreeSetup!(setupProposal.leaseId, proposalId, signal)} onClose={() => setSetupProposal(null)} />}</>
 }

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import type { ReviewStartRequest } from "@cogpit/plugin-contracts"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog"
-import { WorktreeSetupPanel } from "@/components/WorktreeSetupPanel"
+import { WorktreeStartupStatus } from "@/components/WorktreeStartupStatus"
 import { useModelOptions } from "@/hooks/useModelOptions"
 import { authFetch } from "@/lib/auth"
 import { AGENT_KINDS, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
@@ -85,7 +85,7 @@ export function ReviewSessionDialog({ pluginName, request, projectPath, start, o
           <label htmlFor={`${id}-instruction`}>What should the agent do?</label>
           <textarea id={`${id}-instruction`} className={INPUT} rows={3} disabled={starting} value={instruction} placeholder="Read the change and wait for instructions." onChange={(event) => setInstruction(event.target.value)} />
         </>}
-        {starting && <WorktreeSetupPanel projectCwd={projectPath} progressOnly compact />}
+        {starting && <WorktreeStartupStatus projectCwd={projectPath} compact />}
         {error && <p role="alert" className="text-destructive">{error}</p>}
       </div>
       <DialogFooter>

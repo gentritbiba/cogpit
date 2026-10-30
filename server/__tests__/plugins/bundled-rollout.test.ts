@@ -8,7 +8,7 @@ import { captureLegacyPluginHost } from "../../plugins/legacyHost"
 import { pluginRuntimeDescriptor } from "../../plugins/runtime"
 import { openPluginStore, type PluginStore } from "../../plugins/store"
 
-const ids = ["cogpit.clickup", "cogpit.cloudflare", "cogpit.github", "cogpit.tts", "cogpit.vercel"]
+const ids = ["cogpit.clickup", "cogpit.cloudflare", "cogpit.github", "cogpit.saved-drafts", "cogpit.tts", "cogpit.vercel", "cogpit.worktree-setup"]
 const legacyIds = ["cogpit.clickup", "cogpit.github", "cogpit.vercel"]
 const SLOW = 60_000
 const seeds = loadAppPluginSeeds()
@@ -48,6 +48,8 @@ describe("actual bundled optional plugin rollout", () => {
     const registry = JSON.parse(await readFile(join(directory, "runtime-plugins", "registry.json"), "utf8"))
     expect(registry.seedMigration.decisions["cogpit.cloudflare"]).toBe("fresh")
     expect(registry.seedMigration.decisions["cogpit.tts"]).toBe("fresh")
+    expect(registry.seedMigration.decisions["cogpit.saved-drafts"]).toBe("fresh")
+    expect(registry.seedMigration.decisions["cogpit.worktree-setup"]).toBe("fresh")
     expect((await store.migrateLegacySeeds({ client, authorize })).snapshot.revision).toBe(result.snapshot.revision)
   }, SLOW)
 
@@ -90,6 +92,6 @@ describe("actual bundled optional plugin rollout", () => {
       expect(result.snapshot.availableSeeds!.map(seed => seed.manifest.id).sort()).toEqual(ids)
     }
     const registry = JSON.parse(await readFile(join(directory, "runtime-plugins", "registry.json"), "utf8"))
-    expect(registry.seedMigration.decisions).toEqual({ "cogpit.clickup": "uninstalled", "cogpit.cloudflare": "fresh", "cogpit.github": "imported", "cogpit.tts": "fresh", "cogpit.vercel": "imported" })
+    expect(registry.seedMigration.decisions).toEqual({ "cogpit.clickup": "uninstalled", "cogpit.cloudflare": "fresh", "cogpit.github": "imported", "cogpit.saved-drafts": "fresh", "cogpit.tts": "fresh", "cogpit.vercel": "imported", "cogpit.worktree-setup": "fresh" })
   }, SLOW)
 })

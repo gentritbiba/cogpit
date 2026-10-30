@@ -10,7 +10,7 @@ export function loadAppPluginSeeds(): AppPluginSeed[] {
 export function appSeedClientDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
-    runtimes: [RUNTIME], capabilities: { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0" },
+    runtimes: [RUNTIME], capabilities: { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "composer.drafts": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0" },
     browser: ["message-channel", "blob-script", "web-crypto"],
   }
 }

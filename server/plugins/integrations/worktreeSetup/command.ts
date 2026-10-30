@@ -1,4 +1,4 @@
-import { runManagedCommand } from "../lib/managedCommand"
+import { runManagedCommand } from "../../../lib/managedCommand"
 
 export function runSetupCommand(options: {
   cwd: string

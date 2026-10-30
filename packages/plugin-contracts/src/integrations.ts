@@ -5,7 +5,7 @@ import { parseSchema } from "./schema.js"
 const githubOperations = ["actions", "actionJobs", "pulls", "pullFiles", "pullSessions", "issues", "mergePull", "pullReview", "submitReview", "reviewGuide", "cancelReviewGuide"] as const
 const vercelOperations = ["deployments", "buildLogs"] as const
 const cloudflareOperations = ["workspace", "deployments", "version"] as const
-const worktreeSetupOperations = ["snapshot", "propose", "act"] as const
+const worktreeSetupOperations = ["snapshot", "scripts", "propose", "act"] as const
 const operations = <T extends readonly [string, ...string[]]>(values: T) => z.array(z.enum(values)).min(1).max(values.length).refine(list => new Set(list).size === list.length, "Duplicate operation")
 export const integrationPermissionSchema = z.discriminatedUnion("id", [
   z.strictObject({ id: z.literal("github"), operations: operations(githubOperations) }),
@@ -61,6 +61,8 @@ const worktreeSetup = { integration: z.literal("worktreeSetup") }
 export const WORKTREE_SETUP_COMMAND_BYTES = 8000
 const worktreeSetupRequestSchema = z.discriminatedUnion("operation", [
   z.strictObject({ ...worktreeSetup, operation: z.literal("snapshot") }),
+  /** Scripts the workspace's root package declares, offered to fill the command field; never run on their own. */
+  z.strictObject({ ...worktreeSetup, operation: z.literal("scripts") }),
   /** Proposes a recipe; Cogpit shows the exact command in its own dialog and saves it only on the user's confirmation. An empty command disables setup. */
   z.strictObject({
     ...worktreeSetup, operation: z.literal("propose"),

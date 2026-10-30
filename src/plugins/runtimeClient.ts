@@ -291,6 +291,10 @@ export class RuntimePluginClient {
   async startReviewSession(id: string, input: ReviewSessionInput, signal: AbortSignal): Promise<{ sessionId: string; dirName: string; fileName: string }> {
     return z.strictObject({ sessionId: z.string().min(1).max(256), dirName: z.string().min(1).max(8192), fileName: z.string().min(1).max(8192) }).parse(await this.json(`leases/${encodeURIComponent(id)}/review-session`, input, "POST", signal))
   }
+  /** Saves the setup command the user confirmed in Cogpit's dialog; the plugin proposed it under this lease. */
+  async confirmWorktreeSetup(id: string, proposalId: string, signal: AbortSignal): Promise<void> {
+    await this.json(`leases/${encodeURIComponent(id)}/worktree-setup-confirm`, { proposalId }, "POST", signal)
+  }
   /** The opaque handle a plugin on this lease sees for the open session. */
   async sessionHandle(id: string, address: { dirName: string; fileName: string }, signal: AbortSignal): Promise<string> {
     return z.strictObject({ handle: z.string().regex(/^s_[a-f0-9]{48}$/) }).parse(await this.json(`leases/${encodeURIComponent(id)}/session-handle`, address, "POST", signal)).handle

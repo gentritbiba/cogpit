@@ -6,7 +6,7 @@ import { createRuntimePanelActivation, type RuntimePanelActivation, type Runtime
 const request: PluginRequest = { protocol: 1, type: "request", id: "r1", method: "storage.get", params: { key: "setting" } }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const running = new Set<RuntimePanelActivation>()
-function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void, extra: Pick<Parameters<typeof createRuntimePanelActivation>[0], "addContext" | "startReview" | "drafts"> = {}) {
+function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void, extra: Pick<Parameters<typeof createRuntimePanelActivation>[0], "addContext" | "startReview" | "drafts" | "confirmWorktreeSetup"> = {}) {
   const client = {
     lease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })),
     payload: vi.fn(async () => new ArrayBuffer(2)),
@@ -104,6 +104,20 @@ describe("runtime panel activation", () => {
     pending.resolve(null)
     await expect(restore).rejects.toThrow()
     expect(integration.request).not.toHaveBeenCalled()
+  })
+  it("opens Cogpit's setup confirmation only for a proposal the host accepted", async () => {
+    const proposalId = "6f1c2b1e-8a4b-4c1d-9e2f-3a4b5c6d7e8f"
+    const confirm = vi.fn()
+    const propose: PluginRequest = { protocol: 1, type: "request", id: "p", method: "integrations.request", params: { integration: "worktreeSetup", operation: "propose", command: "bun install", timeoutMs: 60_000 } }
+    const value = setup({ call: vi.fn(async () => ({ ok: true, data: { proposalId } })) }, undefined, { confirmWorktreeSetup: confirm }); await settle()
+    await value.activation.execute(propose, new AbortController().signal)
+    expect(confirm).toHaveBeenCalledExactlyOnceWith("lease-1", { proposalId, command: "bun install", timeoutMs: 60_000 })
+    const refused = setup({ call: vi.fn(async () => ({ ok: false, error: { code: "CONFLICT", message: "No" } })) }, undefined, { confirmWorktreeSetup: confirm }); await settle()
+    await refused.activation.execute(propose, new AbortController().signal)
+    expect(confirm).toHaveBeenCalledOnce()
+    const unavailable = setup(); await settle()
+    await expect(unavailable.activation.execute(propose, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" })
+    expect(unavailable.client.call).not.toHaveBeenCalled()
   })
   it("refuses draft actions when the workspace has no permitted composer", async () => {
     const value = setup(); await settle()

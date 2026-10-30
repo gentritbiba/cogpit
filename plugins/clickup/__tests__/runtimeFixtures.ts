@@ -22,12 +22,13 @@ export function fakeClient(): PluginClient {
       }),
     },
     composer: { append: vi.fn().mockResolvedValue(null), appendContext: vi.fn().mockResolvedValue(null) },
+    drafts: { list: vi.fn(), capture: vi.fn(), restore: vi.fn(), remove: vi.fn(), backup: vi.fn(), recover: vi.fn() },
     review: { start: vi.fn().mockResolvedValue({ status: "opened" }) },
     settings: { get: vi.fn().mockResolvedValue({}) },
     ui: { resize: vi.fn().mockResolvedValue(null) },
     navigation: { openExternal: vi.fn().mockResolvedValue(null), openSession: vi.fn().mockResolvedValue(null) },
     storage: { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue(null), delete: vi.fn().mockResolvedValue(null) },
-    onContextChange: vi.fn(() => () => undefined), onThemeChange: vi.fn(() => () => undefined), onVisibilityChange: vi.fn(() => () => undefined), dispose: vi.fn(),
+    onContextChange: vi.fn(() => () => undefined), onThemeChange: vi.fn(() => () => undefined), onVisibilityChange: vi.fn(() => () => undefined), onDraftsChange: vi.fn(() => () => undefined), dispose: vi.fn(),
   }
 }
 export function deferred<T>() {

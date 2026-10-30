@@ -1,4 +1,3 @@
-import { WorktreeSetupPanel } from "@/components/WorktreeSetupPanel"
 import { useState } from "react"
 import { ChevronsUpDown } from "lucide-react"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
@@ -47,7 +46,6 @@ export function NewSessionHeadline({
       {projectPath && (
         <p className="font-mono text-xs text-muted-foreground">{shortPath(projectPath)}</p>
       )}
-      <WorktreeSetupPanel projectCwd={projectPath} progressOnly />
     </div>
   )
 }
