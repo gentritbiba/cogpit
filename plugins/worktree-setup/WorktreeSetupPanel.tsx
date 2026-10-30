@@ -33,11 +33,13 @@ function RecipeEditor({ recipe, api }: { recipe: WorktreeSetupRecipe | null; api
     return () => controller.abort()
   }, [api])
   const unchanged = command.trim() === (recipe?.command ?? "") && minutes * 60_000 === (recipe?.timeoutMs ?? WORKTREE_SETUP_DEFAULT_TIMEOUT_MS)
+  const review = () => {
+    setBusy(true); setStatus(null)
+    void api.propose(command, Math.round(minutes * 60_000)).then(() => setStatus("Confirm the command in Cogpit's dialog to save it."), (error: unknown) => setStatus(message(error, "Unable to review recipe"))).finally(() => setBusy(false))
+  }
+  // The sandbox has no allow-forms, so a <form> never fires submit; the editor acts on an explicit button click.
   return (
-    <form className="space-y-5" onSubmit={(event) => {
-      event.preventDefault(); setBusy(true); setStatus(null)
-      void api.propose(command, Math.round(minutes * 60_000)).then(() => setStatus("Confirm the command in Cogpit's dialog to save it."), (error: unknown) => setStatus(message(error, "Unable to review recipe"))).finally(() => setBusy(false))
-    }}>
+    <div className="space-y-5">
       <div className="space-y-2">
         <label className="text-sm font-medium" htmlFor={`${id}-command`}>Project setup command</label>
         <textarea id={`${id}-command`} className="min-h-24 w-full resize-y rounded-lg border border-input bg-background px-2.5 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" rows={3} value={command} placeholder="bun install" onChange={(event) => setCommand(event.target.value)} />
@@ -58,9 +60,9 @@ function RecipeEditor({ recipe, api }: { recipe: WorktreeSetupRecipe | null; api
       <p className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">Cogpit shows the exact command and asks you to trust it and the project code it runs before saving.</p>
       {status && <p role="status" className="text-sm">{status}</p>}
       <div className="flex justify-end border-t pt-4">
-        <Button type="submit" size="sm" disabled={busy || unchanged || !Number.isInteger(minutes) || minutes < 1 || minutes > 60}>{busy ? "Opening…" : command.trim() ? "Review and save" : "Disable setup"}</Button>
+        <Button type="button" size="sm" disabled={busy || unchanged || !Number.isInteger(minutes) || minutes < 1 || minutes > 60} onClick={review}>{busy ? "Opening…" : command.trim() ? "Review and save" : "Disable setup"}</Button>
       </div>
-    </form>
+    </div>
   )
 }
 

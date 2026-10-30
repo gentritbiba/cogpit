@@ -31,7 +31,11 @@ describe("Worktree setup plugin panel", () => {
     const value = api({ recipe: null, operations: [] })
     render(<WorktreeSetupPanel api={value} active />)
     await userEvent.selectOptions(await screen.findByRole("combobox"), "bootstrap")
-    await userEvent.click(screen.getByRole("button", { name: "Review and save" }))
+    const button = screen.getByRole("button", { name: "Review and save" })
+    // Sandboxed frames without allow-forms never fire submit, so the action must not depend on a form.
+    expect(button.getAttribute("type")).toBe("button")
+    expect(document.querySelector("form")).toBeNull()
+    await userEvent.click(button)
     expect(value.propose).toHaveBeenCalledWith("bun run bootstrap", 600_000)
     expect(await screen.findByText("Confirm the command in Cogpit's dialog to save it.")).toBeTruthy()
   })
