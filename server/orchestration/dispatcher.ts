@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { CommandReceipt } from "../../shared/contracts/orchestration"
+import { DeliveryRefused } from "./deliveryGuards"
 import { OrchestrationStore, settlesOnDelivery, type DispatcherLease, type StoredCommand } from "./store"
 
 const SETTLED = { isError: false, message: undefined }
@@ -9,8 +10,11 @@ export interface DispatchDelivery {
   turnId?: string
   completion?: Promise<{ isError: boolean; message?: string }>
 }
+/** A refusal that names how the command settles and why, instead of the generic hold. */
+export interface DispatchRefusal { disposition: "held" | "cancelled"; reason: string; code?: string }
+
 export interface DispatchAuthority {
-  authorize(command: StoredCommand): Promise<boolean>
+  authorize(command: StoredCommand): Promise<boolean | DispatchRefusal>
   deliver(command: StoredCommand, currentAttempt: () => boolean): Promise<DispatchDelivery>
   activity(command: StoredCommand): { live: boolean; running: boolean }
 }
@@ -24,6 +28,10 @@ export class CommandDispatcher {
   private ticking = false
   private closed = false
   private readonly waiters = new Set<() => void>()
+  private readonly tickHooks = new Set<(lease: DispatcherLease) => Promise<void>>()
+  private readonly lifetime = new AbortController()
+  /** Aborted when the dispatcher closes: work it started stops before any further I/O. */
+  get signal(): AbortSignal { return this.lifetime.signal }
 
   constructor(readonly store: OrchestrationStore) {}
   start(): boolean {
@@ -34,6 +42,9 @@ export class CommandDispatcher {
   }
   attach(scope: string, conversationId: string, authority: DispatchAuthority): void { this.authorities.set(JSON.stringify([scope, conversationId]), authority) }
   detach(scope: string, conversationId: string): void { this.authorities.delete(JSON.stringify([scope, conversationId])) }
+  hasAuthority(scope: string, conversationId: string): boolean { return this.authorities.has(JSON.stringify([scope, conversationId])) }
+  /** Runs `hook` on every tick this dispatcher holds the lease, before queued commands are claimed: the one scheduler clock. */
+  onTick(hook: (lease: DispatcherLease) => Promise<void>): () => void { this.tickHooks.add(hook); return () => this.tickHooks.delete(hook) }
   async tick(): Promise<void> {
     if (this.ticking || this.closed) return
     this.ticking = true
@@ -41,6 +52,9 @@ export class CommandDispatcher {
       this.lease = this.store.acquire(this.owner)
       const lease = this.lease
       if (!lease) { this.active.clear(); return }
+      for (const hook of this.tickHooks) {
+        try { await hook(lease) } catch (error) { if (!this.closed) console.error("[orchestration] scheduled work failed", error) }
+      }
       for (const [key, command] of this.active) {
         const authority = this.authorities.get(JSON.stringify([command.scope, command.receipt.conversationId]))
         if (!authority) continue
@@ -57,9 +71,10 @@ export class CommandDispatcher {
       for (const candidate of this.store.queued()) {
         const authority = this.authorities.get(JSON.stringify([candidate.scope, candidate.receipt.conversationId]))
         if (!authority) continue
-        if (!await authority.authorize(candidate).catch(() => false)) {
+        const verdict = await authority.authorize(candidate).catch(() => false)
+        if (verdict !== true) {
           const claimed = this.store.claim(candidate.scope, candidate.receipt.id, lease)
-          if (claimed) this.store.finish(claimed, lease, "held", { error: "Sign in with access to this session, then resume its queue." })
+          if (claimed) this.store.finish(claimed, lease, verdict ? verdict.disposition : "held", verdict ? { error: verdict.reason, errorCode: verdict.code } : { error: "Sign in with access to this session, then resume its queue." })
           continue
         }
         const activity = authority.activity(candidate)
@@ -73,7 +88,8 @@ export class CommandDispatcher {
   }
   private async dispatch(command: StoredCommand, lease: DispatcherLease, authority: DispatchAuthority): Promise<void> {
     try {
-      if (!await authority.authorize(command).catch(() => false)) { this.store.finish(command, lease, "held", { error: "Access changed before delivery" }); return }
+      const verdict = await authority.authorize(command).catch(() => false)
+      if (verdict !== true) { this.store.finish(command, lease, verdict ? verdict.disposition : "held", verdict ? { error: verdict.reason, errorCode: verdict.code } : { error: "Access changed before delivery" }); return }
       const currentAttempt = () => !this.closed && this.store.currentAttempt(command, lease)
       if (!currentAttempt()) return
       if (command.payload.onlyWhileRunning && !authority.activity(command).running) {
@@ -98,6 +114,11 @@ export class CommandDispatcher {
       } else this.active.set(JSON.stringify([command.scope, command.receipt.id]), { ...command, receipt: { ...command.receipt, delivery: outcome.delivery } })
     } catch (error) {
       if (this.closed) return
+      if (error instanceof DeliveryRefused) {
+        this.store.finish(command, lease, error.disposition, { error: error.message, errorCode: error.code })
+        void this.tick()
+        return
+      }
       const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 0
       const errorCode = status === 400 && typeof error === "object" && error && "code" in error && error.code === "MODEL_REJECTED" ? "MODEL_REJECTED" : undefined
       this.store.finish(command, lease, [400, 403, 404].includes(status) ? "failed" : "unknown", { error: error instanceof Error ? error.message : "Agent delivery failed", errorCode })
@@ -122,8 +143,9 @@ export class CommandDispatcher {
   close(): void {
     for (const finish of this.waiters) finish()
     this.closed = true
+    this.lifetime.abort(new Error("The command dispatcher closed"))
     if (this.timer) clearInterval(this.timer)
     if (this.lease) this.store.release(this.lease)
-    this.authorities.clear(); this.active.clear()
+    this.authorities.clear(); this.active.clear(); this.tickHooks.clear()
   }
 }

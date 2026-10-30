@@ -21,7 +21,8 @@ export function fakeClient(): PluginClient {
         return { tasks: [rawTask("1")], last_page: true }
       }),
     },
-    composer: { append: vi.fn().mockResolvedValue(null) },
+    composer: { append: vi.fn().mockResolvedValue(null), appendContext: vi.fn().mockResolvedValue(null) },
+    review: { start: vi.fn().mockResolvedValue({ status: "opened" }) },
     settings: { get: vi.fn().mockResolvedValue({}) },
     ui: { resize: vi.fn().mockResolvedValue(null) },
     navigation: { openExternal: vi.fn().mockResolvedValue(null), openSession: vi.fn().mockResolvedValue(null) },

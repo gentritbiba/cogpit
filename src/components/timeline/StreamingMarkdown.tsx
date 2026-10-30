@@ -1,5 +1,6 @@
-import { memo, type ReactNode } from "react"
+import { memo, useMemo, useState, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
+import { IncrementalMarkdownParser, incrementalMarkdownPlugin } from "@/lib/incrementalMarkdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 
 function compactHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
@@ -13,7 +14,7 @@ function compactHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
  * being written. Syntax highlighting would retokenize an unfinished fence on
  * every stream flush, and incomplete image paths would issue bad requests.
  */
-const streamingMarkdownComponents: Components = {
+export const streamingMarkdownComponents: Components = {
   ...markdownComponents,
   code({ className, children }) {
     const isInline = !className && typeof children === "string" && !children.includes("\n")
@@ -33,7 +34,7 @@ const streamingMarkdownComponents: Components = {
   img: () => null,
 }
 
-const compactStreamingMarkdownComponents: Components = {
+export const compactStreamingMarkdownComponents: Components = {
   ...streamingMarkdownComponents,
   h1: compactHeading("h1"),
   h2: compactHeading("h2"),
@@ -53,10 +54,12 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
   text,
   compactHeadings = false,
 }: StreamingMarkdownProps) {
+  const [parser] = useState(() => new IncrementalMarkdownParser())
+  const plugins = useMemo(() => [...markdownPlugins, incrementalMarkdownPlugin(parser)], [parser])
   return (
     <ReactMarkdown
       components={compactHeadings ? compactStreamingMarkdownComponents : streamingMarkdownComponents}
-      remarkPlugins={markdownPlugins}
+      remarkPlugins={plugins}
     >
       {text}
     </ReactMarkdown>

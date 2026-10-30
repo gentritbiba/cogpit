@@ -1,3 +1,4 @@
+import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -8,6 +9,7 @@ import type { PendingInteraction } from "../../shared/session/parser"
 import type { SlashSuggestion } from "../../shared/contracts/projectTools"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 import type { SessionActionPermissions } from "@/lib/sessionAccessPermissions"
+import type { ComposerAttachment, ComposerContextItem, QuoteSource } from "../../shared/session/composerContext"
 
 // ── Chat (pty) ──────────────────────────────────────────────────────────────
 
@@ -19,7 +21,8 @@ export interface ChatState {
   /** Resolves false when the message was not sent because the session may not be driven here. */
   sendMessage: (
     text: string,
-    images?: Array<{ data: string; mediaType: string }>
+    images?: Array<{ data: string; mediaType: string }>,
+    onCreated?: ComposerCreated,
   ) => Promise<boolean>
   interrupt: () => void
   stopAgent: () => void
@@ -86,6 +89,10 @@ export interface SessionContextValue {
     /** Load a session (or sub-agent session) by dirName + fileName — matches the sidebar behavior. */
     handleLoadSession: (dirName: string, fileName: string) => void
     handleProviderHandoff?: () => void
+    /** Add typed context to the open composer; returns why it could not be added, or null. */
+    handleAddComposerContext?: (item: ComposerContextItem, attachments?: ComposerAttachment[]) => string | null
+    /** Jump to a quoted reply's source; false when it can no longer be found. */
+    handleOpenQuoteSource?: (source: QuoteSource, text: string) => Promise<boolean>
   }
 }
 

@@ -1,3 +1,5 @@
+import { isSessionStarting } from "./runtimeTypes"
+import { beforeFirstTurn, isStartupFailure } from "./startup"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { asRecord } from "../../shared/objects"
 import { formatFor, turnBoundaryLines } from "../../shared/session/agents"
@@ -318,6 +320,7 @@ export const copilotRuntime: AgentRuntime = {
   descriptor,
 
   async start(req: StartSessionRequest): Promise<StartedSession> {
+    req.signal?.throwIfAborted()
     const sessionId = randomUUID()
     reportSessionId(req, sessionId)
     let opened = false
@@ -334,6 +337,7 @@ export const copilotRuntime: AgentRuntime = {
       if (req.permissions?.mode) {
         await transport.setPermissionMode(sessionId, allowAll(req.permissions.mode))
       }
+      await beforeFirstTurn(req, { sessionId, cwd: req.cwd })
       const attachments = buildAttachments(req.images)
       await transport.send(sessionId, {
         prompt: req.message || IMAGE_ONLY_PROMPT,
@@ -351,7 +355,7 @@ export const copilotRuntime: AgentRuntime = {
           await new Promise((resolve) => setTimeout(resolve, TRANSCRIPT_POLL_INTERVAL_MS))
         }
       }
-      return { sessionId, dirName: req.dirName, fileName, filePath, initialContent }
+      return { sessionId, dirName: req.dirName, cwd: req.cwd, fileName, filePath, initialContent }
     } catch (error) {
       // Order matters: a session that is still open has to be disconnected
       // before the CLI will delete it.
@@ -361,6 +365,7 @@ export const copilotRuntime: AgentRuntime = {
         }
         await transport.deleteSession(sessionId).catch(() => {})
       }
+      if (isStartupFailure(error)) throw error
       throw new AgentRuntimeError(
         500,
         "SPAWN_FAILED",
@@ -370,6 +375,7 @@ export const copilotRuntime: AgentRuntime = {
   },
 
   async send(sessionId, req: SendRequest): Promise<SendOutcome> {
+    if (isSessionStarting(sessionId)) return { delivery: "busy" }
     if (req.onlyWhileRunning && !transport.isTurnActive(sessionId)) return { delivery: "busy" }
     if (!transport.isSessionActive(sessionId)) {
       await transport.resumeSession(sessionId, {

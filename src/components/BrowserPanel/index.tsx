@@ -17,6 +17,8 @@ import { BrowserSessionBar } from "./BrowserSessionBar"
 import { browserLabel, canDrive, DEFAULT_BROWSER, drivenBrowser, homeBrowser } from "./browserSessions"
 import { BrowserSkillDialog } from "./BrowserSkillDialog"
 import { BrowserViewport } from "./BrowserViewport"
+import { BrowserAnnotator, freezeFrame, type FrozenFrame } from "./BrowserAnnotator"
+import type { BrowserContext, ComposerAttachment } from "../../../shared/session/composerContext"
 
 /**
  * The Browser panel: one managed browser on screen, streamed over the
@@ -38,7 +40,11 @@ const MANUAL_HOLD_MS = 10_000
 const STILL_AFTER_MS = 3_000
 const NO_SESSIONS: BrowserSessionInfo[] = []
 
-export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProps) {
+export function BrowserPanel({ context, active, closePanel, onAnnotate }: WorkspacePanelProps & {
+  /** Adds an annotation to the message composer; returns why it could not, or null. Absent where there is no composer. */
+  onAnnotate?: (item: BrowserContext, image: ComposerAttachment) => string | null
+}) {
+  const [frozen, setFrozen] = useState<FrozenFrame | null>(null)
   const [picked, setSelected] = useLocalStorage(deviceScopedKey(SESSION_KEY), DEFAULT_BROWSER)
   const [followAgent, setFollowAgent] = useLocalStorage(deviceScopedKey(FOLLOW_KEY), true)
   const [busy, setBusy] = useState(false)
@@ -129,6 +135,30 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
   const openPage = useCallback((url: string) => send({ type: "launch", url }), [send])
 
   const frameStatus = useFrameStatus(socket.lastFrameAt)
+  const { frame, page, tabs, pageGeneration } = socket
+  const annotate = useCallback(() => {
+    if (!page) return
+    // The annotation describes the frame it freezes: the page it was drawn
+    // for, its tab and the moment it was drawn. A frame that arrived before the
+    // page last changed, or for another tab, is not labelled as the page now.
+    const drawnFor = frame?.page
+    if (!frame || !drawnFor || frame.pageGeneration !== pageGeneration || frame.header.targetId !== drawnFor.targetId) {
+      setActionError("The page is still drawing; try again in a moment")
+      return
+    }
+    const tab = tabs.find((candidate) => candidate.targetId === frame.header.targetId)
+    const copy = freezeFrame(frame.bitmap, {
+      deviceWidth: frame.header.deviceWidth,
+      deviceHeight: frame.header.deviceHeight,
+      url: drawnFor.url,
+      title: drawnFor.title,
+      browser: selected,
+      ...(tab ? { tab: tab.title || tab.url } : {}),
+      capturedAt: new Date(frame.header.ts).toISOString(),
+    })
+    if (copy) setFrozen(copy)
+    else setActionError("The page is still drawing; try again in a moment")
+  }, [frame, page, tabs, pageGeneration, selected])
   const state = socket.state?.state ?? null
   const notInstalled = status?.installed === false || state === "not-installed"
   const live = !notInstalled && state === "live"
@@ -181,6 +211,7 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
           onReload={reload}
           onFollow={follow}
           onCloseTab={closeTab}
+          onAnnotate={onAnnotate && !frozen ? annotate : undefined}
         />
       )}
 
@@ -209,7 +240,8 @@ export function BrowserPanel({ context, active, closePanel }: WorkspacePanelProp
               onOpen={drive ? openPage : undefined}
             />
           ))}
-        {live && (
+        {live && frozen && onAnnotate && <BrowserAnnotator frame={frozen} onAdd={onAnnotate} onCancel={() => setFrozen(null)} />}
+        {live && !frozen && (
           <>
             <BrowserViewport
               className="flex-1"

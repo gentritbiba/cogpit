@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { prependTurns } from "@/lib/timelinePaging"
+import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 import type { ParsedSession, Turn } from "../../shared/session/types"
 
 interface BeforeResponse {
@@ -74,7 +75,7 @@ export function useSessionPaging({
     setIsLoadingOlder(true)
     try {
       const res = await authFetch(
-        `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}`,
+        `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}&projection=${RESULT_PROJECTION}`,
       )
       if (!res.ok) return 0
 

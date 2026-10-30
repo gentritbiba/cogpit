@@ -1,3 +1,4 @@
+import { worktreeSetupService } from "./worktreeSetup/service"
 import express from "express"
 import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
@@ -38,6 +39,7 @@ import { allRuntimes, isSessionActive } from "./agents/runtimes"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
+import { startTriggerScheduler, triggerExecutionsSettled } from "./lib/triggers/runner"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
@@ -185,6 +187,7 @@ export async function createServerComposition(
   const browserSupport = initBrowserSupport(isSessionActive)
   installSessionCli()
   resumeLocalDelegations()
+  startTriggerScheduler()
   const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()
 
@@ -266,6 +269,7 @@ export async function createServerComposition(
         new Promise<void>((resolve) => wss.close(() => resolve())),
         new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),
+        worktreeSetupService.close(),
         browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
       ])
@@ -275,7 +279,7 @@ export async function createServerComposition(
 
   httpServer.on("close", () => {
     closeCommandDispatcher()
-    void cleanupRuntime().finally(closeOrchestrationStore)
+    void cleanupRuntime().then(() => triggerExecutionsSettled()).finally(closeOrchestrationStore)
   })
 
   const dispose = async (): Promise<void> => {
@@ -297,6 +301,7 @@ export async function createServerComposition(
     // a login/config mutation that completed during runtime cleanup cannot be
     // acknowledged without its durable session state reaching disk.
     await settleThenFlushEdition([cleanupRuntime(), serverClosed])
+    await triggerExecutionsSettled()
     closeOrchestrationStore()
   }
 

@@ -57,6 +57,9 @@ export interface StartSessionRequest extends AgentTurnSettings {
   /** Session title, applied however the agent supports it. */
   name?: string
   worktreeName?: string
+  signal?: AbortSignal
+  /** Awaited in the initialized cwd before the first provider prompt. */
+  beforeFirstTurn?: (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => Promise<void>
   /**
    * Told the new session's id once, as soon as the runtime knows it and before
    * anything that can still fail, so a start that fails after the agent has
@@ -285,8 +288,13 @@ export interface AgentRuntime {
   shutdown(): Promise<void>
 }
 
+const startingSessions = new Set<string>()
+export function isSessionStarting(sessionId: string): boolean { return startingSessions.has(sessionId) }
+export function finishSessionStartup(sessionId: string): void { startingSessions.delete(sessionId) }
+
 /** Hand a start's new session id to its caller, which only observes the start and so cannot break it. */
 export function reportSessionId(req: StartSessionRequest, sessionId: string): void {
+  if (req.beforeFirstTurn) startingSessions.add(sessionId)
   try {
     req.onSessionId?.(sessionId)
   } catch (error) {

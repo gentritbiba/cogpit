@@ -1,0 +1,13 @@
+# Worktree setup recipes
+
+Open **Worktrees**, a new session's project header, or the expanded **Terminal** panel to configure a project setup command. Project scripts can fill the command field; they never run just because a repository declares them. Check the trust box and save to enable setup. Clear the command and save to disable it. A recipe trusts the command and the project code it invokes, including package-manager lifecycle scripts.
+
+Recipes belong to the current account on the selected host and the canonical Git project. Linked worktrees share that project's recipe; another account or Git project does not. Configuration and bounded startup history live in the host's Cogpit data directory, outside tracked project configuration.
+
+Creating an isolated session shows initialization, setup, and agent-start progress. Setup runs in the directory reported by native initialization, before the first provider input is released. Native worktree creation hooks keep ownership of their checkout and custom directory. A transport that cannot separate native worktree creation from its first prompt uses a managed `.worktrees/` checkout instead.
+
+A failed setup keeps the first prompt waiting and retains the worktree, output and exit code. Fix the command or project, then choose **Retry setup** to run the current recipe in the same checkout. Duplicate retry actions do not launch duplicate commands. **Cancel startup** stops the command and its descendants and ends startup. It retains the checkout and partial/dirty files. A fresh session can be started deliberately after inspecting them; cancellation does not delete branches or worktrees.
+
+Reopening the project or Terminal panel retrieves the current stage and output. Refreshing the browser does not restart setup. If the server stops, unfinished records become interrupted and are not automatically resumed. Each operation retains at most 64,000 output characters; older output is visibly trimmed. History retains the latest 20 operations, plus active ones. Commands default to a ten-minute timeout (configurable up to one hour); the whole startup, including waiting for retry, expires after two hours.
+
+`createSession` is the integration entry point for interactive, CLI, review and automation callers. Worktree requests await readiness before returning the initialized cwd. Account-aware or delayed callers must supply `authorizeStartup`, which revalidates the current request or execution grant before setup and the first provider prompt; they also supply the owner's `setupScope` (or `retry.scope`). No request, cookie or grant closure is persisted by setup. Independent sends to a session still waiting for readiness return busy.

@@ -3,6 +3,8 @@ import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
+import { visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
+import { composerPromptText } from "./composerContext"
 import type {
   ContentBlock,
   ImageBlock,
@@ -192,7 +194,7 @@ function extractMetadata(events: CopilotEvent[]): CopilotMetadata {
     if (event.type !== "user.message") continue
     metadata.turnCount++
     metadata.timestamp ||= timestamp
-    const content = readString(data.content).trim()
+    const content = composerPromptText(readString(data.content)).trim()
     if (!content) continue
     metadata.firstUserMessage ||= content
     metadata.lastUserMessage = content
@@ -1164,4 +1166,24 @@ export function copilotTurnBoundaries(
     boundaries.push(index)
   }
   return boundaries
+}
+
+// ── Result projection ───────────────────────────────────────────────────────
+
+/** A completed tool's result text in each place `extractToolResult` reads it; success and error stay apart. */
+export function projectCopilotResults(record: Record<string, unknown>, visit: ResultVisitor): boolean {
+  if (record.type !== "tool.execution_complete" || !isObject(record.data)) return false
+  const data = record.data
+  if (typeof data.result === "string") return visitField(data, "result", visit)
+  if (!isObject(data.result)) return false
+  const result = data.result
+  let changed = visitField(result, "detailedContent", visit)
+  changed = visitField(result, "content", visit) || changed
+  if (Array.isArray(result.contents)) {
+    // `extractToolResult` joins the parts' text with newlines into one result: they travel as that one body.
+    const textOf = (part: unknown) => (typeof part === "string" ? part : isObject(part) ? readString(part.text, part.content, part.output) : "") || undefined
+    const joined = visitJoinedText(result.contents, textOf, "\n", (part, text) => typeof part === "string" ? text : { ...(part as object), text }, visit)
+    if (joined) { result.contents = joined; changed = true }
+  }
+  return changed
 }

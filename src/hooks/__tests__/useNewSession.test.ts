@@ -120,6 +120,7 @@ describe("useNewSession", () => {
   })
 
   it("createAndSend preserves cwd and context limit and promotes immediately", async () => {
+    const onCreated = vi.fn()
     const { result } = renderHook(() => useNewSession({ ...defaultOpts, contextWindowTokens: 1000000 }))
 
     // Set up the pending dirName
@@ -145,9 +146,10 @@ describe("useNewSession", () => {
 
     let sessionId: string | null = null
     await act(async () => {
-      sessionId = await result.current.createAndSend("hello")
+      sessionId = await result.current.createAndSend("hello", undefined, onCreated)
     })
 
+    expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ sessionId: expect.any(String), cwd: expect.any(String), dirName: expect.any(String) }))
     expect(sessionId).toBe("session-123")
     const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     expect(body.cwd).toBe("/tmp/my-project")

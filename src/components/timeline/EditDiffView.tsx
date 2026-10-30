@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react"
 import { ChevronsUpDown, Maximize2, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { splitDiffLines } from "../../../shared/diff-utils"
 import {
   Dialog,
   DialogContent,
@@ -9,187 +8,14 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import { getHighlighter, ensureLang, getLangFromPath, type ThemedToken } from "@/lib/shiki"
-import { useIsDarkMode } from "@/hooks/useIsDarkMode"
-import { Button } from "@/components/ui/button"
-
-// ── Simple line-level diff (LCS-based, optimized) ──────────────────────────
-
-interface DiffLine {
-  type: "added" | "removed" | "unchanged"
-  text: string
-  oldIdx?: number
-  newIdx?: number
-}
-
-// Module-level LRU cache — avoids recomputing identical diffs across re-renders
-const DIFF_CACHE_MAX = 24
-const diffCache: Array<{ oldStr: string; newStr: string; result: DiffLine[] }> = []
-
-function getCachedDiff(oldStr: string, newStr: string): DiffLine[] {
-  for (let i = 0; i < diffCache.length; i++) {
-    const e = diffCache[i]
-    if (e.oldStr === oldStr && e.newStr === newStr) return e.result
-  }
-  const result = computeDiff(oldStr, newStr)
-  if (diffCache.length >= DIFF_CACHE_MAX) diffCache.shift()
-  diffCache.push({ oldStr, newStr, result })
-  return result
-}
-
-/** Size threshold — beyond this, skip LCS and show simple removed/added blocks. */
-const LCS_MAX_PRODUCT = 250_000
-
-function computeDiff(oldStr: string, newStr: string): DiffLine[] {
-  const oldLines = splitDiffLines(oldStr)
-  const newLines = splitDiffLines(newStr)
-  const m = oldLines.length
-  const n = newLines.length
-
-  // Trim common prefix/suffix — typical edits share 90%+ lines,
-  // so this dramatically shrinks the LCS matrix.
-  let prefix = 0
-  while (prefix < m && prefix < n && oldLines[prefix] === newLines[prefix]) prefix++
-  let suffix = 0
-  while (
-    suffix < m - prefix &&
-    suffix < n - prefix &&
-    oldLines[m - 1 - suffix] === newLines[n - 1 - suffix]
-  ) suffix++
-
-  const om = m - prefix - suffix
-  const on = n - prefix - suffix
-
-  const result: DiffLine[] = []
-
-  // Prefix unchanged lines
-  for (let k = 0; k < prefix; k++) {
-    result.push({ type: "unchanged", text: oldLines[k], oldIdx: k, newIdx: k })
-  }
-
-  if (om === 0 && on === 0) {
-    // No middle — just prefix+suffix
-  } else if (om === 0) {
-    for (let k = 0; k < on; k++) {
-      result.push({ type: "added", text: newLines[prefix + k], newIdx: prefix + k })
-    }
-  } else if (on === 0) {
-    for (let k = 0; k < om; k++) {
-      result.push({ type: "removed", text: oldLines[prefix + k], oldIdx: prefix + k })
-    }
-  } else if (om * on > LCS_MAX_PRODUCT) {
-    // Fast path for very large diffs — skip LCS, show removed then added.
-    for (let k = 0; k < om; k++) {
-      result.push({ type: "removed", text: oldLines[prefix + k], oldIdx: prefix + k })
-    }
-    for (let k = 0; k < on; k++) {
-      result.push({ type: "added", text: newLines[prefix + k], newIdx: prefix + k })
-    }
-  } else {
-    // LCS on changed middle section — flat Int32Array (single allocation, pre-zeroed)
-    const stride = on + 1
-    const dp = new Int32Array((om + 1) * stride)
-    for (let i = 1; i <= om; i++) {
-      const oldLine = oldLines[prefix + i - 1]
-      const rowOff = i * stride
-      const prevOff = rowOff - stride
-      for (let j = 1; j <= on; j++) {
-        if (oldLine === newLines[prefix + j - 1]) {
-          dp[rowOff + j] = dp[prevOff + j - 1] + 1
-        } else {
-          const up = dp[prevOff + j]
-          const left = dp[rowOff + j - 1]
-          dp[rowOff + j] = up > left ? up : left
-        }
-      }
-    }
-
-    // Backtrack middle section
-    const middle: DiffLine[] = []
-    let i = om, j = on
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && oldLines[prefix + i - 1] === newLines[prefix + j - 1]) {
-        middle.push({ type: "unchanged", text: oldLines[prefix + i - 1], oldIdx: prefix + i - 1, newIdx: prefix + j - 1 })
-        i--; j--
-      } else if (j > 0 && (i === 0 || dp[i * stride + j - 1] >= dp[(i - 1) * stride + j])) {
-        middle.push({ type: "added", text: newLines[prefix + j - 1], newIdx: prefix + j - 1 })
-        j--
-      } else {
-        middle.push({ type: "removed", text: oldLines[prefix + i - 1], oldIdx: prefix + i - 1 })
-        i--
-      }
-    }
-    middle.reverse()
-    result.push(...middle)
-  }
-
-  // Suffix unchanged lines
-  for (let k = 0; k < suffix; k++) {
-    const oi = m - suffix + k
-    const ni = n - suffix + k
-    result.push({ type: "unchanged", text: oldLines[oi], oldIdx: oi, newIdx: ni })
-  }
-
-  return result
-}
-
-// ── Syntax highlighting hook ────────────────────────────────────────────────
+import { getLangFromPath, type ThemedToken } from "@/lib/shiki"
+import { useHighlightedTokens } from "@/hooks/useHighlightedTokens"
+import { renderWork } from "@/lib/rendering/service"
+import type { DiffLine } from "@/lib/rendering/diff"
 
 type TokenizedLines = ThemedToken[][]
-
-function useHighlightedTokens(
-  oldStr: string,
-  newStr: string,
-  filePath: string,
-  isDark: boolean
-): { oldTokens: TokenizedLines | null; newTokens: TokenizedLines | null } {
-  const [oldTokens, setOldTokens] = useState<TokenizedLines | null>(null)
-  const [newTokens, setNewTokens] = useState<TokenizedLines | null>(null)
-
-  useEffect(() => {
-    const lang = getLangFromPath(filePath)
-    if (!lang) {
-      setOldTokens(null)
-      setNewTokens(null)
-      return
-    }
-
-    const theme = isDark ? "github-dark" : "github-light"
-    let cancelled = false
-
-    // Defer highlighting by one frame so the plain-text diff paints first.
-    // This prevents the heavy codeToTokens calls from blocking the initial render.
-    const rafId = requestAnimationFrame(() => {
-      if (cancelled) return
-      getHighlighter()
-        .then(async (hl) => {
-          if (cancelled) return
-          await ensureLang(hl, lang)
-          if (cancelled) return
-          const oldResult = hl.codeToTokens(oldStr, { lang, theme })
-          if (cancelled) return
-          setOldTokens(oldResult.tokens)
-          const newResult = hl.codeToTokens(newStr, { lang, theme })
-          if (cancelled) return
-          setNewTokens(newResult.tokens)
-        })
-        .catch((err) => {
-          console.warn("[EditDiffView] highlight failed:", err)
-          if (!cancelled) {
-            setOldTokens(null)
-            setNewTokens(null)
-          }
-        })
-    })
-
-    return () => {
-      cancelled = true
-      cancelAnimationFrame(rafId)
-    }
-  }, [oldStr, newStr, filePath, isDark])
-
-  return { oldTokens, newTokens }
-}
+import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { Button } from "@/components/ui/button"
 
 // ── Diff line style lookups ─────────────────────────────────────────────────
 
@@ -492,13 +318,24 @@ export function EditDiffView({
 }: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const isDark = useIsDarkMode()
-  const lines = useMemo(() => getCachedDiff(oldString, newString), [oldString, newString])
-  const { oldTokens, newTokens } = useHighlightedTokens(
-    oldString,
-    newString,
-    filePath,
-    isDark
-  )
+  const [diff, setDiff] = useState<{ oldString: string; newString: string; lines: DiffLine[] } | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const request = () => {
+      void renderWork.diff(oldString, newString, controller.signal).then(lines => {
+        if (controller.signal.aborted) return
+        if (lines) setDiff({ oldString, newString, lines })
+        else retry = setTimeout(request, 100)
+      }).catch(() => undefined)
+    }
+    request()
+    return () => { controller.abort(); clearTimeout(retry) }
+  }, [oldString, newString])
+  const lines = diff?.oldString === oldString && diff.newString === newString ? diff.lines : []
+  const lang = getLangFromPath(filePath)
+  const oldTokens = useHighlightedTokens(oldString, lang, isDark)
+  const newTokens = useHighlightedTokens(newString, lang, isDark)
 
   const shortPath = filePath.split("/").slice(-3).join("/")
 
@@ -532,6 +369,7 @@ export function EditDiffView({
             </div>
           </div>
         )}
+        {!diff || diff.oldString !== oldString || diff.newString !== newString ? <div role="status" className="p-2 text-xs text-muted-foreground">Preparing diff…</div> : null}
         <DiffLines
           lines={lines}
           oldTokens={oldTokens}

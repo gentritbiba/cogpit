@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import type { ElidedResult } from "../../../shared/session/types"
 import {
   Check,
   ChevronRight,
@@ -54,6 +55,8 @@ interface CommandRowView {
   analysis: SectionAnalysis
   failed: boolean
   pending: boolean
+  /** The server keeps the rest of this row's output (its preview is `section.output`). */
+  resultRef?: ElidedResult
 }
 
 export function bashSections(toolCall: ToolCall): CommandSection[] {
@@ -117,6 +120,8 @@ function toCallView(toolCall: ToolCall, isAgentActive: boolean): BashCallView {
       analysis: analyses[index],
       failed: analyses[index].failed || index === outerFailure,
       pending: isAgentActive && toolCall.result === null && !toolCall.isError,
+      // One section's output is the whole result; several share one body, shown once below them.
+      ...(toolCall.resultRef && sections.length === 1 ? { resultRef: toolCall.resultRef } : {}),
     })),
     options: bashOptions(toolCall.input),
   }
@@ -131,7 +136,7 @@ function outputSummary(row: CommandRowView): string {
   if (row.pending) return "Output pending"
   if (row.section.output === null) return "Not run"
   if (row.section.output === "") return "No output"
-  const count = lineCount(row.section.output)
+  const count = row.resultRef?.lines ?? lineCount(row.section.output)
   return count === 1 ? "1 line" : `${count} lines`
 }
 
@@ -236,6 +241,7 @@ function CommandOutput({ row, cwd }: { row: CommandRowView; cwd: string | undefi
   return (
     <ToolResultPanel
       result={row.section.output}
+      resultRef={row.resultRef}
       isError={row.failed}
       filePath={row.analysis.readFile?.path}
       renderResult={row.analysis.kind === "search" && !row.failed
@@ -371,6 +377,9 @@ export function BashCommandCard({
                 <CommandRow row={row} expandAll={expandAll} cwd={cwd} />
               </div>
             ))}
+            {toolCall.resultRef && (
+              <ToolResultPanel result={toolCall.result ?? ""} resultRef={toolCall.resultRef} isError={toolCall.isError} />
+            )}
           </div>
         )}
       </div>

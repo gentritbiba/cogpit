@@ -3,12 +3,12 @@
   "id": "cogpit.github",
   "publisher": "cogpit",
   "name": "GitHub",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "runtime": "browser-iife-v1",
   "entry": "plugin.js",
   "style": "plugin.css",
   "engines": {
-    "pluginApi": "^1.1.0",
+    "pluginApi": "^1.3.0",
     "client": ">=2.6.6",
     "host": ">=2.6.6"
   },
@@ -18,14 +18,18 @@
       "workspace.panel": "^1.0.0",
       "navigation.external": "^1.0.0",
       "composer.append": "^1.0.0",
-      "navigation.session": "^1.0.0"
+      "navigation.session": "^1.0.0",
+      "composer.context": "^1.0.0"
     },
     "host": {
-      "integrations.github": "^1.0.0"
+      "integrations.github": "^1.1.0",
+      "storage.json": "^1.0.0"
     }
   },
   "optional": {
-    "client": {},
+    "client": {
+      "review.start": "^1.0.0"
+    },
     "host": {}
   },
   "browser": [
@@ -53,7 +57,8 @@
       "session.identity"
     ],
     "composer": [
-      "append"
+      "append",
+      "context"
     ],
     "navigation": [
       "external",
@@ -70,10 +75,21 @@
           "pullFiles",
           "pullSessions",
           "issues",
-          "mergePull"
+          "mergePull",
+          "pullReview",
+          "submitReview",
+          "reviewGuide",
+          "cancelReviewGuide"
         ]
       }
-    ]
+    ],
+    "review": [
+      "start"
+    ],
+    "storage": {
+      "scope": "project",
+      "quotaKiB": 1024
+    }
   },
   "stateVersion": 1
 }

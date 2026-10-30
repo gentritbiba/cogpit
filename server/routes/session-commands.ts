@@ -1,3 +1,4 @@
+import { initializeAllowanceRecovery, recoveryStatus, optInRecovery, cancelRecovery, reauthorizeRecovery } from "../lib/allowanceRecovery"
 import { resolveConversationTransition, transitionConversation, type TransitionInput, type TransitionResolution } from "../lib/conversationTransition"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { authorizeSession } from "../edition"
@@ -17,6 +18,29 @@ async function context(req: IncomingMessage, res: ServerResponse, sessionId: unk
 }
 
 export function registerSessionCommandRoutes(use: UseFn): void {
+  initializeAllowanceRecovery()
+  use("/api/session-commands", async (req, res, next) => {
+    if (new URL(req.url ?? "/", "http://localhost").searchParams.get("recovery") !== "1") return next()
+    if (req.method === "GET") {
+      try {
+        const sessionId = new URL(req.url ?? "/", "http://localhost").searchParams.get("sessionId")
+        if (!await context(req, res, sessionId, false)) return
+        sendJson(res, 200, await recoveryStatus(req, sessionId!))
+      } catch (error) { sendAgentError(res, error, "Failed to read recovery") }
+      return
+    }
+    if (req.method !== "POST") return next()
+    withJsonBody<Record<string, unknown>>(req, res, async (body) => {
+      try {
+        if (!await context(req, res, body.sessionId, true)) return
+        const sessionId = body.sessionId as string
+        if (body.action === "enable") sendJson(res, 200, await optInRecovery(req, sessionId, body.offerId))
+        else if (body.action === "reauthorize") sendJson(res, 200, await reauthorizeRecovery(req, sessionId))
+        else if (body.action === "cancel") sendJson(res, 200, await cancelRecovery(req, sessionId))
+        else throw new OrchestrationError(400, "Unknown recovery action")
+      } catch (error) { sendAgentError(res, error, "Failed to update recovery") }
+    })
+  })
   use("/api/conversation-transition", (req, res, next) => {
     if (req.method !== "POST") return next()
     withJsonBody<TransitionInput & TransitionResolution & { action?: string }>(req, res, async (body) => {

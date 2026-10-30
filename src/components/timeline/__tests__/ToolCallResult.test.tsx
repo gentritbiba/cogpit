@@ -51,6 +51,7 @@ describe("highlighted tool results", () => {
         "const value = 1\nplain line",
         "typescript",
         true,
+        expect.any(AbortSignal),
       )
     })
   })
@@ -63,6 +64,7 @@ describe("highlighted tool results", () => {
         '{\n  "status": "ok"\n}',
         "json",
         true,
+        expect.any(AbortSignal),
       )
     })
     expect(screen.getByText(/"status": "ok"/)).toBeInTheDocument()

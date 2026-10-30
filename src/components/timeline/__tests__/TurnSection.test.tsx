@@ -18,6 +18,7 @@ vi.mock("@/contexts/AppContext", () => ({
 }))
 
 vi.mock("@/contexts/SessionContext", () => ({
+  useSessionContextOptional: () => null,
   useSessionContext: () => ({
     session: makeSession(),
     isLive: mocks.isLive,

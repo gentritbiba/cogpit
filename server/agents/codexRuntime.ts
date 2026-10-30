@@ -1,3 +1,6 @@
+import { isSessionStarting } from "./runtimeTypes"
+import { beforeFirstTurn, isStartupFailure } from "./startup"
+import { prepareManagedWorktree } from "./managedWorktree"
 import { isValidContextWindowTokens } from "../../shared/session/contextWindowSettings"
 import type { ChildProcess } from "node:child_process"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
@@ -252,6 +255,7 @@ async function startLegacy(
   req: StartSessionRequest,
   knownPaths: Set<string>,
 ): Promise<StartedSession> {
+  await beforeFirstTurn(req, { cwd: req.cwd })
   const imagePaths = await writeTempImageFiles(req.images)
   const args = legacyArgs(req, imagePaths)
   const startedAt = Date.now()
@@ -317,9 +321,14 @@ async function startLegacy(
       const worktreeIdentity = req.worktreeName
         ? await storeFor("codex").readIdentity(identity.filePath).catch(() => null)
         : null
+      if (req.worktreeName && !worktreeIdentity?.cwd) {
+        reject(new AgentRuntimeError(409, "SESSION_UNCONFIRMED", "The native worktree directory is not available yet. Inspect the retained session before retrying."))
+        return
+      }
       resolve({
         sessionId: identity.sessionId,
         dirName: worktreeIdentity?.cwd ? descriptor.dirName.encode(worktreeIdentity.cwd) : req.dirName,
+        cwd: worktreeIdentity?.cwd ?? req.cwd,
         fileName: identity.fileName,
         filePath: identity.filePath,
         initialContent: content,
@@ -748,6 +757,8 @@ export const codexRuntime: AgentRuntime = {
   descriptor,
 
   async start(req) {
+    req.signal?.throwIfAborted()
+    req = await prepareManagedWorktree(req)
     validateContextWindow(req.contextWindowTokens)
     const knownPaths = new Set(
       (await storeFor("codex").listSessionFiles()).map((file) => file.filePath),
@@ -755,7 +766,7 @@ export const codexRuntime: AgentRuntime = {
     if (req.worktreeName) return startLegacy(req, knownPaths)
     let threadStarted = false
     try {
-      const options = executionOptions(req)
+      const options = { ...executionOptions(req), beforeFirstTurn: (identity: { sessionId?: string; cwd: string }) => beforeFirstTurn(req, identity) }
       const started = await startCodexExecution(codexAppServer, options, (threadId) => {
         threadStarted = true
         reportSessionId(req, threadId)
@@ -768,9 +779,11 @@ export const codexRuntime: AgentRuntime = {
       } catch {
         // The rollout can be materialized just after turn/start is accepted.
       }
+      const initializedCwd = typeof started.thread.cwd === "string" ? started.thread.cwd : req.cwd
       return {
         sessionId: identity.sessionId,
-        dirName: req.dirName,
+        dirName: descriptor.dirName.encode(initializedCwd),
+        cwd: initializedCwd,
         fileName: identity.fileName,
         filePath: identity.filePath,
         initialContent,
@@ -778,6 +791,7 @@ export const codexRuntime: AgentRuntime = {
     } catch (error) {
       // Once the app-server has created the thread, that thread is the session;
       // falling back to the CLI would start a second one.
+      if (isStartupFailure(error)) throw error
       if (threadStarted || !isCodexAppServerUnavailable(error)) {
         throw new AgentRuntimeError(
           500,
@@ -790,6 +804,7 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async send(sessionId, req) {
+    if (isSessionStarting(sessionId)) return { delivery: "busy" }
     validateContextWindow(req.contextWindowTokens)
     const legacy = persistentSessions.get(sessionId)
     if (legacy && !legacy.dead) {

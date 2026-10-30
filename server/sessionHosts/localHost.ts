@@ -1,3 +1,4 @@
+import { assertSetupAccess } from "../worktreeSetup/authorization"
 import { accessLevelOf, startTurn } from "../edition"
 import { accessAtLeast } from "../../shared/contracts/sessionAccess"
 import { OrchestrationError } from "../orchestration/store"
@@ -26,6 +27,8 @@ export const localHost: SessionHost = {
     const inputFields = {
       ...startFields(input),
       retry: { requestId: input.requestId, scope: input.scope },
+      setupScope: input.scope,
+      authorizeStartup: input.worktreeName && input.req ? async () => { assertSetupAccess(input.req!) } : undefined,
     }
     const started = input.req ? await createSession(inputFields, (runtime, request) => startTurn(input.req!, Date.now(), runtime, request)) : await createSession(inputFields)
     return { sessionId: started.sessionId, dirName: started.dirName }

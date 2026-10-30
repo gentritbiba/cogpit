@@ -10,6 +10,7 @@ import { chunkFileNames, editionUiBanner, manualChunks } from './build/manualChu
 import { themeBootstrap } from './build/themeBootstrap'
 
 export default defineConfig({
+  worker: { format: "es" },
   plugins: [
     themeBootstrap(),
     react({

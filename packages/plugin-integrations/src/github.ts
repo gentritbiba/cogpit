@@ -175,6 +175,92 @@ export interface GitHubPullFilesResponse {
   truncated: boolean
 }
 
+/**
+ * Whether a changed file's patch came back: `binary` and `too-large` are
+ * files GitHub or the host withholds a patch for, `unavailable` one past the
+ * listing GitHub can serve.
+ */
+export type GitHubPatchState = "text" | "binary" | "too-large" | "unavailable"
+
+export interface GitHubReviewFile extends GitHubPullFile {
+  /** Blob SHA of the file at the head; a changed blob resets the file's viewed mark. */
+  blobSha: string | null
+  patch: string | null
+  patchState: GitHubPatchState
+}
+
+/** One page of a pull request's changes, pinned to the base and head it was read at. */
+export interface GitHubPullReviewResponse {
+  repository: string
+  host: string
+  number: number
+  title: string
+  url: string
+  state: GitHubPullState
+  baseSha: string
+  headSha: string
+  baseBranch: string
+  headBranch: string
+  totalFiles: number
+  /** GitHub lists at most 3000 files of a pull request. */
+  filesCapped: boolean
+  page: number
+  nextPage: number | null
+  files: GitHubReviewFile[]
+}
+
+export type GitHubReviewSide = "LEFT" | "RIGHT"
+
+/**
+ * `already-submitted` is a review this submission id already created, found
+ * before posting again; `stale-head` posts nothing because the head or the
+ * base moved, and carries the current pair.
+ */
+export interface GitHubSubmitReviewResponse {
+  repository: string
+  number: number
+  outcome: "submitted" | "already-submitted" | "stale-head"
+  headSha: string
+  baseSha: string
+  reviewId: number | null
+  url: string | null
+}
+
+export interface GitHubReviewGuideStop {
+  path: string
+  line: number | null
+  side: GitHubReviewSide
+  note: string
+}
+
+export interface GitHubReviewGuide {
+  summary: string
+  /** Files in the order to read them. */
+  groups: Array<{ title: string; note: string; files: string[] }>
+  risks: string[]
+  questions: string[]
+  stops: GitHubReviewGuideStop[]
+}
+
+export type GitHubReviewGuideState = "preparing" | "generating" | "ready" | "failed" | "cancelled"
+
+/** A generated guide, saved with the base and head it was generated for; stale once the pull request moves. */
+export interface GitHubReviewGuideRecord {
+  state: GitHubReviewGuideState
+  baseSha: string
+  headSha: string
+  startedAt: string
+  finishedAt: string | null
+  error: string | null
+  guide: GitHubReviewGuide | null
+}
+
+export interface GitHubReviewGuideResponse {
+  repository: string
+  number: number
+  guide: GitHubReviewGuideRecord | null
+}
+
 export type GitHubIssueState = "open" | "completed" | "not_planned"
 
 export interface GitHubIssueLabel {
@@ -219,6 +305,9 @@ export type GitHubErrorCode =
   | "invalid_response"
   | "no_git_repository"
   | "no_github_remote"
+  /** A write may or may not have reached GitHub; check before trying again. */
+  | "unknown_outcome"
+  | "stale_head"
 
 export interface GitHubErrorResponse {
   error: string

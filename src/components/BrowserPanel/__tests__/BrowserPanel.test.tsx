@@ -62,6 +62,8 @@ let listRead = true
 let lastFrameAt: number | null = null
 let frame: BrowserFrame | null = null
 let tabs: BrowserTab[] = []
+let page: UseBrowserSocket["page"] = null
+let pageGeneration = 0
 let sessionBarRenders = 0
 
 function sessionsDouble(enabled: boolean): UseBrowserSessions {
@@ -85,18 +87,21 @@ function socketDouble(session: string | null): UseBrowserSocket {
   return {
     status: session === null ? "idle" : socketStatus,
     state: session === null ? null : { type: "status", state: socketState, session },
-    page: null,
+    page,
     tabs,
     followed: null,
     frame,
     lastFrameAt,
+    pageGeneration,
     error: socketError,
     send,
   }
 }
 
-function frameOf(ts: number): BrowserFrame {
+function frameOf(ts: number, drawnFor: UseBrowserSocket["page"] = null, generation = 0): BrowserFrame {
   return {
+    page: drawnFor,
+    pageGeneration: generation,
     bitmap: { close: () => {} } as unknown as ImageBitmap,
     header: {
       deviceWidth: 1280,
@@ -213,6 +218,8 @@ beforeEach(() => {
   lastFrameAt = Date.now()
   frame = null
   tabs = []
+  page = null
+  pageGeneration = 0
   sessionBarRenders = 0
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -510,5 +517,51 @@ describe("BrowserPanel for a caller with an account of their own", () => {
 
     await waitFor(() => expect(selectedName()).toContain("Alice's browser"))
     expect(socketSessions).toContain("user-u_alice")
+  })
+})
+
+describe("BrowserPanel annotation", () => {
+  const frozen = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }))
+  vi.mock("@/components/BrowserPanel/BrowserAnnotator", async (importOriginal) => ({
+    ...await importOriginal<typeof import("../BrowserAnnotator")>(),
+    freezeFrame: (_bitmap: ImageBitmap, provenance: Record<string, unknown>) => ({ ...provenance, canvas: document.createElement("canvas") }),
+    BrowserAnnotator: (props: { frame: Record<string, unknown> }) => { frozen.props = props.frame; return <div>annotating</div> },
+  }))
+
+  function annotatingPanel() {
+    return render(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
+  }
+
+  const pageA = { type: "page" as const, targetId: "target-1", url: "https://a.test/", title: "Page A", canGoBack: false, canGoForward: false }
+
+  it("labels the frozen frame with the page it was drawn for, its tab and its draw time", async () => {
+    const user = userEvent.setup()
+    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }, { targetId: "target-2", url: "https://b.test/", title: "Page B" }]
+    page = pageA
+    pageGeneration = 3
+    frame = frameOf(Date.parse("2026-10-29T12:00:00.000Z"), pageA, 3)
+    annotatingPanel()
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toMatchObject({ url: "https://a.test/", title: "Page A", tab: "Page A", capturedAt: "2026-10-29T12:00:00.000Z", deviceWidth: 1280 })
+  })
+
+  it("refuses a frame drawn before the page changed, or for another tab", async () => {
+    const user = userEvent.setup()
+    frozen.props = null
+    tabs = [{ targetId: "target-1", url: "https://a.test/", title: "Page A" }]
+    // Same tab, but the page navigated after the frame arrived (it may still have been decoding).
+    page = { ...pageA, url: "https://a.test/next", title: "Next" }
+    pageGeneration = 4
+    frame = frameOf(Date.now(), pageA, 3)
+    const { rerender } = annotatingPanel()
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toBeNull()
+    expect(screen.getByText(/still drawing/)).toBeInTheDocument()
+
+    // The frame's tab is not the tab its page report names.
+    frame = frameOf(Date.now(), { ...pageA, targetId: "target-2" }, 4)
+    rerender(<BrowserPanel context={contextOf()} active closePanel={closePanel} onAnnotate={() => null} />)
+    await user.click(screen.getByRole("button", { name: "Annotate this frame for the message" }))
+    expect(frozen.props).toBeNull()
   })
 })

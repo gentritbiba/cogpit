@@ -2,7 +2,7 @@ import { z } from "zod"
 import { CONTRACT_LIMITS, type JsonValue, parseJson } from "./json.js"
 import { boundedText, identifier, label, parseSchema } from "./schema.js"
 import { PROTOCOL_MAJOR } from "./manifest.js"
-import { integrationRequestSchema, integrationResultSchema, type PluginIntegrationRequest, type PluginIntegrationResult } from "./integrations.js"
+import { integrationRequestBytes, integrationRequestSchema, integrationResultSchema, type PluginIntegrationRequest, type PluginIntegrationResult } from "./integrations.js"
 import { parsePluginMedia, type PluginMedia } from "./media.js"
 
 const json = z.custom<JsonValue>(() => true)
@@ -34,6 +34,30 @@ const httpsUrl = z.string().min(1).max(2048).refine((value) => {
   try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password } catch { return false }
 }, "Expected an HTTPS URL without credentials")
 const storageKey = identifier
+/** A file reference with a note, added to the composer as a removable context item rather than plain text. */
+export const composerFileContextSchema = z.strictObject({
+  path: z.string().min(1).max(1024),
+  startLine: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  endLine: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  text: boundedText(8192).optional(),
+  comment: boundedText(2000).optional(),
+}).refine((value) => (value.startLine === undefined) === (value.endLine === undefined) && (value.startLine === undefined || value.startLine <= value.endLine!), "Invalid line range")
+export type ComposerFileContext = z.infer<typeof composerFileContextSchema>
+/**
+ * Asks the host to start a review session on a pull request of the selected
+ * project. The host pins `headSha`, asks the user for the provider in its own
+ * dialog and prepares the worktree; the plugin never supplies a prompt.
+ * Resolves once the dialog is open: the plugin follows a guide through the
+ * `reviewGuide` operation, and the host opens a work session itself.
+ */
+export const reviewStartSchema = z.strictObject({
+  number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  headSha: z.string().regex(/^[0-9a-f]{40}$/u),
+  purpose: z.enum(["work", "guide"]),
+})
+export type ReviewStartRequest = z.infer<typeof reviewStartSchema>
+const reviewStartResultSchema = z.strictObject({ status: z.literal("opened") })
+export type ReviewStartResult = z.infer<typeof reviewStartResultSchema>
 const paramsSchemas = {
   "lifecycle.ready": empty,
   "connections.request": z.strictObject({ handle: identifier, operationId: identifier, args: z.record(identifier, z.union([z.string(), z.number().finite(), z.boolean()])) }),
@@ -44,6 +68,8 @@ const paramsSchemas = {
   "storage.set": z.strictObject({ key: storageKey, value: json }),
   "storage.delete": z.strictObject({ key: storageKey }),
   "composer.append": z.strictObject({ text: boundedText(CONTRACT_LIMITS.composerBytes) }),
+  "composer.appendContext": composerFileContextSchema,
+  "review.start": reviewStartSchema,
   "navigation.openExternal": z.strictObject({ url: httpsUrl }),
   "navigation.openSession": z.strictObject({ handle: identifier }),
   "settings.get": empty,
@@ -68,6 +94,8 @@ export interface MethodMap {
   "storage.set": { params: { key: string; value: JsonValue }; result: null }
   "storage.delete": { params: { key: string }; result: null }
   "composer.append": { params: { text: string }; result: null }
+  "composer.appendContext": { params: ComposerFileContext; result: null }
+  "review.start": { params: ReviewStartRequest; result: ReviewStartResult }
   "navigation.openExternal": { params: { url: string }; result: null }
   "navigation.openSession": { params: { handle: string }; result: null }
   "settings.get": { params: Record<string, never>; result: JsonValue }
@@ -113,7 +141,9 @@ export function parseFrameMessage(value: unknown): FrameMessage {
     resultEnvelope ? CONTRACT_LIMITS.responseNodes + 16 : CONTRACT_LIMITS.nodes)
   if (message.type === "request") {
     const maxBytes = message.method === "connections.media" ? CONTRACT_LIMITS.messageBytes : message.method === "composer.append" ? CONTRACT_LIMITS.composerBytes + 64
-      : message.method === "storage.set" ? CONTRACT_LIMITS.storageValueBytes : CONTRACT_LIMITS.argumentBytes
+      : message.method === "storage.set" ? CONTRACT_LIMITS.storageValueBytes
+      : message.method === "composer.appendContext" ? 12288
+      : message.method === "integrations.request" ? integrationRequestBytes(message.params) : CONTRACT_LIMITS.argumentBytes
     const params = parseSchema(paramsSchemas[message.method] as z.ZodType, message.params, maxBytes)
     return { ...message, params } as PluginRequest
   }
@@ -124,6 +154,7 @@ export function parseFrameMessage(value: unknown): FrameMessage {
 export function parseMethodResult<M extends PluginMethod>(method: M, value: unknown): MethodMap[M]["result"] {
   if (method === "connections.media") return parsePluginMedia(value) as MethodMap[M]["result"]
   const schema = method === "integrations.request" ? integrationResultSchema : method === "connections.status" ? connectionStatusSchema
+    : method === "review.start" ? reviewStartResultSchema
     : method === "connections.request" || method === "storage.get" || method === "settings.get" ? json : z.null()
   return parseSchema(schema, value, CONTRACT_LIMITS.responseBytes, CONTRACT_LIMITS.responseNodes) as MethodMap[M]["result"]
 }

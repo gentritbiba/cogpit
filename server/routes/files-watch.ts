@@ -6,6 +6,7 @@ import {
 import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import { formatFor } from "../../shared/session/agents"
 import { storeForPath } from "../agents"
+import { projectLine } from "../agents/resultRefs"
 import { sessionAgentsRunning } from "../agents/agentsRunning"
 import { runtimeForDirName } from "../agents/runtimes"
 import { resolveTaskOutput } from "../agents/taskOutput"
@@ -21,6 +22,7 @@ import { StringDecoder } from "node:string_decoder"
 import { sendJson, type UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
+import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
@@ -44,6 +46,9 @@ export function registerFileWatchRoutes(use: UseFn) {
       return
     }
     const requestedSessionId = url.searchParams.get("sessionId")
+    // A reader that keeps only the last `tail` bytes asks for no more than those.
+    const tailParam = Number.parseInt(url.searchParams.get("tail") ?? "", 10)
+    const tailBytes = Number.isSafeInteger(tailParam) && tailParam > 0 ? tailParam : null
     const output = await resolveTaskOutput(requestedOutputPath)
     if (!output) {
       sendJson(res, 403, { error: "Access denied - only task output files allowed" })
@@ -84,6 +89,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     let closed = false
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     let watcherReady = false
+    let tailPending = tailBytes !== null
     let readInFlight: Promise<void> | null = null
 
     // Serialize reads so fs.watch and the fallback poller cannot emit the same
@@ -102,6 +108,12 @@ export function registerFileWatchRoutes(use: UseFn) {
               offset = 0
               decoder = new StringDecoder("utf8")
             }
+            let omittedBytes = 0
+            if (tailPending) {
+              tailPending = false
+              omittedBytes = Math.max(0, s.size - tailBytes!)
+              offset = omittedBytes
+            }
             if (s.size <= offset) return
 
             const bytesToRead = Math.min(s.size - offset, TASK_OUTPUT_READ_CHUNK_BYTES)
@@ -112,9 +124,12 @@ export function registerFileWatchRoutes(use: UseFn) {
               if (bytesRead <= 0) return
               offset += bytesRead
               recordActivity("Task output reads", { bytes: bytesRead })
-              const text = decoder.write(buf.subarray(0, bytesRead))
-              if (text) {
-                res.write(`data: ${JSON.stringify({ type: "output", text })}\n\n`)
+              // A tail that starts inside a character skips its continuation bytes.
+              let start = 0
+              while (omittedBytes > 0 && start < bytesRead && (buf[start]! & 0xc0) === 0x80) start++
+              const text = decoder.write(buf.subarray(start, bytesRead))
+              if (text || omittedBytes > 0) {
+                res.write(`data: ${JSON.stringify({ type: "output", text, ...(omittedBytes > 0 ? { omittedBytes: omittedBytes + start } : {}) })}\n\n`)
               }
             } finally {
               await fh.close()
@@ -169,8 +184,7 @@ export function registerFileWatchRoutes(use: UseFn) {
   use("/api/watch/", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
-    const url = new URL(req.url || "/", "http://localhost")
-    const parts = url.pathname.split("/").filter(Boolean)
+    const parts = new URL(req.url || "/", "http://localhost").pathname.split("/").filter(Boolean)
 
     if (parts.length !== 2) return next()
 
@@ -190,21 +204,30 @@ export function registerFileWatchRoutes(use: UseFn) {
       return
     }
     let sessionFilePath = filePath
-    const { isNoiseLine } = formatFor(descriptorForDirName(dirName).kind)
+    const format = formatFor(descriptorForDirName(dirName).kind)
+    const { isNoiseLine } = format
+    const url = new URL(req.url || "/", "http://localhost")
+    const projected = url.searchParams.get("projection") === RESULT_PROJECTION
     /**
      * A `lines` event. Noise lines are not sent, but a client advances its
      * resume offset by the bytes of the lines it receives, so their bytes are.
+     * A projected stream sends lighter lines, so it states every native byte
+     * the event accounts for as `bytes` instead.
      */
-    const writeLines = (rawLines: readonly string[]) => {
+    const writeLines = (rawLines: readonly { line: string; offset: number }[]) => {
       const lines: string[] = []
       let skippedBytes = 0
-      for (const line of rawLines) {
+      let bytes = 0
+      for (const { line, offset } of rawLines) {
         if (!line.trim()) continue
-        if (isNoiseLine(line)) skippedBytes += Buffer.byteLength(line, "utf8") + 1
-        else lines.push(line)
+        const lineBytes = Buffer.byteLength(line, "utf8") + 1
+        bytes += lineBytes
+        if (isNoiseLine(line)) skippedBytes += lineBytes
+        else lines.push(projected ? projectLine(format, line, { dirName, fileName }, offset) : line)
       }
       if (lines.length === 0 && skippedBytes === 0) return
-      res.write(`data: ${JSON.stringify({ type: "lines", lines, ...(skippedBytes > 0 ? { skippedBytes } : {}) })}\n\n`)
+      const event = projected ? { type: "lines", lines, bytes } : { type: "lines", lines, ...(skippedBytes > 0 ? { skippedBytes } : {}) }
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
     }
 
     // SSE headers
@@ -223,6 +246,8 @@ export function registerFileWatchRoutes(use: UseFn) {
     let throttleTimer: ReturnType<typeof setTimeout> | null = null
     let trailingTimer: ReturnType<typeof setTimeout> | null = null
     let remainder = "" // partial line buffer
+    // Native byte offset where `remainder` starts, for projected lines' references.
+    let lineStart = offset
     let decoder = new StringDecoder("utf8")
     let flushInFlight: Promise<void> | null = null
     let flushRequested = false
@@ -248,6 +273,7 @@ export function registerFileWatchRoutes(use: UseFn) {
             if (s.size < offset) {
               // File was truncated (e.g. by undo). Reset to current size.
               offset = s.size
+              lineStart = offset
               remainder = ""
               decoder = new StringDecoder("utf8")
               return
@@ -259,7 +285,9 @@ export function registerFileWatchRoutes(use: UseFn) {
                   JSON.parse(remainder)
                   const line = remainder
                   remainder = ""
-                  writeLines([line])
+                  writeLines([{ line, offset: lineStart }])
+                  // Its newline, still to come, arrives as an empty line.
+                  lineStart += Buffer.byteLength(line, "utf8")
                 } catch {
                   // Not valid JSON yet -- still a partial line, keep waiting.
                 }
@@ -282,7 +310,12 @@ export function registerFileWatchRoutes(use: UseFn) {
               // Last element may be a partial line (no trailing \n).
               remainder = rawParts.pop() || ""
 
-              writeLines(rawParts)
+              const located = rawParts.map((line) => {
+                const at = lineStart
+                lineStart += Buffer.byteLength(line, "utf8") + 1
+                return { line, offset: at }
+              })
+              writeLines(located)
             } finally {
               await fh.close()
             }
@@ -392,6 +425,7 @@ export function registerFileWatchRoutes(use: UseFn) {
       .then((s) => {
         if (!hasRequestedOffset) offset = s.size
         else if (offset > s.size) offset = s.size
+        lineStart = offset
         initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)

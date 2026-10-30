@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Clock } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -9,6 +10,7 @@ import { isRemoteDeviceActive } from "@/lib/device"
 import { openProjectTerminal } from "@/lib/openTerminal"
 
 interface RateLimitBannerProps {
+  children?: ReactNode
   block: RateLimitBlock
   dirName: string
   fileName: string
@@ -52,22 +54,11 @@ function extraUsageText(extraUsage: boolean | undefined): string {
   return extraUsage ? "Extra usage is on but did not cover this. " : "Extra usage is off for this account. "
 }
 
-/**
- * Why a session stopped on a spent allowance, and the one way past it.
- *
- * Some CLIs can carry the session on at lower priority, but only from their own
- * terminal — there is no flag or API for it, so the hand-off is the offer. The
- * command is always shown as text: a viewer on a remote device cannot be given
- * a window on the machine running the session, and copying it is their way
- * through.
- */
-export function RateLimitBanner({ block, dirName, fileName, cwd, terminal }: RateLimitBannerProps) {
+/** The provider block, terminal handoff and optional recovery controls. */
+export function RateLimitBanner({ block, dirName, fileName, cwd, terminal, children }: RateLimitBannerProps) {
   const descriptor = descriptorForDirName(dirName)
   const command = getResumeCommand(descriptor.kind, sessionIdFromFileName(fileName), cwd ?? undefined)
   const reset = resetText(block.resetsAt)
-  // The block is read against this same capability before it is published, so
-  // re-checking it here is belt and braces — but it is what keeps the promise
-  // in this copy true no matter which runtime raised the block.
   const lowPriority = block.lowPriority && descriptor.capabilities.lowPriorityInTerminal
   const canOpenTerminal = lowPriority && terminal && !isRemoteDeviceActive()
 
@@ -88,9 +79,10 @@ export function RateLimitBanner({ block, dirName, fileName, cwd, terminal }: Rat
               Resume there with <code className="font-mono">{command}</code>.
             </>
           ) : (
-            <>Nothing here can lift this one; the session continues once the allowance refills.</>
+            <>The allowance must refill before this session can continue.</>
           )}
         </span>
+        {children}
         {canOpenTerminal && (
           <Button
             size="sm"

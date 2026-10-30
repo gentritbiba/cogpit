@@ -6,7 +6,7 @@ import { integrationPermissionSchema } from "./integrations.js"
 import { chatBlockContributionSchema, settingsContributionSchema, skillContributionSchema, sessionActionContributionSchema } from "./contributions.js"
 
 export const PROTOCOL_MAJOR = 1 as const
-export const PLUGIN_API_VERSION = "1.2.0"
+export const PLUGIN_API_VERSION = "1.3.0"
 export const RUNTIME = "browser-iife-v1" as const
 export const versionSchema = z.string().max(128).refine((value) => valid(value) === value, "Expected strict SemVer")
 const range = z.string().min(1).max(256).refine((value) => validRange(value) !== null, "Expected a SemVer range")
@@ -45,7 +45,9 @@ export const manifestSchema = z.strictObject({
   }),
   permissions: z.strictObject({
     context: z.array(z.enum(["project.identity", "session.identity"])).max(2).refine(unique).default([]),
-    composer: z.array(z.literal("append")).max(1).default([]),
+    composer: z.array(z.enum(["append", "context"])).max(2).refine(unique).default([]),
+    /** `start` lets the plugin ask the host to start a pull request review session, which the user confirms in a host dialog. */
+    review: z.array(z.literal("start")).max(1).default([]),
     navigation: z.array(z.enum(["external", "session"])).max(2).refine(unique).default([]),
     connections: z.array(z.strictObject({ id: identifier, definition: canonicalPath, operations: names.min(1) })).max(8).default([]),
     integrations: z.array(integrationPermissionSchema).max(2).default([]),

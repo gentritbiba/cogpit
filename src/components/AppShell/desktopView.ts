@@ -1,4 +1,5 @@
 import type { MainView } from "@/hooks/useSessionState"
+import { newContextId, type FileContext } from "../../../shared/session/composerContext"
 import type { ProjectPromptContext } from "@/plugin-api"
 
 export type DesktopMainView =
@@ -54,16 +55,12 @@ export function resolveDesktopProjectPath({
     ?? null
 }
 
-export function formatProjectPromptContext({
-  path,
-  text,
-  startLine,
-  endLine,
-  comment,
-}: ProjectPromptContext): string {
-  if (!text) return `@${path}`
-
-  const fence = text.includes("```") ? "````" : "```"
-  const lines = startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`
-  return `${comment ? `Review request: ${comment}\n` : ""}${path} (${lines})\n${fence}\n${text}\n${fence}`
+/**
+ * A project file as the composer takes it: an excerpt as typed context (its
+ * review comment included), or, with no excerpt, null — a whole file goes in
+ * as an `@path` mention the agent resolves itself.
+ */
+export function projectContextItem({ path, text, startLine, endLine, comment }: ProjectPromptContext): FileContext | null {
+  if (!text) return null
+  return { id: newContextId(), kind: "file", path, text, ...(startLine !== undefined ? { startLine, endLine: endLine ?? startLine } : {}), ...(comment ? { comment } : {}) }
 }

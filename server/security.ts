@@ -1010,10 +1010,20 @@ export function handleShareRequest(
   next()
 }
 
+/**
+ * A webhook delivery to a scheduled task: `POST /api/automation-hooks/<id>`
+ * exactly. It answers before sign-in because its sender has none; the route
+ * admits only a delivery signed with the task's secret, as input to the task.
+ */
+export function isAutomationIngress(req: IncomingMessage): boolean {
+  return req.method === "POST" && /^\/api\/automation-hooks\/[a-zA-Z0-9_-]{8,128}$/.test(requestTargetPath(req.url || "/") ?? "")
+}
+
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   clearRequestAuthentication(req)
   const editionAuth = editionModule().auth
   if (editionAuth) return editionAuth.middleware(req, res, next)
+  if (isAutomationIngress(req)) return next()
 
   const url = req.url || "/"
   const publicPath = isPublicPath(url)

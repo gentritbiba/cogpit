@@ -30,6 +30,7 @@ import {
   isClaudeNoiseLine,
   isClaudeSessionText,
   parseClaudeSession,
+  projectClaudeResults,
 } from "./claude"
 import {
   appendCodexSession,
@@ -51,7 +52,10 @@ import {
   isCopilotRawRecords,
   isCopilotSessionText,
   parseCopilotSession,
+  projectCopilotResults,
 } from "./copilot"
+import { projectCodexResults } from "./codex-results"
+import type { ResultProjector } from "./resultProjection"
 import { AGENT_KINDS, type AgentKind } from "./types"
 import type {
   ParseSessionOptions,
@@ -152,6 +156,12 @@ export interface AgentFormat {
    * this.
    */
   turnBoundaries(records: readonly Record<string, unknown>[]): number[]
+  /**
+   * Visits the tool-result bodies a record carries, in a fixed order, and
+   * writes back what the visitor returns (result projection v1). Must leave
+   * everything the parser reads besides those bodies as it was.
+   */
+  projectResults: ResultProjector
 }
 
 /**
@@ -178,6 +188,7 @@ const codexFormat: AgentFormat = {
   pageHeaderLine: codexPageHeaderLine,
   brandBranch: brandCodexBranch,
   turnBoundaries: codexTurnBoundaries,
+  projectResults: projectCodexResults,
 }
 
 const copilotFormat: AgentFormat = {
@@ -192,6 +203,7 @@ const copilotFormat: AgentFormat = {
   isNoiseLine: hasNoNoiseLines,
   brandBranch: brandCopilotBranch,
   turnBoundaries: copilotTurnBoundaries,
+  projectResults: projectCopilotResults,
 }
 
 const claudeFormat: AgentFormat = {
@@ -207,6 +219,7 @@ const claudeFormat: AgentFormat = {
   isNoiseLine: isClaudeNoiseLine,
   brandBranch: brandClaudeBranch,
   turnBoundaries: claudeTurnBoundaries,
+  projectResults: projectClaudeResults,
 }
 
 const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({

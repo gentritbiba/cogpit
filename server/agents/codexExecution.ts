@@ -48,6 +48,7 @@ export interface CodexExecutionOptions {
   effort?: string
   contextWindowTokens?: number | null
   fastMode?: boolean
+  beforeFirstTurn?: (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => Promise<void>
   reloadContextWindow?: boolean
 }
 
@@ -226,6 +227,7 @@ export async function startCodexExecution(
   const input = buildCodexUserInput(options.message, options.images)
   const response = await client.startThread(await threadSettings(client, options))
   onThreadStarted?.(response.thread.id)
+  await options.beforeFirstTurn?.({ sessionId: response.thread.id, cwd: typeof response.thread.cwd === "string" ? response.thread.cwd : options.cwd })
   const turn = await client.startTurn({
     threadId: response.thread.id,
     input,

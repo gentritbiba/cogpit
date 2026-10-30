@@ -132,7 +132,7 @@ describe("WorkspaceActivityBar", () => {
         projectFilesRequest: null,
         backgroundAgents: [],
         searchInputRef: { current: null },
-        addProjectContext: vi.fn(),
+        addProjectContext: vi.fn(), addComposerContext: vi.fn(() => null),
         jumpToTurn: vi.fn(),
         toggleServer: vi.fn(),
         serversChanged: vi.fn(),

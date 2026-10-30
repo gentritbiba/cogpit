@@ -84,7 +84,7 @@ describe("useSessionPaging", () => {
       added = await result.current.loadMore()
     })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?before=500&count=30")
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?before=500&count=30&projection=results-v1")
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
     expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
     expect(added).toBe(1)

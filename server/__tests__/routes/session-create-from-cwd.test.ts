@@ -5,8 +5,10 @@ import { AGENT_KINDS, agentKindForDirName, descriptorFor } from "../../../shared
 const { start, recordSessionOrigin } = vi.hoisted(() => ({ start: vi.fn(), recordSessionOrigin: vi.fn() }))
 vi.mock("../../agents/runtimes", async (importOriginal) => ({
   ...await importOriginal<Record<string, unknown>>(),
-  runtimeFor: () => ({ descriptor: { displayName: "Test agent" }, start }),
+  runtimeFor: () => ({ descriptor: { displayName: "Test agent", capabilities: { worktrees: true } }, start }),
 }))
+vi.mock("../../worktreeSetup/store", () => ({ worktreeSetupStore: { project: vi.fn(async () => ({})) } }))
+vi.mock("../../worktreeSetup/service", () => ({ worktreeSetupService: { run: vi.fn(async (options) => options.start({ beforeFirstTurn: async () => {} })) } }))
 vi.mock("../../lib/sessionOrigins", () => ({ recordSessionOrigin }))
 // "/work/my-app" is made up; a missing folder is covered in sessionCwd.test.ts.
 vi.mock("../../lib/folders", () => ({ sessionFolderProblem: async () => null }))

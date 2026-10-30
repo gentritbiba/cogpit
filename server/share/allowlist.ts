@@ -92,7 +92,7 @@ export function shareRequestAllowed(method: string, rawUrl: string, share: Share
   if (SHARE_NAMESPACE.some(([allowedVerb, allowedPath]) =>
     allowedVerb === verb && allowedPath === routePath)) return true
 
-  if (verb === "GET" && (route === "sessions" || route === "watch")) {
+  if (verb === "GET" && (route === "sessions" || route === "watch" || route === "tool-result")) {
     return identity.length === 2
       && identity[0] === share.dirName
       && identity[1] === share.fileName

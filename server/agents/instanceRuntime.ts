@@ -1,3 +1,5 @@
+import { isSessionStarting, finishSessionStartup } from "./runtimeTypes"
+import { beforeFirstTurn } from "./startup"
 import { fork, type ChildProcess } from "node:child_process"
 import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -15,7 +17,7 @@ import type { UsageCostRecord } from "./usageScanners"
 import * as streamBus from "../lib/streamBus"
 import { AgentRuntimeError, NO_ACTIVITY, reportSessionId, type AgentRuntime, type PendingApproval, type PendingQuestion, type PendingPlan, type RuntimeActivity, type SendOutcome, type StartSessionRequest, type TurnResult } from "./runtimeTypes"
 
-interface Call { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; identity?: (id: string) => void }
+interface Call { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; identity?: (id: string) => void; beforeFirstTurn?: StartSessionRequest["beforeFirstTurn"]; startupError?: Error }
 export function providerInstanceEnvironment(instance: ProviderInstance, dataRoot: string): NodeJS.ProcessEnv {
   const descriptor = descriptorFor(instance.agent)
   const userRoot = join(instance.homeDir, "user")
@@ -87,6 +89,20 @@ export function createInstanceRuntime(instance: ProviderInstance, dataRoot: stri
       }
       if (typeof message.id !== "number") return
       const id = message.id
+      if (message.type === "startup-ready" && typeof message.cwd === "string") {
+        const call = pending.get(id)
+        const ready = call?.beforeFirstTurn
+        void Promise.resolve().then(async () => {
+          if (!ready) throw new Error("Startup authorization is no longer available")
+          await ready({ cwd: message.cwd as string, nativeWorktree: message.nativeWorktree === true, sessionId: typeof message.sessionId === "string" ? qualified(message.sessionId) : undefined })
+        }).then(() => {
+          if (child === worker && worker.connected) worker.send({ type: "startup-ready-result", id }, () => {})
+        }, (error: unknown) => {
+          if (call && error instanceof Error) call.startupError = error
+          if (child === worker && worker.connected) worker.send({ type: "startup-ready-result", id, error: error instanceof Error ? error.message : "Startup refused" }, () => {})
+        })
+        return
+      }
       if (message.type === "identity" && typeof message.sessionId === "string") { watched.add(message.sessionId); const sessionId = qualified(message.sessionId); pending.get(id)?.identity?.(sessionId); noteBrowserProfiles(sessionId); return }
       if (message.type === "completion") {
         const completion = completions.get(id)
@@ -98,18 +114,22 @@ export function createInstanceRuntime(instance: ProviderInstance, dataRoot: stri
       const call = pending.get(id)
       if (!call) return
       pending.delete(id); clearTimeout(call.timer)
-      if (typeof message.error === "string") call.reject(new AgentRuntimeError(Number(message.status) || 502, typeof message.code === "string" ? message.code : "INSTANCE_ERROR", message.error))
+      if (typeof message.error === "string") call.reject(call.startupError ?? new AgentRuntimeError(Number(message.status) || 502, typeof message.code === "string" ? message.code : "INSTANCE_ERROR", message.error))
       else call.resolve(message.value)
     })
     return worker
   }
-  async function call<T>(method: string, args: unknown[], identity?: (id: string) => void, timeoutMs = 120000): Promise<{ id: number; value: T }> {
+  async function call<T>(method: string, args: unknown[], identity?: (id: string) => void, timeoutMs = 120000, beforeFirstTurn?: StartSessionRequest["beforeFirstTurn"], signal?: AbortSignal): Promise<{ id: number; value: T }> {
+    signal?.throwIfAborted()
     if (pending.size >= 100) throw new AgentRuntimeError(429, "INSTANCE_BUSY", "Provider instance has too many pending operations")
     const worker = processFor(); const id = ++nextId
     const value = await new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error("Provider instance operation timed out; inspect session history before retrying")) }, timeoutMs)
-      pending.set(id, { resolve: (value) => resolve(value as T), reject, timer, identity })
-      worker.send({ id, method, args }, (error) => { if (error) { clearTimeout(timer); pending.delete(id); reject(error) } })
+      const timer = setTimeout(() => { const call = pending.get(id); pending.delete(id); if (method === "start") abort(); call?.reject(new Error("Provider instance operation timed out; inspect session history before retrying")) }, timeoutMs)
+      const abort = () => { if (worker.connected) worker.send({ type: "startup-abort", id }, () => {}) }
+      signal?.addEventListener("abort", abort, { once: true })
+      if (signal?.aborted) abort()
+      pending.set(id, { resolve: (value) => { signal?.removeEventListener("abort", abort); resolve(value as T) }, reject: (error) => { signal?.removeEventListener("abort", abort); reject(error) }, timer, identity, beforeFirstTurn })
+      worker.send({ id, method, args }, (error) => { if (error) { clearTimeout(timer); const call = pending.get(id); pending.delete(id); call?.reject(error) } })
     })
     return { id, value }
   }
@@ -118,10 +138,14 @@ export function createInstanceRuntime(instance: ProviderInstance, dataRoot: stri
     kind: instance.agent, instanceId: instance.id, descriptor,
     isBusy: () => pending.size > 0 || completions.size > 0 || active.length > 0,
     async start(request: StartSessionRequest) {
-      const { value } = await call<Awaited<ReturnType<AgentRuntime["start"]>>>("start", [{ ...request, onSessionId: undefined, dirName: splitInstanceDirName(request.dirName).nativeDirName }], (id) => reportSessionId(request, id))
-      return { ...value, sessionId: qualified(value.sessionId), dirName: instanceDirName(instance.id, value.dirName) }
+      let announced: string | undefined
+      try {
+        const { value } = await call<Awaited<ReturnType<AgentRuntime["start"]>>>("start", [{ ...request, signal: undefined, beforeFirstTurn: Boolean(request.beforeFirstTurn), onSessionId: undefined, dirName: splitInstanceDirName(request.dirName).nativeDirName }], (id) => { announced = id; reportSessionId(request, id) }, request.beforeFirstTurn ? 24 * 60 * 60_000 : 120_000, request.beforeFirstTurn ? (identity) => beforeFirstTurn(request, identity) : undefined, request.signal)
+        return { ...value, sessionId: qualified(value.sessionId), dirName: instanceDirName(instance.id, value.dirName) }
+      } finally { if (announced) finishSessionStartup(announced) }
     },
     async send(sessionId, request) {
+      if (isSessionStarting(sessionId)) return { delivery: "busy" }
       watched.add(native(sessionId))
       const { id, value } = await call<SendOutcome & { hasCompletion?: boolean }>("send", [native(sessionId), request])
       if (!value.hasCompletion) return value

@@ -1,7 +1,7 @@
-import type { PluginExecutionResult, PluginRequest } from "@cogpit/plugin-contracts"
+import type { ComposerFileContext, PluginExecutionResult, PluginRequest, ReviewStartRequest } from "@cogpit/plugin-contracts"
 import type { RuntimeLease, RuntimePluginClient } from "./runtimeClient"
 
-export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession" | "sessionHandle" | "media">>
+export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession" | "sessionHandle" | "media" | "startReviewSession">>
 export interface RuntimePanelActivation {
   execute(request: PluginRequest, signal: AbortSignal): Promise<PluginExecutionResult>
   setActive(active: boolean): void
@@ -22,6 +22,10 @@ export function createRuntimePanelActivation(options: {
   onError(error: Error): void
   openSession?: (dirName: string, fileName: string) => void
   appendDraft?: (text: string) => void
+  /** Adds a file reference to the composer; returns why it could not, or null. */
+  addContext?: (context: ComposerFileContext) => string | null
+  /** Opens the host's dialog for a review session under this lease. */
+  startReview?: (leaseId: string, request: ReviewStartRequest) => void
   openExternal?: (url: string, signal: AbortSignal) => Promise<void>
   resize?: (height: number) => void
 }): RuntimePanelActivation {
@@ -77,7 +81,7 @@ export function createRuntimePanelActivation(options: {
   }).catch(() => fail(new Error("Plugin panel could not be loaded")))
   return {
     async execute(request, signal) {
-      const sessionAction = request.method === "composer.append" || request.method.startsWith("navigation.")
+      const sessionAction = request.method.startsWith("composer.") || request.method.startsWith("navigation.")
       const combined = AbortSignal.any([signal, controller.signal, ...(request.method === "lifecycle.ready" ? [] : [requests.signal]), ...(sessionAction ? [sessionActions.signal] : [])])
       combined.throwIfAborted()
       if (!lease || lease.expiresAt <= Date.now()) throw new Error("Plugin activation expired")
@@ -90,6 +94,12 @@ export function createRuntimePanelActivation(options: {
       if (request.method === "composer.append" && !options.appendDraft) {
         throw Object.assign(new Error("The message composer is unavailable"), { code: "CAPABILITY_UNAVAILABLE" })
       }
+      if (request.method === "composer.appendContext" && !options.addContext) {
+        throw Object.assign(new Error("The message composer is unavailable"), { code: "CAPABILITY_UNAVAILABLE" })
+      }
+      if (request.method === "review.start" && !options.startReview) {
+        throw Object.assign(new Error("Review sessions are unavailable here"), { code: "CAPABILITY_UNAVAILABLE" })
+      }
       if (request.method === "navigation.openExternal" && !options.openExternal) {
         throw Object.assign(new Error("External navigation is unavailable"), { code: "CAPABILITY_UNAVAILABLE" })
       }
@@ -99,6 +109,17 @@ export function createRuntimePanelActivation(options: {
       const result = await options.client.call(lease.id, request, combined)
       combined.throwIfAborted()
       if (request.method === "ui.resize") options.resize!(request.params.height)
+      if (request.method === "composer.appendContext") {
+        if (performance.now() - lastDraftAppend < 1000) throw Object.assign(new Error("Wait before adding another draft"), { code: "RATE_LIMITED" })
+        lastDraftAppend = performance.now()
+        const refusal = options.addContext!(request.params)
+        if (refusal) throw Object.assign(new Error(refusal), { code: "RESOURCE_REQUIRED" })
+      }
+      if (request.method === "review.start") {
+        if (performance.now() - lastExternalOpen < 1000) throw Object.assign(new Error("Wait before starting another session"), { code: "RATE_LIMITED" })
+        lastExternalOpen = performance.now()
+        options.startReview!(lease.id, request.params)
+      }
       if (request.method === "composer.append") {
         if (performance.now() - lastDraftAppend < 1000) throw Object.assign(new Error("Wait before adding another draft"), { code: "RATE_LIMITED" })
         lastDraftAppend = performance.now()

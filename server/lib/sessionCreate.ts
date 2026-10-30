@@ -1,3 +1,8 @@
+import { finishSessionStartup } from "../agents/runtimeTypes"
+import { editionModule } from "../edition"
+import type { StartupAuthorizationContext } from "../../shared/contracts/worktreeSetup"
+import { worktreeSetupService } from "../worktreeSetup/service"
+import { worktreeSetupStore } from "../worktreeSetup/store"
 import { nativeBinding } from "../agents/nativeBindings"
 import { isAbsolute } from "node:path"
 import {
@@ -99,6 +104,10 @@ export interface CreateSessionInput extends Omit<StartSessionRequest, "dirName" 
   /** The session that asked for this one, recorded so it can find its children. */
   parentSessionId?: string
   retry?: { requestId: string; scope: string }
+  setupScope?: string
+  authorizeStartup?: (context: StartupAuthorizationContext) => Promise<void>
+  /** Runs in the initialized worktree before its setup recipe; only with `worktreeName`. */
+  prepareWorktree?: (cwd: string, signal: AbortSignal) => Promise<void>
 }
 
 type StartFn = (runtime: AgentRuntime, request: StartSessionRequest) => Promise<StartedSession>
@@ -113,7 +122,7 @@ export async function createSession(
   input: CreateSessionInput,
   start: StartFn = (runtime, request) => runtime.start(request),
 ): Promise<StartedSession> {
-  const { dirName: requestedDirName, cwd: requestedCwd, agent, instanceId, parentSessionId, retry, ...request } = input
+  const { dirName: requestedDirName, cwd: requestedCwd, agent, instanceId, parentSessionId, retry, setupScope, authorizeStartup, prepareWorktree, ...request } = input
   if (!requestedDirName && !isUsablePath(requestedCwd)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName or an absolute cwd is required")
   }
@@ -131,7 +140,43 @@ export async function createSession(
     dirName: cwd === spawnCwd ? dirName : descriptorForDirName(dirName).dirName.encode(cwd),
     cwd,
   }
-  const run = () => start(runtime, startRequest)
+  const run = async () => {
+    const launch = async (lifecycle: Pick<StartSessionRequest, "signal" | "beforeFirstTurn"> = {}) => {
+      let sessionId: string | undefined
+      const abort = () => { if (sessionId) void runtime.stop(sessionId).catch(() => {}) }
+      lifecycle.signal?.addEventListener("abort", abort, { once: true })
+      try {
+        return await start(runtime, { ...startRequest, ...lifecycle, onSessionId: (id) => {
+          sessionId = id
+          request.onSessionId?.(id)
+          if (lifecycle.signal?.aborted) abort()
+        } })
+      } catch (error) {
+        if (sessionId) await runtime.stop(sessionId).catch(() => {})
+        throw error
+      } finally { if (sessionId) finishSessionStartup(sessionId); lifecycle.signal?.removeEventListener("abort", abort) }
+    }
+    if (request.worktreeName) {
+      if (editionModule().auth && !authorizeStartup) throw new RouteError(403, ErrorCodes.FORBIDDEN, "Worktree startup requires current execution authority")
+      if (!runtime.descriptor.capabilities.worktrees) throw new RouteError(400, ErrorCodes.INVALID_REQUEST, "This provider does not support worktrees")
+      return worktreeSetupService.run({
+        project: await worktreeSetupStore.project(setupScope ?? retry?.scope ?? "local", cwd),
+        worktreeName: request.worktreeName,
+        signal: request.signal,
+        authorize: authorizeStartup,
+        prepare: prepareWorktree,
+        start: (lifecycle) => launch({ ...lifecycle, beforeFirstTurn: async (identity) => {
+          await lifecycle.beforeFirstTurn(identity)
+          await request.beforeFirstTurn?.(identity)
+        } }),
+      })
+    }
+    if (!authorizeStartup && !request.beforeFirstTurn && !request.signal) return launch()
+    return launch({ signal: request.signal, beforeFirstTurn: async (identity) => {
+      await authorizeStartup?.({ stage: "agent-start", projectCwd: cwd, ...identity })
+      await request.beforeFirstTurn?.(identity)
+    } })
+  }
   const started = retry
     ? await creationRequests.run(retry.scope, retry.requestId, startRequest, run)
     : await run()

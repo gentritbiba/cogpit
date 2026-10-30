@@ -9,7 +9,7 @@
  */
 
 import { Readable } from "node:stream"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -194,7 +194,7 @@ beforeEach(async () => {
   mocks.persistentSessions.clear()
   mocks.activeProcesses.clear()
   registryRoot = await mkdtemp(join(tmpdir(), "cogpit-share-guest-"))
-  projectDir = await mkdtemp(join(tmpdir(), "cogpit-share-guest-project-"))
+  projectDir = await realpath(await mkdtemp(join(tmpdir(), "cogpit-share-guest-project-")))
   await initShareRegistry(registryRoot)
   __resetShareTokensForTest()
   await createShare({ sessionId: SESSION_A, dirName: DIR_NAME, fileName: FILE_NAME })
@@ -438,6 +438,9 @@ describe("guest mutations act on the token's session", () => {
 
 describe("what a guest may not smuggle into a delegated call", () => {
   it("never lets a guest choose the working directory or MCP servers", async () => {
+    let resumed!: (input: Record<string, unknown>) => void
+    const dispatched = new Promise<Record<string, unknown>>((resolve) => { resumed = resolve })
+    mocks.resumeSDKSession.mockImplementationOnce((input: Record<string, unknown>) => { resumed(input); return {} })
     await call("/api/share/send-message", {
       body: {
         message: "hello",
@@ -448,13 +451,13 @@ describe("what a guest may not smuggle into a delegated call", () => {
       wait: false,
     })
 
-    await vi.waitFor(() => expect(mocks.resumeSDKSession).toHaveBeenCalledTimes(1))
-    const resumed = mocks.resumeSDKSession.mock.calls[0][0] as Record<string, unknown>
-    expect(resumed.sessionId).toBe(SESSION_A)
+    const request = await dispatched
+    expect(mocks.resumeSDKSession).toHaveBeenCalledOnce()
+    expect(request.sessionId).toBe(SESSION_A)
     // The cwd comes from the session's own transcript metadata.
-    expect(resumed.cwd).toBe(projectDir)
-    expect(resumed.mcpConfig).toBeUndefined()
-    expect(resumed.permissionMode).toBeUndefined()
+    expect(request.cwd).toBe(projectDir)
+    expect(request.mcpConfig).toBeUndefined()
+    expect(request.permissionMode).toBeUndefined()
   })
 
   it("rejects a message that is neither text nor images", async () => {
@@ -578,16 +581,20 @@ describe("attack surface", () => {
     // The delegated call runs past the guest boundary; a share credential
     // riding along would be a capability leak into host code.
     const seen: Array<Record<string, unknown>> = []
+    let resumed!: () => void
+    const delegated = new Promise<void>((resolve) => { resumed = resolve })
     mocks.sendSDKMessage.mockImplementation(() => ({ running: true }))
     const original = mocks.resumeSDKSession.getMockImplementation()
     mocks.resumeSDKSession.mockImplementation((input: Record<string, unknown>) => {
       seen.push(input)
+      resumed()
       return {}
     })
 
     mocks.sdkSessions.delete(SESSION_A)
     await call("/api/share/send-message", { body: { message: "hello" }, wait: false })
-    await vi.waitFor(() => expect(seen).toHaveLength(1))
+    await delegated
+    expect(seen).toHaveLength(1)
     if (original) mocks.resumeSDKSession.mockImplementation(original)
 
     expect(JSON.stringify(seen[0])).not.toContain("__Host-cogpit_share")

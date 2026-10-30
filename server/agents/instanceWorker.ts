@@ -16,6 +16,8 @@ await loadConfig()
 refreshDirs()
 installBundledSkills([kind])
 const runtime = runtimeFor(kind)
+const startups = new Map<number, AbortController>()
+const readiness = new Map<number, { resolve: () => void; reject: (error: Error) => void }>()
 const answers = new Map<string, () => void>()
 const methods = new Set(["start", "send", "interrupt", "stop", "stopAll", "deleteSession", "respondToApproval", "respondToAllApprovals", "respondToPlan", "answerQuestion", "describeRuntime", "listModels", "liveUsageRecords", "fork", "shutdown", "snapshot", "commitAnswer"])
 function send(message: unknown) { if (process.connected) process.send?.(message) }
@@ -47,6 +49,19 @@ function publishSnapshot() {
 const poll = setInterval(publishSnapshot, 300)
 poll.unref()
 process.on("message", (message: unknown) => {
+  if (isRecord(message) && typeof message.id === "number" && message.type === "startup-abort") {
+    startups.get(message.id)?.abort(new Error("Session startup cancelled"))
+    readiness.get(message.id)?.reject(new Error("Session startup cancelled"))
+    readiness.delete(message.id)
+    return
+  }
+  if (isRecord(message) && typeof message.id === "number" && message.type === "startup-ready-result") {
+    const pending = readiness.get(message.id)
+    readiness.delete(message.id)
+    if (typeof message.error === "string") pending?.reject(new Error(message.error))
+    else pending?.resolve()
+    return
+  }
   if (isRecord(message) && message.type === "plugin-skills-result" && typeof message.requestId === "number") {
     const request = skillRequests.get(message.requestId)
     if (request) { clearTimeout(request.timer); skillRequests.delete(message.requestId); request.resolve(typeof message.instructions === "string" && Buffer.byteLength(message.instructions) <= 131072 ? message.instructions : "") }
@@ -58,7 +73,17 @@ process.on("message", (message: unknown) => {
     if (method === "snapshot") return snapshot()
     if (method === "commitAnswer") { answers.get(JSON.stringify(args))?.(); answers.delete(JSON.stringify(args)); return true }
     if (method === "liveUsageRecords") { args[0] = new Map((args[0] as Array<[string, Array<[string, unknown]>]>).map(([id, models]) => [id, new Map(models)])); args[1] = Array.isArray(args[1]) ? new Set(args[1]) : undefined }
-    if (method === "start" && isRecord(args[0])) args[0].onSessionId = (sessionId: string) => { watch(sessionId); send({ type: "identity", id, sessionId }) }
+    if (method === "start" && isRecord(args[0])) {
+      args[0].onSessionId = (sessionId: string) => { watch(sessionId); send({ type: "identity", id, sessionId }) }
+      const controller = new AbortController()
+      startups.set(id, controller)
+      args[0].signal = controller.signal
+      if (args[0].beforeFirstTurn === true) args[0].beforeFirstTurn = (identity: { sessionId?: string; cwd: string; nativeWorktree?: boolean }) => new Promise<void>((resolve, reject) => {
+        readiness.set(id, { resolve, reject })
+        send({ type: "startup-ready", id, ...identity })
+      })
+      else args[0].beforeFirstTurn = undefined
+    }
     if (typeof args[0] === "string") watch(args[0])
     const operation = runtime[method as keyof typeof runtime]
     if (typeof operation !== "function") throw new Error("Unsupported runtime operation")
@@ -84,7 +109,7 @@ process.on("message", (message: unknown) => {
       return { ...result, completion: undefined, hasCompletion: Boolean(completion) }
     }
     return result
-  })().then((value) => send({ id, value }), (error: unknown) => send({ id, error: error instanceof Error ? error.message : "Instance operation failed", status: isRecord(error) ? error.status : undefined, code: isRecord(error) ? error.code : undefined }))
+  })().finally(() => { startups.delete(id); readiness.delete(id) }).then((value) => send({ id, value }), (error: unknown) => send({ id, error: error instanceof Error ? error.message : "Instance operation failed", status: isRecord(error) ? error.status : undefined, code: isRecord(error) ? error.code : undefined }))
 })
 async function close() { clearInterval(poll); unregisterSkills(); for (const request of skillRequests.values()) { clearTimeout(request.timer); request.resolve("") }; skillRequests.clear(); await runtime.shutdown(); process.disconnect?.() }
 process.on("disconnect", () => { void close().finally(() => process.exit(0)) })

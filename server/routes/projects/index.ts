@@ -45,7 +45,7 @@ async function handleTranscript(
     sendJson(res, 403, { error: "Access denied" })
     return
   }
-  await serveTranscript(res, transcript.filePath, params, formatFor(agentKindForDirName(dirName)))
+  await serveTranscript(res, transcript.filePath, params, formatFor(agentKindForDirName(dirName)), { dirName, fileName })
 }
 
 export function registerProjectRoutes(use: UseFn) {

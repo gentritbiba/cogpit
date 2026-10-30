@@ -169,7 +169,7 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/my-dir/session.jsonl?tail=30",
+        "/api/sessions/my-dir/session.jsonl?tail=30&projection=results-v1",
         { background: false },
       )
       expect(opts.workerParse).toHaveBeenCalled()
@@ -217,7 +217,7 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30`,
+        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30&projection=results-v1`,
         { background: false },
       )
     })
@@ -362,7 +362,7 @@ describe("useSessionActions", () => {
       )
       // Second call goes to the tail endpoint — not the full-file endpoint.
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/member-dir/session.jsonl?tail=30",
+        "/api/sessions/member-dir/session.jsonl?tail=30&projection=results-v1",
         { background: false },
       )
       expect(opts.dispatch).toHaveBeenCalledWith(

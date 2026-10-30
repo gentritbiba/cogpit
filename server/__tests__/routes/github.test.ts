@@ -145,6 +145,7 @@ function harness(apiResponse: unknown) {
     }),
     githubApi,
     githubMutate: vi.fn(),
+    githubPost: vi.fn(),
     githubGraphql,
     pullRequestSessions,
   }
@@ -434,6 +435,7 @@ describe("GitHub routes", () => {
       git: vi.fn(),
       githubApi: vi.fn(),
       githubMutate: vi.fn(),
+      githubPost: vi.fn(),
       githubGraphql: vi.fn(),
       pullRequestSessions: vi.fn(),
     }

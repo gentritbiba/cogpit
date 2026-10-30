@@ -21,7 +21,8 @@ import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionContext, useSessionContextOptional } from "@/contexts/SessionContext"
+import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import type { Turn, TurnContentBlock } from "../../../shared/session/types"
@@ -444,6 +445,18 @@ function blockIdentity(block: TurnContentBlock): string | null {
   }
 }
 
+/** Quoting a reply of this turn into the composer, where the open session has one. */
+function useQuoteInReply(turnId: string): ((text: string) => void) | undefined {
+  const context = useSessionContextOptional()
+  const source = context?.sessionSource
+  const sessionId = context?.session?.sessionId
+  const add = context?.actions.handleAddComposerContext
+  return useMemo(() => {
+    if (!add || !source || !sessionId || context.isSubAgentView || !context.permissions.send) return undefined
+    return (text: string) => { add({ id: newContextId(), kind: "quote", text, source: { dirName: source.dirName, fileName: source.fileName, sessionId, turnId } }) }
+  }, [add, source, sessionId, turnId, context?.isSubAgentView, context?.permissions.send])
+}
+
 function ContentBlocks({
   blocks,
   turnId,
@@ -472,6 +485,7 @@ function ContentBlocks({
   skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
+  const quote = useQuoteInReply(turnId)
   // Indent for every nested block, so the rails all line up.
   const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
   const stackGap = "gap-3"
@@ -531,6 +545,7 @@ function ContentBlocks({
                 effort={effort}
                 timestamp={block.timestamp}
                 messageKey={`${turnId}:${originalBlocks.indexOf(block)}:${ti}`}
+                onQuote={quote}
               />
             ))}
           </div>
