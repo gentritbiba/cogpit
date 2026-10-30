@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { PLUGIN_API_VERSION, PROTOCOL_MAJOR, RUNTIME, MEDIA_LIMIT_BYTES, parsePluginMedia, parseMethodResult, type PluginMedia, type ClientRuntimeDescriptor, type PluginRequest } from "@cogpit/plugin-contracts"
+import { PLUGIN_API_VERSION, PROTOCOL_MAJOR, RUNTIME, MEDIA_LIMIT_BYTES, isDraftMethod, parsePluginMedia, parseMethodResult, type PluginMedia, type ClientRuntimeDescriptor, type PluginRequest } from "@cogpit/plugin-contracts"
 import { pluginSettingsSnapshotSchema } from "../../shared/contracts/pluginSettings"
 import { pluginHostStatusSchema, pluginPreviewSchema, pluginSnapshotSchema, pluginProjectSchema, type PluginHostStatus, type PluginProjectSummary } from "../../shared/contracts/pluginManagement"
 import { pluginConnectionSnapshotSchema, pluginResourceOptionsSchema, type PluginConnectionTarget } from "../../shared/contracts/pluginConnections"
@@ -282,6 +282,8 @@ export class RuntimePluginClient {
   async call(id: string, request: PluginRequest, signal: AbortSignal) {
     if (request.method === "connections.media") throw new Error("Use the binary media transport for audio")
     const response = z.strictObject({ value: z.unknown() }).parse(await this.json(`leases/${encodeURIComponent(id)}/call`, request, "POST", signal))
+    // The host only authorizes drafts requests; the client integration produces their result, which the frame validates.
+    if (isDraftMethod(request.method)) return z.null().parse(response.value)
     return parseMethodResult(request.method, response.value)
   }
   async resolveSession(id: string, handle: string, signal: AbortSignal): Promise<{ dirName: string; fileName: string }> {

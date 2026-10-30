@@ -7,6 +7,8 @@ import { authFetch } from "@/lib/auth"
 import { __resetDeviceRevisionsForTest, __resetIdentityForTest, recordDeviceConnectionRevision, setActiveIdentity, switchDevice } from "@/lib/device"
 import { clientRuntimeDescriptor, EMPTY_PLUGIN_STATE, RuntimePluginClient } from "../runtimeClient"
 import { useRuntimePlugins } from "../useRuntimePlugins"
+import { createRuntimePanelActivation } from "../runtimePanelActivation"
+import { parseMethodResult, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginHostStatus } from "../../../shared/contracts/pluginManagement"
 
 const fetchMock = vi.mocked(authFetch)
@@ -194,6 +196,36 @@ describe("runtime plugin client host and session ownership", () => {
     await refresh; await mutation
     expect(client.getSnapshot().status?.store.revision).toBe(2)
     expect(client.getSnapshot().status?.runtime.registryRevision).toBe(2)
+  })
+})
+
+describe("drafts requests through the real client", () => {
+  const list: PluginRequest = { protocol: 1, type: "request", id: "d", method: "drafts.list", params: {} }
+  async function activate(hostValue: unknown) {
+    respond = (request) => request.url.pathname.endsWith("/call") ? json({ value: hostValue }) : request.url.pathname.includes("/payload/") ? new Response(new Uint8Array(2)) : fallback(request)
+    const client = createClient()
+    await ready(client)
+    const value = { token: "t1", items: [] }
+    const integration = { request: vi.fn(async () => value), onTokenChange: () => () => {}, dispose: () => {} }
+    const loaded = deferred<void>()
+    const activation = createRuntimePanelActivation({ client, pluginId: "cogpit.saved-drafts", digest: "a".repeat(64), projectId: null, contextEpoch: "epoch", active: true,
+      onLoaded: () => loaded.resolve(), onError: (error) => loaded.reject(error), drafts: () => integration })
+    await loaded.promise
+    return { activation, integration, value }
+  }
+  it("accepts the host's authorization and answers with the integration's validated result", async () => {
+    const { activation, integration, value } = await activate(null)
+    const result = await activation.execute(list, new AbortController().signal)
+    activation.dispose()
+    expect(result).toEqual(value)
+    expect(parseMethodResult("drafts.list", result)).toEqual(value)
+    expect(integration.request).toHaveBeenCalledOnce()
+  })
+  it("refuses a host that answers a drafts request with data", async () => {
+    const { activation, integration } = await activate({ token: "host", items: [] })
+    await expect(activation.execute(list, new AbortController().signal)).rejects.toThrow()
+    activation.dispose()
+    expect(integration.request).not.toHaveBeenCalled()
   })
 })
 
