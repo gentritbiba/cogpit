@@ -39,6 +39,8 @@ package() {
   cp -r electron "${pkgdir}/opt/${pkgname}/"
   cp -r src "${pkgdir}/opt/${pkgname}/"
   cp -r shared "${pkgdir}/opt/${pkgname}/"
+  # Built by build:web: the bundled plugin packages the server seeds on first start.
+  cp -r generated "${pkgdir}/opt/${pkgname}/"
 
   cp package.json "${pkgdir}/opt/${pkgname}/"
   cp tsconfig.json "${pkgdir}/opt/${pkgname}/" 2>/dev/null || true
