@@ -21,6 +21,7 @@ import { registerEditorRoutes } from "./routes/editor"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerToolResultRoutes } from "./routes/tool-result"
+import { registerAutomationRoutes } from "./routes/automations"
 import { registerFileRoutes } from "./routes/files"
 import { registerFolderRoutes } from "./routes/folders"
 import { registerGitDiffRoutes } from "./routes/git-diff"
@@ -122,6 +123,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("files", registerFileRoutes),
   apiRoute("files-watch", registerFileWatchRoutes),
   apiRoute("tool-result", registerToolResultRoutes),
+  apiRoute("automations", registerAutomationRoutes),
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
   apiRoute("session-access", registerSessionAccessRoutes),
   apiRoute("session-archive", registerSessionArchiveRoutes),

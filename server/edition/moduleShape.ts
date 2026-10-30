@@ -35,7 +35,7 @@ const AUTH = {
   admitsSocket: "function",
   administers: "function",
   sessions: SESSION_STORE,
-} as const satisfies Record<keyof EditionAuth, Member>
+} as const satisfies Record<Exclude<keyof EditionAuth, "signedWebhookIngress">, Member>
 
 const ACCESS = {
   authorizeSession: "function",
@@ -127,5 +127,8 @@ export function missingEditionMembers(candidate: object): string[] {
   const missing = missingMembers(candidate, MODULE, "")
   if (!("auth" in candidate)) return [...missing, "auth"]
   const unattended = "unattended" in candidate && candidate.unattended !== undefined ? missingMembers(candidate.unattended, UNATTENDED, "unattended") : []
-  return candidate.auth === null ? [...missing, ...unattended] : [...missing, ...unattended, ...missingMembers(candidate.auth, AUTH, "auth")]
+  if (candidate.auth === null) return [...missing, ...unattended]
+  const ingress = typeof candidate.auth === "object" && candidate.auth !== null && "signedWebhookIngress" in candidate.auth
+    && !["boolean", "undefined"].includes(typeof candidate.auth.signedWebhookIngress) ? ["auth.signedWebhookIngress"] : []
+  return [...missing, ...unattended, ...missingMembers(candidate.auth, AUTH, "auth"), ...ingress]
 }

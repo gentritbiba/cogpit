@@ -322,6 +322,12 @@ export interface EditionAuth {
   /** Whether `principal` may act on what no session owns: host-wide items, project-wide defaults, plugins. */
   administers(principal: SessionPrincipal): boolean
   readonly sessions: PersistentSessionStore
+  /**
+   * True when `middleware` passes `isAutomationIngress` requests through
+   * unauthenticated, so a task's webhook URL is usable. Core still checks each
+   * delivery's signature and its task's grant. Absent means false.
+   */
+  readonly signedWebhookIngress?: boolean
 }
 
 // ── Browser profiles ─────────────────────────────────────────────────

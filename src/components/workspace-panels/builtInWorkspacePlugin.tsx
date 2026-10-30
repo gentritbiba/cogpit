@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
-import { FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
+import { CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { Spinner } from "@/components/ui/Spinner"
@@ -26,6 +26,9 @@ const CrewPanel = lazy(() =>
 )
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
+)
+const AutomationsPanel = lazy(() =>
+  import("@/components/AutomationsPanel").then((module) => ({ default: module.AutomationsPanel })),
 )
 
 function PanelFallback() {
@@ -169,6 +172,10 @@ function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
   )
 }
 
+function AutomationsWorkspacePanel(props: WorkspacePanelProps) {
+  return <Suspense fallback={<PanelFallback />}><AutomationsPanel {...props} /></Suspense>
+}
+
 export const builtInWorkspacePlugin = definePlugin({
   id: BUILT_IN_PLUGIN_ID,
   workspacePanels: [
@@ -228,6 +235,16 @@ export const builtInWorkspacePlugin = definePlugin({
       defaultSize: "36%",
       minSize: "320px",
       when: (context) => context.canAccessHostFiles && context.hasFileChanges && context.session !== null,
+    },
+    {
+      id: "automations",
+      title: "Scheduled tasks",
+      icon: CalendarClock,
+      component: AutomationsWorkspacePanel,
+      order: 25,
+      defaultSize: "38%",
+      minSize: "340px",
+      when: (context) => context.canAccessHostFiles,
     },
     {
       id: "session-info",
