@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { readFile } from "node:fs/promises"
 
 const session = vi.hoisted(() => ({ settle: null as null | ((outcome?: string) => void), reply: null as string | null, stop: vi.fn(async () => true), waits: 0 }))
 vi.mock("../../lib/sessionWait", () => ({
@@ -22,7 +23,22 @@ import { prepareReviewWorktree } from "../../prReview/start"
 
 const directories: string[] = []
 const temp = (prefix: string) => { const path = mkdtempSync(join(tmpdir(), prefix)); directories.push(path); return path }
-afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }) })
+const guideFiles: string[] = []
+const storeFile = (root = temp("cogpit-guides-")) => {
+  const file = join(root, "guides.json")
+  guideFiles.push(file)
+  return () => file
+}
+afterEach(async () => {
+  try {
+    for (const file of guideFiles.splice(0)) await vi.waitFor(async () => {
+      const records = Object.values(JSON.parse(await readFile(file, "utf8"))) as { state: string }[]
+      expect(records.every(({ state }) => state !== "preparing" && state !== "generating")).toBe(true)
+    })
+  } finally {
+    for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true })
+  }
+})
 const guide = { summary: "Adds review.", groups: [{ title: "Core", note: "start here", files: ["src/a.ts"] }], risks: ["Paging"], questions: [], stops: [{ path: "src/a.ts", line: 4, side: "RIGHT", note: "Check the bound" }] }
 const pull = { principal: "owner", host: "github.com", owner: "acme", name: "app", number: 7 }
 const pins = { baseSha: "a".repeat(40), headSha: "b".repeat(40) }
@@ -37,7 +53,7 @@ describe("review guides", () => {
 
   it("saves a generated guide with its pins, and marks a restart as interrupted", async () => {
     const root = temp("cogpit-guides-")
-    const store = new ReviewGuideStore(() => join(root, "guides.json"))
+    const store = new ReviewGuideStore(storeFile(root))
     await expect(store.get(pull)).resolves.toBeNull()
     await store.generate(pull, pins, async () => ({ sessionId: "guide-session" }))
     expect(await store.get(pull)).toMatchObject({ state: "generating", ...pins })
@@ -60,7 +76,7 @@ describe("review guides", () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] })
     try {
       session.stop.mockClear()
-      const store = new ReviewGuideStore(() => join(temp("cogpit-guides-"), "guides.json"))
+      const store = new ReviewGuideStore(storeFile())
       await store.generate(pull, pins, async () => ({ sessionId: "blocked-guide" }))
       const waits = session.waits
       session.reply = null
@@ -74,11 +90,10 @@ describe("review guides", () => {
       await until(async () => (await store.get(pull))?.state === "cancelled")
       expect(session.stop).toHaveBeenCalledWith("blocked-guide")
     } finally { vi.useRealTimers() }
-    await new Promise((resolve) => setTimeout(resolve, 20))
   })
 
   it("cancels a generation and stops its session, and records a session that returned no guide", async () => {
-    const store = new ReviewGuideStore(() => join(temp("cogpit-guides-"), "guides.json"))
+    const store = new ReviewGuideStore(storeFile())
     await store.generate(pull, pins, async () => ({ sessionId: "cancel-me" }))
     expect(store.cancel(pull)).toBe(true)
     await until(async () => (await store.get(pull))?.state === "cancelled")
