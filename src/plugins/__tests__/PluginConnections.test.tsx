@@ -55,11 +55,17 @@ describe("host-owned plugin connections", () => {
     expect(document.body.innerHTML).not.toContain("synthetic-fixture-secret")
   })
   it("keeps environment credentials read-only while permitting resource selection", async () => {
-    setup(connection("environment"))
+    const value = setup(connection("environment"))
+    let finishOptions!: (choices: { id: string; label: string }[]) => void
+    value.client.connectionOptions.mockImplementationOnce(() => new Promise((resolve) => { finishOptions = resolve }))
     expect(await screen.findByText("Configured by host")).toBeInTheDocument()
     expect(screen.queryByLabelText("API token")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument()
-    expect(await screen.findByRole("combobox", { name: "Account" })).toBeEnabled()
+    const select = await screen.findByRole("combobox", { name: "Account" })
+    await waitFor(() => expect(value.client.connectionOptions).toHaveBeenCalledOnce())
+    expect(select).toBeDisabled()
+    await act(async () => { finishOptions([{ id: "a", label: "Account A" }]) })
+    await waitFor(() => expect(select).toBeEnabled())
   })
   it("loads a root resource's choices as soon as the connection is available", async () => {
     const value = setup(connection("connected"))
