@@ -91,7 +91,17 @@ export class PluginStore {
       publishers: [...publishers.values()].sort((a, b) => a.id.localeCompare(b.id)),
       legacyPluginIds: remainingLegacyPluginIds(this.options.legacyHost?.classification === "indeterminate" ? this.options.legacyHost : this.registry.seedMigration?.classification, this.registry.seedMigration?.decisions),
       availableSeeds: [...this.appSeeds.values()].map(seed => ({ manifest: structuredClone(seed.inspected.manifest), digest: seed.inspected.digest })),
+      privilegedPluginIds: Object.values(this.registry.plugins).filter(plugin => this.privileged(plugin)).map(plugin => plugin.id).sort(),
     }
+  }
+
+  /** The selected package is release-owned bytes or signed by a pinned official root; a publisher name alone never qualifies. */
+  private privileged(plugin: PluginRegistry["plugins"][string]): boolean {
+    const selected = plugin.versions.find(version => version.digest === plugin.selectedDigest)
+    if (!selected || this.registry.quarantined?.[selected.digest]) return false
+    if (this.seedProvenance(selected.digest, plugin.id, selected.targetPath)?.publisher === selected.manifest.publisher) return true
+    const publisher = this.trust.publishers[selected.manifest.publisher]
+    return publisher?.kind === "official" && !!publisher.checkpoint?.verifiedTargets[selected.targetPath] && !publisher.checkpoint.revokedTargets.includes(selected.targetPath)
   }
 
   private compromised(reason: string): void {

@@ -36,6 +36,7 @@ describe("actual bundled optional plugin rollout", () => {
     expect(result.failures).toEqual([])
     expect(sortedIds(result.snapshot.plugins)).toEqual(legacyIds)
     expect(result.snapshot.legacyPluginIds).toEqual([])
+    expect(result.snapshot.privilegedPluginIds).toEqual(legacyIds)
     for (const seed of seeds.filter(seed => legacyIds.includes(seed.id))) {
       expect(result.snapshot.plugins.find(plugin => plugin.id === seed.id)).toMatchObject({ selectedDigest: seed.payloadDigest, enabled: true, pinned: false, scope: { type: "all" } })
       expect(await store.payload(seed.payloadDigest)).toEqual(seed.payload)

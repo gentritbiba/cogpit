@@ -8,6 +8,8 @@ import { authFetch } from "@/lib/auth"
 import { getActiveDeviceScope, getActiveIdentity, withBase } from "@/lib/device"
 import { version } from "../../package.json"
 import { getPluginBrowserSupport } from "./browserSupport"
+import { browserSafeMode } from "./browserSafeMode"
+import { ClientIntegrationHost, clientIntegrationCapabilities } from "./clientIntegrations"
 
 const sessionSchema = z.strictObject({ sessionId: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: z.number().int().positive() })
 const leaseSchema = z.strictObject({ id: z.string().min(1).max(128), expiresAt: z.number().int().positive() })
@@ -22,7 +24,7 @@ export function clientRuntimeDescriptor(): ClientRuntimeDescriptor {
   return {
     appVersion: version, apiVersions: [PLUGIN_API_VERSION], manifestVersions: [1], protocolVersions: [PROTOCOL_MAJOR],
     runtimes: support.supported ? [RUNTIME] : [],
-    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0" } : {},
+    capabilities: support.supported ? { "workspace.panel": "1.0.0", "composer.append": "1.0.0", "composer.context": "1.0.0", "review.start": "1.0.0", "navigation.external": "1.0.0", "navigation.session": "1.0.0", "chat.blocks": "1.0.0", "session.actions": "1.0.0", "media.audio": "1.0.0", "settings.fields": "1.0.0", ...clientIntegrationCapabilities() } : {},
     browser: support.browser,
   }
 }
@@ -96,11 +98,15 @@ export class RuntimePluginClient {
   private state = EMPTY_PLUGIN_STATE
   private running = false
 
+  /** Release-owned browser integrations that installed plugins turn on, whether or not their panels are open. */
+  readonly integrations = new ClientIntegrationHost()
+
   getSnapshot = (): RuntimePluginState => this.state
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
   private publish(state: RuntimePluginState): void {
     if (JSON.stringify(this.state) === JSON.stringify(state)) return
     this.state = state
+    this.syncIntegrations()
     for (const listener of this.listeners) listener()
   }
   private assertCurrent(signal?: AbortSignal): void {
@@ -111,6 +117,11 @@ export class RuntimePluginClient {
   }
   private hostChanged = (): void => {
     if (this.scope !== getActiveDeviceScope() || this.identity !== getActiveIdentity()) this.stop()
+    else this.syncIntegrations()
+  }
+  private syncIntegrations(): void {
+    const store = this.state.status?.store
+    this.integrations.sync(store?.available && !this.state.status?.safeMode ? store.plugins : [], store?.privilegedPluginIds ?? [], browserSafeMode())
   }
   start(): void {
     if (this.running) return

@@ -26,6 +26,8 @@ export interface RuntimeFrameController {
   dispose(): void
   setActive(active: boolean): void
   updateContext(context: PluginContext): void
+  /** Tells a frame granted composer drafts which composer token is current. */
+  notifyDrafts(token: string): void
 }
 
 export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameController {
@@ -170,6 +172,9 @@ export function createRuntimeFrame(options: RuntimeFrameOptions): RuntimeFrameCo
       active = value
       if (!active) cancelAll(false, true)
       if (delivered) post({ protocol: 1, type: "event", event: "visibility", value: active })
+    },
+    notifyDrafts(token) {
+      if (delivered) post({ protocol: 1, type: "event", event: "drafts", value: { token } })
     },
     updateContext(value) {
       if (disposed) return

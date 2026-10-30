@@ -1,5 +1,5 @@
 import { X } from "lucide-react"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { InstalledPlugin } from "../../shared/contracts/plugins"
 import type { PluginProjectSummary } from "../../shared/contracts/pluginManagement"
@@ -76,6 +76,14 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   const canOpenSession = plugin.manifest.permissions.navigation.includes("session") && !!context.openSession
   const canAddContext = plugin.manifest.permissions.composer.includes("context") && !!context.addFileContext
   const canStartReview = plugin.manifest.permissions.review.includes("start") && !!client.startReviewSession
+  const integrations = plugin.manifest.permissions.composer.includes("drafts") ? client.integrations : undefined
+  const subscribeDrafts = useCallback((listener: () => void) => integrations?.subscribe(listener) ?? (() => {}), [integrations])
+  const drafts = useSyncExternalStore(subscribeDrafts, () => integrations?.drafts(plugin.id) ?? null)
+  const currentDrafts = useRef(drafts)
+  const [draftsToken, setDraftsToken] = useState<string | null>(null)
+  useLayoutEffect(() => { currentDrafts.current = drafts }, [drafts])
+  useEffect(() => drafts?.onTokenChange(setDraftsToken), [drafts])
+  const canUseDrafts = !!integrations
   const workspacePath = project ? context.projectPath : null
   const canOpenExternal = plugin.manifest.permissions.navigation.includes("external")
   const address = plugin.manifest.permissions.context.includes("session.identity") && client.sessionHandle && workspacePath ? context.sessionAddress ?? null : null
@@ -97,14 +105,15 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
       ...(canOpenExternal ? { openExternal } : {}),
       ...(canAddContext ? { addContext: (value) => addFileContext.current?.({ ...value, text: value.text ?? "" }) ?? "The message composer is unavailable" } : {}),
       ...(canStartReview ? { startReview: (leaseId, request) => setReview({ leaseId, request }) } : {}),
+      ...(canUseDrafts ? { drafts: () => currentDrafts.current } : {}),
       onLoaded: (payload, leaseId) => setLoaded({ payload, leaseId, runtime }), onError: (failure) => setError(failure.message) })
     activation.current = runtime
     return () => { runtime.dispose(); activation.current = null }
-  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath])
+  }, [client, pluginId, digest, projectId, epoch, contextEpoch, canAppend, canAddContext, canStartReview, canOpenExternal, openExternal, canOpenSession, workspacePath, canUseDrafts])
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>
   if (!loaded) return <p role="status" className="p-4 text-sm text-muted-foreground">Loading plugin…</p>
   return <><PluginFrame payload={loaded.payload} digest={digest} activationKey={`${epoch}:${loaded.leaseId}`}
-    context={pluginPanelContext(plugin.manifest, project, active, presentation, currentHandle)} active={active} title={title ?? plugin.manifest.name}
+    context={pluginPanelContext(plugin.manifest, project, active, presentation, currentHandle)} active={active} draftsToken={draftsToken} title={title ?? plugin.manifest.name}
     execute={loaded.runtime.execute} onError={loaded.runtime.fail} />{dialog}
     {review && <ReviewSessionDialog pluginName={plugin.manifest.name} request={review.request} projectPath={workspacePath}
       start={(input, signal) => client.startReviewSession!(review.leaseId, input, signal)}

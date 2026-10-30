@@ -366,6 +366,14 @@ describe("host-owned plugin connections and state", () => {
     expect(await manager.call(req, activation.id, request("review.start", { number: 7, headSha: "b".repeat(40), purpose: "guide" }))).toEqual({ status: "opened" })
     await expect(manager.startReviewSession(req, activation.id, { number: 7, headSha: "b".repeat(40), purpose: "guide", agent: "claude", instanceId: "default" })).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
   })
+  it("refuses saved drafts to a developer-signed package even when it declares the grant", async () => {
+    let activation = await lease()
+    await expect(manager.call(req, activation.id, request("drafts.list", {}))).rejects.toMatchObject({ code: "PERMISSION_REQUIRED" })
+    await install(signedPackage(authority, { connection: definition(), drafts: true, version: "1.1.0", metadataVersion: 2, retained: [installed] }))
+    activation = await lease()
+    expect(manager.snapshot().privilegedPluginIds).toEqual([])
+    await expect(manager.call(req, activation.id, request("drafts.list", {}))).rejects.toMatchObject({ code: "PERMISSION_REQUIRED", message: expect.stringContaining("bundled with Cogpit") })
+  })
   it.each([true, false])("blocks activations while old state writes drain and clears the barrier after allowed=%s", async permitted => {
     const activation = await lease()
     let release!: () => void, start!: () => void

@@ -6,7 +6,7 @@ import { createRuntimePanelActivation, type RuntimePanelActivation, type Runtime
 const request: PluginRequest = { protocol: 1, type: "request", id: "r1", method: "storage.get", params: { key: "setting" } }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const running = new Set<RuntimePanelActivation>()
-function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void, extra: Pick<Parameters<typeof createRuntimePanelActivation>[0], "addContext" | "startReview"> = {}) {
+function setup(overrides: Partial<RuntimePanelClient> = {}, appendDraft?: (text: string) => void, extra: Pick<Parameters<typeof createRuntimePanelActivation>[0], "addContext" | "startReview" | "drafts"> = {}) {
   const client = {
     lease: vi.fn(async () => ({ id: "lease-1", expiresAt: Date.now() + 30_000 })),
     payload: vi.fn(async () => new ArrayBuffer(2)),
@@ -81,6 +81,29 @@ describe("runtime panel activation", () => {
     await expect(denied.activation.execute({ protocol: 1, type: "request", id: "review", method: "review.start", params }, new AbortController().signal)).rejects.toThrow("not been granted")
     const absent = setup(); await settle()
     await expect(absent.activation.execute({ protocol: 1, type: "request", id: "review", method: "review.start", params }, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" })
+  })
+  it("answers drafts requests from the active integration only after host authorization", async () => {
+    const order: string[] = []
+    const list = { token: "t1", items: [] }
+    const integration = { request: vi.fn(async () => { order.push("integration"); return list }), onTokenChange: () => () => {}, dispose: () => {} }
+    const value = setup({ call: vi.fn(async () => { order.push("host"); return null }) }, undefined, { drafts: () => integration as never }); await settle()
+    await expect(value.activation.execute({ protocol: 1, type: "request", id: "d", method: "drafts.list", params: {} }, new AbortController().signal)).resolves.toEqual(list)
+    expect(order).toEqual(["host", "integration"])
+  })
+  it("refuses drafts requests without an active integration before asking the host", async () => {
+    const value = setup(); await settle()
+    await expect(value.activation.execute({ protocol: 1, type: "request", id: "d", method: "drafts.backup", params: { token: "t1" } }, new AbortController().signal)).rejects.toMatchObject({ code: "CAPABILITY_UNAVAILABLE" })
+    expect(value.client.call).not.toHaveBeenCalled()
+  })
+  it("cancels a drafts request on a session switch", async () => {
+    const pending = deferred<JsonValue>()
+    const integration = { request: vi.fn(async () => null), onTokenChange: () => () => {}, dispose: () => {} }
+    const value = setup({ call: () => pending.promise }, undefined, { drafts: () => integration as never }); await settle()
+    const restore = value.activation.execute({ protocol: 1, type: "request", id: "d", method: "drafts.restore", params: { token: "t1", id: "x", mode: "replace" } }, new AbortController().signal)
+    value.activation.resetSession()
+    pending.resolve(null)
+    await expect(restore).rejects.toThrow()
+    expect(integration.request).not.toHaveBeenCalled()
   })
   it("refuses draft actions when the workspace has no permitted composer", async () => {
     const value = setup(); await settle()

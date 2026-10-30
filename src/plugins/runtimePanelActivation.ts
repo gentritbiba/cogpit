@@ -1,7 +1,8 @@
-import type { ComposerFileContext, PluginExecutionResult, PluginRequest, ReviewStartRequest } from "@cogpit/plugin-contracts"
+import { isDraftMethod, type ComposerFileContext, type PluginExecutionResult, type PluginRequest, type ReviewStartRequest } from "@cogpit/plugin-contracts"
 import type { RuntimeLease, RuntimePluginClient } from "./runtimeClient"
+import type { DraftsIntegration } from "./clientIntegrations"
 
-export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession" | "sessionHandle" | "media" | "startReviewSession">>
+export type RuntimePanelClient = Pick<RuntimePluginClient, "lease" | "payload" | "renewLease" | "revokeLease" | "call"> & Partial<Pick<RuntimePluginClient, "resolveSession" | "sessionHandle" | "media" | "startReviewSession" | "integrations">>
 export interface RuntimePanelActivation {
   execute(request: PluginRequest, signal: AbortSignal): Promise<PluginExecutionResult>
   setActive(active: boolean): void
@@ -28,6 +29,8 @@ export function createRuntimePanelActivation(options: {
   startReview?: (leaseId: string, request: ReviewStartRequest) => void
   openExternal?: (url: string, signal: AbortSignal) => Promise<void>
   resize?: (height: number) => void
+  /** The active drafts integration for this plugin, read at request time. */
+  drafts?: () => DraftsIntegration | null
 }): RuntimePanelActivation {
   const controller = new AbortController()
   let requests = new AbortController()
@@ -81,7 +84,7 @@ export function createRuntimePanelActivation(options: {
   }).catch(() => fail(new Error("Plugin panel could not be loaded")))
   return {
     async execute(request, signal) {
-      const sessionAction = request.method.startsWith("composer.") || request.method.startsWith("navigation.")
+      const sessionAction = request.method.startsWith("composer.") || request.method.startsWith("navigation.") || isDraftMethod(request.method)
       const combined = AbortSignal.any([signal, controller.signal, ...(request.method === "lifecycle.ready" ? [] : [requests.signal]), ...(sessionAction ? [sessionActions.signal] : [])])
       combined.throwIfAborted()
       if (!lease || lease.expiresAt <= Date.now()) throw new Error("Plugin activation expired")
@@ -106,8 +109,14 @@ export function createRuntimePanelActivation(options: {
       if (request.method === "navigation.openSession" && (!options.openSession || !options.client.resolveSession)) {
         throw Object.assign(new Error("Session navigation is unavailable"), { code: "CAPABILITY_UNAVAILABLE" })
       }
+      if (isDraftMethod(request.method) && !options.drafts?.()) throw Object.assign(new Error("Saved drafts are unavailable here"), { code: "CAPABILITY_UNAVAILABLE" })
       const result = await options.client.call(lease.id, request, combined)
       combined.throwIfAborted()
+      if (isDraftMethod(request.method)) {
+        const drafts = options.drafts!()
+        if (!drafts) throw Object.assign(new Error("Saved drafts are unavailable here"), { code: "CAPABILITY_UNAVAILABLE" })
+        return await drafts.request(request.method, request.params as never, combined)
+      }
       if (request.method === "ui.resize") options.resize!(request.params.height)
       if (request.method === "composer.appendContext") {
         if (performance.now() - lastDraftAppend < 1000) throw Object.assign(new Error("Wait before adding another draft"), { code: "RATE_LIMITED" })

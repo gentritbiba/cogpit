@@ -2,7 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { createHash } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import type { IncomingMessage } from "node:http"
-import { connectionResourceDependencies, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
+import { connectionResourceDependencies, isDraftMethod, evaluateCompatibility, supportsPluginHost, parseIntegrationRequest, parseJson, parseMethodResult, SETTINGS_STORAGE_KEY, validateSettings, type PluginMedia, type PluginIntegrationRequest, type ClientRuntimeDescriptor, type ConnectionDefinition, type JsonValue, type PluginRequest } from "@cogpit/plugin-contracts"
 import type { PluginScope, PluginStoreSnapshot } from "../../shared/contracts/plugins"
 import type { PluginConnectionSnapshot, PluginConnectionTarget, PluginResourceSelection } from "../../shared/contracts/pluginConnections"
 import { getInstanceId } from "../routes/hello"
@@ -115,6 +115,8 @@ export class PluginManager {
     const snapshot = this.storeValue?.snapshot() ?? { available: false, error: "Plugin storage is unavailable", revision: 0, plugins: [], publishers: [] }
     return snapshot.available && this.migrationIssue ? { ...snapshot, error: this.migrationIssue } : snapshot
   }
+  /** Whether the plugin's selected package carries release or official provenance, re-read from the current store. */
+  privileged(pluginId: string): boolean { return this.snapshot().privilegedPluginIds?.includes(pluginId) ?? false }
   reportMigrationIssue(message: string): void { this.migrationIssue = message.slice(0, 500) }
   get connectionRevision(): number { try { return this.connections?.revision ?? 0 } catch { return 0 } }
 
@@ -741,6 +743,10 @@ export class PluginManager {
       }
       if (request.method === "composer.append" && context.plugin.manifest.permissions.composer.includes("append")) return null
       if (request.method === "composer.appendContext" && context.plugin.manifest.permissions.composer.includes("context")) return null
+      if (isDraftMethod(request.method) && context.plugin.manifest.permissions.composer.includes("drafts")) {
+        if (!this.privileged(context.plugin.id)) throw new PluginDataError("PERMISSION_REQUIRED", "Saved drafts are available only to the package bundled with Cogpit")
+        return null
+      }
       if (request.method === "review.start" && context.plugin.manifest.permissions.review.includes("start")) return { status: "opened" }
       if (request.method === "navigation.openExternal" && context.plugin.manifest.permissions.navigation.includes("external")) return null
       if (request.method === "connections.request" || request.method === "connections.status") {

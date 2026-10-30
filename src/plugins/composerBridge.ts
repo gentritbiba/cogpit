@@ -11,6 +11,8 @@ export interface ComposerSnapshot {
   draft: ComposerDraft
   /** An image upload or send is in flight; `replace` refuses until it settles. */
   busy: boolean
+  /** An image upload specifically is in flight. */
+  uploading: boolean
 }
 
 export type ComposerEvent =
@@ -21,6 +23,8 @@ export type ComposerEvent =
   | { type: "settled"; sendId: string; sent: boolean }
   /** A first prompt created a session; the draft now belongs to that identity. */
   | { type: "created"; sendId: string; session: CreatedComposerSession }
+  /** Pasted text the composer could not accept; an extension may keep it. */
+  | { type: "rejected-input"; scope: ComposerScope; text: string }
 
 export interface ComposerKeyInput {
   key: string
