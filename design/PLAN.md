@@ -99,3 +99,15 @@ At `aabfd7db`, the complete private-edition suite passed **773 files / 11,926 te
 Synthetic browser QA covered scheduled task creation/history, webhook coalescing, review drafts/viewed marks, Ask agent context, explicit review submission, pinned-head work sessions, saved guides, and stale-head display. No real provider or GitHub review write was used. Terminal context has unit coverage; install-review upgrade UI was not browser-tested. Release3.5.3 has not been tagged or published.
 
 Final CI dependency: private commit `7038182` retains all route policies and runs its complete suite with two workers. Its predecessor paired run40984942354 passed11,926 tests but exhausted the existing30-minute job limit during builds. No suite, assertion or timeout was removed. PR #20 records the final hosted results.
+
+## Optional-plugin revision — 2026-10-30
+
+In session `01a1891c-89ca-78a1-8495-a51992102e21`, the user explicitly changed items5/6: **both Worktree setup and Saved drafts become optional installable plugins**, with no default controls in the main app. Preserve code and existing saved data; keep generic composer, failed-send safety and worktree readiness hooks needed by the remaining core features. Rename Saved prompts to Saved drafts in the optional feature. This supersedes their default built-in delivery; the other seven items remain in core.
+
+| Package | Scope | Base | Model | Status |
+| --- | --- | --- | --- | --- |
+| UI | Hide worktree recipe configuration from new-session screen; compact editor dialog elsewhere | `4ebc120c` | Lead | Verified: 15 focused, normal/public10172 + memory110, types/lint/build/architecture, desktop/mobile browser QA |
+| PLATFORM-REVIEW | Verify existing plugin architecture; propose minimal safe installation/lifecycle and draft bridge contracts | `4ebc120c` | Opus5.5/high via Cogpit | Complete; existing trusted host integration and lazy client adapter chosen |
+| PLATFORM | Shared plugin contracts/host integration and optional Worktree setup package | Review contract | Same Opus session | Running; shared checkpoints `0c5ba59f`, `407df8e5`, `2b53e301` ready |
+| DRAFTS | Optional Saved drafts package; clean core composer, preserve legacy bytes and send-refusal safety | Shared contract | GPT6.1/high via Cogpit | Running in Cogpit session `01a18dbb-2465-7760-b3e1-d47b52fc69dc` against shared checkpoint |
+| VERIFY | Integrate, permission/data/disable checks, full/public/memory gates and browser QA | Both packages | Lead | Pending |

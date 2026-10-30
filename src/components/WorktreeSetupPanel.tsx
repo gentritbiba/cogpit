@@ -1,6 +1,10 @@
 import { useId, useState } from "react"
+import { Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useCapability } from "@/hooks/useCapability"
 import { useScriptDiscovery } from "@/hooks/useScriptDiscovery"
 import { useWorktreeSetup } from "@/hooks/useWorktreeSetup"
@@ -21,26 +25,37 @@ function RecipeEditor({ recipe, projectCwd, configure }: { recipe: WorktreeSetup
   const { scripts } = useScriptDiscovery(projectCwd)
   const rootScripts = scripts.filter((script) => script.dirLabel === "root/" && /^[\w:@/.-]+$/.test(script.name))
   return (
-    <form className="space-y-2" onSubmit={(event) => {
+    <form className="space-y-5" onSubmit={(event) => {
       event.preventDefault(); setBusy(true); setMessage(null)
       void configure(command, trusted, minutes * 60_000).then(() => setMessage("Setup recipe saved"), (error: unknown) => setMessage(error instanceof Error ? error.message : "Unable to save recipe")).finally(() => setBusy(false))
     }}>
-      <p className="text-xs text-muted-foreground">Saved for your account, this host and this Git project. Runs in each new worktree before its first agent prompt.</p>
-      <label className="block text-xs" htmlFor={`${id}-command`}>Project setup command</label>
-      <textarea id={`${id}-command`} className="w-full rounded border bg-background p-2 font-mono text-xs" rows={2} value={command} placeholder="bun install" onChange={(event) => { setCommand(event.target.value); setTrusted(false) }} />
-      {rootScripts.length > 0 && <label className="block text-xs">Use a project script
-        <select className="ml-2 max-w-full rounded border bg-background p-1" value="" onChange={(event) => { setCommand(`bun run ${event.target.value}`); setTrusted(false) }}>
-          <option value="">Choose a script…</option>
-          {rootScripts.map((script) => <option key={script.name} value={script.name}>{script.name}: {script.command}</option>)}
-        </select>
-      </label>}
-      <label className="flex items-center gap-2 text-xs" htmlFor={`${id}-timeout`}>Timeout (minutes)
-        <Input id={`${id}-timeout`} className="h-7 w-20" type="number" min={1} max={60} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} />
-      </label>
-      <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={trusted} onChange={(event) => setTrusted(event.target.checked)} />I trust this command and the project code it runs in new worktrees.</label>
-      <p className="text-xs text-muted-foreground">Repository scripts are suggestions. Saving a trusted command enables automatic setup. Clear the command to disable it.</p>
-      <Button type="submit" size="sm" disabled={busy || (!!command.trim() && !trusted)}>Save setup recipe</Button>
-      {message && <p role="status" className="text-xs">{message}</p>}
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor={`${id}-command`}>Project setup command</label>
+        <Textarea id={`${id}-command`} className="min-h-24 resize-y font-mono text-xs md:text-xs" rows={3} value={command} placeholder="bun install" onChange={(event) => { setCommand(event.target.value); setTrusted(false) }} />
+        <p className="text-xs text-muted-foreground">Runs before the first prompt in each new worktree. Clear to disable.</p>
+      </div>
+      <div className="flex flex-wrap items-end gap-4">
+        {rootScripts.length > 0 && <label className="min-w-0 flex-1 space-y-2 text-sm font-medium">Use a project script
+          <select className="mt-2 h-9 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" value="" onChange={(event) => { setCommand(`bun run ${event.target.value}`); setTrusted(false) }}>
+            <option value="">Choose a script…</option>
+            {rootScripts.map((script) => <option key={script.name} value={script.name}>{script.name}: {script.command}</option>)}
+          </select>
+        </label>}
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor={`${id}-timeout`}>Timeout (min)</label>
+          <Input id={`${id}-timeout`} className="h-9 w-24" type="number" min={1} max={60} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} />
+        </div>
+      </div>
+      <div className="rounded-lg border bg-muted/30 p-3">
+        <label className="flex items-start gap-3 text-sm leading-relaxed" htmlFor={`${id}-trust`}>
+          <Checkbox id={`${id}-trust`} className="mt-0.5 shrink-0" checked={trusted} onCheckedChange={setTrusted} />
+          I trust this command and the project code it runs in new worktrees.
+        </label>
+      </div>
+      {message && <p role="status" className="text-sm">{message}</p>}
+      <div className="flex justify-end border-t pt-4">
+        <Button type="submit" size="sm" disabled={busy || (!!command.trim() && !trusted)}>{busy ? "Saving…" : "Save setup recipe"}</Button>
+      </div>
     </form>
   )
 }
@@ -50,6 +65,7 @@ export function WorktreeSetupPanel({ projectCwd, dirName, progressOnly = false, 
   const terminal = useCapability("terminal")
   const allowed = hostFiles && terminal
   const { snapshot, error, configure, act } = useWorktreeSetup({ cwd: projectCwd, dirName }, allowed)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   if (!allowed || (!projectCwd && !dirName)) return null
@@ -57,7 +73,8 @@ export function WorktreeSetupPanel({ projectCwd, dirName, progressOnly = false, 
   const visible = progressOnly ? operations.filter((operation) => worktreeSetupActive(operation.stage) || operation.stage === "cancelled" || operation.stage === "interrupted").slice(0, 3) : operations.slice(0, 10)
   if (progressOnly && visible.length === 0) return null
   return (
-    <section aria-label="Worktree setup" className={`${compact ? "max-h-40" : "max-h-80"} shrink-0 space-y-2 overflow-y-auto rounded border p-3 text-left`}>
+    <div className="flex min-w-0 shrink-0 flex-col gap-2 text-left">
+      {visible.length > 0 && <section aria-label="Worktree setup" className={`${compact ? "max-h-40" : "max-h-80"} space-y-2 overflow-y-auto rounded-lg border p-3`}>
       {(actionError || (error && visible.length > 0)) && <p role="alert" className="text-xs text-destructive">{actionError || error}</p>}
       {visible.map((operation) => <article key={operation.id} aria-label={`Worktree ${operation.worktreeName}`} className="space-y-1 text-xs">
         <p role="status" className="font-medium">{operation.worktreeName} · {stageLabel[operation.stage]}</p>
@@ -72,10 +89,21 @@ export function WorktreeSetupPanel({ projectCwd, dirName, progressOnly = false, 
           }}>{action === "retry" ? "Retry setup" : "Cancel startup"}</Button>)}
         </div>}
       </article>)}
-      {!progressOnly && <details>
-        <summary className="cursor-pointer text-xs font-medium">Worktree setup recipe {snapshot?.recipe ? "· enabled" : "· not configured"}</summary>
-        <div className="pt-3">{snapshot ? <RecipeEditor key={snapshot.projectCwd} recipe={snapshot.recipe} projectCwd={snapshot.projectCwd} configure={configure} /> : <p role="status" className="text-xs">{error || "Loading setup configuration…"}</p>}</div>
-      </details>}
-    </section>
+      </section>}
+      {!progressOnly && <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogTrigger render={<Button variant="ghost" size="xs" className="self-start text-muted-foreground" />}>
+          <Settings2 data-icon="inline-start" />
+          Setup recipe
+          {snapshot?.recipe && <span className="text-[10px] text-muted-foreground">· enabled</span>}
+        </DialogTrigger>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto text-left">
+          <DialogHeader>
+            <DialogTitle>Worktree setup</DialogTitle>
+            <DialogDescription>Optional preparation for new worktrees, saved for this project on this machine.</DialogDescription>
+          </DialogHeader>
+          {settingsOpen && (snapshot ? <RecipeEditor key={snapshot.projectCwd} recipe={snapshot.recipe} projectCwd={snapshot.projectCwd} configure={configure} /> : <p role={error ? "alert" : "status"} className="text-sm text-muted-foreground">{error || "Loading setup configuration…"}</p>)}
+        </DialogContent>
+      </Dialog>}
+    </div>
   )
 }

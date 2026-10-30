@@ -47,7 +47,7 @@ export function NewSessionHeadline({
       {projectPath && (
         <p className="font-mono text-xs text-muted-foreground">{shortPath(projectPath)}</p>
       )}
-      <WorktreeSetupPanel projectCwd={projectPath} />
+      <WorktreeSetupPanel projectCwd={projectPath} progressOnly />
     </div>
   )
 }

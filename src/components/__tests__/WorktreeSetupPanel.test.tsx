@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorktreeSetupPanel } from "../WorktreeSetupPanel"
@@ -14,10 +14,26 @@ beforeEach(() => {
 })
 
 describe("worktree setup controls", () => {
+  it("keeps the editor hidden until requested and restores focus when dismissed", async () => {
+    const user = userEvent.setup()
+    render(<WorktreeSetupPanel projectCwd="/repo" />)
+    const trigger = screen.getByRole("button", { name: "Setup recipe" })
+    expect(screen.queryByLabelText("Project setup command")).not.toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    await user.click(trigger)
+    expect(screen.getByRole("dialog", { name: "Worktree setup" })).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+  it("keeps an idle new-session surface empty", () => {
+    const { container } = render(<WorktreeSetupPanel projectCwd="/repo" progressOnly />)
+    expect(container).toBeEmptyDOMElement()
+  })
   it("requires explicit trust before saving a command and never executes script suggestions", async () => {
     const user = userEvent.setup()
     render(<WorktreeSetupPanel projectCwd="/repo" />)
-    fireEvent.click(screen.getByText(/Worktree setup recipe/))
+    await user.click(screen.getByRole("button", { name: /Setup recipe/ }))
     await user.type(screen.getByLabelText("Project setup command"), "bun install")
     expect(screen.getByRole("button", { name: "Save setup recipe" })).toBeDisabled()
     await user.click(screen.getByRole("checkbox"))
@@ -45,7 +61,7 @@ describe("worktree setup controls", () => {
     const user = userEvent.setup()
     mocks.configure.mockRejectedValue(new Error("Disk full"))
     render(<WorktreeSetupPanel projectCwd="/repo" />)
-    fireEvent.click(screen.getByText(/Worktree setup recipe/))
+    await user.click(screen.getByRole("button", { name: /Setup recipe/ }))
     await user.type(screen.getByLabelText("Project setup command"), "bun install")
     await user.click(screen.getByRole("checkbox"))
     await user.click(screen.getByRole("button", { name: "Save setup recipe" }))
