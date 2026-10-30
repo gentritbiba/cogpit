@@ -8,11 +8,13 @@ import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
 import { attachmentSrc, useImageUpload, type UploadedImage } from "./useImageUpload"
-import { canRecall, composerScope, draftStore, mergeDrafts } from "./draftStore"
-import { StashControls } from "./StashControls"
+import { deviceScopedKey } from "@/lib/device"
+import { combineContext } from "./composerEditing"
+import { unsentRecovery, downloadUnsentBackup } from "./unsentRecovery"
 import { ContextChips } from "./ContextChips"
 import { contextRefusal, validateContext, EMPTY_DRAFT, isDraftEmpty, parseComposerMessage, renderComposerMessage, type ComposerAttachment, type ComposerContextItem, type ComposerDraft } from "../../../shared/session/composerContext"
 import { ActionButtons } from "./ActionButtons"
+import { registerComposer, emitComposerEvent, dispatchComposerKey, type ComposerHandle, type ComposerSnapshot } from "@/plugins/composerBridge"
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
@@ -133,16 +135,15 @@ function getActionRowClass(stacked: boolean, isMultiline: boolean): string {
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(props, ref) {
   const { session, sessionSource } = useSessionContext()
   const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", session?.sessionId ?? "pending"])
-  const scope = composerScope(props.projectCwd ?? session?.cwd, identity)
+  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? session?.cwd ?? "", identity])
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 
 const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: string }>(function ScopedChatInput({ scope, allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false }, ref) {
-  const store = useMemo(() => draftStore(scope), [scope])
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  const initial = useRef(snapshot.record.draft).current
+  const recovery = useMemo(() => unsentRecovery(scope), [scope])
+  const snapshot = useSyncExternalStore(recovery.subscribe, recovery.getSnapshot)
+  const initial = useRef(snapshot.draft).current
   const mounted = useRef(true)
-  const recallIndex = useRef<number | null>(null)
   const canAccessHostFiles = useCapability("hostFiles")
   const {
     session,
@@ -185,7 +186,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
 
   const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
-  const applyDraft = useCallback((draft: ComposerDraft) => {
+  const applyDraft = useCallback((value: ComposerDraft) => {
+    const draft = structuredClone(value)
     textRef.current = draft.text
     contextRef.current = draft.context
     imagesRef.current = draft.attachments
@@ -196,8 +198,38 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     setContextError(validateContext(draft.context))
   }, [clearImages, restoreImages])
 
+  const uploadingRef = useRef(false)
+  uploadingRef.current = Boolean(uploading)
+  const inFlight = useRef(new Set<string>())
+  const revision = useRef({ token: crypto.randomUUID() as string, value: "" })
+  const composer = useMemo<ComposerHandle>(() => ({
+    snapshot(): ComposerSnapshot {
+      const draft = structuredClone(draftNow())
+      const busy = uploadingRef.current || inFlight.current.size > 0
+      const value = JSON.stringify([draft, busy])
+      if (value !== revision.current.value) revision.current = { token: crypto.randomUUID(), value }
+      const [, cwd, identity] = JSON.parse(scope) as [string, string, string]
+      return { token: revision.current.token, scope: { key: scope, cwd: cwd || null, identity }, draft, busy, uploading: uploadingRef.current }
+    },
+    replace(draft, expectedToken) {
+      const current = this.snapshot()
+      if (current.token !== expectedToken || current.busy || !mounted.current) return null
+      applyDraft(draft)
+      recovery.edit(draftNow())
+      const snapshot = this.snapshot()
+      emitComposerEvent(this, { type: "change", snapshot })
+      return snapshot
+    },
+    focus() { textareaRef.current?.focus() },
+  }), [scope, draftNow, applyDraft, recovery])
+
+  useLayoutEffect(() => {
+    const unregister = registerComposer(composer)
+    emitComposerEvent(composer, { type: "scope", snapshot: composer.snapshot() })
+    return unregister
+  }, [composer])
+
   const addContext = useCallback((item: ComposerContextItem, attachments: ComposerAttachment[] = []): string | null => {
-    recallIndex.current = null
     const refusal = attachments.length > 0 && !allowImages
       ? "The selected model does not accept images, so this capture cannot be attached. Switch models and try again."
       : contextRefusal(contextRef.current, item)
@@ -214,7 +246,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   }, [attachImages, allowImages])
 
   const removeContext = useCallback((id: string) => {
-    recallIndex.current = null
     contextRef.current = contextRef.current.filter((item) => item.id !== id)
     setContext(contextRef.current)
     removeContextImages(id)
@@ -222,32 +253,15 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [removeContextImages])
 
-  useLayoutEffect(() => { store.saveDraft(draftNow()) }, [text, context, images, store, draftNow])
-  const wasUploading = useRef(false)
-  useLayoutEffect(() => {
-    if (uploading || wasUploading.current) store.markUpload(Boolean(uploading))
-    wasUploading.current = Boolean(uploading)
-  }, [uploading, store])
+  useLayoutEffect(() => { recovery.edit(draftNow()); emitComposerEvent(composer, { type: "change", snapshot: composer.snapshot() }) }, [text, context, images, recovery, draftNow, composer, uploading])
   useEffect(() => {
     mounted.current = true
     const unload = (event: BeforeUnloadEvent) => {
-      if (store.getSnapshot().error) { event.preventDefault(); event.returnValue = "" }
+      if (recovery.getSnapshot().messages.length) { event.preventDefault(); event.returnValue = "" }
     }
     window.addEventListener("beforeunload", unload)
     return () => { mounted.current = false; window.removeEventListener("beforeunload", unload) }
-  }, [store])
-
-  const saveStash = useCallback(() => {
-    if (uploading) { setContextError("Wait for images to finish loading before saving."); return }
-    if (!store.save(draftNow())) return
-    recallIndex.current = null
-    applyDraft(EMPTY_DRAFT)
-    textareaRef.current?.focus()
-  }, [store, draftNow, applyDraft, uploading])
-  const restoreStash = useCallback((id: string, mode: "replace" | "swap" | "merge") => {
-    const restored = store.restore(id, mode)
-    if (restored) { recallIndex.current = null; applyDraft(restored); textareaRef.current?.focus() }
-  }, [store, applyDraft])
+  }, [recovery])
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
@@ -391,43 +405,50 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     if (textResponse && !trimmed) return
 
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
-    const draft: ComposerDraft = { v: 1, text, context, attachments: images }
+    const draft = structuredClone(draftNow())
     // A capture names its image by where it lands among the images sent.
     const sentContext = context.map((item) => item.kind === "browser" ? { ...item, image: images.findIndex((image) => image.contextId === item.id) + 1 } : item)
-    const entryId = store.save(draft, "sending")
-    if (!entryId) return
-    recallIndex.current = null
+    const entryId = recovery.capture(draft)
+    inFlight.current.add(entryId)
+    revision.current = { token: crypto.randomUUID(), value: "" }
+    emitComposerEvent(composer, { type: "before-send", sendId: entryId, scope: composer.snapshot().scope, draft: structuredClone(draft) })
     applyDraft(textResponse ? { ...draft, text: "" } : EMPTY_DRAFT)
+    recovery.edit(draftNow())
+    const clearedRevision = recovery.getSnapshot().revision
     const settle = (sent: boolean) => {
-      store.settle(entryId, sent)
-      if (mounted.current && !sent && isDraftEmpty(draftNow())) applyDraft(store.getSnapshot().record.draft)
+      inFlight.current.delete(entryId)
+      const restored = recovery.settle(entryId, sent, clearedRevision)
+      if (mounted.current && restored) applyDraft(restored)
+      emitComposerEvent(composer, { type: "settled", sendId: entryId, sent })
+      if (mounted.current) emitComposerEvent(composer, { type: "change", snapshot: composer.snapshot() })
     }
     try {
       const delivery = pendingInteraction?.type === "question"
         ? submitUserQuestion(trimmed).then(Boolean)
         : textResponse ? submitPlanResponse(false, undefined, trimmed)
           : session?.sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
-            : onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload, (identity) => store.created(entryId, identity))
+            : onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload, (session) => emitComposerEvent(composer, { type: "created", sendId: entryId, session }))
       void delivery.then(settle, () => settle(false))
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, store, draftNow, applyDraft])
+  }, [text, images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer])
 
   // A copied message with context pastes back as its chips, the same items with the same ids.
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    recallIndex.current = null
     const pasted = event.clipboardData?.getData("text/plain")
     const parsed = pasted ? parseComposerMessage(pasted) : null
     if (parsed && !parsed.context.some((item) => item.kind === "browser")) {
       event.preventDefault()
       try {
-        const combined = mergeDrafts(draftNow(), { v: 1, text: "", context: parsed.context, attachments: [] })
+        const combined = combineContext(draftNow(), { v: 1, text: "", context: parsed.context, attachments: [] })
         contextRef.current = combined.context
         setContext(combined.context)
       } catch (error) {
-        const persisted = store.retainImport(pasted!)
-        setContextError(`${error instanceof Error ? error.message : "Cannot import context"}. The complete pasted message is kept in Saved prompts${persisted ? "." : " in this tab; download a backup before leaving."}`)
+        emitComposerEvent(composer, { type: "rejected-input", scope: composer.snapshot().scope, text: pasted! })
+        const id = recovery.capture({ v: 1, text: pasted!, context: [], attachments: [] })
+        recovery.settle(id, false, -1)
+        setContextError(`${error instanceof Error ? error.message : "Cannot import context"}. The complete pasted message is kept in this tab; download its backup before leaving.`)
         return
       }
       if (parsed.text) {
@@ -439,25 +460,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       return
     }
     handleImagePaste(event)
-  }, [draftNow, store, handleImagePaste])
+  }, [draftNow, recovery, handleImagePaste, composer])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s") {
-      e.preventDefault(); saveStash(); return
-    }
-    const element = e.currentTarget
-    if (canRecall({ ...e, isComposing: e.nativeEvent.isComposing }, element.selectionStart, element.selectionEnd, draftNow(), recallIndex.current !== null, showSlash || showFiles)) {
-      const history = store.getSnapshot().record.entries.filter((entry) => entry.kind === "sent").reverse()
-      const next = e.key === "ArrowUp" ? Math.min((recallIndex.current ?? -1) + 1, history.length - 1) : Math.max((recallIndex.current ?? 0) - 1, -1)
-      if (history.length && (e.key === "ArrowUp" || recallIndex.current !== null)) {
-        e.preventDefault()
-        recallIndex.current = next < 0 ? null : next
-        applyDraft(history[next]?.draft ?? EMPTY_DRAFT)
-        focusComposerAtEnd()
-        return
-      }
-    }
+    if (dispatchComposerKey(composer, { key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, isComposing: e.nativeEvent.isComposing, selectionStart: e.currentTarget.selectionStart, selectionEnd: e.currentTarget.selectionEnd, suggestionsOpen: showSlash || showFiles })) { e.preventDefault(); return }
     if (showFiles && e.key === "Escape") {
       e.preventDefault()
       setFileSuggestionsDismissed(true)
@@ -476,15 +483,14 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, saveStash, draftNow, store, applyDraft, focusComposerAtEnd])
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer])
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { recallIndex.current = null; textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
     getText: () => textRef.current,
     setText: (newText: string) => {
-      recallIndex.current = null
       textRef.current = newText
       setText(newText)
       setFileSuggestionsDismissed(false)
@@ -493,7 +499,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     addContext,
     getDraft: draftNow,
     setDraft: (draft: ComposerDraft) => {
-      recallIndex.current = null
       applyDraft(draft)
       setFileSuggestionsDismissed(false)
       requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
@@ -566,7 +571,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             no suggestion, which is most turns. */}
         <PromptSuggestionBar suggestion={promptSuggestion} onAccept={applySuggestion} />
 
-        <StashControls store={store} snapshot={snapshot} draft={{ v: 1, text, context, attachments: images }} onSave={saveStash} onRestore={restoreStash} />
+        {snapshot.messages.filter((message) => !message.pending).map((message) => <div key={message.id} role="status" className="mb-2 rounded border p-2 text-xs">
+          <p>Unsent message: {message.draft.text.slice(0, 100) || "Context / attachments"}. Kept in this tab.</p>
+          <Button type="button" variant="outline" size="xs" disabled={!isDraftEmpty(draftNow())} onClick={() => { const restored = recovery.restore(message.id); if (restored) applyDraft(restored) }}>Restore unsent message</Button>
+          <Button type="button" variant="ghost" size="xs" onClick={() => downloadUnsentBackup(message.draft)}>Download unsent backup</Button>
+        </div>)}
         <ContextChips items={context} attachments={images} onRemove={removeContext} onOpenQuoteSource={openQuoteSource} className="mb-2" />
         {contextError && (
           <div role="alert" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">
@@ -582,7 +591,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             {images.map((img: UploadedImage, i) => (
               <div key={img.id} className="motion-list-item relative group/thumb">
                 <img src={attachmentSrc(img)} alt={img.contextId ? `Capture for ${context.find((item) => item.id === img.contextId)?.kind === "browser" ? "browser annotation" : "context"} ${i + 1}` : `Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
-                <Button type="button" variant="ghost" size="icon-xs" onClick={() => { recallIndex.current = null; if (img.contextId) removeContext(img.contextId); else removeImage(i) }} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
+                <Button type="button" variant="ghost" size="icon-xs" onClick={() => { if (img.contextId) removeContext(img.contextId); else removeImage(i) }} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
                   <X className="size-3" data-icon="icon" />
                 </Button>
               </div>

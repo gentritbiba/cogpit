@@ -28,8 +28,8 @@ export function composerScope(cwd: string | null | undefined, identity: string):
   return JSON.stringify([deviceScopedKey("composer-v1"), cwd ?? "", identity])
 }
 
-export type SavedPrompt = { id: string; kind: "stash" | "sending" | "refused" | "sent"; savedAt: string; draft: ComposerDraft; createdTarget?: string }
-export interface DraftRecord { v: 1; draft: ComposerDraft; entries: SavedPrompt[]; pendingUpload?: boolean }
+export type SavedDraft = { id: string; kind: "stash" | "sending" | "refused" | "sent"; savedAt: string; draft: ComposerDraft; createdTarget?: string }
+export interface DraftRecord { v: 1; draft: ComposerDraft; entries: SavedDraft[]; pendingUpload?: boolean }
 export interface DraftSnapshot { record: DraftRecord; error: string | null; corrupt: string | null }
 const schema = z.object({ v: z.literal(1), draft: z.unknown(), pendingUpload: z.boolean().optional(), entries: z.array(z.object({ id: z.string(), kind: z.enum(["stash", "sending", "refused", "sent"]), savedAt: z.string(), draft: z.unknown(), createdTarget: z.string().optional() }).strict()) }).strict()
 const stores = new Map<string, DraftStore>()
@@ -51,7 +51,7 @@ export class DraftStore {
         const record: DraftRecord = { v: 1, pendingUpload: value.pendingUpload, draft: validateDraft(value.draft), entries: value.entries.map((entry) => ({ ...entry, draft: validateDraft(entry.draft) })) }
         this.publish({ record, error: null, corrupt: null })
       } catch {
-        this.publish({ ...this.snapshot, corrupt: raw, error: "Saved prompts are damaged or contain expired attachment references. Download the backup before resetting storage; your current draft is kept." })
+        this.publish({ ...this.snapshot, corrupt: raw, error: "Saved drafts are damaged or contain expired attachment references. Download the backup before resetting storage; your current draft is kept." })
       }
     } catch {
       this.publish({ ...this.snapshot, error: "Draft storage is unavailable. Keep this tab open, retry storage or download a backup." })
@@ -75,47 +75,63 @@ export class DraftStore {
     if (JSON.stringify(draft) === JSON.stringify(this.snapshot.record.draft)) return this.snapshot.error === null
     return this.write({ ...this.snapshot.record, draft: structuredClone(draft) })
   }
-  save(draft: ComposerDraft, kind: SavedPrompt["kind"] = "stash"): string | null {
+  save(draft: ComposerDraft, kind: SavedDraft["kind"] = "stash"): string | null {
     if (isDraftEmpty(draft)) return null
     const id = crypto.randomUUID()
     const record = this.snapshot.record
-    const entry: SavedPrompt = { id, kind, savedAt: new Date().toISOString(), draft: structuredClone(draft) }
+    const entry: SavedDraft = { id, kind, savedAt: new Date().toISOString(), draft: structuredClone(draft) }
     // A failed explicit save must leave the live draft and stash list unchanged.
     const saved = this.write({ ...record, draft: structuredClone(EMPTY_DRAFT), entries: [...record.entries, entry] })
     if (!saved) this.publish({ ...this.snapshot, record })
     return saved ? id : null
   }
+  copy(draft: ComposerDraft): string | null {
+    if (isDraftEmpty(draft)) return null
+    const record = this.snapshot.record
+    const id = crypto.randomUUID()
+    const entry: SavedDraft = { id, kind: "stash", savedAt: new Date().toISOString(), draft: structuredClone(draft) }
+    if (this.write({ ...record, entries: [...record.entries, entry] })) return id
+    this.publish({ ...this.snapshot, record })
+    return null
+  }
   retainImport(text: string): boolean {
-    const entry: SavedPrompt = { id: crypto.randomUUID(), kind: "stash", savedAt: new Date().toISOString(), draft: { v: 1, text, context: [], attachments: [] } }
+    const entry: SavedDraft = { id: crypto.randomUUID(), kind: "stash", savedAt: new Date().toISOString(), draft: { v: 1, text, context: [], attachments: [] } }
     return this.write({ ...this.snapshot.record, entries: [...this.snapshot.record.entries, entry] })
   }
-  created(id: string, identity: CreatedComposerSession): void {
+  created(id: string, identity: CreatedComposerSession, canTransfer: (cwd: string) => boolean = () => true): void {
     const [accountDevice] = JSON.parse(this.key) as [string]
     const target = JSON.stringify([accountDevice, identity.cwd, JSON.stringify([identity.dirName, identity.sessionId])])
     const record = this.snapshot.record
     this.write({ ...record, entries: record.entries.map((entry) => entry.id === id ? { ...entry, createdTarget: target } : entry) })
-    this.transferAccepted(id)
+    this.transferAccepted(id, canTransfer)
   }
-  private transferAccepted(id: string): void {
+  private transferAccepted(id: string, canTransfer: (cwd: string) => boolean = () => true): void {
     const entry = this.snapshot.record.entries.find((item) => item.id === id)
     if (entry?.kind !== "sent" || !entry.createdTarget || entry.createdTarget === this.key) return
+    try {
+      const [accountDevice, cwd] = JSON.parse(entry.createdTarget) as [string, string]
+      if (accountDevice !== (JSON.parse(this.key) as [string])[0] || !canTransfer(cwd)) throw new Error("Target is outside the current draft scope")
+    } catch {
+      this.publish({ ...this.snapshot, error: "Recall handoff is outside the enabled account or project scope. The original message is kept here." })
+      return
+    }
     const destination = draftStore(entry.createdTarget)
     const accepted = { ...entry, createdTarget: undefined }
     const targetRecord = destination.getSnapshot().record
     if (targetRecord.entries.some((item) => item.id === id) || destination.write({ ...targetRecord, entries: [...targetRecord.entries, accepted] })) this.remove(id)
     else this.publish({ ...this.snapshot, error: "The first prompt was sent, but recall could not be saved in the new session. Its complete journal is kept here; retry storage or download a backup." })
   }
-  settle(id: string, sent: boolean): void {
+  settle(id: string, sent: boolean, restoreEmpty = true, canTransfer: (cwd: string) => boolean = () => true): void {
     const record = this.snapshot.record
     const entry = record.entries.find((item) => item.id === id)
     if (!entry) return
-    if (!sent && isDraftEmpty(record.draft)) {
+    if (!sent && restoreEmpty && isDraftEmpty(record.draft)) {
       this.write({ ...record, draft: entry.draft, entries: record.entries.filter((item) => item.id !== id) })
     } else {
       const entries = record.entries.map((item) => item.id === id ? { ...item, kind: sent ? "sent" as const : "refused" as const } : item)
       const oldHistory = entries.filter((item) => item.kind === "sent").slice(0, -30)
       this.write({ ...record, entries: entries.filter((item) => !oldHistory.includes(item)) })
-      if (sent) this.transferAccepted(id)
+      if (sent) this.transferAccepted(id, canTransfer)
     }
   }
   restore(id: string, mode: "replace" | "swap" | "merge"): ComposerDraft | null {
@@ -140,9 +156,9 @@ export class DraftStore {
     this.publish({ ...this.snapshot, record })
     return false
   }
-  retry = () => {
+  retry = (canTransfer: (cwd: string) => boolean = () => true) => {
     if (this.snapshot.corrupt !== null || !this.write(this.snapshot.record)) return false
-    this.snapshot.record.entries.forEach((entry) => this.transferAccepted(entry.id))
+    this.snapshot.record.entries.forEach((entry) => this.transferAccepted(entry.id, canTransfer))
     return this.snapshot.error === null
   }
   backup = () => JSON.stringify({ scope: this.key, ...this.snapshot.record, ...(this.snapshot.corrupt !== null ? { damagedStorage: this.snapshot.corrupt } : {}) }, null, 2)

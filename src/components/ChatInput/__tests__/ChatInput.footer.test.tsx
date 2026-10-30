@@ -46,9 +46,9 @@ vi.mock("@/components/SlashSuggestions", () => ({ SlashSuggestions: () => null }
 vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
 
 import { ChatInput } from "../index"
-import { resetDraftStoresForTest } from "../draftStore"
+import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
 
-beforeEach(() => { localStorage.clear(); resetDraftStoresForTest() })
+beforeEach(() => { localStorage.clear(); resetUnsentRecoveriesForTest() })
 
 describe("ChatInput footer", () => {
   it("stacks the message above a control row that ends with Send", () => {
