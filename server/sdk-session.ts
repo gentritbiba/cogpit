@@ -733,7 +733,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
     let readiness: Promise<void> | undefined
     queryOpts.hooks = {
       ...queryOpts.hooks,
-      UserPromptSubmit: [{ timeout: 86400, hooks: [async (input) => {
+      UserPromptSubmit: [...(queryOpts.hooks?.UserPromptSubmit ?? []), { timeout: 86400, hooks: [async (input) => {
         try {
           await (readiness ??= (async () => {
             state.cwd = input.cwd
