@@ -28,6 +28,8 @@ let serverProcess: Electron.UtilityProcess | null = null
 /** Known once the server is listening; until then windows show the loading page. */
 let appOrigin: string | null = null
 let quitting = false
+/** Aborted on quit so a slow login shell is not left running. */
+const shellPathProbe = new AbortController()
 /** Set once the worker exists; re-reports desktop presence to it. */
 let reportAttention: (() => void) | null = null
 
@@ -174,7 +176,14 @@ function startServerWorker(userDataDir: string, isDev: boolean, log: StartupLog)
   return ready
 }
 
-app.whenReady().then(async () => {
+function failStartup(err: unknown, logPath: string | null): void {
+  console.error("[main] Cogpit could not start:", err)
+  // Quitting mid-start kills the worker, which is not a failure to report.
+  if (!quitting) dialog.showErrorBox("Cogpit could not start", startupFailureMessage(err, logPath))
+  app.quit()
+}
+
+async function startApp(): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(process.platform, {
     openExternal: (url) => void shell.openExternal(url),
     openKeyboardShortcuts,
@@ -189,20 +198,16 @@ app.whenReady().then(async () => {
 
   // GUI apps don't inherit the user's shell PATH, and the server worker needs
   // it to find the agent CLIs.
-  if (process.platform !== "win32") {
-    const shellPath = await loginShellPath(process.env.SHELL || "/bin/zsh")
-    if (shellPath) process.env.PATH = shellPath
-  }
+  const shellPath = await loginShellPath(process.env.SHELL || "/bin/zsh", { signal: shellPathProbe.signal })
+  if (shellPath) process.env.PATH = shellPath
+  if (quitting) return
 
-  const startupLog = openStartupLog(app.getPath("logs"))
+  const startupLog = openStartupLog(() => app.getPath("logs"))
   let port: number
   try {
     port = await startServerWorker(app.getPath("userData"), !!process.env.ELECTRON_RENDERER_URL, startupLog)
   } catch (err) {
-    console.error("Failed to start server worker:", err)
-    // Quitting mid-start kills the worker, which is not a failure to report.
-    if (!quitting) dialog.showErrorBox("Cogpit could not start", startupFailureMessage(err, startupLog.path))
-    app.quit()
+    failStartup(err, startupLog.path)
     return
   } finally {
     startupLog.close()
@@ -212,7 +217,11 @@ app.whenReady().then(async () => {
   appOrigin = `http://127.0.0.1:${port}`
   initUpdater()
   if (mainWindow) openApp(mainWindow, appOrigin)
-})
+}
+
+// Anything else that throws during startup would otherwise leave the app
+// running with no server and nothing on screen to say so.
+app.whenReady().then(startApp).catch((err: unknown) => failStartup(err, null))
 
 // Quit when all windows are closed (except on macOS)
 app.on("window-all-closed", () => {
@@ -224,6 +233,7 @@ app.on("window-all-closed", () => {
 // Clean up the server worker when the app quits
 app.on("before-quit", () => {
   quitting = true
+  shellPathProbe.abort()
   if (!serverProcess) return
   const pid = serverProcess.pid
   // Windows has no process groups, so killing the worker alone orphans every

@@ -19,11 +19,11 @@ describe("openStartupLog", () => {
 
   it("starts each launch with a fresh file and stops writing once closed", () => {
     const dir = join(tempDir(), "logs")
-    const previous = openStartupLog(dir)
+    const previous = openStartupLog(() => dir)
     previous.write("old launch\n")
     previous.close()
 
-    const log = openStartupLog(dir)
+    const log = openStartupLog(() => dir)
     log.write("[server-worker] starting\n")
     log.write(Buffer.from("Error: listen EADDRINUSE\n"))
     log.close()
@@ -37,7 +37,17 @@ describe("openStartupLog", () => {
     const blocker = join(tempDir(), "file")
     writeFileSync(blocker, "")
 
-    const log = openStartupLog(join(blocker, "logs"))
+    const log = openStartupLog(() => join(blocker, "logs"))
+    log.write("ignored")
+    log.close()
+
+    expect(log.path).toBeNull()
+  })
+
+  it("has no path when the logs folder cannot even be looked up", () => {
+    const log = openStartupLog(() => {
+      throw new Error("Failed to get 'logs' path")
+    })
     log.write("ignored")
     log.close()
 

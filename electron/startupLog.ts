@@ -12,15 +12,19 @@ export interface StartupLog {
  * The server worker's output until it is ready, on disk so a failed launch can
  * point at it: a GUI app's own stdout goes nowhere. Written synchronously
  * because the error dialog blocks the event loop before an async write lands.
- * Each launch starts a fresh file.
+ * Each launch starts a fresh file. `logsDir` is looked up here because asking
+ * Electron for its logs folder can itself throw.
  */
-export function openStartupLog(dir: string): StartupLog {
-  const path = join(dir, "startup.log")
+export function openStartupLog(logsDir: () => string): StartupLog {
+  let path: string
   let fd: number | null
   try {
+    const dir = logsDir()
+    path = join(dir, "startup.log")
     mkdirSync(dir, { recursive: true })
     fd = openSync(path, "w")
   } catch {
+    // Startup goes on without a log; the error dialog then gives just the reason.
     return { path: null, write() {}, close() {} }
   }
   return {
