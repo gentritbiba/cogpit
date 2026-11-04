@@ -27,6 +27,13 @@ type DesktopOverlaysProps = Pick<
   "navigation" | "project" | "chrome"
 >
 
+declare global {
+  interface Window {
+    /** Opens the shortcuts dialog; the desktop app's Help menu calls it. */
+    __cogpitOpenKeyboardShortcuts?: () => void
+  }
+}
+
 export function DesktopOverlays({
   navigation,
   project,
@@ -44,16 +51,21 @@ export function DesktopOverlays({
   const currentDirName = sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
 
   const onKeyboardShortcutsOpenChange = chrome.onKeyboardShortcutsOpenChange
-  // "?" is the only way in for someone who does not already know ⌘K.
+  // Ways in besides ⌘K: "?" and the desktop app's Help menu.
   useEffect(() => {
+    const open = () => onKeyboardShortcutsOpenChange(true)
     function handleKeyDown(event: KeyboardEvent) {
       if (!matchesKeybinding("keyboardShortcuts", event)) return
       if (isEditableTarget(document.activeElement)) return
       event.preventDefault()
-      onKeyboardShortcutsOpenChange(true)
+      open()
     }
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
+    window.__cogpitOpenKeyboardShortcuts = open
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      delete window.__cogpitOpenKeyboardShortcuts
+    }
   }, [onKeyboardShortcutsOpenChange])
 
   // Slot 1 is always this machine, 2..9 follow registry order — the same

@@ -1,6 +1,9 @@
 import { type ComponentType } from "react"
+import { defaultFilter, useCommandState } from "cmdk"
 import {
   BarChart3,
+  BookOpen,
+  Bug,
   ChevronsDownUp,
   ChevronsUpDown,
   Code2,
@@ -42,6 +45,7 @@ import {
 } from "@/components/ui/command"
 import { Spinner } from "@/components/ui/Spinner"
 import { DEVICE_SWITCH_COMMANDS, shortcutLabel } from "@/lib/keybindings"
+import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
 
 export interface CommandPaletteProject {
   dirName: string
@@ -178,6 +182,12 @@ function action(
  */
 function availableActions(...items: (PaletteAction | false | undefined)[]): PaletteAction[] {
   return items.filter((item): item is PaletteAction => item !== false && item !== undefined)
+}
+
+/** Matched as if its label began with "Help", so typing "help" ranks it above sessions that mention the word. */
+function helpAction(id: string, label: string, keywords: string, icon: ComponentType, run: () => void): PaletteAction {
+  const item = action(id, label, keywords, icon, run)
+  return { ...item, value: `Help ${item.value}` }
 }
 
 export function CommandPalette(props: CommandPaletteProps) {
@@ -374,13 +384,6 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onTogglePreview,
       shortcutLabel("preview"),
     ),
-    props.onOpenKeyboardShortcuts && action(
-      "keyboard-shortcuts",
-      "Customize keyboard shortcuts",
-      "keybindings hotkeys settings",
-      Keyboard,
-      props.onOpenKeyboardShortcuts,
-    ),
     props.onOpenConfig && action(
       "config",
       props.showConfig ? "Close agent configuration" : "Open agent configuration",
@@ -423,6 +426,30 @@ export function CommandPalette(props: CommandPaletteProps) {
     ),
   )
 
+  const help = availableActions(
+    helpAction(
+      "documentation",
+      "Documentation",
+      "docs guide manual readme getting started learn how to",
+      BookOpen,
+      () => window.open(DOCUMENTATION_URL, "_blank", "noopener,noreferrer"),
+    ),
+    props.onOpenKeyboardShortcuts && helpAction(
+      "keyboard-shortcuts",
+      "Keyboard shortcuts",
+      "keys hotkeys keybindings cheat sheet customize",
+      Keyboard,
+      props.onOpenKeyboardShortcuts,
+    ),
+    helpAction(
+      "report-issue",
+      "Report an issue",
+      "bug problem feedback support github",
+      Bug,
+      () => window.open(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer"),
+    ),
+  )
+
   const groups: PaletteGroup[] = [
     { value: "Navigation", items: navigation },
     ...(recentSessions.length > 0 ? [{ value: "Recent sessions", items: recentSessions }] : []),
@@ -430,6 +457,7 @@ export function CommandPalette(props: CommandPaletteProps) {
     ...(devices.length > 0 ? [{ value: "Devices", items: devices }] : []),
     { value: "View", items: view },
     { value: "Tools", items: tools },
+    { value: "Help & docs", items: help },
   ]
 
   function runAction(item: PaletteAction) {
@@ -461,35 +489,52 @@ export function CommandPalette(props: CommandPaletteProps) {
 
         <CommandList className="max-h-[min(26rem,60vh)]">
           <CommandEmpty>No matching actions.</CommandEmpty>
-          {groups.map((group) => (
-            <CommandGroup key={group.value} heading={group.value}>
-              {group.items.map((item) => {
-                const Icon = item.icon
-                return (
-                  <CommandItem
-                    key={item.id}
-                    value={item.value}
-                    onSelect={() => runAction(item)}
-                  >
-                    <Icon aria-hidden="true" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{item.label}</span>
-                      {item.description && (
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {item.description}
-                        </span>
-                      )}
-                    </span>
-                    {item.shortcut && (
-                      <CommandShortcut>{item.shortcut}</CommandShortcut>
-                    )}
-                  </CommandItem>
-                )
-              })}
-            </CommandGroup>
-          ))}
+          <RankedGroups groups={groups} onRun={runAction} />
         </CommandList>
       </Command>
     </CommandDialog>
   )
+}
+
+/**
+ * The groups, best match first. cmdk 1.1.1 sorts the items inside a group but
+ * never moves the groups themselves, so a strong match in a late group (Help
+ * for "help") sat below weak matches in the sessions above it.
+ */
+function RankedGroups({ groups, onRun }: { groups: PaletteGroup[]; onRun: (item: PaletteAction) => void }) {
+  const search = useCommandState((state) => state.search)
+  const ranked = search
+    ? groups
+        .map((group) => ({ group, score: Math.max(0, ...group.items.map((item) => defaultFilter(item.value, search))) }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ group }) => group)
+    : groups
+
+  return ranked.map((group) => (
+    <CommandGroup key={group.value} heading={group.value}>
+      {group.items.map((item) => {
+        const Icon = item.icon
+        return (
+          <CommandItem
+            key={item.id}
+            value={item.value}
+            onSelect={() => onRun(item)}
+          >
+            <Icon aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{item.label}</span>
+              {item.description && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  {item.description}
+                </span>
+              )}
+            </span>
+            {item.shortcut && (
+              <CommandShortcut>{item.shortcut}</CommandShortcut>
+            )}
+          </CommandItem>
+        )
+      })}
+    </CommandGroup>
+  ))
 }

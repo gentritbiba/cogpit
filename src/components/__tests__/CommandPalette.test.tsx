@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { Users } from "lucide-react"
 import { CommandPalette } from "@/components/CommandPalette"
 import { createCommandPaletteProps as createProps } from "./commandPaletteProps"
+import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -49,6 +50,48 @@ describe("CommandPalette", () => {
     )
 
     expect(screen.getByRole("option", { name: /continue adapting useful features/ })).toBeInTheDocument()
+  })
+
+  it("finds help and docs first when searching for help", async () => {
+    const user = userEvent.setup()
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    try {
+      const props = { ...createProps(), onOpenKeyboardShortcuts: vi.fn() }
+      render(
+        <CommandPalette
+          {...props}
+          recentSessions={[{ dirName: "proj", fileName: "a.jsonl", sessionId: "a", projectShortName: "helpdesk", lastUserMessage: "fix the help page" }]}
+        />,
+      )
+
+      await user.type(screen.getByRole("combobox", { name: "Search commands" }), "help")
+
+      expect(screen.getAllByRole("option").slice(0, 3).map((option) => option.textContent))
+        .toEqual(["Documentation", "Keyboard shortcuts", "Report an issue"])
+
+      await user.keyboard("{Enter}")
+      expect(open).toHaveBeenCalledWith(DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
+      expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    } finally {
+      open.mockRestore()
+    }
+  })
+
+  it("opens the keyboard shortcuts and the issue tracker from help", async () => {
+    const user = userEvent.setup()
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    try {
+      const props = { ...createProps(), onOpenKeyboardShortcuts: vi.fn() }
+      render(<CommandPalette {...props} />)
+
+      await user.click(screen.getByText("Keyboard shortcuts"))
+      await user.click(screen.getByText("Report an issue"))
+
+      expect(props.onOpenKeyboardShortcuts).toHaveBeenCalledOnce()
+      expect(open).toHaveBeenCalledWith(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer")
+    } finally {
+      open.mockRestore()
+    }
   })
 
   it("runs the highlighted action from the keyboard", async () => {

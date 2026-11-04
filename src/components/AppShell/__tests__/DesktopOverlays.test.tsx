@@ -201,6 +201,21 @@ describe("DesktopOverlays", () => {
       expect(props.chrome.onKeyboardShortcutsOpenChange).not.toHaveBeenCalled()
       document.body.removeChild(input)
     })
+
+    it("lets the desktop Help menu open it, even while typing", () => {
+      const props = makeProps()
+      const { unmount } = render(<DesktopOverlays {...props} />)
+      const input = document.createElement("input")
+      document.body.appendChild(input)
+      input.focus()
+
+      window.__cogpitOpenKeyboardShortcuts?.()
+
+      expect(props.chrome.onKeyboardShortcutsOpenChange).toHaveBeenCalledWith(true)
+      document.body.removeChild(input)
+      unmount()
+      expect(window.__cogpitOpenKeyboardShortcuts).toBeUndefined()
+    })
   })
 
   it("opens the devices dialog from the palette so it survives a hidden header switcher", async () => {

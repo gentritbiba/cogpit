@@ -4,7 +4,8 @@
 
 <p align="center">
   An open-source GUI for Claude Code, OpenAI Codex, and GitHub Copilot CLI.<br />
-  Run sessions, review code changes, and use the browser alongside your agents.
+  Run sessions, review code changes, and use the browser alongside your agents.<br />
+  Cogpit has no AI models of its own, so you need one of those CLIs installed and signed in.
 </p>
 
 <p align="center">
@@ -35,7 +36,7 @@ It runs on your machine and uses your existing CLI logins. Cogpit is free, MIT-l
 
 ## Get started
 
-Install and sign in to at least one supported CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [OpenAI Codex](https://github.com/openai/codex), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses that CLI's authentication and access to models.
+Install and sign in to at least one supported CLI: [Claude Code](https://code.claude.com/docs/en/quickstart), [OpenAI Codex](https://developers.openai.com/codex/cli), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses that CLI's authentication and access to models.
 
 ### Download the desktop app
 
@@ -50,17 +51,23 @@ Get the installer from the [latest release](https://github.com/gentritbiba/cogpi
 
 The app updates itself: it downloads new releases in the background and installs them when you restart or quit. A pacman install updates when you choose **Restart now** and enter your password. Other Linux packages show a notice instead. On macOS, the app needs write access to the folder it runs from (usually `/Applications`). Otherwise it links to the download.
 
+The macOS app is not notarized by Apple yet, so the first time you open it macOS says it could not verify Cogpit. Click **Done**, open **System Settings → Privacy & Security**, scroll down to the message about Cogpit, and click **Open Anyway**. Confirm with your password. You only need to do this once ([Apple's guide](https://support.apple.com/en-us/102445)).
+
 The Windows installer is unsigned and Windows support has had less testing. SmartScreen may show an unknown-publisher prompt. Use **More info → Run anyway** to open the installer.
 
 ### Run in your browser
 
-With Node.js 20.11 or newer:
+With [Node.js](https://nodejs.org) 22.16 or newer:
 
 ```bash
 npx cogpit@latest
 ```
 
-This starts a local server on an available loopback port and opens Cogpit in your browser. Press `Ctrl+C` to stop it. To open a single existing session:
+This starts a local server on an available loopback port and opens Cogpit in your browser. It also lists which agent CLIs it found and how to install the others. Press `Ctrl+C` to stop it.
+
+On Linux, `npx` compiles Cogpit's terminal component while installing, so install `python3`, `make` and `g++` first (on Debian or Ubuntu: `sudo apt install python3 make g++`).
+
+To open a single existing session:
 
 ```bash
 npx cogpit@latest preview <session-id>
@@ -133,6 +140,8 @@ Cogpit reads session history from the CLI directories on your machine. It does n
 Yes. Run the desktop app with Network Access enabled or run a headless Cogpit server, then connect through your phone's browser. Remote browser access requires HTTPS and authentication. The multi-device hub lets you switch between registered machines. See [self-hosting and remote access](docs/self-hosting.md).
 
 ## Build from source
+
+Requires [Bun](https://bun.sh).
 
 ```bash
 git clone https://github.com/gentritbiba/cogpit.git

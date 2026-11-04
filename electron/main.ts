@@ -1,32 +1,33 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, utilityProcess } from "electron"
-import { execFileSync, execSync } from "node:child_process"
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess } from "electron"
+import { execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
+import { appMenuTemplate } from "./appMenu.ts"
+import { loadingPageUrl } from "./loadingPage.ts"
 import { installNavigationPolicy } from "./navigationPolicy.ts"
 import {
   ATTENTION_WINDOW_EVENTS,
   handleWorkerNotification,
   startAttentionReporting,
 } from "./notifications.ts"
-
-// GUI apps don't inherit the user's shell PATH.
-// Spawn their shell to get the real PATH so `claude` CLI is found.
-if (process.platform !== "win32") {
-  try {
-    const userShell = process.env.SHELL || "/bin/zsh"
-    const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
-    if (realPath) process.env.PATH = realPath
-  } catch {
-    // Fall back to system PATH
-  }
-}
+import { callRendererHook } from "./rendererHooks.ts"
+import { startupFailureMessage, waitForServerReady } from "./serverStartup.ts"
+import { loginShellPath } from "./shellPath.ts"
+import { openStartupLog, type StartupLog } from "./startupLog.ts"
 
 // Windows routes toasts through this ID; it must match the electron-builder
 // appId or notifications are silently dropped.
 if (process.platform === "win32") app.setAppUserModelId("com.cogpit.app")
 
+/** The production renderer build, served by the local server. */
+const STATIC_DIR = join(__dirname, "../renderer")
+
 let mainWindow: BrowserWindow | null = null
 let serverProcess: Electron.UtilityProcess | null = null
+/** Known once the server is listening; until then windows show the loading page. */
+let appOrigin: string | null = null
+let quitting = false
 /** Set once the worker exists; re-reports desktop presence to it. */
 let reportAttention: (() => void) | null = null
 
@@ -68,8 +69,8 @@ function titleBarOptions(): Electron.BrowserWindowConstructorOptions {
   return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 14 } }
 }
 
-async function createWindow(port: number) {
-  mainWindow = new BrowserWindow({
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
@@ -86,26 +87,48 @@ async function createWindow(port: number) {
       backgroundThrottling: true,
     },
   })
-
-  installNavigationPolicy(mainWindow.webContents, `http://127.0.0.1:${port}`, (url) => shell.openExternal(url))
-
-  // Always load from the Express server — it serves the built renderer
-  // and handles all API routes on the same origin (no proxy needed).
-  mainWindow.loadURL(`http://127.0.0.1:${port}`)
+  mainWindow = win
 
   for (const event of ATTENTION_WINDOW_EVENTS) {
     // Electron declares one overload per event name, so a union needs narrowing.
-    mainWindow.on(event as "focus", () => reportAttention?.())
+    win.on(event as "focus", () => reportAttention?.())
   }
 
-  mainWindow.on("closed", () => {
+  win.on("closed", () => {
     mainWindow = null
     reportAttention?.()
   })
 
-  // The worker is forked before this window exists, so its first report saw no
-  // window at all. Re-report now that there is one.
+  if (appOrigin) openApp(win, appOrigin)
+  else win.loadURL(loadingPageUrl(readAppMark())).catch(() => {})
+
+  // The worker may already be reporting presence; re-report now that there is a window.
   reportAttention?.()
+  return win
+}
+
+/** Always load from the local server: it serves the built renderer and every API route on one origin. */
+function openApp(win: BrowserWindow, origin: string): void {
+  installNavigationPolicy(win.webContents, origin, (url) => shell.openExternal(url))
+  win.loadURL(origin)
+}
+
+function readAppMark(): string | null {
+  try {
+    return readFileSync(join(STATIC_DIR, "cogpit.svg"), "utf8")
+  } catch {
+    return null
+  }
+}
+
+function openKeyboardShortcuts(): void {
+  const win = mainWindow ?? createWindow()
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  void callRendererHook(win, "__cogpitOpenKeyboardShortcuts").then((handled) => {
+    if (!handled) console.error("[main] Keyboard shortcuts could not reach the renderer")
+  })
 }
 
 /**
@@ -113,108 +136,82 @@ async function createWindow(port: number) {
  * (child processes, PTY I/O, SQLite queries) never blocks the
  * main process event loop or freezes the renderer.
  */
-function startServerWorker(staticDir: string, userDataDir: string, isDev: boolean): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const workerPath = join(__dirname, "server-worker.js")
-    serverProcess = utilityProcess.fork(workerPath)
+function startServerWorker(userDataDir: string, isDev: boolean, log: StartupLog): Promise<number> {
+  const worker = utilityProcess.fork(join(__dirname, "server-worker.js"), [], { stdio: "pipe" })
+  serverProcess = worker
 
-    // The worker cannot construct Notifications itself; it asks us to. Clicks
-    // are reported back so notification history reflects them.
-    serverProcess.on("message", (msg: unknown) =>
-      handleWorkerNotification(msg, mainWindow, (reply) => serverProcess?.postMessage(reply)))
-
-    // ...and it cannot see window focus, so we tell it when to use the phone.
-    reportAttention = startAttentionReporting(
-      () => mainWindow,
-      (message) => serverProcess?.postMessage(message),
-    )
-
-    const timeout = setTimeout(() => {
-      reject(new Error("Server worker timed out after 15s"))
-    }, 15_000)
-
-    serverProcess.on("message", (msg: { type: string; port?: number; error?: string }) => {
-      if (msg.type === "ready" && msg.port) {
-        clearTimeout(timeout)
-        resolve(msg.port)
-      } else if (msg.type === "error") {
-        clearTimeout(timeout)
-        reject(new Error(msg.error || "Server worker failed"))
-      }
-    })
-
-    serverProcess.on("exit", (code) => {
-      clearTimeout(timeout)
-      if (code !== 0 && code !== null) {
-        console.error(`[main] Server worker exited with code ${code}`)
-      }
-      serverProcess = null
-    })
-
-    // Send configuration to the worker
-    serverProcess.postMessage({ staticDir, userDataDir, isDev })
+  // Piped rather than inherited so startup output also reaches the log a
+  // failed launch points at.
+  worker.stdout?.on("data", (chunk: Buffer) => {
+    process.stdout.write(chunk)
+    log.write(chunk)
   })
+  worker.stderr?.on("data", (chunk: Buffer) => {
+    process.stderr.write(chunk)
+    log.write(chunk)
+  })
+
+  // The worker cannot construct Notifications itself; it asks us to. Clicks
+  // are reported back so notification history reflects them.
+  worker.on("message", (msg: unknown) =>
+    handleWorkerNotification(msg, mainWindow, (reply) => serverProcess?.postMessage(reply)))
+
+  // ...and it cannot see window focus, so we tell it when to use the phone.
+  reportAttention = startAttentionReporting(
+    () => mainWindow,
+    (message) => serverProcess?.postMessage(message),
+  )
+
+  worker.on("exit", (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[main] Server worker exited with code ${code}`)
+    }
+    if (serverProcess === worker) serverProcess = null
+  })
+
+  const ready = waitForServerReady(worker)
+  worker.postMessage({ staticDir: STATIC_DIR, userDataDir, isDev })
+  return ready
 }
 
 app.whenReady().then(async () => {
-  // Determine static directory for production builds
-  const staticDir = join(__dirname, "../renderer")
-  const userDataDir = app.getPath("userData")
-  const isDev = !!process.env.ELECTRON_RENDERER_URL
+  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(process.platform, {
+    openExternal: (url) => void shell.openExternal(url),
+    openKeyboardShortcuts,
+  })))
 
-  // Start server in a separate utility process
+  // Show the window straight away; the server can take seconds to start.
+  createWindow()
+  // macOS: re-create window when dock icon clicked
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+
+  // GUI apps don't inherit the user's shell PATH, and the server worker needs
+  // it to find the agent CLIs.
+  if (process.platform !== "win32") {
+    const shellPath = await loginShellPath(process.env.SHELL || "/bin/zsh")
+    if (shellPath) process.env.PATH = shellPath
+  }
+
+  const startupLog = openStartupLog(app.getPath("logs"))
   let port: number
   try {
-    port = await startServerWorker(staticDir, userDataDir, isDev)
+    port = await startServerWorker(app.getPath("userData"), !!process.env.ELECTRON_RENDERER_URL, startupLog)
   } catch (err) {
     console.error("Failed to start server worker:", err)
+    // Quitting mid-start kills the worker, which is not a failure to report.
+    if (!quitting) dialog.showErrorBox("Cogpit could not start", startupFailureMessage(err, startupLog.path))
     app.quit()
     return
+  } finally {
+    startupLog.close()
   }
 
   console.log(`Cogpit server ready on port ${port} (utility process)`)
-
-  // Custom menu: removes macOS "Show Tab Bar" (Ctrl+Cmd+T) which
-  // conflicts with the open-terminal shortcut in the renderer.
-  const isWindows = process.platform === "win32"
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    isWindows
-      ? { label: "File", submenu: [{ role: "quit", label: "Exit" }] }
-      : { role: "appMenu" },
-    { role: "editMenu" },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: "Window",
-      submenu: [
-        { role: "minimize" },
-        ...(isWindows ? [] : [{ role: "zoom" as const }]),
-        { role: "close" },
-      ],
-    },
-  ]))
-
+  appOrigin = `http://127.0.0.1:${port}`
   initUpdater()
-  await createWindow(port)
-
-  // macOS: re-create window when dock icon clicked
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(port)
-    }
-  })
+  if (mainWindow) openApp(mainWindow, appOrigin)
 })
 
 // Quit when all windows are closed (except on macOS)
@@ -226,6 +223,7 @@ app.on("window-all-closed", () => {
 
 // Clean up the server worker when the app quits
 app.on("before-quit", () => {
+  quitting = true
   if (!serverProcess) return
   const pid = serverProcess.pid
   // Windows has no process groups, so killing the worker alone orphans every

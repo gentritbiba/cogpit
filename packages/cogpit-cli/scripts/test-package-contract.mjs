@@ -38,6 +38,8 @@ const help = spawnSync(process.execPath, ["dist/cli.js", "--help"], { encoding: 
 assert.equal(help.status, 0, help.stderr)
 assert.match(help.stdout, /cogpit \[options\]/i)
 assert.match(help.stdout, /cogpit preview <session-id>/i)
+assert.match(help.stdout, /installed and signed in/)
+assert.match(readFileSync("dist/cli.js", "utf8"), /https:\/\/nodejs\.org/)
 
 const pack = spawnSync("npm", ["pack", "--json", "--dry-run"], { encoding: "utf8" })
 assert.equal(pack.status, 0, pack.stderr)
@@ -99,6 +101,10 @@ try {
   const page = await fetch(url)
   assert.equal(page.status, 200)
   assert.match(await page.text(), /<div id="root"><\/div>/)
+
+  // The orchestration database opens on start, which is when Node would warn.
+  assert.match(stdout, /Agent CLIs on this computer:/)
+  assert.doesNotMatch(stderr, /ExperimentalWarning/)
 
   child.kill("SIGINT")
   const exitCode = await new Promise((resolvePromise, reject) => {

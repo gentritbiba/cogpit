@@ -352,6 +352,7 @@ export function DesktopWorkspace({
       onToggleSidebar={navigation.panels.handleToggleSidebar}
       onKillAll={chrome.onKillAll}
       onOpenSettings={config.openConfigDialog}
+      onOpenKeyboardShortcuts={() => chrome.onKeyboardShortcutsOpenChange(true)}
       onLogout={chrome.onLogout}
       onOpenMainView={navigation.panels.openMainView}
     />

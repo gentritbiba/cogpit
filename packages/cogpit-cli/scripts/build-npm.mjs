@@ -47,7 +47,7 @@ await build({
 writeFileSync(join(outputDir, "cli.js"), `#!/usr/bin/env node
 const [major, minor] = process.versions.node.split(".").map(Number)
 if (major < 22 || (major === 22 && minor < 16)) {
-  console.error("Cogpit requires Node.js 22.16 or newer. Please upgrade Node.js.")
+  console.error(\`Cogpit needs Node.js 22.16 or newer. This computer has \${process.version}. Get the latest from https://nodejs.org\`)
   process.exit(1)
 }
 await import("./cli-runtime.js")

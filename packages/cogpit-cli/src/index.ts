@@ -1,3 +1,5 @@
+import { allDescriptors, descriptorForDirName, type AgentDescriptor } from "../../../shared/session/agent-descriptors"
+import { findExecutableOnPath } from "../../../server/lib/binaryResolver"
 import { CLICKUP_CONFIG_FILE } from "../../../server/lib/clickupConfig"
 import { defaultDataDir } from "../../../server/lib/standalone-bootstrap"
 import { spawn } from "node:child_process"
@@ -29,7 +31,24 @@ export interface CliDependencies {
   openUrl: (url: string) => Promise<void>
   startServer: (options: { port: number; dataDir?: string }) => Promise<RunningStandaloneServer>
   waitForShutdown: () => Promise<void>
+  /** Path of an executable on PATH, or undefined. */
+  findExecutable: (name: string) => string | undefined
   io: CliIo
+}
+
+/**
+ * The agent CLIs someone can install, the default one first. A kind without an
+ * npm package has nothing to install and nothing to suggest.
+ */
+function installableAgents(): AgentDescriptor[] {
+  const lead = descriptorForDirName(null).kind
+  return allDescriptors()
+    .filter((descriptor) => descriptor.cli.packageName)
+    .sort((a, b) => Number(b.kind === lead) - Number(a.kind === lead))
+}
+
+function joinWithOr(names: string[]): string {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`
 }
 
 export const USAGE = `Cogpit
@@ -37,6 +56,8 @@ export const USAGE = `Cogpit
 Run Cogpit locally without installing it:
   cogpit [options]
   cogpit preview <session-id> [options]
+
+Needs ${joinWithOr(installableAgents().map((agent) => agent.displayName))} installed and signed in.
 
 Options:
   --port <number>  Bind a specific local port (default: automatic)
@@ -187,7 +208,30 @@ const defaultDependencies: CliDependencies = {
   openUrl: openExternalUrl,
   startServer: startPackagedServer,
   waitForShutdown: waitForShutdownSignal,
+  findExecutable: (name) => findExecutableOnPath(name),
   io: { stdout: process.stdout, stderr: process.stderr },
+}
+
+/**
+ * Which agent CLIs are on PATH, with the install command for the rest. Only
+ * looks for the executables: nothing is run and no model is called.
+ */
+export function agentCliReport(findExecutable: CliDependencies["findExecutable"]): string {
+  const agents = installableAgents()
+  const width = Math.max(...agents.map((agent) => agent.displayName.length))
+  const found = new Set(agents.filter((agent) => findExecutable(agent.binName)))
+  const lines = agents.map((agent) => {
+    const name = agent.displayName.padEnd(width)
+    return found.has(agent)
+      ? `  ${name}  found`
+      : `  ${name}  not found. Install: npm install -g ${agent.cli.packageName}`
+  })
+  const advice = found.size === 0
+    ? ["Cogpit needs at least one of these. Install one, run it once in a terminal to sign in, then reload the Cogpit page."]
+    : found.size < agents.length
+      ? ["To add another, install it, then run it once in a terminal to sign in."]
+      : []
+  return ["Agent CLIs on this computer:", ...lines, ...advice].join("\n") + "\n"
 }
 
 async function verifyServer(
@@ -260,7 +304,8 @@ export async function run(
     await verifyServer(runtime.url, command, deps)
     const url = buildLaunchUrl(runtime.url, command)
     if (!command.noOpen) await deps.openUrl(url)
-    deps.io.stdout.write(`Cogpit is running at ${url}\n`)
+    deps.io.stdout.write(`Cogpit is running at ${url}\n\n`)
+    deps.io.stdout.write(`${agentCliReport(deps.findExecutable)}\n`)
     deps.io.stdout.write("Press Ctrl+C to stop.\n")
     await deps.waitForShutdown()
     return 0

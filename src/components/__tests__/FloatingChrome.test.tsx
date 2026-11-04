@@ -8,6 +8,7 @@ import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { getResumeCommand, type AgentKind } from "@/lib/agents"
 import { permissionsForAccess, type SessionAccessState } from "@/lib/sessionAccessPermissions"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
+import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import type { ParsedSession, Turn } from "../../../shared/session/types"
 
@@ -100,6 +101,7 @@ const PROPS = {
   onToggleSidebar: vi.fn(),
   onKillAll: vi.fn(),
   onOpenSettings: vi.fn(),
+  onOpenKeyboardShortcuts: vi.fn(),
   onLogout: vi.fn(),
   onOpenMainView: vi.fn(),
 }
@@ -449,6 +451,29 @@ describe("FloatingChrome", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Settings" }))
 
     expect(PROPS.onOpenSettings).toHaveBeenCalledOnce()
+  })
+
+  it("offers help and docs from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    try {
+      renderChrome()
+
+      await user.click(screen.getByRole("button", { name: "More actions" }))
+      expect(await screen.findByText("Help & docs")).toBeInTheDocument()
+      await user.click(screen.getByRole("menuitem", { name: "Documentation" }))
+      expect(open).toHaveBeenCalledWith(DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
+
+      await user.click(screen.getByRole("button", { name: "More actions" }))
+      await user.click(await screen.findByRole("menuitem", { name: "Report an issue" }))
+      expect(open).toHaveBeenCalledWith(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer")
+
+      await user.click(screen.getByRole("button", { name: "More actions" }))
+      await user.click(await screen.findByRole("menuitem", { name: "Keyboard shortcuts" }))
+      expect(PROPS.onOpenKeyboardShortcuts).toHaveBeenCalledOnce()
+    } finally {
+      open.mockRestore()
+    }
   })
 
   it("offers the share control only while a session is open", () => {

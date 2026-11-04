@@ -8,6 +8,7 @@ import {
   type NotificationClickedMessage,
   type NotifyMessage,
 } from "../shared/notifications"
+import { callRendererHook } from "./rendererHooks"
 
 /** Idle time changes without emitting events, so it has to be sampled. */
 const IDLE_POLL_MS = 30_000
@@ -107,10 +108,6 @@ function isWindowActive(win: BrowserWindow): boolean {
   return win.isFocused() && win.isVisible() && !win.isMinimized()
 }
 
-/** How long a click keeps retrying to reach a renderer that is still booting. */
-const REVEAL_RETRY_ATTEMPTS = 20
-const REVEAL_RETRY_DELAY_MS = 250
-
 /** Bring Cogpit forward and route the SPA to the session that notified. */
 async function revealSession(message: NotifyMessage, target: BrowserWindow | null): Promise<void> {
   const win = target && !target.isDestroyed() ? target : BrowserWindow.getAllWindows()[0]
@@ -131,27 +128,7 @@ async function revealSession(message: NotifyMessage, target: BrowserWindow | nul
   const path = sessionPath(message.nav)
   if (!path) return
 
-  // The renderer registers window.__cogpitRevealSession once its router is
-  // mounted. A fire-and-forget pushState used to land in a renderer that was
-  // still booting (cold start, mid-reload) and be silently dropped — so the
-  // navigation is acked and retried until the app is actually ready for it.
-  for (let attempt = 0; attempt < REVEAL_RETRY_ATTEMPTS; attempt++) {
-    if (win.isDestroyed()) return
-    try {
-      const handled: unknown = await win.webContents.executeJavaScript(
-        `typeof window.__cogpitRevealSession === "function"
-          ? (window.__cogpitRevealSession(${JSON.stringify(path)}), true)
-          : false`,
-      )
-      if (handled === true) return
-    } catch {
-      // Renderer mid-load; retry below.
-    }
-    await delay(REVEAL_RETRY_DELAY_MS)
+  if (!(await callRendererHook(win, "__cogpitRevealSession", path))) {
+    console.error("[main] Notification click could not reach the renderer:", path)
   }
-  console.error("[main] Notification click could not reach the renderer:", path)
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

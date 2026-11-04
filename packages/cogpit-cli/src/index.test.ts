@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  agentCliReport,
   buildLaunchUrl,
   parseArgs,
   run,
+  USAGE,
   type CliDependencies,
   type LaunchCommand,
 } from "./index"
+import { quietSqliteWarning } from "./warnings"
 
 function response(status: number, body: unknown): Response {
   return {
@@ -15,7 +18,7 @@ function response(status: number, body: unknown): Response {
   } as Response
 }
 
-function testDependencies(fetchImpl: typeof fetch) {
+function testDependencies(fetchImpl: typeof fetch, onPath: string[] = ["claude"]) {
   const stdout: string[] = []
   const stderr: string[] = []
   const openUrl = vi.fn(async () => {})
@@ -34,6 +37,7 @@ function testDependencies(fetchImpl: typeof fetch) {
     openUrl,
     startServer,
     waitForShutdown,
+    findExecutable: (name) => onPath.includes(name) ? `/usr/local/bin/${name}` : undefined,
     io: {
       stdout: { write: (text) => stdout.push(text) },
       stderr: { write: (text) => stderr.push(text) },
@@ -112,6 +116,50 @@ describe("Cogpit install-free CLI", () => {
     expect(context.stderr).toEqual([])
   })
 
+  it("says in --help that an agent CLI must be installed and signed in", async () => {
+    const context = testDependencies(vi.fn<typeof fetch>())
+
+    await expect(run(["--help"], context.deps)).resolves.toBe(0)
+
+    expect(USAGE).toContain("Needs Claude Code, Codex or GitHub Copilot CLI installed and signed in.")
+    expect(context.stdout.join("")).toBe(USAGE)
+  })
+
+  it("lists the agent CLIs it found and how to install the rest after starting", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response(200, { app: "cogpit" }))
+    const context = testDependencies(fetchImpl, ["claude"])
+
+    await expect(run(["--no-open"], context.deps)).resolves.toBe(0)
+
+    expect(context.stdout.join("")).toBe([
+      "Cogpit is running at http://127.0.0.1:43210/",
+      "",
+      "Agent CLIs on this computer:",
+      "  Claude Code         found",
+      "  Codex               not found. Install: npm install -g @openai/codex",
+      "  GitHub Copilot CLI  not found. Install: npm install -g @github/copilot",
+      "To add another, install it, then run it once in a terminal to sign in.",
+      "",
+      "Press Ctrl+C to stop.",
+      "",
+    ].join("\n"))
+  })
+
+  it("tells a machine with no agent CLI that it needs one", () => {
+    const report = agentCliReport(() => undefined)
+
+    expect(report).toContain("  Claude Code         not found. Install: npm install -g @anthropic-ai/claude-code")
+    expect(report).toContain("Cogpit needs at least one of these.")
+  })
+
+  it("adds no install advice once every agent CLI is present", () => {
+    const report = agentCliReport((name) => `/bin/${name}`)
+
+    expect(report).not.toContain("not found")
+    expect(report).not.toContain("sign in")
+  })
+
   it("starts an embedded server and preflights a preview session", async () => {
     const fetchImpl = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(response(200, { app: "cogpit" }))
@@ -160,5 +208,25 @@ describe("Cogpit install-free CLI", () => {
     expect(context.stderr.join("")).toContain("Session missing was not found")
     expect(context.dispose).toHaveBeenCalledOnce()
     expect(context.waitForShutdown).not.toHaveBeenCalled()
+  })
+})
+
+describe("quietSqliteWarning", () => {
+  it("drops only Node's experimental SQLite warning", () => {
+    const emitted: unknown[][] = []
+    const target = { emitWarning: (...args: unknown[]) => { emitted.push(args) } }
+    quietSqliteWarning(target)
+
+    target.emitWarning("SQLite is an experimental feature and might change at any time", "ExperimentalWarning")
+    target.emitWarning("SQLite is an experimental feature", { type: "ExperimentalWarning" })
+    target.emitWarning("WASI is an experimental feature", "ExperimentalWarning")
+    target.emitWarning("SQLite handle leaked", "Warning")
+    target.emitWarning(new Error("Buffer() is deprecated"), "DeprecationWarning", "DEP0005")
+
+    expect(emitted).toEqual([
+      ["WASI is an experimental feature", "ExperimentalWarning"],
+      ["SQLite handle leaked", "Warning"],
+      [new Error("Buffer() is deprecated"), "DeprecationWarning", "DEP0005"],
+    ])
   })
 })

@@ -3,9 +3,12 @@ import type { LucideIcon } from "lucide-react"
 import {
   Activity,
   ArrowRightLeft,
+  BookOpen,
+  Bug,
   ChartColumn,
   ChevronRight,
   Globe,
+  Keyboard,
   MoreHorizontal,
   PanelLeftOpen,
   Settings,
@@ -21,6 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -50,6 +54,7 @@ import { can } from "@/lib/capabilities"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
 import { cn, copyToClipboard } from "@/lib/utils"
+import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
 import { extractPullRequests, mergePullRequests } from "../../shared/session/prLinks"
 
 interface FloatingChromeProps {
@@ -73,6 +78,7 @@ interface FloatingChromeProps {
   onToggleSidebar: () => void
   onKillAll: () => void
   onOpenSettings: () => void
+  onOpenKeyboardShortcuts: () => void
   onLogout: () => void
   /** Opens an edition main view, from the account control. */
   onOpenMainView: (id: string) => void
@@ -100,6 +106,7 @@ export const FloatingChrome = memo(function FloatingChrome({
   onToggleSidebar,
   onKillAll,
   onOpenSettings,
+  onOpenKeyboardShortcuts,
   onLogout,
   onOpenMainView,
 }: FloatingChromeProps) {
@@ -291,6 +298,22 @@ export const FloatingChrome = memo(function FloatingChrome({
                   <DropdownMenuItem onClick={onOpenSettings}>
                     <Settings />
                     Settings
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Help &amp; docs</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => window.open(DOCUMENTATION_URL, "_blank", "noopener,noreferrer")}>
+                    <BookOpen />
+                    Documentation
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onOpenKeyboardShortcuts}>
+                    <Keyboard />
+                    Keyboard shortcuts
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.open(REPORT_ISSUE_URL, "_blank", "noopener,noreferrer")}>
+                    <Bug />
+                    Report an issue
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 {can("killAny") && (
