@@ -1,18 +1,23 @@
-import { spawn } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 
 /** How long the login shell gets to report PATH before Cogpit starts without it. */
 export const SHELL_PATH_TIMEOUT_MS = 3_000
+
+const START = "<cogpit-path>"
+const END = "</cogpit-path>"
+/** `wait` keeps the shell, and so the parent links to anything it started, alive until the probe ends. */
+const COMMAND = `printf '%s' "${START}$PATH${END}"; wait`
 
 /**
  * The user's PATH as their login shell sets it, or null. GUI apps don't
  * inherit it on macOS and Linux, and without it the agent CLIs are not found.
  * Windows apps do inherit it, so there is nothing to ask.
  *
- * A startup file that waits for input or hangs (an update prompt, a conda hook)
- * must not hold the launch hostage, and must not leave processes behind. The
- * shell runs in its own process group with stdin closed, and the whole group is
- * killed once the shell exits, the timeout passes or `signal` aborts. SIGKILL,
- * because interactive shells ignore SIGTERM.
+ * The PATH is read between markers and taken as soon as it arrives, so output
+ * held open by a job the startup files left running cannot hold it back. A
+ * startup file that waits for input or hangs must not hold the launch hostage,
+ * nor leave processes behind: when the PATH arrives, the timeout passes or
+ * `signal` aborts, everything the shell started is killed.
  */
 export function loginShellPath(
   shell: string,
@@ -20,34 +25,67 @@ export function loginShellPath(
 ): Promise<string | null> {
   if (process.platform === "win32" || signal?.aborted) return Promise.resolve(null)
   return new Promise((resolve) => {
-    const child = spawn(shell, ["-ilc", 'echo -n "$PATH"'], { detached: true, stdio: ["ignore", "pipe", "ignore"] })
-    let stdout = ""
+    const child = spawn(shell, ["-ilc", COMMAND], { detached: true, stdio: ["ignore", "pipe", "ignore"] })
+    let output = ""
     let settled = false
 
-    const killGroup = () => {
-      try {
-        if (child.pid) process.kill(-child.pid, "SIGKILL")
-      } catch {
-        // The group is already empty.
-      }
-    }
     const finish = (path: string | null) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       signal?.removeEventListener("abort", abandon)
-      killGroup()
+      if (child.pid) killProcessTree(child.pid)
       resolve(path)
     }
     const abandon = () => finish(null)
     const timer = setTimeout(abandon, timeoutMs)
     signal?.addEventListener("abort", abandon, { once: true })
 
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk })
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      output += chunk
+      const end = output.indexOf(END)
+      if (end === -1) return
+      const start = output.lastIndexOf(START, end)
+      finish(start === -1 ? null : output.slice(start + START.length, end) || null)
+    })
     child.once("error", abandon)
-    // Anything the startup file left running still holds the pipe open, so
-    // the output is only complete once the rest of the group is gone too.
-    child.once("exit", killGroup)
-    child.once("close", (code) => finish(code === 0 && stdout ? stdout : null))
+    child.once("close", abandon)
   })
+}
+
+/**
+ * Kill the process group `root` leads (the probe runs detached, so it leads its
+ * own) and the group of every process still descended from it. A shell with job
+ * control on gives each job a group of its own, which killing only the shell's
+ * group would miss. The tree is read before anything is killed, while the parent
+ * links still hold. Every group found belongs to the probe's own session or one
+ * a descendant created, so nothing else is touched. SIGKILL, because interactive
+ * shells ignore SIGTERM.
+ */
+function killProcessTree(root: number): void {
+  const groups = new Set([root])
+  try {
+    const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], { encoding: "utf8" })
+      .trim().split("\n").map((line) => line.trim().split(/\s+/).map(Number))
+    const tree = new Set([root])
+    for (let grew = true; grew;) {
+      grew = false
+      for (const [pid, ppid, pgid] of rows) {
+        if (!tree.has(pid) && tree.has(ppid)) {
+          tree.add(pid)
+          groups.add(pgid)
+          grew = true
+        }
+      }
+    }
+  } catch {
+    // Without ps, the shell's own group is all that can be reached.
+  }
+  for (const group of groups) {
+    try {
+      process.kill(-group, "SIGKILL")
+    } catch {
+      // Already gone.
+    }
+  }
 }
