@@ -7,6 +7,8 @@ export const SessionBrowser = memo(function SessionBrowser({
   activeSessionKey,
   onSelectSession,
   onNewSession,
+  onNewFolder,
+  defaultAgentKind,
   creatingSession,
   isMobile,
   onDuplicateSession,
@@ -31,6 +33,8 @@ export const SessionBrowser = memo(function SessionBrowser({
         onDuplicateSession={onDuplicateSession}
         onDeleteSession={onDeleteSession}
         onNewSession={onNewSession}
+        onNewFolder={onNewFolder}
+        defaultAgentKind={defaultAgentKind}
         creatingSession={creatingSession}
         pendingSession={pendingSession}
         refreshRef={liveSessionsRefreshRef}

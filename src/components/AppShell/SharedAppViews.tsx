@@ -65,6 +65,7 @@ export function PrimarySessionBrowser({
   header,
 }: PrimarySessionBrowserProps) {
   const { sessionSource } = useSessionContext()
+  const { config } = useAppContext()
   const activeSessionKey = sessionSource
     ? `${sessionSource.dirName}/${sessionSource.fileName}`
     : null
@@ -74,6 +75,8 @@ export function PrimarySessionBrowser({
       activeSessionKey={activeSessionKey}
       onSelectSession={navigation.actions.handleDashboardSelect}
       onNewSession={navigation.onStartNewSession}
+      onNewFolder={navigation.onStartNewFolder}
+      defaultAgentKind={config.defaultAgentKind}
       creatingSession={navigation.creatingSession}
       pendingSession={navigation.pendingSession}
       onDuplicateSession={navigation.handlers.handleDuplicateSessionByPath}

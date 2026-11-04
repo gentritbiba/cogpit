@@ -21,7 +21,7 @@ import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch
 import { useEditionUi } from "@/edition/hooks"
 import { useSessionListFilter } from "@/lib/sessionListFilter"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
-import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
+import { agentKindForDirName, getResumeSpawn, type AgentKind } from "@/lib/agents"
 import { useSessionArchive } from "@/hooks/useSessionArchive"
 import { isSessionLive, listedSessions, projectGroupKey, sessionTitle } from "./sessionListView"
 import { classifyAttention, rollUpCrews } from "./attentionGroups"
@@ -30,6 +30,7 @@ import { AttentionStrip } from "./AttentionStrip"
 import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
 import { SessionCardList, type SessionListSharedProps } from "./SessionCardList"
 import { ProjectScopePicker } from "./ProjectScopePicker"
+import { NewSessionButton } from "./NewSessionButton"
 import { mergeSessions, projectScopeOptions, scopeSessions } from "./projectScope"
 import { useOlderSessions, type OlderSessionsTarget } from "./useOlderSessions"
 
@@ -43,6 +44,10 @@ interface LiveSessionsProps {
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: DeleteSession
   onNewSession?: (dirName: string, cwd?: string) => void
+  /** Starts a session in a folder; with `onNewSession` it lets the list offer every project. */
+  onNewFolder?: (cwd: string) => void
+  /** The agent a session started in a new folder runs. */
+  defaultAgentKind?: AgentKind
   creatingSession?: boolean
   /** Info about a session being created — shows a placeholder row */
   pendingSession?: PendingSessionInfo | null
@@ -54,7 +59,7 @@ interface LiveSessionsProps {
 
 const ALL_PROJECTS: OlderSessionsTarget = { key: "all" }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, onNewFolder, defaultAgentKind, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
@@ -90,6 +95,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   )
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
+  const [newSessionPickerOpen, setNewSessionPickerOpen] = useState(false)
   // Which project the sidebar is focused on; null lists every project. Kept
   // per device, since projects differ between devices and DeviceRoot remounts
   // on a device change.
@@ -342,6 +348,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     scheduleTimeout(fetchData, 3000)
   }, [pty, fetchData, scheduleTimeout])
 
+  const sessionStarts = onNewSession && onNewFolder && defaultAgentKind
+    ? { onNewSession, onNewFolder, defaultAgentKind }
+    : null
+
   const sessionListProps: SessionListSharedProps = {
     activeSessionKey,
     procBySession,
@@ -385,12 +395,24 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         totalSessions={listedUnits.length}
         crewCount={groupCrewsPreferred ? crews.crewOf.size : 0}
         onChange={setProjectScope}
-        onNewSession={onNewSession}
-        creatingSession={creatingSession}
         onRenameProject={renameProject}
         archivableCount={focusedArchivable.length}
         onArchiveIdle={() => handleArchiveSessions(focusedArchivable)}
-      />
+      >
+        {sessionStarts && (
+          <NewSessionButton
+            {...sessionStarts}
+            project={focusedProject && {
+              dirName: focusedProject.dirName,
+              cwd: focusedProject.cwd,
+              label: focusedProjectLabel ?? focusedProject.key,
+            }}
+            creatingSession={creatingSession}
+            pickerOpen={newSessionPickerOpen}
+            onPickerOpenChange={setNewSessionPickerOpen}
+          />
+        )}
+      </ProjectScopePicker>
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">
@@ -406,6 +428,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             onShowAllProjects={() => setProjectScope(null)}
             filterEmpty={listFilter.key !== null && FilterEmpty ? <FilterEmpty className="min-h-56 px-4 py-8" /> : null}
             onShowArchived={() => setShowArchived(true)}
+            onNewSession={sessionStarts ? () => setNewSessionPickerOpen(true) : undefined}
             onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
 
@@ -433,7 +456,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             lineageSessions={visibleSessions}
             memberStatusOf={memberStatusOf}
             older={{
-              canLoad: (projectScope === null || Boolean(focusedProject)) && !older.loaded && !searching,
+              // The inventory lists the newest sessions, so an empty one has nothing older behind it.
+              canLoad: (projectScope === null || Boolean(focusedProject)) && !older.loaded && !searching
+                && filteredSessions.length > 0,
               loading: older.loading,
               load: older.load,
             }}

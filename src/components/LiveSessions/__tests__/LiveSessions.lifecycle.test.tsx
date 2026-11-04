@@ -126,9 +126,17 @@ vi.mock("@/components/ui/tooltip", () => ({
 }))
 vi.mock("../AttentionStrip", () => ({ AttentionStrip: () => null }))
 vi.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PopoverTrigger: (props: ButtonHTMLAttributes<HTMLButtonElement>) => <button type="button" {...props} />,
+  Popover: ({ open, children }: { open?: boolean; children: ReactNode }) => <div data-popover-open={open}>{children}</div>,
+  PopoverTrigger: ({ render: renderProp, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { render?: ReactElement }) => (
+    isValidElement(renderProp)
+      ? cloneElement(renderProp as ReactElement<ButtonHTMLAttributes<HTMLButtonElement>>, props, children)
+      : <button type="button" {...props}>{children}</button>
+  ),
   PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}))
+vi.mock("@/components/ProjectSwitcherList", () => ({
+  useProjectList: () => [],
+  ProjectSwitcherList: () => <div data-testid="new-session-picker" />,
 }))
 vi.mock("../SessionRow", () => ({
   SessionRow: ({
@@ -716,7 +724,9 @@ describe("LiveSessions focused on a project", () => {
     )
 
     await act(async () => {
-      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} />)
+      renderLive(
+        <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} onNewFolder={vi.fn()} defaultAgentKind="claude" />,
+      )
     })
 
     expect(screen.getByTestId("card-lib-1")).toBeInTheDocument()
@@ -787,6 +797,65 @@ describe("LiveSessions across every project", () => {
 
     expect(mocks.authFetch).toHaveBeenCalledWith("/api/active-sessions?limit=200&perProject=100")
     expect(screen.getAllByTestId(/^card-/).map((card) => card.getAttribute("data-testid"))).toEqual(["card-app-1", "card-lib-old"])
+  })
+})
+
+describe("LiveSessions new session", () => {
+  function inventory(rows: ActiveSessionInfo[]) {
+    mocks.authFetch.mockImplementation((input: string) => {
+      if (input.startsWith("/api/active-sessions")) return Promise.resolve(jsonResponse(rows))
+      if (input === "/api/running-processes") return Promise.resolve(jsonResponse([]))
+      return new Promise<Response>(() => {})
+    })
+  }
+  const pickerOpen = () => screen.getByTestId("new-session-picker").closest("[data-popover-open]")?.getAttribute("data-popover-open")
+
+  it("offers a New button across every project that opens the project picker", async () => {
+    window.history.replaceState(null, "", "/")
+    inventory([{ ...session("app-1"), cwd: "/home/me/app" }])
+
+    await act(async () => {
+      renderLive(
+        <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} onNewFolder={vi.fn()} defaultAgentKind="claude" />,
+      )
+    })
+
+    const button = screen.getByRole("button", { name: "New session" })
+    expect(button).toHaveTextContent("New")
+    expect(screen.queryByRole("button", { name: /^New session in/ })).not.toBeInTheDocument()
+    expect(pickerOpen()).toBe("false")
+  })
+
+  it("starts from an empty list through the same picker and offers nothing older", async () => {
+    window.history.replaceState(null, "", "/")
+    inventory([])
+
+    await act(async () => {
+      renderLive(
+        <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} onNewFolder={vi.fn()} defaultAgentKind="claude" />,
+      )
+    })
+
+    expect(screen.getByText("No sessions yet")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Load older sessions" })).not.toBeInTheDocument()
+    const emptyStateButton = screen.getAllByRole("button", { name: "New session" }).find((button) => button.textContent === "New session")!
+    expect(pickerOpen()).toBe("false")
+
+    fireEvent.click(emptyStateButton)
+
+    expect(pickerOpen()).toBe("true")
+  })
+
+  it("offers no way to start a session without the folder handlers", async () => {
+    window.history.replaceState(null, "", "/")
+    inventory([])
+
+    await act(async () => {
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onNewSession={vi.fn()} />)
+    })
+
+    expect(screen.getByText("No sessions yet")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
   })
 })
 

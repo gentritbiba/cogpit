@@ -1,10 +1,9 @@
-import { useState } from "react"
-import { ChevronsUpDown, Folder, FolderSearch, Layers, Loader2, Plus } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { ChevronsUpDown, Folder, Layers } from "lucide-react"
 
 import { LiveIndicator } from "@/components/header-shared"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
-import { Button } from "@/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -14,7 +13,6 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { openFolderBrowser } from "@/lib/folders"
 import { cn } from "@/lib/utils"
 
 import type { ProjectScopeOption } from "./projectScope"
@@ -29,12 +27,12 @@ interface ProjectScopePickerProps {
   /** Listed sessions that started a crew. */
   crewCount?: number
   onChange: (key: string | null) => void
-  onNewSession?: (dirName: string, cwd?: string) => void
-  creatingSession?: boolean
   onRenameProject?: (dirName: string, name: string) => void
   /** Idle sessions in the focused project that "Archive idle sessions" would hide. */
   archivableCount?: number
   onArchiveIdle?: () => void
+  /** Actions beside the picker, such as starting a new session. */
+  children?: ReactNode
 }
 
 function plural(count: number, noun: string): string {
@@ -86,11 +84,10 @@ export function ProjectScopePicker({
   totalSessions,
   crewCount = 0,
   onChange,
-  onNewSession,
-  creatingSession,
   onRenameProject,
   archivableCount,
   onArchiveIdle,
+  children,
 }: ProjectScopePickerProps) {
   const [open, setOpen] = useState(false)
   const focusedLabel = focused?.customName ?? value
@@ -215,37 +212,7 @@ export function ProjectScopePicker({
           </Command>
         </PopoverContent>
       </Popover>
-      {focused && onNewSession && (
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="shrink-0"
-          disabled={creatingSession}
-          onClick={() => onNewSession(focused.dirName, focused.cwd)}
-          aria-label={`New session in ${focusedLabel}`}
-        >
-          {creatingSession ? (
-            <Loader2 data-icon="inline-start" className="animate-spin" />
-          ) : (
-            <Plus data-icon="inline-start" />
-          )}
-        </Button>
-      )}
-      {onNewSession && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0"
-          disabled={creatingSession}
-          onClick={() => openFolderBrowser()}
-          aria-label="Start a session in a folder"
-          title="Start a session in a folder"
-        >
-          <FolderSearch data-icon="inline-start" />
-        </Button>
-      )}
+      {children}
     </div>
   )
 }

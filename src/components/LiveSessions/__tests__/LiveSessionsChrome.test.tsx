@@ -103,6 +103,29 @@ describe("LiveSessionsFeedback", () => {
     expect(screen.queryByText("Everything is archived")).not.toBeInTheDocument()
   })
 
+  it("offers a New session button in the plain empty state", () => {
+    const onNewSession = vi.fn()
+    render(<LiveSessionsFeedback {...base} hiddenArchivedCount={0} onShowArchived={vi.fn()} onNewSession={onNewSession} />)
+
+    expect(screen.getByText("Pick a project or folder to start your first session.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "New session" }))
+    expect(onNewSession).toHaveBeenCalledOnce()
+  })
+
+  it("points to the agent CLIs when sessions cannot be started here", () => {
+    render(<LiveSessionsFeedback {...base} hiddenArchivedCount={0} onShowArchived={vi.fn()} />)
+
+    expect(screen.getByText("Start Claude Code, Codex, or Copilot to see recent work here.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "New session" })).not.toBeInTheDocument()
+  })
+
+  it("offers no New session button for an empty search", () => {
+    render(<LiveSessionsFeedback {...base} searching hiddenArchivedCount={0} onShowArchived={vi.fn()} onNewSession={vi.fn()} />)
+
+    expect(screen.getByText("No matching sessions")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "New session" })).not.toBeInTheDocument()
+  })
+
   it("does not blame archiving for an empty search", () => {
     render(<LiveSessionsFeedback {...base} searching hiddenArchivedCount={4} onShowArchived={vi.fn()} />)
 

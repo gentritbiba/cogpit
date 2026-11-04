@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import type { AgentKind } from "@/lib/agents"
 
 /** Delete a session; resolves true once the server has, and a list drops its row only then. */
 export type DeleteSession = (dirName: string, fileName: string) => Promise<boolean>
@@ -13,6 +14,8 @@ export interface SessionBrowserProps {
   activeSessionKey: string | null
   onSelectSession: (dirName: string, fileName: string) => void
   onNewSession?: (dirName: string, cwd?: string) => void
+  onNewFolder?: (cwd: string) => void
+  defaultAgentKind?: AgentKind
   creatingSession?: boolean
   pendingSession?: PendingSessionInfo | null
   isMobile?: boolean

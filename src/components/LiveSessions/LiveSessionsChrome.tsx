@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Activity, AlertTriangle, Archive, Layers, ListTree, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, Archive, Layers, ListTree, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -145,6 +145,8 @@ interface LiveSessionsFeedbackProps {
   /** Stands for a list the edition's session filter left empty; null while the list is unfiltered. */
   filterEmpty?: ReactNode
   onShowArchived: () => void
+  /** Opens the new-session picker; without it the empty list offers no way to start one. */
+  onNewSession?: () => void
   onRetry: () => void
 }
 
@@ -161,6 +163,7 @@ export function LiveSessionsFeedback({
   onShowAllProjects,
   filterEmpty = null,
   onShowArchived,
+  onNewSession,
   onRetry,
 }: LiveSessionsFeedbackProps) {
   const empty = emptyVariant({ showEmpty, searching, focusedProject, hiddenArchivedCount, filtered: Boolean(filterEmpty) })
@@ -235,11 +238,15 @@ export function LiveSessionsFeedback({
             </EmptyMedia>
             <EmptyTitle>{searching ? "No matching sessions" : "No sessions yet"}</EmptyTitle>
             <EmptyDescription>
-              {searching
-                ? "Try #157, honest-cms #157, or paste a PR URL."
-                : "Start Claude Code, Codex, or Copilot to see recent work here."}
+              {plainEmptyDescription(searching, Boolean(onNewSession))}
             </EmptyDescription>
           </EmptyHeader>
+          {!searching && onNewSession && (
+            <Button size="sm" onClick={onNewSession}>
+              <Plus data-icon="inline-start" />
+              New session
+            </Button>
+          )}
         </Empty>
       )}
 
@@ -281,6 +288,12 @@ function emptyVariant({
   if (!searching && hiddenArchivedCount > 0) return "archived"
   if (!searching && filtered) return "filtered"
   return "plain"
+}
+
+function plainEmptyDescription(searching: boolean, canStart: boolean): string {
+  if (searching) return "Try #157, honest-cms #157, or paste a PR URL."
+  if (canStart) return "Pick a project or folder to start your first session."
+  return "Start Claude Code, Codex, or Copilot to see recent work here."
 }
 
 function focusedEmptyDescription(searching: boolean, hiddenArchivedCount: number): string {

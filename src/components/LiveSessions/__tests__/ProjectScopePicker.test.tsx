@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ProjectScopePicker } from "../ProjectScopePicker"
-import { onFolderBrowserRequest } from "@/lib/folders"
 import type { ProjectScopeOption } from "../projectScope"
 
 vi.mock("@/components/ui/popover", () => ({
@@ -35,7 +34,6 @@ describe("ProjectScopePicker", () => {
     const trigger = screen.getByRole("button", { name: "Choose a project to focus on" })
     expect(trigger).toHaveTextContent("All projects")
     expect(trigger).toHaveTextContent("2 projects, 15 sessions")
-    expect(screen.queryByRole("button", { name: /New session in/ })).not.toBeInTheDocument()
 
     const list = within(screen.getByTestId("popover"))
     const app = list.getByText("App").closest("[cmdk-item]")!
@@ -48,9 +46,8 @@ describe("ProjectScopePicker", () => {
     expect(onChange).toHaveBeenCalledWith("work/app")
   })
 
-  it("becomes the focused project's masthead with a new-session action", () => {
+  it("becomes the focused project's masthead with its actions beside it", () => {
     const onChange = vi.fn()
-    const onNewSession = vi.fn()
     render(
       <ProjectScopePicker
         options={options}
@@ -58,17 +55,16 @@ describe("ProjectScopePicker", () => {
         focused={options[0]}
         totalSessions={15}
         onChange={onChange}
-        onNewSession={onNewSession}
         onRenameProject={vi.fn()}
-      />,
+      >
+        <button type="button">New</button>
+      </ProjectScopePicker>,
     )
 
     const trigger = screen.getByRole("button", { name: "Focused on App. Change project" })
     expect(trigger).toHaveTextContent("App")
     expect(trigger).toHaveTextContent("12 sessions, 2 live")
-
-    fireEvent.click(screen.getByRole("button", { name: "New session in App" }))
-    expect(onNewSession).toHaveBeenCalledWith("-work-app", "/work/app")
+    expect(screen.getByRole("button", { name: "New" })).toBeInTheDocument()
 
     fireEvent.click(within(screen.getByTestId("popover")).getByText("All projects"))
     expect(onChange).toHaveBeenCalledWith(null)
@@ -87,27 +83,10 @@ describe("ProjectScopePicker", () => {
     expect(screen.queryByLabelText(/in another project/)).not.toBeInTheDocument()
   })
 
-  it("opens the folder browser in one click, with or without a focused project", () => {
-    const requested = vi.fn()
-    const stop = onFolderBrowserRequest(requested)
-    render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} onNewSession={vi.fn()} />)
-
-    fireEvent.click(screen.getByRole("button", { name: "Start a session in a folder" }))
-
-    expect(requested).toHaveBeenCalledOnce()
-    stop()
-  })
-
-  it("offers no folder browser where sessions cannot be started", () => {
-    render(<ProjectScopePicker options={options} value={null} focused={null} totalSessions={15} onChange={vi.fn()} />)
-    expect(screen.queryByRole("button", { name: "Start a session in a folder" })).not.toBeInTheDocument()
-  })
-
   it("keeps a focused project that has no listed sessions selectable", () => {
-    render(<ProjectScopePicker options={options} value="work/gone" focused={null} totalSessions={15} onChange={vi.fn()} onNewSession={vi.fn()} />)
+    render(<ProjectScopePicker options={options} value="work/gone" focused={null} totalSessions={15} onChange={vi.fn()} />)
 
     const trigger = screen.getByRole("button", { name: "Focused on work/gone. Change project" })
     expect(trigger).toHaveTextContent("No sessions listed")
-    expect(screen.queryByRole("button", { name: /New session in/ })).not.toBeInTheDocument()
   })
 })
