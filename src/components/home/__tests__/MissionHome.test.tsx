@@ -139,8 +139,40 @@ describe("MissionHome", () => {
     fireEvent.keyDown(field, { key: "Enter", shiftKey: true })
     expect(starter.onStart).not.toHaveBeenCalled()
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form")
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form", undefined)
     expect(field).toHaveValue("")
+  })
+
+  it("sends pasted images with the first message, even without text", async () => {
+    class Reader {
+      onload?: () => void
+      result = "data:image/png;base64,eA=="
+      readAsDataURL() { queueMicrotask(() => this.onload?.()) }
+    }
+    class Picture {
+      onload?: () => void
+      width = 20
+      height = 10
+      set src(_: string) { queueMicrotask(() => this.onload?.()) }
+    }
+    vi.stubGlobal("FileReader", Reader)
+    vi.stubGlobal("Image", Picture)
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage() {} } as unknown as CanvasRenderingContext2D)
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,cG5n")
+    try {
+      const starter = start()
+      render(<MissionHome onOpenSession={vi.fn()} start={starter} />)
+      const field = screen.getByRole("textbox", { name: "First message" })
+      const file = new File(["png"], "shot.png", { type: "image/png" })
+      fireEvent.paste(field, { clipboardData: { items: [{ type: "image/png", getAsFile: () => file }] } })
+      expect(await screen.findByRole("img", { name: "Upload 1" })).toHaveAttribute("src", "data:image/png;base64,cG5n")
+      fireEvent.keyDown(field, { key: "Enter" })
+      expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "", [{ data: "cG5n", mediaType: "image/png" }])
+      expect(screen.queryByRole("img", { name: "Upload 1" })).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
   })
 
   it("starts in the same folder with another agent when the picker switches provider", () => {
@@ -152,7 +184,7 @@ describe("MissionHome", () => {
     const field = screen.getByRole("textbox", { name: "First message" })
     fireEvent.change(field, { target: { value: "hello" } })
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith(expect.not.stringMatching(/^-workspace$/), "/workspace", "hello")
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith(expect.not.stringMatching(/^-workspace$/), "/workspace", "hello", undefined)
   })
 
   it("keeps the project shown when typing began, even as sessions reorder", () => {
@@ -165,7 +197,7 @@ describe("MissionHome", () => {
     expect(projectChip("workspace")).toHaveAttribute("aria-pressed", "true")
     expect(projectChip("elsewhere")).toHaveAttribute("aria-pressed", "false")
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "ship it")
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "ship it", undefined)
   })
 
   it("switches where the session starts from a recent-project chip", () => {
@@ -180,7 +212,7 @@ describe("MissionHome", () => {
     const field = screen.getByRole("textbox", { name: "First message" })
     fireEvent.change(field, { target: { value: "go" } })
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-elsewhere", "/elsewhere", "go")
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-elsewhere", "/elsewhere", "go", undefined)
   })
 
   it("marks rows whose session or crew is working or waiting", () => {
@@ -201,7 +233,7 @@ describe("MissionHome", () => {
     expect(projectChip("repo")).toHaveAttribute("aria-pressed", "true")
     fireEvent.change(screen.getByRole("textbox", { name: "First message" }), { target: { value: "hi" } })
     fireEvent.keyDown(screen.getByRole("textbox", { name: "First message" }), { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-repo", "/repo", "hi")
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-repo", "/repo", "hi", undefined)
   })
 
   it("asks for a project when no session suggests one", () => {

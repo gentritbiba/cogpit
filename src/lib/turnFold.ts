@@ -1,4 +1,5 @@
 import type { TurnContentBlock } from "../../shared/session/types"
+import { startsCrewSession } from "@/lib/crewCommands"
 import { formatDuration } from "@/lib/format"
 
 /** Which blocks a turn hides behind its work disclosure. */
@@ -50,6 +51,15 @@ const CONTINUATION_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "thinking",
   "tool_calls",
 ])
+
+/**
+ * Sessions the turn started are part of the story, not its process: the
+ * reader follows a crew by who was started and who reported back, so a
+ * start stays in view when the rest of the work folds away.
+ */
+function startsSessions(block: TurnContentBlock): boolean {
+  return block.kind === "tool_calls" && block.toolCalls.some(startsCrewSession)
+}
 
 function holdsUnansweredPrompt(block: TurnContentBlock): boolean {
   return block.kind === "tool_calls" && block.toolCalls.some(
@@ -127,7 +137,7 @@ export function planTurnFold(
   for (let i = 0; i < blocks.length; i++) {
     if (i === terminalTextIndex || i === openPromptIndex) continue
     const block = blocks[i]
-    if (PINNED_KINDS.has(block.kind)) continue
+    if (PINNED_KINDS.has(block.kind) || startsSessions(block)) continue
 
     foldedIndices.push(i)
     if (block.kind === "tool_calls") hiddenToolCalls += block.toolCalls.length

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getCommandText, getToolPresentation, getToolSummary, getToolTier } from "../../../shared/session/toolSummary"
+import { getCommandText, getToolPresentation, getToolSummary } from "../../../shared/session/toolSummary"
 
 function summarize(name: string, input: Record<string, unknown>): string {
   return getToolSummary({ name, input })
@@ -31,13 +31,10 @@ describe("consistent tool presentation", () => {
     expect(() => summarize("AskUserQuestion", { questions: [null, 5, {}] })).not.toThrow()
   })
 
-  it("uses the same style for native aliases and keeps read-only operations quiet", () => {
-    expect(getToolTier("functions.exec_command")).toBe(getToolTier("Bash"))
-    expect(getToolTier("functions.apply_patch")).toBe(getToolTier("Edit"))
-    expect(getToolTier("collaboration.list_agents")).toBe("readOnly")
-    expect(getToolTier("collaboration.wait_agent")).toBe("readOnly")
-    expect(getToolTier("functions.get_goal")).toBe("readOnly")
-    expect(getToolTier("mcp__server__exec_command")).toBe("readOnly")
+  it("normalizes native aliases to the same operation", () => {
+    const style = (name: string) => getToolPresentation({ name, input: {} }).styleName
+    expect(style("functions.exec_command")).toBe(style("Bash"))
+    expect(style("functions.apply_patch")).toBe(style("Edit"))
   })
 
   it("presents direct and wrapped web requests consistently", () => {

@@ -26,7 +26,6 @@ import {
   memberActivity,
   memberCellState,
   startedLabel,
-  type CrewCellState,
   type CrewTreeRow,
 } from "./crewView"
 
@@ -39,18 +38,11 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "done", label: "Done" },
 ]
 
-const CELL: Record<CrewCellState, string> = {
-  working: "bg-success shadow-[0_0_0_2px_color-mix(in_oklch,var(--success)_25%,transparent)]",
-  "needs-you": "bg-warning",
-  done: "bg-muted-foreground/40",
-  failed: "bg-destructive",
-  unreachable: "border border-muted-foreground/50",
-}
-
 /**
  * The crew of the open session, pinned to its root wherever in the crew the
- * user is: a strip with one cell per member, the requests it is blocked on
- * one at a time, and every member in the order it was started.
+ * user is: counts by state, the requests it is blocked on one at a time, and
+ * its members in the order they were started, showing only working ones
+ * until the user picks another filter.
  */
 export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
   const sessionId = context.session?.sessionId ?? null
@@ -72,21 +64,6 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
     if (!next.delete(sessionId)) next.add(sessionId)
     return next
   })
-  const reveal = (member: CrewMember) => {
-    setCollapsed((previous) => {
-      const next = new Set(previous)
-      const seen = new Set<string>()
-      let parentId = member.parentId
-      while (parentId && !seen.has(parentId)) {
-        seen.add(parentId)
-        next.delete(parentId)
-        parentId = byId.get(parentId)?.parentId ?? null
-      }
-      return next
-    })
-    requestAnimationFrame(() => document.querySelector(`[data-crew-row="${member.sessionId}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
-  }
-
   return (
     <aside aria-label="Crew" className="flex size-full min-h-0 flex-col bg-canvas">
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
@@ -109,7 +86,7 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
           </TabsList>
           <TabsContent value="overview" className="min-h-0">
             <ScrollArea className="h-full min-h-0">
-              <CrewRoll crew={crew} hereId={sessionId} nameOf={nameOf} onOpen={open} onReveal={reveal} />
+              <CrewRoll crew={crew} hereId={sessionId} nameOf={nameOf} onOpen={open} />
               <NeedsYou crew={crew} busy={busy} nameOf={nameOf} onOpen={open} onRespond={respond} />
               <CrewSessions
                 crew={crew}
@@ -142,11 +119,10 @@ interface CrewSectionProps {
   onOpen: (member: CrewMember) => void
 }
 
-function CrewRoll({ crew, hereId, nameOf, onOpen, onReveal }: CrewSectionProps & { hereId: string | null; onReveal: (member: CrewMember) => void }) {
+function CrewRoll({ crew, hereId, nameOf, onOpen }: CrewSectionProps & { hereId: string | null }) {
   const root = crew.members.find((member) => member.sessionId === crew.rootId)
-  const members = crew.members.filter((member) => member.parentId !== null)
   const tally = crewTally(crew)
-  const since = members[0]?.startedAt
+  const since = crew.members.find((member) => member.parentId !== null)?.startedAt
   return (
     <section aria-label="Crew summary" className="border-b px-3 pb-3 pt-1">
       <div className="flex items-baseline gap-2">
@@ -165,29 +141,6 @@ function CrewRoll({ crew, hereId, nameOf, onOpen, onReveal }: CrewSectionProps &
           {since ? ` · since ${startedLabel(since)}` : ""}
         </span>
       </div>
-      {members.length > 0 && (
-        <div data-crew-strip className="mt-2.5 grid grid-cols-[repeat(auto-fit,minmax(6px,1fr))] gap-[3px]" role="list" aria-label="One cell per session, in the order they were started">
-          {members.map((member) => {
-            const state = memberCellState(member)
-            return (
-              <button
-                key={member.sessionId}
-                type="button"
-                role="listitem"
-                data-crew-cell={state}
-                title={`${nameOf(member)}: ${memberActivity(member)}`}
-                aria-label={`${nameOf(member)}: ${memberActivity(member)}`}
-                onClick={() => onReveal(member)}
-                className={cn(
-                  "h-2.5 rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  CELL[state],
-                  member.sessionId === hereId && "outline outline-[1.5px] outline-offset-2 outline-foreground",
-                )}
-              />
-            )
-          })}
-        </div>
-      )}
       <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
         {tally.working > 0 && <Count dot={CREW_DOT.working} value={tally.working} label="working" />}
         {tally.needsYou > 0 && <Count dot={CREW_DOT["needs-you"]} value={tally.needsYou} label={tally.needsYou === 1 ? "needs you" : "need you"} />}
@@ -297,7 +250,7 @@ function CrewSessions({
   collapsed: ReadonlySet<string>
   onToggle: (sessionId: string) => void
 }) {
-  const [filter, setFilter] = useState<Filter>("all")
+  const [filter, setFilter] = useState<Filter>("working")
   let hiddenBelow: number | null = null
   const rows = crewTree(crew).filter(({ member, depth }) => {
     if (filter !== "all") {
@@ -332,7 +285,12 @@ function CrewSessions({
         </div>
       </div>
       {rows.length === 0 ? (
-        <p className="px-1.5 py-4 text-center text-xs text-muted-foreground">No sessions here.</p>
+        <div className="flex flex-col items-center gap-1 px-1.5 py-4 text-xs text-muted-foreground">
+          <p>{filter === "working" ? "Nothing is working right now." : "No sessions here."}</p>
+          {filter !== "all" && (
+            <Button variant="ghost" size="xs" onClick={() => setFilter("all")}>Show all</Button>
+          )}
+        </div>
       ) : (
         <ul className="flex flex-col">
           {rows.map((row) => (

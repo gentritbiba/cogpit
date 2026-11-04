@@ -1,14 +1,18 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react"
 import { FolderOpen, Send } from "lucide-react"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
+import { ImageDropOverlay, ImageNotice, ImageThumbnails } from "@/components/ChatInput/ImageAttachments"
+import { useImageUpload } from "@/components/ChatInput/useImageUpload"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { ProjectSwitcherList, useProjectList } from "@/components/ProjectSwitcherList"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import { agentKindForDirName, projectDirNameFor, type AgentKind } from "@/lib/agents"
 import { projectName } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { splitInstanceDirName } from "../../../shared/session/instances"
 
 export interface HomeProject {
   dirName: string
@@ -27,8 +31,8 @@ export interface HomeModelControls {
 export interface HomeStart {
   defaultAgentKind: AgentKind
   model: HomeModelControls
-  /** Start a session in the project and send the message as its first turn. */
-  onStart: (dirName: string, cwd: string | undefined, message: string) => void
+  /** Start a session in the project and send the message, with any pasted or dropped images, as its first turn. */
+  onStart: (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => void
 }
 
 const MAX_CHIPS = 6
@@ -36,8 +40,8 @@ const MAX_CHIPS = 6
 /**
  * Where work starts: the projects worked in lately as a row, any other one a
  * picker away, and the composer under them with the model picker inside.
- * Enter sends the first message straight into a new session; the full
- * composer takes over from there.
+ * Enter sends the first message, and any images pasted or dropped onto it,
+ * straight into a new session; the full composer takes over from there.
  */
 export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]; start: HomeStart }) {
   const [picked, setPicked] = useState<HomeProject | null>(null)
@@ -45,7 +49,10 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
   const project = picked ?? recent[0] ?? null
   const chips = (picked && !recent.some((candidate) => sameFolder(candidate, picked)) ? [picked, ...recent] : [...recent]).slice(0, MAX_CHIPS)
   const message = text.trim()
-  const canStart = Boolean(project && message)
+  const agentKind = project ? agentKindForDirName(project.dirName) : start.defaultAgentKind
+  const { imageInput } = useModelCapabilities(agentKind, start.model.selectedModel, splitInstanceDirName(project?.dirName).instanceId)
+  const { images, uploading, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(imageInput)
+  const canStart = Boolean(project && (message || images.length > 0)) && !uploading && !hasUnsupportedAttachments
 
   const choose = (dirName: string, cwd?: string) => {
     setPicked({ dirName, cwd, name: cwd ? projectName(cwd) : dirName })
@@ -56,11 +63,16 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
   const switchAgent = project && cwd
     ? (kind: AgentKind) => setPicked({ ...project, dirName: projectDirNameFor(kind, cwd) })
     : undefined
+  // Sessions reorder as they work, so the project selected when the message was begun is the one it goes to.
+  const holdProject = () => {
+    if (!picked && project) setPicked(project)
+  }
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    if (!project || !message) return
-    start.onStart(project.dirName, project.cwd, message)
+    if (!project || !canStart) return
+    start.onStart(project.dirName, project.cwd, message, images.length > 0 ? images.map(({ data, mediaType }) => ({ data, mediaType })) : undefined)
     setText("")
+    clearImages()
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -95,16 +107,25 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
         })}
         <ProjectPicker defaultAgentKind={start.defaultAgentKind} onChoose={choose} onChooseFolder={chooseFolder} anyListed={chips.length > 0} />
       </div>
-      <form onSubmit={submit} className="min-w-0">
+      <form
+        onSubmit={submit}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={(event) => { holdProject(); handleDrop(event) }}
+        className="relative min-w-0"
+      >
+        {isDragOver && <ImageDropOverlay />}
+        <ImageThumbnails images={images} onRemove={(_, index) => removeImage(index)} />
+        <ImageNotice message={imageError} onDismiss={hasUnsupportedAttachments ? undefined : dismissImageError} />
         <div className="flex items-end gap-2 rounded-xl border bg-popover py-2 pl-4 pr-2 shadow-lg shadow-black/5 transition-[border-color,box-shadow] duration-150 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
           <Textarea
             aria-label="First message"
             value={text}
             onChange={(event) => {
-              // Sessions reorder as they work, so the project selected when typing started is the one the message goes to.
-              if (!picked && project) setPicked(project)
+              holdProject()
               setText(event.target.value)
             }}
+            onPaste={(event) => { holdProject(); handlePaste(event) }}
             onKeyDown={onKeyDown}
             placeholder={project ? `Describe the task for ${project.name}` : "Pick a project, then describe the task"}
             rows={1}
@@ -114,7 +135,7 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
             {project && (
               <ChatInputSettings
                 isNewSession
-                agentKind={agentKindForDirName(project.dirName)}
+                agentKind={agentKind}
                 onAgentKindChange={switchAgent}
                 selectedModel={start.model.selectedModel}
                 onModelChange={start.model.onModelChange}

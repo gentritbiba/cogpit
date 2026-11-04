@@ -45,7 +45,7 @@ export function matchesSearch(turn: Turn, query: string): boolean {
 // ── Activity grouping (thinking + tool_calls) ──────────────────────────────
 
 export type ActivityItem =
-  | { kind: "thinking"; blocks: ThinkingBlock[] }
+  | { kind: "thinking"; blocks: ThinkingBlock[]; thoughtForMs?: number }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
 
 /** Upper bound on a single thinking block's attributed duration (10 minutes). */
@@ -86,9 +86,10 @@ export function collectActivity(
   while (j < blocks.length) {
     const block = blocks[j]
     if (block.kind === "thinking") {
-      items.push({ kind: "thinking", blocks: block.blocks })
+      const ms = thinkingGapMs(blocks, j)
+      items.push({ kind: "thinking", blocks: block.blocks, thoughtForMs: ms })
       thinkingCount += block.blocks.length
-      thoughtForMs += thinkingGapMs(blocks, j)
+      thoughtForMs += ms
       j++
     } else if (block.kind === "tool_calls") {
       items.push({ kind: "tool_calls", toolCalls: block.toolCalls })
@@ -99,4 +100,53 @@ export function collectActivity(
     }
   }
   return { items, toolCalls: allToolCalls, thinkingCount, thoughtForMs, nextIndex: j }
+}
+
+export type ActivitySegment =
+  | { kind: "activity"; items: ActivityItem[]; toolCalls: ToolCall[]; thinkingCount: number; thoughtForMs: number }
+  | { kind: "spawn"; toolCall: ToolCall }
+
+/**
+ * A run of activity cut where a call starts another session: those calls
+ * stand on their own, as the sessions they started, and the work on either
+ * side stays grouped.
+ */
+export function segmentActivity(items: readonly ActivityItem[], isSpawn: (toolCall: ToolCall) => boolean): ActivitySegment[] {
+  const segments: ActivitySegment[] = []
+  let current: Extract<ActivitySegment, { kind: "activity" }> | null = null
+  const open = () => {
+    if (!current) {
+      current = { kind: "activity", items: [], toolCalls: [], thinkingCount: 0, thoughtForMs: 0 }
+      segments.push(current)
+    }
+    return current
+  }
+  for (const item of items) {
+    if (item.kind === "thinking") {
+      const segment = open()
+      segment.items.push(item)
+      segment.thinkingCount += item.blocks.length
+      segment.thoughtForMs += item.thoughtForMs ?? 0
+      continue
+    }
+    let run: ToolCall[] = []
+    const flush = () => {
+      if (run.length === 0) return
+      const segment = open()
+      segment.items.push({ kind: "tool_calls", toolCalls: run })
+      segment.toolCalls.push(...run)
+      run = []
+    }
+    for (const toolCall of item.toolCalls) {
+      if (!isSpawn(toolCall)) {
+        run.push(toolCall)
+        continue
+      }
+      flush()
+      segments.push({ kind: "spawn", toolCall })
+      current = null
+    }
+    flush()
+  }
+  return segments
 }

@@ -7,10 +7,14 @@ import {
   parseInterrupts,
   parseLocalCommandOutputs,
   parseTaskNotifications,
+  promptSource,
   stripSystemNotificationPreamble,
   stripSystemTags,
 } from "@/lib/userMessageContent"
 import { withVoiceModeInstruction } from "../../../shared/voiceMode"
+import { formatTaskAttention, formatTaskWakeup } from "../../../shared/contracts/taskWakeup"
+import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
+import { renderComposerMessage } from "../../../shared/session/composerContext"
 
 describe("stripSystemTags", () => {
   it("removes every injected context block and trims", () => {
@@ -208,5 +212,54 @@ describe("slash command extraction", () => {
   it("normalises empty args to null", () => {
     expect(extractCommandArgs("<command-args></command-args>")).toBeNull()
     expect(extractCommandArgs("no tags here")).toBeNull()
+  })
+})
+
+describe("promptSource", () => {
+  it("reads what the reader typed as theirs, with or without composer context or a slash command", () => {
+    expect(promptSource("Fix the login bug")).toEqual({ kind: "reader" })
+    expect(promptSource("<system-reminder>todo list</system-reminder>\nAlso check the tests")).toEqual({ kind: "reader" })
+    expect(promptSource("<command-name>/review</command-name><command-message>review</command-message><command-args></command-args>")).toEqual({ kind: "reader" })
+    const quoted = renderComposerMessage({
+      text: "Please look",
+      context: [{ id: "ctx-quote0001", kind: "quote", text: "Use the queue", source: { dirName: "-repo", fileName: "s.jsonl", sessionId: "s", turnId: "t" } }],
+    })
+    expect(promptSource(quoted)).toEqual({ kind: "reader" })
+  })
+
+  it("reads a session it started reporting back as a wakeup", () => {
+    const wakeup = formatTaskWakeup({ id: "task-1", parentSessionId: "parent", childSessionId: "child-1", state: "completed", result: { turn: { reply: "Done." } } })
+    const source = promptSource(wakeup)
+    expect(source.kind).toBe("wakeup")
+    expect(source).toMatchObject({ wakeup: { taskId: "task-1", childSessionId: "child-1", state: "completed", result: { turn: { reply: "Done." } } } })
+  })
+
+  it("reads a session it started that cannot go on alone as needing attention, with what it needs", () => {
+    const attention = formatTaskAttention({ id: "task-2", childSessionId: "child-2" }, "It asked: which branch?", ["Answer with cogpit-session answer child-2 <text>."])
+    expect(promptSource(attention)).toEqual({
+      kind: "attention",
+      childSessionId: "child-2",
+      detail: "It asked: which branch?\nAnswer with cogpit-session answer child-2 <text>.",
+    })
+  })
+
+  it("reads what others wrote on the reader's behalf as events", () => {
+    expect(promptSource(`<teammate-message teammate_id="team-lead">Map the repo</teammate-message>`)).toEqual({ kind: "event" })
+    expect(promptSource("<task-notification><task-id>t</task-id><status>completed</status><summary>Build</summary></task-notification>")).toEqual({ kind: "event" })
+    expect(promptSource("[SYSTEM NOTIFICATION - NOT USER INPUT]\nAutomated.\n\nThe build finished.")).toEqual({ kind: "event" })
+    expect(promptSource("<local-command-stdout>Compacted</local-command-stdout>")).toEqual({ kind: "event" })
+    expect(promptSource("[Request interrupted by user]")).toEqual({ kind: "event" })
+    const chat = formatCrewChatDelivery(
+      { sequence: 3, id: "m3", rootId: "root", author: { kind: "agent", name: "lane-a" }, text: "Ready for review", mentions: [], createdAt: 0 },
+      false,
+      "cogpit-session chat fetch 'root'",
+      "cogpit-session chat post 'root' <text>",
+    )
+    expect(promptSource(chat)).toEqual({ kind: "event" })
+  })
+
+  it("reads a prompt with only injected context as silent", () => {
+    expect(promptSource("<system-reminder>The date changed.</system-reminder>")).toEqual({ kind: "silent" })
+    expect(promptSource("")).toEqual({ kind: "silent" })
   })
 })

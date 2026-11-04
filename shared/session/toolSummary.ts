@@ -94,20 +94,6 @@ const TOOL_LABELS: Readonly<Record<string, { label: string; styleName: string }>
   view_image: { label: "View image", styleName: "Read" },
 }
 
-export type ToolTier = "mutating" | "readOnly"
-
-const MUTATING_TOOLS = new Set([
-  "Write", "Edit", "Bash", "exec", "Task", "Agent", "Skill", "TodoWrite", "Image",
-  "AskUserQuestion", "CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger",
-  "PushNotification", "EnterWorktree", "ExitWorktree", "SendMessage", "EndConversation",
-  "TaskCreate", "TaskUpdate", "TaskStop", "Workflow",
-])
-
-export function getToolTier(name: string): ToolTier {
-  const normalized = normalizeFunctionName(name)
-  return MUTATING_TOOLS.has(TOOL_LABELS[normalized]?.styleName ?? normalized) ? "mutating" : "readOnly"
-}
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }

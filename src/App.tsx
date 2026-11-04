@@ -525,16 +525,16 @@ export default function App() {
   // The home composer starts a session with its first message already written.
   // The message waits one render for the pending session to exist, so it goes
   // through the same send path as a message typed into the new session's composer.
-  const [queuedFirstMessage, setQueuedFirstMessage] = useState<string | null>(null)
-  const handleStartNewSessionWith = useCallback(async (dirName: string, cwd: string | undefined, message: string) => {
+  const [queuedFirstMessage, setQueuedFirstMessage] = useState<{ message: string; images?: Array<{ data: string; mediaType: string }> } | null>(null)
+  const handleStartNewSessionWith = useCallback(async (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => {
     await handleStartNewSession(dirName, cwd)
-    setQueuedFirstMessage(message)
+    setQueuedFirstMessage({ message, images })
   }, [handleStartNewSession])
   const sendQueuedFirstMessage = agentChat.sendMessage
   useEffect(() => {
     if (!queuedFirstMessage || !state.pendingDirName) return
     setQueuedFirstMessage(null)
-    void sendQueuedFirstMessage(queuedFirstMessage)
+    void sendQueuedFirstMessage(queuedFirstMessage.message, queuedFirstMessage.images)
   }, [queuedFirstMessage, state.pendingDirName, sendQueuedFirstMessage])
   const newSessionModel = { selectedModel, onModelChange: setSelectedModel, selectedEffort: effectiveEffort, onEffortChange: setSelectedEffort }
 

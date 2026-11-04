@@ -131,3 +131,88 @@ export function visibleToolActivity(
   ))
   return { visible, hidden: entries.length - visible.length }
 }
+
+/** What a finished call did, as the verb that starts its row: "Read", "Ran", "Edited". */
+const PAST_VERBS: Readonly<Record<string, string>> = {
+  "Read file": "Read",
+  "Write file": "Wrote",
+  "Edit file": "Edited",
+  "Apply patch": "Edited",
+  "Edit notebook": "Edited",
+  "Run command": "Ran",
+  "Continue command": "Continued",
+  "Search files": "Searched",
+  "Find files": "Found files",
+  "Search web": "Searched the web",
+  "Search images": "Searched images",
+  "Open page": "Opened",
+  "Open link": "Opened",
+  "Find on page": "Found on page",
+  "Capture page": "Captured",
+  "View image": "Viewed",
+  "Spawn agent": "Started agent",
+  "Message agent": "Messaged",
+  "Ask question": "Asked",
+  "Use skill": "Used skill",
+  "Update plan": "Updated plan",
+  "Find tools": "Loaded tools",
+  "Wait for agents": "Waited for agents",
+  "Wait for tools": "Waited",
+  "Run workflow": "Ran workflow",
+}
+
+/** The same verbs while the call is still running. */
+const PRESENT_VERBS: Readonly<Record<string, string>> = {
+  "Read file": "Reading",
+  "Write file": "Writing",
+  "Edit file": "Editing",
+  "Apply patch": "Editing",
+  "Edit notebook": "Editing",
+  "Run command": "Running",
+  "Continue command": "Running",
+  "Search files": "Searching",
+  "Find files": "Finding files",
+  "Search web": "Searching the web",
+  "Open page": "Opening",
+  "Open link": "Opening",
+  "View image": "Viewing",
+  "Spawn agent": "Starting agent",
+  "Message agent": "Messaging",
+  "Ask question": "Asking",
+  "Use skill": "Using skill",
+  "Update plan": "Updating plan",
+  "Find tools": "Loading tools",
+  "Wait for agents": "Waiting for agents",
+  "Wait for tools": "Waiting",
+  "Run workflow": "Running workflow",
+}
+
+/** The verb a tool row opens with, in the tense its state calls for; other tools keep their own label. */
+export function toolVerb(label: string, running: boolean): string {
+  return (running ? PRESENT_VERBS[label] : PAST_VERBS[label]) ?? label
+}
+
+const GROUP_PHRASES: Readonly<Record<string, (count: number) => string>> = {
+  read: (count) => `read ${count} ${count === 1 ? "file" : "files"}`,
+  write: (count) => `wrote ${count} ${count === 1 ? "file" : "files"}`,
+  edit: (count) => `made ${count} ${count === 1 ? "edit" : "edits"}`,
+  command: (count) => `ran ${count} ${count === 1 ? "command" : "commands"}`,
+  search: (count) => `searched ${count === 1 ? "once" : `${count} times`}`,
+  page: (count) => `opened ${count} ${count === 1 ? "page" : "pages"}`,
+  image: (count) => `viewed ${count} ${count === 1 ? "image" : "images"}`,
+  agent: (count) => `started ${count} ${count === 1 ? "agent" : "agents"}`,
+  message: (count) => `sent ${count} ${count === 1 ? "message" : "messages"}`,
+  question: (count) => `asked ${count} ${count === 1 ? "question" : "questions"}`,
+  skill: (count) => `used ${count} ${count === 1 ? "skill" : "skills"}`,
+  "plan update": () => "updated the plan",
+  "crew call": (count) => `made ${count} crew ${count === 1 ? "call" : "calls"}`,
+}
+
+/** A group's activity as one sentence: "Ran 3 commands, read 2 files, made 1 edit". */
+export function activitySentence(summary: ToolActivitySummary, thoughtForMs = 0, thinkingCount = 0): string {
+  const phrases = summary.groups.map(({ label, count }) => GROUP_PHRASES[label]?.(count) ?? `used ${label}${count > 1 ? ` ×${count}` : ""}`)
+  if (thoughtForMs >= 1000) phrases.push(`thought for ${Math.round(thoughtForMs / 1000)}s`)
+  else if (thinkingCount > 0 && phrases.length === 0) phrases.push("thought")
+  const sentence = phrases.join(", ")
+  return sentence ? sentence[0]!.toUpperCase() + sentence.slice(1) : "Worked"
+}

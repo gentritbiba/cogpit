@@ -4,9 +4,9 @@ The web timeline shares tool-call components across desktop, Electron, and mobil
 
 ## Shared web structure
 
-- Each row shows an operation icon, a readable action name, and a separate target or description. Summaries stay bounded to two lines even when details open. The complete command or input remains available below.
-- Completed calls have a quiet check; running, failed, awaiting-review, and missing-result states have explicit labels. Status is included in the disclosure’s accessible description. Hook timing and replaced-output metadata remain visible.
-- An activity group has one count and a normalized operation breakdown. It exposes running, failure, awaiting-review, and missing-result counts while collapsed. Consecutive shell calls remain separate chronological rows, each with its own disclosure.
+- Each call is one line: an operation icon, a verb in the tense of its state ("Read", "Ran", "Edited"; "Reading", "Running" while it runs), then its target or description, and for edits the lines added and removed. The line truncates; the complete command or input remains available below. The tool's own name and the wall clock are in the row's tooltip.
+- A running call swaps its icon for a spinner. Completed calls draw no status. Failed, awaiting-review and missing-result calls say so in words. Status is included in the disclosure’s accessible description. Hook timing and replaced-output metadata remain visible.
+- An activity group is one line that says what the work did ("Ran 3 commands, read 2 files, thought for 4s"). It exposes running, failure, awaiting-review, and missing-result counts while collapsed. Opened, its calls hang off a rail as their own rows. Consecutive shell calls remain separate chronological rows, each with its own disclosure.
 - Automatically opened live groups keep the latest three individual entries plus all pending, failed, and awaiting-review calls. Earlier entries can be revealed together. Explicit collapse wins over automatic opening; navigation to a call reveals its group. Thinking and question history retain their place.
 - Opening a call shows its useful input and result. Ordinary commands show complete wrapping command text and an output preview immediately. Sectioned shell scripts keep one output disclosure per section with output. Global expansion preserves the user’s prior section choices.
 - A detected failure inside a sectioned shell script appears in the row status and group count, even when a later shell command succeeded. Arbitrary tool text is not classified as a shell failure.
@@ -18,6 +18,16 @@ The web timeline shares tool-call components across desktop, Electron, and mobil
 - Structured `Bash` file diffs appear alongside command output, preserving hunk coordinates and any count of omitted file diffs. Reported diffs feed file summaries; omitted diffs cannot contribute changes. Shell diffs do not add undo support for those commands.
 - Images and videos referenced with markdown image syntax render inline: images open in the zoomable viewer, and `mp4`, `m4v`, `webm` and `mov` files play with controls and seek over HTTP byte ranges. Only absolute local paths render, served by the Cogpit proxy; the CSP blocks remote `https://` media. On the web, persisted result images take precedence over a local-file preview for image reads.
 - Phone layouts keep summaries within the available width and use touch-sized controls. Long file paths must not squeeze short operation names out of the header.
+
+## Sessions and agents
+
+A call that starts another session is shown as that session, not as a tool. `cogpit-session new` (one row per session it started), `Task`, `Agent` and `spawn_agent` each render a row with the provider's mark, a dot for its state, its name, one line of what it reported or was asked, its state and the time. The row unfolds to the reply or the brief, with the raw command a further click away, and its open button opens the session or sub-agent transcript. Crew rows take name, provider and live state (working, needs you) from the session list, falling back to the name and `--agent` the start used. A background agent's call returns only a receipt, so its row reads its outcome from the task notification that reports it later. Crew starts stay visible when a finished turn folds its work, and a sub-agent's own activity block is not repeated under its row.
+
+A prompt that wakes a session because one it started finished or needs attention is shown as that session reporting back: the same row, with the reply's first line as its preview and the full reply inside.
+
+## Messages
+
+What the reader typed sits on the right as a bubble, with its time, Restore and branches under it on hover. Prompts nobody typed (background-task reports, crew chat deliveries, teammate messages, interrupts) run full width as events, and a prompt holding only context injected for the agent is not shown. Text the agent writes between steps carries copy and quote on hover only. The turn's last reply ends with the model, effort and time, and its copy and quote actions.
 
 ## Operation names
 

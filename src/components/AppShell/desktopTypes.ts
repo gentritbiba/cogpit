@@ -1,4 +1,4 @@
-import type { HomeModelControls } from "@/components/home/HomeComposer"
+import type { HomeModelControls, HomeStart } from "@/components/home/HomeComposer"
 import type {
   Dispatch,
   MutableRefObject,
@@ -67,7 +67,7 @@ export interface SessionStartNavigation {
   creatingSession: boolean
   pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
-  onStartNewSessionWith: (dirName: string, cwd: string | undefined, message: string) => void
+  onStartNewSessionWith: HomeStart["onStart"]
   newSessionModel: HomeModelControls
   onStartNewFolder: (cwd: string) => void
   onSelectProject: (dirName: string | null) => void

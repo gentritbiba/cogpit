@@ -7,7 +7,8 @@ import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
-import { attachmentSrc, useImageUpload, type UploadedImage } from "./useImageUpload"
+import { useImageUpload } from "./useImageUpload"
+import { ImageDropOverlay, ImageNotice, ImageThumbnails } from "./ImageAttachments"
 import { deviceScopedKey } from "@/lib/device"
 import { combineContext } from "./composerEditing"
 import { unsentRecovery, downloadUnsentBackup } from "./unsentRecovery"
@@ -547,11 +548,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {isDragOver && (
-        <div className="motion-enter pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg border-2 border-dashed border-info/40 bg-info/10">
-          <span className="text-sm font-medium text-info">Drop images here</span>
-        </div>
-      )}
+      {isDragOver && <ImageDropOverlay />}
 
       {showSlash && (
         <SlashSuggestions suggestions={filteredSlashList} filter={slashFilter} loading={slashSuggestionsLoading} selectedIndex={slashSelectedIndex} onSelect={handleSlashSelect} onHover={setSlashSelectedIndex} onEdit={onEditConfig} />
@@ -602,29 +599,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
           </div>
         )}
 
-        {images.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {images.map((img: UploadedImage, i) => (
-              <div key={img.id} className="motion-list-item relative group/thumb">
-                <img src={attachmentSrc(img)} alt={img.contextId ? `Capture for ${context.find((item) => item.id === img.contextId)?.kind === "browser" ? "browser annotation" : "context"} ${i + 1}` : `Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
-                <Button type="button" variant="ghost" size="icon-xs" onClick={() => { if (img.contextId) removeContext(img.contextId); else removeImage(i) }} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-popover p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
-                  <X className="size-3" data-icon="icon" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {imageError && (
-          <div role="status" aria-live="polite" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">
-            <span className="flex-1">{imageError}</span>
-            {!hasUnsupportedAttachments && (
-              <Button type="button" variant="ghost" size="icon-xs" onClick={dismissImageError} className="text-muted-foreground" aria-label="Dismiss image notice">
-                <X data-icon="icon" />
-              </Button>
-            )}
-          </div>
-        )}
+        <ImageThumbnails
+          images={images}
+          altFor={(img, i) => img.contextId ? `Capture for ${context.find((item) => item.id === img.contextId)?.kind === "browser" ? "browser annotation" : "context"} ${i + 1}` : `Upload ${i + 1}`}
+          onRemove={(img, i) => { if (img.contextId) removeContext(img.contextId); else removeImage(i) }}
+        />
+        <ImageNotice message={imageError} onDismiss={hasUnsupportedAttachments ? undefined : dismissImageError} />
 
         <div className={cn(
           "relative overflow-hidden border bg-popover shadow-lg shadow-black/5 transition-[border-color,box-shadow] duration-150",

@@ -57,6 +57,14 @@ const CONFIG_BADGES: Record<AgentKind, { letter: string; label: string }> = {
   copilot: { letter: "G", label: "Loaded by GitHub Copilot CLI" },
 }
 
+/** A provider's brand color for its mark; null where the brand mark is monochrome. */
+const MARK_COLORS: Record<AgentKind, string | null> = {
+  acp: null,
+  claude: "#D97757",
+  codex: null,
+  copilot: null,
+}
+
 /** Series colour, so one agent keeps one colour across every chart and legend. */
 const CHART_COLORS: Record<AgentKind, string> = {
   acp: "var(--chart-4)",
@@ -133,6 +141,10 @@ export function agentConfigBadge(kind: AgentKind): { letter: string; label: stri
 
 export function agentInterruptLabel(kind: AgentKind): string {
   return INTERRUPT_LABELS[kind]
+}
+
+export function agentMarkColor(kind: AgentKind): string | null {
+  return MARK_COLORS[kind]
 }
 
 export function agentChartColor(kind: AgentKind): string {

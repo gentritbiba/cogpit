@@ -6,6 +6,7 @@
  */
 
 import { shortenModel } from "../../shared/session/model-names"
+import { getCommandText } from "../../shared/session/toolSummary"
 import { AGENT_KINDS, descriptorFor } from "@/lib/agents"
 
 export type CrewVerb =
@@ -28,6 +29,8 @@ export interface CrewInvocation {
   args: string[]
   flags: Record<string, string>
   switches: string[]
+  /** Where in the command the invocation's words begin, just after `cogpit-session`. */
+  at: number
 }
 
 const SESSION_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
@@ -77,7 +80,11 @@ function wordsFrom(command: string, start: number): string[] {
       flush()
       continue
     }
-    if ("\n;&|<>)`".includes(char)) break
+    if ("\n;&|<>)`".includes(char)) {
+      // `2>&1`: the digits name a file descriptor, not an argument.
+      if ((char === "<" || char === ">") && /^\d+$/.test(word)) word = ""
+      break
+    }
     if (char === "\\" && command[index + 1] === "\n") {
       index++
       continue
@@ -210,7 +217,7 @@ export function parseCrewInvocations(command: string): CrewInvocation[] {
     const [verb, ...rest] = wordsFrom(command, end)
     if (!verb || !isVerb(verb)) continue
     const words = rest
-    const invocation: CrewInvocation = { verb, args: [], flags: {}, switches: [] }
+    const invocation: CrewInvocation = { verb, args: [], flags: {}, switches: [], at: end }
     for (let index = 0; index < words.length; index++) {
       const word = words[index]!
       if (!word.startsWith("--")) {
@@ -225,6 +232,11 @@ export function parseCrewInvocations(command: string): CrewInvocation[] {
     invocations.push(invocation)
   }
   return invocations
+}
+
+/** The `cogpit-session new` invocations in a command, in the order they start their sessions. */
+export function crewStarts(command: string): CrewInvocation[] {
+  return parseCrewInvocations(command).filter((invocation) => invocation.verb === "new")
 }
 
 export interface CrewCall {
@@ -252,13 +264,62 @@ function ids(values: readonly string[]): string[] {
   }))]
 }
 
-function startedIds(result: string | null): string[] {
-  if (!result) return []
-  const fields = [...result.matchAll(/"sessionId"\s*:\s*"([^"]+)"/g)].map((match) => match[1]!)
-  return ids(fields)
+/** The top-level JSON objects in a command's output, in the order it printed them. */
+function printedObjects(output: string): Array<Record<string, unknown>> {
+  const objects: Array<Record<string, unknown>> = []
+  let depth = 0
+  let begin = -1
+  let inString = false
+  for (let index = 0; index < output.length; index++) {
+    const char = output[index]
+    if (inString) {
+      if (char === "\\") index++
+      else if (char === "\"") inString = false
+    } else if (char === "\"") {
+      if (depth > 0) inString = true
+    } else if (char === "{") {
+      if (depth++ === 0) begin = index
+    } else if (char === "}" && depth > 0 && --depth === 0) {
+      try {
+        const value: unknown = JSON.parse(output.slice(begin, index + 1))
+        if (value && typeof value === "object" && !Array.isArray(value)) objects.push(value as Record<string, unknown>)
+      } catch { /* not JSON; another program's braces */ }
+    }
+  }
+  return objects
 }
 
-function startDetails({ flags }: CrewInvocation): string[] {
+/**
+ * The session each start in a command opened, one slot per `new` in the
+ * order they appear, undefined where that cannot be known for sure. A
+ * start prints the session with its `dirName` and the wait that follows
+ * it. A `--wait` start prints a report instead, which looks like a
+ * `status` or `wait` report, so reports count only in a command that ran
+ * no other verb. Each kind is matched to its starts in order, and only
+ * when the output holds exactly one per start; otherwise those starts stay
+ * unlinked rather than name the wrong session.
+ */
+export function startedIds(result: string | null, command: string): Array<string | undefined> {
+  const invocations = parseCrewInvocations(command)
+  const starts = invocations.filter((invocation) => invocation.verb === "new")
+  if (!result || starts.length === 0) return []
+  const onlyStarts = starts.length === invocations.length
+  const plain: string[] = []
+  const reports: string[] = []
+  for (const printed of printedObjects(result)) {
+    const sessionId = typeof printed.sessionId === "string" ? ids([printed.sessionId])[0] : undefined
+    if (!sessionId || plain.includes(sessionId) || reports.includes(sessionId)) continue
+    if ("dirName" in printed && "next" in printed && !("outcome" in printed)) plain.push(sessionId)
+    else if (onlyStarts && "outcome" in printed) reports.push(sessionId)
+  }
+  const blocking = starts.filter((start) => start.switches.includes("wait")).length
+  const plainIds = plain.length === starts.length - blocking ? plain : []
+  const reportIds = reports.length === blocking ? reports : []
+  return starts.map((start) => (start.switches.includes("wait") ? reportIds : plainIds).shift())
+}
+
+/** What a start asked for besides its message: model, effort, worktree, machine, read-only. */
+export function startDetails({ flags }: CrewInvocation): string[] {
   const agent = AGENT_KINDS.find((kind) => kind === flags.agent)
   return [
     flags.model ? shortenModel(flags.model) : agent ? descriptorFor(agent).displayName : null,
@@ -280,7 +341,7 @@ export function describeCrewCall(command: string, result: string | null): CrewCa
   if (invocations.length === 0) return null
   const verb = invocations.reduce((best, { verb: next }) => (WEIGHT[next] > WEIGHT[best] ? next : best), invocations[0]!.verb)
   const chosen = invocations.filter((invocation) => invocation.verb === verb)
-  const started = verb === "new" ? startedIds(result) : []
+  const started = verb === "new" ? startedIds(result, command).filter((sessionId): sessionId is string => sessionId !== undefined) : []
   return {
     verb,
     count: chosen.length,
@@ -334,4 +395,76 @@ export function crewCallSentence(call: CrewCall, nameOf: (sessionId: string) => 
     case "transition": return `Handed ${target ?? "a session"} to another provider`
     case "receipt": return "Checked a delivery"
   }
+}
+
+interface Heredoc {
+  /** Where its `<<` is in the command. */
+  at: number
+  /** The file it was written to, when it was. */
+  target: string | null
+  body: string
+}
+
+/** Every heredoc in a command, in order. */
+function heredocs(command: string): Heredoc[] {
+  const found: Heredoc[] = []
+  const opener = /<<-?\s*(['"]?)([A-Za-z0-9_.-]+)\1([^\n]*)\n/g
+  for (let match = opener.exec(command); match; match = opener.exec(command)) {
+    const lineStart = command.lastIndexOf("\n", match.index) + 1
+    const line = command.slice(lineStart, match.index) + match[3]
+    const target = /(?:^|[^<>&\d])>\s*([^\s;|&<>]+)/.exec(line)?.[1] ?? null
+    const lines = command.slice(match.index + match[0].length).split("\n")
+    const end = lines.findIndex((value) => value.trim() === match![2])
+    found.push({ at: match.index, target: target ? unquote(target) : null, body: lines.slice(0, end === -1 ? undefined : end).join("\n").trim() })
+    if (end !== -1) opener.lastIndex = match.index + match[0].length + lines.slice(0, end + 1).join("\n").length
+  }
+  return found
+}
+
+function unquote(word: string): string {
+  return word.replace(/^['"]|['"]$/g, "")
+}
+
+/**
+ * What an invocation reads from stdin, from its own line: a heredoc it
+ * opens (`new - <<EOF`), a file it redirects in (`new - < brief.md`) that
+ * the command wrote earlier with a heredoc, or a heredoc piped into it
+ * (`cat <<EOF | cogpit-session new -`).
+ */
+function stdinBrief(invocation: CrewInvocation, command: string, bodies: readonly Heredoc[]): string {
+  const lineStart = command.lastIndexOf("\n", invocation.at) + 1
+  const lineEnd = command.indexOf("\n", invocation.at) === -1 ? command.length : command.indexOf("\n", invocation.at)
+  const own = bodies.find((body) => body.at >= invocation.at && body.at < lineEnd)
+  if (own) return own.body
+  const file = /(?<!<)<(?!<)\s*([^\s;|&<>]+)/.exec(command.slice(invocation.at, lineEnd))?.[1]
+  if (file) return fileBrief(unquote(file), invocation, bodies)
+  return bodies.findLast((body) => body.target === null && body.at >= lineStart && body.at < invocation.at)?.body ?? ""
+}
+
+/** The brief a command wrote to `file` with a heredoc before the invocation that reads it. */
+function fileBrief(file: string, invocation: CrewInvocation, bodies: readonly Heredoc[]): string {
+  return bodies.findLast((body) => body.target === file && body.at < invocation.at)?.body ?? ""
+}
+
+/**
+ * The message a start was given, as the agent will read it: a heredoc's
+ * body rather than the shell around it, including a brief the same command
+ * wrote to a file and then fed in. A brief from anywhere else comes back
+ * empty.
+ */
+export function startMessage(invocation: CrewInvocation, command: string): string {
+  const message = invocation.args.join(" ").trim()
+  const inline = /^\$\(\s*cat\s+<<-?\s*(['"]?)([A-Za-z0-9_.-]+)\1[^\n]*\n([\s\S]*?)\n\s*\2\s*\)?$/.exec(message)
+  if (inline) return inline[3]!.trim()
+  if (message !== "-" && !message.startsWith("$(")) return message
+  const bodies = heredocs(command)
+  if (message === "-") return stdinBrief(invocation, command, bodies)
+  const file = /^\$\(\s*cat\s+([^\s)]+)\s*\)$/.exec(message)?.[1]
+  return file ? fileBrief(unquote(file), invocation, bodies) : ""
+}
+
+/** Whether a tool call started crew sessions with `cogpit-session new`. */
+export function startsCrewSession(toolCall: { input: Record<string, unknown>; result: string | null }): boolean {
+  const command = getCommandText(toolCall.input)
+  return command.includes("cogpit-session") && describeCrewCall(command, toolCall.result)?.verb === "new"
 }

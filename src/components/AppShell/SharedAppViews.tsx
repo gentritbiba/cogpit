@@ -6,7 +6,7 @@ import { SessionBrowser } from "@/components/session-browser"
 import { Spinner } from "@/components/ui/Spinner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
-import type { HomeModelControls } from "@/components/home/HomeComposer"
+import type { HomeModelControls, HomeStart } from "@/components/home/HomeComposer"
 import type { EditionMainView } from "@/edition/contract"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
@@ -43,7 +43,7 @@ interface ShellNavigation {
   pendingSession: PendingSessionInfo | null
   onStartNewSession: (dirName: string, cwd?: string) => void
   /** Start a session and send its first message in one step. */
-  onStartNewSessionWith: (dirName: string, cwd: string | undefined, message: string) => void
+  onStartNewSessionWith: HomeStart["onStart"]
   /** The model and effort a session started from the home uses. */
   newSessionModel: HomeModelControls
   onStartNewFolder: (cwd: string) => void

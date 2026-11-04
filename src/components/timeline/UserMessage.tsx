@@ -21,7 +21,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ProcessingIcon } from "@/components/ui/StatusIcons"
 import { TaskNotificationCard } from "./TaskNotificationCard"
-import { DelegatedResultCard } from "./DelegatedResultCard"
+import { DelegatedResultRow } from "./DelegatedResultRow"
 import { parseTaskWakeup } from "../../../shared/contracts/taskWakeup"
 import { CrewChatDeliveryCard } from "./CrewChatDeliveryCard"
 import { parseCrewChatDelivery } from "../../../shared/contracts/crewChat"
@@ -167,8 +167,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   return (
     <div className="group">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          {hasTags && (
+        {hasTags && (
+          <div className="mb-1 flex items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -186,8 +186,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                 </>
               )}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
 
         {!showRaw && isSystemNotification && (
           <div className="mb-2">
@@ -289,7 +289,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
           </div>
         )}
 
-        {!showRaw && wakeup && <DelegatedResultCard wakeup={wakeup} />}
+        {!showRaw && wakeup && <DelegatedResultRow wakeup={wakeup} timestamp={timestamp} />}
         {!showRaw && crewDelivery && <CrewChatDeliveryCard delivery={crewDelivery} />}
 
         {!showRaw && notifications.length > 0 && (
@@ -311,9 +311,9 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         {!showRaw && interrupts.length > 0 && (
           <div className="mb-2 flex flex-col gap-1">
             {interrupts.map((text, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+              <div key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Hand className="size-3 shrink-0" data-icon="inline-start" />
-                <span>{text}</span>
+                <span>{text.replace(/^\[|\]$/g, "")}</span>
               </div>
             ))}
           </div>

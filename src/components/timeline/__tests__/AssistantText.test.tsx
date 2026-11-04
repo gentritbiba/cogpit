@@ -22,30 +22,49 @@ describe("AssistantText", () => {
     expect(await screen.findByRole("button", { name: "Response copied" })).toBeInTheDocument()
   })
 
-  it("shows the reasoning effort next to the model", () => {
-    render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" />)
+  it("shows the model and reasoning effort under the turn's answer", () => {
+    const { container } = render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" showMeta />)
 
-    expect(screen.getByText("Opus 5")).toBeInTheDocument()
-    expect(screen.getByText("xhigh")).toBeInTheDocument()
+    const meta = container.querySelector("[data-reply-meta]")
+    expect(meta).toHaveTextContent("Opus 5 · xhigh")
+    expect(screen.getByTitle("Reasoning effort: xhigh")).toBeInTheDocument()
   })
 
   it("omits the effort label when the turn recorded none", () => {
-    render(<AssistantText text="hi" model="claude-opus-5" />)
+    render(<AssistantText text="hi" model="claude-opus-5" showMeta />)
 
     expect(screen.getByText("Opus 5")).toBeInTheDocument()
-    expect(screen.queryByText("xhigh")).not.toBeInTheDocument()
+    expect(screen.queryByText(/xhigh/)).not.toBeInTheDocument()
   })
 
   it("shows effort even when the model is unknown", () => {
-    render(<AssistantText text="hi" model={null} effort="max" />)
+    render(<AssistantText text="hi" model={null} effort="max" showMeta />)
 
     expect(screen.getByText("max")).toBeInTheDocument()
   })
 
-  it("hides the whole header row in compact mode", () => {
-    render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" compact />)
+  it("never presents the CLI's own <synthetic> messages as a model", () => {
+    const { container } = render(<AssistantText text="API Error" model="<synthetic>" showMeta />)
 
-    expect(screen.queryByText("xhigh")).not.toBeInTheDocument()
+    expect(container.querySelector("[data-reply-meta]")).not.toHaveTextContent("synthetic")
+    expect(screen.getByRole("button", { name: "Copy response" })).toBeInTheDocument()
+  })
+
+  it("keeps text between steps free of meta, offering only copy and quote", () => {
+    const { container } = render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" onQuote={vi.fn()} />)
+
+    expect(container.querySelector("[data-reply-meta]")).toBeNull()
+    expect(screen.queryByText(/Opus 5/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy response" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Quote in reply/ })).toBeInTheDocument()
+  })
+
+  it("hides the meta and actions in compact mode", () => {
+    const { container } = render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" showMeta compact />)
+
+    expect(container.querySelector("[data-reply-meta]")).toBeNull()
+    expect(screen.queryByText(/xhigh/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Copy response" })).toBeNull()
   })
 })
 

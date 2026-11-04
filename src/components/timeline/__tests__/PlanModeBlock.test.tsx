@@ -166,13 +166,13 @@ describe("PlanModeBlock", () => {
 
     const callsButton = screen.getByText("1 call during planning")
 
-    // ToolCallCard not visible before expansion (file_path badge not shown)
-    expect(screen.queryByText("src/main.ts")).toBeNull()
+    // ToolCallCard not visible before expansion (its row is not rendered)
+    expect(screen.queryByRole("button", { name: "Toggle Read file details: src/main.ts" })).toBeNull()
 
     fireEvent.click(callsButton)
 
-    // After expanding, the tool call card appears with the file path
-    expect(screen.getByText("src/main.ts")).toBeInTheDocument()
+    // After expanding, the tool call row appears as "Read src/main.ts"
+    expect(screen.getByRole("button", { name: "Toggle Read file details: src/main.ts" })).toHaveTextContent(/^Read\s*src\/main\.ts/)
   })
 
   it("collapses the entire block when header button is clicked", () => {
@@ -216,9 +216,9 @@ describe("PlanModeBlock", () => {
     const callsButton = screen.getByText("1 call during planning")
     fireEvent.click(callsButton)
 
-    // The Skill tool call card should be rendered — presence of the tool name badge is sufficient
-    // (the exact skill source rendering is tested in ToolCallCard.test.tsx)
-    expect(screen.getByText("Use skill")).toBeInTheDocument()
+    // The Skill row renders with its verb, and the forwarded metadata adds its source
+    expect(screen.getByText("Used skill")).toBeInTheDocument()
+    expect(screen.getByText("source: project")).toBeInTheDocument()
   })
 
   it("opens embedded tool groups without opening payloads at level one", () => {
@@ -238,7 +238,7 @@ describe("PlanModeBlock", () => {
       />
     )
 
-    expect(screen.getByText("src/main.ts")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Toggle Read file details: src/main.ts" })).toBeInTheDocument()
     expect(screen.queryByText(/"file_path"/)).toBeNull()
   })
 

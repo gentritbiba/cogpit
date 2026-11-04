@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { ThinkingBlock, ToolCall } from "../../../shared/session/types"
 import {
+  activitySentence,
   summarizeToolActivity,
   toolCallFailed,
   toolActivityEntries,
+  toolVerb,
   visibleToolActivity,
 } from "../toolActivity"
 
@@ -216,5 +218,66 @@ describe("visibleToolActivity", () => {
     ])
     expect(visibleToolActivity(entries, true, true)).toEqual({ visible: entries, hidden: 0 })
     expect(visibleToolActivity([], true, true)).toEqual({ visible: [], hidden: 0 })
+  })
+})
+
+describe("toolVerb", () => {
+  it("opens a finished call's row with what it did", () => {
+    expect(toolVerb("Read file", false)).toBe("Read")
+    expect(toolVerb("Run command", false)).toBe("Ran")
+    expect(toolVerb("Edit file", false)).toBe("Edited")
+    expect(toolVerb("Apply patch", false)).toBe("Edited")
+    expect(toolVerb("Search web", false)).toBe("Searched the web")
+  })
+
+  it("speaks in the present while the call runs", () => {
+    expect(toolVerb("Read file", true)).toBe("Reading")
+    expect(toolVerb("Run command", true)).toBe("Running")
+    expect(toolVerb("Edit file", true)).toBe("Editing")
+    expect(toolVerb("Spawn agent", true)).toBe("Starting agent")
+  })
+
+  it("keeps a tool's own label when it has no verb, in either tense", () => {
+    expect(toolVerb("mcp__linear__create_issue", false)).toBe("mcp__linear__create_issue")
+    expect(toolVerb("mcp__linear__create_issue", true)).toBe("mcp__linear__create_issue")
+    // Past-only verbs fall back to the label while running rather than claiming completion.
+    expect(toolVerb("Capture page", true)).toBe("Capture page")
+  })
+})
+
+describe("activitySentence", () => {
+  it("reads a group's operations as one sentence, in the order they first ran", () => {
+    const summary = summarizeToolActivity([
+      call("shell-one", "Bash"),
+      call("read-one"),
+      call("shell-two", "functions.exec_command"),
+      call("read-two"),
+      call("edit", "Edit"),
+    ])
+    expect(activitySentence(summary)).toBe("Ran 2 commands, read 2 files, made 1 edit")
+  })
+
+  it("counts singular operations in words", () => {
+    const summary = summarizeToolActivity([call("search", "Grep"), call("read")])
+    expect(activitySentence(summary)).toBe("Searched once, read 1 file")
+  })
+
+  it("adds the time spent thinking, rounded to seconds", () => {
+    const summary = summarizeToolActivity([call("shell", "Bash")])
+    expect(activitySentence(summary, 4_400, 2)).toBe("Ran 1 command, thought for 4s")
+  })
+
+  it("says it thought when thinking was too short to time and nothing else ran", () => {
+    expect(activitySentence(summarizeToolActivity([]), 0, 1)).toBe("Thought")
+    expect(activitySentence(summarizeToolActivity([call("read")]), 300, 1)).toBe("Read 1 file")
+  })
+
+  it("names tools without a phrase by their label and count", () => {
+    const summary = summarizeToolActivity([call("a", "mcp__linear__list"), call("b", "mcp__linear__list")])
+    expect(activitySentence(summary)).toBe(`Used ${summary.groups[0]!.label} ×2`)
+  })
+
+  it("falls back to a neutral word for an empty group", () => {
+    expect(activitySentence(summarizeToolActivity([]))).toBe("Worked")
   })
 })

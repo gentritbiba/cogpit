@@ -2,6 +2,7 @@ import { useState, useMemo, memo, useId } from "react"
 import {
   ChevronRight,
   ExternalLink,
+  Loader2,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
@@ -24,20 +25,16 @@ import {
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import { JsonResultHighlighted, ToolResultPanel } from "./ToolCallResult"
 import { isCodexExecCall } from "../../../shared/session/codex-exec"
-import { getCommandText, getToolPresentation, getToolTier } from "../../../shared/session/toolSummary"
+import { getCommandText, getToolPresentation } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { ToolCallStatus, ToolOperationIcon } from "./ToolCallStatus"
 import { ToolFileDiffs } from "./ToolFileDiffs"
-import { toolCallFailed } from "@/lib/toolActivity"
+import { toolCallFailed, toolVerb } from "@/lib/toolActivity"
+import { computeDiff } from "@/lib/rendering/diff"
 import { crewCallSentence, describeCrewCall, type CrewCall } from "@/lib/crewCommands"
 import { revealSessionById } from "@/lib/revealSession"
 import { useSessionNamer } from "@/hooks/useSessionNamer"
-
-export function getToolTextStyle(name: string, isError = false): string {
-  if (isError) return "text-destructive"
-  return getToolTier(name) === "mutating" ? "text-foreground" : "text-muted-foreground"
-}
 
 /** Absolute path of the image a read opened, or null when it read something else. */
 function imageReadPath(toolCall: ToolCall): string | null {
@@ -50,18 +47,46 @@ function imageReadPath(toolCall: ToolCall): string | null {
   return typeof path === "string" && isLocalImagePath(path) ? path : null
 }
 
-/** The row's headline: what the call is for (intent, target path, skill name), read before the tool name. */
-function ToolSummary({ summary, filePath, monospace, className }: { summary: string; filePath: boolean; monospace: boolean; className: string }) {
+/** What the call acted on, after its verb: a path keeps its file name when the folders give way. */
+function ToolTarget({ summary, filePath, monospace }: { summary: string; filePath: boolean; monospace: boolean }) {
   const separator = Math.max(summary.lastIndexOf("/"), summary.lastIndexOf("\\"))
-  if (filePath && summary.length > 30 && separator >= 0) {
+  if (filePath && separator >= 0) {
     return (
-      <span className={cn("flex min-w-0 font-mono leading-5", className)} title={summary}>
-        <span className="truncate">{summary.slice(0, separator + 1)}</span>
-        <span className="max-w-full shrink-0 truncate">{summary.slice(separator + 1)}</span>
+      <span className="flex min-w-0 font-mono text-xs" title={summary}>
+        <span className="truncate text-muted-foreground/80">{summary.slice(0, separator + 1)}</span>
+        <span className="max-w-full shrink-0 truncate text-foreground/80">{summary.slice(separator + 1)}</span>
       </span>
     )
   }
-  return <span className={cn("line-clamp-2 min-w-0 leading-5 [overflow-wrap:anywhere]", monospace && "font-mono", className)} title={summary}>{summary}</span>
+  return <span className={cn("min-w-0 truncate text-muted-foreground", monospace && "font-mono text-xs")} title={summary}>{summary}</span>
+}
+
+/** Lines an edit added and removed, when that is cheap to know. */
+function editStat(toolCall: ToolCall, hasEditDiff: boolean): { add: number; del: number } | null {
+  if (toolCall.isError) return null
+  if (toolCall.diffLineCounts) return toolCall.diffLineCounts
+  if (toolCall.fileDiffs?.length) {
+    let add = 0
+    let del = 0
+    for (const hunk of toolCall.fileDiffs.flatMap((diff) => diff.hunks)) {
+      for (const line of hunk.lines) {
+        if (line.startsWith("+")) add++
+        else if (line.startsWith("-")) del++
+      }
+    }
+    return add || del ? { add, del } : null
+  }
+  if (!hasEditDiff) return null
+  const before = toolCall.input.old_string as string
+  const after = toolCall.input.new_string as string
+  if (before.length + after.length > 40_000) return null
+  let add = 0
+  let del = 0
+  for (const line of computeDiff(before, after)) {
+    if (line.type === "added") add++
+    else if (line.type === "removed") del++
+  }
+  return add || del ? { add, del } : null
 }
 
 function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement {
@@ -78,9 +103,9 @@ function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement 
  * A crew call's line with the sessions it names. Only crew calls subscribe
  * to the session list for names, so other cards do not re-render on its polls.
  */
-function CrewCallHeadline({ call, className }: { call: CrewCall; className: string }) {
+function CrewCallHeadline({ call }: { call: CrewCall }) {
   const sentence = crewCallSentence(call, useSessionNamer())
-  return <span className={cn("line-clamp-2 min-w-0 leading-5 [overflow-wrap:anywhere]", className)} title={sentence}>{sentence}</span>
+  return <span className="min-w-0 truncate text-foreground/90" title={sentence}>{sentence}</span>
 }
 
 /** The sessions a crew call acted on, each a link to open it. */
@@ -145,7 +170,6 @@ export const ToolCallCard = memo(function ToolCallCard({
   const nameTitle = presentation.label === toolCall.name
     ? toolCall.name
     : `${presentation.label} (${toolCall.name})`
-  const nameClass = getToolTextStyle(crewCall ? "Crew" : presentation.styleName, failed)
   const timeLabel = toolCall.timestamp
     ? new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : undefined
@@ -169,6 +193,8 @@ export const ToolCallCard = memo(function ToolCallCard({
     typeof toolCall.input.old_string === "string" &&
     typeof toolCall.input.new_string === "string" &&
     typeof toolCall.input.file_path === "string"
+
+  const diffStat = useMemo(() => editStat(toolCall, hasEditDiff), [toolCall, hasEditDiff])
 
   const imagePath = imageReadPath(toolCall)
   const hasResultImages = Boolean(toolCall.resultImages?.length)
@@ -195,12 +221,20 @@ export const ToolCallCard = memo(function ToolCallCard({
     )
   }
 
+  const running = toolCall.result === null && Boolean(isAgentActive) && !toolCall.awaitingReview
+  const verb = toolVerb(presentation.label, running)
+  const isPathTarget = [toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)
+  const target = summary && summary !== verb ? summary : ""
+
   return (
-    <div className={cn("min-w-0 rounded-lg", showPanel && "bg-muted", failed && "bg-destructive/5")} data-tool-call-id={toolCall.id}>
+    <div className="min-w-0" data-tool-call-id={toolCall.id}>
       <button
         type="button"
-        className="group/tool flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title={timeLabel}
+        className={cn(
+          "group/tool flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          showPanel && "bg-muted/40",
+        )}
+        title={timeLabel ? `${nameTitle} · ${timeLabel}` : nameTitle}
         aria-label={`Toggle ${displayName} details${summary ? `: ${summary}` : ""}`}
         aria-expanded={showPanel}
         aria-controls={panelId}
@@ -209,28 +243,40 @@ export const ToolCallCard = memo(function ToolCallCard({
           if (!expandToolPayloads) setPanelOpen((open) => !open)
         }}
       >
-        <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground", failed && "text-destructive")}>
-          <ToolOperationIcon styleName={crewCall ? "Crew" : presentation.styleName} />
+        <span className={cn("flex size-4 shrink-0 items-center justify-center text-muted-foreground", failed && "text-destructive", running && "text-info")}>
+          {running
+            ? <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+            : <ToolOperationIcon styleName={crewCall ? "Crew" : presentation.styleName} />}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
           {crewCall ? (
-            <CrewCallHeadline call={crewCall} className={cn("text-[13px] font-medium", nameClass)} />
-          ) : summary && (
-            <ToolSummary
-              summary={summary}
-              filePath={[toolCall.input.file_path, toolCall.input.path, toolCall.input.notebook_path].includes(summary)}
-              monospace={!crewCall && (!hasCommand || !toolCall.input.description)}
-              className={cn("text-[13px] font-medium", nameClass)}
-            />
+            <CrewCallHeadline call={crewCall} />
+          ) : (
+            <>
+              <span className={cn("shrink-0 font-medium", failed ? "text-destructive" : "text-foreground/90")}>{verb}</span>
+              {target && (
+                <ToolTarget
+                  summary={target}
+                  filePath={isPathTarget}
+                  monospace={!hasCommand || !toolCall.input.description}
+                />
+              )}
+              {diffStat && (
+                <span className="shrink-0 font-mono text-xs tabular-nums">
+                  {diffStat.add > 0 && <span className="text-success">+{diffStat.add}</span>}
+                  {diffStat.add > 0 && diffStat.del > 0 && " "}
+                  {diffStat.del > 0 && <span className="text-destructive">−{diffStat.del}</span>}
+                </span>
+              )}
+            </>
           )}
-          <span className={cn(summary ? "text-xs text-muted-foreground" : cn("text-[13px] font-medium", nameClass), "leading-5")} title={nameTitle}>{displayName}</span>
         </span>
-        <span id={statusId} className="flex shrink-0 flex-col items-end gap-1">
-          <ToolCallStatus toolCall={toolCall} failed={failed} isAgentActive={isAgentActive} />
+        <span id={statusId} className="flex shrink-0 items-center gap-2">
           {Boolean(toolCall.hookDurationMs && toolCall.hookDurationMs > 0) && <span className="text-xs tabular-nums text-muted-foreground" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>}
           {toolCall.outputReplacedByHook && <span className="text-xs text-info" title="Output replaced by hook">hook</span>}
+          <ToolCallStatus toolCall={toolCall} failed={failed} isAgentActive={isAgentActive} />
         </span>
-        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", showPanel && "rotate-90")} aria-hidden="true" />
+        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground opacity-0 transition-[transform,opacity] group-hover/tool:opacity-100 group-focus-visible/tool:opacity-100", showPanel && "rotate-90 opacity-100")} aria-hidden="true" />
         {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
       </button>
 
@@ -286,7 +332,7 @@ export const ToolCallCard = memo(function ToolCallCard({
 
       <Collapsible open={showPanel}>
         <CollapsibleContent id={panelId}>
-          <div className="min-w-0 px-3 pb-3 pt-1 sm:pl-14">
+          <div className="min-w-0 pb-2 pl-8 pr-2 pt-1">
             {hasEditDiff && <EditToolDiff toolCall={toolCall} />}
             {crewCall && <CrewCallSessions call={crewCall} />}
             {hasCommand ? (

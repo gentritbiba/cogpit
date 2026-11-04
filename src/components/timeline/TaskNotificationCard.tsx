@@ -1,97 +1,80 @@
-import { useState, type ReactNode } from "react"
-import { Bell, ChevronDown, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import { Bell, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { parseTaskNotifications, type TaskNotification } from "@/lib/userMessageContent"
 import { cn } from "@/lib/utils"
 import { CompletedIcon, FailedIcon, RunningIcon } from "@/components/ui/StatusIcons"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 
-const ERROR_STYLE = {
-  Icon: FailedIcon,
-  color: "text-destructive",
-  bg: "border-destructive/20 bg-destructive/5",
-  badgeVariant: "destructive",
-} as const
-
 const STATUS_STYLES = {
-  completed: { Icon: CompletedIcon, color: "text-success", bg: "border-success/20 bg-success/5", badgeVariant: "secondary", label: "Completed" },
-  failed: { ...ERROR_STYLE, label: "Failed" },
-  error: { ...ERROR_STYLE, label: "Error" },
-  running: { Icon: RunningIcon, color: "text-warning", bg: "border-warning/20 bg-warning/5", badgeVariant: "outline", label: "Running" },
+  completed: { Icon: CompletedIcon, color: "text-success", label: "Completed" },
+  failed: { Icon: FailedIcon, color: "text-destructive", label: "Failed" },
+  error: { Icon: FailedIcon, color: "text-destructive", label: "Error" },
+  running: { Icon: RunningIcon, color: "text-warning", label: "Running" },
 } as const
 
-const EVENT_STYLE = { Icon: Bell, color: "text-muted-foreground", bg: "border-border/40 bg-muted/30", badgeVariant: "outline" } as const
+const EVENT_STYLE = { Icon: Bell, color: "text-muted-foreground" } as const
 
-export function TaskNotificationCard({ notification, action }: { notification: TaskNotification; action?: ReactNode }) {
+/**
+ * A background task reporting back, as one line: what it was, how it ended,
+ * and its output a click away.
+ */
+export function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
   const [expanded, setExpanded] = useState(false)
   const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES]
     ?? { ...EVENT_STYLE, label: notification.status || "Event" }
   const { Icon: StatusIcon } = statusStyle
   const hasDetail = notification.result.length > 0 || notification.event.length > 0 || notification.outputFile.length > 0
-  const Chevron = expanded ? ChevronDown : ChevronRight
+  const row = (
+    <>
+      <StatusIcon className={cn("size-3.5 shrink-0", statusStyle.color)} />
+      <span className="min-w-0 flex-1 truncate text-foreground/90" title={notification.summary}>{notification.summary}</span>
+      <span className={cn("shrink-0 text-xs", statusStyle.color)}>{statusStyle.label}</span>
+      {hasDetail && <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")} />}
+    </>
+  )
+  const rowClass = "flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5"
+
+  if (!hasDetail) return <div data-task-notification className={rowClass}>{row}</div>
 
   return (
-    <Collapsible
-      open={expanded}
-      onOpenChange={setExpanded}
-      className={cn("my-1 rounded-lg border p-3", statusStyle.bg)}
-    >
-      <div className="flex items-start gap-2">
-        <StatusIcon className={cn("mt-0.5 size-4 shrink-0", statusStyle.color)} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{notification.summary}</span>
-            <Badge variant={statusStyle.badgeVariant} className={statusStyle.color}>
-              {statusStyle.label}
-            </Badge>
-            {action && <div className="ml-auto">{action}</div>}
-          </div>
-          {hasDetail && (
-            <>
-              <CollapsibleTrigger
-                render={(
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="mt-1.5 -ml-2 text-muted-foreground"
-                  />
-                )}
-              >
-                <Chevron data-icon="inline-start" />
-                {expanded ? "Hide detail" : "Show detail"}
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div className="mt-2 border-t border-border/30 pt-2 text-sm text-foreground/90">
-                  {notification.result && (
-                    <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
-                      {notification.result}
-                    </ReactMarkdown>
-                  )}
-                  {notification.event && (
-                    <div className="whitespace-pre-wrap break-words font-mono text-xs">{notification.event}</div>
-                  )}
-                  {notification.outputFile && (
-                    <div className="mt-2">
-                      <div className="text-xs font-medium text-muted-foreground">Output file</div>
-                      <div className="mt-1 select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
-                        {notification.outputFile}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CollapsibleContent>
-            </>
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="min-w-0" data-task-notification>
+      <CollapsibleTrigger
+        render={(
+          <button
+            type="button"
+            aria-label={`${expanded ? "Hide detail" : "Show detail"}: ${notification.summary}`}
+            className={cn(rowClass, "transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+          />
+        )}
+      >
+        {row}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mb-1 ml-[15px] border-l border-border/60 py-1 pl-4 text-sm text-foreground/90">
+          {notification.result && (
+            <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
+              {notification.result}
+            </ReactMarkdown>
+          )}
+          {notification.event && (
+            <div className="whitespace-pre-wrap break-words font-mono text-xs">{notification.event}</div>
+          )}
+          {notification.outputFile && (
+            <div className="mt-2">
+              <div className="text-xs font-medium text-muted-foreground">Output file</div>
+              <div className="mt-1 select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                {notification.outputFile}
+              </div>
+            </div>
           )}
         </div>
-      </div>
+      </CollapsibleContent>
     </Collapsible>
   )
 }

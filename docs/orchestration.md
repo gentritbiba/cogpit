@@ -129,7 +129,8 @@ worktree folders. Search stays flat and shows lineage. The Crew panel opens
 on the first visit to a crew, remains rooted at its coordinator while opening
 members, and offers request answers, member navigation, stop and result
 acknowledgment. Requests show their actual waiting time when the provider
-records it.
+records it. Its overview summarizes the crew as counts by state, and its
+session list starts on Working so large crews open on what is running.
 
 The Crew panel's Map tab draws the same crew as a tree of cards from its root,
 left to right by depth; a panel too narrow for that stacks the cards, each

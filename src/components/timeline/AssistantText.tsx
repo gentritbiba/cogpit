@@ -20,6 +20,11 @@ interface AssistantTextProps {
   compact?: boolean
   /** Quote the reply, or the part of it selected, into the composer. */
   onQuote?: (text: string) => void
+  /**
+   * The turn's answer, which carries the model and time under it. Text the
+   * agent wrote between its steps only offers copy and quote, on hover.
+   */
+  showMeta?: boolean
 }
 
 /** The text selected inside `root`, or null when the selection is elsewhere or empty. */
@@ -40,6 +45,7 @@ export const AssistantText = memo(function AssistantText({
   messageKey,
   compact = false,
   onQuote,
+  showMeta = false,
 }: AssistantTextProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const markdownText = useMemo(() => preprocessMediaPaths(text), [text])
@@ -48,53 +54,54 @@ export const AssistantText = memo(function AssistantText({
 
   if (!text) return null
 
-  return (
-    <div className="group">
-      {!compact && <div className="mb-1 flex min-h-6 items-center justify-end gap-1.5">
-        {model && (
-          <span className="text-xs text-muted-foreground">
-            {shortenModel(model)}
-          </span>
-        )}
-        {effort && (
-          <span className="text-xs text-muted-foreground" title={`Reasoning effort: ${effort}`}>
-            {effort}
-          </span>
-        )}
-        {(model || effort) && timestamp && <span className="text-xs text-muted-foreground">·</span>}
-        {timestamp && (
-          <span className="text-xs text-muted-foreground">
-            {new Date(timestamp).toLocaleTimeString()}
-          </span>
-        )}
+  const actions = !compact && (
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="text-muted-foreground hover:text-foreground"
+        onClick={() => copy(text)}
+        aria-label={copied ? "Response copied" : "Copy response"}
+        title={copied ? "Copied" : "Copy response"}
+      >
+        {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+      </Button>
+      {onQuote && (
         <Button
           variant="ghost"
           size="icon-sm"
-          className="opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-          onClick={() => copy(text)}
-          aria-label={copied ? "Response copied" : "Copy response"}
-          title={copied ? "Copied" : "Copy response"}
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => onQuote(selectionWithin(contentRef.current) ?? text)}
+          aria-label="Quote in reply (the selected part, or the whole response)"
+          title="Quote in reply"
         >
-          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          <MessageSquareQuote data-icon="inline-start" />
         </Button>
-        {onQuote && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-            onClick={() => onQuote(selectionWithin(contentRef.current) ?? text)}
-            aria-label="Quote in reply (the selected part, or the whole response)"
-            title="Quote in reply"
-          >
-            <MessageSquareQuote data-icon="inline-start" />
-          </Button>
-        )}
-      </div>}
+      )}
+    </>
+  )
+  // `<synthetic>` marks a message the CLI wrote itself, such as an error; it is not a model.
+  const meta = [model && !model.startsWith("<") && shortenModel(model), effort, timestamp && new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean)
+
+  return (
+    <div className="group/text relative min-w-0">
       <div ref={contentRef} className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
         <CogpitBlockScope.Provider value={blockScope}>
           <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
         </CogpitBlockScope.Provider>
       </div>
+      {actions && (showMeta ? (
+        <div data-reply-meta className="mt-1 flex min-h-7 items-center gap-1 text-xs text-muted-foreground">
+          {meta.length > 0 && (
+            <span className="pr-1 tabular-nums" title={effort ? `Reasoning effort: ${effort}` : undefined}>{meta.join(" · ")}</span>
+          )}
+          <span className="flex items-center gap-0.5 transition-opacity sm:opacity-0 sm:group-hover/text:opacity-100 sm:focus-within:opacity-100">{actions}</span>
+        </div>
+      ) : (
+        <div className="absolute -top-1 right-0 flex items-center rounded-md bg-background/90 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur transition-opacity focus-within:opacity-100 group-hover/text:opacity-100">
+          {actions}
+        </div>
+      ))}
     </div>
   )
 })

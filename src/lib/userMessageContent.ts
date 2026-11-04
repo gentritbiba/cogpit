@@ -7,7 +7,9 @@
 // The iOS client mirrors this in `ios/CogpitKit/Sources/CogpitKit/Transcript/UserMessageContent.swift`.
 
 import { stripAnsi } from "@/lib/ansi"
-import { isTaskWakeup, parseTaskAttention, parseTaskWakeup } from "../../shared/contracts/taskWakeup"
+import { isTaskWakeup, parseTaskAttention, parseTaskWakeup, type TaskWakeup } from "../../shared/contracts/taskWakeup"
+import { parseAgentEnvelope } from "../../shared/session/agentEnvelope"
+import { parseComposerMessage } from "../../shared/session/composerContext"
 import { parseCrewChatDelivery } from "../../shared/contracts/crewChat"
 import { VOICE_MODE_TAG } from "../../shared/voiceMode"
 
@@ -242,4 +244,44 @@ export function generatedPromptSummary(
   nameOf?: (sessionId: string) => string | undefined,
 ): string | null {
   return taskWakeupSummary(text, nameOf) ?? crewChatDeliverySummary(text)
+}
+
+// ── Who a prompt came from ──────────────────────────────────────────────
+
+export type PromptSource =
+  | { kind: "reader" }
+  /** Written on someone else's behalf: a teammate, the crew chat, a background task, the system. */
+  | { kind: "event" }
+  /** A session this one started reporting its result. */
+  | { kind: "wakeup"; wakeup: TaskWakeup }
+  /** A session this one started that cannot go on alone. */
+  | { kind: "attention"; childSessionId: string; detail: string }
+  /** Nothing anyone would read: only context injected for the agent, or a reminder. */
+  | { kind: "silent" }
+
+/**
+ * Whether the reader typed a prompt, and when not, what wrote it: the
+ * timeline shows the reader's words as theirs and everything else as
+ * something that happened.
+ */
+export function promptSource(text: string): PromptSource {
+  if (parseComposerMessage(text)) return { kind: "reader" }
+  const envelope = parseAgentEnvelope(text)
+  if (envelope.matched) return { kind: "event" }
+  const clean = stripSystemTags(envelope.body).trim()
+  const wakeup = parseTaskWakeup(clean)
+  if (wakeup) return { kind: "wakeup", wakeup }
+  const attention = parseTaskAttention(clean)
+  if (attention) {
+    const marker = `Child session: ${attention.childSessionId}.`
+    return { kind: "attention", childSessionId: attention.childSessionId, detail: clean.slice(clean.indexOf(marker) + marker.length).trim() }
+  }
+  if (parseCrewChatDelivery(clean)) return { kind: "event" }
+  const { text: afterBanner, isSystemNotification } = stripSystemNotificationPreamble(clean)
+  if (isSystemNotification) return { kind: "event" }
+  const { notifications, remainingText } = parseTaskNotifications(afterBanner)
+  const { outputs, remainingText: afterOutputs } = parseLocalCommandOutputs(remainingText)
+  const { interrupts, remainingText: words } = parseInterrupts(afterOutputs)
+  if (words.trim() || extractCommandName(envelope.body)) return { kind: "reader" }
+  return notifications.length > 0 || outputs.length > 0 || interrupts.length > 0 ? { kind: "event" } : { kind: "silent" }
 }

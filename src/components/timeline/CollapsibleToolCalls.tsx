@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useId, memo } from "react"
-import { ChevronRight, ListTree, Loader2, XCircle } from "lucide-react"
+import { Brain, ChevronRight, ListTree, Loader2 } from "lucide-react"
 import { ToolCallCard } from "./ToolCallCard"
 import { ThinkingBlock } from "./ThinkingBlock"
 import type { ToolCall } from "../../../shared/session/types"
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
-import { summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
+import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls, expandAll, expandToolPayloads, activeToolCallId,
@@ -61,7 +61,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   function renderCall(call: ToolCall) {
     const isActive = activeToolCallId === call.id
     return (
-      <div key={call.id} ref={isActive ? targetRef : undefined} className={cn("min-w-0", isActive && "rounded-lg ring-2 ring-ring")}>
+      <div key={call.id} ref={isActive ? targetRef : undefined} className={cn("min-w-0", isActive && "rounded-md ring-2 ring-ring")}>
         <ToolCallCard toolCall={call} expandToolPayloads={expandToolPayloads} isAgentActive={isAgentActive && call.result === null} skillMetadata={skillMetadata} />
       </div>
     )
@@ -72,29 +72,30 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   }
 
   const title = toolCalls.length > 0 ? `${toolCalls.length} tool ${toolCalls.length === 1 ? "call" : "calls"}` : "Thinking"
-  const thinkingLabel = thoughtForMs > 0 ? `Thought for ${Math.max(1, Math.round(thoughtForMs / 1000))}s` : thinkingCount > 0 ? "Includes thinking" : ""
-  const description = [summary.text, thinkingLabel].filter(Boolean).join(" · ")
+  const sentence = activitySentence(summary, thoughtForMs, thinkingCount)
+  const Icon = toolCalls.length > 0 ? ListTree : Brain
 
   return (
-    <div className="min-w-0 rounded-xl border border-border/80 bg-card" data-tool-activity="">
+    <div className="min-w-0" data-tool-activity="">
       <button
         type="button"
-        className="flex min-h-14 w-full min-w-0 items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={`${isOpen ? "Collapse" : "Expand"} ${title}${description ? `: ${description}` : ""}`}
+        className="group/tool flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={`${isOpen ? "Collapse" : "Expand"} ${title}: ${sentence}`}
         aria-expanded={isOpen}
         aria-controls={panelId}
         aria-describedby={statusId}
         aria-disabled={expandAll || hasUserQuestion || undefined}
         onClick={() => { if (!expandAll && !hasUserQuestion) setOpenOverride(!isOpen) }}
       >
-        <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[13px] font-medium text-foreground">{title}</span>
-          {description && <span className="text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">{description}</span>}
+        <span className={cn("flex size-4 shrink-0 items-center justify-center text-muted-foreground", hasInProgressCall && "text-info")}>
+          {hasInProgressCall
+            ? <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+            : <Icon className="size-3.5" aria-hidden="true" />}
         </span>
-        <span id={statusId} className="flex shrink-0 flex-col items-end gap-1 text-xs">
-          {summary.running > 0 && <span className="flex items-center gap-1.5 text-info"><Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />{summary.running} running</span>}
-          {summary.failed > 0 && <span className="flex items-center gap-1.5 text-destructive"><XCircle className="size-3.5" aria-hidden="true" />{summary.failed} failed</span>}
+        <span className="min-w-0 flex-1 truncate text-muted-foreground" title={summary.text}>{sentence}</span>
+        <span id={statusId} className="flex shrink-0 items-center gap-2.5 text-xs">
+          {summary.running > 0 && <span className="text-info">{summary.running} running</span>}
+          {summary.failed > 0 && <span className="text-destructive">{summary.failed} failed</span>}
           {summary.awaitingReview > 0 && <span className="text-muted-foreground">{summary.awaitingReview} awaiting review</span>}
           {summary.unavailable > 0 && <span className="text-muted-foreground">{summary.unavailable} no result</span>}
         </span>
@@ -102,11 +103,11 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
       </button>
       <Collapsible open={isOpen}>
         <CollapsibleContent id={panelId}>
-          <div className="min-w-0 border-t border-border/70 px-1 py-1">
-            {tail.hidden > 0 && <Button type="button" variant="ghost" size="sm" className="mb-1 ml-2" onClick={() => setOpenOverride(true)}>Show {tail.hidden} earlier {tail.hidden === 1 ? "step" : "steps"}</Button>}
+          <div className="ml-[15px] min-w-0 border-l border-border/60 py-0.5 pl-2">
+            {tail.hidden > 0 && <Button type="button" variant="ghost" size="xs" className="mb-0.5 text-muted-foreground" onClick={() => setOpenOverride(true)}>Show {tail.hidden} earlier {tail.hidden === 1 ? "step" : "steps"}</Button>}
             {tail.visible.map((entry) => entry.kind === "tool_call"
               ? renderCall(entry.toolCall)
-              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} className="px-3 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
+              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
           </div>
         </CollapsibleContent>
       </Collapsible>

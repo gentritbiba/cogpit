@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { UserMessage } from "../UserMessage"
 import { ImageGalleryProvider } from "../SessionImageGallery"
 import { formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
@@ -104,7 +104,7 @@ describe("UserMessage — task notification status", () => {
     expect(screen.queryByText("Running")).not.toBeInTheDocument()
     expect(container.querySelector(".status-icon-spin")).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "Show detail" }))
+    fireEvent.click(screen.getByRole("button", { name: 'Show detail: Monitor event: "wait for the review gate"' }))
     expect(screen.getByText("reviewer output updated")).toBeInTheDocument()
   })
 
@@ -136,7 +136,10 @@ describe("UserMessage — animated disclosures", () => {
 
     render(<UserMessage content={notification} timestamp="" />)
 
-    const disclosure = screen.getByRole("button", { name: "Show detail" })
+    // The whole one-line row is the disclosure, named after what it reports.
+    const disclosure = screen.getByRole("button", { name: "Show detail: Audit complete" })
+    expect(disclosure).toHaveTextContent("Audit complete")
+    expect(disclosure).toHaveTextContent("Completed")
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(disclosure)
 
@@ -146,8 +149,18 @@ describe("UserMessage — animated disclosures", () => {
     expect(document.getElementById(panelId!)).toHaveClass("h-[var(--collapsible-panel-height)]")
     expect(screen.getByText("All files checked.")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide detail" }))
+    expect(disclosure).toHaveAccessibleName("Hide detail: Audit complete")
+    fireEvent.click(disclosure)
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("renders a notification without detail as a plain row, not a button", () => {
+    const bare = "<task-notification><status>completed</status><summary>Lint passed</summary></task-notification>"
+    const { container } = render(<UserMessage content={bare} timestamp="" />)
+
+    expect(screen.getByText("Lint passed")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /detail/ })).toBeNull()
+    expect(container.querySelector("[data-task-notification]")?.tagName).toBe("DIV")
   })
 
   it("keeps fetched slash-command content in an animated panel", async () => {
@@ -191,29 +204,50 @@ describe("UserMessage — delegated session results", () => {
     result: { turn: { reply: "Pricing copy fixed." }, filesChanged: [{ path: "a.ts" }, { path: "b.ts" }] },
   })
 
-  it("shows the finished session as a result card instead of the raw prompt", () => {
-    render(<UserMessage content={wakeup} timestamp="" />)
-    expect(screen.getByText("Delegated session")).toBeInTheDocument()
-    expect(screen.getByText("Completed")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument()
+  it("shows the finished session as a row reporting back instead of the raw prompt", () => {
+    const { container } = render(<UserMessage content={wakeup} timestamp="" />)
+    const row = screen.getByRole("button", { name: "Delegated session, Finished: Pricing copy fixed." })
+    expect(container.querySelector("[data-session-row]")).toHaveAttribute("data-session-row", "finished")
+    expect(row).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "Open Delegated session" })).toBeInTheDocument()
     expect(screen.queryByText(/Acknowledge receipt/)).toBeNull()
 
-    fireEvent.click(screen.getByText("Show detail"))
-    expect(screen.getByText("Pricing copy fixed.")).toBeInTheDocument()
-    expect(screen.getByText("2 files changed")).toBeInTheDocument()
+    fireEvent.click(row)
+    expect(row).toHaveAttribute("aria-expanded", "true")
+    const detail = document.getElementById(row.getAttribute("aria-controls")!)!
+    expect(within(detail).getByText("Pricing copy fixed.")).toBeInTheDocument()
+    expect(within(detail).getByText("2 files changed")).toBeInTheDocument()
   })
 
   it("counts the changed files a long result had to leave out", () => {
     const trimmed = formatTaskWakeup({ id: "task-2", parentSessionId: "parent", childSessionId: "child-2", state: "completed", result: { turn: { reply: "Done." }, filesChanged: Array.from({ length: 600 }, (_, i) => ({ path: `src/generated/module-${i}/deeply/nested/file-${i}.ts` })) } })
     render(<UserMessage content={trimmed} timestamp="" />)
-    fireEvent.click(screen.getByText("Show detail"))
+    fireEvent.click(screen.getByRole("button", { name: /^Delegated session, Finished/ }))
     expect(screen.getByText("600 files changed")).toBeInTheDocument()
+  })
+
+  it("previews the changed files when the session sent no reply, and opens it on click", () => {
+    const silent = formatTaskWakeup({ id: "task-3", parentSessionId: "parent", childSessionId: "child-3", state: "error", result: { filesChanged: [{ path: "a.ts" }] } })
+    render(<UserMessage content={silent} timestamp="" />)
+    const row = screen.getByRole("button", { name: "Open Delegated session, Failed" })
+    expect(row).toHaveTextContent("1 file changed")
+    expect(row).not.toHaveAttribute("aria-expanded")
   })
 
   it("keeps the raw prompt one click away", () => {
     render(<UserMessage content={wakeup} timestamp="" />)
     fireEvent.click(screen.getByText("Show raw"))
     expect(screen.getByText(/Acknowledge receipt/)).toBeInTheDocument()
+  })
+})
+
+describe("UserMessage — interrupts", () => {
+  it("shows an interrupt as a quiet note without its brackets", () => {
+    render(<UserMessage content="[Request interrupted by user]" timestamp="" />)
+    const note = screen.getByText("Request interrupted by user")
+    expect(note.parentElement).toHaveClass("text-muted-foreground")
+    expect(note.parentElement).not.toHaveClass("text-destructive")
+    expect(screen.queryByText("Show raw")).toBeNull()
   })
 })
 

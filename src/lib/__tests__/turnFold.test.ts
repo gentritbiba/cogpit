@@ -305,3 +305,40 @@ describe("planTurnFold — async questions", () => {
     expect(plan.foldedIndices).not.toContain(3)
   })
 })
+
+describe("planTurnFold — crew starts", () => {
+  const LANE = "01a11695-2938-7ec2-9d9c-0c8af023bd5f"
+  const shell = (id: string, command: string, result: string | null = "ok"): ToolCall =>
+    ({ id, name: "Bash", input: { command }, result, isError: false, timestamp: "" })
+  const start = shell("start", `cogpit-session new "Audit the routes" --name audit`, JSON.stringify({ sessionId: LANE }))
+
+  it("keeps a block that starts sessions in view while the rest of the work folds", () => {
+    const blocks: TurnContentBlock[] = [
+      tools("Read"),
+      { kind: "tool_calls", toolCalls: [start] },
+      { kind: "tool_calls", toolCalls: [shell("wait", `cogpit-session wait ${LANE}`)] },
+      text("Audit started and finished"),
+    ]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldable).toBe(true)
+    expect(plan.foldedIndices).toEqual([0, 2])
+    expect(plan.hiddenToolCalls).toBe(2)
+  })
+
+  it("pins a start that is still running", () => {
+    const blocks: TurnContentBlock[] = [
+      tools("Grep"),
+      { kind: "tool_calls", toolCalls: [{ ...start, result: null }] },
+    ]
+
+    expect(planTurnFold(blocks, "working").foldedIndices).toEqual([0])
+  })
+
+  it("does not fold a turn whose only work is starting sessions", () => {
+    const plan = planTurnFold([{ kind: "tool_calls", toolCalls: [start] }, text("Started")])
+
+    expect(plan.foldable).toBe(false)
+  })
+})

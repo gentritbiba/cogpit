@@ -1,6 +1,6 @@
 import {
-  Check, CircleHelp, Clock3, FileSearch, FileText, Globe, ListTodo,
-  Loader2, MessageSquare, Network, Pencil, Plug, Search, Sparkles, Terminal, Users, XCircle,
+  CircleHelp, FileSearch, FileText, Globe, ListTodo,
+  MessageSquare, Network, Pencil, Plug, Search, Sparkles, Terminal, Users,
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
@@ -12,15 +12,15 @@ export function ToolOperationIcon({ styleName }: { styleName: string }) {
     TodoWrite: ListTodo, Task: Users, SendMessage: MessageSquare,
     AskUserQuestion: CircleHelp, Skill: Sparkles, Crew: Network,
   })[styleName] ?? Plug
-  return <Icon className="size-4 shrink-0" aria-hidden="true" />
+  return <Icon className="size-3.5 shrink-0" aria-hidden="true" />
 }
 
 const TOOL_STATUS = {
-  failed: { Icon: XCircle, label: "Failed", description: "failed" },
-  awaitingReview: { Icon: Clock3, label: "Awaiting review", description: "awaiting review" },
-  running: { Icon: Loader2, label: "Running", description: "running" },
-  unavailable: { Icon: Clock3, label: "No result", description: "has no result" },
-  completed: { Icon: Check, label: "Completed", description: "completed" },
+  failed: { label: "Failed", visible: true },
+  awaitingReview: { label: "Awaiting review", visible: true },
+  running: { label: "Running", visible: false },
+  unavailable: { label: "No result", visible: true },
+  completed: { label: "Completed", visible: false },
 }
 
 function statusFor(toolCall: ToolCall, failed: boolean, isAgentActive?: boolean): keyof typeof TOOL_STATUS {
@@ -30,14 +30,17 @@ function statusFor(toolCall: ToolCall, failed: boolean, isAgentActive?: boolean)
   return isAgentActive ? "running" : "unavailable"
 }
 
+/**
+ * Where a call stands, in words. A running or completed call reads from the
+ * row's icon and verb, so only a failure, a call held for review and one that
+ * never got a result are drawn.
+ */
 export function ToolCallStatus({ toolCall, failed = Boolean(toolCall.isError), isAgentActive }: { toolCall: ToolCall; failed?: boolean; isAgentActive?: boolean }) {
   const status = statusFor(toolCall, failed, isAgentActive)
-  const { Icon, label, description } = TOOL_STATUS[status]
-  const running = status === "running"
+  const { label, visible } = TOOL_STATUS[status]
   return (
-    <span className={cn("flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground", failed && "text-destructive", running && "text-info")} title={label}>
-      <Icon role="img" aria-label={`Tool call ${description}`} className={cn("size-3.5", running && "motion-safe:animate-spin")} />
-      <span className={cn(status === "completed" && "sr-only")}>{label}</span>
+    <span data-tool-status={status} className={cn("shrink-0 text-xs text-muted-foreground", failed && "text-destructive", !visible && "sr-only")}>
+      {label}
     </span>
   )
 }

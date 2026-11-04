@@ -37,6 +37,12 @@ const crew: SessionCrew = {
   ],
 }
 
+async function allSessions() {
+  const sessions = await screen.findByRole("region", { name: "Sessions" })
+  fireEvent.click(within(sessions).getByRole("radio", { name: "All" }))
+  return sessions
+}
+
 function renderPanel() {
   const openSession = vi.fn()
   const context = { session: { sessionId: "lane" }, openSession } as unknown as WorkspacePanelContext
@@ -56,17 +62,15 @@ describe("CrewPanel", () => {
   it("opens a remote member on its owning device", async () => {
     mocks.crew = { ...crew, members: [crew.members[0]!, member("remote", { device: { id: "dev_1", name: "agentbox" } })] }
     const { openSession } = renderPanel()
-    fireEvent.click(await screen.findByRole("button", { name: "remote, Finished" }))
+    fireEvent.click(within(await allSessions()).getByRole("button", { name: "remote, Finished" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/d/dev_1/-remote/remote")
     expect(openSession).not.toHaveBeenCalled()
   })
-  it("rolls the crew up under its root: one cell per member, and counts", async () => {
+  it("rolls the crew up under its root as counts", async () => {
     renderPanel()
     expect(await screen.findByRole("button", { name: "Wave 3 coordinator" })).toBeInTheDocument()
     expect(mocks.fetch).toHaveBeenCalledWith("/api/session-crew/lane")
 
-    const cells = [...document.querySelectorAll("[data-crew-cell]")].map((cell) => cell.getAttribute("data-crew-cell"))
-    expect(cells).toEqual(["working", "needs-you", "done"])
     const summary = screen.getByRole("region", { name: "Crew summary" })
     expect(summary).toHaveTextContent("3 sessions")
     expect(summary).toHaveTextContent("1 working")
@@ -86,7 +90,7 @@ describe("CrewPanel", () => {
 
   it("lists every member, marks where the user is, and opens one", async () => {
     const { openSession } = renderPanel()
-    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    const sessions = await allSessions()
     const lane = within(sessions).getByRole("button", { name: "lane, Bash" })
     expect(lane).toHaveAttribute("aria-current", "true")
     expect(lane).toHaveTextContent("you are here")
@@ -98,7 +102,8 @@ describe("CrewPanel", () => {
 
   it("marks a result read and stops a working member", async () => {
     renderPanel()
-    fireEvent.click(await screen.findByRole("button", { name: "Mark theories's result read" }))
+    await allSessions()
+    fireEvent.click(screen.getByRole("button", { name: "Mark theories's result read" }))
     await waitFor(() => expect(mocks.json).toHaveBeenCalledWith("/api/delegated-tasks", { sessionId: "coordinator", taskId: "task-9", action: "ack" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Stop lane" }))
@@ -117,11 +122,22 @@ describe("CrewPanel", () => {
     expect(openSession).toHaveBeenCalledWith("-theories", "theories.jsonl")
   })
 
-  it("filters the list by what members are doing", async () => {
+  it("shows working members by default and filters the list by what members are doing", async () => {
     renderPanel()
     const sessions = await screen.findByRole("region", { name: "Sessions" })
+    expect(within(sessions).getByRole("radio", { name: "Working" })).toHaveAttribute("aria-checked", "true")
+    expect(within(sessions).getAllByRole("listitem").map((item) => item.getAttribute("data-crew-row"))).toEqual(["lane"])
     fireEvent.click(within(sessions).getByRole("radio", { name: "Need you" }))
     expect(within(sessions).getAllByRole("listitem").map((item) => item.getAttribute("data-crew-row"))).toEqual(["rooftop"])
+  })
+
+  it("offers every member when nothing is working", async () => {
+    mocks.crew = { ...crew, members: [crew.members[0]!, member("idle")] }
+    renderPanel()
+    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    expect(sessions).toHaveTextContent("Nothing is working right now.")
+    fireEvent.click(within(sessions).getByRole("button", { name: "Show all" }))
+    expect(within(sessions).getByRole("button", { name: "idle, Finished" })).toBeInTheDocument()
   })
 
   function nestedCrew() {
@@ -138,7 +154,7 @@ describe("CrewPanel", () => {
   it("folds every descendant without opening the parent, preserving nested folds and siblings", async () => {
     nestedCrew()
     const { openSession } = renderPanel()
-    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    const sessions = await allSessions()
     expect(within(sessions).queryByRole("button", { name: /Collapse theories/ })).not.toBeInTheDocument()
     fireEvent.click(within(sessions).getByRole("button", { name: "Collapse branch's child sessions" }))
     fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
@@ -159,7 +175,7 @@ describe("CrewPanel", () => {
   it("reveals matching descendants in status filters and restores folds on All", async () => {
     nestedCrew()
     renderPanel()
-    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    const sessions = await allSessions()
     fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
     fireEvent.click(within(sessions).getByRole("radio", { name: "Need you" }))
     expect(within(sessions).getByRole("button", { name: "helper, Plan to review" })).toBeInTheDocument()
@@ -171,29 +187,11 @@ describe("CrewPanel", () => {
     nestedCrew()
     const user = userEvent.setup()
     renderPanel()
-    const toggle = await screen.findByRole("button", { name: "Collapse lane's child sessions" })
+    const toggle = within(await allSessions()).getByRole("button", { name: "Collapse lane's child sessions" })
     toggle.focus()
     await user.keyboard("{Enter}")
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     await user.keyboard(" ")
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("unfolds ancestors when a hidden member is selected from the summary strip", async () => {
-    nestedCrew()
-    const scroll = vi.fn()
-    const previous = Element.prototype.scrollIntoView
-    Element.prototype.scrollIntoView = scroll
-    try {
-      renderPanel()
-      const sessions = await screen.findByRole("region", { name: "Sessions" })
-      fireEvent.click(within(sessions).getByRole("button", { name: "Collapse branch's child sessions" }))
-      fireEvent.click(within(sessions).getByRole("button", { name: "Collapse lane's child sessions" }))
-      fireEvent.click(screen.getByRole("listitem", { name: "helper: Plan to review" }))
-      expect(within(sessions).getByRole("button", { name: "helper, Plan to review" })).toBeInTheDocument()
-      await waitFor(() => expect(scroll).toHaveBeenCalled())
-    } finally {
-      Element.prototype.scrollIntoView = previous
-    }
   })
 })

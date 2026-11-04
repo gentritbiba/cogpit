@@ -11,12 +11,12 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks }: ThinkingBlo
   return (
     <div className="flex flex-col gap-2">
       {blocks.map((block, i) => (
-        <pre
+        <p
           key={i}
-          className="text-xs text-muted-foreground/70 font-mono whitespace-pre-wrap break-words max-h-96 overflow-y-auto"
+          className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words text-xs italic leading-5 text-muted-foreground"
         >
           {block.thinking}
-        </pre>
+        </p>
       ))}
     </div>
   )

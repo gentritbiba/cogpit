@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { getToolTextStyle, ToolCallCard } from "../ToolCallCard"
-import { getToolSummary, getToolTier } from "../../../../shared/session/toolSummary"
+import { ToolCallCard } from "../ToolCallCard"
+import { getToolSummary } from "../../../../shared/session/toolSummary"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
@@ -104,79 +104,94 @@ describe("getToolSummary", () => {
   })
 })
 
-describe("getToolTier", () => {
-  it("counts spawning, steering and messaging agents as changing the world", () => {
-    for (const name of ["Agent", "TaskCreate", "TaskUpdate", "TaskStop", "SendMessage", "EndConversation"]) {
-      expect(getToolTier(name)).toBe("mutating")
-    }
-  })
+/** The call's status word: drawn for failures and waits, screen-reader-only while running or done. */
+function toolStatus(container: HTMLElement): HTMLElement {
+  const status = container.querySelector<HTMLElement>("[data-tool-status]")
+  if (!status) throw new Error("no tool status")
+  return status
+}
 
-  it("counts launching a workflow as changing the world", () => {
-    // A workflow run spawns a fleet of agents that edit the repo.
-    expect(getToolTier("Workflow")).toBe("mutating")
-  })
+function spinners(container: HTMLElement): Element[] {
+  return [...container.querySelectorAll("svg.motion-safe\\:animate-spin")]
+}
 
-  it("counts inspecting and reporting on that work as read-only", () => {
-    for (const name of ["ListAgents", "TaskList", "TaskOutput", "LSP", "StructuredOutput", "ReportFindings"]) {
-      expect(getToolTier(name)).toBe("readOnly")
-    }
-  })
-})
-
-describe("getToolTextStyle", () => {
-  it("gives calls that change the world full strength", () => {
-    for (const name of ["Write", "Edit", "Bash", "exec", "Task"]) {
-      expect(getToolTextStyle(name)).toBe("text-foreground")
-    }
-  })
-
-  it("mutes read-only calls", () => {
-    for (const name of ["Read", "Grep", "Glob", "WebFetch", "WebSearch"]) {
-      expect(getToolTextStyle(name)).toBe("text-muted-foreground")
-    }
-  })
-
-  it("mutes unknown tools rather than inventing a hue for them", () => {
-    expect(getToolTextStyle("SomeUnknownMcpTool")).toBe("text-muted-foreground")
-  })
-
-  it("reserves red for failures, whatever the tool was", () => {
-    expect(getToolTextStyle("Read", true)).toBe("text-destructive")
-    expect(getToolTextStyle("Bash", true)).toBe("text-destructive")
-  })
-})
-
-describe("ToolCallCard status icon", () => {
-  it("marks completed calls with a quiet success icon", () => {
+describe("ToolCallCard status", () => {
+  it("reads a completed call as its past-tense verb, with no visible status word", () => {
     const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), result: "contents" }
 
-    render(<ToolCallCard toolCall={toolCall} />)
+    const { container } = render(<ToolCallCard toolCall={toolCall} />)
 
-    expect(screen.queryByRole("img", { name: "Tool call failed" })).toBeNull()
-    expect(screen.queryByRole("img", { name: "Tool call running" })).toBeNull()
-    expect(screen.getByRole("img", { name: "Tool call completed" })).toBeInTheDocument()
+    const row = screen.getByRole("button", { name: "Toggle Read file details: x.ts" })
+    expect(within(row).getByText("Read")).toBeInTheDocument()
+    expect(toolStatus(container)).toHaveAttribute("data-tool-status", "completed")
+    expect(toolStatus(container)).toHaveClass("sr-only")
+    expect(row).toHaveAccessibleDescription(/completed/i)
+    expect(spinners(container)).toHaveLength(0)
   })
 
-  it("marks a failed call", () => {
+  it("marks a failed call in red, with a visible status word", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Read", { file_path: "x.ts" }),
       result: "ENOENT",
       isError: true,
     }
 
-    render(<ToolCallCard toolCall={toolCall} />)
+    const { container } = render(<ToolCallCard toolCall={toolCall} />)
 
-    expect(screen.getByRole("img", { name: "Tool call failed" })).toBeTruthy()
+    expect(toolStatus(container)).toHaveAttribute("data-tool-status", "failed")
+    expect(toolStatus(container)).toHaveTextContent("Failed")
+    expect(toolStatus(container)).not.toHaveClass("sr-only")
+    expect(screen.getByText("Read")).toHaveClass("text-destructive")
     expect(screen.getByRole("button", { name: /Read file details/ })).toHaveAccessibleDescription(/failed/i)
   })
 
-  it("marks a call that is still running", () => {
+  it("marks a call that is still running with a spinner and a present-tense verb", () => {
     const toolCall = makeToolCall("Bash", { command: "bun test" })
 
-    render(<ToolCallCard toolCall={toolCall} isAgentActive />)
+    const { container } = render(<ToolCallCard toolCall={toolCall} isAgentActive />)
 
-    expect(screen.getByRole("img", { name: "Tool call running" })).toBeTruthy()
+    expect(screen.getByText("Running", { ignore: "[data-tool-status]" })).toBeInTheDocument()
+    expect(spinners(container)).toHaveLength(1)
+    expect(toolStatus(container)).toHaveAttribute("data-tool-status", "running")
+    expect(toolStatus(container)).toHaveClass("sr-only")
     expect(screen.getByRole("button", { name: /Run command details/ })).toHaveAccessibleDescription(/running/i)
+  })
+
+  it("names a call that never got a result, without a spinner", () => {
+    const toolCall = makeToolCall("Bash", { command: "bun test" })
+
+    const { container } = render(<ToolCallCard toolCall={toolCall} />)
+
+    expect(toolStatus(container)).toHaveAttribute("data-tool-status", "unavailable")
+    expect(toolStatus(container)).toHaveTextContent("No result")
+    expect(toolStatus(container)).not.toHaveClass("sr-only")
+    expect(spinners(container)).toHaveLength(0)
+  })
+
+  it("counts the lines an edit added and removed", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Edit", { file_path: "/repo/src/a.ts", old_string: "one\ntwo\n", new_string: "one\n2\nthree\n" }),
+      result: "ok",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} />)
+
+    const row = screen.getByRole("button", { name: /Edit file details/ })
+    expect(within(row).getByText("Edited")).toBeInTheDocument()
+    expect(within(row).getByText("+2")).toHaveClass("text-success")
+    expect(within(row).getByText("−1")).toHaveClass("text-destructive")
+  })
+
+  it("drops the diff stat when the edit failed", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Edit", { file_path: "/repo/src/a.ts", old_string: "one", new_string: "two" }),
+      result: "String not found",
+      isError: true,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} />)
+
+    expect(screen.queryByText(/^\+\d/)).toBeNull()
   })
 })
 
@@ -190,14 +205,14 @@ describe("ToolCallCard timestamp", () => {
     })
     const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), timestamp, result: "ok" }
 
-    const { container } = render(<ToolCallCard toolCall={toolCall} />)
+    render(<ToolCallCard toolCall={toolCall} />)
 
     // Costs no visible ink: the only node carrying it is screen-reader-only.
     const printed = screen.queryByText(expected)
     expect(printed?.tagName).toBe("TIME")
     expect(printed?.className).toContain("sr-only")
-    // Mouse users get it from the row's tooltip.
-    expect(container.querySelector(`[title="${expected}"]`)).toBeTruthy()
+    // Mouse users get it from the row's tooltip, after the tool's name.
+    expect(screen.getByRole("button", { name: /Read file details/ })).toHaveAttribute("title", `Read file (Read) · ${expected}`)
   })
 
   it("gives assistive tech a machine-readable time", () => {
@@ -473,7 +488,7 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.queryByRole("button", { name: "Raw input" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Result" })).toBeNull()
 
-    fireEvent.click(screen.getByText("Read file"))
+    fireEvent.click(within(disclosure).getByText("Read"))
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     const panelId = disclosure.getAttribute("aria-controls")
@@ -517,7 +532,10 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.queryByRole("button", { name: "Diff" })).toBeNull()
     fireEvent.click(disclosure)
 
-    expect(screen.getAllByText("src/example.ts")).toHaveLength(2)
+    // The row splits the path into folder and name; the opened diff names the whole file.
+    expect(screen.getByText("src/example.ts")).toBeInTheDocument()
+    expect(within(disclosure).getByText("+1")).toBeInTheDocument()
+    expect(within(disclosure).getByText("−1")).toBeInTheDocument()
     fireEvent.click(screen.getByTitle("Expand diff"))
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     expect(screen.queryByText("Edit applied successfully")).toBeNull()
@@ -753,11 +771,11 @@ describe("ToolCallCard Bash input rendering", () => {
 
     const disclosure = screen.getByRole("button", { name: /Run command details/ })
     const summary = within(disclosure).getByTitle(/^bun run check:step-1/)
-    expect(summary).toHaveClass("line-clamp-2")
+    expect(summary).toHaveClass("truncate")
     fireEvent.click(disclosure)
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
-    expect(summary).toHaveClass("line-clamp-2")
+    expect(summary).toHaveClass("truncate")
     const commandBlock = within(screen.getByRole("region", { name: "Bash command" })).getByText(/check:step-12/).closest("pre")
     expect(commandBlock?.textContent).toBe(command)
     expect(commandBlock).not.toHaveClass("line-clamp-2")
@@ -786,7 +804,7 @@ describe("ToolCallCard Codex exec input rendering", () => {
 
     render(<ToolCallCard toolCall={toolCall} />)
 
-    expect(screen.getByText("Search web")).toBeTruthy()
+    expect(screen.getByText("Searched the web")).toBeTruthy()
     expect(screen.getByText("Codex app-server items")).toBeTruthy()
     expect(screen.queryByText("exec")).toBeNull()
     expect(screen.queryByText(/const r = await/)).toBeNull()
@@ -832,7 +850,8 @@ text(r.output);`
     expect(screen.getByRole("region", { name: "View image" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Source" }))
     expect(screen.getByLabelText("Codex exec script").textContent).toContain("tools.view_image")
-    expect(screen.getAllByText("View image")).toHaveLength(2)
+    expect(screen.getByText("Viewed")).toBeInTheDocument()
+    expect(screen.getAllByText("View image")).toHaveLength(1)
   })
 
   it("renders nested agent messages as recipient and readable message before the source", () => {
@@ -902,7 +921,7 @@ describe("ToolCallCard provider parity", () => {
     expect(screen.queryByRole("button", { name: "Copy result" })).toBeNull()
     rerender(<ToolCallCard toolCall={{ ...toolCall, result: null }} expandToolPayloads isAgentActive />)
     expect(screen.queryByText("No output")).toBeNull()
-    expect(screen.getByRole("img", { name: "Tool call running" })).toBeTruthy()
+    expect(document.querySelector("[data-tool-status]")).toHaveAttribute("data-tool-status", "running")
   })
 })
 
@@ -1304,8 +1323,7 @@ describe("CollapsibleToolCalls", () => {
       />,
     )
 
-    expect(screen.getByText("2 tool calls")).toBeInTheDocument()
-    expect(screen.getByText("2 commands")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Collapse 2 tool calls: Ran 2 commands" })).toHaveTextContent("Ran 2 commands")
     const firstDisclosure = screen.getByRole("button", { name: /Run command details: Run tests/ })
     const secondDisclosure = screen.getByRole("button", { name: /Run command details: Build app/ })
     expect(firstDisclosure).toHaveAttribute("aria-expanded", "false")
@@ -1340,12 +1358,21 @@ describe("CollapsibleToolCalls", () => {
     )
 
     expect(screen.getByText("3 running")).toBeInTheDocument()
-    expect(screen.getAllByRole("img", { name: "Tool call running" })).toHaveLength(3)
-    for (const target of [/Read file details: src\/pending.ts/, /Search files details: pending-symbol/, /Run command details: bun test/]) {
+    expect(document.querySelectorAll('[data-tool-status="running"]')).toHaveLength(3)
+    for (const [target, verb] of [
+      [/Read file details: src\/pending.ts/, "Reading"],
+      [/Search files details: pending-symbol/, "Searching"],
+      [/Run command details: bun test/, "Running"],
+    ] as const) {
       const disclosure = screen.getByRole("button", { name: target })
-      expect(within(disclosure).getByRole("img", { name: "Tool call running" })).toBeInTheDocument()
+      expect(within(disclosure).getByText(verb, { ignore: "[data-tool-status]" })).toBeInTheDocument()
+      expect(disclosure.querySelector("[data-tool-status]")).toHaveAttribute("data-tool-status", "running")
+      expect(disclosure.querySelector("svg.motion-safe\\:animate-spin")).not.toBeNull()
     }
-    expect(within(screen.getByRole("button", { name: /Read file details: src\/completed.ts/ })).queryByRole("img", { name: "Tool call running" })).toBeNull()
+    const done = screen.getByRole("button", { name: /Read file details: src\/completed.ts/ })
+    expect(within(done).getByText("Read")).toBeInTheDocument()
+    expect(done.querySelector("[data-tool-status]")).toHaveAttribute("data-tool-status", "completed")
+    expect(done.querySelector("svg.motion-safe\\:animate-spin")).toBeNull()
   })
 
   it("lets the user collapse a live group and leaves its running count visible", () => {
@@ -1363,13 +1390,14 @@ describe("CollapsibleToolCalls", () => {
     )
 
     const disclosure = screen.getByRole("button", { name: /Collapse 2 tool calls/ })
+    const pendingRow = { name: "Toggle Edit file details: /tmp/in-progress.ts" }
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByText("/tmp/in-progress.ts")).toBeInTheDocument()
+    expect(screen.getByRole("button", pendingRow)).toBeInTheDocument()
 
     fireEvent.click(disclosure)
 
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByText("/tmp/in-progress.ts")).toBeNull()
+    expect(screen.queryByRole("button", pendingRow)).toBeNull()
     expect(within(disclosure).getByText("1 running")).toBeInTheDocument()
   })
 
@@ -1385,9 +1413,9 @@ describe("CollapsibleToolCalls", () => {
       <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
-    const disclosure = screen.getByRole("button", { name: /Expand 4 tool calls/ })
-    expect(within(disclosure).getByText("4 tool calls")).toBeInTheDocument()
-    expect(within(disclosure).getByText("1 read · 2 commands · 1 search")).toBeInTheDocument()
+    const disclosure = screen.getByRole("button", { name: "Expand 4 tool calls: Read 1 file, ran 2 commands, searched once" })
+    const sentence = within(disclosure).getByText("Read 1 file, ran 2 commands, searched once")
+    expect(sentence).toHaveAttribute("title", "1 read · 2 commands · 1 search")
     expect(within(disclosure).queryByText("Read file")).toBeNull()
     expect(within(disclosure).queryByText(/Run command/)).toBeNull()
     expect(screen.queryByText(/×2/)).toBeNull()
@@ -1442,10 +1470,10 @@ describe("CollapsibleToolCalls", () => {
     await user.keyboard("{Enter}")
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
     expect(document.getElementById(panelId!)).toBeInTheDocument()
-    expect(screen.getByText("src/a.ts")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Toggle Read file details: src/a.ts" })).toBeInTheDocument()
     await user.keyboard(" ")
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByText("src/a.ts")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Toggle Read file details: src/a.ts" })).toBeNull()
   })
 
   it("bounds live history while keeping older pending and failed calls visible", () => {
@@ -1459,17 +1487,18 @@ describe("CollapsibleToolCalls", () => {
       <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} isAgentActive />,
     )
 
+    const step = (index: number) => ({ name: `Toggle Read file details: src/step-${index}.ts` })
     for (const index of [0, 1, 4, 5, 6]) {
-      expect(screen.getByText(`src/step-${index}.ts`)).toBeInTheDocument()
+      expect(screen.getByRole("button", step(index))).toBeInTheDocument()
     }
-    expect(screen.queryByText("src/step-2.ts")).toBeNull()
-    expect(screen.queryByText("src/step-3.ts")).toBeNull()
-    expect(screen.getAllByRole("img", { name: "Tool call running" })).toHaveLength(2)
-    expect(screen.getByRole("img", { name: "Tool call failed" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", step(2))).toBeNull()
+    expect(screen.queryByRole("button", step(3))).toBeNull()
+    expect(document.querySelectorAll('[data-tool-status="running"]')).toHaveLength(2)
+    expect(document.querySelectorAll('[data-tool-status="failed"]')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole("button", { name: "Show 2 earlier steps" }))
-    expect(screen.getByText("src/step-2.ts")).toBeInTheDocument()
-    expect(screen.getByText("src/step-3.ts")).toBeInTheDocument()
+    expect(screen.getByRole("button", step(2))).toBeInTheDocument()
+    expect(screen.getByRole("button", step(3))).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /earlier steps/ })).toBeNull()
   })
 
@@ -1532,7 +1561,7 @@ describe("ToolCallCard mobile payload controls", () => {
 
     const disclosure = screen.getByRole("button", { name: `Toggle Run command details: ${description}` })
     const summary = within(disclosure).getByTitle(description)
-    expect(summary).toHaveClass("line-clamp-2")
+    expect(summary).toHaveClass("truncate")
     expect(within(disclosure).getByText(description)).toBe(summary)
     expect(within(summary).queryByText("ToolCallCard.tsx")).toBeNull()
   })
@@ -1692,7 +1721,7 @@ describe("ToolCallCard sectioned Bash commands", () => {
   it("uses the command description as its readable collapsed summary", () => {
     render(<ToolCallCard toolCall={sectioned} />)
     const disclosure = screen.getByRole("button", { name: /Run command details: Survey settings infrastructure/ })
-    expect(within(disclosure).getByText("Run command")).toBeInTheDocument()
+    expect(within(disclosure).getByText("Ran")).toBeInTheDocument()
     expect(within(disclosure).getByText("Survey settings infrastructure")).toBeInTheDocument()
     expect(screen.queryByLabelText(/^Sections:/)).toBeNull()
     expect(screen.queryByText(/echo ---HOTSWAP/)).toBeNull()
@@ -1772,8 +1801,8 @@ describe("ToolCallCard sectioned Bash commands", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false")
     expect(within(disclosure).getByText("Failed")).toBeInTheDocument()
     expect(disclosure).toHaveAccessibleDescription(/failed/i)
-    expect(within(disclosure).getByRole("img", { name: "Tool call failed" })).toBeInTheDocument()
-    expect(within(disclosure).queryByRole("img", { name: "Tool call completed" })).toBeNull()
+    expect(within(disclosure).getByText("Ran")).toHaveClass("text-destructive")
+    expect(disclosure.querySelector("[data-tool-status]")).toHaveAttribute("data-tool-status", "failed")
 
     fireEvent.click(disclosure)
     expect(within(screen.getByRole("button", { name: /A section/ })).getByText("Failed")).toHaveClass("text-destructive")
@@ -1833,12 +1862,12 @@ describe("ToolCallCard sectioned Bash commands", () => {
 
 
 describe("structured file-change results", () => {
-  it.each(["Edit", "Write"])("shows %s as awaiting review without a completed icon", (name) => {
+  it.each(["Edit", "Write"])("shows %s as awaiting review, in words and without a spinner", (name) => {
     const toolCall = { ...makeToolCall(name, { file_path: "/a.ts", old_string: "before", new_string: "after", content: "after" }), result: "File unchanged until owner review.", awaitingReview: true }
     render(<ToolCallCard toolCall={toolCall} expandToolPayloads isAgentActive />)
     expect(screen.getByText("Awaiting review")).toBeVisible()
-    expect(screen.queryByRole("img", { name: "Tool call completed" })).toBeNull()
-    expect(screen.queryByRole("img", { name: "Tool call running" })).toBeNull()
+    expect(screen.getByText("Awaiting review")).toHaveAttribute("data-tool-status", "awaitingReview")
+    expect(document.querySelector("svg.motion-safe\\:animate-spin")).toBeNull()
     expect(screen.getByText("File unchanged until owner review.")).toBeVisible()
   })
 
@@ -1865,7 +1894,7 @@ describe("ToolCallCard crew calls", () => {
 
     const header = screen.getByRole("button", { name: /Toggle Crew details/ })
     expect(header).toHaveTextContent("Messaged w3-rooftop")
-    expect(header).toHaveTextContent("Crew")
+    expect(header).not.toHaveTextContent("cogpit-session")
 
     fireEvent.click(header)
     fireEvent.click(await screen.findByRole("button", { name: "w3-rooftop" }))

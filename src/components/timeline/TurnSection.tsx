@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from "react"
-import { Clock, RotateCcw } from "lucide-react"
+import { RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
 import { AgentMessageCard } from "./AgentMessageCard"
 import { AssistantText } from "./AssistantText"
@@ -10,14 +10,18 @@ import { RecapBanner } from "./RecapBanner"
 import { TaskNotificationBlock } from "./TaskNotificationCard"
 import { LocalCommandBlock } from "./LocalCommandOutput"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
+import { DelegatedAttentionRow, DelegatedResultRow } from "./DelegatedResultRow"
+import { clockLabel } from "./SessionRow"
+import { isSpawnCall, SpawnedSessionRows } from "./SpawnedSessionRows"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { TurnContextMenu } from "@/components/TurnContextMenu"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { LiveElapsed } from "./AgentStatusIndicator"
-import { collectActivity } from "@/lib/timelineHelpers"
+import { collectActivity, segmentActivity, type ActivityItem } from "@/lib/timelineHelpers"
+import { promptSource } from "@/lib/userMessageContent"
+import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
@@ -25,23 +29,16 @@ import { useSessionContext, useSessionContextOptional } from "@/contexts/Session
 import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
-import type { Turn, TurnContentBlock } from "../../../shared/session/types"
+import type { SubAgentMessage, Turn, TurnContentBlock } from "../../../shared/session/types"
 import { hasEditToolCalls } from "../../../shared/session/edit-calls"
 import { cn } from "@/lib/utils"
-import { formatDuration, getTurnDuration } from "@/lib/format"
+import { getTurnDuration } from "@/lib/format"
 import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
-const PROMPT_CARD = "border border-border bg-prompt-surface"
-
-/**
- * One rail for nesting. Depth is the only thing a rail has to communicate, so
- * every nested block shares a single hairline; a nested agent transcript is a
- * genuine structural difference, so it keeps the one accent.
- */
-const NEST_RAIL = "border-l border-border/40"
-const AGENT_RAIL = "border-l border-border"
+/** What the reader typed: their side of the conversation, set apart on the right. */
+const PROMPT_BUBBLE = "ml-auto w-fit max-w-[min(85%,44rem)] rounded-2xl rounded-tr-md border border-border/70 bg-prompt-surface px-4 py-2.5"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -246,6 +243,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [foldPlan, turn.contentBlocks, workVisible])
 
+  const spawnedAgents = useMemo(() => spawnedAgentActivity(turn), [turn])
+
   const contentBlockProps = {
     turnId: turn.id,
     originalBlocks: turn.contentBlocks,
@@ -256,8 +255,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
     activeToolCallId,
     isAgentActive,
     isSessionLive,
-    isMobile,
     skillMetadata,
+    spawnedAgents,
   }
 
   return (
@@ -265,35 +264,30 @@ const TurnSectionInner = memo(function TurnSectionInner({
       data-turn-index={index}
       className={cn(
         "group relative",
-        isMobile ? "px-0 py-5" : "px-4 py-5",
+        isMobile ? "px-0 py-4" : "px-4 py-4",
         isActive && "rounded-lg ring-1 ring-ring/40",
       )}
     >
-      <TurnHeader
-        index={index}
-        turn={turn}
-        branchCount={branchCount}
-        isTurnDone={isTurnDone}
-        isMobile={isMobile}
-        onRestoreToHere={onRestoreToHere}
-        onOpenBranches={onOpenBranches}
-      />
-
-      <div className="flex flex-col gap-3">
-        {turn.userMessage && (
-          <MaybePromptContextMenu index={index}>
-            <div data-turn-prompt className={cn(
-              "rounded-lg p-3",
-              PROMPT_CARD,
-            )}>
-              <UserMessage
-                content={turn.userMessage}
-                timestamp={turn.timestamp}
-                onEditCommand={onEditCommand}
-                onExpandCommand={onExpandCommand}
-              />
-            </div>
-          </MaybePromptContextMenu>
+      <div className="flex flex-col gap-2.5">
+        {turn.userMessage ? (
+          <TurnPrompt
+            index={index}
+            turn={turn}
+            branchCount={branchCount}
+            isMobile={isMobile}
+            onRestoreToHere={onRestoreToHere}
+            onOpenBranches={onOpenBranches}
+            onEditCommand={onEditCommand}
+            onExpandCommand={onExpandCommand}
+          />
+        ) : (
+          <TurnActions
+            index={index}
+            branchCount={branchCount}
+            isMobile={isMobile}
+            onRestoreToHere={onRestoreToHere}
+            onOpenBranches={onOpenBranches}
+          />
         )}
 
         {foldPlan.foldable ? (
@@ -337,92 +331,136 @@ const TurnSectionInner = memo(function TurnSectionInner({
   )
 })
 
-// ── Turn header ──────────────────────────────────────────────────────────────
+/**
+ * What each agent this turn's spawn calls started has recorded, by the call
+ * that started it: its id, latest status and latest words. Agents those
+ * agents started are filed under the same call, so they are left out.
+ */
+function spawnedAgentActivity(turn: Turn): ReadonlyMap<string, SubAgentMessage> {
+  const byCall = new Map<string, SubAgentMessage>()
+  for (const message of turn.subAgentActivity) {
+    const callId = message.parentToolUseId
+    if (!callId || message.parentAgentId) continue
+    const seen = byCall.get(callId)
+    byCall.set(callId, seen
+      ? { ...message, agentId: seen.agentId, status: message.status ?? seen.status, text: message.text.length > 0 ? message.text : seen.text }
+      : message)
+  }
+  return byCall
+}
 
-function TurnHeader({
-  index,
-  turn,
-  branchCount,
-  isTurnDone,
-  isMobile,
-  onRestoreToHere,
-  onOpenBranches,
-}: {
+// ── The prompt ───────────────────────────────────────────────────────────────
+
+interface TurnActionProps {
   index: number
-  turn: Turn
   branchCount: number
-  isTurnDone: boolean
   isMobile: boolean
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
-}) {
-  const showLiveTimer = !isTurnDone && !!turn.timestamp
-  const durationMs = isTurnDone ? getTurnDuration(turn) : null
+}
 
+/** Restore and branches, for a turn; shown under its prompt, on hover where there is hover. */
+function TurnActions({ index, branchCount, isMobile, onRestoreToHere, onOpenBranches, time }: TurnActionProps & { time?: string }) {
+  const clock = time ? clockLabel(time) : ""
+  if (!onRestoreToHere && !(branchCount > 0 && onOpenBranches) && !clock) return null
   return (
-    <div className={cn("flex items-center", isMobile ? "mb-2 gap-1.5" : "mb-4 gap-2")}>
-      {/* The turn boundary is carried by the accented user message below; this
-          number is a label for cross-referencing panels, not a second cue. */}
-      <span className="shrink-0 font-mono text-xs text-muted-foreground">
-        {index + 1}
+    <div className="flex min-h-6 items-center justify-end gap-1 text-xs text-muted-foreground">
+      <span
+        className={cn(
+          "flex items-center gap-1 transition-opacity",
+          !isMobile && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        )}
+      >
+        {clock && <time className="px-1 tabular-nums" dateTime={time}>{clock}</time>}
+        {onRestoreToHere && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => onRestoreToHere(index)}
+            className="text-muted-foreground hover:text-foreground"
+            title="Undo this turn and all after it"
+          >
+            <RotateCcw data-icon="inline-start" />
+            Restore
+          </Button>
+        )}
       </span>
-      <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
-      {onRestoreToHere && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={() => onRestoreToHere(index)}
-          className={cn(
-            "ml-auto text-muted-foreground transition-opacity hover:text-foreground",
-            isMobile ? "opacity-70" : "opacity-0 group-hover:opacity-100",
-          )}
-          title="Undo this turn and all after it"
-        >
-          <RotateCcw data-icon="inline-start" />
-          <span className="hidden sm:inline">Restore</span>
-        </Button>
-      )}
       {branchCount > 0 && onOpenBranches && (
-        <div className={cn(!onRestoreToHere && "ml-auto")}>
-          <BranchIndicator
-            branchCount={branchCount}
-            onClick={() => onOpenBranches(index)}
-          />
-        </div>
+        <BranchIndicator
+          branchCount={branchCount}
+          onClick={() => onOpenBranches(index)}
+        />
       )}
     </div>
   )
 }
 
-// ── Turn timer ───────────────────────────────────────────────────────────────
+/**
+ * What started the turn. The reader's own words sit on the right as theirs;
+ * a session reporting back, a background task or a teammate is something that
+ * happened, so it runs full width with the rest of the conversation.
+ */
+function TurnPrompt({
+  turn,
+  onEditCommand,
+  onExpandCommand,
+  ...actions
+}: TurnActionProps & {
+  turn: Turn
+  onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+}) {
+  const content = turn.userMessage!
+  const source = useMemo(() => promptSource(getUserMessageText(content)), [content])
 
-function TurnTimer({
-  durationMs,
-  showLiveTimer,
-  timestamp,
-}: {
-  durationMs: number | null
-  showLiveTimer: boolean
-  timestamp: string
-}): React.ReactElement | null {
-  if (durationMs !== null) {
+  if (source.kind === "silent" && getUserMessageImages(content).length === 0) {
+    return <TurnActions {...actions} />
+  }
+
+  // Nobody typed these, so they carry no hover row: Restore stays on the
+  // context menu, and only branches, which are worth knowing about, show.
+  if (source.kind === "event" || source.kind === "wakeup" || source.kind === "attention") {
     return (
-      <span className="flex items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground">
-        <Clock className="size-3" data-icon="inline-start" />
-        {formatDuration(durationMs)}
-      </span>
+      <div className="flex flex-col gap-0.5">
+        <MaybePromptContextMenu index={actions.index}>
+          {source.kind === "event" && (
+            <div data-turn-prompt>
+              <UserMessage content={content} timestamp={turn.timestamp} compact />
+            </div>
+          )}
+          {source.kind === "wakeup" && (
+            <div data-turn-prompt className="-mx-2">
+              <DelegatedResultRow wakeup={source.wakeup} timestamp={turn.timestamp} />
+            </div>
+          )}
+          {source.kind === "attention" && (
+            <div data-turn-prompt className="-mx-2">
+              <DelegatedAttentionRow childSessionId={source.childSessionId} detail={source.detail} timestamp={turn.timestamp} />
+            </div>
+          )}
+        </MaybePromptContextMenu>
+        <TurnActions {...actions} onRestoreToHere={undefined} />
+      </div>
     )
   }
-  if (showLiveTimer) {
-    return (
-      <span className="flex items-center gap-1 font-mono text-xs tabular-nums text-info">
-        <Clock className="size-3" data-icon="inline-start" />
-        <LiveElapsed startTimestamp={timestamp} className="tabular-nums" />
-      </span>
-    )
-  }
-  return null
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <MaybePromptContextMenu index={actions.index}>
+        <div data-turn-prompt className={PROMPT_BUBBLE}>
+          <UserMessage
+            content={content}
+            timestamp={turn.timestamp}
+            onEditCommand={onEditCommand}
+            onExpandCommand={onExpandCommand}
+            compact
+          />
+        </div>
+      </MaybePromptContextMenu>
+      <TurnActions {...actions} time={turn.timestamp} />
+    </div>
+  )
 }
 
 // ── Content blocks renderer ──────────────────────────────────────────────────
@@ -457,38 +495,86 @@ function useQuoteInReply(turnId: string): ((text: string) => void) | undefined {
   }, [add, source, sessionId, turnId, context?.isSubAgentView, context?.permissions.send])
 }
 
+interface ActivityProps {
+  expandAll: boolean
+  expandToolPayloads: boolean
+  activeToolCallId: string | null
+  isAgentActive: boolean
+  skillMetadata?: Map<string, SkillMeta>
+  /** What the agents this turn started recorded, by the call that started them. */
+  spawnedAgents: ReadonlyMap<string, SubAgentMessage>
+}
+
+/**
+ * A run of thinking and tool calls: grouped work, broken wherever a call
+ * started a session or an agent, which shows as its own row.
+ */
+function ActivityRun({ items, ...props }: ActivityProps & { items: ActivityItem[] }) {
+  // Work between two spawns is named after the spawn before it, so a group
+  // keeps its identity, and its open state, while calls stream into it.
+  let previousSpawn: string | null = null
+  const rows = segmentActivity(items, isSpawnCall).map((segment) => {
+    if (segment.kind === "spawn") {
+      previousSpawn = segment.toolCall.id
+      return (
+        <SpawnedSessionRows
+          key={`spawn:${segment.toolCall.id}`}
+          toolCall={segment.toolCall}
+          isAgentActive={props.isAgentActive}
+          expandToolPayloads={props.expandToolPayloads}
+          activity={props.spawnedAgents.get(segment.toolCall.id)}
+        />
+      )
+    }
+    // A run without thinking skips activityItems, so a lone call renders as its own row.
+    return (
+      <CollapsibleToolCalls
+        key={previousSpawn ? `after:${previousSpawn}` : "lead"}
+        toolCalls={segment.toolCalls}
+        expandAll={props.expandAll}
+        expandToolPayloads={props.expandToolPayloads}
+        activeToolCallId={props.activeToolCallId}
+        isAgentActive={props.isAgentActive}
+        activityItems={segment.thinkingCount > 0 ? segment.items : undefined}
+        thinkingCount={segment.thinkingCount}
+        thoughtForMs={segment.thoughtForMs}
+        skillMetadata={props.skillMetadata}
+      />
+    )
+  })
+  return <div className="flex min-w-0 flex-col">{rows}</div>
+}
+
+/** Where the turn's last words are, so only that reply carries the turn's model, time and actions. */
+function finalTextIndex(blocks: TurnContentBlock[]): number {
+  for (let index = blocks.length - 1; index >= 0; index--) {
+    if (blocks[index].kind === "text") return index
+  }
+  return -1
+}
+
 function ContentBlocks({
   blocks,
   turnId,
   originalBlocks,
   model,
   effort,
-  expandAll,
-  expandToolPayloads,
-  activeToolCallId,
-  isAgentActive,
   isSessionLive,
-  isMobile,
-  skillMetadata,
-}: {
+  ...activity
+}: ActivityProps & {
   blocks: TurnContentBlock[]
   turnId: string
   originalBlocks: TurnContentBlock[]
   model: string | null
   effort?: string
-  expandAll: boolean
-  expandToolPayloads: boolean
-  activeToolCallId: string | null
-  isAgentActive: boolean
   isSessionLive: boolean
-  isMobile: boolean
-  skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
   const quote = useQuoteInReply(turnId)
-  // Indent for every nested block, so the rails all line up.
-  const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
-  const stackGap = "gap-3"
+  const lastTextIndex = finalTextIndex(originalBlocks)
+  // A sub-agent's own block repeats what its row already shows.
+  const shownAsRow = (block: TurnContentBlock) => block.kind === "sub_agent" &&
+    block.messages.every((message) => message.parentToolUseId && activity.spawnedAgents.has(message.parentToolUseId))
 
   const keyUses = new Map<string, number>()
   const keyFor = (block: TurnContentBlock, index: number) => {
@@ -502,68 +588,34 @@ function ContentBlocks({
   while (i < blocks.length) {
     const block = blocks[i]
 
-    // Group consecutive thinking + tool_calls blocks into one collapsible
     if (block.kind === "thinking" || block.kind === "tool_calls") {
-      const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i)
-      // A lone tool_calls run has nothing to interleave, so it skips
-      // activityItems — but it keeps the same key, since a run that later grows
-      // a thinking block is still the same group to the user.
-      const isOrphanToolRun = items.length === 1 && items[0].kind === "tool_calls"
-
-      elements.push(
-        <div key={keyFor(block, i)} className={cn(NEST_RAIL, nestIndent)}>
-          <CollapsibleToolCalls
-            toolCalls={toolCalls}
-            expandAll={expandAll}
-            expandToolPayloads={expandToolPayloads}
-            activeToolCallId={activeToolCallId}
-            isAgentActive={isAgentActive}
-            activityItems={isOrphanToolRun ? undefined : items}
-            thinkingCount={thinkingCount}
-            thoughtForMs={thoughtForMs}
-            skillMetadata={skillMetadata}
-          />
-        </div>
-      )
+      const { items, nextIndex } = collectActivity(blocks, i)
+      elements.push(<ActivityRun key={keyFor(block, i)} items={items} {...activity} />)
       i = nextIndex
       continue
     }
 
     if (block.kind === "text") {
-      const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i + 1)
+      const { items, nextIndex } = collectActivity(blocks, i + 1)
+      const blockIndex = originalBlocks.indexOf(block)
       // The trailing activity sits inside the text element rather than after it,
       // so streaming another paragraph into this block never moves the group to
       // a different element and remounts it.
       elements.push(
-        <div key={keyFor(block, i)}>
-          <div className={cn("flex flex-col", stackGap)}>
-            {block.text.map((text, ti) => (
-              <AssistantText
-                key={ti}
-                text={text}
-                model={model}
-                effort={effort}
-                timestamp={block.timestamp}
-                messageKey={`${turnId}:${originalBlocks.indexOf(block)}:${ti}`}
-                onQuote={quote}
-              />
-            ))}
-          </div>
-          {(toolCalls.length > 0 || thinkingCount > 0) && (
-            <div className={cn("mt-1.5", NEST_RAIL, nestIndent)}>
-              <CollapsibleToolCalls
-                toolCalls={toolCalls}
-                expandAll={expandAll}
-                expandToolPayloads={expandToolPayloads}
-                activeToolCallId={activeToolCallId}
-                isAgentActive={isAgentActive}
-                activityItems={thinkingCount > 0 ? items : undefined}
-                thinkingCount={thinkingCount}
-                thoughtForMs={thoughtForMs}
-                skillMetadata={skillMetadata}
-              />
-            </div>
-          )}
+        <div key={keyFor(block, i)} className="flex min-w-0 flex-col gap-2.5">
+          {block.text.map((text, ti) => (
+            <AssistantText
+              key={ti}
+              text={text}
+              model={model}
+              effort={effort}
+              timestamp={block.timestamp}
+              messageKey={`${turnId}:${blockIndex}:${ti}`}
+              onQuote={quote}
+              showMeta={blockIndex === lastTextIndex && ti === block.text.length - 1}
+            />
+          ))}
+          {items.length > 0 && <ActivityRun items={items} {...activity} />}
         </div>
       )
       i = nextIndex
@@ -572,15 +624,11 @@ function ContentBlocks({
 
     if (block.kind === "queued_prompt") {
       elements.push(
-        <div
-          key={keyFor(block, i)}
-          className={cn(
-            "rounded-lg p-3",
-            PROMPT_CARD,
-          )}
-        >
-          <Badge variant="outline" className="mb-2">Queued while working</Badge>
-          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} />
+        <div key={keyFor(block, i)} className="flex flex-col gap-1">
+          <span className="ml-auto text-xs text-muted-foreground">Sent while it was working</span>
+          <div data-queued-prompt className={PROMPT_BUBBLE}>
+            <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact />
+          </div>
         </div>
       )
       i++
@@ -602,22 +650,18 @@ function ContentBlocks({
       continue
     }
 
-    if (block.kind === "sub_agent") {
-      elements.push(
-        <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
-          <AgentPanel messages={block.messages} expandAll={expandAll} label="Sub-agent activity" countLabel="subagents active" />
-        </div>
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "background_agent") {
-      elements.push(
-        <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
-          <AgentPanel messages={block.messages} expandAll={expandAll} label="Background agent activity" countLabel="agents active" />
-        </div>
-      )
+    if (block.kind === "sub_agent" || block.kind === "background_agent") {
+      if (!shownAsRow(block)) {
+        elements.push(
+          <AgentPanel
+            key={keyFor(block, i)}
+            messages={block.messages}
+            expandAll={activity.expandAll}
+            label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
+            countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
+          />
+        )
+      }
       i++
       continue
     }
@@ -638,10 +682,10 @@ function ContentBlocks({
           planFilePath={block.planFilePath}
           status={block.status}
           toolCalls={block.toolCalls}
-          expandAll={expandAll}
-          expandToolPayloads={expandToolPayloads}
-          isAgentActive={isAgentActive}
-          skillMetadata={skillMetadata}
+          expandAll={activity.expandAll}
+          expandToolPayloads={activity.expandToolPayloads}
+          isAgentActive={activity.isAgentActive}
+          skillMetadata={activity.skillMetadata}
         />
       )
       i++

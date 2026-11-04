@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
-import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
+import type { ParsedSession, SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
+import { formatTaskAttention, formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
 
 const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
   isLive: true,
   undoEnabled: false,
   isMobile: false,
+  /** What `useSessionContextOptional` hands rows that look up the open transcript. */
+  optionalContext: null as null | { session: { turns: Turn[] }; permissions: { send: boolean }; actions: Record<string, never> },
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -18,7 +21,7 @@ vi.mock("@/contexts/AppContext", () => ({
 }))
 
 vi.mock("@/contexts/SessionContext", () => ({
-  useSessionContextOptional: () => null,
+  useSessionContextOptional: () => mocks.optionalContext,
   useSessionContext: () => ({
     session: makeSession(),
     isLive: mocks.isLive,
@@ -46,6 +49,10 @@ vi.mock("../AgentStatusIndicator", () => ({
 
 vi.mock("../AssistantText", () => ({
   AssistantText: ({ text, compact }: { text: string; compact?: boolean }) => <div data-testid="assistant-text" data-compact={String(Boolean(compact))}>{text}</div>,
+}))
+
+vi.mock("../AgentPanel", () => ({
+  AgentPanel: ({ label }: { label: string }) => <div>{label}</div>,
 }))
 
 vi.mock("../CollapsibleToolCalls", () => ({
@@ -271,5 +278,213 @@ describe("TurnSection prompt context menu", () => {
     render(<TurnSection turn={promptTurn} index={1} />)
 
     expect(triggerFor("Do the thing")).toBeNull()
+  })
+})
+
+describe("TurnSection prompts", () => {
+  beforeEach(() => {
+    mocks.isLive = false
+    mocks.status = "completed"
+    mocks.undoEnabled = true
+    mocks.optionalContext = null
+  })
+
+  const promptOf = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-turn-prompt]")
+  const wakeup = formatTaskWakeup({
+    id: "task-1",
+    parentSessionId: "session-1",
+    childSessionId: "child-1",
+    state: "completed",
+    result: { turn: { reply: "Pricing copy fixed." } },
+  })
+
+  it("sets the reader's own prompt apart as a bubble, with its time and Restore under it", () => {
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: "Do the thing" }} index={0} />)
+
+    expect(promptOf(container)).toHaveClass("ml-auto", "rounded-2xl")
+    expect(promptOf(container)).toHaveTextContent("Do the thing")
+    expect(container.querySelector("time")).toHaveAttribute("datetime", turn.timestamp)
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
+  })
+
+  it("shows a session reporting back as its row, not as the reader's bubble", () => {
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: wakeup }} index={0} />)
+
+    expect(promptOf(container)).not.toHaveClass("ml-auto")
+    expect(promptOf(container)?.querySelector("[data-session-row]")).toHaveAttribute("data-session-row", "finished")
+    expect(screen.getByRole("button", { name: "Delegated session, Finished: Pricing copy fixed." })).toBeInTheDocument()
+    expect(screen.queryByText(/Acknowledge receipt/)).toBeNull()
+    // Nobody typed it: Restore stays on the context menu, with no hover row of its own.
+    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
+    expect(promptOf(container)?.closest("[data-slot='context-menu-trigger']")).not.toBeNull()
+  })
+
+  it("names a reporting session after the start that launched it in this transcript", () => {
+    const child = "7d0c1b52-4f0e-4a39-9a51-0f6f2d1c8e11"
+    const start: ToolCall = {
+      id: "start-1",
+      name: "Bash",
+      input: { command: `cogpit-session new "Rewrite the pricing copy" --name pricing-copy --agent codex` },
+      result: JSON.stringify({ sessionId: child, dirName: "-repo", next: `cogpit-session wait ${child}` }),
+      isError: false,
+      timestamp: "2026-08-19T11:59:00.000Z",
+    }
+    mocks.optionalContext = {
+      session: { turns: [{ ...turn, id: "turn-start", toolCalls: [start] }] },
+      permissions: { send: false },
+      actions: {},
+    }
+
+    const childWakeup = formatTaskWakeup({ id: "task-1", parentSessionId: "session-1", childSessionId: child, state: "completed", result: { turn: { reply: "Pricing copy fixed." } } })
+    render(<TurnSection turn={{ ...turn, userMessage: childWakeup }} index={0} />)
+
+    expect(screen.getByRole("button", { name: "pricing-copy, Finished: Pricing copy fixed." })).toBeInTheDocument()
+  })
+
+  it("shows a session that cannot go on alone as a row that asks for attention", () => {
+    const attention = formatTaskAttention({ id: "task-2", childSessionId: "child-2" }, "It asked: which branch?", [])
+
+    render(<TurnSection turn={{ ...turn, userMessage: attention }} index={0} />)
+
+    const row = screen.getByRole("button", { name: "Open Delegated session, Needs attention" })
+    expect(row).toHaveTextContent("It asked: which branch?")
+  })
+
+  it("runs a system event full width, without a bubble or a hover row", () => {
+    const notification = "<task-notification><task-id>t</task-id><status>completed</status><summary>Build finished</summary></task-notification>"
+
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: notification }} index={0} />)
+
+    expect(promptOf(container)).not.toHaveClass("ml-auto")
+    expect(promptOf(container)?.querySelector("[data-task-notification]")).toHaveTextContent("Build finished")
+    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
+  })
+
+  it("shows no prompt for one that only carries injected context, keeping the turn's actions", () => {
+    const { container } = render(
+      <TurnSection turn={{ ...turn, userMessage: "<system-reminder>The date changed.</system-reminder>" }} index={0} />,
+    )
+
+    expect(promptOf(container)).toBeNull()
+    expect(screen.queryByText(/The date changed/)).toBeNull()
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
+  })
+
+  it("shows a prompt sent mid-turn as the reader's bubble, labelled as queued", () => {
+    const queuedTurn: Turn = {
+      ...turn,
+      id: "turn-queued",
+      contentBlocks: [
+        { kind: "text", text: ["Working on it"] },
+        { kind: "queued_prompt", content: "Also check mobile", timestamp: "2026-08-19T12:00:01.000Z" },
+        { kind: "text", text: ["Final response"] },
+      ],
+      toolCalls: [],
+    }
+
+    const { container } = render(<TurnSection turn={queuedTurn} index={0} />)
+
+    expect(screen.getByText("Sent while it was working")).toBeInTheDocument()
+    expect(container.querySelector("[data-queued-prompt]")).toHaveClass("ml-auto")
+    expect(container.querySelector("[data-queued-prompt]")).toHaveTextContent("Also check mobile")
+  })
+})
+
+describe("TurnSection sessions it started", () => {
+  beforeEach(() => {
+    mocks.isLive = false
+    mocks.status = "completed"
+    mocks.undoEnabled = false
+    mocks.optionalContext = null
+  })
+
+  const LANE = "01a11695-2938-7ec2-9d9c-0c8af023bd5f"
+  const read: ToolCall = {
+    id: "read-1",
+    name: "Read",
+    input: { file_path: "/workspace/routes.ts" },
+    result: "export {}",
+    isError: false,
+    timestamp: "2026-08-19T12:00:01.000Z",
+  }
+  const start: ToolCall = {
+    id: "start-1",
+    name: "Bash",
+    input: { command: `cogpit-session new "Audit the API routes" --name audit --agent codex` },
+    result: JSON.stringify({ sessionId: LANE, dirName: "-repo", next: `cogpit-session wait ${LANE}` }),
+    isError: false,
+    timestamp: "2026-08-19T12:00:02.000Z",
+  }
+  const crewTurn = (startCall: ToolCall): Turn => ({
+    ...turn,
+    id: "turn-crew",
+    contentBlocks: [
+      { kind: "tool_calls", toolCalls: [read] },
+      { kind: "tool_calls", toolCalls: [startCall] },
+      { kind: "text", text: ["Started the audit"] },
+    ],
+    assistantText: ["Started the audit"],
+    toolCalls: [read, startCall],
+  })
+
+  it("shows a crew start as the session it started, in view while the rest of the work folds", () => {
+    render(<TurnSection turn={crewTurn(start)} index={0} />)
+
+    const fold = screen.getByRole("button", { name: /worked/i })
+    expect(fold).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Read")).toBeNull()
+    expect(screen.queryByText("Bash")).toBeNull()
+    const row = screen.getByRole("button", { name: "audit, Started: Audit the API routes" })
+
+    fireEvent.click(row)
+    expect(document.getElementById(row.getAttribute("aria-controls")!)).toHaveTextContent("Codex")
+    expect(screen.getByRole("button", { name: "Command" })).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(fold)
+    expect(screen.getByText("Read")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "audit, Started: Audit the API routes" })).toBeInTheDocument()
+  })
+
+  it("shows a start still running in the live turn as starting", () => {
+    mocks.isLive = true
+    mocks.status = "thinking"
+
+    render(<TurnSection turn={crewTurn({ ...start, result: null })} index={0} />)
+
+    expect(screen.getByRole("button", { name: "audit, Starting: Audit the API routes" })).toBeInTheDocument()
+  })
+
+  it("shows a sub-agent once, as the row of the call that started it", () => {
+    const task: ToolCall = {
+      id: "task-1",
+      name: "Task",
+      input: { description: "Map the routes", prompt: "Find every API route", subagent_type: "Explore" },
+      result: "Found 12 routes.\nagentId: agent-1",
+      isError: false,
+      timestamp: "2026-08-19T12:00:02.000Z",
+    }
+    const agentMessage = { agentId: "agent-1", parentToolUseId: "task-1", toolCalls: [] } as unknown as SubAgentMessage
+    const agentTurn: Turn = {
+      ...turn,
+      id: "turn-agent",
+      contentBlocks: [
+        { kind: "tool_calls", toolCalls: [task] },
+        { kind: "sub_agent", messages: [agentMessage] },
+        { kind: "sub_agent", messages: [{ agentId: "agent-2", toolCalls: [] } as unknown as SubAgentMessage] },
+        { kind: "text", text: ["Mapped"] },
+      ],
+      assistantText: ["Mapped"],
+      toolCalls: [task],
+      subAgentActivity: [agentMessage],
+    }
+
+    render(<TurnSection turn={agentTurn} index={0} />)
+    fireEvent.click(screen.getByRole("button", { name: /worked/i }))
+
+    const row = screen.getByRole("button", { name: "Map the routes, Finished: Found 12 routes." })
+    fireEvent.click(row)
+    expect(document.getElementById(row.getAttribute("aria-controls")!)).not.toHaveTextContent("agentId")
+    // Only the agent no call accounts for keeps its own activity panel.
+    expect(screen.getAllByText("Sub-agent activity")).toHaveLength(1)
   })
 })
