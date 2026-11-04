@@ -44,7 +44,7 @@ interface CapturedCall {
     env?: NodeJS.ProcessEnv
     plugins?: { type: string; path: string }[]
     systemPrompt?: { type: string; preset: string; append?: string }
-    hooks?: { PreToolUse?: { matcher?: string; hooks: unknown[] }[]; SessionStart?: { timeout?: number; hooks: Array<(input: { cwd: string }) => Promise<unknown>> }[]; WorktreeCreate?: unknown }
+    hooks?: { PreToolUse?: { matcher?: string; hooks: unknown[] }[]; UserPromptSubmit?: { timeout?: number; hooks: Array<(input: { cwd: string }) => Promise<{ continue?: boolean } | undefined>> }[]; SessionStart?: unknown; WorktreeCreate?: unknown }
   }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
@@ -73,6 +73,31 @@ let releaseHeldQuery: (() => void) | null = null
 let holdQueryAfterMessages = false
 let releaseQueryAfterMessages: (() => void) | null = null
 
+// When set, the next query behaves like the CLI: it reads each prompt, runs the
+// UserPromptSubmit hooks with the session's cwd (a `--worktree` session's
+// worktree) and only then starts the turn. It never calls a SessionStart callback.
+interface NativeCli { cwd: string; runsHooks: boolean; turnsStarted: number; results: number; releaseTurn: (() => void) | null }
+let nativeCli: NativeCli | null = null
+
+async function* nativeCliTurns(cli: NativeCli, prompt: AsyncIterable<unknown>, options: CapturedCall["options"]) {
+  for await (const _input of prompt) {
+    let stopped = false
+    for (const matcher of cli.runsHooks ? options.hooks?.UserPromptSubmit ?? [] : []) {
+      for (const hook of matcher.hooks) if ((await hook({ cwd: cli.cwd }))?.continue === false) stopped = true
+    }
+    if (stopped) {
+      yield { type: "result", is_error: false, result: "Operation stopped by hook" }
+      continue
+    }
+    yield { type: "system", subtype: "init", cwd: cli.cwd }
+    cli.turnsStarted++
+    yield { type: "assistant", message: { content: [] } }
+    await new Promise<void>((resolve) => { cli.releaseTurn = resolve })
+    cli.results++
+    yield { type: "result", is_error: false }
+  }
+}
+
 vi.mock("@anthropic-ai/claude-agent-sdk", () => {
   return {
     query: (args: { prompt: unknown; options: CapturedCall["options"] }) => {
@@ -92,6 +117,11 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       streamInputSpy = vi.fn().mockResolvedValue(undefined)
 
       async function* gen() {
+        if (nativeCli) {
+          yield* nativeCliTurns(nativeCli, args.prompt as AsyncIterable<unknown>, args.options)
+          resolveCompleted()
+          return
+        }
         if (holdQueryOpen) {
           await new Promise<void>((resolve) => { releaseHeldQuery = resolve })
         }
@@ -195,6 +225,7 @@ beforeEach(() => {
   releaseHeldQuery = null
   holdQueryAfterMessages = false
   releaseQueryAfterMessages = null
+  nativeCli = null
   vi.clearAllMocks()
 })
 
@@ -278,7 +309,7 @@ describe("sdk-session browser support", () => {
     expect(plugins).toBeUndefined()
   })
 
-  it("gates the first prompt in the native cwd without replacing WorktreeCreate hooks", async () => {
+  it("holds the first prompt in the native cwd without replacing WorktreeCreate hooks", async () => {
     holdQueryOpen = true
     const { createSDKSession, stopSDKSession } = await loadModule()
     let release!: () => void
@@ -286,17 +317,12 @@ describe("sdk-session browser support", () => {
     createSDKSession({ sessionId: "setup-gated", cwd: "/project", worktreeName: "custom", message: "First prompt", beforeFirstTurn: gate })
     const hooks = captured[0].options.hooks!
     expect(hooks.WorktreeCreate).toBeUndefined()
-    const hook = hooks.SessionStart![0].hooks[0]
-    const input = captured[0].prompt as AsyncIterable<unknown>
-    let sent = false
-    const firstInput = input[Symbol.asyncIterator]().next().then((message) => { sent = !message.done; return message })
+    const hook = hooks.UserPromptSubmit![0].hooks[0]
     let finished = false
     const running = hook({ cwd: "/custom/native/worktree" }).then((value) => { finished = true; return value })
     expect(gate).toHaveBeenCalledWith({ sessionId: "setup-gated", cwd: "/custom/native/worktree" })
-    await Promise.resolve(); expect(finished).toBe(false); expect(sent).toBe(false)
+    await Promise.resolve(); expect(finished).toBe(false)
     release(); expect(await running).toEqual({})
-    expect((await firstInput).done).toBe(false)
-    expect(sent).toBe(true)
     await hook({ cwd: "/custom/native/worktree" })
     expect(gate).toHaveBeenCalledOnce()
     stopSDKSession("setup-gated"); releaseHeldQuery?.()
@@ -307,7 +333,7 @@ describe("sdk-session browser support", () => {
     const { createSDKSession, stopSDKSession } = await loadModule()
     const failed = vi.fn()
     createSDKSession({ sessionId: "setup-refused", cwd: "/project", message: "Never send", beforeFirstTurn: async () => { throw new Error("setup refused") }, onStartupError: failed })
-    expect(await captured[0].options.hooks!.SessionStart![0].hooks[0]({ cwd: "/project" })).toMatchObject({ continue: false, decision: "block" })
+    expect(await captured[0].options.hooks!.UserPromptSubmit![0].hooks[0]({ cwd: "/project" })).toMatchObject({ continue: false, decision: "block" })
     expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: "setup refused" }))
     stopSDKSession("setup-refused"); releaseHeldQuery?.()
   })
@@ -2081,5 +2107,54 @@ describe("sdk-session user dialogs", () => {
     await expect(pending).resolves.toEqual({ behavior: "cancelled" })
     expect(mod.getSDKUserDialogs("dialog-abort")).toEqual([])
     releaseHeldQuery?.()
+  })
+})
+
+describe("sdk-session native worktree startup", () => {
+  const worktree = "/project/.claude/worktrees/worker"
+
+  async function startWorktreeSession(gate: () => Promise<void>) {
+    const { claudeRuntime } = await import("../agents/claudeRuntime")
+    return claudeRuntime.start({ dirName: "-project", cwd: "/project", worktreeName: "worker", message: "First prompt", beforeFirstTurn: gate })
+  }
+
+  it("readies the worktree the CLI reports and returns before the first turn ends", async () => {
+    const cli: NativeCli = { cwd: worktree, runsHooks: true, turnsStarted: 0, results: 0, releaseTurn: null }
+    nativeCli = cli
+    let release!: () => void
+    const gate = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const started = startWorktreeSession(gate)
+
+    await vi.waitFor(() => expect(gate).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree, nativeWorktree: true })))
+    expect(captured[0].options.hooks!.SessionStart).toBeUndefined()
+    expect(cli.turnsStarted).toBe(0)
+    release()
+
+    const session = await started
+    expect(session.cwd).toBe(worktree)
+    expect(cli.turnsStarted).toBe(1)
+    expect(cli.results).toBe(0)
+    cli.releaseTurn?.()
+  })
+
+  it("stops the first prompt when readiness is refused", async () => {
+    const cli: NativeCli = { cwd: worktree, runsHooks: true, turnsStarted: 0, results: 0, releaseTurn: null }
+    nativeCli = cli
+    const refused = new Error("setup refused")
+
+    await expect(startWorktreeSession(async () => { throw refused })).rejects.toBe(refused)
+    expect(cli.turnsStarted).toBe(0)
+  })
+
+  it("fails instead of waiting forever when the first turn ends without readiness", async () => {
+    const cli: NativeCli = { cwd: worktree, runsHooks: false, turnsStarted: 0, results: 0, releaseTurn: null }
+    nativeCli = cli
+    const gate = vi.fn(async () => {})
+    const started = startWorktreeSession(gate)
+    await vi.waitFor(() => expect(cli.releaseTurn).not.toBeNull())
+    cli.releaseTurn!()
+
+    await expect(started).rejects.toMatchObject({ code: "SPAWN_FAILED" })
+    expect(gate).not.toHaveBeenCalled()
   })
 })

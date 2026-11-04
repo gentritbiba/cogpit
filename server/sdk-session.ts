@@ -727,16 +727,18 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   const first = buildUserMessage(prompt, opts.images)
   inputTurns.set(state, { sent: [first.uuid!], completed: 0, taken: null })
   if (opts.beforeFirstTurn) {
+    // The CLI never calls an SDK SessionStart callback. It does hold each
+    // prompt until UserPromptSubmit returns, and reports the session's own cwd
+    // there, which for `--worktree` is the initialized worktree.
     let readiness: Promise<void> | undefined
     queryOpts.hooks = {
       ...queryOpts.hooks,
-      SessionStart: [{ timeout: 86400, hooks: [async (input) => {
+      UserPromptSubmit: [{ timeout: 86400, hooks: [async (input) => {
         try {
           await (readiness ??= (async () => {
             state.cwd = input.cwd
             await opts.beforeFirstTurn!({ sessionId: state.sessionId, cwd: input.cwd })
             state.abort?.signal.throwIfAborted()
-            messageStream.enqueue(first)
           })())
           return {}
         } catch (error) {
@@ -747,7 +749,8 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         }
       }] }],
     }
-  } else messageStream.enqueue(first)
+  }
+  messageStream.enqueue(first)
   state.messageStream = messageStream
 
   // Streaming input keeps one SDK/CLI process alive across turns. This is

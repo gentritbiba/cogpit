@@ -181,6 +181,7 @@ function startInteractive(req: StartSessionRequest): Promise<StartedSession> {
       state.onResult = null
       const outcome = turnResultFrom(result)
       if (outcome.isError) fail(outcome.message ?? "Claude returned an error")
+      else if (!readinessComplete) fail("Claude ran its first prompt before session startup finished")
       else void succeed()
     }
   })
