@@ -263,12 +263,10 @@ describe("sdk-session browser support", () => {
       expect(captured[0].options.systemPrompt?.append).toContain("Speech skill for /tmp")
     } finally { unregister() }
   })
-  it("puts the shim first on PATH and loads the browser plugin", async () => {
-    const { binDir, pluginDir } = await import("../browser/paths")
+  it("puts the shim first on PATH and passes no skills plugin", async () => {
+    const { binDir } = await import("../browser/paths")
     const { ensureShim } = await import("../browser/shim")
-    const { ensurePlugin } = await import("../browser/skill")
     ensureShim("/usr/local/bin/agent-browser")
-    ensurePlugin()
 
     const { createSDKSession } = await loadModule()
     createSDKSession({ sessionId: "browser-env", cwd: "/tmp", message: "hi" })
@@ -277,7 +275,7 @@ describe("sdk-session browser support", () => {
     const { env, plugins } = captured[0].options
     expect(env!.PATH!.split(delimiter)[0]).toBe(binDir())
     expect(env!.COGPIT_SESSION_ID).toBe("browser-env")
-    expect(plugins).toEqual([{ type: "local", path: pluginDir() }])
+    expect(plugins).toBeUndefined()
   })
 
   it("gates the first prompt in the native cwd without replacing WorktreeCreate hooks", async () => {

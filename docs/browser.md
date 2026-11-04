@@ -139,15 +139,6 @@ Every agent still runs as the same OS user. Separate profiles keep browser state
     .unowned            #   the profile for agents no note names
   sessions.json         # Metadata: notes, creator, createdAt, last URLs, archive/restore timestamps
   sweeper.owner         # pid + start time of the Cogpit allowed to reap this tree
-  plugin/
-    .claude-plugin/
-      plugin.json       # Plugin manifest
-    skills/
-      cogpit/
-      cogpit-sessions/
-      cogpit-memory/
-      cogpit-browser/
-        SKILL.md        # Short entrypoint; references/ holds advanced procedures
 
 ~/.cogpit/bin/agent-browser    # The shim (bash), regenerated on Cogpit start
 ```
@@ -206,7 +197,7 @@ Panel-driven emulation has a minimum width of 1024 pixels to keep desktop breakp
 
 ## What Every Agent Is Told
 
-The browser skill has a short entrypoint and an optional advanced reference, but skill loading is lazy: only its `description` reaches the model, and the body loads only if the model chooses to read it. The essential live-browser and subagent rules also travel outside the skill, through the SDK, in `server/browser/agentContext.ts`:
+The browser guide lives in the `cogpit` skill (`references/browser.md`, then `references/browser-advanced.md`), but skill loading is lazy: only its `description` reaches the model, and the body loads only if the model chooses to read it. The essential live-browser and subagent rules also travel outside the skill, through the SDK, in `server/browser/agentContext.ts`:
 
 - **`BROWSER_CONTEXT_APPEND`** — a short guide appended to the system prompt (`systemPrompt: { type: "preset", …, append }`) on every request. It explains that the agent and user share browser state but can select different tabs, suggests live demos, website testing and research, and describes persistent signed-in workflows. It teaches manual handoffs for login and 2FA: name the browser and tab, pause, wait for confirmation, select the handoff tab, take a fresh snapshot, then continue. It also covers browser ownership, leaving the default browser running, and the limits of awareness: website snapshots cannot reveal whether the user opened the panel or what Cogpit's layout looks like. None of this depends on reading a skill.
 - **`browserPreToolUseHook`** — a `PreToolUse` hook on the shell tool. When the call comes from a subagent (`agent_id` present; the main thread has none), a shared shell scanner distinguishes executable words from arguments, comments and redirection targets. Direct `agent-browser` calls, including quoted executable paths and calls through supported `env`, `command`, `exec`, `npx` and `bunx` forms, are rewritten onto `tmp-<agent-id>` via `updatedInput`. `additionalContext` tells the subagent which browser it actually got. Valid literal `tmp-*` calls stay unchanged.
@@ -229,16 +220,15 @@ Agents launched outside Cogpit, legacy `exec` fallbacks, and other non-SDK integ
 
 ## Agent Skill
 
-Cogpit delivers its bundled skills (`cogpit`, `cogpit-sessions`, `cogpit-memory` and `cogpit-browser`) two ways:
+Cogpit ships one skill, `cogpit`, and copies it into each agent CLI's global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`) **automatically on every launch**. Sessions Cogpit starts, one-shot runs and agents started outside Cogpit all read that copy. Its `SKILL.md` is a short index; the browser guide is `references/browser.md`, with advanced procedures in `references/browser-advanced.md`, and agents load each only when needed.
 
-- **As a local plugin**, passed to the sessions Cogpit drives through the SDK. `~/.cogpit/browser/plugin` is written at startup in the plugin shape the descriptor declares (`.claude-plugin/plugin.json` plus `skills/`). It lives inside Cogpit's own tree, so nothing the user owns is touched.
-- **As an installed skill**, copied into an agent CLI's own global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`) **automatically on every launch**. That is what reaches one-shot runs, agents started outside Cogpit, and the CLIs that take no plugin. It is idempotent — an unchanged file is left alone — and one CLI failing does not stop the others.
+The refresh writes into every existing agent config root and is idempotent: an unchanged file is left alone, and one CLI failing does not stop the others. Custom configured homes are respected, including isolated provider accounts when their worker starts; when the Claude home an SDK session inherits (`CLAUDE_CONFIG_DIR`, else `~/.claude`) differs from the configured one, both get the skill. Unrelated skills and files are left alone; linked source files are updated without replacing their symlinks. No network download is needed: the Markdown is embedded in the Electron, npm and headless server bundles by `sync-cogpit-skill`.
 
-The first launch after installation or an update refreshes the bundled skills and their references in every existing agent config root. Custom configured homes are respected, including isolated provider accounts when their worker starts. Unchanged files and unrelated skills are left alone; linked source files are updated without replacing their symlinks. A failed write is logged and does not stop startup or other installs. No network download is needed: the Markdown is embedded in the Electron, npm and headless server bundles by `sync-cogpit-skill`.
+Earlier releases also installed `cogpit-browser`, `cogpit-sessions` and `cogpit-memory` as separate skills and passed a duplicate copy to SDK sessions as a plugin under `~/.cogpit/browser/plugin`. On launch Cogpit deletes those copies only where a file still matches a version it shipped (`server/agents/retiredSkillFiles.ts`), removes the emptied directories and any link that pointed at a directory it just removed, and deletes the old plugin directory.
 
-The **Agent skill…** browser menu and `POST /api/browser/skill/install` remain available for an immediate browser-skill refresh or an explicit install into a missing config root. Browser-specific advanced procedures live in `references/advanced.md`; agents load them only when needed.
+The **Agent skill…** browser menu and `POST /api/browser/skill/install` remain available for an immediate refresh or an explicit install into a missing config root.
 
-The skill covers:
+The browser guide covers:
 - What the Browser panel is and to mention it when starting browser work
 - Default browser semantics and login persistence
 - Named browsers: `--session name`, list via `GET /api/browser`, add notes via `PATCH`
@@ -264,13 +254,13 @@ There is no host gate: when `agent-browser` is not on the machine, status still 
 | POST | `/api/browser/sessions/:name/launch` | `{url?: string}` | 200 `{ok:true}` / 400 bad url / 502 would not start | Launch or reopen browser (default `about:blank` or last URL) |
 | POST | `/api/browser/sessions/:name/stop` | — | 200 `{ok:true}` | Stop the daemon (profile preserved) |
 | GET | `/api/browser/skill` | — | `{targets:[{kind, label, configRoot, installed, automatic}]}` | Where the skill can go, and where it already is |
-| POST | `/api/browser/skill/install` | `{target: "claude"\|"codex"\|"copilot"\|"all"}` | `{paths}` | Copy skill to `~/.claude/skills` etc. for agents not run through Cogpit |
+| POST | `/api/browser/skill/install` | `{target: "claude"\|"codex"\|"copilot"\|"all"}` | `{paths}` | Copy the `cogpit` skill to `~/.claude/skills` etc. |
 
 URL length is capped at 2048 characters. Names are validated; `default` cannot be deleted. Launch URL schemes are allow-listed (`http`, `https`, `about`); a url with no scheme gets `http://` when it is loopback (`localhost`, `127.x`, `0.0.0.0`, `::1`) and `https://` otherwise, so `example.com:8080` becomes `https://example.com:8080` while `localhost:3000` becomes `http://localhost:3000`.
 
 `launch` is not fire-and-forget: it waits for the shim, so a browser that fails to start answers 502 with the CLI's stderr. `DELETE` stops the browser before deleting its profile — that ordering lives in the route, so a live Chromium is never writing into a directory that is being removed.
 
-`skill/install` explicitly refreshes the browser skill; the session CLI startup hook also refreshes all bundled skills outside `~/.cogpit`. `"all"` covers every CLI whose config root already exists — a CLI you do not have is skipped rather than created — while a single target creates the directory it needs. `automatic` marks the CLIs the local plugin already reaches, which need no install for sessions Cogpit starts itself.
+`skill/install` refreshes the `cogpit` skill immediately; the session CLI startup hook does the same on every launch. `"all"` covers every CLI whose config root already exists — a CLI you do not have is skipped rather than created — while a single target creates the directory it needs. `automatic` marks the CLIs whose config root exists, which the launch refresh already reaches.
 
 ## Security
 
@@ -278,7 +268,7 @@ URL length is capped at 2048 characters. Names are validated; `default` cannot b
 - With accounts, the REST routes are open to every signed-in account and each handler checks the browser it names; the skill routes stay with whoever administers the server.
 - CDP listens only on `127.0.0.1` without auth — the same local-user boundary as the agent-browser process itself.
 - Browser names and session ids are validated before touching the file system.
-- Startup refresh writes only the bundled Cogpit skills into existing agent config roots. It does not change agent settings or unrelated skills.
+- Startup refresh writes only the `cogpit` skill into existing agent config roots, and removes only unmodified copies of the skills it replaced. It does not change agent settings or unrelated skills.
 - `default` cannot be deleted via any API.
 - When a Cogpit session is revoked, its open browser panel connection is closed immediately and stops receiving video.
 
@@ -320,7 +310,7 @@ The panel shows an install prompt and a command to run:
 ```bash
 npm i -g agent-browser && agent-browser install
 ```
-Reload Cogpit once installed — the shim is written at startup and only when the real binary is on PATH. The panel's "Install the agent skill…" button opens the same dialog as the browser menu's **Agent skill…** item, which copies the skill into a CLI's global skills directory for agents not launched through Cogpit. Existing agent config roots are already refreshed automatically on launch.
+Reload Cogpit once installed — the shim is written at startup and only when the real binary is on PATH. The panel's "Install the agent skill…" button opens the same dialog as the browser menu's **Agent skill…** item, which copies the `cogpit` skill into a CLI's global skills directory. Existing agent config roots are already refreshed automatically on launch.
 
 **Full reset**
 

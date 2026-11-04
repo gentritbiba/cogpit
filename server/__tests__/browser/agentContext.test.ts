@@ -20,7 +20,7 @@ describe("BROWSER_CONTEXT_APPEND", () => {
     expect(BROWSER_CONTEXT_APPEND).toContain("Browser panel")
     expect(BROWSER_CONTEXT_APPEND).toContain("`default`")
     expect(BROWSER_CONTEXT_APPEND).toContain("--session tmp-")
-    expect(BROWSER_CONTEXT_APPEND).toContain("cogpit-browser")
+    expect(BROWSER_CONTEXT_APPEND).toContain("browser guide in the `cogpit` skill")
   })
 
   it("keeps browsers headless and points a bot check at the skill", () => {

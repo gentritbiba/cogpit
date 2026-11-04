@@ -33,7 +33,7 @@ import {
   type BrowserPatch,
 } from "../browser/registry"
 import { findRealAgentBrowser } from "../browser/shim"
-import { installSkill, installSkillEverywhere, skillTargets } from "../browser/skill"
+import { installSkill, installSkillEverywhere, skillTargets } from "../agents/skills"
 import { mayActHostWide, markDecided, reservesBrowserName } from "../edition"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn, type NextFn } from "../http"
 

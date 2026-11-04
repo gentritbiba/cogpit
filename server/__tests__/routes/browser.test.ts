@@ -22,7 +22,7 @@ function skillTarget(kind: (typeof SKILL_KINDS)[number]): BrowserSkillTarget {
     label: displayName,
     configRoot: `/tmp/home/${config.rootDirName}`,
     installed: false,
-    automatic: config.pluginManifestDir !== null,
+    automatic: true,
   }
 }
 
@@ -55,8 +55,8 @@ function createDeps() {
       browser: name, targetId: "tab-1", state: "complete", url: request.url,
       status: 200, headers: { "content-type": "application/json" }, body: "{}", truncated: false,
     })),
-    installSkill: vi.fn((target: string) => `/tmp/home/.${target}/skills/cogpit-browser`),
-    installSkillEverywhere: vi.fn(() => SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit-browser`)),
+    installSkill: vi.fn((target: string) => `/tmp/home/.${target}/skills/cogpit`),
+    installSkillEverywhere: vi.fn(() => SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit`)),
     skillTargets: vi.fn(() => SKILL_KINDS.map(skillTarget)),
   } satisfies BrowserRouteDeps
 }
@@ -487,7 +487,7 @@ describe("POST /api/browser/skill/install", () => {
     const call = await drive("POST", "/skill/install", { target: SUPPORTED_TARGET })
 
     expect(call.status()).toBe(200)
-    expect(call.body()).toEqual({ paths: [`/tmp/home/.${SUPPORTED_TARGET}/skills/cogpit-browser`] })
+    expect(call.body()).toEqual({ paths: [`/tmp/home/.${SUPPORTED_TARGET}/skills/cogpit`] })
     expect(deps.installSkill).toHaveBeenCalledWith(SUPPORTED_TARGET)
     expect(deps.installSkillEverywhere).not.toHaveBeenCalled()
   })
@@ -497,7 +497,7 @@ describe("POST /api/browser/skill/install", () => {
 
     expect(call.status()).toBe(200)
     expect(call.body()).toEqual({
-      paths: SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit-browser`),
+      paths: SKILL_KINDS.map((kind) => `/tmp/home/.${kind}/skills/cogpit`),
     })
     expect(deps.installSkillEverywhere).toHaveBeenCalledOnce()
     expect(deps.installSkill).not.toHaveBeenCalled()

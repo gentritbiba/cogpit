@@ -68,8 +68,8 @@ export function BrowserNotInstalled({ onOpenSkill }: { onOpenSkill: () => void }
           Install the agent skill…
         </Button>
         <EmptyDescription className="text-xs">
-          The skill teaches the agent when to use a named browser and how this panel follows
-          along. Installing writes it into your home directory, so it is never done for you.
+          The Cogpit skill teaches the agent when to use a named browser and how this panel
+          follows along. Cogpit installs it on launch for the agent CLIs you have.
         </EmptyDescription>
       </EmptyContent>
     </Empty>

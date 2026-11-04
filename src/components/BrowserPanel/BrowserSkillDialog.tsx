@@ -16,9 +16,9 @@ import type { SkillInstallResult, SkillTarget, SkillTargetsResult } from "@/hook
 import type { BrowserSkillTarget } from "../../../shared/browser/types"
 
 /**
- * Where the browser skill is installed, and the only place it gets installed
- * from. Every row writes into the user's own home directory, so the dialog
- * names the directory before the button and nothing here happens on its own.
+ * Where the Cogpit skill is installed. Launch refreshes it in every existing
+ * CLI config; a row here can also create one, so the dialog names the
+ * directory before the button.
  */
 
 interface BrowserSkillDialogProps {
@@ -70,11 +70,10 @@ export function BrowserSkillDialog({
         <DialogHeader>
           <DialogTitle>Agent skill</DialogTitle>
           <DialogDescription>
-            The skill teaches an agent how Cogpit&rsquo;s browsers work: when to use a named
-            one, when to keep to a throwaway, and that this panel is watching. Install it for
-            agents you run outside Cogpit &mdash; it writes a{" "}
-            <code className="font-mono">SKILL.md</code> into that CLI&rsquo;s configuration
-            directory in your home folder.
+            The Cogpit skill teaches an agent how Cogpit works, including when to use a
+            named browser or a throwaway one and that this panel is watching. Cogpit
+            refreshes it on launch for every agent CLI you have. Installing here writes it
+            into that CLI&rsquo;s configuration directory in your home folder.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,7 +97,7 @@ export function BrowserSkillDialog({
                     </span>
                     {target.automatic && (
                       <span className="truncate text-xs text-muted-foreground">
-                        Already automatic in the sessions Cogpit starts
+                        Refreshed automatically on launch
                       </span>
                     )}
                   </span>

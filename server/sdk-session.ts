@@ -26,7 +26,7 @@ import { pluginSkillContext } from "./plugins/skillContext"
 import { readSdkRateLimit } from "./agents/rateLimit"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
-import { cogpitAgentEnv, browserPluginPaths, browserShimInstalled } from "./browser/agentEnv"
+import { cogpitAgentEnv, browserShimInstalled } from "./browser/agentEnv"
 import * as streamBus from "./lib/streamBus"
 import { projectElicitationSchema } from "./lib/elicitationSchema"
 import { asRecord } from "../shared/objects"
@@ -454,13 +454,6 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 
   queryOpts.env = cogpitAgentEnv({ ...process.env }, state.sessionId)
   delete queryOpts.env.CLAUDECODE
-
-  // The browser skill reaches the CLI as a local plugin, so an agent knows the
-  // Browser panel exists without the user installing anything.
-  const browserPlugins = browserPluginPaths().map((path) => ({ type: "local" as const, path }))
-  if (browserPlugins.length > 0) {
-    queryOpts.plugins = [...(queryOpts.plugins ?? []), ...browserPlugins]
-  }
 
   // A skill is only read if the agent decides to read it, so the panel and the
   // subagent throwaway rule also arrive as context it cannot skip and a hook it

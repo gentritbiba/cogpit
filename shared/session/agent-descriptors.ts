@@ -291,12 +291,6 @@ export interface AgentConfigLayout {
   readonly themesDir: string | null
   /** Global-only installed-plugin tree, if the CLI has one. */
   readonly pluginsDir: string | null
-  /**
-   * Marker directory holding `plugin.json` inside a plugin the CLI loads from a
-   * path, and so the shape Cogpit writes its own local plugin in. Null for a
-   * CLI that has no plugins and reads `skillsDir` alone.
-   */
-  readonly pluginManifestDir: string | null
 }
 
 // ── Context window ──────────────────────────────────────────────────────────
@@ -665,7 +659,6 @@ const claude: AgentDescriptor = {
     commandsDir: "commands",
     themesDir: "themes",
     pluginsDir: "plugins",
-    pluginManifestDir: ".claude-plugin",
   },
   contextWindow: {
     // Anything not listed is treated as current-generation, so a model released
@@ -834,7 +827,6 @@ const codex: AgentDescriptor = {
     commandsDir: "prompts",
     themesDir: null,
     pluginsDir: null,
-    pluginManifestDir: null,
   },
   contextWindow: {
     // The GPT-5 family window. A rollout that reports `model_context_window`
@@ -965,7 +957,6 @@ const copilot: AgentDescriptor = {
     commandsDir: null,
     themesDir: null,
     pluginsDir: null,
-    pluginManifestDir: null,
   },
   contextWindow: {
     // Copilot brokers models from several vendors, so this is the smallest

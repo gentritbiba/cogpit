@@ -112,10 +112,6 @@ export function registryFile(): string {
   return join(browserHome(), "sessions.json")
 }
 
-export function pluginDir(): string {
-  return join(browserHome(), "plugin")
-}
-
 /** Names the one Cogpit allowed to reap this tree; see `acquireSweepOwnership`. */
 export function sweepOwnerFile(): string {
   return join(browserHome(), "sweeper.owner")

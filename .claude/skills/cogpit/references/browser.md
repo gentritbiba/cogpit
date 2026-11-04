@@ -1,8 +1,3 @@
----
-name: cogpit-browser
-description: Use agent-browser inside Cogpit with shared live browsers, persistent logins, user handoffs and private subagent browsers.
----
-
 # Browser work inside Cogpit
 
 Use the normal `agent-browser` commands. Cogpit manages profiles and streams
@@ -51,7 +46,7 @@ pass the challenge, then wait for confirmation and snapshot again. Keep the
 window for the task and close it when done. Private `tmp-` browsers cannot use
 this escape: report the block to the parent.
 
-Read [advanced.md](references/advanced.md) when reusing a verified browser for
+Read [browser-advanced.md](browser-advanced.md) when reusing a verified browser for
 HTTP requests, handling challenge responses, leaving browser notes or marking
 up screenshots. Never export clearance cookies to other clients or profiles.
 

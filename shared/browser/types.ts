@@ -51,7 +51,7 @@ export interface BrowserRequestResult {
   truncated: boolean
 }
 
-/** One agent CLI the browser skill can be installed for, and whether it is. */
+/** One agent CLI the Cogpit skill can be installed for, and whether it is. */
 export interface BrowserSkillTarget {
   kind: AgentKind
   /** The CLI's product name, as the descriptor table spells it. */
@@ -59,10 +59,7 @@ export interface BrowserSkillTarget {
   /** Its global config directory, under the user's home. */
   configRoot: string
   installed: boolean
-  /**
-   * Cogpit already hands the skill to the sessions it starts for this CLI,
-   * through its local plugin or startup refresh of an existing config root.
-   */
+  /** The config root exists, so every launch refreshes the skill there. */
   automatic: boolean
 }
 

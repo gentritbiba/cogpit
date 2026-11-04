@@ -14,8 +14,7 @@ import { existsSync } from "node:fs"
 import { delimiter } from "node:path"
 import { serverPort } from "../lib/portFile"
 import { noteBrowserProfiles } from "./owners"
-import { binDir, pluginDir, shimPath } from "./paths"
-import { pluginManifestFile } from "./skill"
+import { binDir, shimPath } from "./paths"
 import { instanceSessionId } from "../../shared/session/instances"
 import { getDataRoot } from "../config"
 
@@ -59,9 +58,4 @@ export function cogpitAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string)
   if (path.split(delimiter)[0] === dir) return env
   env[key] = path ? `${dir}${delimiter}${path}` : dir
   return env
-}
-
-export function browserPluginPaths(): string[] {
-  const manifest = pluginManifestFile()
-  return manifest !== null && existsSync(manifest) ? [pluginDir()] : []
 }

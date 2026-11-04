@@ -31,17 +31,6 @@ vi.mock("../../browser/shim", async (importOriginal) => {
   }
 })
 
-vi.mock("../../browser/skill", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../browser/skill")>()
-  return {
-    ...actual,
-    ensurePlugin: () => {
-      if (failures.has("plugin")) throw new Error("plugin write failed")
-      return actual.ensurePlugin()
-    },
-  }
-})
-
 vi.mock("../../browser/daemons", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../browser/daemons")>()
   return {
@@ -64,7 +53,6 @@ vi.mock("../../browser/daemons", async (importOriginal) => {
 
 import { initBrowserSupport } from "../../browser"
 import { renderCmdLauncher, renderNodeShim, renderShim } from "../../browser/shim"
-import { pluginManifestFile, pluginSkillFile, SKILL_NAME } from "../../browser/skill"
 import { nodeShimPath, profilesDir, sharedRunDir, shimPath } from "../../browser/paths"
 import { AGENT_KINDS, descriptorFor } from "../../../shared/session/agent-descriptors"
 
@@ -76,26 +64,16 @@ let previousSkillHome: string | undefined
 let previousPath: string | undefined
 let errors: unknown[][] = []
 
-/** Non-null unless no CLI takes a plugin at all, which the descriptor table rules out. */
-function manifestFile(): string {
-  const path = pluginManifestFile()
-  if (path === null) throw new Error("No agent CLI takes a plugin")
-  return path
-}
-
-/** Where an install would put the skill, one entry per CLI that reads skills. */
-function skillTargets(): { configRoot: string; dir: string; skill: string }[] {
+/** The config root of every CLI that reads skills. */
+function configRoots(): string[] {
   return AGENT_KINDS.flatMap((kind) => {
     const { rootDirName, skillsDir } = descriptorFor(kind).config
-    if (skillsDir === null) return []
-    const configRoot = join(skillHome, rootDirName)
-    const dir = join(configRoot, skillsDir, SKILL_NAME)
-    return [{ configRoot, dir, skill: join(dir, "SKILL.md") }]
+    return skillsDir === null ? [] : [join(skillHome, rootDirName)]
   })
 }
 
 function giveTheUserEveryCli(): void {
-  for (const { configRoot } of skillTargets()) mkdirSync(configRoot, { recursive: true })
+  for (const configRoot of configRoots()) mkdirSync(configRoot, { recursive: true })
 }
 
 const alwaysDead = () => false
@@ -137,15 +115,17 @@ afterEach(() => {
 })
 
 describe("initBrowserSupport", () => {
-  it.skipIf(process.platform === "win32")("creates the tree, installs the shim and plugin, and starts a sweeper", async () => {
+  it.skipIf(process.platform === "win32")("creates the tree, installs the shim, removes the old skills plugin and starts a sweeper", async () => {
+    const oldPlugin = join(root, "browser", "plugin")
+    mkdirSync(join(oldPlugin, "skills", "cogpit-browser"), { recursive: true })
+    writeFileSync(join(oldPlugin, "skills", "cogpit-browser", "SKILL.md"), "old")
     const support = initBrowserSupport(alwaysDead)
 
     expect(statSync(profilesDir()).isDirectory()).toBe(true)
     expect(statSync(sharedRunDir()).isDirectory()).toBe(true)
     expect(readFileSync(shimPath(), "utf8")).toBe(renderShim(realBinary))
     if (process.platform !== "win32") expect(statSync(shimPath()).mode & 0o111).not.toBe(0)
-    expect(JSON.parse(readFileSync(manifestFile(), "utf8")).name).toBe("cogpit")
-    expect(readFileSync(pluginSkillFile(), "utf8")).toContain("name: cogpit-browser")
+    expect(existsSync(oldPlugin)).toBe(false)
     expect(record.sweepersStarted).toBe(1)
     expect(errors).toEqual([])
 
@@ -198,9 +178,8 @@ describe("initBrowserSupport", () => {
 
     const support = initBrowserSupport(alwaysDead)
 
-    expect(skillTargets().length).toBeGreaterThan(1)
-    // Browser initialization writes only the runtime plugin, not global skills.
-    for (const { configRoot } of skillTargets()) expect(readdirSync(configRoot)).toEqual([])
+    expect(configRoots().length).toBeGreaterThan(1)
+    for (const configRoot of configRoots()) expect(readdirSync(configRoot)).toEqual([])
     expect(errors).toEqual([])
 
     await support.shutdown()
@@ -217,7 +196,6 @@ describe("initBrowserSupport", () => {
   it.each([
     ["find", "PATH scan failed"],
     ["shim", "shim write failed"],
-    ["plugin", "plugin write failed"],
     ["sweeper", "sweeper failed"],
   ])("logs and continues when the %s step throws", async (step, message) => {
     failures.add(step)

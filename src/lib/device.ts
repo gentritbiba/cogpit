@@ -4,7 +4,7 @@
 // the URL carries a leading "/d/:deviceId" segment and API traffic is routed to
 // the hub reverse-proxy under "/hub/:deviceId/*". Unprefixed "/api/*" always
 // means "this machine" (the local/hub device) — see the external-agent contract
-// in the cogpit-sessions skill.
+// in the `cogpit` skill's sessions guide.
 
 export const LOCAL_DEVICE_ID = "local"
 

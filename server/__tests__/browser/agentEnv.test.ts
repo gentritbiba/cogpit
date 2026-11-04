@@ -3,12 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { browserPluginPaths, browserShimInstalled, cogpitAgentEnv } from "../../browser/agentEnv"
-import { binDir, NO_COGPIT_SESSION, ownersDir, pluginDir, shimPath } from "../../browser/paths"
+import { browserShimInstalled, cogpitAgentEnv } from "../../browser/agentEnv"
+import { binDir, NO_COGPIT_SESSION, ownersDir, shimPath } from "../../browser/paths"
 import { __resetEditionForTest, PERSONAL_EDITION } from "../../edition"
 import { installFakeEdition } from "../edition/fakeEdition"
 import { resetServerPortForTest, setServerPort } from "../../lib/portFile"
-import { ensurePlugin } from "../../browser/skill"
 
 let root = ""
 let previousHome: string | undefined
@@ -132,13 +131,3 @@ describe("browserShimInstalled", () => {
   })
 })
 
-describe("browserPluginPaths", () => {
-  it("is empty until the plugin manifest exists", () => {
-    expect(browserPluginPaths()).toEqual([])
-  })
-
-  it("points at the plugin directory once written", () => {
-    ensurePlugin()
-    expect(browserPluginPaths()).toEqual([pluginDir()])
-  })
-})

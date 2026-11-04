@@ -4,7 +4,7 @@ import { runtimeFor } from "./runtimes"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
 import { isRecord } from "../../shared/objects"
 import * as streamBus from "../lib/streamBus"
-import { installBundledSkills } from "./skills"
+import { installCogpitSkill } from "./skills"
 import { registerPluginSkills } from "../plugins/skillContext"
 
 const kind = process.env.COGPIT_WORKER_AGENT as AgentKind
@@ -14,7 +14,7 @@ setDataRoot(dataRoot)
 setConfigPath(process.env.COGPIT_WORKER_CONFIG_PATH ?? "")
 await loadConfig()
 refreshDirs()
-installBundledSkills([kind])
+installCogpitSkill([kind])
 const runtime = runtimeFor(kind)
 const startups = new Map<number, AbortController>()
 const readiness = new Map<number, { resolve: () => void; reject: (error: Error) => void }>()

@@ -206,14 +206,14 @@ describe("useBrowserSessions", () => {
   it("returns the paths the install wrote", async () => {
     const { result } = renderHook(() => useBrowserSessions(true))
     await settle()
-    mockedAuthFetch.mockResolvedValueOnce(response({ paths: ["/home/me/skills/cogpit-browser"] }))
+    mockedAuthFetch.mockResolvedValueOnce(response({ paths: ["/home/me/skills/cogpit"] }))
 
     let outcome: unknown
     await act(async () => {
       outcome = await result.current.installSkill("all")
     })
 
-    expect(outcome).toEqual({ ok: true, paths: ["/home/me/skills/cogpit-browser"] })
+    expect(outcome).toEqual({ ok: true, paths: ["/home/me/skills/cogpit"] })
     const [url, init] = mockedAuthFetch.mock.calls[1] as [string, RequestInit]
     expect(url).toBe("/api/browser/skill/install")
     expect(init.body).toBe(JSON.stringify({ target: "all" }))

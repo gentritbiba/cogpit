@@ -41,7 +41,7 @@ const SKILL_TARGETS: BrowserSkillTarget[] = [
   { kind: AGENT_KINDS[0], label: "First CLI", configRoot: "/home/me/.first", installed: true, automatic: true },
   { kind: AGENT_KINDS[1], label: "Second CLI", configRoot: "/home/me/.second", installed: false, automatic: false },
 ]
-const installSkill = vi.fn(async () => ({ ok: true as const, paths: ["/home/me/.second/skills/cogpit-browser"] }))
+const installSkill = vi.fn(async () => ({ ok: true as const, paths: ["/home/me/.second/skills/cogpit"] }))
 const readSkillTargets = vi.fn(async () => ({ ok: true as const, targets: SKILL_TARGETS }))
 const remove = vi.fn(async () => ({ ok: true as const }))
 const setArchived = vi.fn(async (_name: string, _archived: boolean) => ({ ok: true as const }))

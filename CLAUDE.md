@@ -130,7 +130,7 @@ running its tests, package-contract build and `npm publish`. The release commit
 does not need to keep `packages/cogpit-cli/package.json` synchronized with the
 app version. The tag is the source of truth for the published launcher.
 
-## External Session API (cogpit-sessions skill)
+## External Session API
 
 Agents drive other sessions with the `cogpit-session` CLI. The server writes it
 to `~/.cogpit/bin` on start (`server/sessionCli/install.ts`) and runs it with its
@@ -166,13 +166,31 @@ Questions from sessions routed to the user are collected by
 `sessionHosts/delegatedRequests.ts` and shown above the parent session's
 composer (`GET /api/session-requests`).
 
-See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for usage.
+Agent-facing usage lives in the `cogpit` skill's
+`.claude/skills/cogpit/references/sessions.md`.
 
-`.claude/skills/cogpit/` is the installable bundle for agents outside this repo
-(`npx skills add gentritbiba/agent-window --skill cogpit`). Its `references/`
-are generated from the `cogpit-sessions` skill and
-`packages/cogpit-memory/skill/SKILL.md`; edit those sources, then run
-`bun run sync-cogpit-skill`. `check:cogpit-skill-sync` fails CI on drift.
+## Cogpit Agent Skill (keep it current)
+
+`.claude/skills/cogpit/` is the one skill that teaches agents how Cogpit works.
+Cogpit embeds it in every build and refreshes it in each agent CLI's global
+skills directory on launch (`server/agents/skills.ts`); it is also the
+`npx skills add gentritbiba/agent-window --skill cogpit` bundle. It is layered:
+`SKILL.md` is a short index, and each row points at one file in `references/`,
+which may point one level deeper (`browser.md` → `browser-advanced.md`,
+`devices.md` → `remote-workspaces.md`). Add a topic as a new reference and an
+index row; never grow `SKILL.md` into a manual.
+
+**Keeping this skill accurate is part of every change.** When a change alters
+anything an agent running inside Cogpit can see or use (`cogpit-session`
+commands or flags, `cogpit-memory`, the `agent-browser` shim, environment
+variables, `~/.cogpit` paths, rendered reply syntax, panels, devices, plugins),
+update the matching reference in the same commit, then run
+`bun run sync-cogpit-skill`. Removed behavior comes out of the skill too.
+
+`references/memory.md` and `references/remote-workspaces.md` are generated from
+`packages/cogpit-memory/skill/SKILL.md` and `docs/remote-workspaces.md`; edit
+those sources. The sync script also regenerates `server/agents/bundledSkills.ts`,
+and `check:cogpit-skill-sync` fails CI on drift.
 
 ## Nested iOS Repository
 

@@ -14,7 +14,6 @@ import {
   isValidBrowserName,
   isValidCogpitSessionId,
   NO_COGPIT_SESSION,
-  pluginDir,
   profileDir,
   profilesDir,
   registryFile,
@@ -67,7 +66,6 @@ describe("browser home", () => {
     expect(runRoot()).toBe(join(home, "run"))
     expect(sharedRunDir()).toBe(join(home, "run", SHARED_RUN_NAME))
     expect(registryFile()).toBe(join(home, "sessions.json"))
-    expect(pluginDir()).toBe(join(home, "plugin"))
     expect(sweepOwnerFile()).toBe(join(home, "sweeper.owner"))
   })
 })
