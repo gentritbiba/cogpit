@@ -3,6 +3,8 @@ import { toast } from "sonner"
 import { Toaster } from "@/components/ui/sonner"
 import { useEditionUiUnavailable } from "@/edition/hooks"
 import { themeMode, type ThemeId } from "@/lib/themes"
+import { descriptorFor } from "@/lib/agents"
+import { agentNotInstalledIn } from "../../shared/session/agentFailures"
 
 interface AppStatusToastsProps {
   activeError: string | null
@@ -26,11 +28,17 @@ export function AppStatusToasts({
       toast.dismiss("app-error")
       return
     }
-    toast.error(activeError, {
+    // A failed start is the user's work not happening, so it stays until they
+    // dismiss it, with the next step attached when there is one.
+    const [title, ...rest] = activeError.split("\n")
+    const missing = agentNotInstalledIn(activeError)
+    const installPage = missing ? descriptorFor(missing).cli.install?.page : null
+    toast.error(title, {
       id: "app-error",
-      duration: 8000,
+      description: rest.join("\n") || undefined,
+      duration: Infinity,
       onDismiss: clearActiveError,
-      onAutoClose: clearActiveError,
+      ...(installPage ? { action: { label: "How to install", onClick: () => window.open(installPage, "_blank", "noopener,noreferrer") } } : {}),
     })
   }, [activeError, clearActiveError])
 

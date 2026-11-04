@@ -10,6 +10,8 @@ import {
   type MessageConnection,
 } from "vscode-jsonrpc/node.js"
 import { findExecutableOnPath, resolveAgentCommand } from "../lib/binaryResolver"
+import { agentNotInstalledMessage } from "../../shared/session/agentFailures"
+import { logAgentFailure } from "./failureLog"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { pluginSkillContext } from "../plugins/skillContext"
@@ -896,9 +898,7 @@ export class CopilotRuntime {
     if (this.spawn === defaultSpawn && !/[\\/]/.test(command)) {
       const executable = findExecutableOnPath(command, { env: this.env })
       if (!executable) {
-        throw new CopilotRuntimeError(
-          `Failed to start Copilot CLI: ${command} was not found on PATH`,
-        )
+        throw new CopilotRuntimeError(agentNotInstalledMessage("copilot", process.platform))
       }
       command = executable
     }
@@ -1296,6 +1296,10 @@ export class CopilotRuntime {
       const type = notification.event.type
       const data = notification.event.data
       this.finishObservedTurn(notification.sessionId, type === "session.shutdown" ? new Error("Session shut down before completion") : { isError: type !== "session.idle", message: type === "session.error" && isRecord(data) && typeof data.message === "string" ? data.message : type === "abort" ? "Turn was interrupted" : type === "session.error" ? "Provider turn failed" : undefined })
+      if (type === "session.error") {
+        const statusCode = isRecord(data) && typeof data.statusCode === "number" ? data.statusCode : undefined
+        logAgentFailure("turn", { sessionId: notification.sessionId, kind: "copilot", message: isRecord(data) && typeof data.message === "string" ? data.message : "Provider turn failed", httpStatus: statusCode })
+      }
       if (
         notification.event.type === "abort"
         || notification.event.type === "session.error"

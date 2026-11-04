@@ -146,7 +146,7 @@ export function SessionRow({
               className={cn(
                 "shrink-0",
                 isNativeIdle && "text-success",
-                !isNativeIdle && getStatusColor(s.agentStatus),
+                !isNativeIdle && getStatusColor(s.agentStatus, s.agentTerminalReason),
               )}
             >
               {statusLabel}

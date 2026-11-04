@@ -94,6 +94,7 @@ import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 import { useSessionAccess } from "@/hooks/useSessionAccess"
 import { accessReadOnlyReason, SessionReadOnlyNotice, type ReadOnlyReason } from "@/components/SessionReadOnlyNotice"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
+import { withStartPrompt } from "@/lib/startPrompts"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -525,16 +526,22 @@ export default function App() {
   // The home composer starts a session with its first message already written.
   // The message waits one render for the pending session to exist, so it goes
   // through the same send path as a message typed into the new session's composer.
-  const [queuedFirstMessage, setQueuedFirstMessage] = useState<{ message: string; images?: Array<{ data: string; mediaType: string }> } | null>(null)
+  // A first message that could not be sent lands back in the new session's
+  // composer, where the user now is, instead of disappearing.
+  const [queuedFirstMessage, setQueuedFirstMessage] = useState<{ message: string; images?: Array<{ data: string; mediaType: string }>; settle: (sent: boolean) => void } | null>(null)
   const handleStartNewSessionWith = useCallback(async (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => {
     await handleStartNewSession(dirName, cwd)
-    setQueuedFirstMessage({ message, images })
+    return new Promise<boolean>((settle) => setQueuedFirstMessage({ message, images, settle }))
   }, [handleStartNewSession])
   const sendQueuedFirstMessage = agentChat.sendMessage
   useEffect(() => {
     if (!queuedFirstMessage || !state.pendingDirName) return
     setQueuedFirstMessage(null)
-    void sendQueuedFirstMessage(queuedFirstMessage.message, queuedFirstMessage.images)
+    const { message, images, settle } = queuedFirstMessage
+    void sendQueuedFirstMessage(message, images).then((sent) => {
+      if (!sent && !chatInputRef.current?.getText().trim()) chatInputRef.current?.setText(message)
+      settle(sent)
+    }, () => settle(false))
   }, [queuedFirstMessage, state.pendingDirName, sendQueuedFirstMessage])
   const newSessionModel = { selectedModel, onModelChange: setSelectedModel, selectedEffort: effectiveEffort, onEffortChange: setSelectedEffort }
 
@@ -877,8 +884,9 @@ export default function App() {
     loadMore: chunkedSession.loadMore,
   })
 
+  const displayedSession = useMemo(() => state.session && withStartPrompt(state.session), [state.session])
   const sessionContextValue = useMemo<SessionContextValue>(() => ({
-    session: state.session,
+    session: displayedSession,
     sessionSource: state.sessionSource,
     isLive,
     sseState,
@@ -910,7 +918,7 @@ export default function App() {
       handleOpenQuoteSource,
     },
   }), [
-    state.session, state.sessionSource,
+    displayedSession, state.sessionSource,
     isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit,
     undoRedo, pendingInteraction, isSubAgentView, sessionPermissions,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,

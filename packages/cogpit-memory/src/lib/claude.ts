@@ -11,12 +11,14 @@
  * It knows nothing about its siblings and nothing about the registry that picks
  * between them: `./agents` imports this module, never the other way round.
  */
+import { classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { isAssistantMessage } from "./messageTypeGuards"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
 import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 import type {
+  AgentFailure,
   ParseSessionOptions,
   ParsedSession,
   RawMessage,
@@ -104,7 +106,7 @@ function extractSessionMetadata(messages: RawMessage[]): ClaudeMetadata {
     if ((msg as Record<string, unknown>).branchedFrom && !meta.branchedFrom) {
       meta.branchedFrom = (msg as Record<string, unknown>).branchedFrom as typeof meta.branchedFrom
     }
-    if (isAssistantMessage(msg) && msg.message.model && !meta.model) {
+    if (isAssistantMessage(msg) && msg.message.model && !isSyntheticModel(msg.message.model) && !meta.model) {
       meta.model = msg.message.model
     }
     if (meta.sessionId && meta.version && meta.gitBranch && meta.cwd && meta.model) break
@@ -202,7 +204,7 @@ export function appendClaudeSession(
     cwd: existing.cwd,
     slug: existing.slug,
     name: existing.name,
-    model: existing.model || (allTurns.length > 0 ? allTurns[allTurns.length - 1].model || "" : ""),
+    model: existing.model || [...allTurns].reverse().find((turn) => turn.model && !isSyntheticModel(turn.model))?.model || "",
     turns: allTurns,
     stats,
     rawMessages: allRawMessages,
@@ -239,6 +241,36 @@ interface ClaudeBackgroundWork {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+/** `<synthetic>` marks a reply Claude Code wrote itself, such as an error; it is not a model. */
+export function isSyntheticModel(model: unknown): boolean {
+  return typeof model === "string" && model.startsWith("<")
+}
+
+/**
+ * The failure behind a reply Claude Code wrote in place of the model's, when
+ * the API call failed (`isApiErrorMessage`): a 401 is a missing or bad login.
+ */
+export function claudeApiFailure(record: RawRecord): AgentFailure | null {
+  if (record.type !== "assistant" || record.isApiErrorMessage !== true) return null
+  const message = isObject(record.message) ? record.message : null
+  const text = Array.isArray(message?.content)
+    ? message.content.filter((block) => isObject(block) && typeof block.text === "string").map((block) => block.text).join("\n").trim()
+    : ""
+  const status = typeof record.apiErrorStatus === "number" ? record.apiErrorStatus : undefined
+  const failure = classifyAgentFailure(text || "The request failed", status)
+  return record.error === "authentication_failed" ? { ...failure, reason: "not_signed_in" } : failure
+}
+
+/**
+ * Whether an assistant record closes its turn. `stop_sequence` is how Claude
+ * Code ends the replies it writes itself, which never ask for a tool.
+ */
+export function claudeRecordEndsTurn(record: RawRecord): boolean {
+  if (record.type !== "assistant" || !isObject(record.message)) return false
+  const { stop_reason: stopReason, model } = record.message
+  return stopReason === "end_turn" || stopReason === "stop_sequence" || (isSyntheticModel(model) && stopReason !== "tool_use")
 }
 
 /** Extract every string that could carry a <task-notification> from a user message. */
@@ -401,7 +433,12 @@ export function deriveClaudeSessionStatus(rawMessages: readonly RawRecord[]): Se
       const message = msg.message as { stop_reason?: string | null; content?: Array<{ type: string; name?: string }> } | undefined
       const stopReason = message?.stop_reason
 
-      if (stopReason === "end_turn") {
+      const failure = claudeApiFailure(msg)
+      if (failure) {
+        const terminalReason = typeof msg.error === "string" && msg.error ? msg.error : "api_error"
+        return { status: "completed", terminalReason, failure, pendingQueue: Math.max(0, pendingEnqueues) }
+      }
+      if (claudeRecordEndsTurn(msg)) {
         // The turn ended, but the agent may still be waiting on background
         // agents rather than on the user.
         const work = getBackgroundWork()

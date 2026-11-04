@@ -71,7 +71,7 @@ function StatusBadge({ session, live }: { session: SessionInfo; live: boolean })
       session.agentPendingAgents,
     ) ?? "Active"
     return (
-      <Badge variant="secondary" className={getStatusColor(session.agentStatus)}>
+      <Badge variant="secondary" className={getStatusColor(session.agentStatus, session.agentTerminalReason)}>
         <span
           aria-hidden="true"
           data-icon="inline-start"

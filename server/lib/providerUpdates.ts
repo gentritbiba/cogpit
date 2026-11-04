@@ -24,8 +24,7 @@ import {
   type AgentDescriptor,
 } from "../../shared/session/agent-descriptors"
 import { compareVersions } from "../../shared/versions"
-import { activeExecutableFor } from "../agents/executables"
-import { findExecutableOnPath } from "./binaryResolver"
+import { spawnedExecutableFor } from "../agents/executables"
 import { CLI_OUTPUT_MAX_CHARS, probeCliVersion, runCli } from "./cliProcess"
 
 const REGISTRY_TIMEOUT_MS = 4_000
@@ -193,18 +192,13 @@ export function formatCommand(command: UpdateCommand): string {
 
 // ── Probes ───────────────────────────────────────────────────────────────
 
-/**
- * The binary Cogpit spawns for this agent plus its realpath, deduped. Agents
- * without an executable choice resolve through PATH like any shell would.
- */
-function resolveBinaryPaths(descriptor: AgentDescriptor): string[] {
-  const onPath = activeExecutableFor(descriptor.kind) ?? findExecutableOnPath(descriptor.binName)
-  if (!onPath) return []
+/** The binary Cogpit spawns for this agent plus its realpath, deduped. */
+function resolveBinaryPaths(path: string): string[] {
   try {
-    const real = realpathSync(onPath)
-    return real === onPath ? [onPath] : [onPath, real]
+    const real = realpathSync(path)
+    return real === path ? [path] : [path, real]
   } catch {
-    return [onPath]
+    return [path]
   }
 }
 
@@ -267,11 +261,13 @@ export function _resetProviderUpdateCachesForTests(): void {
 }
 
 async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdateInfo> {
-  const paths = resolveBinaryPaths(descriptor)
+  const executable = spawnedExecutableFor(descriptor.kind)
+  const paths = executable ? resolveBinaryPaths(executable.path) : []
   const base = {
     provider: descriptor.kind,
     displayName: descriptor.displayName,
     packageName: descriptor.cli.packageName,
+    installCommand: descriptor.cli.install?.command(process.platform) ?? null,
     binaryPath: paths[0] ?? null,
     checkedAt: new Date().toISOString(),
   }
@@ -288,11 +284,13 @@ async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdat
     }
   }
 
+  // Cogpit's own copy updates with Cogpit, so it is never offered an update
+  // there would be no command to run.
+  const installMethod = executable?.bundled ? "bundled" : detectInstallMethod(descriptor.kind, paths)
   const [currentVersion, latestVersion] = await Promise.all([
     probeCliVersion(base.binaryPath, descriptor.cli.versionArgs),
-    fetchLatestVersion(descriptor.cli.packageName),
+    installMethod === "bundled" ? null : fetchLatestVersion(descriptor.cli.packageName),
   ])
-  const installMethod = detectInstallMethod(descriptor.kind, paths)
   const command = buildUpdateCommand(descriptor.kind, installMethod)
 
   return {

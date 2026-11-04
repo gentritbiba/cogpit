@@ -1,10 +1,15 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 
 const state = vi.hoisted(() => ({
   sessions: [] as ActiveSessionInfo[], input: {} as PendingHumanInput, canInteract: true,
+  fetchProviderUpdates: vi.fn(async () => [] as unknown[]),
+}))
+vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/providerUpdates")>()),
+  fetchProviderUpdates: state.fetchProviderUpdates,
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
   useSessionInventory: () => ({ sessions: state.sessions, procBySession: new Map(), processes: [] }),
@@ -21,15 +26,16 @@ vi.mock("@/components/ChatInput/ChatInputSettings", () => ({
   ),
 }))
 import { MissionHome } from "../MissionHome"
+import { _resetAgentAvailabilityForTests } from "@/lib/agents/availability"
 
 const row = (sessionId: string, overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionInfo => ({
   sessionId, dirName: "-workspace", fileName: `${sessionId}.jsonl`, projectShortName: "workspace", cwd: "/workspace",
   lastModified: new Date().toISOString(), size: 1, customTitle: sessionId, ...overrides,
 })
-const start = () => ({
+const start = (sent = true) => ({
   defaultAgentKind: "claude" as const,
   model: { selectedModel: "", onModelChange: vi.fn(), selectedEffort: "", onEffortChange: vi.fn() },
-  onStart: vi.fn(),
+  onStart: vi.fn(async () => sent),
 })
 const projectChip = (name: string) => within(screen.getByRole("group", { name: "Projects" })).getByRole("button", { name })
 const permission = (sessionId: string, requestId: string, timestamp = 1) => ({
@@ -128,7 +134,7 @@ describe("MissionHome", () => {
     expect(state.input.respond).toHaveBeenCalledWith("lane", "p", "deny")
   })
 
-  it("starts a session in the latest project with the message typed on the home", () => {
+  it("starts a session in the latest project with the message typed on the home", async () => {
     const starter = start()
     render(<MissionHome onOpenSession={vi.fn()} start={starter} />)
     expect(projectChip("workspace")).toHaveAttribute("aria-pressed", "true")
@@ -140,7 +146,25 @@ describe("MissionHome", () => {
     expect(starter.onStart).not.toHaveBeenCalled()
     fireEvent.keyDown(field, { key: "Enter" })
     expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form", undefined)
-    expect(field).toHaveValue("")
+    await waitFor(() => expect(field).toHaveValue(""))
+  })
+
+  it("says before sending that the project's agent is not installed", async () => {
+    _resetAgentAvailabilityForTests()
+    state.fetchProviderUpdates.mockResolvedValueOnce([{ provider: "claude", installed: false }])
+    render(<MissionHome onOpenSession={vi.fn()} start={start()} />)
+    expect(await screen.findByText("Claude Code isn't installed on this computer.")).toBeInTheDocument()
+    _resetAgentAvailabilityForTests()
+  })
+
+  it("keeps the typed message when the session could not start", async () => {
+    const starter = start(false)
+    render(<MissionHome onOpenSession={vi.fn()} start={starter} />)
+    const field = screen.getByRole("textbox", { name: "First message" })
+    fireEvent.change(field, { target: { value: "fix the login form" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    await waitFor(() => expect(starter.onStart).toHaveResolved())
+    expect(field).toHaveValue("fix the login form")
   })
 
   it("sends pasted images with the first message, even without text", async () => {
@@ -168,7 +192,7 @@ describe("MissionHome", () => {
       expect(await screen.findByRole("img", { name: "Upload 1" })).toHaveAttribute("src", "data:image/png;base64,cG5n")
       fireEvent.keyDown(field, { key: "Enter" })
       expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "", [{ data: "cG5n", mediaType: "image/png" }])
-      expect(screen.queryByRole("img", { name: "Upload 1" })).not.toBeInTheDocument()
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Upload 1" })).not.toBeInTheDocument())
     } finally {
       vi.unstubAllGlobals()
       vi.restoreAllMocks()

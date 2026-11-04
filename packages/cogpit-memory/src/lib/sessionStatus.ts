@@ -32,6 +32,9 @@ export function getTerminalReasonLabel(reason: string): string {
     case "max_turns": return "Stopped — turn limit reached"
     case "aborted_tools": return "Stopped — tools aborted"
     case "blocking_limit": return "Stopped — blocked"
+    case "authentication_failed": return "Stopped — not signed in"
+    case "api_error": return "Stopped — the request failed"
+    case "turn_failed": return "Stopped — the turn failed"
     default: return `Stopped — ${reason.replace(/_/g, " ")}`
   }
 }

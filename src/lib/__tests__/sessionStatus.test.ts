@@ -717,6 +717,7 @@ describe("deriveSessionStatus — Copilot format", () => {
     ["session.error", { message: "model failed" }, {
       status: "completed",
       terminalReason: "model failed",
+      failure: { reason: "other", message: "model failed" },
     }],
   ])("clears stale nested agents on root %s", (type, data, expected) => {
     expect(deriveSessionStatus([

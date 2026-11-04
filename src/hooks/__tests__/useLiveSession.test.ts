@@ -401,6 +401,22 @@ describe("useLiveSession", () => {
     expect(result.current.rateLimit).toBeNull()
   })
 
+  it("does not carry a failed turn's error into the next session", () => {
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const { result, rerender } = renderHook(
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      { initialProps: { src: source } },
+    )
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "turn_error", message: "Not logged in · Please run /login" })
+    })
+    expect(result.current.turnError).toBe("Not logged in · Please run /login")
+
+    rerender({ src: { dirName: "codex__dir", fileName: "b.jsonl", rawText: "{}" } })
+    expect(result.current.turnError).toBeNull()
+  })
+
   it("tracks a compaction from start to finish", () => {
     const source: SessionSource = {
       dirName: "dir",

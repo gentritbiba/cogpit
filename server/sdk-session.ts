@@ -24,6 +24,7 @@ import { claudeCliPath } from "./agents/claudeExecutable"
 import { appendToSystemPrompt, withControlQuery } from "./agents/sdk"
 import { pluginSkillContext } from "./plugins/skillContext"
 import { readSdkRateLimit } from "./agents/rateLimit"
+import { logAgentFailure } from "./agents/failureLog"
 import type { UserQuestionAnswers } from "./agents/runtimeTypes"
 import { BROWSER_CONTEXT_APPEND, BROWSER_HOOK_TOOL, browserPreToolUseHook } from "./browser/agentContext"
 import { cogpitAgentEnv, browserShimInstalled } from "./browser/agentEnv"
@@ -132,7 +133,7 @@ export interface SDKSessionState {
   disallowedTools: string[]
   model?: string
   effort?: string
-  /** Fast is a Claude session setting, independent from reasoning effort. */
+  /** Fast is a session setting, independent from reasoning effort. */
   fastMode?: boolean
   /** Ultracode: standing dynamic-workflow orchestration for the session, at
    *  whatever effort is selected. Set at launch via the SDK `settings` option
@@ -171,6 +172,10 @@ export function observeSDKResult(state: SDKSessionState) {
   return { completion, cancel: () => { observers.delete(observer); observer.resolve({ is_error: true, result: "Message was not accepted" }) } }
 }
 function notifyResultObservers(state: SDKSessionState, result: Record<string, unknown>, end = false) {
+  if (result.is_error) {
+    const httpStatus = typeof result.api_error_status === "number" ? result.api_error_status : undefined
+    logAgentFailure("turn", { sessionId: state.sessionId, kind: "claude", message: describeErrorResult(result), httpStatus })
+  }
   const turns = inputTurns.get(state)
   // A send that joins a running turn gets no result of its own, so a result
   // settles every send the CLI has taken up. A CLI without lifecycle reports

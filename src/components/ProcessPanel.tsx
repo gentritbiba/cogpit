@@ -18,6 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
+import { registerSignInRunner } from "@/lib/agents/signIn"
+import { isRemoteDeviceActive } from "@/lib/device"
 
 const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
@@ -204,6 +206,18 @@ export const ProcessPanel = memo(function ProcessPanel({
 }: ProcessPanelProps) {
   const pty = usePty()
   const [height, setHeight] = useState(loadHeight)
+
+  // Sign-ins run here, where the user can answer the CLI's prompts. A phone or
+  // another device's session gets the command to copy instead.
+  const { spawnTerminal } = pty
+  const canSignIn = !mobile && pty.status === "connected" && !isRemoteDeviceActive()
+  useEffect(() => {
+    if (!canSignIn || !onProcessStarted) return
+    return registerSignInRunner(({ name, command, args }) => {
+      const id = spawnTerminal({ name, cwd: projectDir ?? undefined, command, args })
+      onProcessStarted({ id, name, type: "terminal", status: "running", ...(projectDir ? { source: projectDir } : {}) })
+    })
+  }, [canSignIn, onProcessStarted, projectDir, spawnTerminal])
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
 
   // Sync PTY session status → ProcessPanel entries

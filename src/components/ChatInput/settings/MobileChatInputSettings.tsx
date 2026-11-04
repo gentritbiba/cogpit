@@ -24,7 +24,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
+import { friendlyModelName, useProviderOptions } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
 import type { CommonSettingsControlProps, SettingOption } from "./types"
 import type { McpServer } from "../../../../shared/contracts/projectTools"
@@ -137,6 +137,7 @@ function MobileModelControls({
   onPermissionModeChange,
   changeAndApply,
 }: MobileModelControlsProps) {
+  const providerOptions = useProviderOptions(agentKind)
   return (
     <section aria-labelledby="mobile-model-controls" className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -153,7 +154,7 @@ function MobileModelControls({
             label="Agent"
             ariaLabel="Agent"
             value={agentKind}
-            options={AGENT_OPTIONS}
+            options={providerOptions.map((option) => ({ value: option.value, label: option.installed ? option.label : `${option.label} (not installed)` }))}
             onChange={(value) => onAgentKindChange(value as AgentKind)}
           />
         )}

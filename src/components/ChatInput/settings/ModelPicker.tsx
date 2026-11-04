@@ -1,13 +1,14 @@
 import { ContextWindowControl } from "./ContextWindowControl"
 import { useId, type ReactNode } from "react"
-import { Sparkles, Zap } from "lucide-react"
+import { ExternalLink, Sparkles, Zap } from "lucide-react"
 import { Popover, PopoverTrigger } from "@/components/ui/popover"
 import { Toggle } from "@/components/ui/toggle"
-import { capabilitiesFor, type AgentKind } from "@/lib/agents"
+import { capabilitiesFor, descriptorFor, type AgentKind } from "@/lib/agents"
+import { refreshAgentAvailability } from "@/lib/agents/availability"
 import { loadModelCatalog } from "@/hooks/useModelOptions"
 import { cn, type ServiceTierOption } from "@/lib/utils"
 import { SettingsSlider } from "./SettingsSlider"
-import { AGENT_OPTIONS } from "./modelOptions"
+import { AGENT_OPTIONS, useProviderOptions } from "./modelOptions"
 import {
   PickerChip,
   PickerList,
@@ -61,6 +62,9 @@ export function ModelPicker({
   isNewSession,
 }: ModelPickerProps) {
   const capabilities = capabilitiesFor(agentKind)
+  const providerOptions = useProviderOptions(agentKind)
+  const selectedMissing = providerOptions.some((option) => option.value === agentKind && !option.installed)
+  const installPage = descriptorFor(agentKind).cli.install?.page
   const provider = AGENT_OPTIONS.find((option) => option.value === agentKind)
   const ProviderIcon = provider?.Icon
   const providerLabel = provider?.label ?? agentKind
@@ -93,7 +97,7 @@ export function ModelPicker({
   const effortLabelId = useId()
 
   return (
-    <Popover modal={false} onOpenChange={(open) => { if (open) void loadModelCatalog() }}>
+    <Popover modal={false} onOpenChange={(open) => { if (open) { void loadModelCatalog(); void refreshAgentAvailability() } }}>
       <PopoverTrigger
         render={(
           <PickerChip
@@ -130,16 +134,28 @@ export function ModelPicker({
               onValueChange={(next) => onAgentKindChange?.(next)}
               aria-labelledby={providerLabelId}
             >
-              {AGENT_OPTIONS.map((option) => (
+              {providerOptions.map((option) => (
                 <PickerOption
                   key={option.value}
                   value={option.value}
                   title={option.label}
+                  description={option.installed ? undefined : "Not installed"}
                   icon={option.Icon}
                   disabled={providerLocked && option.value !== agentKind}
                 />
               ))}
             </PickerList>
+            {selectedMissing && installPage && (
+              <a
+                href={installPage}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mx-2 mt-1 inline-flex items-center gap-1 text-xs text-info underline-offset-2 hover:underline"
+              >
+                How to install
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
+            )}
             {providerLocked && !isNewSession && (
               <p className="mt-auto px-2 pb-1 pt-3 text-[11px] leading-4 text-muted-foreground">
                 Fixed for this session. Start a new one to switch.

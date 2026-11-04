@@ -1,7 +1,25 @@
 import type { ModelOption } from "@/lib/utils"
 import { shortenModel } from "@/lib/format"
+import { descriptorFor, type AgentKind } from "@/lib/agents"
+import { agentAvailability, isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
+import { AGENT_OPTIONS } from "@/lib/agents/presentation"
 
-export { AGENT_OPTIONS } from "@/lib/agents/presentation"
+export { AGENT_OPTIONS }
+
+/**
+ * The providers to offer, each marked with whether this server can run it. An
+ * agent with no install page of its own (one Cogpit runs from a configured
+ * executable) is offered only once the server can run it, or while selected.
+ */
+export function useProviderOptions(selected: AgentKind) {
+  const availability = useAgentAvailability()
+  return AGENT_OPTIONS
+    .filter((option) =>
+      option.value === selected
+      || descriptorFor(option.value).cli.install
+      || agentAvailability(availability, option.value)?.installed)
+    .map((option) => ({ ...option, installed: isAgentInstalled(availability, option.value) }))
+}
 
 /**
  * Find the catalog row a model id refers to — an exact value/alias match wins

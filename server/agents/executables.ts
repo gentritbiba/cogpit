@@ -1,17 +1,30 @@
-import type { AgentKind } from "../../shared/session/types"
+import { existsSync } from "node:fs"
+import { descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
 import type { ActiveExecutable, ExecutableReport } from "../../shared/contracts/agentExecutable"
-import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { findExecutableOnPath, isExecutableFile } from "../lib/binaryResolver"
-import { claudeCliPath, describeClaudeExecutable, refreshClaudeExecutable } from "./claudeExecutable"
+import { describeClaudeExecutable, refreshClaudeExecutable, resolveClaudeExecutable } from "./claudeExecutable"
+
+export interface SpawnedExecutable {
+  path: string
+  /** The copy Cogpit's own SDK ships, which updates with Cogpit rather than by itself. */
+  bundled: boolean
+}
 
 /**
- * Where each agent CLI is actually spawned from, for callers outside the agent
- * layer that report on the binary (the update banner, the executable picker).
- * Only one agent has a choice to make; the rest run whatever PATH offers, so
- * they answer undefined / null and callers fall back to the PATH lookup.
+ * The binary Cogpit spawns for an agent, for callers outside the agent layer
+ * that report on it (the update banner, the provider picker). Claude Code has a
+ * choice to make; an ACP agent runs only the executable it was configured
+ * with; the rest run whatever PATH offers.
  */
-export function activeExecutableFor(kind: AgentKind): string | undefined {
-  return kind === "claude" ? claudeCliPath() : undefined
+export function spawnedExecutableFor(kind: AgentKind): SpawnedExecutable | null {
+  if (kind === "claude") {
+    // A configured path that no longer exists is nothing to run.
+    const resolved = resolveClaudeExecutable()
+    return resolved && existsSync(resolved.path) ? { path: resolved.path, bundled: resolved.source === "bundled" } : null
+  }
+  const name = kind === "acp" ? process.env.COGPIT_PROVIDER_EXECUTABLE : descriptorFor(kind).binName
+  const path = name ? findExecutableOnPath(name) : undefined
+  return path ? { path, bundled: false } : null
 }
 
 export function describeExecutableFor(kind: AgentKind): Promise<ExecutableReport> | null {

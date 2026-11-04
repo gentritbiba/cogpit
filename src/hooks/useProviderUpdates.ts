@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { useLocalStorage } from "@/hooks/useLocalStorage"
+import { refreshAgentAvailability, replaceAgentAvailability, useAgentAvailability } from "@/lib/agents/availability"
 import {
-  fetchProviderUpdates,
   nextDismissals,
   pendingProviderUpdates,
   providerUpdateDismissKey,
@@ -32,27 +32,16 @@ export interface ProviderUpdatesState {
 }
 
 export function useProviderUpdates(): ProviderUpdatesState {
-  const [providers, setProviders] = useState<ProviderUpdateInfo[]>([])
+  const providers = useAgentAvailability() ?? []
   const [dismissed, setDismissed] = useLocalStorage<string[]>(PROVIDER_UPDATE_DISMISSALS_KEY, [])
   const [updating, setUpdating] = useState<ProviderUpdateId | null>(null)
   const [outcome, setOutcome] = useState<ProviderUpdateOutcome | null>(null)
 
+  // An unreachable registry or server is not worth surfacing: the banner stays
+  // hidden until a later check succeeds.
   useEffect(() => {
-    const controller = new AbortController()
-    const check = () => {
-      fetchProviderUpdates(controller.signal)
-        .then(setProviders)
-        // An unreachable registry or server is not worth surfacing: the banner
-        // stays hidden until a later check succeeds.
-        .catch(() => undefined)
-    }
-
-    check()
-    const timer = setInterval(check, RECHECK_INTERVAL_MS)
-    return () => {
-      controller.abort()
-      clearInterval(timer)
-    }
+    const timer = setInterval(() => void refreshAgentAvailability(), RECHECK_INTERVAL_MS)
+    return () => clearInterval(timer)
   }, [])
 
   const update = useCallback(async (provider: ProviderUpdateId) => {
@@ -61,9 +50,7 @@ export function useProviderUpdates(): ProviderUpdatesState {
     try {
       const result = await runProviderUpdate(provider)
       setOutcome(result)
-      setProviders((previous) =>
-        previous.map((info) => (info.provider === provider ? result.info : info)),
-      )
+      replaceAgentAvailability(result.info)
     } catch (error) {
       setOutcome({
         provider,

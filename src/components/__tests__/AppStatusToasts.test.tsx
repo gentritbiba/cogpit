@@ -49,8 +49,8 @@ describe("AppStatusToasts", () => {
         "Unable to load session",
         expect.objectContaining({
           id: "app-error",
+          duration: Infinity,
           onDismiss: clearError,
-          onAutoClose: clearError,
         }),
       )
       expect(mocks.warning).toHaveBeenCalledWith(
@@ -62,6 +62,31 @@ describe("AppStatusToasts", () => {
         expect.objectContaining({ id: "session-connection" }),
       )
     })
+  })
+
+  it("keeps a missing agent on screen with its install page", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null)
+    render(
+      <AppStatusToasts
+        activeError={"Codex isn't installed on this computer.\nInstall it from https://developers.openai.com/codex/cli, or run: npm install -g @openai/codex"}
+        modelFallbackNotice={null}
+        dismissModelFallbackNotice={vi.fn()}
+        connectionLost={false}
+        theme="dark"
+      />,
+    )
+
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(
+      "Codex isn't installed on this computer.",
+      expect.objectContaining({
+        description: "Install it from https://developers.openai.com/codex/cli, or run: npm install -g @openai/codex",
+        duration: Infinity,
+        action: expect.objectContaining({ label: "How to install" }),
+      }),
+    ))
+    mocks.error.mock.calls.at(-1)![1].action.onClick()
+    expect(open).toHaveBeenCalledWith("https://developers.openai.com/codex/cli", "_blank", "noopener,noreferrer")
+    open.mockRestore()
   })
 
   it("dismisses status toasts when their conditions clear", async () => {

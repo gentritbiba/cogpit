@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ProcessPanel } from "../ProcessPanel"
+import { startAgentSignIn } from "@/lib/agents/signIn"
 
 const mocks = vi.hoisted(() => ({
+  ptyStatus: "connected",
+  spawnTerminal: vi.fn(() => "pty_1"),
   killSession: vi.fn(),
   runScript: vi.fn(),
   stopScript: vi.fn(),
@@ -11,7 +14,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/PtyContext", () => ({
   usePty: () => ({
     sessions: [],
+    status: mocks.ptyStatus,
     killSession: mocks.killSession,
+    spawnTerminal: mocks.spawnTerminal,
   }),
 }))
 
@@ -242,5 +247,22 @@ describe("ProcessPanel", () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it("runs an agent's sign-in in a new terminal tab when asked", () => {
+    const onProcessStarted = vi.fn()
+    const { unmount } = render(<ProcessPanel {...defaultProps} collapsed projectDir="/project" onProcessStarted={onProcessStarted} />)
+
+    expect(startAgentSignIn("codex")).toBe(true)
+    expect(mocks.spawnTerminal).toHaveBeenCalledWith({ name: "Sign in to Codex", cwd: "/project", command: "codex", args: ["login"] })
+    expect(onProcessStarted).toHaveBeenCalledWith({ id: "pty_1", name: "Sign in to Codex", type: "terminal", status: "running", source: "/project" })
+
+    unmount()
+    expect(startAgentSignIn("codex")).toBe(false)
+  })
+
+  it("offers no sign-in runner on a phone", () => {
+    render(<ProcessPanel {...defaultProps} collapsed mobile projectDir="/project" onProcessStarted={vi.fn()} />)
+    expect(startAgentSignIn("codex")).toBe(false)
   })
 })

@@ -58,21 +58,6 @@ describe("forwardCodexStreamNotification", () => {
     expect(getSnapshot(THREAD_ID)).toBeNull()
   })
 
-  it("forwards app-server errors to the watching client", () => {
-    const events: StreamBusEvent[] = []
-    subscribe(THREAD_ID, (event) => events.push(event))
-
-    forwardCodexStreamNotification({
-      method: "error",
-      params: { threadId: THREAD_ID, error: { message: "response stream disconnected" } },
-    })
-
-    expect(events).toContainEqual({
-      type: "turn_error",
-      message: "response stream disconnected",
-    })
-  })
-
   it("clears the browser overlay when the Codex turn completes", () => {
     const events: StreamBusEvent[] = []
     subscribe(THREAD_ID, (event) => events.push(event))

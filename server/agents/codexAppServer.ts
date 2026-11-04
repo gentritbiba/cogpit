@@ -48,6 +48,9 @@ import { resolveAgentCommand } from "../lib/binaryResolver"
 import { cogpitAgentEnv } from "../browser/agentEnv"
 import { NO_COGPIT_SESSION } from "../browser/paths"
 import { forwardCodexStreamNotification } from "../lib/codexStreamAdapter"
+import { codexErrorFailure } from "../../shared/session/codex"
+import { agentSignedOutTitle } from "../../shared/session/agentFailures"
+import { logAgentFailure } from "./failureLog"
 import { publishError } from "../lib/streamBus"
 import { codexQuestions } from "./codexQuestions"
 import {
@@ -905,6 +908,10 @@ export class CodexAppServer {
           const key = JSON.stringify([threadId, turnId])
           const error = isRecord(turn) && isRecord(turn.error) ? stringField(turn.error, "message") : undefined
           const result = { isError: isRecord(turn) && ["failed", "interrupted"].includes(String(turn.status)), ...(error ? { message: error } : {}) }
+          if (isRecord(turn) && turn.status === "failed") {
+            const failure = codexErrorFailure(turn.error)
+            logAgentFailure("turn", { sessionId: threadId, kind: "codex", message: failure?.message ?? "The turn failed", httpStatus: failure?.httpStatus })
+          }
           this.completedTurns.set(key, result)
           while (this.completedTurns.size > 256) this.completedTurns.delete(this.completedTurns.keys().next().value!)
           for (const waiter of this.completionWaiters.get(key) ?? []) waiter.resolve(result)
@@ -1125,4 +1132,17 @@ export class CodexAppServer {
 /** Shared process-backed client used by the HTTP runtime and approval routes. */
 export const codexAppServer = new CodexAppServer({ reportError: publishError })
 codexAppServer.subscribe(forwardCodexStreamNotification)
+
+/**
+ * Turn errors, in plain words when the cause is a missing login: Codex retries
+ * that like a dropped connection ("Reconnecting… 2/5"), so it is named as soon
+ * as the first retry says so.
+ */
+export function publishTurnError(notification: CodexNotification): void {
+  if (notification.method !== "error" || !isRecord(notification.params)) return
+  const threadId = stringField(notification.params, "threadId")
+  const failure = codexErrorFailure(notification.params.error)
+  if (threadId && failure) publishError(threadId, failure.reason === "not_signed_in" ? agentSignedOutTitle("codex") : failure.message)
+}
+codexAppServer.subscribe(publishTurnError)
 codexAppServer.subscribe((notification) => codexQuestions.observe(notification))

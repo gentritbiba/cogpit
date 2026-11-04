@@ -137,13 +137,15 @@ export function usePtySocket(enabled = true) {
     subscribersRef.current.delete(sessionId)
   }, [])
 
-  const spawnTerminal = useCallback((opts: { name?: string; cwd?: string } = {}) => {
+  /** A shell, or `command` with `args` in its place. */
+  const spawnTerminal = useCallback((opts: { name?: string; cwd?: string; command?: string; args?: readonly string[] } = {}) => {
     const id = `pty_${crypto.randomUUID().slice(0, 8)}`
     send({
       type: "spawn",
       id,
       name: opts.name ?? "Terminal",
       cwd: opts.cwd,
+      ...(opts.command ? { command: opts.command, args: opts.args ?? [] } : {}),
       metadata: { type: "terminal" },
     })
     return id

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Copy, Check, AlertCircle } from "lucide-react"
+import { Copy, Check, AlertCircle, ExternalLink } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { descriptorFor, type AgentKind } from "@/lib/agents"
+import { agentNotInstalledIn, agentSignedOutTitle, classifyAgentFailure } from "../../../shared/session/agentFailures"
 
 /**
  * Inline send error shown under the composer. The preview is a single
@@ -15,12 +17,16 @@ import { Button } from "@/components/ui/button"
  * CLI's captured stderr) in a copyable dialog so failures can actually be
  * diagnosed instead of just reading "Claude Code process exited with code 1".
  */
-export function ErrorBanner({ error }: { error: string }) {
+export function ErrorBanner({ error, agentKind }: { error: string; agentKind: AgentKind }) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const firstLine = error.split("\n")[0]
-  const hasMore = error.includes("\n") || error.length > firstLine.length
+  // A missing login reads the same for every agent, whatever words its CLI used.
+  const signedOut = classifyAgentFailure(error).reason === "not_signed_in"
+  const firstLine = signedOut ? agentSignedOutTitle(agentKind) : error.split("\n")[0]
+  const hasMore = error.includes("\n") || error !== firstLine
+  const missing = agentNotInstalledIn(error)
+  const installPage = missing ? descriptorFor(missing).cli.install?.page : null
 
   const handleCopy = async () => {
     try {
@@ -46,6 +52,18 @@ export function ErrorBanner({ error }: { error: string }) {
         <span className="truncate">{firstLine}</span>
         {hasMore && <span className="shrink-0 opacity-60">(details)</span>}
       </Button>
+      {installPage && (
+        <Button
+          variant="outline"
+          size="xs"
+          className="ml-2"
+          render={<a href={installPage} target="_blank" rel="noopener noreferrer" />}
+          nativeButton={false}
+        >
+          <ExternalLink data-icon="inline-start" />
+          How to install
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">

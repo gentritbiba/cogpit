@@ -22,6 +22,7 @@ import { recordSessionOrigin } from "./sessionOrigins"
 import { storeStartedSettings } from "./sessionSettings"
 import { splitInstanceDirName, instanceDirName } from "../../shared/session/instances"
 import { orchestrationStore } from "../orchestration/storage"
+import { logAgentFailure } from "../agents/failureLog"
 
 /**
  * Starting a session, for the create-and-send route and the session CLI alike.
@@ -151,6 +152,7 @@ export async function createSession(
           if (lifecycle.signal?.aborted) abort()
         } })
       } catch (error) {
+        logAgentFailure("start", { sessionId, kind, message: error instanceof Error ? error.message : String(error) })
         if (sessionId) await runtime.stop(sessionId).catch(() => {})
         throw error
       } finally { if (sessionId) finishSessionStartup(sessionId); lifecycle.signal?.removeEventListener("abort", abort) }

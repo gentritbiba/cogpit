@@ -11,6 +11,7 @@ import { slugifyWorktreeName } from "@/lib/utils"
 import { agentKindForDirName, descriptorFor } from "@/lib/agents"
 import { fetchWithModelFallback } from "@/lib/agents/modelFallback"
 import { rename as renameSession } from "@/hooks/useSessionNames"
+import { rememberStartPrompt } from "@/lib/startPrompts"
 import {
   learnListedAccess,
   rememberCreatedSession,
@@ -308,6 +309,7 @@ export function useNewSession({
         pendingDirNameRef.current = null
         pendingCwdRef.current = null
         rememberCreatedSession(created.sessionId)
+        rememberStartPrompt(created.sessionId, message)
         const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, (parsed, source) => {
           onCreated?.({ sessionId: parsed.sessionId, cwd: parsed.cwd, dirName: source.dirName })
           onSessionFinalized(parsed, source)

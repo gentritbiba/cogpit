@@ -36,12 +36,24 @@ export interface SessionStatusInfo {
   pendingQueue?: number
   /** Why the session terminated (from Claude Code's terminal_reason). Only set for non-normal endings. */
   terminalReason?: string
+  /** Set when the last turn ended on an error the agent reported instead of a reply. */
+  failure?: AgentFailure
   /** Number of background agents/workflows still running (status awaiting_agents) */
   pendingAgents?: number
   /** Short descriptions of the pending background agents, oldest first */
   pendingAgentDescriptions?: string[]
   /** Agents launched since the oldest one still running, in launch order (status awaiting_agents) */
   backgroundAgents?: BackgroundAgent[]
+}
+
+export type AgentFailureReason = "not_installed" | "not_signed_in" | "http_status" | "other"
+
+/** A failure sorted into what the user can do about it; see `agentFailures.ts`. */
+export interface AgentFailure {
+  reason: AgentFailureReason
+  /** The agent's own words, for the details view and logs. */
+  message: string
+  httpStatus?: number
 }
 
 /** A background agent launched by the session. */

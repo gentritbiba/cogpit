@@ -555,6 +555,7 @@ export function makeProviderUpdateInfo(
     displayName: "Claude Code",
     packageName: "@anthropic-ai/claude-code",
     installed: true,
+    installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
     binaryPath: "/usr/local/bin/claude",
     currentVersion: "2.1.19",
     latestVersion: "2.1.20",

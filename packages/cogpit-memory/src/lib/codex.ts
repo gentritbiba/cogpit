@@ -1,6 +1,7 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
+import { agentSignedOutTitle, classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { linkAsyncAnswers } from "./asyncAnswers"
 import { composerPromptText } from "./composerContext"
@@ -17,6 +18,7 @@ import {
   type CodexToolOutput,
 } from "./codex-tool-normalization"
 import type {
+  AgentFailure,
   AudioBlock,
   ContentBlock,
   ImageBlock,
@@ -185,10 +187,37 @@ function readSubAgentActivity(record: CodexRecord): SubAgentActivity | null {
   }
 }
 
-/** The message a failed turn's `task_complete` carries (Codex 0.160.1+). */
-function turnErrorMessage(payload: Record<string, unknown>): string {
-  if (payload.type !== "task_complete" || !isObject(payload.error)) return ""
-  return typeof payload.error.message === "string" ? payload.error.message.trim() : ""
+/**
+ * HTTP status inside Codex's error info, which the rollout spells in snake case
+ * and the app server in camel case, under variant names that change between
+ * releases.
+ */
+function httpStatusIn(info: unknown, depth = 0): number | undefined {
+  if (info === "unauthorized") return 401
+  if (!isObject(info) || depth > 3) return undefined
+  const status = info.http_status_code ?? info.httpStatusCode
+  if (typeof status === "number") return status
+  for (const nested of Object.values(info)) {
+    const found = httpStatusIn(nested, depth + 1)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** Why a Codex turn failed, from a rollout `task_complete.error` or an app-server `TurnError`. */
+export function codexErrorFailure(error: unknown): AgentFailure | null {
+  if (!isObject(error) || typeof error.message !== "string" || !error.message.trim()) return null
+  const details = [error.additional_details, error.additionalDetails].find((value) => typeof value === "string" && value.trim())
+  const status = httpStatusIn(error.codex_error_info ?? error.codexErrorInfo)
+  const failure = classifyAgentFailure(error.message.trim(), status)
+  return failure.reason === "other" && typeof details === "string"
+    ? { ...classifyAgentFailure(details, status), message: error.message.trim() }
+    : failure
+}
+
+/** Why a turn failed, when its `task_complete` says it did (Codex 0.160.1+). */
+function turnFailure(payload: Record<string, unknown>): AgentFailure | null {
+  return payload.type === "task_complete" ? codexErrorFailure(payload.error) : null
 }
 
 function isCodexRecord(record: CodexRecord | null): record is CodexRecord {
@@ -982,9 +1011,11 @@ function walkCodexRecords(
     }
 
     if (record.type === "event_msg" && payload) {
-      const turnError = turnErrorMessage(payload)
-      if (turnError) {
-        appendAssistantText(current, turnError, timestamp)
+      const failure = turnFailure(payload)
+      if (failure) {
+        // A raw 401 with its request ids means nothing to someone who has never
+        // signed in; the session's status carries the original for details.
+        appendAssistantText(current, failure.reason === "not_signed_in" ? agentSignedOutTitle("codex") : failure.message, timestamp)
         continue
       }
     }
@@ -1555,6 +1586,10 @@ export function deriveCodexSessionStatus(rawMessages: readonly RawRecord[]): Ses
       const payload = msg.payload as { type?: string; message?: string } | undefined
       switch (payload?.type) {
         case "task_complete": {
+          const failure = turnFailure(payload as Record<string, unknown>)
+          if (failure) {
+            return { status: "completed", terminalReason: failure.reason === "not_signed_in" ? "authentication_failed" : "turn_failed", failure }
+          }
           // The turn ended, but spawned collab agents may still be running.
           return awaitingAgentsStatus(collectCodexBackgroundAgents(rawMessages)) ?? { status: "completed" }
         }

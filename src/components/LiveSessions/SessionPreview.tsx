@@ -49,7 +49,7 @@ export function SessionPreview({
         </span>
       )}
       {statusLabel && (
-        <span className={cn("font-medium", getStatusColor(s.agentStatus))}>
+        <span className={cn("font-medium", getStatusColor(s.agentStatus, s.agentTerminalReason))}>
           {statusLabel}
         </span>
       )}

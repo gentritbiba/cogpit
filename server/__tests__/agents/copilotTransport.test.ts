@@ -155,7 +155,7 @@ describe("CopilotRuntime", () => {
     const runtime = new CopilotRuntime({ env: { PATH: "" } })
 
     await expect(runtime.listModels()).rejects.toThrow(
-      "Failed to start Copilot CLI: copilot was not found on PATH",
+      "GitHub Copilot CLI isn't installed on this computer.",
     )
     await expect(runtime.shutdown()).resolves.toEqual([])
   })

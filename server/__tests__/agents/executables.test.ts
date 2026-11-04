@@ -72,12 +72,13 @@ describe("findLaunchableExecutable", () => {
       runnable: [INSTALLED, BUNDLED],
       versions: { [INSTALLED]: "2.1.318", [BUNDLED]: "2.1.306" },
     })
-    const { findLaunchableExecutable, activeExecutableFor } = await load()
+    const { findLaunchableExecutable } = await load()
+    const { claudeCliPath } = await import("../../agents/claudeExecutable")
 
     await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "found", path: INSTALLED, source: "path" })
     expect(mocks.runCli).toHaveBeenCalledWith(INSTALLED, ["--version"], 5_000)
     expect(mocks.runCli).toHaveBeenCalledWith(BUNDLED, ["--version"], 5_000)
-    expect(activeExecutableFor("claude")).toBe(INSTALLED)
+    expect(claudeCliPath()).toBe(INSTALLED)
     expect(mocks.execFileSync).not.toHaveBeenCalled()
   })
 
@@ -105,10 +106,11 @@ describe("findLaunchableExecutable", () => {
         runnable: [INSTALLED, BUNDLED],
         versions: { [INSTALLED]: failed, [BUNDLED]: "2.1.306" },
       })
-      const { findLaunchableExecutable, activeExecutableFor } = await load()
+      const { findLaunchableExecutable } = await load()
+    const { claudeCliPath } = await import("../../agents/claudeExecutable")
 
       await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "found", path: BUNDLED, source: "bundled" })
-      expect(activeExecutableFor("claude")).toBe(BUNDLED)
+      expect(claudeCliPath()).toBe(BUNDLED)
     }
   })
 

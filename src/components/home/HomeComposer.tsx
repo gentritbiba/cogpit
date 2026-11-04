@@ -10,6 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea"
 import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import { agentKindForDirName, projectDirNameFor, type AgentKind } from "@/lib/agents"
+import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
+import { AgentInstallHelp } from "@/components/AgentSetupHelp"
 import { projectName } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { splitInstanceDirName } from "../../../shared/session/instances"
@@ -31,8 +33,11 @@ export interface HomeModelControls {
 export interface HomeStart {
   defaultAgentKind: AgentKind
   model: HomeModelControls
-  /** Start a session in the project and send the message, with any pasted or dropped images, as its first turn. */
-  onStart: (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => void
+  /**
+   * Start a session in the project and send the message, with any pasted or
+   * dropped images, as its first turn. Resolves whether it was sent.
+   */
+  onStart: (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => Promise<boolean>
 }
 
 const MAX_CHIPS = 6
@@ -50,6 +55,7 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
   const chips = (picked && !recent.some((candidate) => sameFolder(candidate, picked)) ? [picked, ...recent] : [...recent]).slice(0, MAX_CHIPS)
   const message = text.trim()
   const agentKind = project ? agentKindForDirName(project.dirName) : start.defaultAgentKind
+  const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind)
   const { imageInput } = useModelCapabilities(agentKind, start.model.selectedModel, splitInstanceDirName(project?.dirName).instanceId)
   const { images, uploading, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(imageInput)
   const canStart = Boolean(project && (message || images.length > 0)) && !uploading && !hasUnsupportedAttachments
@@ -67,17 +73,19 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
   const holdProject = () => {
     if (!picked && project) setPicked(project)
   }
-  const submit = (event?: FormEvent) => {
+  // The text is the user's work: it stays until the session has it.
+  const submit = async (event?: FormEvent) => {
     event?.preventDefault()
     if (!project || !canStart) return
-    start.onStart(project.dirName, project.cwd, message, images.length > 0 ? images.map(({ data, mediaType }) => ({ data, mediaType })) : undefined)
+    const sent = await start.onStart(project.dirName, project.cwd, message, images.length > 0 ? images.map(({ data, mediaType }) => ({ data, mediaType })) : undefined)
+    if (!sent) return
     setText("")
     clearImages()
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      submit()
+      void submit()
     }
   }
 
@@ -107,6 +115,7 @@ export function HomeComposer({ recent, start }: { recent: readonly HomeProject[]
         })}
         <ProjectPicker defaultAgentKind={start.defaultAgentKind} onChoose={choose} onChooseFolder={chooseFolder} anyListed={chips.length > 0} />
       </div>
+      {project && !agentInstalled && <AgentInstallHelp kind={agentKind} />}
       <form
         onSubmit={submit}
         onDragOver={handleDragOver}

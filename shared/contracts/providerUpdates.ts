@@ -23,6 +23,8 @@ export type ProviderInstallMethod =
   | "homebrew"
   | "winget"
   | "native"
+  /** The copy Cogpit's SDK ships, which updates with Cogpit. */
+  | "bundled"
   | "unknown"
 
 export type ProviderUpdateStatus =
@@ -30,7 +32,7 @@ export type ProviderUpdateStatus =
   | "current"
   /** A newer version is published. */
   | "behind"
-  /** The CLI is not on PATH. */
+  /** Cogpit found no binary it could run. */
   | "not-installed"
   /** Probe or registry lookup failed; never surfaced as an update prompt. */
   | "unknown"
@@ -41,6 +43,8 @@ export interface ProviderUpdateInfo {
   /** npm package the version check reads, for display and support. */
   packageName: string
   installed: boolean
+  /** The command that installs this CLI on the server's own platform, when a person installs it. */
+  installCommand: string | null
   binaryPath: string | null
   currentVersion: string | null
   latestVersion: string | null

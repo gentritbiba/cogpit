@@ -8,6 +8,8 @@ import { useAgentProgress } from "@/contexts/StreamingOverlayContext"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type { SessionStatus, SessionStatusInfo } from "../../../shared/session/sessionStatus"
 import type { BackgroundAgent } from "../../../shared/session/types"
+import { AgentFailureNotice } from "@/components/AgentSetupHelp"
+import { agentKindForDirName } from "@/lib/agents"
 
 function StatusIcon({ status }: { status: SessionStatus }) {
   switch (status) {
@@ -231,7 +233,7 @@ function CompletedAgentStatus({
 }
 
 export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
-  const { session, isLive, sseState, isCompacting, pendingInteraction } = useSessionContext()
+  const { session, sessionSource, isLive, sseState, isCompacting, pendingInteraction } = useSessionContext()
 
   // Suppress stale "completed" when isLive transitions false→true (new turn starting).
   // Without this, the old "Done" briefly flashes before the new user message arrives.
@@ -303,6 +305,9 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
 
   const isCompleted = agentStatus?.status === "completed"
   const lastTurn = session?.turns[session.turns.length - 1] ?? null
+  // A turn that failed stays failed however long ago it ran, so this is not
+  // gated on having watched it end the way the ready line is.
+  const failure = derivedStatus?.status === "completed" ? derivedStatus.failure : undefined
 
   // Compute turn duration for "Done" display
   // NOTE: This useMemo must be called before early returns to satisfy Rules of Hooks.
@@ -329,6 +334,8 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
       </div>
     )
   }
+
+  if (failure) return <AgentFailureNotice kind={agentKindForDirName(sessionSource?.dirName)} failure={failure} />
 
   if (!agentStatus) return null
 

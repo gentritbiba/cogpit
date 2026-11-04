@@ -235,7 +235,7 @@ export function SessionCard({
             <Badge
               variant="secondary"
               data-session-live-state
-              className={cn(isNativeIdle ? "text-success" : getStatusColor(s.agentStatus))}
+              className={cn(isNativeIdle ? "text-success" : getStatusColor(s.agentStatus, s.agentTerminalReason))}
             >
               {statusLabel}
             </Badge>

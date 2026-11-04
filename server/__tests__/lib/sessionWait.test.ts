@@ -124,6 +124,16 @@ describe("readSessionState", () => {
     clearTurnError("a")
     expect((await readSessionState("a")).outcome).toBe("completed")
   })
+
+  it("reports a turn the agent failed as an error, in plain words first", async () => {
+    const failure = { reason: "not_signed_in", message: "Invalid API key · Fix external API key", httpStatus: 401 }
+    mocks.getSessionStatus.mockResolvedValue({ status: "completed", terminalReason: "authentication_failed", failure })
+    expect(await readSessionState("a", written(60_000))).toMatchObject({
+      outcome: "error",
+      error: "Claude Code isn't signed in. Invalid API key · Fix external API key",
+      failure,
+    })
+  })
 })
 
 describe("waitForSessions", () => {

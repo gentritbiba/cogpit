@@ -18,6 +18,7 @@ const FILES = [
   "parser.ts",
   "agents.ts",
   "agent-descriptors.ts",
+  "agentFailures.ts",
   "claude.ts",
   "codex.ts",
   "copilot.ts",

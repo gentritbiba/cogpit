@@ -49,13 +49,6 @@ export function forwardCodexStreamNotification(notification: CodexNotification):
       return
     }
 
-    case "error": {
-      const error = params.error
-      const message = isObject(error) ? stringField(error, "message") : undefined
-      if (message) streamBus.publishError(threadId, message)
-      return
-    }
-
     // A turn starting also clears, so an interrupted prior turn leaves no
     // stale overlay behind.
     case "turn/started":

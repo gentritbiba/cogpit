@@ -228,12 +228,13 @@ let memo: { key: string; resolved: ResolvedClaudeExecutable | undefined } | unde
 /**
  * The Claude CLI the configured choice resolves to right now. Memoized per
  * choice — resolution shells out to `claude --version` — and recomputed the
- * moment the setting changes.
+ * moment the setting changes. Finding nothing is not memoized, so a CLI
+ * installed while Cogpit runs is picked up by the next session.
  */
 export function resolveClaudeExecutable(): ResolvedClaudeExecutable | undefined {
   const choice = configuredChoice()
   const key = JSON.stringify(choice)
-  if (memo?.key !== key) {
+  if (memo?.key !== key || !memo.resolved) {
     memo = {
       key,
       resolved: chooseClaudeExecutable(choice, discoverClaudeExecutables(resolveModule), readCliVersionSync),

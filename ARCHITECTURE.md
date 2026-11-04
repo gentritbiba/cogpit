@@ -121,6 +121,12 @@ Cogpit stores the user's executable preference in `AppConfig.agentExecutable` (o
 
 The descriptor's `AgentCli.bundledBySdk` boolean (set to `true` only for Claude) indicates whether the SDK vendors a copy, which is what enables the executable picker. The live binary path is queried via `GET /api/agent-executable/:kind`, which is read-only, so an edition's route policy may treat it as authed-only.
 
+A lookup that finds no binary is not remembered, so a CLI installed while Cogpit runs is used by the next session. Before spawning, the Claude runtime checks that the resolved binary exists and otherwise fails with `AGENT_NOT_INSTALLED`, never the SDK's own "reinstall the SDK" error. `/api/provider-updates` reports the bundled copy with `installMethod: "bundled"` and no registry lookup, because it updates with Cogpit.
+
+### Missing or signed-out agents
+
+`AgentCli.install` (official page, per-platform command) and `AgentCli.signIn` (argv for the CLI's own login) are the facts; `shared/session/agentFailures.ts` turns any agent's failure text and HTTP status into `not_installed`, `not_signed_in`, `http_status` or `other`, with the plain wording the UI shows. Each format maps its own failure records onto that: Claude's synthetic `isApiErrorMessage` reply, Codex's failed `task_complete`, Copilot's `session.error`. The derived status then ends the turn with `failure`, so `cogpit-session` reports outcome `error` and the conversation shows a sign-in card. Its Sign in button runs the binary Cogpit spawns (`binaryPath` from `/api/provider-updates`) with `signIn.args` in the terminal panel, which registers itself as the runner (`src/lib/agents/signIn.ts`); without one the card shows the command to copy. `server/agents/failureLog.ts` writes one line per failed start or turn with the classified reason.
+
 ## Enforcement
 
 `bun run check:agents` (wired into `.github/workflows/quality.yml`) splits the

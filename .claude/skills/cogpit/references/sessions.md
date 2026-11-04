@@ -95,6 +95,12 @@ A child blocked on a question or approval notifies you once per request with
 | 3 | Still running or timed out; keep waiting |
 | 1 | Error, missing session or unreachable device; inspect the response |
 
+A turn the agent could not run, such as an API error or a CLI that is not
+installed or signed in, settles as outcome `error`. Its `failure.reason` is
+`not_installed`, `not_signed_in`, `http_status` (with `httpStatus`) or `other`,
+and `error` gives the plain explanation followed by the agent's own words. A
+person has to install or sign in to the CLI before a resend can work.
+
 ## Orchestrator checklist
 
 - Before you end your turn with children working, make sure each one will

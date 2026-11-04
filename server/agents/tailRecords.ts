@@ -1,5 +1,6 @@
 import { AGENT_KINDS, type AgentKind } from "../../shared/session/agent-descriptors"
 import type { RawRecord, SessionStatusInfo } from "../../shared/session/types"
+import { claudeApiFailure, claudeRecordEndsTurn } from "../../shared/session/claude"
 
 /**
  * Per-agent interpretation of a single transcript record, for the reverse tail
@@ -80,10 +81,11 @@ const claudeTail: AgentTailFormat = {
     if (record.type === "attachment") return KEEP
 
     if (record.type === "assistant" || record.type === "user" || record.type === "queue-operation") {
-      // end_turn needs user context and pending background-launch info, so it
-      // switches to the filtered scan instead of deciding here.
-      const stopReason = (record.message as { stop_reason?: string } | undefined)?.stop_reason
-      if (record.type === "assistant" && stopReason === "end_turn") {
+      // A failed API call is the whole verdict. Any other turn end needs user
+      // context and pending background-launch info, so it switches to the
+      // filtered scan instead of deciding here.
+      if (claudeApiFailure(record)) return ANSWER
+      if (claudeRecordEndsTurn(record)) {
         return { kind: "turn-end", awaitUserActivity: true }
       }
       const canDerive = record.type === "assistant"

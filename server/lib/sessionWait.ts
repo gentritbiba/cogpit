@@ -10,6 +10,7 @@ import type { AgentStore } from "../agents/types"
 import { findJsonlPath } from "../sessionPaths"
 import { orchestrationStore } from "../orchestration/storage"
 import type { AgentKind } from "../../shared/session/agent-descriptors"
+import { agentFailureTitle } from "../../shared/session/agentFailures"
 import type { SessionStatusInfo } from "../../shared/session/types"
 import { RECENT_ACTIVITY_MS, WORKING_STATUSES } from "../../shared/sessionActivity"
 import type { WorkspaceEnvironment, WorkspaceRunContext } from "../../shared/contracts/workspaces"
@@ -110,7 +111,9 @@ export async function readSessionState(sessionId: string, known?: KnownTranscrip
   const waiting = listPendingInput(sessionId)
   const identity = filePath && store?.readIdentity ? await store.readIdentity(filePath).catch(() => null) : null
   const workspace = identity?.cwd ? await workspaceDetailsForCwd(identity.cwd) : {}
-  const error = turnErrors.get(sessionId) ?? statusInfo?.terminalReason
+  const failure = statusInfo?.failure
+  const error = turnErrors.get(sessionId)
+    ?? (failure ? `${agentFailureTitle(runtime.kind, failure)} ${failure.message}` : statusInfo?.terminalReason)
 
   let outcome: SessionOutcome
   if (waiting.length > 0) outcome = "needs_input"

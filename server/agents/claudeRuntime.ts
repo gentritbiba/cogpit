@@ -8,7 +8,10 @@ import {
   readFile,
   unlink,
 } from "../helpers"
+import { existsSync } from "node:fs"
 import { fetchClaudeModels } from "./claudeModels"
+import { claudeCliPath } from "./claudeExecutable"
+import { agentNotInstalledError } from "./spawnError"
 import { withControlQuery } from "./sdk"
 import { activeProcesses, terminateTrackedSession } from "../processRegistry"
 import {
@@ -252,13 +255,23 @@ async function describeClaudeRuntime(force = false): Promise<ClaudeRuntimeSnapsh
   }
 }
 
+/**
+ * Fail in plain words before spawning when there is no Claude Code to run.
+ * Left to it, the SDK reports a missing binary with advice for developers.
+ */
+function requireInstalledCli(): void {
+  const path = claudeCliPath()
+  if (!path || !existsSync(path)) throw agentNotInstalledError("claude")
+}
+
 // ── The adapter ─────────────────────────────────────────────────────────────
 
 export const claudeRuntime: AgentRuntime = {
   kind: "claude",
   descriptor,
 
-  start(req) {
+  async start(req) {
+    requireInstalledCli()
     return startInteractive(req)
   },
 
@@ -294,6 +307,7 @@ export const claudeRuntime: AgentRuntime = {
       return { delivery: joinsTurn ? "enqueued" : "started", ...(observed ? { completion: observed.completion.then(turnResultFrom) } : {}) }
     }
 
+    requireInstalledCli()
     const state = resumeSDKSession({
       sessionId,
       cwd: await resolveSessionCwd(req.cwd, req.filePath),

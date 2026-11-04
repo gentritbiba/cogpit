@@ -1,4 +1,5 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
+import { classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats, mergeTokenUsage } from "./sessionStats"
@@ -1085,11 +1086,17 @@ export function deriveCopilotSessionStatus(rawMessages: readonly RawRecord[]): S
         }
         return { status: "processing" }
       }
-      case "session.error":
+      case "session.error": {
+        const failure = classifyAgentFailure(
+          typeof data.message === "string" && data.message ? data.message : "Copilot session error",
+          typeof data.statusCode === "number" ? data.statusCode : undefined,
+        )
         return {
           status: "completed",
-          terminalReason: typeof data.message === "string" ? data.message : "Copilot session error",
+          terminalReason: failure.reason === "not_signed_in" ? "authentication_failed" : failure.message,
+          failure,
         }
+      }
       case "assistant.idle":
       case "session.idle":
         return { status: sawUserActivity ? "completed" : "idle" }

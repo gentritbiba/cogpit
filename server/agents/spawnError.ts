@@ -1,23 +1,20 @@
-import { descriptorFor, type AgentKind } from "../../shared/session/agent-descriptors"
+import { agentNotInstalledMessage } from "../../shared/session/agentFailures"
+import type { AgentKind } from "../../shared/session/agent-descriptors"
+import { AgentRuntimeError } from "./runtimeTypes"
 
-/** Where an agent's CLI can be installed from, when Cogpit knows. */
-const INSTALL_COMMAND: Partial<Record<AgentKind, string>> = {
-  claude: "npm install -g @anthropic-ai/claude-code",
+/** Code the client reads to offer the agent's install page. */
+export const AGENT_NOT_INSTALLED = "AGENT_NOT_INSTALLED"
+
+/** The error a start or send fails with when the agent's CLI is not on this computer. */
+export function agentNotInstalledError(kind: AgentKind): AgentRuntimeError {
+  return new AgentRuntimeError(500, AGENT_NOT_INSTALLED, agentNotInstalledMessage(kind, process.platform))
 }
 
 /**
- * Turn a failed spawn into something a user can act on.
- *
- * Cogpit never vendors an agent, so the common failure is simply that the CLI
- * is not installed — which `ENOENT` alone does not say. Any other error is the
- * OS's own message, which is more specific than anything written here.
+ * Turn a failed spawn into something a user can act on. `ENOENT` alone does
+ * not say that the CLI is missing; any other error is the OS's own message,
+ * which is more specific than anything written here.
  */
-export function friendlySpawnError(
-  err: NodeJS.ErrnoException,
-  kind: AgentKind = "claude",
-): string {
-  if (err.code !== "ENOENT") return err.message
-  const install = INSTALL_COMMAND[kind]
-  return `${descriptorFor(kind).displayName} is not installed or not found in PATH.`
-    + (install ? ` Install it with: ${install}` : "")
+export function friendlySpawnError(err: NodeJS.ErrnoException, kind: AgentKind): string {
+  return err.code === "ENOENT" ? agentNotInstalledMessage(kind, process.platform) : err.message
 }

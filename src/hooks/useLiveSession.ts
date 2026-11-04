@@ -118,10 +118,11 @@ export function useLiveSession(
   // rawText only changes on explicit session load/reload, not during SSE streaming.
   useEffect(() => {
     // A prediction belongs to the turn that produced it — never to whatever
-    // session is loaded next. A block belongs to the session that hit it; the
-    // watcher replays a standing one on connect.
+    // session is loaded next. A block or a failed turn belongs to the session
+    // that hit it; the watcher replays a standing block on connect.
     setPromptSuggestion(null)
     setRateLimit(null)
+    setTurnError(null)
     if (!dirName || !fileName) {
       setIsLive(false)
       setSseState("disconnected")

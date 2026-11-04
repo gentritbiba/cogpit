@@ -20,7 +20,10 @@ import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
-import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
+import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
+import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
+import { startAgentSignIn } from "@/lib/agents/signIn"
+import { AgentInstallHelp, AgentSignInCard } from "@/components/AgentSetupHelp"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
@@ -185,6 +188,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const contextRef = useRef(context)
   contextRef.current = context
   const [contextError, setContextError] = useState<string | null>(null)
+  const [signInHelp, setSignInHelp] = useState(false)
+  const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind ?? DEFAULT_AGENT_KIND)
   const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
 
   const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
@@ -399,6 +404,15 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const submitText = useCallback(async (message: string) => {
     const trimmed = message.trim()
     if (!trimmed && images.length === 0 && context.length === 0) return
+    // The CLI's own advice when it is signed out is "run /login", which only
+    // its terminal understands; here it opens that terminal instead.
+    const kind = agentKind ?? DEFAULT_AGENT_KIND
+    if (/^\/login$/i.test(trimmed) && images.length === 0 && context.length === 0 && descriptorFor(kind).cli.signIn) {
+      applyDraft(EMPTY_DRAFT)
+      recovery.edit(draftNow())
+      setSignInHelp(!startAgentSignIn(kind))
+      return
+    }
     if ((!allowImages && images.length > 0) || uploading) return
     const refusal = validateContext(context)
     if (refusal) { setContextError(refusal); return }
@@ -434,7 +448,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind])
   const handleSubmit = useCallback(() => submitText(text), [submitText, text])
 
   // Spoken text continues the draft; sending it sends the whole draft.
@@ -589,6 +603,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
           <Button type="button" variant="outline" size="xs" disabled={!isDraftEmpty(draftNow())} onClick={() => { const restored = recovery.restore(message.id); if (restored) applyDraft(restored) }}>Restore unsent message</Button>
           <Button type="button" variant="ghost" size="xs" onClick={() => downloadUnsentBackup(message.draft)}>Download unsent backup</Button>
         </div>)}
+        {!agentInstalled && <AgentInstallHelp kind={agentKind ?? DEFAULT_AGENT_KIND} className="mb-2" />}
+        {signInHelp && <AgentSignInCard kind={agentKind ?? DEFAULT_AGENT_KIND} className="mb-2" onDismiss={() => setSignInHelp(false)} />}
         <ContextChips items={context} attachments={images} onRemove={removeContext} onOpenQuoteSource={openQuoteSource} className="mb-2" />
         {contextError && (
           <div role="alert" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">
@@ -671,11 +687,11 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
             </div>
           </div>
         </div>
-        {status === "error" && error && <ErrorBanner key={error} error={error} />}
+        {status === "error" && error && <ErrorBanner key={error} error={error} agentKind={agentKind ?? DEFAULT_AGENT_KIND} />}
         {/* Failures with no HTTP response behind them arrive over SSE instead.
             Mutually exclusive with the banner above: the server only publishes
             when nothing is waiting on a response. */}
-        {turnError && <ErrorBanner key={turnError} error={turnError} />}
+        {turnError && <ErrorBanner key={turnError} error={turnError} agentKind={agentKind ?? DEFAULT_AGENT_KIND} />}
       </div>
     </div>
   )

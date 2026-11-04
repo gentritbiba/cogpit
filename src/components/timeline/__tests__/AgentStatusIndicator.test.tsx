@@ -267,3 +267,28 @@ describe("AgentStatusIndicator lifecycle", () => {
     expect(screen.getByText("2s")).toBeInTheDocument()
   })
 })
+
+describe("AgentStatusIndicator failed turns", () => {
+  const failedWith = (failureRecord: Record<string, unknown>): MockSession => ({
+    rawMessages: [{ type: "user", message: { role: "user", content: "hi" } }, failureRecord],
+    turns: [],
+  })
+  const apiError = (error: string, status: number, text: string) => ({
+    type: "assistant", error, isApiErrorMessage: true, apiErrorStatus: status,
+    message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text }] },
+  })
+
+  it("asks to sign in instead of thinking forever, even on a session opened later", () => {
+    render(indicatorWithContext({ isLive: false, session: failedWith(apiError("authentication_failed", 401, "Not logged in · Please run /login")) }))
+    expect(screen.getByRole("alert")).toHaveTextContent("Claude Code isn't signed in.")
+    expect(screen.getByText("It said: Not logged in · Please run /login")).toBeInTheDocument()
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument()
+    expect(screen.queryByText("Waiting for your input")).not.toBeInTheDocument()
+  })
+
+  it("shows any other API error in red, not as a finished turn", () => {
+    render(indicatorWithContext({ session: failedWith(apiError("rate_limit", 429, "API Error: Rate limited")) }))
+    expect(screen.getByRole("status")).toHaveTextContent("Claude Code stopped with an error.API Error: Rate limited")
+    expect(document.querySelector("[data-agent-ready]")).toBeNull()
+  })
+})
