@@ -1,6 +1,5 @@
 import { captureLegacyPluginHost } from "./plugins/legacyHost"
-import { existsSync, mkdirSync } from "node:fs"
-import { homedir } from "node:os"
+import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { AddressInfo } from "node:net"
 
@@ -11,7 +10,6 @@ import {
   getConfig,
   getConfiguredEditionValue,
   loadConfig,
-  saveConfig,
   setConfigPath,
 } from "./config"
 import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
@@ -42,7 +40,6 @@ export interface RunningStandaloneServer {
   port: number
   url: string
   dataDir: string
-  createdConfig?: string
   envPassword: boolean
   dispose: () => Promise<void>
 }
@@ -86,21 +83,8 @@ export async function startStandaloneServer({
   const legacyPluginHost = await captureLegacyPluginHost(dataDir)
   mkdirSync(dataDir, { recursive: true })
 
-  const configPath = join(dataDir, "config.local.json")
-  setConfigPath(configPath)
-  const configExisted = existsSync(configPath)
+  setConfigPath(join(dataDir, "config.local.json"))
   await loadConfig()
-
-  // Prefer a real Claude installation when both providers are available. The
-  // config module already synthesizes an in-memory Codex-only configuration.
-  let createdConfig: string | undefined
-  if (!configExisted) {
-    const claudeDir = join(homedir(), ".claude")
-    if (existsSync(join(claudeDir, "projects"))) {
-      await saveConfig({ claudeDir })
-      createdConfig = `${configPath} for ${claudeDir}`
-    }
-  }
 
   // Resolve the edition before applying network-password policy. An edition
   // that signs accounts in deliberately ignores the shared password, and a
@@ -166,7 +150,6 @@ export async function startStandaloneServer({
     port: boundPort,
     url: `http://${urlHost}:${boundPort}`,
     dataDir,
-    createdConfig,
     envPassword: !!envPassword,
     dispose: async () => {
       if (disposed) return

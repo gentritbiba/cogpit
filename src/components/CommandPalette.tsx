@@ -30,6 +30,7 @@ import {
   Settings2,
   Skull,
   SlidersHorizontal,
+  Stethoscope,
   Terminal,
   TerminalSquare,
 } from "lucide-react"
@@ -105,6 +106,7 @@ export interface CommandPaletteProps {
   onKillAll?: () => void
   onOpenConfig?: () => void
   onOpenSettings: () => void
+  onCheckAgents?: () => void
   onOpenKeyboardShortcuts?: () => void
   onTogglePreview?: () => void
   onToggleProjectFiles?: () => void
@@ -392,6 +394,13 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onOpenConfig,
     ),
     action("settings", "Open Cogpit settings", "preferences network", Settings, props.onOpenSettings),
+    props.onCheckAgents && action(
+      "check-agents",
+      "Check agent setup",
+      "install sign in login doctor environment agents cli",
+      Stethoscope,
+      props.onCheckAgents,
+    ),
     action(
       "theme",
       "Change theme & chat width",

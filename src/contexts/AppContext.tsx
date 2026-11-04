@@ -11,7 +11,6 @@ export interface AppConfig {
   claudeDir: string | null
   /** Provider used for provider-neutral dashboard controls when no thread is open. */
   defaultAgentKind: AgentKind
-  setClaudeDir: (dir: string | null) => void
   showConfigDialog: boolean
   openConfigDialog: () => void
   handleCloseConfigDialog: () => void

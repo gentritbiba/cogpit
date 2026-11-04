@@ -94,6 +94,17 @@ describe("CommandPalette", () => {
     }
   })
 
+  it("reopens the agent check when searched by what a newcomer would type", async () => {
+    const user = userEvent.setup()
+    const onCheckAgents = vi.fn()
+    render(<CommandPalette {...createProps()} onCheckAgents={onCheckAgents} />)
+
+    await user.type(screen.getByRole("combobox", { name: "Search commands" }), "sign in")
+    await user.click(screen.getByText("Check agent setup"))
+
+    expect(onCheckAgents).toHaveBeenCalledOnce()
+  })
+
   it("runs the highlighted action from the keyboard", async () => {
     const user = userEvent.setup()
     const props = createProps()

@@ -197,6 +197,36 @@ export interface AgentSelfUpdate {
   matches(normalizedPath: string): boolean
 }
 
+/** Where a newcomer learns to install a CLI, and the one command that does it. */
+export interface AgentInstallGuide {
+  /** The CLI's official install page. */
+  readonly page: string
+  /** A command to paste into a terminal on `platform`. */
+  command(platform: string): string
+}
+
+/** What a CLI's own sign-in status command printed. */
+export interface AgentSignInReport {
+  readonly code: number | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/**
+ * How a CLI gets an account, and how Cogpit can tell whether it has one without
+ * ever calling a model. Every check here reads local state only.
+ */
+export interface AgentSignIn {
+  /** argv appended to the binary to start the CLI's own sign-in. */
+  readonly args: readonly string[]
+  /** Environment variables whose presence alone gives the CLI an account. */
+  readonly envVars: readonly string[]
+  /** argv that makes the CLI report its sign-in state offline; null when it has none. */
+  readonly statusArgs: readonly string[] | null
+  /** Reads that report: `"unknown"` whenever it does not say plainly. */
+  readStatus(report: AgentSignInReport): boolean | "unknown"
+}
+
 /** How a CLI shows up in the machine's process listing. */
 export interface AgentProcessMatch {
   /**
@@ -237,8 +267,9 @@ export interface AgentCli {
   /** The native session ID this CLI supplies to its shell commands. */
   readonly sessionIdEnvVar?: string
   /**
-   * Path inside the home whose existence proves the CLI has been used. Empty
-   * when the home directory itself is the evidence.
+   * Folder inside the home whose existence proves the CLI has been used: where
+   * it keeps session history. The home alone proves less, because a CLI creates
+   * it the first time it runs for any reason, even to report its sign-in.
    */
   readonly installMarker: string
   /**
@@ -250,6 +281,9 @@ export interface AgentCli {
   readonly requiresConfiguration?: boolean
   readonly homeIsDiscoverable: boolean
   readonly process: AgentProcessMatch
+  /** Null for an agent Cogpit is told how to launch rather than one a person installs. */
+  readonly install: AgentInstallGuide | null
+  readonly signIn: AgentSignIn | null
 }
 
 // ── Config-file layout ──────────────────────────────────────────────────────
@@ -642,6 +676,26 @@ const claude: AgentDescriptor = {
         commandCapture(command, new RegExp(`--resume(?:=|\\s+)(${ARGV_SESSION_ID})`))
         ?? commandCapture(command, new RegExp(`--session-id(?:=|\\s+)(${ARGV_SESSION_ID})`)),
     },
+    install: {
+      page: "https://code.claude.com/docs/en/setup",
+      command: (platform) => platform === "win32"
+        ? "irm https://claude.ai/install.ps1 | iex"
+        : "curl -fsSL https://claude.ai/install.sh | bash",
+    },
+    signIn: {
+      args: ["auth", "login"],
+      envVars: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
+      statusArgs: ["auth", "status", "--json"],
+      // Exits 1 while signed out, so the JSON is the answer, not the exit code.
+      readStatus: ({ stdout }) => {
+        try {
+          const { loggedIn } = JSON.parse(stdout) as { loggedIn?: unknown }
+          return typeof loggedIn === "boolean" ? loggedIn : "unknown"
+        } catch {
+          return "unknown"
+        }
+      },
+    },
   },
   config: {
     rootDirName: ".claude",
@@ -808,7 +862,7 @@ const codex: AgentDescriptor = {
     homeDirName: ".codex",
     homeEnvVar: "CODEX_HOME",
     sessionIdEnvVar: "CODEX_THREAD_ID",
-    installMarker: "",
+    installMarker: "sessions",
     homeIsDiscoverable: true,
     process: {
       by: "command",
@@ -816,6 +870,20 @@ const codex: AgentDescriptor = {
         command,
         new RegExp(`codex(?:\\s+\\S+)*\\s+exec\\s+resume\\s+(${ARGV_SESSION_ID})`),
       ),
+    },
+    install: {
+      page: "https://developers.openai.com/codex/cli",
+      command: () => "npm install -g @openai/codex",
+    },
+    signIn: {
+      args: ["login"],
+      envVars: [],
+      statusArgs: ["login", "status"],
+      // Exits 0 when signed in; "Not logged in" with a non-zero code when not.
+      readStatus: ({ code, stdout, stderr }) => {
+        if (code === 0) return true
+        return /not logged in/i.test(`${stdout}\n${stderr}`) ? false : "unknown"
+      },
     },
   },
   config: {
@@ -945,6 +1013,20 @@ const copilot: AgentDescriptor = {
       sessionIdFromCommand: (command) =>
         commandCapture(command, new RegExp(`--resume(?:=|\\s+)(${ARGV_SESSION_ID})`)),
     },
+    install: {
+      page: "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+      command: (platform) => platform === "win32"
+        ? "winget install GitHub.Copilot"
+        : "curl -fsSL https://gh.io/copilot-install | bash",
+    },
+    // No status command, and its own login may sit in the system credential
+    // store, so only a token in the environment is proof either way.
+    signIn: {
+      args: ["login"],
+      envVars: ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+      statusArgs: null,
+      readStatus: () => "unknown",
+    },
   },
   config: {
     rootDirName: ".copilot",
@@ -1013,7 +1095,7 @@ const acp: AgentDescriptor = {
   sessionFile: { name: (id) => `${id}.jsonl`, sessionId: sessionIdFromJsonlName, ...jsonlPathUrlCodec, transcriptRoot: (path) => { const segments = plainPathSegments(path); return segments?.length === 1 ? ownTranscriptRoot(sessionIdFromJsonlName(path)) : null } },
   resume: { command: () => "Resume this session in Cogpit", args: () => [] },
   launchArgs: { permissions: () => [], model: () => [], effort: () => [], fastTier: () => [] },
-  cli: { ...copilot.cli, packageName: "", homebrew: null, wingetId: null, selfUpdate: null, requiresConfiguration: true, homeDirName: ".cogpit-acp", homeEnvVar: "COGPIT_ACP_HOME", homeIsDiscoverable: true, installMarker: "projects" },
+  cli: { ...copilot.cli, packageName: "", homebrew: null, wingetId: null, selfUpdate: null, requiresConfiguration: true, homeDirName: ".cogpit-acp", homeEnvVar: "COGPIT_ACP_HOME", homeIsDiscoverable: true, installMarker: "projects", install: null, signIn: null },
   config: { ...copilot.config, rootDirName: ".cogpit-acp", instructions: [], settings: [], skillsDir: null },
   capabilities: { ...copilot.capabilities, undo: false, redo: false, nativeRewind: false, nativeFork: false, midTurnSteering: false, activeNotifications: false, externalProcesses: false, autoPermissionMode: "never", toolPermissionRules: false, namedSessions: false },
 }
@@ -1033,6 +1115,26 @@ export function descriptorFor(kind: AgentKind): AgentDescriptor {
 
 export function allDescriptors(): readonly AgentDescriptor[] {
   return AGENT_KINDS.map((kind) => DESCRIPTORS[kind])
+}
+
+/** An agent a person installs and signs in to themselves. */
+export interface InstallableAgentDescriptor extends AgentDescriptor {
+  readonly cli: AgentCli & { readonly install: AgentInstallGuide; readonly signIn: AgentSignIn }
+}
+
+function isInstallable(descriptor: AgentDescriptor): descriptor is InstallableAgentDescriptor {
+  return descriptor.cli.install !== null && descriptor.cli.signIn !== null
+}
+
+/**
+ * Installable agents in the order setup offers them. The agent owning every
+ * unprefixed project leads, because it is the one Cogpit prefers whenever
+ * several are equally present.
+ */
+export function installableDescriptors(): readonly InstallableAgentDescriptor[] {
+  const preferred = descriptorForDirName(null)
+  return [preferred, ...allDescriptors().filter((descriptor) => descriptor !== preferred)]
+    .filter(isInstallable)
 }
 
 /**

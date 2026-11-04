@@ -136,7 +136,6 @@ export function useAppConfig(): AppConfig {
     configError,
     claudeDir,
     defaultAgentKind,
-    setClaudeDir,
     showConfigDialog,
     openConfigDialog,
     handleCloseConfigDialog,

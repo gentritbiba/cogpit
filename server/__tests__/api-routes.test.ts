@@ -79,6 +79,7 @@ const CANONICAL_ROUTE_IDS = [
   "provider-updates",
   "agent-executable",
   "agent-accounts",
+  "agent-check",
   "browser",
   "plugins",
 ] as const

@@ -31,6 +31,7 @@ import { NetworkAccessSection } from "./NetworkAccessSection"
 import { ExecutableSection } from "./ExecutableSection"
 import { AccountSection } from "./AccountSection"
 import { SlackSection } from "./SlackSection"
+import { AgentsSection } from "./AgentsSection"
 import {
   DEFAULT_EXECUTABLE_CHOICE,
   parseExecutableChoice,
@@ -68,7 +69,7 @@ function ValidationStatus({ status, error }: { status: string; error: string | n
     return (
       <div className="flex items-center gap-2 text-sm text-success">
         <CheckCircle data-icon="inline-start" className="size-3.5" />
-        Valid .claude directory found
+        Folder found
       </div>
     )
   }
@@ -237,6 +238,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
         </DialogHeader>
 
         <FieldGroup>
+          <AgentsSection active={open} />
+
           {canWriteConfig && <Field>
             <FieldLabel>Plugins</FieldLabel>
             <FieldDescription>Manage installed plugins, their settings, and service connections.</FieldDescription>

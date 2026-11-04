@@ -26,9 +26,14 @@ vi.mock("../lib/binaryResolver", () => ({
   findExecutableOnPath: vi.fn(),
 }))
 
+vi.mock("../agents/bundledExecutable", () => ({
+  bundledExecutable: vi.fn(),
+}))
+
 import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "../password-utils"
 import { findExecutableOnPath } from "../lib/binaryResolver"
+import { bundledExecutable } from "../agents/bundledExecutable"
 import { dirname, resolve, join } from "node:path"
 import { asReaddirMock } from "./http-fixtures"
 
@@ -41,6 +46,40 @@ const mockedHashPassword = vi.mocked(hashPassword)
 const mockedIsMalformedPasswordHash = vi.mocked(isMalformedPasswordHash)
 const mockedIsPasswordHashed = vi.mocked(isPasswordHashed)
 const mockedFindExecutableOnPath = vi.mocked(findExecutableOnPath)
+const mockedBundledExecutable = vi.mocked(bundledExecutable)
+
+const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+
+/**
+ * A machine with no config file whose only directories are `dirs` and their
+ * parents, whose PATH holds `onPath`, and whose Cogpit build bundles `bundled`.
+ */
+function freshMachine({ dirs = [], onPath = [], bundled = [] }: {
+  dirs?: string[]
+  onPath?: string[]
+  bundled?: string[]
+}) {
+  mockedReadFile.mockRejectedValue(enoent())
+  mockedStat.mockImplementation(async (path) => {
+    const target = resolve(String(path))
+    if (dirs.some((dir) => resolve(dir) === target || resolve(dir).startsWith(`${target}/`))) {
+      return { isDirectory: () => true } as unknown as Stats
+    }
+    throw enoent()
+  })
+  mockedFindExecutableOnPath.mockImplementation((binName: string) =>
+    onPath.includes(binName) ? `/usr/local/bin/${binName}` : undefined)
+  mockedBundledExecutable.mockImplementation((kind) =>
+    bundled.includes(kind) ? `/bundle/${kind}` : undefined)
+}
+
+// freshMachine() installs lasting implementations; no other test expects them.
+afterEach(() => {
+  mockedReadFile.mockReset()
+  mockedStat.mockReset()
+  mockedFindExecutableOnPath.mockReset()
+  mockedBundledExecutable.mockReset()
+})
 
 // ── getDirs ─────────────────────────────────────────────────────────────
 
@@ -91,42 +130,56 @@ describe("validateClaudeDir", () => {
     expect(result.resolved).toBe(resolve("/some/dir"))
   })
 
+  it("accepts a freshly installed CLI's folder, before it has any history", async () => {
+    const { validateClaudeDir } = await import("../config")
+    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+    mockedReaddir.mockResolvedValueOnce(["settings.json"] as unknown as Dirent[])
+
+    await expect(validateClaudeDir("/some/dir")).resolves.toEqual({ valid: true, resolved: resolve("/some/dir") })
+  })
+
+  it("expands a leading ~ to the home directory, as a shell would", async () => {
+    const { validateClaudeDir } = await import("../config")
+    mockedStat.mockResolvedValue({ isDirectory: () => true } as unknown as Stats)
+    mockedReaddir.mockResolvedValue([] as unknown as Dirent[])
+
+    await expect(validateClaudeDir(" ~/.claude ")).resolves.toMatchObject({ resolved: resolve("/home/test/.claude") })
+    await expect(validateClaudeDir("~")).resolves.toMatchObject({ resolved: resolve("/home/test") })
+    expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.claude"))
+  })
+
+  it("leaves a ~ that names another user's home alone", async () => {
+    const { expandHome } = await import("../config")
+    expect(expandHome("~alice/.claude")).toBe("~alice/.claude")
+    expect(expandHome("/abs/~/x")).toBe("/abs/~/x")
+  })
+
   it("returns error when path is not a directory", async () => {
     const { validateClaudeDir } = await import("../config")
     mockedStat.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
 
     const result = await validateClaudeDir("/some/file")
     expect(result.valid).toBe(false)
-    expect(result.error).toContain("not a directory")
+    expect(result.error).toBe("That is a file, not a folder.")
   })
 
   it("returns error when path does not exist", async () => {
     const { validateClaudeDir } = await import("../config")
-    mockedStat.mockRejectedValueOnce(new Error("ENOENT"))
+    mockedStat.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
     const result = await validateClaudeDir("/nonexistent")
     expect(result.valid).toBe(false)
-    expect(result.error).toContain("does not exist")
-  })
-
-  it("returns error when directory has no projects subdir", async () => {
-    const { validateClaudeDir } = await import("../config")
-    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
-    mockedReaddir.mockResolvedValueOnce(["other", "stuff"] as unknown as Dirent[])
-
-    const result = await validateClaudeDir("/some/dir")
-    expect(result.valid).toBe(false)
-    expect(result.error).toContain("projects")
+    expect(result.error).toBe("No folder at that path.")
   })
 
   it("returns error when directory contents cannot be read", async () => {
     const { validateClaudeDir } = await import("../config")
     mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
-    mockedReaddir.mockRejectedValueOnce(new Error("EPERM"))
+    mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
 
     const result = await validateClaudeDir("/restricted/dir")
     expect(result.valid).toBe(false)
-    expect(result.error).toContain("Cannot read directory")
+    expect(result.error).toBe("Cogpit cannot open that folder.")
   })
 })
 
@@ -257,91 +310,132 @@ describe("loadConfig", () => {
     expect(mockedWriteFile).not.toHaveBeenCalled()
   })
 
-  it("returns null for missing file", async () => {
+  it("returns null for a missing file when no agent CLI is on the machine", async () => {
     const { loadConfig } = await import("../config")
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    freshMachine({})
 
-    const config = await loadConfig()
-    expect(config).toBeNull()
+    await expect(loadConfig()).resolves.toBeNull()
   })
 
-  it("bootstraps a Codex-only config when no config file exists", async () => {
+  it("does not bootstrap from the bundled copy alone, so setup can ask for a sign-in first", async () => {
     const { loadConfig } = await import("../config")
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+    freshMachine({ bundled: ["claude"] })
 
-    const config = await loadConfig()
+    await expect(loadConfig()).resolves.toBeNull()
+  })
 
-    expect(config).toEqual({
+  it("bootstraps the configured agent from a home without history yet, which is then no placeholder", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ dirs: ["/home/test/.claude"] })
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "claude",
+    })
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("bootstraps the configured agent from its binary on PATH, before it has ever run", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ onPath: ["claude"] })
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "claude",
+      claudeDirIsPlaceholder: true,
+    })
+  })
+
+  it("prefers the configured agent when every CLI is installed but none has been used", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ onPath: ["claude", "codex", "copilot"] })
+
+    await expect(loadConfig()).resolves.toMatchObject({ defaultAgent: "claude" })
+  })
+
+  it("prefers the bundled copy over a CLI that is installed but has never run", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ onPath: ["codex"], bundled: ["claude"] })
+
+    await expect(loadConfig()).resolves.toMatchObject({ defaultAgent: "claude", claudeDirIsPlaceholder: true })
+  })
+
+  it("prefers an agent that has been used over one that is only installed", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ dirs: ["/home/test/.codex/sessions"], onPath: ["claude"], bundled: ["claude"] })
+
+    await expect(loadConfig()).resolves.toEqual({
       claudeDir: join("/home/test", ".claude"),
       defaultAgent: "codex",
       claudeDirIsPlaceholder: true,
     })
-    expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.codex"))
-    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("does not count a home that merely running the CLI created as use", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ dirs: ["/home/test/.claude", "/home/test/.codex/sessions"] })
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "codex",
+    })
+  })
+
+  it("prefers the configured agent when several have been used", async () => {
+    const { loadConfig } = await import("../config")
+    freshMachine({ dirs: ["/home/test/.claude/projects", "/home/test/.codex/sessions"] })
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "claude",
+    })
   })
 
   it("honors CODEX_HOME when bootstrapping a Codex-only config", async () => {
     const { loadConfig } = await import("../config")
     process.env.CODEX_HOME = "/opt/codex-data"
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+    freshMachine({ dirs: ["/opt/codex-data/sessions"], onPath: ["claude"] })
 
-    const config = await loadConfig()
-
-    expect(config?.defaultAgent).toBe("codex")
-    expect(mockedStat).toHaveBeenCalledWith(resolve("/opt/codex-data"))
+    await expect(loadConfig()).resolves.toMatchObject({ defaultAgent: "codex" })
+    expect(mockedStat).toHaveBeenCalledWith(resolve("/opt/codex-data/sessions"))
   })
 
-  it("bootstraps a Copilot-only config when Codex is unavailable", async () => {
+  it("bootstraps a Copilot-only config from its session history", async () => {
     const { loadConfig } = await import("../config")
     process.env.COPILOT_HOME = "/opt/copilot-data"
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat
-      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-      .mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+    freshMachine({ dirs: ["/opt/copilot-data/session-state"], onPath: ["claude"] })
 
-    const config = await loadConfig()
-
-    expect(config).toEqual({
+    await expect(loadConfig()).resolves.toEqual({
       claudeDir: join("/home/test", ".claude"),
       defaultAgent: "copilot",
       claudeDirIsPlaceholder: true,
     })
-    expect(mockedStat).toHaveBeenNthCalledWith(1, resolve("/home/test/.codex"))
-    expect(mockedStat).toHaveBeenNthCalledWith(2, resolve("/opt/copilot-data/session-state"))
   })
 
   it("bootstraps a first Copilot session when only that CLI is on PATH", async () => {
     const { loadConfig } = await import("../config")
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
-      binName === "copilot" ? "/usr/local/bin/copilot" : undefined,
-    )
+    freshMachine({ onPath: ["copilot"] })
 
-    await expect(loadConfig()).resolves.toEqual({
-      claudeDir: join("/home/test", ".claude"),
-      defaultAgent: "copilot",
-      claudeDirIsPlaceholder: true,
-    })
+    await expect(loadConfig()).resolves.toMatchObject({ defaultAgent: "copilot", claudeDirIsPlaceholder: true })
     expect(mockedFindExecutableOnPath).toHaveBeenCalledWith("copilot")
   })
 
-  it("bootstraps from any discoverable CLI on PATH, not just one", async () => {
-    const { loadConfig } = await import("../config")
-    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
-      binName === "codex" ? "/usr/local/bin/codex" : undefined,
-    )
+  it("picks up an agent installed after startup on the next redetection", async () => {
+    const { loadConfig, redetectConfig } = await import("../config")
+    freshMachine({})
+    await expect(loadConfig()).resolves.toBeNull()
 
-    await expect(loadConfig()).resolves.toEqual({
-      claudeDir: join("/home/test", ".claude"),
-      defaultAgent: "codex",
-      claudeDirIsPlaceholder: true,
-    })
+    freshMachine({ onPath: ["codex"] })
+    await expect(redetectConfig()).resolves.toMatchObject({ defaultAgent: "codex" })
+  })
+
+  it("keeps an existing config when redetecting", async () => {
+    const { loadConfig, redetectConfig } = await import("../config")
+    freshMachine({ onPath: ["codex"] })
+    const config = await loadConfig()
+
+    freshMachine({ onPath: ["claude"] })
+    await expect(redetectConfig()).resolves.toBe(config)
   })
 
   it("returns null for malformed JSON", async () => {
@@ -423,6 +517,45 @@ describe("loadConfig", () => {
 
     expect(config?.edition).toBeUndefined()
     expect(getConfiguredEditionValue()).toBe("enterprise")
+  })
+})
+
+describe("adoptDetectedAgents", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("saves the copy bundled with Cogpit, so a newcomer can continue and sign in", async () => {
+    const { adoptDetectedAgents, loadConfig } = await import("../config")
+    freshMachine({ bundled: ["claude"] })
+    await loadConfig()
+
+    const expected = {
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "claude",
+      claudeDirIsPlaceholder: true,
+    }
+    await expect(adoptDetectedAgents()).resolves.toEqual(expected)
+    expect(mockedWriteFile).toHaveBeenCalledOnce()
+    expect(JSON.parse(mockedWriteFile.mock.calls[0][1] as string)).toEqual({ ...expected, runtimePluginsVersion: 1 })
+  })
+
+  it("finds nothing to adopt, and writes nothing, on a machine without any agent", async () => {
+    const { adoptDetectedAgents, loadConfig } = await import("../config")
+    freshMachine({})
+    await loadConfig()
+
+    await expect(adoptDetectedAgents()).resolves.toBeNull()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("returns a configuration that already exists unchanged", async () => {
+    const { adoptDetectedAgents, loadConfig } = await import("../config")
+    freshMachine({ onPath: ["codex"] })
+    const config = await loadConfig()
+
+    await expect(adoptDetectedAgents()).resolves.toBe(config)
+    expect(mockedWriteFile).not.toHaveBeenCalled()
   })
 })
 

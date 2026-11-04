@@ -305,15 +305,28 @@ describe("app-server upgrade lifecycle", () => {
   })
 })
 
+/** Run `body` on a machine without any agent CLI: no home directories, nothing on PATH. */
+async function withoutAgentClis(body: () => Promise<void>): Promise<void> {
+  const keys = ["CODEX_HOME", "COPILOT_HOME", "PATH", "HOME", "USERPROFILE"] as const
+  const previous = new Map(keys.map((key) => [key, process.env[key]]))
+  process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+  process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
+  process.env.PATH = join(fixtureRoot, "missing-bin-dir")
+  process.env.HOME = join(fixtureRoot, "empty-home")
+  process.env.USERPROFILE = process.env.HOME
+  try {
+    await body()
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
 describe("app-server initialization and proxy failures", () => {
   it("blocks data APIs until configuration exists", async () => {
-    const previousCodexHome = process.env.CODEX_HOME
-    const previousCopilotHome = process.env.COPILOT_HOME
-    const previousPath = process.env.PATH
-    process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
-    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
-    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
-    try {
+    await withoutAgentClis(async () => {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
 
@@ -323,24 +336,11 @@ describe("app-server initialization and proxy failures", () => {
       await expect(response.json()).resolves.toMatchObject({ code: "NOT_CONFIGURED" })
       await appServer.dispose()
       openServers.delete(appServer.httpServer)
-    } finally {
-      if (previousCodexHome === undefined) delete process.env.CODEX_HOME
-      else process.env.CODEX_HOME = previousCodexHome
-      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
-      else process.env.COPILOT_HOME = previousCopilotHome
-      if (previousPath === undefined) delete process.env.PATH
-      else process.env.PATH = previousPath
-    }
+    })
   })
 
   it("leaves /api/me reachable before configuration, and no path an edition would open", async () => {
-    const previousCodexHome = process.env.CODEX_HOME
-    const previousCopilotHome = process.env.COPILOT_HOME
-    const previousPath = process.env.PATH
-    process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
-    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
-    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
-    try {
+    await withoutAgentClis(async () => {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
 
@@ -354,37 +354,24 @@ describe("app-server initialization and proxy failures", () => {
       await expect(me.json()).resolves.toMatchObject({
         authenticated: true,
         edition: "personal",
-      })
+    })
 
-      // Personal edition has no first-time setup, so nothing past core's own
-      // discovery and sign-in paths answers before configuration.
-      const setup = await fetch(`${baseUrl}/api/setup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: "alice", password: "irrelevant" }),
-      })
-      expect(setup.status).toBe(503)
+    // Personal edition has no first-time setup, so nothing past core's own
+    // discovery and sign-in paths answers before configuration.
+    const setup = await fetch(`${baseUrl}/api/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "alice", password: "irrelevant" }),
+    })
+    expect(setup.status).toBe(503)
 
-      await appServer.dispose()
-      openServers.delete(appServer.httpServer)
-    } finally {
-      if (previousCodexHome === undefined) delete process.env.CODEX_HOME
-      else process.env.CODEX_HOME = previousCodexHome
-      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
-      else process.env.COPILOT_HOME = previousCopilotHome
-      if (previousPath === undefined) delete process.env.PATH
-      else process.env.PATH = previousPath
-    }
+    await appServer.dispose()
+    openServers.delete(appServer.httpServer)
+    })
   })
 
   it("matches 503-gate exemptions on segment boundaries only", async () => {
-    const previousCodexHome = process.env.CODEX_HOME
-    const previousCopilotHome = process.env.COPILOT_HOME
-    const previousPath = process.env.PATH
-    process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
-    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
-    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
-    try {
+    await withoutAgentClis(async () => {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
 
@@ -399,14 +386,7 @@ describe("app-server initialization and proxy failures", () => {
 
       await appServer.dispose()
       openServers.delete(appServer.httpServer)
-    } finally {
-      if (previousCodexHome === undefined) delete process.env.CODEX_HOME
-      else process.env.CODEX_HOME = previousCodexHome
-      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
-      else process.env.COPILOT_HOME = previousCopilotHome
-      if (previousPath === undefined) delete process.env.PATH
-      else process.env.PATH = previousPath
-    }
+    })
   })
 
   it("returns 502 when the configured Vite development server is unavailable", async () => {

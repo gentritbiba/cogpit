@@ -46,6 +46,7 @@ import { registerProjectRoutes } from "./routes/projects"
 import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerAgentExecutableRoutes } from "./routes/agent-executable"
 import { registerAgentAccountRoutes } from "./routes/agent-accounts"
+import { registerAgentCheckRoutes } from "./routes/agent-check"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerSessionAccessRoutes } from "./routes/session-access"
 import { registerSessionArchiveRoutes } from "./routes/session-archive"
@@ -169,6 +170,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("provider-updates", registerProviderUpdateRoutes),
   apiRoute("agent-executable", registerAgentExecutableRoutes),
   apiRoute("agent-accounts", registerAgentAccountRoutes),
+  apiRoute("agent-check", registerAgentCheckRoutes),
   apiRoute("browser", registerBrowserRoutes),
   apiRoute("plugins", registerPluginRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]

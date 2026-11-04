@@ -11,7 +11,6 @@
  */
 import { execFileSync } from "node:child_process"
 import { readFileSync, statSync } from "node:fs"
-import { createRequire } from "node:module"
 import { posix, win32 } from "node:path"
 
 import type {
@@ -25,15 +24,12 @@ import {
   DETECTED_EXECUTABLE_SOURCES,
 } from "../../shared/contracts/agentExecutable"
 import { getConfig } from "../config"
-import { findExecutableOnPath, isDirectlyLaunchable, nativeBinaryName } from "../lib/binaryResolver"
+import { findExecutableOnPath, isDirectlyLaunchable } from "../lib/binaryResolver"
 import { probeCliVersion } from "../lib/cliProcess"
+import { findBundledClaude, resolveModule } from "./bundledExecutable"
 
 const BIN_NAME = "claude"
 const NPM_PACKAGE = "@anthropic-ai/claude-code"
-const CLI_BIN_NAME = nativeBinaryName(BIN_NAME)
-
-/** Separator-agnostic so the packaged Windows app is detected too. */
-const ASAR_SEGMENT = /([\\/])app\.asar([\\/])/
 
 export interface ClaudeExecutables {
   /** Directly launchable `claude` on PATH. */
@@ -133,19 +129,6 @@ function findInstalledClaude(): string | undefined {
   return findExecutableOnPath(BIN_NAME, { directOnly: true })
 }
 
-function findBundledClaude(resolveModule: (id: string) => string): string | undefined {
-  try {
-    const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    // Swapping the file name keeps the resolver's own separators, which the
-    // asar rewrite relies on.
-    return resolveModule(`${platformPkg}/package.json`)
-      .replace(/package\.json$/, CLI_BIN_NAME)
-      .replace(ASAR_SEGMENT, "$1app.asar.unpacked$2")
-  } catch {
-    return undefined
-  }
-}
-
 export function discoverClaudeExecutables(
   resolveModule: (id: string) => string,
   probes: DiscoveryProbes = {},
@@ -224,8 +207,6 @@ export function chooseClaudeExecutable(
 
 // ── Live resolution ─────────────────────────────────────────────────────
 
-const resolveModule = (id: string) => createRequire(import.meta.url).resolve(id)
-
 function configuredChoice(): ExecutableChoice {
   return getConfig()?.agentExecutable ?? DEFAULT_EXECUTABLE_CHOICE
 }
@@ -247,6 +228,11 @@ export function resolveClaudeExecutable(): ResolvedClaudeExecutable | undefined 
     }
   }
   return memo.resolved
+}
+
+/** Drop the memoized resolution, so a CLI installed since is found on the next call. */
+export function forgetClaudeExecutable(): void {
+  memo = undefined
 }
 
 /**

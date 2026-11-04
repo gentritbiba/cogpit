@@ -38,9 +38,6 @@ try {
   process.exit(1)
 }
 
-if (runtime.createdConfig) {
-  console.log(`First run: created ${runtime.createdConfig}`)
-}
 const deviceName = resolveDeviceName(process.env, hostname())
 const banner = buildBootBanner({
   deviceName,

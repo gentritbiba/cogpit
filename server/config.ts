@@ -5,14 +5,16 @@ import { fileURLToPath } from "node:url"
 import {
   AGENT_KINDS,
   PERSISTED_AGENT_HOME_FIELD,
-  allDescriptors,
   descriptorFor,
+  installableDescriptors,
   soleDescriptorWhere,
   type AgentKind,
+  type InstallableAgentDescriptor,
 } from "../shared/session/agent-descriptors"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
 import { writeOwnerOnlyJson } from "./atomicJsonFile"
 import { findExecutableOnPath } from "./lib/binaryResolver"
+import { bundledExecutable } from "./agents/bundledExecutable"
 import {
   parseExecutableChoice,
   type ExecutableChoice,
@@ -75,9 +77,9 @@ export interface AppConfig {
   /** Agent new sessions default to. */
   defaultAgent?: AgentKind
   /**
-   * Whether `claudeDir` was invented while bootstrapping an install that has no
-   * Claude Code, and so has never been proven to be a real Claude home. Saving
-   * settings may reuse that exact path; any other path must still validate.
+   * Whether the home above is the default location, chosen while bootstrapping
+   * before that directory existed. Saving settings may reuse that exact path;
+   * any other path must still validate.
    */
   claudeDirIsPlaceholder?: boolean
   /** An edition package to run instead of personal edition; only the standalone shell honors it. */
@@ -210,35 +212,76 @@ export function getProjectsRoot(): string {
     ?? homedir()
 }
 
-/**
- * Bootstrap configuration for a machine that has a discoverable agent CLI but
- * not the configured one. `claudeDir` is a placeholder so the rest of the app
- * has a history root to name; nothing is ever read from it until the user
- * points it somewhere real.
- *
- * Evidence is either the CLI's own state directory or its binary on PATH — the
- * second case covers a CLI that has been installed but never run.
- */
-async function detectBootstrapConfig(): Promise<AppConfig | null> {
-  const discoverable = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable && !descriptor.cli.requiresConfiguration)
-  const placeholder = () => join(homedir(), CONFIGURED_HOME_AGENT.cli.homeDirName)
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
 
-  for (const descriptor of discoverable) {
-    const marker = join(agentHomeDir(descriptor.kind), descriptor.cli.installMarker)
-    try {
-      if ((await stat(marker)).isDirectory()) {
-        return { claudeDir: placeholder(), defaultAgent: descriptor.kind, claudeDirIsPlaceholder: true }
-      }
-    } catch {
-      // Try the next agent.
-    }
+/**
+ * How an agent CLI shows up on this machine, strongest first: its session
+ * history (it has been used), its binary on PATH or its home directory
+ * (installed, perhaps never used), or only the copy bundled with Cogpit.
+ */
+type AgentPresence = "used" | "installed" | "bundled"
+
+async function agentPresence(descriptor: InstallableAgentDescriptor): Promise<AgentPresence | null> {
+  const { cli } = descriptor
+  // The configured home is not known yet, so its default location is the evidence.
+  const home = cli.homeIsDiscoverable ? agentHomeDir(descriptor.kind) : join(homedir(), cli.homeDirName)
+  if (await isDirectory(join(home, cli.installMarker))) return "used"
+  if (findExecutableOnPath(descriptor.binName) || await isDirectory(home)) return "installed"
+  return bundledExecutable(descriptor.kind) ? "bundled" : null
+}
+
+/**
+ * Configuration for a machine without a config file, built from the agent CLIs
+ * found on it. An agent that has been used becomes the default; otherwise the
+ * order of {@link installableDescriptors} decides. A copy bundled with Cogpit
+ * only counts on its own when `acceptBundled`: at startup it does not, so the
+ * setup screen can first ask the person to sign in to it.
+ *
+ * The configured agent's home is its default location, marked a placeholder
+ * until that directory exists.
+ */
+async function detectAgentConfig(acceptBundled: boolean): Promise<AppConfig | null> {
+  const found = (await Promise.all(installableDescriptors().map(async (descriptor) => ({
+    descriptor,
+    presence: await agentPresence(descriptor),
+  })))).filter((entry) => entry.presence !== null)
+  if (!acceptBundled && found.every((entry) => entry.presence === "bundled")) return null
+
+  const chosen = found.find((entry) => entry.presence === "used") ?? found[0]
+  if (!chosen) return null
+  const home = join(homedir(), CONFIGURED_HOME_AGENT.cli.homeDirName)
+  return {
+    [PERSISTED_AGENT_HOME_FIELD]: home,
+    defaultAgent: chosen.descriptor.kind,
+    ...(await isDirectory(home) ? {} : { claudeDirIsPlaceholder: true }),
   }
-  for (const descriptor of discoverable) {
-    if (findExecutableOnPath(descriptor.binName)) {
-      return { claudeDir: placeholder(), defaultAgent: descriptor.kind, claudeDirIsPlaceholder: true }
-    }
-  }
-  return null
+}
+
+/**
+ * Look for agent CLIs again while nothing is configured, so one installed
+ * after Cogpit started is picked up without a restart.
+ */
+export async function redetectConfig(): Promise<AppConfig | null> {
+  return cachedConfig ?? loadConfig()
+}
+
+/**
+ * Setup's Continue: keep what detection finds, the bundled copy included, and
+ * save it so the next start does not ask again. A configuration that already
+ * exists is returned unchanged.
+ */
+export async function adoptDetectedAgents(): Promise<AppConfig | null> {
+  const existing = await redetectConfig()
+  if (existing) return existing
+  const detected = await detectAgentConfig(true)
+  if (detected) await saveConfig(detected)
+  return detected
 }
 
 /** Narrow an arbitrary persisted value to an agent kind. */
@@ -252,12 +295,11 @@ export async function loadConfig(): Promise<AppConfig | null> {
   try {
     raw = await readFile(CONFIG_PATH, "utf-8")
   } catch (error) {
-    // A first-run external-provider user should not need a Claude history
-    // directory. Only bootstrap on a genuinely missing config file: malformed
-    // or unreadable user configuration must remain visible instead of being
-    // silently ignored.
+    // Every shell bootstraps from the agents it finds, and only on a genuinely
+    // missing config file: malformed or unreadable user configuration must
+    // remain visible instead of being silently ignored.
     cachedConfig = (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? await detectBootstrapConfig()
+      ? await detectAgentConfig(false)
       : null
     return cachedConfig
   }
@@ -338,29 +380,32 @@ interface ValidationResult {
   resolved?: string
 }
 
+/** `~` and `~/…` name the user's home, as in a shell; anything else is returned as is. */
+export function expandHome(path: string): string {
+  return path === "~" || /^~[\\/]/.test(path) ? join(homedir(), path.slice(1)) : path
+}
+
+/**
+ * Whether a typed path can be the configured agent's home. Any existing,
+ * readable directory can: a CLI that was installed but has not run a session
+ * yet has no history folder inside it, and Cogpit reads that folder once it
+ * appears.
+ */
 export async function validateClaudeDir(dirPath: string): Promise<ValidationResult> {
-  const resolved = resolve(dirPath)
+  const resolved = resolve(expandHome(dirPath.trim()))
 
   try {
-    const s = await stat(resolved)
-    if (!s.isDirectory()) {
-      return { valid: false, error: "Path is not a directory" }
+    if (!(await stat(resolved)).isDirectory()) {
+      return { valid: false, error: "That is a file, not a folder." }
     }
-  } catch {
-    return { valid: false, error: "Path does not exist" }
-  }
-
-  try {
-    const entries = await readdir(resolved)
-    const { installMarker, homeDirName } = CONFIGURED_HOME_AGENT.cli
-    if (!entries.includes(installMarker)) {
-      return {
-        valid: false,
-        error: `Directory does not contain a "${installMarker}" subdirectory. This does not appear to be a valid ${homeDirName} directory.`,
-      }
+    await readdir(resolved)
+  } catch (error) {
+    return {
+      valid: false,
+      error: (error as NodeJS.ErrnoException).code === "ENOENT"
+        ? "No folder at that path."
+        : "Cogpit cannot open that folder.",
     }
-  } catch {
-    return { valid: false, error: "Cannot read directory contents" }
   }
 
   return { valid: true, resolved }

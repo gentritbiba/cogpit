@@ -22,7 +22,18 @@ import { verifyRemotePassword } from "../password-verify"
 import { flushPersistentSessions, revokeAllShareTokens, type SessionPrincipal } from "../security"
 import { clearAllShares } from "../share/registry"
 import { editionModule, reportAuthEvent } from "../edition"
-import { configuredEdition, getConfig, getConfiguredEditionValue, getProjectsRoot, saveConfig, validateClaudeDir, type AppConfig } from "../config"
+import {
+  adoptDetectedAgents,
+  configuredEdition,
+  expandHome,
+  getConfig,
+  getConfiguredEditionValue,
+  getProjectsRoot,
+  redetectConfig,
+  saveConfig,
+  validateClaudeDir,
+  type AppConfig,
+} from "../config"
 import { changedConfigKeys, storedSettings, type ClientSettings } from "../lib/configChanges"
 import { descriptorForDirName } from "../../shared/session/agent-descriptors"
 import { DEFAULT_EXECUTABLE_CHOICE } from "../../shared/contracts/agentExecutable"
@@ -97,7 +108,7 @@ async function saveClientSettings(
   // placeholder path is unchanged; any new Claude path must still
   // pass the normal validation above.
   const reusingPlaceholder = currentConfig?.claudeDirIsPlaceholder === true
-    && resolve(claudeDir) === resolve(currentConfig.claudeDir)
+    && resolve(expandHome(claudeDir)) === resolve(currentConfig.claudeDir)
   if (!validation.valid && !reusingPlaceholder) {
     sendJson(res, 400, { error: validation.error })
     return
@@ -315,13 +326,30 @@ export function registerConfigRoutes(use: UseFn) {
     sendJson(res, 200, await validateClaudeDir(dirPath))
   })
 
+  // POST /api/config/detect - setup's Continue: adopt the agents found on this
+  // machine, the copy bundled with Cogpit included. 409 while there are none.
+  use("/api/config/detect", async (req, res, next) => {
+    if (req.method !== "POST") return next()
+    if (!await adoptDetectedAgents()) {
+      sendJson(res, 409, { error: "No coding agent was found on this computer yet." })
+      return
+    }
+    refreshDirs()
+    sendJson(res, 200, { success: true })
+  })
+
   // GET /api/config - return current config (or null)
   // POST /api/config - validate and save config
   use("/api/config", async (req, res, next) => {
     if (req.method === "GET") {
       // Only handle exact path
       if (req.url && req.url !== "/" && req.url !== "" && !req.url.startsWith("?")) return next()
-      const config = getConfig()
+      let config = getConfig()
+      // An agent installed since startup is found here, without a restart.
+      if (!config && await redetectConfig()) {
+        refreshDirs()
+        config = getConfig()
+      }
       sendJson(res, 200, config ? {
         claudeDir: config.claudeDir,
         // `mode` is the wire name this field has always had; the agent an

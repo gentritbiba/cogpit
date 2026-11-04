@@ -1051,7 +1051,7 @@ export default function App() {
   }
 
   if (!config.claudeDir) {
-    if (configAdminEnabled) return <SetupScreen onConfigured={config.setClaudeDir} />
+    if (configAdminEnabled) return <SetupScreen onConfigured={config.retryConfig} />
     return (
       <div className="dark flex h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Cogpit is waiting for an administrator to finish server setup.

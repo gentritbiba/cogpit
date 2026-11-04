@@ -12,6 +12,10 @@
 - **Agents.** Claude Code, Codex and GitHub Copilot CLI, each with the user's
   own login. Transcripts stay where each CLI writes them (`~/.claude/projects`,
   `~/.codex/sessions`, `~/.copilot/session-state`); Cogpit reads them in place.
+  When one is missing or signed out, point the user at Settings → Agents or
+  ⌘K → "Check agent setup", which show each CLI's state and the command that
+  fixes it. `GET /api/agent-check` returns the same as JSON, read from local
+  state without calling a model.
 - **Devices.** One Cogpit can switch between other machines that run Cogpit.
   Each session runs on one machine, and its file paths belong to that machine.
 

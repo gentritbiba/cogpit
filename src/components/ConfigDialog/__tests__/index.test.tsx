@@ -7,6 +7,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 
 import { ConfigDialog } from "@/components/ConfigDialog"
 import { PASSWORD_MIN_LENGTH } from "../../../../shared/contracts/password"
+import { MISSING_CODEX, agentCheck } from "@/components/AgentCheck/__tests__/fixtures"
 
 const SAVED_CONFIG = {
   claudeDir: "/Users/me/.claude",
@@ -29,7 +30,11 @@ const ACCOUNTS_REPORT = {
   ],
 }
 
-function mockConfig(overrides: Partial<typeof SAVED_CONFIG> = {}, accounts: unknown = { status: "missing" }) {
+function mockConfig(
+  overrides: Partial<typeof SAVED_CONFIG> = {},
+  accounts: unknown = { status: "missing" },
+  agentChecks: unknown[] = [],
+) {
   mocks.authFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url === "/api/agent-accounts/claude") return Promise.resolve({ ok: true, json: async () => accounts })
     if (url === "/api/config" && init?.method === "POST") {
@@ -39,6 +44,9 @@ function mockConfig(overrides: Partial<typeof SAVED_CONFIG> = {}, accounts: unkn
       return Promise.resolve({ ok: true, json: async () => ({ ...SAVED_CONFIG, ...overrides }) })
     }
     if (url === "/api/shares") return Promise.resolve({ ok: true, json: async () => [] })
+    if (url === "/api/agent-check") {
+      return Promise.resolve({ ok: true, json: async () => ({ agents: agentChecks, checkedAt: "2026-11-04T00:00:00.000Z" }) })
+    }
     if (url === "/api/agent-executable/claude") {
       return Promise.resolve({ ok: true, json: async () => EXECUTABLE_REPORT })
     }
@@ -234,5 +242,24 @@ describe("ConfigDialog account switcher", () => {
 
     const trigger = await screen.findByRole("button", { name: /Claude Code accounts/ })
     expect(trigger).toHaveTextContent("me@example.com · 2 accounts")
+  })
+})
+
+describe("ConfigDialog agents section", () => {
+  beforeEach(() => {
+    mocks.authFetch.mockReset()
+  })
+
+  it("summarises how many agents are ready and lists each one with its next step", async () => {
+    mockConfig({}, { status: "missing" }, [agentCheck(), MISSING_CODEX])
+    const user = userEvent.setup()
+    renderDialog()
+
+    const trigger = await screen.findByRole("button", { name: /Agents.*1 of 2 ready/ })
+    await user.click(trigger)
+
+    expect(screen.getByText("Ready")).toBeInTheDocument()
+    expect(screen.getByText("npm install -g @openai/codex")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument()
   })
 })

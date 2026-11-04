@@ -23,7 +23,10 @@ vi.mock("../../helpers", () => ({
 vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn() }))
 
 vi.mock("../../config", async (importOriginal) => ({
+  adoptDetectedAgents: vi.fn(),
   configuredEdition: (await importOriginal<typeof import("../../config")>()).configuredEdition,
+  expandHome: (await importOriginal<typeof import("../../config")>()).expandHome,
+  redetectConfig: vi.fn(),
   getConfig: vi.fn(),
   getConfiguredEditionValue: vi.fn(),
   getProjectsRoot: vi.fn(() => "/srv/projects"),
@@ -32,6 +35,7 @@ vi.mock("../../config", async (importOriginal) => ({
 }))
 
 vi.mock("node:os", () => ({
+  homedir: () => "/home/me",
   networkInterfaces: vi.fn(),
 }))
 
@@ -52,7 +56,15 @@ import {
   revokeAllSessions,
 } from "../../helpers"
 import { isRateLimited } from "../../lib/rateLimit"
-import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir, type AppConfig } from "../../config"
+import {
+  adoptDetectedAgents,
+  getConfig,
+  getConfiguredEditionValue,
+  redetectConfig,
+  saveConfig,
+  validateClaudeDir,
+  type AppConfig,
+} from "../../config"
 import { networkInterfaces } from "node:os"
 
 const mockedIsTrustedDirectLocalRequest = vi.mocked(isTrustedDirectLocalRequest)
@@ -74,6 +86,8 @@ const mockedGetConfig = vi.mocked(getConfig)
 const mockedGetConfiguredEditionValue = vi.mocked(getConfiguredEditionValue)
 const mockedSaveConfig = vi.mocked(saveConfig)
 const mockedValidateClaudeDir = vi.mocked(validateClaudeDir)
+const mockedRedetectConfig = vi.mocked(redetectConfig)
+const mockedAdoptDetectedAgents = vi.mocked(adoptDetectedAgents)
 const mockedNetworkInterfaces = vi.mocked(networkInterfaces)
 
 import type { Middleware } from "../../helpers"
@@ -566,6 +580,42 @@ describe("config routes", () => {
 
   // ── GET /api/config ───────────────────────────────────────────────────
 
+  describe("POST /api/config/detect", () => {
+    it("adopts the agents found on this machine and reloads the directories", async () => {
+      const handler = getRouteHandler(handlers, "/api/config/detect")
+      const { req, res, next } = createLanReqRes("POST", "/")
+      mockedAdoptDetectedAgents.mockResolvedValueOnce({ claudeDir: "/home/.claude", defaultAgent: "claude" })
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(200)
+      expect(JSON.parse(res._getData())).toEqual({ success: true })
+      expect(mockedRefreshDirs).toHaveBeenCalled()
+    })
+
+    it("answers 409 in plain words while no agent is on the machine", async () => {
+      const handler = getRouteHandler(handlers, "/api/config/detect")
+      const { req, res, next } = createLanReqRes("POST", "/")
+      mockedAdoptDetectedAgents.mockResolvedValueOnce(null)
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(409)
+      expect(JSON.parse(res._getData()).error).toBe("No coding agent was found on this computer yet.")
+      expect(mockedRefreshDirs).not.toHaveBeenCalled()
+    })
+
+    it("leaves other methods to the next handler", async () => {
+      const handler = getRouteHandler(handlers, "/api/config/detect")
+      const { req, res, next } = createLanReqRes("GET", "/")
+
+      await handler(req, res, next)
+
+      expect(next).toHaveBeenCalled()
+      expect(mockedAdoptDetectedAgents).not.toHaveBeenCalled()
+    })
+  })
+
   describe("GET /api/config", () => {
     it("returns null when no config", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
@@ -575,6 +625,19 @@ describe("config routes", () => {
       await handler(req, res, next)
 
       expect(JSON.parse(res._getData())).toBeNull()
+    })
+
+    it("looks for agents again while unconfigured, so one installed since startup is found", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const { req, res, next } = createLanReqRes("GET", "/")
+      const detected: AppConfig = { claudeDir: "/home/.claude", defaultAgent: "codex", claudeDirIsPlaceholder: true }
+      mockedGetConfig.mockReturnValueOnce(null).mockReturnValueOnce(detected)
+      mockedRedetectConfig.mockResolvedValueOnce(detected)
+
+      await handler(req, res, next)
+
+      expect(mockedRefreshDirs).toHaveBeenCalled()
+      expect(JSON.parse(res._getData())).toMatchObject({ claudeDir: "/home/.claude", mode: "codex" })
     })
 
     it("returns config with password masked as 'set'", async () => {
@@ -781,6 +844,30 @@ describe("config routes", () => {
         claudeDirIsPlaceholder: true,
         terminalApp: "Ghostty",
         editorApp: "Visual Studio Code",
+      }))
+    })
+
+    it("matches the unchanged placeholder when it is typed with ~", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const { req, res, next, sendBody } = createLanReqRes("POST", "/", JSON.stringify({ claudeDir: "~/.claude" }))
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/me/.claude",
+        defaultAgent: "claude",
+        claudeDirIsPlaceholder: true,
+      })
+      mockedValidateClaudeDir.mockResolvedValueOnce({ valid: false, error: "No folder at that path." })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => {
+        expect(res.end).toHaveBeenCalled()
+      })
+      expect(res._getStatus()).toBe(200)
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        claudeDir: "/home/me/.claude",
+        claudeDirIsPlaceholder: true,
       }))
     })
 
