@@ -75,9 +75,18 @@ export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND, freshI
     JSON.stringify(config.allowedTools) !== JSON.stringify(applied.allowedTools) ||
     JSON.stringify(config.disallowedTools) !== JSON.stringify(applied.disallowedTools)
 
-  const setMode = useCallback((mode: PermissionMode) => {
-    setConfig((prev) => ({ ...(prev ?? fallback), mode: supportedMode(agentKind, mode) }))
-  }, [agentKind, fallback])
+  /** The mode a session of `kind` starts with, for a composer whose agent is not the open session's. */
+  const modeFor = useCallback(
+    (kind: AgentKind) => supportedMode(kind, (storedConfig ?? fallback).mode),
+    [storedConfig, fallback],
+  )
+
+  /** Store a mode chosen for an agent `kind`, checked against that agent, not the open session's. */
+  const setModeFor = useCallback((kind: AgentKind, mode: PermissionMode) => {
+    setConfig((prev) => ({ ...(prev ?? fallback), mode: supportedMode(kind, mode) }))
+  }, [fallback])
+
+  const setMode = useCallback((mode: PermissionMode) => setModeFor(agentKind, mode), [agentKind, setModeFor])
 
   const markApplied = useCallback(() => {
     setAppliedConfig(config)
@@ -87,6 +96,8 @@ export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND, freshI
     config,
     hasPendingChanges,
     setMode,
+    modeFor,
+    setModeFor,
     markApplied,
   }
 }

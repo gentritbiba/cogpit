@@ -33,8 +33,17 @@ vi.mock("@/components/ProjectSwitcherList", () => ({
   useProjectList: () => [],
 }))
 vi.mock("@/components/ChatInput/ChatInputSettings", () => ({
-  ChatInputSettings: ({ agentKind, selectedModel, onAgentKindChange }: { agentKind: string; selectedModel: string; onAgentKindChange?: (kind: "codex") => void }) => (
-    <button type="button" onClick={() => onAgentKindChange?.("codex")}>Model {agentKind} {selectedModel || "default"}</button>
+  ChatInputSettings: ({ agentKind, selectedModel, onAgentKindChange, permissionMode, onPermissionModeChange }: {
+    agentKind: string
+    selectedModel: string
+    onAgentKindChange?: (kind: "codex") => void
+    permissionMode?: string
+    onPermissionModeChange?: (mode: "acceptEdits") => void
+  }) => (
+    <>
+      <button type="button" onClick={() => onAgentKindChange?.("codex")}>Model {agentKind} {selectedModel || "default"}</button>
+      {permissionMode && <button type="button" onClick={() => onPermissionModeChange?.("acceptEdits")}>Access {permissionMode}</button>}
+    </>
   ),
 }))
 import { MissionHome } from "../MissionHome"
@@ -284,6 +293,23 @@ describe("MissionHome", () => {
     expect(projectChip("site")).toHaveAttribute("aria-pressed", "true")
     // The model and access chips show before a folder is chosen, too.
     expect(screen.getByRole("button", { name: /^Model claude/ })).toBeInTheDocument()
+  })
+
+  it("sets access for the agent this composer starts, not the session open behind the home", () => {
+    const onPermissionModeChange = vi.fn()
+    const starter = start()
+    const modes: Record<string, string> = { claude: "acceptEdits", codex: "default" }
+    render(<MissionHome onOpenSession={vi.fn()} start={{
+      ...starter,
+      model: { ...starter.model, permissionModeFor: (kind: string) => modes[kind], onPermissionModeChange },
+    } as typeof starter} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Access acceptEdits" }))
+    expect(onPermissionModeChange).toHaveBeenLastCalledWith("claude", "acceptEdits")
+
+    fireEvent.click(screen.getByRole("button", { name: /^Model claude/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Access default" }))
+    expect(onPermissionModeChange).toHaveBeenLastCalledWith("codex", "acceptEdits")
   })
 
   it("explains itself and names its shortcuts", () => {

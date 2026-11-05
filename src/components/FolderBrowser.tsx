@@ -197,13 +197,8 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack, selects
           onValueChange={setFilter}
         />
         <CommandList className="box-content max-h-72 p-1" aria-busy={busy}>
-          {error !== null ? (
-            <FolderProblem
-              message={error}
-              onRetry={() => open(target.path)}
-              onRoot={target.path === null ? undefined : () => open(null)}
-            />
-          ) : typedPath !== null ? (
+          {/* A typed path is always a way on, even from a folder that could not be opened. */}
+          {typedPath !== null && (
             <CommandGroup className="p-0">
               <CommandItem
                 value={GO_TO}
@@ -215,7 +210,14 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack, selects
                 <span className="min-w-0 flex-1 truncate">Go to <span className="font-mono text-xs">{typedPath}</span></span>
               </CommandItem>
             </CommandGroup>
-          ) : listing === null ? (
+          )}
+          {error !== null ? (
+            <FolderProblem
+              message={error}
+              onRetry={() => open(target.path)}
+              onRoot={target.path === null ? undefined : () => open(null)}
+            />
+          ) : typedPath !== null ? null : listing === null ? (
             <div role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Spinner className="size-4" />
               Loading folders…

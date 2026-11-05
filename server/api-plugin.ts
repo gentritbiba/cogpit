@@ -1,7 +1,6 @@
 import type { Plugin } from "vite"
-import { fileURLToPath } from "node:url"
 import { registerApiRoutes } from "./api-routes"
-import { getConfiguredEditionValue, loadConfig, getConfig } from "./config"
+import { getConfiguredEditionValue, getDataRoot, loadConfig, getConfig } from "./config"
 import { authMiddleware, devSecurityHeaders, bodySizeLimit } from "./helpers"
 import { apiNotFound, requestTargetPath } from "./http"
 import { cleanupProcesses } from "./processRegistry"
@@ -12,6 +11,7 @@ import { initShareRegistry } from "./share/registry"
 import { allRuntimes } from "./agents/runtimes"
 import { initializeAppPlugins } from "./plugins/startup"
 import { captureLegacyPluginHost } from "./plugins/legacyHost"
+import { beginServerStart } from "./lib/installState"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
@@ -20,6 +20,10 @@ export function sessionApiPlugin(): Plugin {
   return {
     name: "session-api",
     async configureServer(server) {
+      // The checkout is the dev shell's data root. First, before anything writes.
+      const dataDir = getDataRoot()
+      await beginServerStart(dataDir)
+
       // Kill all active child processes when the server shuts down
       server.httpServer?.on("close", () => {
         void Promise.all([
@@ -31,7 +35,6 @@ export function sessionApiPlugin(): Plugin {
       // Vite awaits async configureServer hooks. Complete initialization before
       // registering middleware so the first request observes the same ready
       // config/registry state as Electron and standalone composition.
-      const dataDir = fileURLToPath(new URL("..", import.meta.url))
       const legacyHost = await captureLegacyPluginHost(dataDir)
       await Promise.all([
         loadConfig(),

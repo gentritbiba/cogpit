@@ -548,8 +548,8 @@ export default function App() {
     onModelChange: setSelectedModel,
     selectedEffort: effectiveEffort,
     onEffortChange: setSelectedEffort,
-    permissionMode: perms.config.mode,
-    onPermissionModeChange: perms.setMode,
+    permissionModeFor: perms.modeFor,
+    onPermissionModeChange: perms.setModeFor,
   }
 
   // Detect if session belongs to a team

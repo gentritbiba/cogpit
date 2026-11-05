@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createServer, request } from "node:http"
 import { connect } from "node:net"
+import { existsSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -41,6 +42,36 @@ const shellCases: ReadonlyArray<readonly [name: string, factory: AppServerFactor
 useAppServerFixture()
 
 describe.each(shellCases)("%s shell", (_name, factory) => {
+  /** Starts the shell with HOME in the fixture, so ~/.cogpit is whatever the test makes it. */
+  async function startWithHome(cogpitHomeBefore: boolean) {
+    const home = join(fixtureRoot, "user-home")
+    await mkdir(cogpitHomeBefore ? join(home, ".cogpit") : home, { recursive: true })
+    const saved = { HOME: process.env.HOME, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR, COGPIT_SLACK_DIR: process.env.COGPIT_SLACK_DIR }
+    process.env.HOME = home
+    delete process.env.COGPIT_WORKSPACES_DIR
+    delete process.env.COGPIT_SLACK_DIR
+    try {
+      const { httpServer } = await factory(staticDir, userDataDir)
+      await close(httpServer)
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+    return JSON.parse(await readFile(join(userDataDir, "install-state.json"), "utf8")) as { freshInstall: boolean }
+  }
+
+  it("decides a fresh install before anything this start writes", async () => {
+    expect(await startWithHome(false)).toMatchObject({ freshInstall: true })
+    // The start went on to write its own files, which an earlier install would have left.
+    expect(existsSync(join(userDataDir, "plugin-host-classification"))).toBe(true)
+  })
+
+  it("keeps an install an earlier one when ~/.cogpit was there before it started", async () => {
+    expect(await startWithHome(true)).toMatchObject({ freshInstall: false })
+  })
+
   it("answers an API path no handler serves with a JSON 404, never the app shell", async () => {
     await writeFile(join(userDataDir, "config.local.json"), JSON.stringify({ claudeDir: fixtureRoot }))
     const { httpServer } = await factory(staticDir, userDataDir)

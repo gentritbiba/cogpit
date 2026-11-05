@@ -1,5 +1,5 @@
 import { captureLegacyPluginHost } from "./plugins/legacyHost"
-import { captureInstallState } from "./lib/installState"
+import { beginServerStart } from "./lib/installState"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { AddressInfo } from "node:net"
@@ -81,8 +81,8 @@ export async function startStandaloneServer({
   publishPort = false,
   legacyClickUpPath,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
-  // First, before this start writes anything there of its own.
-  await captureInstallState(dataDir)
+  // First, before this start writes anything of its own.
+  await beginServerStart(dataDir)
   const legacyPluginHost = await captureLegacyPluginHost(dataDir)
   mkdirSync(dataDir, { recursive: true })
 

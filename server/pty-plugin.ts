@@ -9,13 +9,18 @@ import { PtyAuthorizationController } from "./pty-authorization"
 import { BrowserViewerManager } from "./browser/viewerSocket"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
+import { getDataRoot } from "./config"
+import { beginServerStart } from "./lib/installState"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
 import { isSessionActive } from "./agents/runtimes"
 
 export function ptyPlugin(): Plugin {
   return {
     name: "pty-websocket",
-    configureServer(server: ViteDevServer) {
+    async configureServer(server: ViteDevServer) {
+      // Vite starts the API plugin first, but whichever runs first looks for an
+      // earlier Cogpit before the session CLI and browser support write ~/.cogpit.
+      await beginServerStart(getDataRoot())
       const wss = new WebSocketServer({ noServer: true })
       const manager = new PtySessionManager(wss)
       const browserWss = new WebSocketServer({ noServer: true })

@@ -14,7 +14,7 @@ vi.mock("../browser/platform", () => ({ browserUnsupportedReason: () => null }))
 import { ptyPlugin } from "../pty-plugin"
 import { profilesDir, sharedRunDir } from "../browser/paths"
 import { hashPassword, createSessionToken, revokeSessionToken, __resetSessionsForTest } from "../security"
-import { loadConfig, setConfigPath } from "../config"
+import { loadConfig, setConfigPath, setDataRoot } from "../config"
 import { __resetEditionForTest } from "../edition"
 
 let root: string
@@ -41,6 +41,8 @@ beforeEach(async () => {
     networkPassword: hashPassword("remote-network-password"),
   }))
   setConfigPath(configPath)
+  // The dev shell keeps its data in the checkout; here, in the fixture.
+  setDataRoot(root)
   await loadConfig()
   __resetEditionForTest()
 })

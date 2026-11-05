@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
+import { existsSync } from "node:fs"
+import { mkdir, readFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 import { getConfig } from "../config"
 import { startStandaloneServer } from "../standalone-runtime"
@@ -37,6 +40,23 @@ describe("startStandaloneServer", () => {
     await runtime.dispose()
     runningServers.pop()
     await expect(fetch(`${runtime.url}/api/hello`)).rejects.toThrow()
+  })
+
+  it("decides the install first, before the plugin store or ~/.cogpit is written", async () => {
+    const { staticDir, dataDir } = await fixture()
+    const freshData = join(dirname(dataDir), "fresh-data")
+    const home = join(dirname(dataDir), "user-home")
+    await mkdir(home)
+    const savedHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      runningServers.push(await startStandaloneServer({ staticDir, dataDir: freshData, host: "127.0.0.1", port: 0, env: {} }))
+    } finally {
+      process.env.HOME = savedHome
+    }
+
+    expect(JSON.parse(await readFile(join(freshData, "install-state.json"), "utf8"))).toMatchObject({ freshInstall: true })
+    expect(existsSync(join(freshData, "plugin-host-classification"))).toBe(true)
   })
 
   it("refuses a passwordless non-loopback bind before listening", async () => {

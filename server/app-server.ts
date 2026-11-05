@@ -8,7 +8,7 @@ import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
 import { closeCommandDispatcher } from "./lib/durableSend"
-import { captureInstallState } from "./lib/installState"
+import { beginServerStart } from "./lib/installState"
 import { closeOrchestrationStore } from "./orchestration/storage"
 import {
   setConfigPath,
@@ -97,13 +97,13 @@ export async function createServerComposition(
   userDataDir: string,
   environment: AppServerEnvironment,
 ) {
+  // First, before anything below writes; a standalone start has begun it already.
+  await beginServerStart(userDataDir)
   // The app bundle is read-only, so everything Cogpit writes for itself lives
   // under the user-data directory. Setting the root before refreshDirs() keeps
   // those paths correct across later config reloads.
   setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
-  // Before anything below writes there; a standalone start has captured it already.
-  await captureInstallState(userDataDir)
   const legacyHost = environment.legacyPluginHost ?? await captureLegacyPluginHost(userDataDir)
   await loadConfig()
   const configEdition = getConfiguredEditionValue()

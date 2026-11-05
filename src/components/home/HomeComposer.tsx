@@ -29,8 +29,10 @@ export interface HomeModelControls {
   onModelChange: (model: string) => void
   selectedEffort: string
   onEffortChange: (effort: string) => void
-  permissionMode?: PermissionMode
-  onPermissionModeChange?: (mode: PermissionMode) => void
+  /** The access a session of that agent starts with. */
+  permissionModeFor?: (agentKind: AgentKind) => PermissionMode
+  /** Store access chosen for a session of that agent. */
+  onPermissionModeChange?: (agentKind: AgentKind, mode: PermissionMode) => void
 }
 
 export interface HomeStart {
@@ -104,6 +106,8 @@ export function HomeComposer({
     setText("")
     clearImages()
   }
+  // Access is chosen for the agent this composer starts, whichever session is open behind the home.
+  const onPermissionModeChange = start.model.onPermissionModeChange
   const fill = (example: string) => {
     holdProject()
     setText(example)
@@ -190,8 +194,8 @@ export function HomeComposer({
               onModelChange={start.model.onModelChange}
               selectedEffort={start.model.selectedEffort}
               onEffortChange={start.model.onEffortChange}
-              permissionMode={start.model.permissionMode}
-              onPermissionModeChange={start.model.onPermissionModeChange}
+              permissionMode={start.model.permissionModeFor?.(agentKind)}
+              onPermissionModeChange={onPermissionModeChange && ((mode) => onPermissionModeChange(agentKind, mode))}
             />
             <Button type="submit" size="icon-xs" disabled={!canStart} aria-label="Start session" title="Start session (Enter)">
               <Send data-icon="icon" />

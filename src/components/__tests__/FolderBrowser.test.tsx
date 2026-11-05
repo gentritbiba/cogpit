@@ -278,6 +278,24 @@ describe("FolderBrowser", () => {
     expect(listed()).toEqual(["(root)", "~/code", "/home/me/notes"])
   })
 
+  it("still goes to a typed path after one that could not be opened, keeping that error in view", async () => {
+    const user = userEvent.setup()
+    renderSwitcher("folders")
+    const filter = await screen.findByRole("combobox", { name: "Filter folders" })
+    await screen.findByRole("option", { name: /code/ })
+
+    await user.type(filter, "~/missing{Enter}")
+    expect(await screen.findByText("The folder /home/me/missing does not exist")).toBeInTheDocument()
+
+    await user.type(filter, "~/notes")
+    expect(screen.getByRole("option", { name: "Go to ~/notes" })).toBeInTheDocument()
+    expect(screen.getByText("The folder /home/me/missing does not exist")).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    await screen.findByText("No folders here")
+    expect(screen.queryByText("The folder /home/me/missing does not exist")).not.toBeInTheDocument()
+    expect(listed()).toEqual(["(root)", "~/missing", "~/notes"])
+  })
+
   it("warns before handing an agent the whole home folder or disk, without refusing it", async () => {
     const user = userEvent.setup()
     const props = renderSwitcher("folders")

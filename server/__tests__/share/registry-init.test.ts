@@ -39,7 +39,7 @@ vi.mock("../../share/registry", async (importOriginal) => {
 import { createServerComposition } from "../../app-server"
 import { sessionApiPlugin } from "../../api-plugin"
 import { createShare } from "../../share/registry"
-import { setConfigPath } from "../../config"
+import { setConfigPath, setDataRoot } from "../../config"
 import { __resetEditionForTest } from "../../edition"
 import { cleanupProcesses } from "../../processRegistry"
 import { codexAppServer } from "../../agents/codexAppServer"
@@ -109,6 +109,8 @@ describe("share registry initialization parity", () => {
       throw new Error("Expected a configureServer hook")
     }
 
+    // The dev shell's data root is the checkout; here, the fixture's folder.
+    setDataRoot(userDataDir)
     try {
       await configureServer({
         httpServer: { on: () => {} },
@@ -117,6 +119,7 @@ describe("share registry initialization parity", () => {
 
       expect(shareRegistryDirs).toHaveLength(1)
       expect(shareRegistryDirs[0]).toBe(deviceRegistryDirs[0])
+      expect(shareRegistryDirs[0]).toBe(userDataDir)
     } finally {
       await Promise.all([cleanupProcesses(), codexAppServer.shutdown()])
     }

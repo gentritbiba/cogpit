@@ -33,3 +33,4 @@ qa-notes.md
 /generated/runtime-plugin-seeds/
 
 /plugin-host-classification/
+/install-state.json

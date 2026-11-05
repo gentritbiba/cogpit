@@ -51,6 +51,21 @@ describe("usePermissions", () => {
     expect(result.current.hasPendingChanges).toBe(false)
   })
 
+  it("keeps a mode chosen for the next session's agent while another agent's session is open", () => {
+    // Mission Control over a Codex session; the home composer starts Claude with Accept Edits.
+    const { result, rerender } = renderHook(({ kind }) => usePermissions(kind), { initialProps: { kind: "codex" as "codex" | "claude" } })
+    act(() => result.current.setModeFor("claude", "acceptEdits"))
+
+    expect(result.current.modeFor("claude")).toBe("acceptEdits")
+    expect(JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode).toBe("acceptEdits")
+    // The open Codex session shows the closest mode it has, without changing the choice.
+    expect(result.current.config.mode).toBe("default")
+    expect(result.current.modeFor("codex")).toBe("default")
+
+    rerender({ kind: "claude" })
+    expect(result.current.config.mode).toBe("acceptEdits")
+  })
+
   describe("initial state", () => {
     it("keeps an earlier install in full access when nothing is stored", () => {
       const { result } = renderHook(() => usePermissions())
