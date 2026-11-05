@@ -1,5 +1,6 @@
 import type { Dirent } from "node:fs"
 import { mkdir, readdir, realpath, stat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import {
   FOLDER_LISTING_LIMIT,
@@ -7,7 +8,7 @@ import {
   type FolderEntry,
   type FolderListing,
 } from "../../shared/contracts/folders"
-import { getProjectsRoot } from "../config"
+import { expandHome, getProjectsRoot } from "../config"
 import { isWithinDir } from "../pathSafety"
 import { ErrorCodes, RouteError } from "./routeError"
 
@@ -51,12 +52,19 @@ async function requireFolder(path: string, action: string): Promise<void> {
   if (!isFolder) throw notAFolder(path)
 }
 
-/** A caller-supplied absolute path, normalized. */
+/** A caller-supplied absolute path, or one under `~` as a shell writes it, normalized. */
 export function absoluteFolderPath(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.includes("\0") || !isAbsolute(value)) {
+  const path = typeof value === "string" ? expandHome(value) : value
+  if (typeof path !== "string" || path.includes("\0") || !isAbsolute(path)) {
     throw new RouteError(400, ErrorCodes.INVALID_REQUEST, `${field} must be an absolute path`)
   }
-  return resolve(value)
+  return resolve(path)
+}
+
+/** What choosing `path` hands an agent beyond one project: the whole home folder, or the whole disk. */
+function breadthOf(path: string): FolderListing["broad"] {
+  if (path === resolve(homedir())) return "home"
+  return dirname(path) === path ? "disk" : null
 }
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true })
@@ -126,6 +134,7 @@ export async function listFolder(requested: string, top: string | null = null): 
     parent: parent === path || atTop ? null : parent,
     root: getProjectsRoot(),
     confined: top !== null,
+    broad: breadthOf(path),
     folders,
     truncated: await anyFolder(path, candidates.slice(next)),
   }

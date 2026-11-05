@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react"
-import { AlertCircle, ArrowLeft, ChevronRight, Folder, FolderOpen, FolderPlus, House } from "lucide-react"
+import { AlertCircle, ArrowLeft, ChevronRight, CornerDownRight, Folder, FolderOpen, FolderPlus, House, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -14,7 +14,8 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/Spinner"
-import { createFolder, fetchFolderListing, pathCrumbs } from "@/lib/folders"
+import { createFolder, fetchFolderListing, isTypedFolderPath, pathCrumbs } from "@/lib/folders"
+import { formatShortcut } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import { folderNameProblem, FOLDER_LISTING_LIMIT, type FolderListing } from "../../shared/contracts/folders"
 
@@ -26,6 +27,8 @@ interface FolderBrowserProps {
   onStart: (cwd: string) => void
   /** Back to the project list. */
   onBack: () => void
+  /** Choosing the folder only selects it; nothing starts until a message is sent. */
+  selectsOnly?: boolean
 }
 
 /** The answer for one request, tagged with it so a late answer to an older one is never shown as current. */
@@ -35,15 +38,24 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+const BROAD_WARNING: Record<NonNullable<FolderListing["broad"]>, string> = {
+  home: "This gives the agent access to everything in your home folder.",
+  disk: "This gives the agent access to everything on this disk.",
+}
+
+/** The value of the "go to this path" row, apart from any folder's. */
+const GO_TO = "go-to-path"
+
 /**
  * The server's folders, one level at a time: where a session starts when the
  * folder is not a project yet, or does not exist yet, on a machine whose paths
  * the user cannot type from memory. Starts in the server's projects root.
  *
- * Keyboard: type to filter, arrows and Enter to open a folder, Backspace in an
- * empty filter to go up, Cmd/Ctrl+Enter to start the session.
+ * Keyboard: type to filter, or type a path (`/…`, `~/…`) and Enter to go
+ * there; arrows and Enter to open a folder, Backspace in an empty filter to go
+ * up, Cmd/Ctrl+Enter to choose the folder shown.
  */
-export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: FolderBrowserProps) {
+export function FolderBrowser({ hostName, projectPaths, onStart, onBack, selectsOnly = false }: FolderBrowserProps) {
   // `path` null is the projects root; each navigation is a new request, so a retry reads again.
   const [target, setTarget] = useState<{ path: string | null; request: number }>({ path: null, request: 0 })
   const request = `${target.request}:${target.path ?? ""}`
@@ -74,10 +86,13 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: Folde
   const listing = loaded && "listing" in loaded ? loaded.listing : null
   const error = !busy && loaded && "error" in loaded ? loaded.error : null
   const here = busy ? null : listing?.path ?? null
+  const typedPath = isTypedFolderPath(filter.trim()) ? filter.trim() : null
   const query = filter.trim().toLowerCase()
-  const folders = listing?.folders.filter((folder) => folder.name.toLowerCase().includes(query)) ?? []
+  const folders = typedPath ? [] : listing?.folders.filter((folder) => folder.name.toLowerCase().includes(query)) ?? []
   // Each listing and filter starts on its first folder, so Enter always has somewhere to go.
-  const highlight = folders.some((folder) => folder.path === highlighted) ? highlighted : folders[0]?.path ?? ""
+  const highlight = typedPath ? GO_TO : folders.some((folder) => folder.path === highlighted) ? highlighted : folders[0]?.path ?? ""
+  const broad = !busy && listing?.broad ? BROAD_WARNING[listing.broad] : null
+  const actionLabel = selectsOnly ? "Use this folder" : "Start session here"
 
   const shownPath = listing?.path
   useEffect(() => {
@@ -188,6 +203,18 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: Folde
               onRetry={() => open(target.path)}
               onRoot={target.path === null ? undefined : () => open(null)}
             />
+          ) : typedPath !== null ? (
+            <CommandGroup className="p-0">
+              <CommandItem
+                value={GO_TO}
+                onSelect={() => open(typedPath)}
+                onMouseDown={(event) => event.preventDefault()}
+                className="h-auto gap-3 px-3 py-2"
+              >
+                <CornerDownRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">Go to <span className="font-mono text-xs">{typedPath}</span></span>
+              </CommandItem>
+            </CommandGroup>
           ) : listing === null ? (
             <div role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Spinner className="size-4" />
@@ -199,7 +226,7 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: Folde
                 <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
                 <EmptyTitle>{query ? "No folder matches" : "No folders here"}</EmptyTitle>
                 <EmptyDescription>
-                  {query ? "Try another name." : "Start a session right here, or make a new folder."}
+                  {query ? "Try another name, or type a path." : selectsOnly ? "Use this folder, or make a new one." : "Start a session right here, or make a new folder."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -230,6 +257,12 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: Folde
         </CommandList>
       </Command>
       <div className="flex flex-col gap-1.5 border-t p-2">
+        {broad && !naming && (
+          <p role="note" className="flex items-start gap-1.5 px-1 text-xs text-warning">
+            <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            {broad} Pick your project's own folder unless you mean that.
+          </p>
+        )}
         {naming ? (
           <form onSubmit={(event) => void submitNewFolder(event)} className="flex items-center gap-2">
             <Input
@@ -272,7 +305,8 @@ export function FolderBrowser({ hostName, projectPaths, onStart, onBack }: Folde
               onClick={start}
               aria-keyshortcuts="Meta+Enter Control+Enter"
             >
-              Start session here
+              {actionLabel}
+              <kbd aria-hidden="true" className="font-sans text-[11px] opacity-70">{formatShortcut({ key: "↵", modKey: true })}</kbd>
             </Button>
           </div>
         )}

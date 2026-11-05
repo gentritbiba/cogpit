@@ -255,7 +255,7 @@ export function WorktreePanel({
                 <EmptyMedia variant="icon"><GitBranch /></EmptyMedia>
                 <EmptyTitle>No worktrees</EmptyTitle>
                 <EmptyDescription>
-                Create a new session with &ldquo;Isolate in worktree&rdquo; enabled
+                  Turn on Worktree when you start a session, and its changes stay in a separate copy of this project.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

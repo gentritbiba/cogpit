@@ -156,6 +156,7 @@ React, TypeScript, Vite, Electron, Tailwind CSS, and Express. [Architecture](ARC
 
 ## Documentation
 
+- [Your first session](docs/first-session.md): from opening Cogpit to a first finished task, for anyone new to coding agents.
 - [Using Cogpit](docs/usage.md): session controls, history, file changes, goals, and notifications.
 - [Browser panel](docs/browser.md): shared browsing, persistent logins, and setup.
 - [Self-hosting](docs/self-hosting.md): headless servers, HTTPS, and authentication.

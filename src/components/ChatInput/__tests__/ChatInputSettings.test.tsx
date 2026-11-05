@@ -435,9 +435,14 @@ describe("ChatInputSettings", () => {
     expect(onPermissionModeChange).toHaveBeenCalledWith("auto")
   })
 
-  it("enables full access directly without a confirmation dialog", () => {
+  it("explains full access in plain words the first time it is chosen, then never again", async () => {
+    localStorage.removeItem("cogpit:full-access-explained")
     const onPermissionModeChange = vi.fn()
-    render(
+    const choose = () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Permissions: / }))
+      fireEvent.click(screen.getByRole("radio", { name: /Full access/ }))
+    }
+    const { rerender } = render(
       <ChatInputSettings
         agentKind="codex"
         selectedModel="gpt-5.6-sol"
@@ -450,11 +455,38 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Permissions: Workspace" }))
-    fireEvent.click(screen.getByRole("radio", { name: /Full access/ }))
+    choose()
+    const explanation = await screen.findByRole("alertdialog", { name: "Let the agent act without asking?" })
+    expect(explanation).toHaveTextContent("without asking you first")
+    expect(onPermissionModeChange).not.toHaveBeenCalled()
+    fireEvent.click(within(explanation).getByRole("button", { name: "Keep asking first" }))
+    expect(onPermissionModeChange).not.toHaveBeenCalled()
 
-    expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
-    expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
+    choose()
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Use Full access" }))
+    expect(onPermissionModeChange).toHaveBeenCalledExactlyOnceWith("bypassPermissions")
+
+    const withMode = (permissionMode: "default" | "bypassPermissions") => (
+      <ChatInputSettings
+        agentKind="codex"
+        selectedModel="gpt-5.6-sol"
+        onModelChange={vi.fn()}
+        selectedEffort="medium"
+        onEffortChange={vi.fn()}
+        isNewSession
+        permissionMode={permissionMode}
+        onPermissionModeChange={onPermissionModeChange}
+      />
+    )
+    rerender(withMode("bypassPermissions"))
+    expect(screen.getByRole("button", { name: "Permissions: Full access" })).toHaveClass("text-warning")
+
+    rerender(withMode("default"))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    choose()
+    expect(onPermissionModeChange).toHaveBeenCalledTimes(2)
+    expect(onPermissionModeChange).toHaveBeenLastCalledWith("bypassPermissions")
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
 
   it("closes on Escape and restores focus to the chip", async () => {

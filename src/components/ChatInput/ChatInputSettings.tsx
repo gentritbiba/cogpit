@@ -3,6 +3,7 @@ import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import type { PermissionMode } from "@/lib/permissions"
 import { DesktopChatInputSettings } from "./settings/DesktopChatInputSettings"
+import { useFullAccessConfirmation } from "./settings/FullAccessConfirm"
 import { MobileChatInputSettings } from "./settings/MobileChatInputSettings"
 import { friendlyModelName, resolveDefaultModelName } from "./settings/modelOptions"
 import type { CommonSettingsControlProps, SettingOption } from "./settings/types"
@@ -94,6 +95,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
       setTimeout(() => onApplySettings(), 0)
     }
   }, [isNewSession, onApplySettings])
+  const fullAccess = useFullAccessConfirmation(onPermissionModeChange, changeAndApply)
 
   const handleModelChange = useCallback(
     (model: string) => changeAndApply(() => onModelChange(model)),
@@ -155,7 +157,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     onUltracodeEnabledChange,
     autoModeAvailable,
     permissionMode,
-    onPermissionModeChange,
+    onPermissionModeChange: fullAccess.change,
     mcpServers,
     selectedMcpServers,
     onToggleMcpServer,
@@ -168,15 +170,23 @@ export const ChatInputSettings = memo(function ChatInputSettings({
 
   if (mobile) {
     return (
-      <MobileChatInputSettings
-        {...commonSettingsProps}
-        open={mobileOpen}
-        onOpenChange={setMobileOpen}
-        catalogOptions={catalogOptions}
-        mobileExtra={mobileExtra}
-      />
+      <>
+        <MobileChatInputSettings
+          {...commonSettingsProps}
+          open={mobileOpen}
+          onOpenChange={setMobileOpen}
+          catalogOptions={catalogOptions}
+          mobileExtra={mobileExtra}
+        />
+        {fullAccess.dialog}
+      </>
     )
   }
 
-  return <DesktopChatInputSettings {...commonSettingsProps} trailingExtra={trailingExtra} />
+  return (
+    <>
+      <DesktopChatInputSettings {...commonSettingsProps} trailingExtra={trailingExtra} />
+      {fullAccess.dialog}
+    </>
+  )
 })

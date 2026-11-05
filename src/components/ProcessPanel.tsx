@@ -383,7 +383,7 @@ export const ProcessPanel = memo(function ProcessPanel({
                     </EmptyMedia>
                     <EmptyTitle>No terminal open</EmptyTitle>
                     <EmptyDescription>
-                      Start a terminal here or run a project script from the left.
+                      {projectDir ? "Open a terminal to run commands in this project yourself." : "Open a project to start a terminal."}
                     </EmptyDescription>
                   </EmptyHeader>
                   {onRequestTerminal && projectDir && (

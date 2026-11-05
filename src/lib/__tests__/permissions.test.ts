@@ -1,13 +1,19 @@
 import { describe, it, expect } from "vitest"
-import { DEFAULT_PERMISSIONS } from "../permissions"
+import { defaultPermissions } from "../permissions"
 
-describe("DEFAULT_PERMISSIONS", () => {
-  it("defaults to full access", () => {
-    expect(DEFAULT_PERMISSIONS.mode).toBe("bypassPermissions")
+describe("defaultPermissions", () => {
+  it("starts a new install in the ask-first mode every agent has", () => {
+    expect(defaultPermissions(true).mode).toBe("default")
+  })
+
+  it("keeps an earlier install in full access", () => {
+    expect(defaultPermissions(false).mode).toBe("bypassPermissions")
   })
 
   it("has empty allowedTools and disallowedTools", () => {
-    expect(DEFAULT_PERMISSIONS.allowedTools).toEqual([])
-    expect(DEFAULT_PERMISSIONS.disallowedTools).toEqual([])
+    for (const fresh of [true, false]) {
+      expect(defaultPermissions(fresh).allowedTools).toEqual([])
+      expect(defaultPermissions(fresh).disallowedTools).toEqual([])
+    }
   })
 })

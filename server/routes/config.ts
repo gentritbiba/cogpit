@@ -18,6 +18,7 @@ import {
 } from "../helpers"
 import { isRateLimited } from "../lib/rateLimit"
 import { serialQueue } from "../lib/serialQueue"
+import { installState } from "../lib/installState"
 import { verifyRemotePassword } from "../password-verify"
 import { flushPersistentSessions, revokeAllShareTokens, type SessionPrincipal } from "../security"
 import { clearAllShares } from "../share/registry"
@@ -362,6 +363,7 @@ export function registerConfigRoutes(use: UseFn) {
         useBuiltInEditor: config.useBuiltInEditor || false,
         agentExecutable: config.agentExecutable ?? DEFAULT_EXECUTABLE_CHOICE,
         projectsRoot: getProjectsRoot(),
+        freshInstall: installState().freshInstall,
       } : null)
       return
     }

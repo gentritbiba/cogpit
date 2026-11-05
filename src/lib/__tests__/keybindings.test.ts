@@ -98,6 +98,9 @@ describe("keybindings", () => {
     expect(shortcutLabel("nextLiveSession")).toContain("↓")
     expect(shortcutLabel("recentSessionForward")).toContain("Tab")
     expect(shortcutLabel("focusComposer")).toBe("Space")
+    // "?" is already the shifted key, so its label does not repeat the Shift.
+    expect(shortcutLabel("keyboardShortcuts")).toBe("?")
+    expect(shortcutLabel("commandPalette")).toMatch(/^(?:⌘|Ctrl\+)K$/)
     expect(shortcutLabel("missionControl")).toMatch(/^Double (?:⌘|Ctrl)$/)
     expect(shortcutLabel(DEVICE_SWITCH_COMMANDS[0])).toMatch(/1$/)
   })

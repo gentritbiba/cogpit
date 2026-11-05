@@ -94,9 +94,11 @@ interface PickerOptionProps {
   description?: string
   icon?: ComponentType<{ className?: string }>
   disabled?: boolean
+  /** A choice to make with care, drawn in the warning colour. */
+  warning?: boolean
 }
 
-export function PickerOption({ value, title, description, icon: Icon, disabled }: PickerOptionProps) {
+export function PickerOption({ value, title, description, icon: Icon, disabled, warning = false }: PickerOptionProps) {
   return (
     <Radio.Root
       value={value}
@@ -106,9 +108,9 @@ export function PickerOption({ value, title, description, icon: Icon, disabled }
         "group/option data-checked:bg-accent data-checked:text-accent-foreground data-disabled:cursor-not-allowed data-disabled:opacity-40 data-disabled:hover:bg-transparent",
       )}
     >
-      {Icon && <Icon className="size-4 shrink-0 text-muted-foreground group-data-checked/option:text-foreground" />}
+      {Icon && <Icon className={cn("size-4 shrink-0", warning ? "text-warning" : "text-muted-foreground group-data-checked/option:text-foreground")} />}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate leading-5 group-data-checked/option:font-medium">{title}</span>
+        <span className={cn("truncate leading-5 group-data-checked/option:font-medium", warning && "text-warning")}>{title}</span>
         {description && (
           <span className="truncate text-xs leading-4 text-muted-foreground" title={description}>{description}</span>
         )}

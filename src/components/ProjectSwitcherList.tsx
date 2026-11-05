@@ -18,6 +18,7 @@ import { FolderBrowser } from "@/components/FolderBrowser"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { useFolderHostName } from "@/hooks/useFolderHostName"
 import { authFetch } from "@/lib/auth"
+import { fetchFolderListing, isHomeRelativePath, isTypedFolderPath } from "@/lib/folders"
 import { parseWorktreePath, shortPath } from "@/lib/format"
 import { nestWorktreeProjects } from "@/lib/projectWorktrees"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -63,6 +64,8 @@ interface ProjectSwitcherListProps {
   initialView?: ProjectSwitcherView
   /** Shown under the project list, not under the folder browser. */
   children?: ReactNode
+  /** Choosing a folder only selects it, as the home does; a message starts the session. */
+  selectsOnly?: boolean
 }
 
 /**
@@ -79,9 +82,12 @@ export function ProjectSwitcherList({
   currentPath,
   initialView = "projects",
   children,
+  selectsOnly = false,
 }: ProjectSwitcherListProps) {
   const [view, setView] = useState(initialView)
   const [filter, setFilter] = useState("")
+  // A `~` path is the server's to expand; its answer, or why it has none.
+  const [resolving, setResolving] = useState<{ path: string; error: string | null } | null>(null)
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const { names: projectNames } = useProjectNames()
   const hostName = useFolderHostName()
@@ -100,11 +106,22 @@ export function ProjectSwitcherList({
   }, [projects, filter, projectNames])
 
   const folderPath = filter.trim()
-  const isAbsoluteFolderPath = folderPath.startsWith("/")
-    || /^[a-z]:[\\/]/i.test(folderPath)
-    || folderPath.startsWith("\\\\")
-  const canAddFolder = isAbsoluteFolderPath
+  const canAddFolder = isTypedFolderPath(folderPath)
     && !projects.some((project) => normalizePath(project.path) === normalizePath(folderPath))
+  const resolveError = resolving?.path === folderPath ? resolving.error : null
+  const chooseTypedFolder = () => {
+    if (!isHomeRelativePath(folderPath)) {
+      onNewFolder(folderPath)
+      return
+    }
+    setResolving({ path: folderPath, error: null })
+    fetchFolderListing(folderPath)
+      .then((listing) => onNewFolder(listing.path))
+      .catch((error: unknown) => setResolving({
+        path: folderPath,
+        error: error instanceof Error && error.message ? error.message : "This folder could not be opened",
+      }))
+  }
   const current = currentPath
     ? normalizePath(parseWorktreePath(currentPath)?.parentPath ?? currentPath)
     : null
@@ -117,6 +134,9 @@ export function ProjectSwitcherList({
     BROWSE_FOLDERS,
   ]
   const highlight = highlighted !== null && values.includes(highlighted) ? highlighted : values[0]
+  const browseLabel = hostName ? `Browse folders on ${hostName}…` : "Browse folders…"
+  // Nothing to list yet: browsing is the one way on, offered as the empty state's own button.
+  const noProjectsYet = projects.length === 0 && !folderPath
 
   if (view === "folders") {
     return (
@@ -125,6 +145,7 @@ export function ProjectSwitcherList({
         projectPaths={new Set(projects.map((project) => normalizePath(project.path)))}
         onStart={onNewFolder}
         onBack={() => setView("projects")}
+        selectsOnly={selectsOnly}
       />
     )
   }
@@ -143,12 +164,30 @@ export function ProjectSwitcherList({
         onValueChange={setFilter}
       />
       <CommandList className="box-content max-h-80 p-1">
-        {filtered.length === 0 && !canAddFolder && (
+        {noProjectsYet ? (
+          <Empty className="border-0 py-8">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
+              <EmptyTitle>No projects yet</EmptyTitle>
+              <EmptyDescription>Pick the folder your project lives in.</EmptyDescription>
+            </EmptyHeader>
+            <CommandGroup className="p-0">
+              <CommandItem
+                value={BROWSE_FOLDERS}
+                onSelect={() => setView("folders")}
+                className="h-8 justify-center gap-2 rounded-md! bg-primary px-3 font-medium text-primary-foreground data-[selected=true]:bg-primary/90 data-[selected=true]:text-primary-foreground [&_svg]:text-primary-foreground! [&>svg:last-child]:hidden"
+              >
+                <FolderSearch data-icon="inline-start" />
+                {browseLabel}
+              </CommandItem>
+            </CommandGroup>
+          </Empty>
+        ) : filtered.length === 0 && !canAddFolder && (
           <Empty className="border-0 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
               <EmptyTitle>No projects found</EmptyTitle>
-              <EmptyDescription>Try another name, paste an absolute path, or browse the folders.</EmptyDescription>
+              <EmptyDescription>Try another name, paste a folder path, or browse the folders.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
@@ -157,14 +196,18 @@ export function ProjectSwitcherList({
             <CommandItem
               value={`folder:${folderPath}`}
               className="motion-list-item h-auto gap-3 px-3 py-2.5"
-              onSelect={() => onNewFolder(folderPath)}
+              onSelect={chooseTypedFolder}
             >
               <FolderPlus data-icon="inline-start" className="size-4 shrink-0 text-foreground" />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">Start in this folder</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {folderPath} · {agentSwitcherName(defaultAgentKind)}
-                </div>
+                <div className="text-sm font-medium">{selectsOnly ? "Use this folder" : "Start in this folder"}</div>
+                {resolveError ? (
+                  <div role="alert" className="truncate text-xs text-destructive">{resolveError}</div>
+                ) : (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {folderPath} · {agentSwitcherName(defaultAgentKind)}
+                  </div>
+                )}
               </div>
             </CommandItem>
           )}
@@ -199,18 +242,18 @@ export function ProjectSwitcherList({
           })}
         </CommandGroup>
         {/* Sticky at the foot of the scrolling list, over its padding, so it shows however many projects there are. */}
-        <CommandGroup className="sticky -bottom-1 border-t bg-popover p-0 py-1">
-          <CommandItem
-            value={BROWSE_FOLDERS}
-            className="h-auto gap-3 px-3 py-2.5"
-            onSelect={() => setView("folders")}
-          >
-            <FolderSearch data-icon="inline-start" className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              {hostName ? `Browse folders on ${hostName}…` : "Browse folders…"}
-            </span>
-          </CommandItem>
-        </CommandGroup>
+        {!noProjectsYet && (
+          <CommandGroup className="sticky -bottom-1 border-t bg-popover p-0 py-1">
+            <CommandItem
+              value={BROWSE_FOLDERS}
+              className="h-auto gap-3 px-3 py-2.5"
+              onSelect={() => setView("folders")}
+            >
+              <FolderSearch data-icon="inline-start" className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{browseLabel}</span>
+            </CommandItem>
+          </CommandGroup>
+        )}
       </CommandList>
       {children}
     </Command>

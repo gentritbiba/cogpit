@@ -429,6 +429,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             filterEmpty={listFilter.key !== null && FilterEmpty ? <FilterEmpty className="min-h-56 px-4 py-8" /> : null}
             onShowArchived={() => setShowArchived(true)}
             onNewSession={sessionStarts ? () => setNewSessionPickerOpen(true) : undefined}
+            onNewSessionHere={sessionStarts && focusedProject
+              ? () => sessionStarts.onNewSession(focusedProject.dirName, focusedProject.cwd)
+              : undefined}
             onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
 

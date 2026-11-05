@@ -131,6 +131,8 @@ describe("ProcessPanel", () => {
     expect(screen.getByRole("button", { name: "New terminal" })).toBeDisabled()
     expect(screen.queryByRole("region", { name: "Scripts" })).not.toBeInTheDocument()
     expect(screen.getByText("No terminal open")).toBeInTheDocument()
+    // Nothing is listed beside it, so it points at nothing there.
+    expect(screen.getByText("Open a project to start a terminal.")).toBeInTheDocument()
   })
 
   it("keeps process selection and close actions as separate controls", () => {

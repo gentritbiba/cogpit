@@ -415,11 +415,13 @@ function formatKey(key: string): string {
   return key.length === 1 ? key.toUpperCase() : key
 }
 
-export function formatShortcut(shortcut: KeybindingShortcut): string {
+export function formatShortcut(input: KeybindingShortcut): string {
   const mac = isMac()
-  if ("doubleTapModifier" in shortcut) {
+  if ("doubleTapModifier" in input) {
     return mac ? "Double ⌘" : "Double Ctrl"
   }
+  // A symbol such as "?" already names the shifted key; "⇧?" would say it twice.
+  const shortcut = input.shiftKey && /^[^\p{L}\p{N}\s]$/u.test(input.key) ? { ...input, shiftKey: false } : input
   if (shortcut.modKey) {
     return mac
       ? `${shortcut.shiftKey ? "⇧" : ""}⌘${formatKey(shortcut.key)}`

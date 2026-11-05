@@ -165,6 +165,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
       configError: null,
       claudeDir: null,
       defaultAgentKind: agentKindForDirName(info.dirName),
+      freshInstall: false,
       showConfigDialog: false,
       openConfigDialog: noop,
       handleCloseConfigDialog: noop,

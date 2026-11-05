@@ -147,6 +147,8 @@ interface LiveSessionsFeedbackProps {
   onShowArchived: () => void
   /** Opens the new-session picker; without it the empty list offers no way to start one. */
   onNewSession?: () => void
+  /** Starts a session in the focused project, which its empty state offers first. */
+  onNewSessionHere?: () => void
   onRetry: () => void
 }
 
@@ -164,6 +166,7 @@ export function LiveSessionsFeedback({
   filterEmpty = null,
   onShowArchived,
   onNewSession,
+  onNewSessionHere,
   onRetry,
 }: LiveSessionsFeedbackProps) {
   const empty = emptyVariant({ showEmpty, searching, focusedProject, hiddenArchivedCount, filtered: Boolean(filterEmpty) })
@@ -214,6 +217,12 @@ export function LiveSessionsFeedback({
             </EmptyDescription>
           </EmptyHeader>
           <div className="flex flex-wrap justify-center gap-2">
+            {!searching && onNewSessionHere && (
+              <Button size="sm" onClick={onNewSessionHere}>
+                <Plus data-icon="inline-start" />
+                New session
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={onShowAllProjects}>
               <Layers data-icon="inline-start" />
               All projects

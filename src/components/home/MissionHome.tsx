@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { openAgentCheck } from "@/components/AgentCheck/AgentCheckHost"
 import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Pencil, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,14 +12,18 @@ import { sessionGroupKey, sessionTitle } from "@/components/LiveSessions/session
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
+import { useAgentCheck } from "@/hooks/useAgentCheck"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { agentKindForDirName, projectDirNameFor } from "@/lib/agents"
 import { formatRelativeTime, parseWorktreePath, projectName } from "@/lib/format"
+import { shortcutLabel } from "@/lib/keybindings"
 import { revealSessionById } from "@/lib/revealSession"
 import { cn } from "@/lib/utils"
-import { HomeComposer, type HomeProject, type HomeStart } from "./HomeComposer"
+import { agentSummary, dismissGetStarted, EXAMPLE_TASKS, getStartedDismissed, showsGetStarted } from "./firstRun"
+import { GetStarted } from "./GetStarted"
+import { HomeComposer, type HomeGuideControls, type HomeProject, type HomeStart } from "./HomeComposer"
 import { HomeRequestPrompt } from "./HomeRequestPrompt"
 import { homeQueue, homeRequestId, homeSessionRows, homeSessions, recentHomeProjects, searchHomeSessions, type HomeRequest, type HomeSession } from "./homeView"
 
@@ -37,6 +42,8 @@ export interface MissionHomeProps {
   onBrowseProjects?: () => void
   /** Starting a session from the home; without it the composer stays hidden. */
   start?: HomeStart
+  /** The server started on a machine with no earlier Cogpit data: a new install gets the getting-started card. */
+  freshInstall?: boolean
 }
 
 /**
@@ -64,7 +71,7 @@ function isShortcutTarget(event: globalThis.KeyboardEvent): boolean {
  * all of them. The composer and search stay put; only the lists scroll, and
  * the queue takes a column only while something is waiting.
  */
-export function MissionHome({ onOpenSession, onBrowseProjects, start }: MissionHomeProps) {
+export function MissionHome({ onOpenSession, onBrowseProjects, start, freshInstall = false }: MissionHomeProps) {
   const inventory = useSessionInventory()
   const input = usePendingHumanInput()
   const { names, rename } = useSessionNames()
@@ -109,7 +116,11 @@ export function MissionHome({ onOpenSession, onBrowseProjects, start }: MissionH
     if (session) onOpenSession(session.dirName, session.fileName)
     else void revealSessionById(sessionId)
   }
-  const running = inventory.processes.filter((process) => process.sessionId).length
+  // Agents of the sessions listed here; the machine's other agent processes are not the user's work in Cogpit.
+  const running = inventory.processes.filter((process) => process.sessionId && byId.has(process.sessionId)).length
+  const [guideDismissed, setGuideDismissed] = useState(getStartedDismissed)
+  const guideShown = Boolean(start)
+    && showsGetStarted({ freshInstall, sessionCount: inventory.sessions.length, dismissed: guideDismissed })
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -126,10 +137,25 @@ export function MissionHome({ onOpenSession, onBrowseProjects, start }: MissionH
     <div className="flex h-full min-h-0 flex-col">
       <div className="mx-auto flex w-full max-w-6xl shrink-0 flex-col gap-8 px-6 pt-16 lg:px-10">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h1 className="text-xl font-semibold tracking-tight">Mission Control</h1>
-          {running > 0 && <p className="text-xs text-muted-foreground">{running} {running === 1 ? "agent" : "agents"} running on this machine</p>}
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 className="text-xl font-semibold tracking-tight">Mission Control</h1>
+            <p className="text-sm text-muted-foreground">Start a task here, and answer anything your agents are waiting on.</p>
+          </div>
+          {running > 0 && <p className="text-xs text-muted-foreground">{running} {running === 1 ? "agent" : "agents"} running</p>}
         </div>
-        {start && <HomeComposer recent={recent} start={start} />}
+        {start && (
+          <HomeComposer
+            recent={recent}
+            start={start}
+            guide={guideShown ? (controls) => (
+              <FirstRunGuide controls={controls} onDismiss={() => { dismissGetStarted(); setGuideDismissed(true) }} />
+            ) : undefined}
+            examples={guideShown ? EXAMPLE_TASKS : undefined}
+          />
+        )}
+        <p className="-mt-4 hidden text-right text-[11px] text-muted-foreground/70 sm:block">
+          Press <kbd className="font-sans">{shortcutLabel("keyboardShortcuts")}</kbd> for shortcuts · <kbd className="font-sans">{shortcutLabel("commandPalette")}</kbd> for commands
+        </p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <div
@@ -161,6 +187,28 @@ export function MissionHome({ onOpenSession, onBrowseProjects, start }: MissionH
         </div>
       </div>
     </div>
+  )
+}
+
+/** The getting-started card, with the agent check it ticks from. */
+function FirstRunGuide({ controls, onDismiss }: { controls: HomeGuideControls; onDismiss: () => void }) {
+  const check = useAgentCheck()
+  const agent = agentSummary(check.agents, check.error)
+  const { recheck } = check
+  // Someone off installing or signing in comes back to a fresh answer.
+  useEffect(() => {
+    if (agent.ready) return
+    window.addEventListener("focus", recheck)
+    return () => window.removeEventListener("focus", recheck)
+  }, [agent.ready, recheck])
+  return (
+    <GetStarted
+      agent={agent}
+      projectName={controls.project?.name ?? null}
+      folderButton={controls.folderButton}
+      onCheckAgents={openAgentCheck}
+      onDismiss={onDismiss}
+    />
   )
 }
 

@@ -123,7 +123,8 @@ describe("ChatInputSettings mobile", () => {
     expect(onMcpAuth).toHaveBeenCalledWith("github")
   })
 
-  it("enables full access directly without a confirmation dialog", async () => {
+  it("explains full access once, then enables it directly", async () => {
+    localStorage.removeItem("cogpit:full-access-explained")
     const user = userEvent.setup()
     const onPermissionModeChange = vi.fn()
 
@@ -146,7 +147,13 @@ describe("ChatInputSettings mobile", () => {
     await user.click(within(sheet).getByRole("combobox", { name: "Access policy" }))
     await user.click(await screen.findByRole("option", { name: "Full access" }))
 
-    expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
-    expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
+    expect(onPermissionModeChange).not.toHaveBeenCalled()
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Use Full access" }))
+    expect(onPermissionModeChange).toHaveBeenCalledExactlyOnceWith("bypassPermissions")
+
+    await user.click(within(sheet).getByRole("combobox", { name: "Access policy" }))
+    await user.click(await screen.findByRole("option", { name: "Full access" }))
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    expect(onPermissionModeChange).toHaveBeenCalledTimes(2)
   })
 })

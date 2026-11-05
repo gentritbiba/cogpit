@@ -404,7 +404,7 @@ export function DesktopWorkspace({
             onSelect: () => setPluginsOpen(true),
           }, {
             id: "config",
-            title: "Config",
+            title: "Agent files",
             icon: SlidersHorizontal,
             active: state.mainView === "config",
             onSelect: navigation.panels.handleToggleConfig,

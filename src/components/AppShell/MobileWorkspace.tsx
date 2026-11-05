@@ -117,7 +117,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
         actions={[
           ...(canConfigure ? [{ id: "plugins", title: "Plugins", icon: Puzzle, active: false, onSelect: () => setPluginsOpen(true) }] : []),
           { id: "mission", title: "Mission Control", icon: LayoutGrid, active: selectedUtility === "mission", onSelect: () => openUtility("mission") },
-          ...(canConfigure ? [{ id: "config", title: "Config", icon: SlidersHorizontal, active: selectedUtility === "config", onSelect: () => openUtility("config") }] : []),
+          ...(canConfigure ? [{ id: "config", title: "Agent files", icon: SlidersHorizontal, active: selectedUtility === "config", onSelect: () => openUtility("config") }] : []),
         ]}
         actionContent={selectedUtility === "mission" ? (
           <div className="flex h-full min-h-0 flex-col"><MissionControlView navigation={navigation} /></div>

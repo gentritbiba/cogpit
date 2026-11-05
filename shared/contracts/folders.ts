@@ -1,7 +1,7 @@
 /**
  * The folder browser a remote Cogpit uses to pick where a new session starts:
- * `GET /api/folders?path=<absolute>` lists one folder's subfolders on the
- * server, `POST /api/folders` makes a new one.
+ * `GET /api/folders?path=<absolute or ~/…>` lists one folder's subfolders on
+ * the server, `POST /api/folders` makes a new one.
  */
 
 /** Most subfolders one listing returns; `truncated` says the folder holds more. */
@@ -25,6 +25,11 @@ export interface FolderListing {
   root: string
   /** The caller may browse and make folders only inside `root`. */
   confined: boolean
+  /**
+   * An agent started here could reach far more than one project: `"home"` for
+   * the server account's home folder, `"disk"` for the top of a disk.
+   */
+  broad: "home" | "disk" | null
   /** Its subfolders, hidden ones left out, sorted by name ignoring case. */
   folders: FolderEntry[]
   /** The folder holds more subfolders than `folders` lists. */

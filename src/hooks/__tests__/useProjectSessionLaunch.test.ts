@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { DEFAULT_PERMISSIONS } from "@/lib/permissions"
+import { defaultPermissions } from "@/lib/permissions"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
 
 const encodeCodexDirName = (cwd: string) => descriptorFor("codex").dirName.encode(cwd)
@@ -18,7 +18,7 @@ const dispatch = vi.fn<(action: SessionAction) => void>()
 const onModelRejected = vi.fn<(model: string) => void>()
 
 const baseOptions = {
-  permissionsConfig: DEFAULT_PERMISSIONS,
+  permissionsConfig: defaultPermissions(false),
   dispatch,
   isMobile: false,
   defaultAgentKind: "claude" as AgentKind,

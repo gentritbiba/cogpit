@@ -21,6 +21,7 @@ vi.mock("../../helpers", () => ({
 }))
 
 vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn() }))
+vi.mock("../../lib/installState", () => ({ installState: vi.fn(() => ({ freshInstall: false })) }))
 
 vi.mock("../../config", async (importOriginal) => ({
   adoptDetectedAgents: vi.fn(),
@@ -56,6 +57,7 @@ import {
   revokeAllSessions,
 } from "../../helpers"
 import { isRateLimited } from "../../lib/rateLimit"
+import { installState } from "../../lib/installState"
 import {
   adoptDetectedAgents,
   getConfig,
@@ -71,6 +73,7 @@ const mockedIsTrustedDirectLocalRequest = vi.mocked(isTrustedDirectLocalRequest)
 const mockedHasTrustedMutationSource = vi.mocked(hasTrustedMutationSource)
 const mockedCanIssueBrowserSession = vi.mocked(canIssueBrowserSession)
 const mockedIsRateLimited = vi.mocked(isRateLimited)
+const mockedInstallState = vi.mocked(installState)
 const mockedCreateSessionToken = vi.mocked(createSessionToken)
 const mockedGetRequestSessionToken = vi.mocked(getRequestSessionToken)
 const mockedSetBrowserSessionCookie = vi.mocked(setBrowserSessionCookie)
@@ -670,6 +673,20 @@ describe("config routes", () => {
       await handler(req, res, next)
 
       expect(JSON.parse(res._getData()).projectsRoot).toBe("/srv/projects")
+    })
+
+    it("reports whether this is a fresh install, which new installs' safer defaults follow", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      mockedGetConfig.mockReturnValue({ claudeDir: "/home/.claude" })
+      const read = async () => {
+        const { req, res, next } = createLanReqRes("GET", "/")
+        await handler(req, res, next)
+        return JSON.parse(res._getData()).freshInstall
+      }
+
+      expect(await read()).toBe(false)
+      mockedInstallState.mockReturnValueOnce({ freshInstall: true })
+      expect(await read()).toBe(true)
     })
 
     it("reports the built-in editor preference", async () => {

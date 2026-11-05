@@ -1,6 +1,10 @@
 # Using Cogpit
 
-[Install Cogpit](../README.md#get-started), then select a project and a session. Cogpit reads existing CLI history and connects to the agent runtime when you start or continue work.
+[Install Cogpit](../README.md#get-started), then select a project and a session. Cogpit reads existing CLI history and connects to the agent runtime when you start or continue work. New to coding agents? [Your first session](first-session.md) walks through it step by step.
+
+## Mission Control
+
+Mission Control is the first screen: start a task in any project folder, answer what your sessions are waiting on, and find your sessions. Until a new install has its first session, it leads with a **Get started** checklist that ticks itself as an agent is ready, a folder is chosen and a task is sent; dismiss it at any time. **Open a folder…** goes straight to the folder browser. Type a path there, `~/code/app` included, or browse to it. Cogpit warns before you choose your whole home folder or the top of a disk, because the agent can then reach everything in it. Choosing the folder only selects it; the first message starts the session. Press `Cmd+Enter` or `Ctrl+Enter` to choose the folder shown.
 
 ## Agent support
 
@@ -39,7 +43,7 @@ The model chip beside Send opens the provider, model, reasoning effort, and avai
 
 On capable Claude models, Ultracode turns on standing multi-agent orchestration for the current session, at whichever effort you pick. It is off until you enable it and does not carry into another session.
 
-Full access is the default permission mode. Choose a more restrictive profile to require approvals or limit operations. Native approval requests show the command or operation and the decisions the runtime accepts. Codex requests from nested subagents also appear in the composer.
+The access chip beside the model chip, on Mission Control too, sets what the agent may do without asking. A new install starts in each agent's ask-first mode: **Ask** for Claude Code and Copilot, **Workspace** for Codex. Installs from before this change keep **Full access**, which lets the agent act without asking; it is shown in amber, and Cogpit explains it the first time you choose it. Choose a more restrictive profile to require approvals or limit operations. Native approval requests show the command or operation and the decisions the runtime accepts. Codex requests from nested subagents also appear in the composer.
 
 For Claude sessions, the MCP selector lets you filter available servers and enable or disable them for the session. Other CLIs use their own configuration.
 
@@ -75,7 +79,7 @@ Session analytics show available input, output, cache, and context usage, plus t
 
 The header performance monitor shows CPU, memory, event-loop, stream, and API activity. The desktop app also breaks down Electron process usage. It polls while open.
 
-The process leak monitor flags suspected orphaned agents, browsers, and scripts, with CPU usage, age, and severity. On macOS and Linux, Cogpit automatically cleans up orphaned agent session trees only after they are at least 30 minutes old and appear in two consecutive sweeps. Review and clean up other suspected leaks from the monitor.
+The process leak monitor flags suspected orphaned agents, browsers, and scripts, with CPU usage, age, and severity. It scans every agent process on the machine, so its header badge appears only once you have a session. On macOS and Linux, Cogpit automatically cleans up orphaned agent session trees only after they are at least 30 minutes old and appear in two consecutive sweeps. Review and clean up other suspected leaks from the monitor.
 
 ## Notifications
 
@@ -122,7 +126,7 @@ Claude Code and Codex sessions can be shared with a guest through a passphrase-p
 
 ## Configuration, integrations, and shortcuts
 
-Browse and edit the installed CLIs' instruction files, settings, and skills at global and project scope. Commands, agents, themes, and MCP configuration appear for CLIs that support them. Cogpit writes changes to disk when you save.
+**Agent files** in the rail beside the workspace browses and edits the installed CLIs' instruction files, settings, and skills at global and project scope. Commands, agents, themes, and MCP configuration appear for CLIs that support them. Cogpit writes changes to disk when you save.
 
 GitHub, ClickUp, Vercel, and Cloudflare panels are read-only integrations. GitHub uses your authenticated `gh` CLI for Actions, pull requests, and issues. ClickUp uses a personal API token and supports a linked list per project. Vercel uses CLI 50.5.1 or newer and the project linked at the exact session root. Cloudflare uses Wrangler 4.65.0 or newer and the nearest Wrangler configuration in the workspace. The [plugin guide](plugins.md) covers setup, installation from signed `.cogpit-plugin` files, and the SDK for building custom panels. Runtime plugins can be installed through Plugins → Install from file without rebuilding Cogpit.
 

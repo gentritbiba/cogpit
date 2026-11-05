@@ -5,6 +5,8 @@ import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 
 const state = vi.hoisted(() => ({
   sessions: [] as ActiveSessionInfo[], input: {} as PendingHumanInput, canInteract: true,
+  processes: [] as Array<{ pid: number; sessionId: string | null }>,
+  agents: null as unknown[] | null, recheck: vi.fn(),
   fetchProviderUpdates: vi.fn(async () => [] as unknown[]),
 }))
 vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
@@ -12,14 +14,24 @@ vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
   fetchProviderUpdates: state.fetchProviderUpdates,
 }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
-  useSessionInventory: () => ({ sessions: state.sessions, procBySession: new Map(), processes: [] }),
+  useSessionInventory: () => ({ sessions: state.sessions, procBySession: new Map(), processes: state.processes }),
 }))
+vi.mock("@/hooks/useAgentCheck", () => ({
+  useAgentCheck: () => ({ agents: state.agents, checking: false, error: null, recheck: state.recheck }),
+}))
+const openAgentCheck = vi.fn()
+vi.mock("@/components/AgentCheck/AgentCheckHost", () => ({ openAgentCheck: () => openAgentCheck() }))
 vi.mock("@/contexts/PendingHumanInputContext", () => ({ usePendingHumanInput: () => state.input }))
 const renameSession = vi.fn()
 vi.mock("@/hooks/useSessionNames", () => ({ useSessionNames: () => ({ names: {}, rename: renameSession }) }))
 vi.mock("@/hooks/useProjectNames", () => ({ useProjectNames: () => ({ names: {} }) }))
 vi.mock("@/hooks/useListedPermissions", () => ({ useListedPermissions: () => () => ({ canInteract: state.canInteract }) }))
-vi.mock("@/components/ProjectSwitcherList", () => ({ ProjectSwitcherList: () => null, useProjectList: () => [] }))
+vi.mock("@/components/ProjectSwitcherList", () => ({
+  ProjectSwitcherList: ({ onNewFolder, initialView, selectsOnly }: { onNewFolder: (cwd: string) => void; initialView?: string; selectsOnly?: boolean }) => (
+    <button type="button" onClick={() => onNewFolder("/home/me/site")}>Pick from {initialView}{selectsOnly ? ", select only" : ""}</button>
+  ),
+  useProjectList: () => [],
+}))
 vi.mock("@/components/ChatInput/ChatInputSettings", () => ({
   ChatInputSettings: ({ agentKind, selectedModel, onAgentKindChange }: { agentKind: string; selectedModel: string; onAgentKindChange?: (kind: "codex") => void }) => (
     <button type="button" onClick={() => onAgentKindChange?.("codex")}>Model {agentKind} {selectedModel || "default"}</button>
@@ -43,7 +55,11 @@ const permission = (sessionId: string, requestId: string, timestamp = 1) => ({
 })
 
 beforeEach(() => {
+  localStorage.clear()
   renameSession.mockClear()
+  openAgentCheck.mockClear()
+  state.processes = []
+  state.agents = null
   state.sessions = [row("lead"), row("lane", { crew: { rootId: "lead", parentId: "lead", startedAt: 1 } })]
   state.canInteract = true
   state.input = {
@@ -260,11 +276,110 @@ describe("MissionHome", () => {
     expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-repo", "/repo", "hi", undefined)
   })
 
-  it("asks for a project when no session suggests one", () => {
+  it("offers to open a folder, straight in the folder browser, when no session suggests one", async () => {
     state.sessions = []
     render(<MissionHome onOpenSession={vi.fn()} start={start()} />)
-    expect(screen.getByRole("button", { name: "Choose a project" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^Model / })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Open a folder…" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Pick from folders, select only" }))
+    expect(projectChip("site")).toHaveAttribute("aria-pressed", "true")
+    // The model and access chips show before a folder is chosen, too.
+    expect(screen.getByRole("button", { name: /^Model claude/ })).toBeInTheDocument()
+  })
+
+  it("explains itself and names its shortcuts", () => {
+    render(<MissionHome onOpenSession={vi.fn()} start={start()} />)
+    expect(screen.getByRole("heading", { name: "Mission Control" })).toBeInTheDocument()
+    expect(screen.getByText("Start a task here, and answer anything your agents are waiting on.")).toBeInTheDocument()
+    expect(screen.getByText(/for shortcuts ·/)).toHaveTextContent(/^Press \? for shortcuts · (?:⌘|Ctrl\+)K for commands$/)
+  })
+
+  it("counts only the agents of sessions listed here as running", () => {
+    state.processes = [{ pid: 1, sessionId: "lead" }, { pid: 2, sessionId: "someone-elses" }, { pid: 3, sessionId: null }]
+    render(<MissionHome onOpenSession={vi.fn()} />)
+    expect(screen.getByText("1 agent running")).toBeInTheDocument()
+  })
+
+  describe("on a new install", () => {
+    const agent = (displayName: string, signedIn: boolean | "unknown", installed = true) => ({
+      kind: "claude", displayName, binary: installed ? { path: "/bin/x", source: "path" } : null,
+      unlaunchableChoice: null, version: "1", signedIn, install: { page: "", command: "" }, signIn: null,
+    })
+
+    beforeEach(() => {
+      state.sessions = []
+    })
+
+    it("leads with getting started, ticking each step from real state", async () => {
+      state.agents = [agent("Claude Code", true)]
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      const guide = screen.getByRole("region", { name: "Get started" })
+      expect(guide).toHaveTextContent("Cogpit lets an AI coding agent work on a project folder on your computer")
+      expect(within(guide).getByText("Claude Code is ready.")).toBeInTheDocument()
+      expect(within(guide).getAllByLabelText("Done")).toHaveLength(1)
+      expect(within(guide).getByRole("link", { name: /first-session guide/ })).toHaveAttribute("href", expect.stringContaining("docs/first-session.md"))
+
+      fireEvent.click(within(guide).getByRole("button", { name: "Check agent setup" }))
+      expect(openAgentCheck).toHaveBeenCalledOnce()
+
+      // The guide holds the folder button; the empty project row does not repeat it.
+      expect(screen.queryByRole("group", { name: "Projects" })).not.toBeInTheDocument()
+      fireEvent.click(within(guide).getByRole("button", { name: "Open a folder…" }))
+      fireEvent.click(await screen.findByRole("button", { name: /Pick from folders/ }))
+      expect(within(guide).getByText("site")).toBeInTheDocument()
+      expect(within(guide).getAllByLabelText("Done")).toHaveLength(2)
+      expect(projectChip("site")).toHaveAttribute("aria-pressed", "true")
+    })
+
+    it("says what is missing when no agent is ready", () => {
+      state.agents = [agent("Claude Code", false)]
+      const { unmount } = render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      expect(screen.getByText("Claude Code is installed. Sign in to use it.")).toBeInTheDocument()
+      expect(screen.queryByLabelText("Done")).not.toBeInTheDocument()
+      unmount()
+
+      state.agents = [agent("Claude Code", false, false)]
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      expect(screen.getByText("No coding agent found on this computer yet.")).toBeInTheDocument()
+    })
+
+    it("checks the agents again when the person comes back to the window", () => {
+      state.agents = [agent("Claude Code", false)]
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      window.dispatchEvent(new Event("focus"))
+      expect(state.recheck).toHaveBeenCalled()
+    })
+
+    it("fills the composer with an example first task", () => {
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      const examples = screen.getByRole("group", { name: "Example tasks" })
+      fireEvent.click(within(examples).getByRole("button", { name: /^Explain what this project does/ }))
+      const field = screen.getByRole("textbox", { name: "First message" })
+      expect(field).toHaveValue("Explain what this project does and how its files are organized.")
+      expect(field).toHaveFocus()
+    })
+
+    it("stays dismissed once dismissed", () => {
+      const { unmount } = render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss getting started" }))
+      expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("group", { name: "Example tasks" })).not.toBeInTheDocument()
+      unmount()
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument()
+    })
+
+    it("goes away once the first session exists", () => {
+      state.sessions = [row("first")]
+      render(<MissionHome onOpenSession={vi.fn()} start={start()} freshInstall />)
+      expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument()
+    })
+  })
+
+  it("never shows getting started on an install from before", () => {
+    state.sessions = []
+    render(<MissionHome onOpenSession={vi.fn()} start={start()} />)
+    expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "Example tasks" })).not.toBeInTheDocument()
   })
 
   it("searches every session, including ones too old to list, and clears with Escape", () => {

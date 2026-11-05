@@ -132,14 +132,14 @@ export function ProjectsView({
                 <EmptyDescription>
                   {searchFilter
                     ? "Try a project name or path."
-                    : "Start Claude Code, Codex, or Copilot and its project will appear here."}
+                    : "Pick the folder your project lives in, and start your first session there."}
                 </EmptyDescription>
               </EmptyHeader>
               {!searchFilter && (
                 <EmptyContent>
-                  <Button variant="outline" size="sm" onClick={() => openFolderBrowser()}>
+                  <Button size="sm" onClick={() => openFolderBrowser()}>
                     <FolderSearch data-icon="inline-start" />
-                    Start in a folder
+                    Open a folder…
                   </Button>
                 </EmptyContent>
               )}

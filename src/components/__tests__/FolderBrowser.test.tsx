@@ -44,7 +44,9 @@ function parentOf(path: string): string | null {
   return path.slice(0, path.lastIndexOf("/")) || "/"
 }
 
-function listing(path: string): Response {
+function listing(requested: string): Response {
+  // The server reads ~ the way a shell does.
+  const path = requested.replace(/^~(?=\/|$)/, ROOT)
   const names = mocks.tree[path]
   if (!names) return json({ error: `The folder ${path} does not exist`, code: "NOT_FOUND" }, 404)
   return json({
@@ -52,6 +54,7 @@ function listing(path: string): Response {
     parent: mocks.confined && path === ROOT ? null : parentOf(path),
     root: ROOT,
     confined: mocks.confined,
+    broad: path === ROOT ? "home" : path === "/" ? "disk" : null,
     folders: [...names].sort().map((name) => ({ name, path: `${path === "/" ? "" : path}/${name}` })),
     truncated: false,
   })
@@ -92,9 +95,9 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function renderSwitcher(initialView?: ProjectSwitcherView) {
+function renderSwitcher(initialView?: ProjectSwitcherView, { projects = [PROJECT], selectsOnly = false }: { projects?: ProjectInfo[]; selectsOnly?: boolean } = {}) {
   const props = { onNewSession: vi.fn(), onNewFolder: vi.fn() }
-  render(<ProjectSwitcherList projects={[PROJECT]} defaultAgentKind="claude" initialView={initialView} {...props} />)
+  render(<ProjectSwitcherList projects={projects} defaultAgentKind="claude" initialView={initialView} selectsOnly={selectsOnly} {...props} />)
   return props
 }
 
@@ -136,6 +139,41 @@ describe("the switcher's way into the folder browser", () => {
     renderSwitcher("folders")
     expect(await screen.findByText("Folders on Mac mini")).toBeInTheDocument()
     expect(listed()).toEqual(["(root)"])
+  })
+
+  it("offers to browse, prominently, before there is any project", async () => {
+    const user = userEvent.setup()
+    renderSwitcher(undefined, { projects: [] })
+    expect(screen.getByText("No projects yet")).toBeInTheDocument()
+    expect(screen.getByText("Pick the folder your project lives in.")).toBeInTheDocument()
+    expect(screen.queryByText("No projects found")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("option", { name: "Browse folders…" })).toHaveLength(1)
+
+    await user.keyboard("{Enter}")
+    expect(await screen.findByRole("option", { name: /code/ })).toBeInTheDocument()
+  })
+
+  it("still says no project matches a search", async () => {
+    const user = userEvent.setup()
+    renderSwitcher()
+    await user.type(screen.getByPlaceholderText("Search projects, paste a folder path, or browse"), "zzz")
+    expect(screen.getByText("No projects found")).toBeInTheDocument()
+  })
+
+  it("takes a ~ path, which the server resolves to the folder it names", async () => {
+    const user = userEvent.setup()
+    const props = renderSwitcher(undefined, { selectsOnly: true })
+    const search = screen.getByPlaceholderText("Search projects, paste a folder path, or browse")
+
+    await user.type(search, "~/notes")
+    await user.click(screen.getByRole("option", { name: /Use this folder/ }))
+    await waitFor(() => expect(props.onNewFolder).toHaveBeenCalledWith("/home/me/notes"))
+
+    await user.clear(search)
+    await user.type(search, "~/missing")
+    await user.click(screen.getByRole("option", { name: /Use this folder/ }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("The folder /home/me/missing does not exist")
+    expect(props.onNewFolder).toHaveBeenCalledTimes(1)
   })
 
   it("goes back to the project list", async () => {
@@ -223,6 +261,42 @@ describe("FolderBrowser", () => {
     await user.keyboard("{Backspace}")
     expect(crumbs().getAllByRole("listitem").map((item) => item.textContent)).toEqual(["me"])
     expect(listed()).toEqual(["(root)", "/home/me/code", "/home/me"])
+  })
+
+  it("goes to a typed path, absolute or under ~", async () => {
+    const user = userEvent.setup()
+    renderSwitcher("folders")
+    const filter = await screen.findByRole("combobox", { name: "Filter folders" })
+    await screen.findByRole("option", { name: /code/ })
+
+    await user.type(filter, "~/code{Enter}")
+    expect(await screen.findByRole("option", { name: /app/ })).toBeInTheDocument()
+    await user.type(filter, "/home/me/notes")
+    expect(screen.getByRole("option", { name: "Go to /home/me/notes" })).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    await screen.findByText("No folders here")
+    expect(listed()).toEqual(["(root)", "~/code", "/home/me/notes"])
+  })
+
+  it("warns before handing an agent the whole home folder or disk, without refusing it", async () => {
+    const user = userEvent.setup()
+    const props = renderSwitcher("folders")
+    expect(await screen.findByRole("note")).toHaveTextContent("This gives the agent access to everything in your home folder.")
+    await user.click(screen.getByRole("option", { name: /notes/ }))
+    await screen.findByText("No folders here")
+    expect(screen.queryByRole("note")).not.toBeInTheDocument()
+
+    await user.click(crumbs().getByRole("button", { name: "/" }))
+    expect(await screen.findByRole("note")).toHaveTextContent("This gives the agent access to everything on this disk.")
+    await user.click(screen.getByRole("button", { name: "Start session here" }))
+    expect(props.onNewFolder).toHaveBeenCalledWith("/")
+  })
+
+  it("says it only selects the folder where that is all it does, and shows its shortcut", async () => {
+    renderSwitcher("folders", { selectsOnly: true })
+    const use = await screen.findByRole("button", { name: "Use this folder" })
+    expect(use).toHaveTextContent(/Use this folder(?:⌘|Ctrl\+)↵/)
+    expect(screen.queryByRole("button", { name: "Start session here" })).not.toBeInTheDocument()
   })
 
   it("filters the listed folders by name", async () => {

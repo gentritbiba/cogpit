@@ -287,7 +287,7 @@ describe("DesktopWorkspace", () => {
 
     expect(await screen.findByTestId("config-browser")).toHaveTextContent("/fresh/session")
     expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Config" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Agent files" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "false")
   })
 
@@ -420,7 +420,7 @@ describe("DesktopWorkspace", () => {
     expect(await screen.findByTestId("mission-control")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "Mission Control" })).toHaveClass("bg-sidebar-primary")
-    expect(screen.getByRole("button", { name: "Config" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: "Agent files" })).toHaveAttribute("aria-pressed", "false")
   })
 
   it("opens worktrees inside the resizable workspace panel", async () => {

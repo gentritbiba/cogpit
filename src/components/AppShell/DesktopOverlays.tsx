@@ -1,4 +1,5 @@
 import { lazy, useCallback, useEffect, useMemo, useState, Suspense } from "react"
+import { AgentCheckHost, openAgentCheck } from "@/components/AgentCheck/AgentCheckHost"
 import { FIND_IN_CONVERSATION_EVENT } from "@/components/ChatArea"
 import type { CommandPaletteDevice, CommandPaletteExtraAction } from "@/components/CommandPalette"
 import { DevicesDialog } from "@/components/DevicesDialog"
@@ -16,7 +17,6 @@ import { copyToClipboard } from "@/lib/utils"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
-const AgentCheckDialog = lazy(() => import("@/components/AgentCheck/AgentCheckDialog").then((module) => ({ default: module.AgentCheckDialog })))
 const CommandPaletteHost = lazy(() => import("@/components/CommandPaletteHost").then((module) => ({ default: module.CommandPaletteHost })))
 const ConfigDialog = lazy(() => import("@/components/ConfigDialog").then((module) => ({ default: module.ConfigDialog })))
 const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then((module) => ({ default: module.KeyboardShortcutsDialog })))
@@ -44,7 +44,6 @@ export function DesktopOverlays({
   const { session, sessionSource } = useSessionContext()
   const { devices, activeDeviceId } = useDevices()
   const [devicesDialogMode, setDevicesDialogMode] = useState<null | "add" | "manage">(null)
-  const [agentCheckOpen, setAgentCheckOpen] = useState(false)
   const canManageDevices = can("manageDevices")
   const mainViews = useMainViews()
   const openMainViewId = state.mainView === "extension" ? state.extensionViewId : null
@@ -179,7 +178,7 @@ export function DesktopOverlays({
           onKillAll={can("killAny") ? chrome.onKillAll : undefined}
           onOpenConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
           onOpenSettings={config.openConfigDialog}
-          onCheckAgents={() => setAgentCheckOpen(true)}
+          onCheckAgents={openAgentCheck}
           onOpenKeyboardShortcuts={() => onKeyboardShortcutsOpenChange(true)}
           onTogglePreview={project.currentCwd ? project.onTogglePreview : undefined}
           onToggleProjectFiles={can("hostFiles") && project.currentCwd ? project.onToggleProjectFiles : undefined}
@@ -221,9 +220,7 @@ export function DesktopOverlays({
         />
       </Suspense>
 
-      <Suspense fallback={null}>
-        <AgentCheckDialog open={agentCheckOpen} onOpenChange={setAgentCheckOpen} />
-      </Suspense>
+      <AgentCheckHost />
 
       <Suspense fallback={null}>
         <KeyboardShortcutsDialog

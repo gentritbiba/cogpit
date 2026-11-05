@@ -20,10 +20,16 @@ export interface PermissionsConfig extends AgentPermissionsConfig {
   disallowedTools: string[]
 }
 
-export const DEFAULT_PERMISSIONS: PermissionsConfig = {
-  mode: "bypassPermissions",
-  allowedTools: [],
-  disallowedTools: [],
+/** The mode that lets an agent act without asking; the picker warns before it. */
+export const FULL_ACCESS_MODE: PermissionMode = "bypassPermissions"
+
+/**
+ * The access picker's value until someone on this device chooses one. A new
+ * install starts in each agent's ask-first mode; an install from before keeps
+ * the Full access its users have always had.
+ */
+export function defaultPermissions(freshInstall: boolean): PermissionsConfig {
+  return { mode: freshInstall ? "default" : FULL_ACCESS_MODE, allowedTools: [], disallowedTools: [] }
 }
 
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"

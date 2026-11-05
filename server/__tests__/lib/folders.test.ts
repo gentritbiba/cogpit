@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { access, chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { dirname, join, parse } from "node:path"
 import { FOLDER_LISTING_LIMIT } from "../../../shared/contracts/folders"
 import { absoluteFolderPath, createFolder, listFolder, sessionFolderProblem } from "../../lib/folders"
@@ -59,6 +59,7 @@ describe("listFolder", () => {
       parent: dirname(root),
       root: expect.any(String),
       confined: false,
+      broad: null,
       folders: ["Alpha", "beta", "gamma"].map((name) => ({ name, path: join(root, name) })),
       truncated: false,
     })
@@ -84,11 +85,16 @@ describe("listFolder", () => {
     expect(await names()).toEqual(["linked", "real"])
   })
 
-  it("has no parent at the top of the filesystem", async () => {
+  it("has no parent at the top of the filesystem, and says it reaches the whole disk", async () => {
     const top = parse(root).root
     const listing = await listFolder(top)
     expect(listing.path).toBe(top)
     expect(listing.parent).toBeNull()
+    expect(listing.broad).toBe("disk")
+  })
+
+  it("says the home folder reaches everything in it", async () => {
+    expect((await listFolder(homedir())).broad).toBe("home")
   })
 
   it("names the projects root browsing starts in", async () => {
@@ -160,6 +166,11 @@ describe("absoluteFolderPath", () => {
 
   it("resolves dot segments", () => {
     expect(absoluteFolderPath(join(root, "x", ".."), "parent")).toBe(root)
+  })
+
+  it("reads ~ as the home folder, the way a shell does", () => {
+    expect(absoluteFolderPath("~", "path")).toBe(homedir())
+    expect(absoluteFolderPath("~/code/app", "path")).toBe(join(homedir(), "code", "app"))
   })
 })
 

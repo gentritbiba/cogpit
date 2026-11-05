@@ -38,14 +38,14 @@ function mockNetworkDisabled() {
   mockNetworkInfo({ enabled: false })
 }
 
-function mockConfigResponse(claudeDir: string | null = "/home/user/.claude") {
+function mockConfigResponse(claudeDir: string | null = "/home/user/.claude", extra: Record<string, unknown> = {}) {
   // /api/config is intentionally per-device → authFetch. /api/network-info is
   // hub-local → hubFetch (see mockNetworkDisabled / per-test overrides).
   mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString()
     if (url.includes("/api/config")) {
       return new Response(
-        JSON.stringify({ claudeDir }),
+        JSON.stringify({ claudeDir, ...extra }),
         { status: 200 }
       )
     }
@@ -70,6 +70,17 @@ describe("useAppConfig", () => {
       // configLoading is initially true
       expect(result.current.configLoading).toBe(true)
       await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
+    })
+
+    it("reports a fresh install only when the server says so", async () => {
+      mockConfigResponse("/home/user/.claude")
+      const earlier = renderHook(() => useAppConfig())
+      await waitFor(() => expect(earlier.result.current.configLoading).toBe(false))
+      expect(earlier.result.current.freshInstall).toBe(false)
+
+      mockConfigResponse("/home/user/.claude", { freshInstall: true })
+      const fresh = renderHook(() => useAppConfig())
+      await waitFor(() => expect(fresh.result.current.freshInstall).toBe(true))
     })
 
     it("loads config successfully", async () => {

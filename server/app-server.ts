@@ -8,6 +8,7 @@ import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
 import { closeCommandDispatcher } from "./lib/durableSend"
+import { captureInstallState } from "./lib/installState"
 import { closeOrchestrationStore } from "./orchestration/storage"
 import {
   setConfigPath,
@@ -101,6 +102,8 @@ export async function createServerComposition(
   // those paths correct across later config reloads.
   setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
+  // Before anything below writes there; a standalone start has captured it already.
+  await captureInstallState(userDataDir)
   const legacyHost = environment.legacyPluginHost ?? await captureLegacyPluginHost(userDataDir)
   await loadConfig()
   const configEdition = getConfiguredEditionValue()

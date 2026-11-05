@@ -71,6 +71,7 @@ describe("GET /api/folders", () => {
         parent: dirname(root),
         root,
         confined: false,
+        broad: null,
         folders: [{ name: "app", path: join(root, "app") }],
         truncated: false,
       },

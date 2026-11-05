@@ -28,6 +28,24 @@ export async function createFolder(parent: string, name: string): Promise<string
   return (await res.json() as CreatedFolder).path
 }
 
+/**
+ * Whether typed text names a folder by path rather than by name: absolute
+ * (`/…`, `C:\…`, `\\server\share`) or under the home folder (`~`, `~/…`),
+ * which the server reads the way a shell does.
+ */
+export function isTypedFolderPath(text: string): boolean {
+  return text.startsWith("/")
+    || /^[a-z]:[\\/]/i.test(text)
+    || text.startsWith("\\\\")
+    || text === "~"
+    || /^~[\\/]/.test(text)
+}
+
+/** A typed path the server can resolve: `~` paths only it can expand. */
+export function isHomeRelativePath(text: string): boolean {
+  return text === "~" || /^~[\\/]/.test(text)
+}
+
 // ── Breadcrumb ───────────────────────────────────────────────────────────
 
 export interface PathCrumb {

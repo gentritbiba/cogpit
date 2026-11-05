@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { usePermissions } from "@/hooks/usePermissions"
 import {
-  DEFAULT_PERMISSIONS,
+  defaultPermissions,
   PERMISSIONS_STORAGE_KEY,
 } from "@/lib/permissions"
+
+const EARLIER_INSTALL_DEFAULTS = defaultPermissions(false)
 
 function setPath(pathname: string) {
   Object.defineProperty(window, "location", {
@@ -50,10 +52,32 @@ describe("usePermissions", () => {
   })
 
   describe("initial state", () => {
-    it("returns DEFAULT_PERMISSIONS when localStorage is empty", () => {
+    it("keeps an earlier install in full access when nothing is stored", () => {
       const { result } = renderHook(() => usePermissions())
-      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.config).toEqual(EARLIER_INSTALL_DEFAULTS)
+      expect(result.current.config.mode).toBe("bypassPermissions")
       expect(result.current.hasPendingChanges).toBe(false)
+    })
+
+    it("starts a new install in each agent's ask-first mode", () => {
+      for (const kind of ["claude", "codex", "copilot"] as const) {
+        const { result } = renderHook(() => usePermissions(kind, true))
+        expect(result.current.config.mode).toBe("default")
+      }
+    })
+
+    it("follows the install once the server answers, without counting it a change", () => {
+      const { result, rerender } = renderHook(({ fresh }) => usePermissions("claude", fresh), { initialProps: { fresh: false } })
+      rerender({ fresh: true })
+      expect(result.current.config.mode).toBe("default")
+      expect(result.current.hasPendingChanges).toBe(false)
+      expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).toBeNull()
+    })
+
+    it("keeps a stored choice on a new install", () => {
+      localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify({ mode: "bypassPermissions" }))
+      const { result } = renderHook(() => usePermissions("claude", true))
+      expect(result.current.config.mode).toBe("bypassPermissions")
     })
 
     it("loads config from localStorage on mount", () => {
@@ -82,21 +106,21 @@ describe("usePermissions", () => {
       expect(result.current.config.mode).toBe("bypassPermissions")
     })
 
-    it("falls back to DEFAULT_PERMISSIONS for malformed JSON", () => {
+    it("falls back to the install's defaults for malformed JSON", () => {
       localStorage.setItem(PERMISSIONS_STORAGE_KEY, "not-valid-json")
 
       const { result } = renderHook(() => usePermissions())
-      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.config).toEqual(EARLIER_INSTALL_DEFAULTS)
     })
 
-    it("falls back to DEFAULT_PERMISSIONS if stored object has no mode", () => {
+    it("falls back to the install's defaults if stored object has no mode", () => {
       localStorage.setItem(
         PERMISSIONS_STORAGE_KEY,
         JSON.stringify({ allowedTools: ["Read"] })
       )
 
-      const { result } = renderHook(() => usePermissions())
-      expect(result.current.config.mode).toBe(DEFAULT_PERMISSIONS.mode)
+      const { result } = renderHook(() => usePermissions("claude", true))
+      expect(result.current.config.mode).toBe("default")
     })
 
     it("defaults to empty arrays for invalid tool lists", () => {
@@ -162,7 +186,7 @@ describe("usePermissions", () => {
       expect(localStorage.getItem(REMOTE_KEY)).toBeNull()
     })
 
-    it("a fresh remote scope falls back to DEFAULT_PERMISSIONS, not the local value", () => {
+    it("a fresh remote scope falls back to the defaults, not the local value", () => {
       // Local device has its own stored config...
       localStorage.setItem(
         PERMISSIONS_STORAGE_KEY,
@@ -173,7 +197,7 @@ describe("usePermissions", () => {
       setPath("/d/dev_x/")
       const { result } = renderHook(() => usePermissions())
 
-      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.config).toEqual(EARLIER_INSTALL_DEFAULTS)
       // The fresh remote scope must not have been written from the local value.
       expect(localStorage.getItem(REMOTE_KEY)).toBeNull()
       // The local (unscoped) value is left untouched.

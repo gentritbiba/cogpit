@@ -18,7 +18,7 @@ function topFor(req: IncomingMessage): string | null {
   return mayActHostWide(req) ? null : getProjectsRoot()
 }
 
-/** GET /api/folders?path=<absolute>: its subfolders; no path lists the projects root. */
+/** GET /api/folders?path=<absolute or ~/…>: its subfolders; no path lists the projects root. */
 async function listRequested(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const requested = new URL(req.url || "/", "http://localhost").searchParams.get("path")
   try {

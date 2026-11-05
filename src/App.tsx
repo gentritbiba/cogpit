@@ -377,7 +377,7 @@ export default function App() {
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
 
   // Permissions management
-  const perms = usePermissions(currentAgentKind)
+  const perms = usePermissions(currentAgentKind, config.freshInstall)
   const permsSetMode = perms.setMode
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
@@ -543,7 +543,14 @@ export default function App() {
       settle(sent)
     }, () => settle(false))
   }, [queuedFirstMessage, state.pendingDirName, sendQueuedFirstMessage])
-  const newSessionModel = { selectedModel, onModelChange: setSelectedModel, selectedEffort: effectiveEffort, onEffortChange: setSelectedEffort }
+  const newSessionModel = {
+    selectedModel,
+    onModelChange: setSelectedModel,
+    selectedEffort: effectiveEffort,
+    onEffortChange: setSelectedEffort,
+    permissionMode: perms.config.mode,
+    onPermissionModeChange: perms.setMode,
+  }
 
   // Detect if session belongs to a team
   const teamContext = useSessionTeam(

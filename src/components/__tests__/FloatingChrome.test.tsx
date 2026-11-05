@@ -78,7 +78,7 @@ vi.mock("sonner", () => ({
   toast: Object.assign(mocks.toast, { success: mocks.toastSuccess, error: mocks.toastError }),
 }))
 vi.mock("@/components/TokenUsageWidget", () => ({ TokenUsageIndicator: () => null }))
-vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => null }))
+vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => <span>Leak monitor</span> }))
 vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
 vi.mock("@/components/PowerMonitor", () => ({
   PowerMonitor: ({ open }: { open: boolean }) => (open ? <div data-testid="power-monitor" /> : null),
@@ -210,6 +210,16 @@ describe("FloatingChrome", () => {
     vi.clearAllMocks()
     __resetCapabilitiesForTest()
     __resetEditionUiForTest()
+  })
+
+  it("keeps the machine-wide leak badge away until the user has a session", () => {
+    const { unmount } = renderChrome()
+    expect(screen.queryByText("Leak monitor")).not.toBeInTheDocument()
+    unmount()
+
+    withScannedSession("test-session-id", [])
+    renderChrome()
+    expect(screen.getByText("Leak monitor")).toBeInTheDocument()
   })
 
   it("keeps provider handoff inside the overflow menu", async () => {

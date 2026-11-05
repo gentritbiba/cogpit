@@ -11,6 +11,8 @@ export interface AppConfig {
   claudeDir: string | null
   /** Provider used for provider-neutral dashboard controls when no thread is open. */
   defaultAgentKind: AgentKind
+  /** The server started on a machine with no earlier Cogpit data, so new-install defaults apply. */
+  freshInstall: boolean
   showConfigDialog: boolean
   openConfigDialog: () => void
   handleCloseConfigDialog: () => void

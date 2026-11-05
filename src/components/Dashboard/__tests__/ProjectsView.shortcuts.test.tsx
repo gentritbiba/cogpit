@@ -77,7 +77,7 @@ describe("ProjectsView", () => {
 
     expect(screen.getByText("No projects match your search")).toBeInTheDocument()
     expect(screen.getByText("Try a project name or path.")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Start in a folder" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open a folder…" })).not.toBeInTheDocument()
   })
 
   it("offers to start in a folder when there are no projects yet", async () => {
@@ -87,7 +87,8 @@ describe("ProjectsView", () => {
     renderView({ projects: [] })
 
     expect(screen.getByText("No projects yet")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Start in a folder" }))
+    expect(screen.getByText("Pick the folder your project lives in, and start your first session there.")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Open a folder…" }))
 
     expect(requested).toHaveBeenCalledOnce()
     stop()

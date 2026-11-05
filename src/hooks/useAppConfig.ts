@@ -32,6 +32,7 @@ async function fetchNetworkInfo(signal?: AbortSignal): Promise<NetworkState> {
 interface ConfigSnapshot {
   claudeDir: string | null
   defaultAgentKind: AgentKind
+  freshInstall: boolean
   /** Route "open in editor" affordances to Cogpit's own file workspace. */
   useBuiltInEditor: boolean
 }
@@ -43,11 +44,14 @@ async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
   const data = (await res.json()) as {
     claudeDir?: string
     mode?: string
+    freshInstall?: boolean
     useBuiltInEditor?: boolean
   } | null
   return {
     claudeDir: data?.claudeDir ?? null,
     defaultAgentKind: parseAgentKind(data?.mode, DEFAULT_AGENT_KIND),
+    // A server from before install tracking says nothing: an earlier install.
+    freshInstall: data?.freshInstall === true,
     useBuiltInEditor: data?.useBuiltInEditor === true,
   }
 }
@@ -57,6 +61,7 @@ export function useAppConfig(): AppConfig {
   const [configError, setConfigError] = useState<string | null>(null)
   const [claudeDir, setClaudeDir] = useState<string | null>(null)
   const [defaultAgentKind, setDefaultAgentKind] = useState<AgentKind>(DEFAULT_AGENT_KIND)
+  const [freshInstall, setFreshInstall] = useState(false)
   const [showConfigDialog, setShowConfigDialog] = useState(false)
   const [networkUrl, setNetworkUrl] = useState<string | null>(null)
   const [networkAccessDisabled, setNetworkAccessDisabled] = useState(false)
@@ -68,6 +73,7 @@ export function useAppConfig(): AppConfig {
   const applySnapshot = useCallback((snapshot: ConfigSnapshot) => {
     setClaudeDir(snapshot.claudeDir)
     setDefaultAgentKind(snapshot.defaultAgentKind)
+    setFreshInstall(snapshot.freshInstall)
     setBuiltInEditorEnabled(snapshot.useBuiltInEditor)
   }, [])
 
@@ -136,6 +142,7 @@ export function useAppConfig(): AppConfig {
     configError,
     claudeDir,
     defaultAgentKind,
+    freshInstall,
     showConfigDialog,
     openConfigDialog,
     handleCloseConfigDialog,

@@ -4,26 +4,28 @@ import { agentPermissionModes } from "@/lib/agents/presentation"
 import {
   type PermissionsConfig,
   type PermissionMode,
-  DEFAULT_PERMISSIONS,
+  defaultPermissions,
   PERMISSIONS_STORAGE_KEY,
 } from "@/lib/permissions"
 import { deviceScopedKey } from "@/lib/device"
 
 // Permissions are per-device: the local device keeps the unscoped key; a remote
 // device gets its own scoped key. A fresh remote scope has no stored value and
-// falls back to explicit DEFAULT_PERMISSIONS — it never inherits the local
-// device's stored value.
+// falls back to that device's defaults — it never inherits the local device's
+// stored value.
 function storageKey(): string {
   return deviceScopedKey(PERMISSIONS_STORAGE_KEY)
 }
 
-function loadFromStorage(): PermissionsConfig {
+/** The stored choice, or null while nobody on this device has made one. */
+function loadFromStorage(): PermissionsConfig | null {
   try {
     const raw = localStorage.getItem(storageKey())
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
+      if (!parsed.mode) return null
       return {
-        mode: (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode,
+        mode: parsed.mode as PermissionMode,
         allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
         disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
       }
@@ -31,7 +33,7 @@ function loadFromStorage(): PermissionsConfig {
   } catch {
     // corrupted storage
   }
-  return DEFAULT_PERMISSIONS
+  return null
 }
 
 function saveToStorage(config: PermissionsConfig): void {
@@ -47,11 +49,17 @@ function supportedConfig(kind: AgentKind, config: PermissionsConfig): Permission
   return { ...config, mode: supportedMode(kind, config.mode), ...(!capabilitiesFor(kind).toolPermissionRules && { allowedTools: [], disallowedTools: [] }) }
 }
 
-export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND) {
-  const [storedConfig, setConfig] = useState<PermissionsConfig>(loadFromStorage)
-  const [appliedConfig, setAppliedConfig] = useState<PermissionsConfig>(loadFromStorage)
-  const config = useMemo(() => supportedConfig(agentKind, storedConfig), [storedConfig, agentKind])
-  const applied = useMemo(() => supportedConfig(agentKind, appliedConfig), [appliedConfig, agentKind])
+/**
+ * The access picker's value. Until the user picks a mode on this device it
+ * follows the server's install: ask first on a new one, Full access on one
+ * from before (see {@link defaultPermissions}).
+ */
+export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND, freshInstall = false) {
+  const [storedConfig, setConfig] = useState<PermissionsConfig | null>(loadFromStorage)
+  const [appliedConfig, setAppliedConfig] = useState<PermissionsConfig | null>(loadFromStorage)
+  const fallback = useMemo(() => defaultPermissions(freshInstall), [freshInstall])
+  const config = useMemo(() => supportedConfig(agentKind, storedConfig ?? fallback), [storedConfig, fallback, agentKind])
+  const applied = useMemo(() => supportedConfig(agentKind, appliedConfig ?? fallback), [appliedConfig, fallback, agentKind])
   const isInitial = useRef(true)
 
   useEffect(() => {
@@ -59,7 +67,7 @@ export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND) {
       isInitial.current = false
       return
     }
-    saveToStorage(storedConfig)
+    if (storedConfig) saveToStorage(storedConfig)
   }, [storedConfig])
 
   const hasPendingChanges =
@@ -68,8 +76,8 @@ export function usePermissions(agentKind: AgentKind = DEFAULT_AGENT_KIND) {
     JSON.stringify(config.disallowedTools) !== JSON.stringify(applied.disallowedTools)
 
   const setMode = useCallback((mode: PermissionMode) => {
-    setConfig((prev) => ({ ...prev, mode: supportedMode(agentKind, mode) }))
-  }, [agentKind])
+    setConfig((prev) => ({ ...(prev ?? fallback), mode: supportedMode(agentKind, mode) }))
+  }, [agentKind, fallback])
 
   const markApplied = useCallback(() => {
     setAppliedConfig(config)

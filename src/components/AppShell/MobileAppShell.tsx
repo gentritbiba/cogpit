@@ -4,6 +4,7 @@ import { TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatArea } from "@/components/ChatArea"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
+import { AgentCheckHost } from "@/components/AgentCheck/AgentCheckHost"
 import { FolderBrowserHost } from "@/components/FolderBrowserHost"
 import { MobileNav, type MobileTab } from "@/components/MobileNav"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
@@ -138,6 +139,7 @@ export function MobileAppShell({
         onNewFolder={navigation.onStartNewFolder}
         defaultAgentKind={config.defaultAgentKind}
       />
+      <AgentCheckHost />
       {session && project.hasFileChanges && (
         <Suspense fallback={null}>
           <MobileFileChanges

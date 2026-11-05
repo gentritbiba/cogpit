@@ -165,9 +165,18 @@ describe("LiveSessionsFeedback when focused on a project", () => {
   })
 
   it("scopes an empty search to the project", () => {
-    render(<LiveSessionsFeedback {...base} searching hiddenArchivedCount={0} focusedProject="App" onShowAllProjects={vi.fn()} />)
+    render(<LiveSessionsFeedback {...base} searching hiddenArchivedCount={0} focusedProject="App" onShowAllProjects={vi.fn()} onNewSessionHere={vi.fn()} />)
 
     expect(screen.getByText("No matching sessions in App")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "New session" })).not.toBeInTheDocument()
+  })
+
+  it("starts a session in the project it names", () => {
+    const onNewSessionHere = vi.fn()
+    render(<LiveSessionsFeedback {...base} hiddenArchivedCount={0} focusedProject="App" onShowAllProjects={vi.fn()} onNewSessionHere={onNewSessionHere} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "New session" }))
+    expect(onNewSessionHere).toHaveBeenCalledOnce()
   })
 })
 

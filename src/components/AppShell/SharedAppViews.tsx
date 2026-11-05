@@ -126,6 +126,7 @@ export function MissionControlView({ navigation, showProjectHistory = false }: {
             onOpenSession={navigation.actions.handleDashboardSelect}
             onBrowseProjects={() => setBrowsing(true)}
             start={{ defaultAgentKind: config.defaultAgentKind, model: navigation.newSessionModel, onStart: navigation.onStartNewSessionWith }}
+            freshInstall={config.freshInstall}
           />
         )}
       </div>
