@@ -238,7 +238,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
         </DialogHeader>
 
         <FieldGroup>
-          <AgentsSection active={open} />
+          {/* Close for the sign-in terminal, unless that would drop unsaved settings. */}
+          <AgentsSection active={open} onSignInStarted={canSave ? undefined : onClose} />
 
           {canWriteConfig && <Field>
             <FieldLabel>Plugins</FieldLabel>

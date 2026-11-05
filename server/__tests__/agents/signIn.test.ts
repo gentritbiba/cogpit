@@ -7,7 +7,7 @@ import type { ProviderInstance } from "../../../shared/contracts/orchestration"
 
 const mocks = vi.hoisted(() => ({
   instances: new Map<string, ProviderInstance>(),
-  spawned: vi.fn<(kind: string) => { path: string; bundled: boolean } | null>(),
+  spawned: vi.fn<(kind: string) => { path: string; source: "path" | "npm" | "bundled" | "custom" } | null>(),
 }))
 vi.mock("../../agents/executables", () => ({ spawnedExecutableFor: mocks.spawned }))
 vi.mock("../../agents/instanceConfigurations", async (importOriginal) => ({
@@ -19,7 +19,7 @@ vi.mock("../../agents/instanceConfigurations", async (importOriginal) => ({
   },
 }))
 
-import { agentSignInCommand, agentSignInLaunch, providerSetupCommand } from "../../agents/signIn"
+import { agentSignInCommand, agentSignInLaunch, agentSignInTerminalCommand, providerSetupCommand } from "../../agents/signIn"
 
 const BUNDLED = "/app/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
 let root = ""
@@ -40,7 +40,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "cogpit-sign-in-"))
   vi.stubEnv("COGPIT_ORCHESTRATION_ROOT", root)
   mocks.instances.clear()
-  mocks.spawned.mockImplementation((kind) => (kind === "claude" ? { path: BUNDLED, bundled: true } : null))
+  mocks.spawned.mockImplementation((kind) => (kind === "claude" ? { path: BUNDLED, source: "bundled" } : null))
 })
 
 afterEach(() => {
@@ -71,7 +71,7 @@ describe("agentSignInLaunch", () => {
   })
 
   it("launches a Windows npm shim through cmd.exe, as the runtimes do", () => {
-    mocks.spawned.mockReturnValue({ path: "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd", bundled: false })
+    mocks.spawned.mockReturnValue({ path: "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd", source: "path" })
     vi.stubEnv("COMSPEC", "C:\\Windows\\system32\\cmd.exe")
     const launch = onPlatform("win32", () => agentSignInLaunch("codex"))!
     expect(launch.command).toBe("C:\\Windows\\system32\\cmd.exe")
@@ -91,7 +91,7 @@ describe("agentSignInLaunch", () => {
 describe("sign-in commands to copy", () => {
   it("spells the default account's command with the binary Cogpit runs", () => {
     expect(onPlatform("darwin", () => agentSignInCommand("claude"))).toBe(`${BUNDLED} auth login`)
-    mocks.spawned.mockReturnValue({ path: "/Users/me/Application Support/claude", bundled: false })
+    mocks.spawned.mockReturnValue({ path: "/Users/me/Application Support/claude", source: "custom" })
     expect(onPlatform("darwin", () => agentSignInCommand("claude"))).toBe("'/Users/me/Application Support/claude' auth login")
   })
 
@@ -103,10 +103,10 @@ describe("sign-in commands to copy", () => {
   })
 
   it("quotes an apostrophe the way each shell needs, in the executable and in instance paths", () => {
-    mocks.spawned.mockReturnValue({ path: "C:\\Users\\O'Brien\\AppData\\Roaming\\npm\\codex.cmd", bundled: false })
+    mocks.spawned.mockReturnValue({ path: "C:\\Users\\O'Brien\\AppData\\Roaming\\npm\\codex.cmd", source: "custom" })
     expect(onPlatform("win32", () => agentSignInCommand("codex")))
       .toBe("& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\codex.cmd' login")
-    mocks.spawned.mockReturnValue({ path: "/Users/O'Brien/bin/codex", bundled: false })
+    mocks.spawned.mockReturnValue({ path: "/Users/O'Brien/bin/codex", source: "custom" })
     expect(onPlatform("darwin", () => agentSignInCommand("codex"))).toBe("'/Users/O'\\''Brien/bin/codex' login")
 
     const home = join(root, "O'Brien")
@@ -121,6 +121,22 @@ describe("sign-in commands to copy", () => {
     expect(posix).toContain(`HOME='${user.replace(/'/g, "'\\''")}'`)
     expect(posix).toContain(`CLAUDE_CONFIG_DIR='${home.replace(/'/g, "'\\''")}'`)
     expect(posix.endsWith(`'${join(home, "claude").replace(/'/g, "'\\''")}' auth login`)).toBe(true)
+  })
+
+  it("names a binary found on PATH the short way, and gives the agent check the same command", () => {
+    mocks.spawned.mockReturnValue({ path: "/usr/local/bin/claude", source: "path" })
+    expect(onPlatform("darwin", () => agentSignInCommand("claude"))).toBe("claude auth login")
+    expect(onPlatform("win32", () => agentSignInCommand("claude"))).toBe("claude auth login")
+
+    for (const binary of [{ path: "/usr/local/bin/claude", source: "path" as const }, { path: BUNDLED, source: "bundled" as const }]) {
+      mocks.spawned.mockReturnValue(binary)
+      expect(agentSignInTerminalCommand("claude", binary, "darwin")).toEqual({
+        executable: binary.path,
+        args: ["auth", "login"],
+        command: onPlatform("darwin", () => agentSignInCommand("claude")),
+      })
+    }
+    expect(agentSignInTerminalCommand("acp", { path: "/opt/acp", source: "custom" }, "darwin")).toBeNull()
   })
 
   it("leaves an ACP instance's login for the administrator to fill in", () => {

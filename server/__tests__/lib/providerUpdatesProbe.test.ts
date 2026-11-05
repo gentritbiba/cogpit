@@ -33,7 +33,7 @@ const entry = async (provider: string) => (await getProviderUpdates()).find((inf
 describe("getProviderUpdates", () => {
   it("counts Cogpit's bundled Claude as installed but never offers an update it cannot run", async () => {
     mocks.spawnedExecutableFor.mockImplementation((kind: string) =>
-      kind === "claude" ? { path: "/app/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude", bundled: true } : null)
+      kind === "claude" ? { path: "/app/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude", source: "bundled" } : null)
 
     const claude = await entry("claude")
 
@@ -50,7 +50,7 @@ describe("getProviderUpdates", () => {
 
   it("still compares an installed CLI with the registry", async () => {
     mocks.spawnedExecutableFor.mockImplementation((kind: string) =>
-      kind === "codex" ? { path: "/Users/x/.bun/bin/codex", bundled: false } : null)
+      kind === "codex" ? { path: "/Users/x/.bun/bin/codex", source: "path" } : null)
     expect(await entry("codex")).toMatchObject({ installed: true, installMethod: "bun", status: "behind", latestVersion: "9.9.9" })
   })
 })

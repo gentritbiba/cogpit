@@ -27,7 +27,7 @@ export function AgentCheckDialog({ open, onOpenChange }: AgentCheckDialogProps) 
             Which coding agents are installed on this computer, and whether you're signed in.
           </DialogDescription>
         </DialogHeader>
-        <AgentCheckView check={check} />
+        <AgentCheckView check={check} onSignInStarted={() => onOpenChange(false)} />
         <DialogFooter>
           <CheckAgainButton check={check} />
           <Button type="button" onClick={() => onOpenChange(false)}>Done</Button>

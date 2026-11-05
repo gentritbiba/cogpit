@@ -288,7 +288,7 @@ async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdat
 
   // Cogpit's own copy updates with Cogpit, so it is never offered an update
   // there would be no command to run.
-  const installMethod = executable?.bundled ? "bundled" : detectInstallMethod(descriptor.kind, paths)
+  const installMethod = executable?.source === "bundled" ? "bundled" : detectInstallMethod(descriptor.kind, paths)
   const [currentVersion, latestVersion] = await Promise.all([
     probeCliVersion(base.binaryPath, descriptor.cli.versionArgs),
     installMethod === "bundled" ? null : fetchLatestVersion(descriptor.cli.packageName),

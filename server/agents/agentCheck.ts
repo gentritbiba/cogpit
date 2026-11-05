@@ -6,42 +6,20 @@
  * or the CLI's own offline status command. Nothing here calls a model, and a
  * report that does not say plainly is "unknown", never a guess.
  */
-import type { AgentCheck, SignInState, TerminalCommand } from "../../shared/contracts/agentCheck"
+import type { AgentCheck, SignInState } from "../../shared/contracts/agentCheck"
 import {
   installableDescriptors,
   type InstallableAgentDescriptor,
 } from "../../shared/session/agent-descriptors"
 import { probeCliVersion, runCli } from "../lib/cliProcess"
 import { findLaunchableExecutable } from "./executables"
+import { agentSignInTerminalCommand } from "./signIn"
 
 const STATUS_TIMEOUT_MS = 5_000
 
 export interface AgentCheckEnvironment {
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
-}
-
-function quote(value: string, platform: NodeJS.Platform): string {
-  if (/^[\w@%+=:,./\\-]+$/.test(value)) return value
-  return platform === "win32" ? `"${value}"` : `'${value.replace(/'/g, "'\\''")}'`
-}
-
-/**
- * The sign-in command as a person would type it. A binary found on PATH is
- * named the short way; any other one (the copy bundled with Cogpit, a custom
- * path) has to be spelled out, or the terminal would not find it.
- */
-export function signInCommand(
-  descriptor: InstallableAgentDescriptor,
-  binary: NonNullable<AgentCheck["binary"]>,
-  platform: NodeJS.Platform,
-): TerminalCommand {
-  const args = [...descriptor.cli.signIn.args]
-  const onPath = binary.source === "path" || binary.source === "npm"
-  const head = onPath
-    ? descriptor.binName
-    : `${platform === "win32" ? "& " : ""}${quote(binary.path, platform)}`
-  return { executable: binary.path, args, command: [head, ...args].join(" ") }
 }
 
 /**
@@ -79,7 +57,8 @@ async function checkAgent(
     version,
     signedIn,
     install: { page: descriptor.cli.install.page, command: descriptor.cli.install.command(platform) },
-    signIn: binary ? signInCommand(descriptor, binary, platform) : null,
+    // The same builder the Sign in button's terminal runs, so the two never disagree.
+    signIn: binary ? agentSignInTerminalCommand(descriptor.kind, binary, platform) : null,
   }
 }
 

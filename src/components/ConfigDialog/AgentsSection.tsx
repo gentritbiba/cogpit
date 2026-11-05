@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { Bot } from "lucide-react"
 import { AgentCheckView, CheckAgainButton } from "@/components/AgentCheck/AgentCheckView"
-import type { SignInHandler } from "@/components/AgentCheck/AgentCheckList"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { Field, FieldDescription } from "@/components/ui/field"
 import { useAgentCheck } from "@/hooks/useAgentCheck"
@@ -11,11 +10,11 @@ import { SectionTrigger } from "./SectionTrigger"
 interface AgentsSectionProps {
   /** Checks only while Settings is open. */
   active: boolean
-  onSignIn?: SignInHandler
+  onSignInStarted?: () => void
 }
 
 /** Each agent CLI's install and sign-in status, with the step that fixes it. */
-export function AgentsSection({ active, onSignIn }: AgentsSectionProps) {
+export function AgentsSection({ active, onSignInStarted }: AgentsSectionProps) {
   const [open, setOpen] = useState(false)
   const check = useAgentCheck(active)
   const agents = check.agents
@@ -30,7 +29,7 @@ export function AgentsSection({ active, onSignIn }: AgentsSectionProps) {
           <FieldDescription>
             The coding agents installed on this computer, and whether you're signed in to each.
           </FieldDescription>
-          <AgentCheckView check={check} onSignIn={onSignIn} />
+          <AgentCheckView check={check} onSignInStarted={onSignInStarted} />
           <div>
             <CheckAgainButton check={check} />
           </div>

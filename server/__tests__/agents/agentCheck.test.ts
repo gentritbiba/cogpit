@@ -96,7 +96,18 @@ describe("checkAgents", () => {
     machine({ claude: { status: "found", path: bundled, source: "bundled" } })
 
     expect((await check("claude")).signIn?.command).toBe(`'${bundled}' auth login`)
-    expect((await check("claude", { env: {}, platform: "win32" })).signIn?.command).toBe(`& "${bundled}" auth login`)
+    expect((await check("claude", { env: {}, platform: "win32" })).signIn?.command).toBe(`& '${bundled}' auth login`)
+  })
+
+  it("quotes an apostrophe in the copied command the way PowerShell needs", async () => {
+    const bundled = "C:\\Users\\O'Brien\\AppData\\Local\\Programs\\cogpit\\claude.exe"
+    machine({ claude: { status: "found", path: bundled, source: "bundled" } })
+
+    expect((await check("claude", { env: {}, platform: "win32" })).signIn).toEqual({
+      executable: bundled,
+      args: ["auth", "login"],
+      command: "& 'C:\\Users\\O''Brien\\AppData\\Local\\Programs\\cogpit\\claude.exe' auth login",
+    })
   })
 
   it("reports a deleted custom executable as not found, even with an account token set", async () => {

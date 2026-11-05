@@ -23,11 +23,11 @@ afterEach(() => {
 })
 
 describe("spawnedExecutableFor", () => {
-  it("marks the SDK's own Claude binary as bundled", () => {
+  it("says where Claude's binary came from, the SDK's own copy included", () => {
     mocks.resolveClaudeExecutable.mockReturnValue({ source: "bundled", path: "/sdk/claude" })
-    expect(spawnedExecutableFor("claude")).toEqual({ path: "/sdk/claude", bundled: true })
+    expect(spawnedExecutableFor("claude")).toEqual({ path: "/sdk/claude", source: "bundled" })
     mocks.resolveClaudeExecutable.mockReturnValue({ source: "path", path: "/bin/claude" })
-    expect(spawnedExecutableFor("claude")).toEqual({ path: "/bin/claude", bundled: false })
+    expect(spawnedExecutableFor("claude")).toEqual({ path: "/bin/claude", source: "path" })
     mocks.resolveClaudeExecutable.mockReturnValue(undefined)
     expect(spawnedExecutableFor("claude")).toBeNull()
   })
@@ -38,13 +38,13 @@ describe("spawnedExecutableFor", () => {
   })
 
   it("finds the other CLIs on PATH", () => {
-    expect(spawnedExecutableFor("codex")).toEqual({ path: "/usr/local/bin/codex", bundled: false })
+    expect(spawnedExecutableFor("codex")).toEqual({ path: "/usr/local/bin/codex", source: "path" })
   })
 
   it("runs an ACP agent only from its configured executable, never a PATH namesake", () => {
     vi.stubEnv("COGPIT_PROVIDER_EXECUTABLE", "")
     expect(spawnedExecutableFor("acp")).toBeNull()
     vi.stubEnv("COGPIT_PROVIDER_EXECUTABLE", "/opt/agents/my-acp")
-    expect(spawnedExecutableFor("acp")).toEqual({ path: "/opt/agents/my-acp", bundled: false })
+    expect(spawnedExecutableFor("acp")).toEqual({ path: "/opt/agents/my-acp", source: "custom" })
   })
 })

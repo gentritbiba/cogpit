@@ -4,10 +4,10 @@ import type { ActiveExecutable, ExecutableReport } from "../../shared/contracts/
 import { findExecutableOnPath, isExecutableFile } from "../lib/binaryResolver"
 import { describeClaudeExecutable, refreshClaudeExecutable, resolveClaudeExecutable } from "./claudeExecutable"
 
+/** A binary, and how it was found: `bundled` is the copy Cogpit's own SDK ships, which updates with Cogpit. */
 export interface SpawnedExecutable {
   path: string
-  /** The copy Cogpit's own SDK ships, which updates with Cogpit rather than by itself. */
-  bundled: boolean
+  source: ActiveExecutable["source"]
 }
 
 /**
@@ -20,11 +20,12 @@ export function spawnedExecutableFor(kind: AgentKind): SpawnedExecutable | null 
   if (kind === "claude") {
     // A configured path that no longer exists is nothing to run.
     const resolved = resolveClaudeExecutable()
-    return resolved && existsSync(resolved.path) ? { path: resolved.path, bundled: resolved.source === "bundled" } : null
+    return resolved && existsSync(resolved.path) ? resolved : null
   }
-  const name = kind === "acp" ? process.env.COGPIT_PROVIDER_EXECUTABLE : descriptorFor(kind).binName
+  const configured = kind === "acp"
+  const name = configured ? process.env.COGPIT_PROVIDER_EXECUTABLE : descriptorFor(kind).binName
   const path = name ? findExecutableOnPath(name) : undefined
-  return path ? { path, bundled: false } : null
+  return path ? { path, source: configured ? "custom" : "path" } : null
 }
 
 export function describeExecutableFor(kind: AgentKind): Promise<ExecutableReport> | null {
