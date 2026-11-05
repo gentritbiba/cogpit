@@ -47,7 +47,8 @@ vi.mock("@/hooks/useSessionNamer", () => ({
   useSessionNamer: () => (sessionId: string) => (sessionId.startsWith("01a11695") ? "w3-rooftop" : undefined),
 }))
 
-vi.mock("@/components/timeline/LiveSubagentTranscript", () => ({
+vi.mock("@/components/timeline/LiveSubagentTranscript", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/components/timeline/LiveSubagentTranscript")>(),
   LiveSubagentTranscript: ({ toolUseId }: { toolUseId: string }) => (
     <div data-testid="live-subagent-transcript">{toolUseId}</div>
   ),

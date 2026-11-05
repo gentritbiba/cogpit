@@ -1,7 +1,16 @@
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react"
 import { useAgentProgress, useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
 import { messagesForToolUse } from "@/lib/streamingOverlay"
+import type { ToolCall } from "../../../shared/session/types"
 import { StreamingMarkdown } from "./StreamingMarkdown"
+
+/**
+ * A Task or Agent call still waiting on its sub-agent. Its own row streams
+ * the agent's live output, so the activity panel leaves that call alone.
+ */
+export function streamsSubagentOnRow(toolCall: ToolCall): boolean {
+  return (toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null
+}
 
 /**
  * Live tail of a running subagent's streamed output, rendered inside its

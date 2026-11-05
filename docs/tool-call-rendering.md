@@ -19,11 +19,13 @@ The web timeline shares tool-call components across desktop, Electron, and mobil
 - Images and videos referenced with markdown image syntax render inline: images open in the zoomable viewer, and `mp4`, `m4v`, `webm` and `mov` files play with controls and seek over HTTP byte ranges. Only absolute local paths render, served by the Cogpit proxy; the CSP blocks remote `https://` media. On the web, persisted result images take precedence over a local-file preview for image reads.
 - Phone layouts keep summaries within the available width and use touch-sized controls. Long file paths must not squeeze short operation names out of the header.
 
-## Sessions and agents
+## Sub-sessions
 
-A call that starts another session is shown as that session, not as a tool. `cogpit-session new` (one row per session it started), `Task`, `Agent` and `spawn_agent` each render a row with the provider's mark, a dot for its state, its name, one line of what it reported or was asked, its state and the time. The row unfolds to the reply or the brief, with the raw command a further click away, and its open button opens the session or sub-agent transcript. Crew rows take name, provider and live state (working, needs you) from the session list, falling back to the name and `--agent` the start used. A background agent's call returns only a receipt, so its row reads its outcome from the task notification that reports it later. Crew starts stay visible when a finished turn folds its work, and a sub-agent's own activity block is not repeated under its row.
+A `cogpit-session new` call is shown as the sessions it started, not as a tool: one row per session, with the provider's mark, a dot for its state, its name, one line of what it was asked, its state and the time. The row unfolds to the brief, with the raw command a further click away, and its open button opens the session. Name, provider and live state (working, needs you) come from the session list, falling back to the name and `--agent` the start used. Starts stay visible when a finished turn folds its work.
 
 A prompt that wakes a session because one it started finished or needs attention is shown as that session reporting back: the same row, with the reply's first line as its preview and the full reply inside.
+
+Sub-agents (`Task`, `Agent`, `spawn_agent`) run inside the session on its own provider, so they stay ordinary tool rows with their activity panel. A pending `Task` or `Agent` call streams its agent's live output under its own row, and the panel streams only agents whose call has already returned. The panel says when an agent failed, was interrupted or was cancelled, rather than leaving it working.
 
 ## Messages
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { startedSessions, taskOutcomes } from "../startedSessions"
+import { startedSessions } from "../startedSessions"
 import type { ToolCall, Turn } from "../../../shared/session/types"
 import { emptyTurn } from "@/__tests__/fixtures"
 
@@ -64,23 +64,5 @@ describe("startedSessions", () => {
     const turns: Turn[] = [emptyTurn({ toolCalls: [shell("a", `cogpit-session new hi`, startOutput(LANE))] })]
 
     expect(startedSessions(turns)).toBe(startedSessions(turns))
-  })
-})
-
-describe("taskOutcomes", () => {
-  const notification = (toolUseId: string, status: string, result: string) =>
-    `<task-notification><task-id>t-${toolUseId}</task-id><tool-use-id>${toolUseId}</tool-use-id><status>${status}</status><summary>Agent done</summary><result>${result}</result></task-notification>`
-
-  it("finds how a background task came out, by the call that launched it, in prompts and mid-turn blocks", () => {
-    const turns: Turn[] = [
-      emptyTurn({ userMessage: notification("call-1", "completed", "Mapped 12 routes") }),
-      emptyTurn({ contentBlocks: [{ kind: "task_notification", content: notification("call-2", "failed", "Crashed") }] }),
-    ]
-
-    const outcomes = taskOutcomes(turns)
-
-    expect(outcomes.get("call-1")).toMatchObject({ status: "completed", result: "Mapped 12 routes" })
-    expect(outcomes.get("call-2")).toMatchObject({ status: "failed", result: "Crashed" })
-    expect(outcomes.has("call-3")).toBe(false)
   })
 })

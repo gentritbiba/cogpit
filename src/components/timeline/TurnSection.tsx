@@ -12,7 +12,9 @@ import { LocalCommandBlock } from "./LocalCommandOutput"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { DelegatedAttentionRow, DelegatedResultRow } from "./DelegatedResultRow"
 import { clockLabel } from "./SessionRow"
-import { isSpawnCall, SpawnedSessionRows } from "./SpawnedSessionRows"
+import { CrewStartRows } from "./CrewStartRows"
+import { streamsSubagentOnRow } from "./LiveSubagentTranscript"
+import { startsCrewSession } from "@/lib/crewCommands"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
@@ -29,7 +31,7 @@ import { useSessionContext, useSessionContextOptional } from "@/contexts/Session
 import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
-import type { SubAgentMessage, Turn, TurnContentBlock } from "../../../shared/session/types"
+import type { Turn, TurnContentBlock } from "../../../shared/session/types"
 import { hasEditToolCalls } from "../../../shared/session/edit-calls"
 import { cn } from "@/lib/utils"
 import { getTurnDuration } from "@/lib/format"
@@ -243,11 +245,15 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [foldPlan, turn.contentBlocks, workVisible])
 
-  const spawnedAgents = useMemo(() => spawnedAgentActivity(turn), [turn])
+  const liveOnCallRow = useMemo(
+    () => new Set(turn.toolCalls.filter(streamsSubagentOnRow).map((call) => call.id)),
+    [turn.toolCalls],
+  )
 
   const contentBlockProps = {
     turnId: turn.id,
     originalBlocks: turn.contentBlocks,
+    liveOnCallRow,
     model: turn.model,
     effort: turn.effort,
     expandAll,
@@ -256,7 +262,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
     isAgentActive,
     isSessionLive,
     skillMetadata,
-    spawnedAgents,
   }
 
   return (
@@ -330,24 +335,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
     </div>
   )
 })
-
-/**
- * What each agent this turn's spawn calls started has recorded, by the call
- * that started it: its id, latest status and latest words. Agents those
- * agents started are filed under the same call, so they are left out.
- */
-function spawnedAgentActivity(turn: Turn): ReadonlyMap<string, SubAgentMessage> {
-  const byCall = new Map<string, SubAgentMessage>()
-  for (const message of turn.subAgentActivity) {
-    const callId = message.parentToolUseId
-    if (!callId || message.parentAgentId) continue
-    const seen = byCall.get(callId)
-    byCall.set(callId, seen
-      ? { ...message, agentId: seen.agentId, status: message.status ?? seen.status, text: message.text.length > 0 ? message.text : seen.text }
-      : message)
-  }
-  return byCall
-}
 
 // ── The prompt ───────────────────────────────────────────────────────────────
 
@@ -501,28 +488,25 @@ interface ActivityProps {
   activeToolCallId: string | null
   isAgentActive: boolean
   skillMetadata?: Map<string, SkillMeta>
-  /** What the agents this turn started recorded, by the call that started them. */
-  spawnedAgents: ReadonlyMap<string, SubAgentMessage>
 }
 
 /**
  * A run of thinking and tool calls: grouped work, broken wherever a call
- * started a session or an agent, which shows as its own row.
+ * started crew sessions, which show as their own rows.
  */
 function ActivityRun({ items, ...props }: ActivityProps & { items: ActivityItem[] }) {
-  // Work between two spawns is named after the spawn before it, so a group
+  // Work between two starts is named after the start before it, so a group
   // keeps its identity, and its open state, while calls stream into it.
   let previousSpawn: string | null = null
-  const rows = segmentActivity(items, isSpawnCall).map((segment) => {
+  const rows = segmentActivity(items, startsCrewSession).map((segment) => {
     if (segment.kind === "spawn") {
       previousSpawn = segment.toolCall.id
       return (
-        <SpawnedSessionRows
+        <CrewStartRows
           key={`spawn:${segment.toolCall.id}`}
           toolCall={segment.toolCall}
           isAgentActive={props.isAgentActive}
           expandToolPayloads={props.expandToolPayloads}
-          activity={props.spawnedAgents.get(segment.toolCall.id)}
         />
       )
     }
@@ -557,6 +541,7 @@ function ContentBlocks({
   blocks,
   turnId,
   originalBlocks,
+  liveOnCallRow,
   model,
   effort,
   isSessionLive,
@@ -565,6 +550,8 @@ function ContentBlocks({
   blocks: TurnContentBlock[]
   turnId: string
   originalBlocks: TurnContentBlock[]
+  /** Calls whose own row streams their sub-agent's live output. */
+  liveOnCallRow: ReadonlySet<string>
   model: string | null
   effort?: string
   isSessionLive: boolean
@@ -572,9 +559,6 @@ function ContentBlocks({
   const elements: React.ReactNode[] = []
   const quote = useQuoteInReply(turnId)
   const lastTextIndex = finalTextIndex(originalBlocks)
-  // A sub-agent's own block repeats what its row already shows.
-  const shownAsRow = (block: TurnContentBlock) => block.kind === "sub_agent" &&
-    block.messages.every((message) => message.parentToolUseId && activity.spawnedAgents.has(message.parentToolUseId))
 
   const keyUses = new Map<string, number>()
   const keyFor = (block: TurnContentBlock, index: number) => {
@@ -651,17 +635,16 @@ function ContentBlocks({
     }
 
     if (block.kind === "sub_agent" || block.kind === "background_agent") {
-      if (!shownAsRow(block)) {
-        elements.push(
-          <AgentPanel
-            key={keyFor(block, i)}
-            messages={block.messages}
-            expandAll={activity.expandAll}
-            label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
-            countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
-          />
-        )
-      }
+      elements.push(
+        <AgentPanel
+          key={keyFor(block, i)}
+          messages={block.messages}
+          expandAll={activity.expandAll}
+          label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
+          countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
+          liveOnCallRow={liveOnCallRow}
+        />
+      )
       i++
       continue
     }

@@ -18,7 +18,19 @@ interface AgentPanelProps {
   expandAll: boolean
   label: string
   countLabel: string
+  /** Calls whose own row streams their agent's live output, so the panel leaves it out. */
+  liveOnCallRow?: ReadonlySet<string>
 }
+
+/** How an agent that stopped without completing ended, by the status its transcript recorded. */
+const UNFINISHED_ENDINGS: ReadonlyMap<string, "Failed" | "Interrupted" | "Cancelled"> = new Map([
+  ["failed", "Failed"],
+  ["error", "Failed"],
+  ["errored", "Failed"],
+  ["interrupted", "Interrupted"],
+  ["cancelled", "Cancelled"],
+  ["canceled", "Cancelled"],
+])
 
 /**
  * Shared collapsible panel for sub-agent and background-agent activity.
@@ -34,6 +46,7 @@ export const AgentPanel = memo(function AgentPanel({
   expandAll,
   label,
   countLabel,
+  liveOnCallRow,
 }: AgentPanelProps): React.ReactElement | null {
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
@@ -86,6 +99,10 @@ export const AgentPanel = memo(function AgentPanel({
   }, [allMessages])
 
   const parentToolByAgent = useMemo(() => buildParentToolByAgent(allMessages), [allMessages])
+  const liveToolUseId = (agentId: string) => {
+    const toolUseId = parentToolByAgent.get(agentId)
+    return toolUseId && !liveOnCallRow?.has(toolUseId) ? toolUseId : undefined
+  }
 
   // Pick the "return" message for each agent — the last message that carried
   // non-empty text (what the sub-agent handed back to its parent). Falls back
@@ -173,8 +190,8 @@ export const AgentPanel = memo(function AgentPanel({
       {/* Live transcript is visible even while the panel is collapsed —
           running agents stream here before any return text exists. */}
       {!isOpen && agentIds.map((id) => {
-        const ptid = parentToolByAgent.get(id)
-        return ptid ? <LiveSubagentTranscript key={id} toolUseId={ptid} /> : null
+        const toolUseId = liveToolUseId(id)
+        return toolUseId ? <LiveSubagentTranscript key={id} toolUseId={toolUseId} /> : null
       })}
 
       {isOpen && (
@@ -203,7 +220,7 @@ export const AgentPanel = memo(function AgentPanel({
                 stats={stats}
                 run={runByAgent.get(id)}
                 depth={depth}
-                parentToolUseId={parentToolByAgent.get(id)}
+                liveToolUseId={liveToolUseId(id)}
                 canNavigate={canNavigate}
                 onOpen={() => {
                   if (!canNavigate) return
@@ -230,7 +247,8 @@ interface AgentReturnItemProps {
   run: { model?: string; effort?: string } | undefined
   /** How many agents deep it was launched: 0 for one the main thread started. */
   depth: number
-  parentToolUseId: string | undefined
+  /** The call whose live output this item streams, unless that call's own row does. */
+  liveToolUseId: string | undefined
   canNavigate: boolean
   onOpen: () => void
 }
@@ -241,7 +259,7 @@ function AgentReturnItem({
   stats,
   run,
   depth,
-  parentToolUseId,
+  liveToolUseId,
   canNavigate,
   onOpen,
 }: AgentReturnItemProps): React.ReactElement {
@@ -251,8 +269,10 @@ function AgentReturnItem({
   const text = message?.text
   const markdownText = useMemo(() => preprocessMediaPaths((text ?? []).join("\n\n")), [text])
   const hasText = (text?.length ?? 0) > 0
-  const isRunning = stats?.status != null && stats.status !== "completed" && stats.status !== "async_launched"
-  const isCompleted = stats?.status === "completed"
+  const status = stats?.status
+  const isCompleted = status === "completed"
+  const ending = status ? UNFINISHED_ENDINGS.get(status) : undefined
+  const isRunning = status != null && !isCompleted && !ending && status !== "async_launched"
 
   return (
     <div className={cn("border-l pl-3", depth === 1 && "ml-4", depth >= 2 && "ml-8")}>
@@ -266,6 +286,12 @@ function AgentReturnItem({
           {stats && (
             <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
               {isCompleted && <CheckCircle2 className="size-3 text-success" />}
+              {ending && (
+                <span className={cn("inline-flex items-center gap-0.5", ending === "Failed" ? "text-destructive" : "text-warning")}>
+                  <XCircle className="size-3" />
+                  {ending}
+                </span>
+              )}
               {stats.durationMs != null && (
                 <span className="inline-flex items-center gap-0.5">
                   <Clock className="size-3" />
@@ -310,11 +336,13 @@ function AgentReturnItem({
                   <Loader2 className="size-3 animate-spin" />
                   Working — no return yet
                 </>
+              ) : ending ? (
+                <>{ending} before returning anything</>
               ) : (
                 <>No return message from this agent</>
               )}
             </div>
-            {parentToolUseId && <LiveSubagentTranscript toolUseId={parentToolUseId} />}
+            {liveToolUseId && <LiveSubagentTranscript toolUseId={liveToolUseId} />}
           </div>
         )}
       </div>

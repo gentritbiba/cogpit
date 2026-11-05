@@ -6,7 +6,7 @@ import {
 } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
-import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
+import { LiveSubagentTranscript, streamsSubagentOnRow } from "@/components/timeline/LiveSubagentTranscript"
 import { EditDiffView } from "./EditDiffView"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
@@ -377,9 +377,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         </CollapsibleContent>
       </Collapsible>
 
-      {(toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null && (
-        <LiveSubagentTranscript toolUseId={toolCall.id} />
-      )}
+      {streamsSubagentOnRow(toolCall) && <LiveSubagentTranscript toolUseId={toolCall.id} />}
     </div>
   )
 })

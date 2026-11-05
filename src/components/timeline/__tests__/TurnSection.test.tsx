@@ -454,7 +454,7 @@ describe("TurnSection sessions it started", () => {
     expect(screen.getByRole("button", { name: "audit, Starting: Audit the API routes" })).toBeInTheDocument()
   })
 
-  it("shows a sub-agent once, as the row of the call that started it", () => {
+  it("keeps a sub-agent a tool row with its activity panel: only crew sessions get session rows", () => {
     const task: ToolCall = {
       id: "task-1",
       name: "Task",
@@ -470,7 +470,6 @@ describe("TurnSection sessions it started", () => {
       contentBlocks: [
         { kind: "tool_calls", toolCalls: [task] },
         { kind: "sub_agent", messages: [agentMessage] },
-        { kind: "sub_agent", messages: [{ agentId: "agent-2", toolCalls: [] } as unknown as SubAgentMessage] },
         { kind: "text", text: ["Mapped"] },
       ],
       assistantText: ["Mapped"],
@@ -478,13 +477,12 @@ describe("TurnSection sessions it started", () => {
       subAgentActivity: [agentMessage],
     }
 
-    render(<TurnSection turn={agentTurn} index={0} />)
+    const { container } = render(<TurnSection turn={agentTurn} index={0} />)
     fireEvent.click(screen.getByRole("button", { name: /worked/i }))
 
-    const row = screen.getByRole("button", { name: "Map the routes, Finished: Found 12 routes." })
-    fireEvent.click(row)
-    expect(document.getElementById(row.getAttribute("aria-controls")!)).not.toHaveTextContent("agentId")
-    // Only the agent no call accounts for keeps its own activity panel.
-    expect(screen.getAllByText("Sub-agent activity")).toHaveLength(1)
+    expect(container.querySelector("[data-session-row]")).toBeNull()
+    // Rendered by the tool-call group (mocked here to list its calls by name).
+    expect(screen.getByText("Task")).toBeInTheDocument()
+    expect(screen.getByText("Sub-agent activity")).toBeInTheDocument()
   })
 })

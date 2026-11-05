@@ -122,3 +122,33 @@ describe("AgentPanel nesting and run settings", () => {
     expect(screen.getByText("outer1234 said").closest(".border-l")).not.toHaveClass("ml-4")
   })
 })
+
+describe("AgentPanel terminal states", () => {
+  function ended(status: string, text: string[] = []): SubAgentMessage {
+    return { ...summaryOnlyAgent(), isBackground: false, parentToolUseId: "tool-1", durationMs: 4_000, status, text }
+  }
+
+  it.each([
+    ["failed", "Failed", "text-destructive"],
+    ["errored", "Failed", "text-destructive"],
+    ["interrupted", "Interrupted", "text-warning"],
+    ["cancelled", "Cancelled", "text-warning"],
+  ])("says a %s agent with no reply ended, instead of working forever", (status, label, tone) => {
+    renderPanel([ended(status)])
+    expect(screen.getByText(label)).toHaveClass(tone)
+    expect(screen.getByText(`${label} before returning anything`)).toBeInTheDocument()
+    expect(screen.queryByText("Working — no return yet")).toBeNull()
+  })
+
+  it("keeps the failure beside the error a failed agent reported", () => {
+    renderPanel([ended("failed", ["Rate limited by the provider"])])
+    expect(screen.getByText("Failed")).toBeInTheDocument()
+    expect(screen.getByText("Rate limited by the provider")).toBeInTheDocument()
+  })
+
+  it("still shows an agent without a final status as working", () => {
+    renderPanel([ended("running")])
+    expect(screen.getByText("Working — no return yet")).toBeInTheDocument()
+    expect(screen.queryByText(/before returning anything/)).toBeNull()
+  })
+})
