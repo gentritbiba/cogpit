@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip"
 import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import { formatTokenCount } from "@/lib/format"
+import { formatMinorUnits } from "@/lib/localCommandReports"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -28,6 +29,54 @@ const USAGE_TEXT_COLOR: Record<UsageLevel, string> = {
   caution: "text-warning",
   warning: "text-warning",
   danger: "text-destructive",
+}
+
+function levelColor(pct: number | undefined): string {
+  return USAGE_TEXT_COLOR[pct == null ? "nominal" : usageLevel(pct)]
+}
+
+type Credits = NonNullable<UsageData["extraUsage"]> & { usedCredits: number }
+
+function isSpendingCredits(extra: UsageData["extraUsage"]): extra is Credits {
+  return !!extra?.isEnabled && extra.usedCredits != null
+}
+
+/** Share of the monthly credit limit spent; undefined when there is no limit. */
+function creditsPct({ usedCredits, monthlyLimit, utilization }: Credits): number | undefined {
+  if (monthlyLimit == null) return undefined
+  return utilization ?? (monthlyLimit > 0 ? usedCredits / monthlyLimit * 100 : 0)
+}
+
+/** Plan utilization, or credits spent for an account without plan windows. */
+function headline(usage: UsageData): { text: string; pct?: number } | null {
+  const planPct = usage.fiveHour?.utilization ?? usage.sevenDay?.utilization
+  if (planPct != null) return { text: `${planPct.toFixed(0)}%`, pct: planPct }
+  const credits = usage.extraUsage
+  if (!isSpendingCredits(credits)) return null
+  return { text: formatMinorUnits(credits.usedCredits, credits.currency), pct: creditsPct(credits) }
+}
+
+function CreditsSection({ credits }: { credits: Credits }) {
+  const pct = creditsPct(credits)
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">Usage credits</span>
+        <span className="font-semibold">{formatMinorUnits(credits.usedCredits, credits.currency)} spent</span>
+      </div>
+      {credits.monthlyLimit == null || pct == null ? (
+        <div className="text-xs text-muted-foreground">No monthly limit</div>
+      ) : (
+        <>
+          <Progress value={Math.min(pct, 100)} />
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{formatMinorUnits(credits.monthlyLimit, credits.currency)} monthly limit</span>
+            <span className={cn("font-semibold", levelColor(pct))}>{pct.toFixed(1)}% used</span>
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 function TooltipBody({ usage }: { usage: UsageData }) {
@@ -69,11 +118,11 @@ function TooltipBody({ usage }: { usage: UsageData }) {
           </div>
         )
       })}
-      {usage.extraUsage?.isEnabled && usage.extraUsage.usedCredits != null && usage.extraUsage.monthlyLimit != null && (
-        <div className="flex flex-col gap-1 pt-1 text-xs text-muted-foreground">
-          <Separator />
-          Extra: ${usage.extraUsage.usedCredits.toFixed(2)} / ${usage.extraUsage.monthlyLimit.toFixed(2)}
-        </div>
+      {isSpendingCredits(usage.extraUsage) && (
+        <>
+          {rows.length > 0 && <Separator />}
+          <CreditsSection credits={usage.extraUsage} />
+        </>
       )}
       {(usage.lifetimeTokens != null || usage.creditBalance || usage.creditsUnlimited) && (
         <div className="flex flex-col gap-1 pt-1 text-xs text-muted-foreground">
@@ -98,19 +147,18 @@ export function TokenUsageIndicator({ agentKind = DEFAULT_AGENT_KIND }: { agentK
 
   if (!available || !usage) return null
 
-  // Show the primary metric: 5-hour utilization
-  const primary = usage.fiveHour?.utilization ?? usage.sevenDay?.utilization
-  if (primary == null) return null
+  const primary = headline(usage)
+  if (!primary) return null
 
   return (
     <Tooltip>
       <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.agentKind ? agentShortName(usage.agentKind) : "agent"} usage`} onClick={refresh} disabled={loading} className="mr-1 font-mono" />}>
           <span className={cn(
             "tabular-nums",
-            USAGE_TEXT_COLOR[usageLevel(primary)],
+            levelColor(primary.pct),
             loading && "opacity-50",
           )}>
-            {primary.toFixed(0)}%
+            {primary.text}
           </span>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="p-3">
