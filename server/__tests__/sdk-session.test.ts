@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 
 /**
  * Tests for the Claude Agent SDK session lifecycle, with a focus on
@@ -2122,6 +2122,8 @@ describe("sdk-session user dialogs", () => {
 
 describe("sdk-session native worktree startup", () => {
   const worktree = "/project/.claude/worktrees/worker"
+  // A cold import of the runtime can outlast waitFor's default second on a slow runner.
+  beforeAll(async () => { await import("../agents/claudeRuntime") })
   beforeEach(() => { claudeBinary.path = process.execPath })
   afterEach(() => { claudeBinary.path = undefined })
 
@@ -2137,7 +2139,7 @@ describe("sdk-session native worktree startup", () => {
     const gate = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
     const started = startWorktreeSession(gate)
 
-    await vi.waitFor(() => expect(gate).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree, nativeWorktree: true })))
+    await vi.waitFor(() => expect(gate).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree, nativeWorktree: true })), { timeout: 10_000 })
     expect(captured[0].options.hooks!.SessionStart).toBeUndefined()
     expect(cli.turnsStarted).toBe(0)
     release()
@@ -2163,7 +2165,7 @@ describe("sdk-session native worktree startup", () => {
     nativeCli = cli
     const gate = vi.fn(async () => {})
     const started = startWorktreeSession(gate)
-    await vi.waitFor(() => expect(cli.releaseTurn).not.toBeNull())
+    await vi.waitFor(() => expect(cli.releaseTurn).not.toBeNull(), { timeout: 10_000 })
     cli.releaseTurn!()
 
     await expect(started).rejects.toMatchObject({ code: "SPAWN_FAILED" })
