@@ -848,8 +848,12 @@ export function securityHeaders(req: IncomingMessage, res: ServerResponse, next:
   next()
 }
 
+/** Vite's documents keep their inline scripts, but a frame may only go where production lets it, or to a local preview. */
+const DEV_DOCUMENT_POLICY = "frame-src 'self' http://localhost:* http://127.0.0.1:*"
+
 export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   if (isProtectedTransportRequest(req)) setSecurityHeaders(req, res)
+  else res.setHeader("Content-Security-Policy", DEV_DOCUMENT_POLICY)
   if (isStrayFrameNavigation(req)) return sendJson(res, 403, { error: "Not available in a frame" })
   next()
 }

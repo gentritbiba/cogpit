@@ -351,8 +351,20 @@ describe("devSecurityHeaders", () => {
     devSecurityHeaders(req, res, next)
 
     expect(headers["X-Content-Type-Options"]).toBeUndefined()
-    expect(headers["Content-Security-Policy"]).toBeUndefined()
+    expect(headers["Content-Security-Policy"]).not.toContain("script-src")
     expect(next).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a view's frame off other sites while local previews still load", () => {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: {}, url: "/" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+
+    devSecurityHeaders(req, res, vi.fn())
+
+    expect(headers["Content-Security-Policy"]).toBe("frame-src 'self' http://localhost:* http://127.0.0.1:*")
   })
 
   it("keeps the production policy on dev API responses", () => {

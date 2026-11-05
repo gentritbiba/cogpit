@@ -34,8 +34,9 @@ refuses any request a browser marks as loading into a frame
 (`Sec-Fetch-Dest: iframe`) unless it is for the view or plugin shell
 (`server/security.ts`). The app's own policy keeps the frame on Cogpit's
 origin, and the desktop app also refuses any navigation of the frame away
-from the shell. The Vite dev server sends no policy on the app document, so
-during development a view can still navigate its frame to another site.
+from the shell. Under the Vite dev server the app document carries only a
+`frame-src` policy, which also allows local previews on `localhost` and
+`127.0.0.1`, so a view cannot reach another site there either.
 
 The parent trusts nothing a view posts, because the view's own code can post
 the same messages as the kit: sizes are clamped, errors truncated, links must be
