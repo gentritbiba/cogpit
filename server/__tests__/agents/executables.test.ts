@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findExecutableOnPath: vi.fn(),
   isExecutableFile: vi.fn(),
   probeCliVersion: vi.fn(),
+  runCli: vi.fn(),
   findBundledClaude: vi.fn(),
   execFileSync: vi.fn(),
 }))
@@ -16,7 +17,7 @@ vi.mock("../../lib/binaryResolver", async (importOriginal) => ({
   findExecutableOnPath: mocks.findExecutableOnPath,
   isExecutableFile: mocks.isExecutableFile,
 }))
-vi.mock("../../lib/cliProcess", () => ({ probeCliVersion: mocks.probeCliVersion, runCli: vi.fn() }))
+vi.mock("../../lib/cliProcess", () => ({ probeCliVersion: mocks.probeCliVersion, runCli: mocks.runCli }))
 vi.mock("../../agents/bundledExecutable", () => ({
   findBundledClaude: mocks.findBundledClaude,
   resolveModule: (id: string) => id,
@@ -29,19 +30,29 @@ vi.mock("node:child_process", async (importOriginal) => ({
 const INSTALLED = "/fake/bin/claude"
 const BUNDLED = "/fake/app/node_modules/sdk/claude"
 
+/** How a binary answers `--version`: a version printed on a clean exit, or a whole run. */
+type VersionRun = string | { code: number | null; stdout: string; timedOut?: boolean }
+
 /** A machine where `onPath` binaries are on PATH, `runnable` paths can start, and `versions` answer. */
 function machine({ choice, onPath = {}, bundled, runnable = [], versions = {} }: {
   choice?: ExecutableChoice
   onPath?: Record<string, string>
   bundled?: string
   runnable?: string[]
-  versions?: Record<string, string>
+  versions?: Record<string, VersionRun>
 }) {
   mocks.getConfig.mockReturnValue(choice ? { claudeDir: "/home/me/.claude", agentExecutable: choice } : null)
   mocks.findExecutableOnPath.mockImplementation((binName: string) => onPath[binName])
   mocks.findBundledClaude.mockReturnValue(bundled)
   mocks.isExecutableFile.mockImplementation((path: string) => runnable.includes(path))
-  mocks.probeCliVersion.mockImplementation(async (path: string) => versions[path] ?? null)
+  const runOf = (path: string) => {
+    const answer = versions[path]
+    const run = typeof answer === "string" ? { code: 0, stdout: `${answer} (Claude Code)` } : answer
+    return { stderr: "", timedOut: false, ...(run ?? { code: null, stdout: "" }) }
+  }
+  mocks.runCli.mockImplementation(async (path: string) => runOf(path))
+  // Like the real probe, which reads whatever was printed, however the run ended.
+  mocks.probeCliVersion.mockImplementation(async (path: string) => runOf(path).stdout.match(/\d+\.\d+\.\d+/)?.[0] ?? null)
 }
 
 async function load() {
@@ -64,8 +75,8 @@ describe("findLaunchableExecutable", () => {
     const { findLaunchableExecutable, activeExecutableFor } = await load()
 
     await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "found", path: INSTALLED, source: "path" })
-    expect(mocks.probeCliVersion).toHaveBeenCalledWith(INSTALLED, ["--version"])
-    expect(mocks.probeCliVersion).toHaveBeenCalledWith(BUNDLED, ["--version"])
+    expect(mocks.runCli).toHaveBeenCalledWith(INSTALLED, ["--version"], 5_000)
+    expect(mocks.runCli).toHaveBeenCalledWith(BUNDLED, ["--version"], 5_000)
     expect(activeExecutableFor("claude")).toBe(INSTALLED)
     expect(mocks.execFileSync).not.toHaveBeenCalled()
   })
@@ -82,6 +93,25 @@ describe("findLaunchableExecutable", () => {
     await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "found", path: BUNDLED, source: "bundled" })
   })
 
+  it("ignores a version from a run that failed or timed out, as the blocking reader does", async () => {
+    for (const failed of [
+      { code: 1, stdout: "2.1.400 (Claude Code)" },
+      { code: null, stdout: "2.1.400 (Claude Code)", timedOut: true },
+    ]) {
+      vi.resetModules()
+      machine({
+        onPath: { claude: INSTALLED },
+        bundled: BUNDLED,
+        runnable: [INSTALLED, BUNDLED],
+        versions: { [INSTALLED]: failed, [BUNDLED]: "2.1.306" },
+      })
+      const { findLaunchableExecutable, activeExecutableFor } = await load()
+
+      await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "found", path: BUNDLED, source: "bundled" })
+      expect(activeExecutableFor("claude")).toBe(BUNDLED)
+    }
+  })
+
   it("reports nothing to start when the automatic choice finds no binary", async () => {
     machine({})
     const { findLaunchableExecutable } = await load()
@@ -95,7 +125,7 @@ describe("findLaunchableExecutable", () => {
 
     await expect(findLaunchableExecutable("claude")).resolves.toEqual({ status: "unlaunchable-choice", path: "/opt/old/claude" })
     expect(mocks.isExecutableFile).toHaveBeenCalledWith("/opt/old/claude")
-    expect(mocks.probeCliVersion).not.toHaveBeenCalled()
+    expect(mocks.runCli).not.toHaveBeenCalled()
   })
 
   it("flags a saved source that no longer exists on this machine", async () => {

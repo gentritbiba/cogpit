@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { LaunchableExecutable } from "../../agents/executables"
 import type { AgentKind } from "../../../shared/session/types"
 
@@ -145,12 +145,7 @@ describe("sharedAgentCheck", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.resetModules()
-    vi.useFakeTimers({ toFake: ["Date"] })
     machine({ claude: onPath("/usr/local/bin/claude") })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   async function freshModule() {
@@ -174,17 +169,15 @@ describe("sharedAgentCheck", () => {
     expect(mocks.findLaunchableExecutable).toHaveBeenCalledTimes(installableDescriptors().length)
   })
 
-  it("answers a quick repeat from the finished check, and runs again once that has aged", async () => {
+  it("checks afresh right after a finished check, so an agent installed meanwhile shows up", async () => {
     const { sharedAgentCheck } = await freshModule()
-    const first = await sharedAgentCheck()
+    const before = await sharedAgentCheck()
+    expect(before.find((agent) => agent.kind === "codex")?.binary).toBeNull()
 
-    vi.advanceTimersByTime(1_000)
-    expect(await sharedAgentCheck()).toBe(first)
-    expect(mocks.runCli).toHaveBeenCalledOnce()
+    machine({ claude: onPath("/usr/local/bin/claude"), codex: onPath("/usr/local/bin/codex") })
+    const after = await sharedAgentCheck()
 
-    vi.advanceTimersByTime(1_500)
-    expect(await sharedAgentCheck()).not.toBe(first)
-    expect(mocks.runCli).toHaveBeenCalledTimes(2)
+    expect(after.find((agent) => agent.kind === "codex")?.binary).toEqual({ path: "/usr/local/bin/codex", source: "path" })
   })
 })
 

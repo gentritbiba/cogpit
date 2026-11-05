@@ -15,8 +15,6 @@ import { probeCliVersion, runCli } from "../lib/cliProcess"
 import { findLaunchableExecutable } from "./executables"
 
 const STATUS_TIMEOUT_MS = 5_000
-/** How long a finished check answers repeat requests, so a burst of clicks runs it once. */
-const REUSE_MS = 2_000
 
 export interface AgentCheckEnvironment {
   platform?: NodeJS.Platform
@@ -90,19 +88,14 @@ export function checkAgents(environment: AgentCheckEnvironment = {}): Promise<Ag
   return Promise.all(installableDescriptors().map((descriptor) => checkAgent(descriptor, environment)))
 }
 
-let shared: { result: Promise<AgentCheck[]>; settledAt: number | null } | null = null
+let inFlight: Promise<AgentCheck[]> | null = null
 
 /**
- * The check every client asks for. Callers arriving while one runs, or within
- * {@link REUSE_MS} of its end, share it instead of spawning the CLIs again.
+ * The check every client asks for. Callers arriving while one runs share it;
+ * a request after it ends starts a new one, so "Check again" sees an install
+ * made a moment ago.
  */
 export function sharedAgentCheck(): Promise<AgentCheck[]> {
-  if (shared && (shared.settledAt === null || Date.now() - shared.settledAt < REUSE_MS)) return shared.result
-  const run = { result: checkAgents(), settledAt: null as number | null }
-  shared = run
-  run.result.then(
-    () => { run.settledAt = Date.now() },
-    () => { if (shared === run) shared = null },
-  )
-  return run.result
+  if (!inFlight) inFlight = checkAgents().finally(() => { inFlight = null })
+  return inFlight
 }

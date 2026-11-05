@@ -25,7 +25,7 @@ import {
 } from "../../shared/contracts/agentExecutable"
 import { getConfig } from "../config"
 import { findExecutableOnPath, isDirectlyLaunchable } from "../lib/binaryResolver"
-import { probeCliVersion } from "../lib/cliProcess"
+import { probeCliVersion, runCli } from "../lib/cliProcess"
 import { findBundledClaude, resolveModule } from "./bundledExecutable"
 
 const BIN_NAME = "claude"
@@ -150,17 +150,25 @@ function versionTuple(output: string | null): number[] | undefined {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
 }
 
+const VERSION_TIMEOUT_MS = 5_000
+
 /** The binary's version; undefined if it won't answer. */
 function readCliVersionSync(binPath: string): number[] | undefined {
   try {
     return versionTuple(execFileSync(binPath, ["--version"], {
       encoding: "utf-8",
-      timeout: 5_000,
+      timeout: VERSION_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "ignore"],
     }))
   } catch {
     return undefined
   }
+}
+
+/** {@link readCliVersionSync} without blocking: a run that fails or times out has no version either. */
+async function readCliVersion(binPath: string): Promise<number[] | undefined> {
+  const run = await runCli(binPath, ["--version"], VERSION_TIMEOUT_MS)
+  return run.code === 0 && !run.timedOut ? versionTuple(run.stdout) : undefined
 }
 
 function isAtLeast(version: number[], floor: number[]): boolean {
@@ -252,7 +260,7 @@ export async function refreshClaudeExecutable(): Promise<{
   const versions = new Map(await Promise.all(
     compared
       .filter((path): path is string => path !== undefined)
-      .map(async (path) => [path, versionTuple(await probeCliVersion(path, ["--version"]))] as const),
+      .map(async (path) => [path, await readCliVersion(path)] as const),
   ))
   const resolved = chooseClaudeExecutable(choice, found, (path) => versions.get(path))
   // A setting saved while the probes ran makes this answer stale; the memo resolves that one itself.

@@ -4,7 +4,7 @@
     "These numbers may only go DOWN. Cogpit's scripts/check-agents.ts fails if a",
     "file exceeds its budget, and also if it comes in under — so a cleanup must",
     "lower the number in the same commit. Delete the entry once a file reaches zero.",
-    "Seeded at 118 files / 392 lines."
+    "Seeded at 116 files / 373 lines."
   ],
   "files": {
     "electron/main.ts": 1,
