@@ -22,11 +22,13 @@ export interface UsageData {
   sevenDay?: UsageBucket
   sevenDayOpus?: UsageBucket
   sevenDaySonnet?: UsageBucket
+  /** Usage credits; amounts are in minor units of `currency` (cents for USD). */
   extraUsage?: {
     isEnabled: boolean
     monthlyLimit?: number
     usedCredits?: number
     utilization?: number
+    currency?: string
   }
   subscriptionType?: string
   lifetimeTokens?: number
@@ -77,6 +79,7 @@ function anthropicExtraUsage(raw: Record<string, unknown> | undefined): UsageDat
     monthlyLimit: num(raw.monthly_limit),
     usedCredits: num(raw.used_credits),
     utilization: num(raw.utilization),
+    currency: str(raw.currency),
   }
 }
 

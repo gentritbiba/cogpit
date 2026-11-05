@@ -99,6 +99,28 @@ describe("mapClaudeRuntimeResponse", () => {
       extraUsage: { isEnabled: true, monthlyLimit: 100, usedCredits: 8 },
     })
   })
+
+  it("keeps the credits and their currency for an account without plan windows", () => {
+    expect(mapClaudeRuntimeResponse({
+      available: true,
+      account: {},
+      usage: {
+        subscription_type: null,
+        rate_limits: {
+          five_hour: null,
+          seven_day: null,
+          extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 1240, utilization: 24.8, currency: "USD" },
+        },
+      },
+    })).toEqual({
+      fiveHour: undefined,
+      sevenDay: undefined,
+      sevenDayOpus: undefined,
+      sevenDaySonnet: undefined,
+      extraUsage: { isEnabled: true, monthlyLimit: 5000, usedCredits: 1240, utilization: 24.8, currency: "USD" },
+      subscriptionType: undefined,
+    })
+  })
 })
 
 describe("mapCopilotRuntimeResponse", () => {
