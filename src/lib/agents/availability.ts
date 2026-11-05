@@ -16,7 +16,8 @@ const snapshots = new Map<string, readonly ProviderUpdateInfo[]>()
 const inFlight = new Map<string, Promise<void>>()
 const listeners = new Set<() => void>()
 
-function currentScope(): string {
+/** The device scope availability is kept under; capture it before awaiting work that reports back. */
+export function agentAvailabilityScope(): string {
   return deviceScopedKey("agent-availability")
 }
 
@@ -26,12 +27,12 @@ function notify(): void {
 
 /** Ask the active machine again; concurrent callers share one request. A failed check keeps the last answer. */
 export function refreshAgentAvailability(): Promise<void> {
-  const scope = currentScope()
+  const scope = agentAvailabilityScope()
   const pending = inFlight.get(scope)
   if (pending) return pending
   const request = fetchProviderUpdates()
     .then((next) => {
-      if (currentScope() !== scope) return
+      if (agentAvailabilityScope() !== scope) return
       snapshots.set(scope, next)
       notify()
     }, () => undefined)
@@ -40,9 +41,12 @@ export function refreshAgentAvailability(): Promise<void> {
   return request
 }
 
-/** Replace one agent's entry, e.g. with the answer an update run came back with. */
-export function replaceAgentAvailability(info: ProviderUpdateInfo): void {
-  const scope = currentScope()
+/**
+ * Replace one agent's entry under `scope`, the device the answer came from,
+ * e.g. an update run's result. Never the active scope: that may be another
+ * machine by the time the answer lands.
+ */
+export function replaceAgentAvailability(info: ProviderUpdateInfo, scope: string): void {
   const current = snapshots.get(scope)
   if (!current) return
   snapshots.set(scope, current.map((entry) => (entry.provider === info.provider ? info : entry)))
@@ -54,12 +58,12 @@ function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener) }
 }
 
-const readSnapshot = () => snapshots.get(currentScope()) ?? null
+const readSnapshot = () => snapshots.get(agentAvailabilityScope()) ?? null
 
 /** Every agent's entry on the active machine, or null until its first check answers. */
 export function useAgentAvailability(): readonly ProviderUpdateInfo[] | null {
   const current = useSyncExternalStore(subscribe, readSnapshot, readSnapshot)
-  const scope = currentScope()
+  const scope = agentAvailabilityScope()
   useEffect(() => {
     if (!snapshots.has(scope)) void refreshAgentAvailability()
   }, [scope])

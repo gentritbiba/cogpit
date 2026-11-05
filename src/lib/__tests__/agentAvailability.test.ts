@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { makeProviderUpdateInfo } from "@/__tests__/fixtures"
 
-const mocks = vi.hoisted(() => ({ fetchProviderUpdates: vi.fn() }))
+const mocks = vi.hoisted(() => ({ fetchProviderUpdates: vi.fn(), runProviderUpdate: vi.fn() }))
 vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/providerUpdates")>()),
   fetchProviderUpdates: mocks.fetchProviderUpdates,
+  runProviderUpdate: mocks.runProviderUpdate,
 }))
 
 import { _resetAgentAvailabilityForTests, refreshAgentAvailability, useAgentAvailability } from "@/lib/agents/availability"
+import { useProviderUpdates } from "@/hooks/useProviderUpdates"
 
 const onMachine = (binaryPath: string) => [makeProviderUpdateInfo({ binaryPath })]
 const goTo = (path: string) => window.history.pushState(null, "", path)
@@ -60,5 +62,32 @@ describe("useAgentAvailability", () => {
     const { result: back } = renderHook(() => useAgentAvailability())
     expect(back.current).toBeNull()
     await waitFor(() => expect(back.current?.[0].binaryPath).toBe("/local/fresh"))
+  })
+
+  it("files an update's result under the machine that ran it, not the one active when it lands", async () => {
+    mocks.fetchProviderUpdates.mockResolvedValueOnce(onMachine("/local/claude")).mockResolvedValueOnce(onMachine("/box/claude"))
+    let finishUpdate!: (value: unknown) => void
+    mocks.runProviderUpdate.mockReturnValueOnce(new Promise((resolve) => { finishUpdate = resolve }))
+    const updates = renderHook(() => useProviderUpdates())
+    const local = renderHook(() => useAgentAvailability())
+    await waitFor(() => expect(local.result.current?.[0].binaryPath).toBe("/local/claude"))
+
+    let running!: Promise<void>
+    act(() => { running = updates.result.current.update("claude") })
+    goTo("/d/box")
+    const box = renderHook(() => useAgentAvailability())
+    await waitFor(() => expect(box.result.current?.[0].binaryPath).toBe("/box/claude"))
+
+    const updated = makeProviderUpdateInfo({ binaryPath: "/local/claude-updated", signInCommand: "/local/claude-updated auth login" })
+    await act(async () => {
+      finishUpdate({ provider: "claude", status: "succeeded", message: "Claude Code updated", output: null, info: updated })
+      await running
+    })
+    box.rerender()
+    expect(box.result.current?.[0]).toMatchObject({ binaryPath: "/box/claude", signInCommand: "/usr/local/bin/claude auth login" })
+
+    goTo("/")
+    local.rerender()
+    expect(local.result.current?.[0].binaryPath).toBe("/local/claude-updated")
   })
 })

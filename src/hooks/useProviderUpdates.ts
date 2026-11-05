@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { useLocalStorage } from "@/hooks/useLocalStorage"
-import { refreshAgentAvailability, replaceAgentAvailability, useAgentAvailability } from "@/lib/agents/availability"
+import { agentAvailabilityScope, refreshAgentAvailability, replaceAgentAvailability, useAgentAvailability } from "@/lib/agents/availability"
 import {
   nextDismissals,
   pendingProviderUpdates,
@@ -47,10 +47,11 @@ export function useProviderUpdates(): ProviderUpdatesState {
   const update = useCallback(async (provider: ProviderUpdateId) => {
     setUpdating(provider)
     setOutcome(null)
+    const scope = agentAvailabilityScope()
     try {
       const result = await runProviderUpdate(provider)
       setOutcome(result)
-      replaceAgentAvailability(result.info)
+      replaceAgentAvailability(result.info, scope)
     } catch (error) {
       setOutcome({
         provider,

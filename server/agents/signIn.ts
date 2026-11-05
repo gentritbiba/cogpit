@@ -54,21 +54,24 @@ export function agentSignInLaunch(kind: AgentKind, instanceId?: string | null): 
   }
 }
 
-const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
-const bare = (value: string) => (/^[\w@%+=:,./-]+$/.test(value) ? value : quote(value))
+/** A POSIX shell single-quoted word: an apostrophe closes, escapes and reopens. */
+const posixQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
+/** A PowerShell single-quoted string: an apostrophe is doubled. */
+const powershellQuote = (value: string) => `'${value.replace(/'/g, "''")}'`
+const bare = (value: string) => (/^[\w@%+=:,./-]+$/.test(value) ? value : posixQuote(value))
 
 /**
  * One line to paste into a terminal on this server, PowerShell on Windows.
  * `executable` is quoted unless it is a placeholder for a person to fill in.
  */
 function commandLine(target: SignInTarget, { placeholder = false } = {}): string {
-  const executable = placeholder ? target.executable : quote(target.executable)
   const entries = Object.entries(target.env)
   if (process.platform === "win32") {
-    return [...entries.map(([key, value]) => `$env:${key}=${quote(value)}`), [`&`, executable, ...target.args].join(" ")].join("; ")
+    const executable = placeholder ? target.executable : powershellQuote(target.executable)
+    return [...entries.map(([key, value]) => `$env:${key}=${powershellQuote(value)}`), [`&`, executable, ...target.args].join(" ")].join("; ")
   }
-  const prefix = entries.map(([key, value]) => `${key}=${quote(value)}`)
-  return [...(prefix.length > 0 ? ["env", ...prefix] : []), placeholder ? executable : bare(target.executable), ...target.args].join(" ")
+  const prefix = entries.map(([key, value]) => `${key}=${posixQuote(value)}`)
+  return [...(prefix.length > 0 ? ["env", ...prefix] : []), placeholder ? target.executable : bare(target.executable), ...target.args].join(" ")
 }
 
 /** The sign-in as a command to copy, for where Cogpit cannot open a terminal. */

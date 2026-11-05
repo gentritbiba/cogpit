@@ -102,6 +102,27 @@ describe("sign-in commands to copy", () => {
     expect(onPlatform("win32", () => agentSignInCommand("claude", "work"))).toMatch(/^\$env:HOME='.+'; .+; & '.+claude' auth login$/)
   })
 
+  it("quotes an apostrophe the way each shell needs, in the executable and in instance paths", () => {
+    mocks.spawned.mockReturnValue({ path: "C:\\Users\\O'Brien\\AppData\\Roaming\\npm\\codex.cmd", bundled: false })
+    expect(onPlatform("win32", () => agentSignInCommand("codex")))
+      .toBe("& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\codex.cmd' login")
+    mocks.spawned.mockReturnValue({ path: "/Users/O'Brien/bin/codex", bundled: false })
+    expect(onPlatform("darwin", () => agentSignInCommand("codex"))).toBe("'/Users/O'\\''Brien/bin/codex' login")
+
+    const home = join(root, "O'Brien")
+    instance({ id: "obrien", homeDir: home, executable: join(home, "claude") })
+    const user = join(home, "user")
+    const powershell = onPlatform("win32", () => agentSignInCommand("claude", "obrien"))!
+    expect(powershell).toContain(`$env:HOME='${user.replace(/'/g, "''")}'`)
+    expect(powershell).toContain(`$env:CLAUDE_CONFIG_DIR='${home.replace(/'/g, "''")}'`)
+    expect(powershell.endsWith(`& '${join(home, "claude").replace(/'/g, "''")}' auth login`)).toBe(true)
+    expect(powershell).not.toContain("'\\''")
+    const posix = onPlatform("darwin", () => agentSignInCommand("claude", "obrien"))!
+    expect(posix).toContain(`HOME='${user.replace(/'/g, "'\\''")}'`)
+    expect(posix).toContain(`CLAUDE_CONFIG_DIR='${home.replace(/'/g, "'\\''")}'`)
+    expect(posix.endsWith(`'${join(home, "claude").replace(/'/g, "'\\''")}' auth login`)).toBe(true)
+  })
+
   it("leaves an ACP instance's login for the administrator to fill in", () => {
     const acp = instance({ id: "acp1", agent: "acp", executable: "/opt/acp" })
     expect(onPlatform("darwin", () => providerSetupCommand(acp))).toMatch(/^env HOME='.+' <provider-login-command>$/)
