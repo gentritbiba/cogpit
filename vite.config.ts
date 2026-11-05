@@ -6,11 +6,13 @@ import { sessionApiPlugin } from './server/api-plugin'
 import { ptyPlugin } from './server/pty-plugin'
 import { bundleBoundary } from './build/bundleBoundary'
 import { editionAliases } from './build/editionAliases'
+import { VIEW_LIBRARY_IDS, viewLibraryAliases } from './build/viewLibraryAliases'
 import { chunkFileNames, editionUiBanner, manualChunks } from './build/manualChunks'
 import { themeBootstrap } from './build/themeBootstrap'
 
 export default defineConfig({
   worker: { format: "es" },
+  optimizeDeps: { exclude: VIEW_LIBRARY_IDS },
   plugins: [
     themeBootstrap(),
     react({
@@ -28,6 +30,7 @@ export default defineConfig({
     alias: [
       { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
       ...editionAliases(),
+      ...viewLibraryAliases(),
     ],
   },
   build: {

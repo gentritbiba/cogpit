@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath, URL } from "node:url"
 import { bundleBoundary } from "./build/bundleBoundary"
 import { editionAliases } from "./build/editionAliases"
+import { VIEW_LIBRARY_IDS, viewLibraryAliases } from "./build/viewLibraryAliases"
 import { chunkFileNames, editionUiBanner, manualChunks } from "./build/manualChunks"
 import { themeBootstrap } from "./build/themeBootstrap"
 
@@ -39,6 +40,7 @@ export default defineConfig({
   },
   renderer: {
     worker: { format: "es" },
+    optimizeDeps: { exclude: VIEW_LIBRARY_IDS },
     root: ".",
     build: {
       outDir: "out/renderer",
@@ -71,6 +73,7 @@ export default defineConfig({
       alias: [
         { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
         ...editionAliases(),
+        ...viewLibraryAliases(),
       ],
     },
   },

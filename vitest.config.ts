@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { defineConfig } from "vitest/config"
 import { fileURLToPath, URL } from "node:url"
 import { editionAliases } from "./build/editionAliases"
+import { viewLibraryAliases } from "./build/viewLibraryAliases"
 import { hasTeamEdition, root, TEAM_EDITION_ENTRY } from "./scripts/lib/sourceFiles"
 
 // The team edition is a private package; a public clone's editions/team is empty.
@@ -13,6 +14,7 @@ export default defineConfig({
     alias: [
       { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
       ...editionAliases(),
+      ...viewLibraryAliases(),
       ...(withTeam ? [{ find: "@cogpit/team", replacement: join(root, TEAM_EDITION_ENTRY) }] : []),
     ],
   },

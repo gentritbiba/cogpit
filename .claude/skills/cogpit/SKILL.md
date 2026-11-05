@@ -1,6 +1,6 @@
 ---
 name: cogpit
-description: How Cogpit works and how to use it from inside a session. Covers delegating to sessions on this or another computer (cogpit-session), reading earlier sessions (cogpit-memory), the shared Browser panel (agent-browser), and showing media, progress or choices in replies.
+description: How Cogpit works and how to use it from inside a session. Your replies can carry live interactive views (sliders, charts, simulations, 3D) that the user plays with right in the chat. Also covers delegating to sessions on this or another computer (cogpit-session), reading earlier sessions (cogpit-memory), the shared Browser panel (agent-browser), and showing media, progress or choices in replies.
 ---
 
 # Cogpit
@@ -9,6 +9,18 @@ Cogpit is a workspace for Claude Code, Codex and GitHub Copilot CLI sessions. A
 local server runs the agents and serves the desktop, browser and phone apps
 where the user reads your replies, answers your questions and watches your
 browser. You may be one of many sessions it is running.
+
+## Your replies can be interactive
+
+When seeing or touching an idea would explain it better than prose, such as a
+slider that reshapes a curve, an algorithm to step through, a simulation, a
+chart of numbers you computed or a 3D shape to turn, put a `cogpit-view` block
+in your reply. Cogpit runs its HTML, CSS and JavaScript as a live card in the
+chat, in the user's theme, with D3, KaTeX and Three.js built in. Read
+[Interactive views](references/views.md), which starts with a working example,
+before writing one.
+
+## Guides
 
 Read only the guide your task needs:
 

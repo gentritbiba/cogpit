@@ -49,7 +49,7 @@ export const AssistantText = memo(function AssistantText({
 }: AssistantTextProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const markdownText = useMemo(() => preprocessMediaPaths(text), [text])
-  const blockScope = useMemo(() => ({ messageKey: messageKey ?? timestamp ?? `${text.length}:${text.slice(0, 64)}` }), [messageKey, timestamp, text])
+  const blockScope = useMemo(() => ({ messageKey: messageKey ?? timestamp ?? `${text.length}:${text.slice(0, 64)}`, markdown: markdownText }), [messageKey, timestamp, text, markdownText])
   const [copied, copy] = useCopyWithFeedback()
 
   if (!text) return null

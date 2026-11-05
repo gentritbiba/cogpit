@@ -7,12 +7,14 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useHighlightedTokens } from "@/hooks/useHighlightedTokens"
-import { cogpitBlockKind, CogpitBlockScope } from "./cogpit-blocks/kinds"
+import { cogpitBlockKind, CogpitBlockScope, isCogpitView, isFenceClosed } from "./cogpit-blocks/kinds"
 import { parsePluginBlockLanguage } from "@cogpit/plugin-contracts"
 import { RuntimePluginBlock } from "@/plugins/RuntimePluginContributions"
 
 /** Blocks an agent declares to show structure; loaded with their parser only when a reply has one. */
 const CogpitBlock = lazy(() => import("./cogpit-blocks/CogpitBlock"))
+/** An interactive page an agent built, with the sandbox it runs in. */
+const CogpitView = lazy(() => import("./cogpit-blocks/view/CogpitView"))
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -111,6 +113,16 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 
   const plain = <HighlightedCodeBlock code={code} lang={lang} {...rest} />
   if (blockScope && lang && parsePluginBlockLanguage(lang)) return <RuntimePluginBlock language={lang} source={code} instanceKey={`${blockScope.messageKey}:${_node?.position?.start.offset ?? 0}`} fallback={plain} />
+  if (blockScope && isCogpitView(lang)) {
+    const start = _node?.position?.start.offset
+    const end = _node?.position?.end.offset
+    const complete = start !== undefined && end !== undefined && isFenceClosed(blockScope.markdown.slice(start, end))
+    return (
+      <Suspense fallback={plain}>
+        <CogpitView source={code} complete={complete} fallback={plain} />
+      </Suspense>
+    )
+  }
   const blockKind = blockScope ? cogpitBlockKind(lang) : null
   if (blockKind) {
     return (
