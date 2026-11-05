@@ -132,6 +132,16 @@ describe("SessionCard", () => {
     expect(screen.queryByRole("button", { name: "Archive session" })).not.toBeInTheDocument()
   })
 
+  it.each([
+    ["with a running process", { proc: proc() }, {}],
+    ["while its own process idles", {}, { isActive: true }],
+  ])("labels a session that stopped on a failed sign-in in red, %s", (_, props, overrides) => {
+    renderCard({ agentStatus: "completed", agentTerminalReason: "authentication_failed", ...overrides }, props)
+    const label = cardBody().getByText("Stopped — not signed in")
+    expect(label).toHaveClass("text-destructive")
+    expect(label).not.toHaveClass("text-success")
+  })
+
   it("offers to archive an idle session and to restore an archived one", () => {
     const onArchiveSession = vi.fn()
     renderCard({}, { onArchiveSession })

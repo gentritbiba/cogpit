@@ -25,6 +25,7 @@ import {
 } from "../../shared/session/agent-descriptors"
 import { compareVersions } from "../../shared/versions"
 import { spawnedExecutableFor } from "../agents/executables"
+import { agentSignInCommand } from "../agents/signIn"
 import { CLI_OUTPUT_MAX_CHARS, probeCliVersion, runCli } from "./cliProcess"
 
 const REGISTRY_TIMEOUT_MS = 4_000
@@ -268,6 +269,7 @@ async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdat
     displayName: descriptor.displayName,
     packageName: descriptor.cli.packageName,
     installCommand: descriptor.cli.install?.command(process.platform) ?? null,
+    signInCommand: agentSignInCommand(descriptor.kind),
     binaryPath: paths[0] ?? null,
     checkedAt: new Date().toISOString(),
   }

@@ -22,7 +22,7 @@ import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
 import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
-import { startAgentSignIn } from "@/lib/agents/signIn"
+import { signInTargetFor, startAgentSignIn } from "@/lib/agents/signIn"
 import { AgentInstallHelp, AgentSignInCard } from "@/components/AgentSetupHelp"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
@@ -144,7 +144,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 
-const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: string }>(function ScopedChatInput({ scope, allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false }, ref) {
+const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: string }>(function ScopedChatInput({ scope, allowImages = true, agentKind, projectCwd, leadingAccessory, footer, compact = false, composerIdentity }, ref) {
   const recovery = useMemo(() => unsentRecovery(scope), [scope])
   const snapshot = useSyncExternalStore(recovery.subscribe, recovery.getSnapshot)
   const initial = useRef(snapshot.draft).current
@@ -152,6 +152,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const canAccessHostFiles = useCapability("hostFiles")
   const {
     session,
+    sessionSource,
     isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
@@ -189,6 +190,9 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   contextRef.current = context
   const [contextError, setContextError] = useState<string | null>(null)
   const [signInHelp, setSignInHelp] = useState(false)
+  // A pending session has no source yet; its dirName names the account instance too.
+  const signInDirName = sessionSource?.dirName ?? composerIdentity
+  const signInTarget = useMemo(() => signInTargetFor(agentKind ?? DEFAULT_AGENT_KIND, signInDirName), [agentKind, signInDirName])
   const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind ?? DEFAULT_AGENT_KIND)
   const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
 
@@ -410,7 +414,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     if (/^\/login$/i.test(trimmed) && images.length === 0 && context.length === 0 && descriptorFor(kind).cli.signIn) {
       applyDraft(EMPTY_DRAFT)
       recovery.edit(draftNow())
-      setSignInHelp(!startAgentSignIn(kind))
+      setSignInHelp(!startAgentSignIn(signInTarget))
       return
     }
     if ((!allowImages && images.length > 0) || uploading) return
@@ -448,7 +452,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind, signInTarget])
   const handleSubmit = useCallback(() => submitText(text), [submitText, text])
 
   // Spoken text continues the draft; sending it sends the whole draft.
@@ -604,7 +608,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
           <Button type="button" variant="ghost" size="xs" onClick={() => downloadUnsentBackup(message.draft)}>Download unsent backup</Button>
         </div>)}
         {!agentInstalled && <AgentInstallHelp kind={agentKind ?? DEFAULT_AGENT_KIND} className="mb-2" />}
-        {signInHelp && <AgentSignInCard kind={agentKind ?? DEFAULT_AGENT_KIND} className="mb-2" onDismiss={() => setSignInHelp(false)} />}
+        {signInHelp && <AgentSignInCard target={signInTarget} className="mb-2" onDismiss={() => setSignInHelp(false)} />}
         <ContextChips items={context} attachments={images} onRemove={removeContext} onOpenQuoteSource={openQuoteSource} className="mb-2" />
         {contextError && (
           <div role="alert" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">

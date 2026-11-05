@@ -9,6 +9,8 @@ const mockExecFileSync = vi.hoisted(() => vi.fn())
 
 vi.mock("node-pty", () => ({ spawn: mockPtySpawn }))
 vi.mock("node:child_process", () => ({ execFileSync: mockExecFileSync }))
+const mockSignInLaunch = vi.hoisted(() => vi.fn())
+vi.mock("../agents/signIn", () => ({ agentSignInLaunch: mockSignInLaunch }))
 
 import { PtySessionManager } from "../pty-server"
 
@@ -189,5 +191,64 @@ describe("PtySessionManager", () => {
         expect(pty.kill).toHaveBeenCalledOnce()
       })
     })
+  })
+})
+
+describe("PtySessionManager sign-in terminals", () => {
+  beforeEach(() => {
+    mockPtySpawn.mockReset()
+    mockSignInLaunch.mockReset()
+  })
+
+  function spawnSignIn(signIn: unknown) {
+    mockPtySpawn.mockReturnValue(fakePty())
+    const socket = new FakeSocket()
+    const manager = new PtySessionManager({ clients: new Set([socket]) } as never)
+    manager.handleConnection(socket as never)
+    socket.emit("message", Buffer.from(JSON.stringify({ type: "spawn", id: "sign-in", command: "/bin/sh", args: ["-l"], signIn })))
+    return { manager, socket }
+  }
+
+  it("runs the launch the server builds for the agent and account, never the client's command", () => {
+    mockSignInLaunch.mockReturnValue({ command: "/opt/codex/bin/codex", args: ["login"], verbatimArgs: false, env: { HOME: "/data/instances/work/user" } })
+    const { manager } = spawnSignIn({ agent: "codex", instanceId: "work" })
+
+    expect(mockSignInLaunch).toHaveBeenCalledWith("codex", "work")
+    const [command, args, options] = mockPtySpawn.mock.calls[0]
+    expect(command).toBe("/opt/codex/bin/codex")
+    expect(args).toEqual(["login"])
+    expect(options.env).toMatchObject({ HOME: "/data/instances/work/user", TERM: "xterm-256color" })
+    manager.cleanup()
+  })
+
+  it("hands cmd.exe its command line verbatim for a Windows batch shim", () => {
+    mockSignInLaunch.mockReturnValue({
+      command: "C:\\Windows\\system32\\cmd.exe",
+      args: ["/d", "/s", "/c", "\"^\"C:\\npm\\codex.cmd^\" login\""],
+      verbatimArgs: true,
+      env: {},
+    })
+    const { manager } = spawnSignIn({ agent: "codex", instanceId: null })
+
+    expect(mockSignInLaunch).toHaveBeenCalledWith("codex", null)
+    expect(mockPtySpawn.mock.calls[0][1]).toBe("/d /s /c \"^\"C:\\npm\\codex.cmd^\" login\"")
+    manager.cleanup()
+  })
+
+  it("reports an agent with no sign-in instead of starting anything", () => {
+    mockSignInLaunch.mockReturnValue(null)
+    const { manager, socket } = spawnSignIn({ agent: "acp" })
+
+    expect(mockPtySpawn).not.toHaveBeenCalled()
+    expect(messages(socket)).toContainEqual(expect.objectContaining({ type: "error", id: "sign-in", message: expect.stringContaining("no sign-in") }))
+    manager.cleanup()
+  })
+
+  it("starts the requested terminal when the sign-in names no known agent", () => {
+    mockPtySpawn.mockReturnValue(fakePty())
+    const { manager } = spawnSignIn({ agent: "rm -rf" })
+    expect(mockSignInLaunch).not.toHaveBeenCalled()
+    expect(mockPtySpawn.mock.calls[0][0]).toBe("/bin/sh")
+    manager.cleanup()
   })
 })

@@ -9,6 +9,7 @@ import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { EMPTY_OVERLAY } from "@/lib/streamingOverlay"
 import type { ParsedSession } from "../../../../shared/session/types"
 import { AgentStatusIndicator, LiveElapsed } from "../AgentStatusIndicator"
+import { registerSignInRunner } from "@/lib/agents/signIn"
 
 interface MockSession {
   rawMessages: Array<Record<string, unknown>>
@@ -81,15 +82,18 @@ function indicatorWithContext({
   isCompacting = false,
   pendingInteraction = null,
   agentProgress,
+  dirName,
 }: {
   session?: MockSession
   isLive?: boolean
   isCompacting?: boolean
   pendingInteraction?: SessionContextValue["pendingInteraction"]
   agentProgress?: Record<string, string>
+  dirName?: string
 } = {}) {
   const value = {
     session: session as unknown as ParsedSession,
+    sessionSource: dirName ? { dirName, fileName: "s.jsonl", rawText: "" } : null,
     isLive,
     sseState: "connected",
     isCompacting,
@@ -284,6 +288,15 @@ describe("AgentStatusIndicator failed turns", () => {
     expect(screen.getByText("It said: Not logged in · Please run /login")).toBeInTheDocument()
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument()
     expect(screen.queryByText("Waiting for your input")).not.toBeInTheDocument()
+  })
+
+  it("signs in the account instance the session runs under", () => {
+    const runner = vi.fn()
+    const unregister = registerSignInRunner(runner)
+    render(indicatorWithContext({ session: failedWith(apiError("authentication_failed", 401, "Not logged in")), dirName: "instance__work__-workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(runner).toHaveBeenCalledWith({ target: { kind: "claude", instanceId: "work" }, name: "Sign in to Claude Code" })
+    unregister()
   })
 
   it("shows any other API error in red, not as a finished turn", () => {

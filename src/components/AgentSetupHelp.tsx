@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { descriptorFor, type AgentKind } from "@/lib/agents"
 import { agentAvailability, useAgentAvailability } from "@/lib/agents/availability"
-import { signInCommandFor, startAgentSignIn, useCanRunSignIn } from "@/lib/agents/signIn"
+import { startAgentSignIn, useCanRunSignIn, useSignInCommand, type SignInTarget } from "@/lib/agents/signIn"
 import { cn } from "@/lib/utils"
 import {
   agentFailureTitle,
@@ -72,24 +72,23 @@ export function AgentInstallHelp({ kind, className }: { kind: AgentKind; classNa
  * The agent's login is missing or no longer works. Its own sign-in runs in
  * Cogpit's terminal; where there is none, the command is shown to copy.
  */
-export function AgentSignInCard({ kind, detail, className = "mx-4 my-3", onDismiss }: {
-  kind: AgentKind
+export function AgentSignInCard({ target, detail, className = "mx-4 my-3", onDismiss }: {
+  /** The agent, and the account instance the session runs under. */
+  target: SignInTarget
   /** The agent's own words, when it said why. */
   detail?: string
   className?: string
   onDismiss?: () => void
 }) {
-  // Loads the binary path the sign-in command must use.
-  useAgentAvailability()
   const canRun = useCanRunSignIn()
   const [started, setStarted] = useState(false)
-  const command = signInCommandFor(kind)
+  const command = useSignInCommand(target)
 
   return (
     <div role="alert" data-agent-sign-in className={cn("flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm", className)}>
       <div className="flex items-center gap-2 font-medium text-destructive">
         <LogIn className="size-4 shrink-0" />
-        <span className="flex-1">{agentSignedOutTitle(kind)}</span>
+        <span className="flex-1">{agentSignedOutTitle(target.kind)}</span>
         {onDismiss && (
           <Button variant="ghost" size="icon-xs" onClick={onDismiss} className="text-muted-foreground" aria-label="Dismiss">
             <X />
@@ -104,24 +103,27 @@ export function AgentSignInCard({ kind, detail, className = "mx-4 my-3", onDismi
       {detail && <p className="text-xs text-muted-foreground/80">It said: {detail}</p>}
       {canRun ? (
         <div>
-          <Button size="sm" variant={started ? "outline" : "default"} onClick={() => setStarted(startAgentSignIn(kind))}>
+          <Button size="sm" variant={started ? "outline" : "default"} onClick={() => setStarted(startAgentSignIn(target))}>
             <LogIn data-icon="inline-start" />
             {started ? "Open sign-in again" : "Sign in"}
           </Button>
         </div>
-      ) : command && (
+      ) : command ? (
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground">Run this on the computer running Cogpit:</span>
           <CopyableCommand command={command} />
         </div>
+      ) : target.instanceId && (
+        <span className="text-xs text-muted-foreground">Ask the person who runs Cogpit to sign this account in.</span>
       )}
     </div>
   )
 }
 
 /** A turn that ended on an error instead of a reply, in the conversation's last status slot. */
-export function AgentFailureNotice({ kind, failure }: { kind: AgentKind; failure: AgentFailure }) {
-  if (failure.reason === "not_signed_in") return <AgentSignInCard kind={kind} detail={failure.message} />
+export function AgentFailureNotice({ target, failure }: { target: SignInTarget; failure: AgentFailure }) {
+  const { kind } = target
+  if (failure.reason === "not_signed_in") return <AgentSignInCard target={target} detail={failure.message} />
   if (failure.reason === "not_installed") return <AgentInstallHelp kind={kind} className="mx-4 my-3" />
   return (
     <div role="status" data-agent-failed className="flex min-w-0 items-center gap-2.5 px-4 py-3">

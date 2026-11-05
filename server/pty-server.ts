@@ -1,8 +1,18 @@
 import { WebSocket, WebSocketServer } from "ws"
 import { spawnPty, type PtyProcess } from "./pty-backend"
+import { agentSignInLaunch } from "./agents/signIn"
+import { AGENT_KINDS, type AgentKind } from "../shared/session/agent-descriptors"
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
+
+/** The `signIn` field of a spawn message, when it names a known agent. */
+function signInRequest(value: unknown): { agent: AgentKind; instanceId: string | null } | null {
+  if (!value || typeof value !== "object") return null
+  const { agent, instanceId } = value as { agent?: unknown; instanceId?: unknown }
+  if (typeof agent !== "string" || !(AGENT_KINDS as readonly string[]).includes(agent)) return null
+  return { agent: agent as AgentKind, instanceId: typeof instanceId === "string" && instanceId ? instanceId : null }
+}
 
 function defaultShell(): string {
   if (process.platform === "win32") return process.env.COMSPEC ?? "powershell.exe"
@@ -169,17 +179,22 @@ export class PtySessionManager {
     const cwd = (msg.cwd as string) || homedir()
     const cols = (msg.cols as number) || 80
     const rows = (msg.rows as number) || 24
-    const command = (msg.command as string) || defaultShell()
-    const args = (msg.args as string[]) || []
     const metadata = (msg.metadata as PtySessionMetadata | undefined)
 
     let pty: PtyProcess
     try {
+      // A sign-in names only the agent and account: the server picks the binary,
+      // its Windows shim handling and the account's environment itself.
+      const signIn = signInRequest(msg.signIn)
+      const launch = signIn ? agentSignInLaunch(signIn.agent, signIn.instanceId) : null
+      if (signIn && !launch) throw new Error("This agent has no sign-in to run")
+      const command = launch?.command ?? ((msg.command as string) || defaultShell())
+      const args = launch ? (launch.verbatimArgs ? launch.args.join(" ") : launch.args) : ((msg.args as string[]) || [])
       pty = spawnPty(command, args, {
         cols,
         rows,
         cwd,
-        env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+        env: { ...process.env, ...launch?.env, TERM: "xterm-256color" } as Record<string, string>,
       })
     } catch (err) {
       ws.send(

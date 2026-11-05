@@ -1,6 +1,7 @@
 import { mayActHostWide, markDecided } from "../edition"
 import { orchestrationStore } from "../orchestration/storage"
-import { createProviderInstance, providerSetupCommand } from "../agents/instanceConfigurations"
+import { createProviderInstance } from "../agents/instanceConfigurations"
+import { providerSetupCommand } from "../agents/signIn"
 import { runtimeFor } from "../agents/runtimes"
 import { removeInstanceRuntime } from "../agents/instanceRuntimes"
 import { sendAgentError } from "./agentErrors"

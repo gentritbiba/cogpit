@@ -69,17 +69,24 @@ describe("ChatInput agent setup", () => {
     mocks.startAgentSignIn.mockReturnValue(true)
     render(<ChatInput agentKind="codex" />)
     send("/login")
-    expect(mocks.startAgentSignIn).toHaveBeenCalledExactlyOnceWith("codex")
+    expect(mocks.startAgentSignIn).toHaveBeenCalledExactlyOnceWith({ kind: "codex", instanceId: null })
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(message()).toHaveValue("")
   })
 
-  it("shows the command to copy when there is no terminal for /login", () => {
+  it("signs in the account instance a new session will run under", () => {
+    mocks.startAgentSignIn.mockReturnValue(true)
+    render(<ChatInput agentKind="claude" composerIdentity="instance__work__-workspace" />)
+    send("/login")
+    expect(mocks.startAgentSignIn).toHaveBeenCalledExactlyOnceWith({ kind: "claude", instanceId: "work" })
+  })
+
+  it("shows the command to copy when there is no terminal for /login", async () => {
     mocks.startAgentSignIn.mockReturnValue(false)
     render(<ChatInput agentKind="claude" />)
     send("/login")
     expect(screen.getByRole("alert")).toHaveTextContent("Claude Code isn't signed in.")
-    expect(screen.getByTitle("claude auth login")).toBeInTheDocument()
+    expect(await screen.findByTitle("/usr/local/bin/claude auth login")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })

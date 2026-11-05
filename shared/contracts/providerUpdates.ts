@@ -45,6 +45,8 @@ export interface ProviderUpdateInfo {
   installed: boolean
   /** The command that installs this CLI on the server's own platform, when a person installs it. */
   installCommand: string | null
+  /** The command that signs the default account in, with the binary Cogpit runs, quoted for the server's shell. */
+  signInCommand: string | null
   binaryPath: string | null
   currentVersion: string | null
   latestVersion: string | null

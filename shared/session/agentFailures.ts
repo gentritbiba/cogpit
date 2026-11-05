@@ -57,20 +57,6 @@ export function agentInstallCommand(kind: AgentKind, platform: string): string |
   return descriptorFor(kind).cli.install?.command(platform) ?? null
 }
 
-function shellQuote(value: string): string {
-  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`
-}
-
-/**
- * The command that signs the CLI in, run with `executable` — the binary Cogpit
- * spawns, which need not be on anyone's PATH — or the CLI's own name.
- */
-export function agentSignInCommand(kind: AgentKind, executable?: string | null): string | null {
-  const { binName, cli } = descriptorFor(kind)
-  if (!cli.signIn) return null
-  return [shellQuote(executable || binName), ...cli.signIn.args].join(" ")
-}
-
 export function agentNotInstalledTitle(kind: AgentKind): string {
   return `${descriptorFor(kind).displayName} isn't installed on this computer.`
 }

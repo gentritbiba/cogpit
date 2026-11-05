@@ -10,6 +10,7 @@ import type { SessionStatus, SessionStatusInfo } from "../../../shared/session/s
 import type { BackgroundAgent } from "../../../shared/session/types"
 import { AgentFailureNotice } from "@/components/AgentSetupHelp"
 import { agentKindForDirName } from "@/lib/agents"
+import { signInTargetFor } from "@/lib/agents/signIn"
 
 function StatusIcon({ status }: { status: SessionStatus }) {
   switch (status) {
@@ -335,7 +336,10 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     )
   }
 
-  if (failure) return <AgentFailureNotice kind={agentKindForDirName(sessionSource?.dirName)} failure={failure} />
+  if (failure) {
+    const dirName = sessionSource?.dirName
+    return <AgentFailureNotice target={signInTargetFor(agentKindForDirName(dirName), dirName)} failure={failure} />
+  }
 
   if (!agentStatus) return null
 

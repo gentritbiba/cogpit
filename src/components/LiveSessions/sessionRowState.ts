@@ -33,7 +33,8 @@ export function describeSessionRow(
   const hasProcess = proc !== undefined
   const isNativeLive = s.isActive === true
   const isLive = hasProcess || isNativeLive
-  const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus)
+  // A session that stopped on an error says why, even while its process idles.
+  const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus) && !s.agentTerminalReason
   const isDeferred = s.agentStatus === "deferred"
   const isReadOnly = isExternallyDrivenSession(agentKindForDirName(s.dirName), proc)
   return {

@@ -171,11 +171,17 @@ export function observeSDKResult(state: SDKSessionState) {
   observers.add(observer); resultObservers.set(state, observers)
   return { completion, cancel: () => { observers.delete(observer); observer.resolve({ is_error: true, result: "Message was not accepted" }) } }
 }
+/** Whether a turn is still owed an answer: a caller waits on it, or it was mid-flight. */
+function hasUnfinishedWork(state: SDKSessionState): boolean {
+  return state.onResult !== null || (resultObservers.get(state)?.size ?? 0) > 0 || state.running
+}
+
+function logTurnFailure(state: SDKSessionState, result: Record<string, unknown>): void {
+  const httpStatus = typeof result.api_error_status === "number" ? result.api_error_status : undefined
+  logAgentFailure("turn", { sessionId: state.sessionId, kind: "claude", message: describeErrorResult(result), httpStatus })
+}
+
 function notifyResultObservers(state: SDKSessionState, result: Record<string, unknown>, end = false) {
-  if (result.is_error) {
-    const httpStatus = typeof result.api_error_status === "number" ? result.api_error_status : undefined
-    logAgentFailure("turn", { sessionId: state.sessionId, kind: "claude", message: describeErrorResult(result), httpStatus })
-  }
   const turns = inputTurns.get(state)
   // A send that joins a running turn gets no result of its own, so a result
   // settles every send the CLI has taken up. A CLI without lifecycle reports
@@ -526,6 +532,7 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     state.running = (msg.queued_turn_count ?? 0) > 0
     streamBus.clear(state.sessionId)
     const result = msg as unknown as Record<string, unknown>
+    if (result.is_error) logTurnFailure(state, result)
     notifyResultObservers(state, result)
     if (state.onResult) {
       state.onResult(result)
@@ -712,6 +719,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         state.messageStream?.close(); state.messageStream = null
         abort.abort()
         const result = { type: "result", is_error: true, result: String(error) }
+        logTurnFailure(state, result)
         notifyResultObservers(state, result, true)
         const callback = state.onResult
         state.onResult = null
@@ -768,6 +776,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   attachSubagentWatcher(state)
 
   ;(async () => {
+    let failureLogged = false
     try {
       for await (const msg of q) {
         processSDKEvent(state, msg)
@@ -778,6 +787,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       // Append captured stderr so the surfaced error is verbose enough to
       // diagnose (the SDK's own message is just "exited with code 1").
       const result = detail && !base.includes(detail) ? `${base}\n\n${detail}` : base
+      if (hasUnfinishedWork(state)) { logTurnFailure(state, { is_error: true, result }); failureLogged = true }
       notifyResultObservers(state, { is_error: true, result }, true)
       if (state.onResult) {
         state.onResult({ type: "result", is_error: true, result })
@@ -792,6 +802,10 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       // running flag, pending prompts) must only be torn down by the query that
       // still owns it, or this finally blanks a live turn seconds after it began.
       const ownsSession = state.activeQuery === q
+      // A query that already answered every turn ends quietly; one that dies
+      // with a turn still owed is a failure worth a log line.
+      const ended = { is_error: true, result: "Session ended before the turn completed" }
+      if (!failureLogged && ownsSession && hasUnfinishedWork(state)) logTurnFailure(state, ended)
       messageStream.close()
       if (ownsSession) {
         state.subagentWatcher?.close()
@@ -804,7 +818,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       if (state.activeQuery === q) state.activeQuery = null
       if (state.abort === queryOpts.abortController) state.abort = null
       if (ownsSession) rejectAllPending(state, "Session ended")
-      notifyResultObservers(state, { is_error: true, result: "Session ended before the turn completed" }, true)
+      notifyResultObservers(state, ended, true)
       // The iterator can finish without ever yielding a `result` — Query.close()
       // (teardownState/stopSDKSession) ends it cleanly rather than throwing. Any
       // HTTP response parked on onResult would otherwise never end, leaving the

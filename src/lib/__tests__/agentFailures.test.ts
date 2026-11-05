@@ -3,7 +3,6 @@ import {
   agentFailureTitle,
   agentNotInstalledIn,
   agentNotInstalledMessage,
-  agentSignInCommand,
   classifyAgentFailure,
 } from "../../../shared/session/agentFailures"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
@@ -74,13 +73,6 @@ describe("what the user is told", () => {
   it("finds the agent a not-installed message is about", () => {
     expect(agentNotInstalledIn(agentNotInstalledMessage("codex", "linux"))).toBe("codex")
     expect(agentNotInstalledIn("Something else broke")).toBeNull()
-  })
-
-  it("signs in with the binary Cogpit runs, quoted when it must be", () => {
-    expect(agentSignInCommand("claude")).toBe("claude auth login")
-    expect(agentSignInCommand("codex", "/opt/codex/bin/codex")).toBe("/opt/codex/bin/codex login")
-    expect(agentSignInCommand("claude", "/Users/me/Application Support/claude")).toBe("'/Users/me/Application Support/claude' auth login")
-    expect(agentSignInCommand("acp")).toBeNull()
   })
 })
 

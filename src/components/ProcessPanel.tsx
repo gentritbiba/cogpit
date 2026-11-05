@@ -213,8 +213,8 @@ export const ProcessPanel = memo(function ProcessPanel({
   const canSignIn = !mobile && pty.status === "connected" && !isRemoteDeviceActive()
   useEffect(() => {
     if (!canSignIn || !onProcessStarted) return
-    return registerSignInRunner(({ name, command, args }) => {
-      const id = spawnTerminal({ name, cwd: projectDir ?? undefined, command, args })
+    return registerSignInRunner(({ name, target }) => {
+      const id = spawnTerminal({ name, cwd: projectDir ?? undefined, signIn: { agent: target.kind, instanceId: target.instanceId } })
       onProcessStarted({ id, name, type: "terminal", status: "running", ...(projectDir ? { source: projectDir } : {}) })
     })
   }, [canSignIn, onProcessStarted, projectDir, spawnTerminal])

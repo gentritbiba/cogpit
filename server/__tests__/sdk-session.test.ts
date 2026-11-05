@@ -168,6 +168,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
   }
 })
 
+const failureLog = vi.hoisted(() => ({ logAgentFailure: vi.fn() }))
+vi.mock("../agents/failureLog", () => failureLog)
+
 // subagentWatcher pulls in fs — stub it out
 vi.mock("../subagentWatcher", () => ({
   watchSubagents: vi.fn(() => ({ close: vi.fn(), rescan: vi.fn() })),
@@ -2156,5 +2159,37 @@ describe("sdk-session native worktree startup", () => {
 
     await expect(started).rejects.toMatchObject({ code: "SPAWN_FAILED" })
     expect(gate).not.toHaveBeenCalled()
+  })
+})
+
+describe("sdk-session failure log", () => {
+  it("stays quiet when a query answers its turn and then shuts down", async () => {
+    const sdk = await loadModule()
+    const state = sdk.createSDKSession({ sessionId: "quiet-success", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => !state.running && !state.activeQuery)
+    expect(failureLog.logAgentFailure).not.toHaveBeenCalled()
+  })
+
+  it("logs a failed turn once, with the API status", async () => {
+    scriptedMessages = [
+      { type: "assistant", message: { content: [] } },
+      { type: "result", is_error: true, result: "Invalid API key · Fix external API key", api_error_status: 401 },
+    ]
+    const sdk = await loadModule()
+    const state = sdk.createSDKSession({ sessionId: "signed-out", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => !state.running && !state.activeQuery)
+    expect(failureLog.logAgentFailure).toHaveBeenCalledExactlyOnceWith("turn", {
+      sessionId: "signed-out", kind: "claude", message: "Invalid API key · Fix external API key", httpStatus: 401,
+    })
+  })
+
+  it("logs a process that dies with a turn still owed once, not again on shutdown", async () => {
+    scriptedError = new Error("Claude Code process exited with code 1")
+    const sdk = await loadModule()
+    const state = sdk.createSDKSession({ sessionId: "crashed", cwd: "/tmp", message: "hi" })
+    state.onResult = vi.fn()
+    await waitUntil(() => !state.activeQuery)
+    expect(failureLog.logAgentFailure).toHaveBeenCalledOnce()
+    expect(failureLog.logAgentFailure.mock.calls[0][1]).toMatchObject({ sessionId: "crashed", message: expect.stringContaining("exited with code 1") })
   })
 })

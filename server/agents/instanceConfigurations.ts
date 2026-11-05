@@ -8,13 +8,16 @@ import { orchestrationStore } from "../orchestration/storage"
 import { OrchestrationError } from "../orchestration/store"
 import { findExecutableOnPath } from "../lib/binaryResolver"
 import { providerInstanceEnvironment } from "./instanceRuntime"
-export function providerSetupCommand(instance: ProviderInstance): string {
+/**
+ * The variables that point an agent CLI at a provider-account instance's own
+ * home and config folders, from the same builder its worker uses, so a login
+ * run with them lands where that instance's sessions look for it.
+ */
+export function instanceAuthEnvironment(instance: ProviderInstance): Record<string, string> {
   const env = providerInstanceEnvironment(instance, process.env.COGPIT_ORCHESTRATION_ROOT || getDataRoot())
   const descriptor = descriptorFor(instance.agent)
   const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", descriptor.cli.homeEnvVar, descriptor.cli.bundledBySdk ? "CLAUDE_CONFIG_DIR" : null].filter((key): key is string => key !== null)
-  const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
-  if (process.platform === "win32") return keys.map((key) => `$env:${key}=${quote(env[key]!)}`).join("; ") + `; & ${quote(instance.executable || descriptor.binName)}`
-  return `env ${keys.map((key) => `${key}=${quote(env[key]!)}`).join(" ")} ${instance.agent === "acp" ? "<provider-login-command>" : quote(instance.executable || descriptor.binName)}`
+  return Object.fromEntries(keys.flatMap((key) => env[key] ? [[key, env[key]!]] : []))
 }
 
 export function providerInstances(): ProviderInstance[] { return process.env.COGPIT_AGENT_WORKER === "1" ? [] : orchestrationStore().instances().filter((instance) => !instance.retired) }

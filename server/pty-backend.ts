@@ -57,14 +57,18 @@ export function bunTerminalRuntime(globalObject: object = globalThis): BunTermin
     : null
 }
 
+/**
+ * `args` as one string is a command line passed through verbatim, which only
+ * node-pty on Windows takes: `cmd.exe` needs its `/c` line unquoted.
+ */
 export function spawnPty(
   command: string,
-  args: string[],
+  args: string[] | string,
   options: PtySpawnOptions,
   runtime: BunTerminalRuntime | null = bunTerminalRuntime(),
 ): PtyProcess {
   if (!runtime) return nodePtySpawn(command, args, { name: "xterm-256color", ...options })
-  return spawnBunTerminal(runtime, command, args, options)
+  return spawnBunTerminal(runtime, command, typeof args === "string" ? [args] : args, options)
 }
 
 /**

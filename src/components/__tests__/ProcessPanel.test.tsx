@@ -253,16 +253,17 @@ describe("ProcessPanel", () => {
     const onProcessStarted = vi.fn()
     const { unmount } = render(<ProcessPanel {...defaultProps} collapsed projectDir="/project" onProcessStarted={onProcessStarted} />)
 
-    expect(startAgentSignIn("codex")).toBe(true)
-    expect(mocks.spawnTerminal).toHaveBeenCalledWith({ name: "Sign in to Codex", cwd: "/project", command: "codex", args: ["login"] })
+    expect(startAgentSignIn({ kind: "codex", instanceId: "work" })).toBe(true)
+    // The server builds the command from the agent and account; the panel only names them.
+    expect(mocks.spawnTerminal).toHaveBeenCalledWith({ name: "Sign in to Codex", cwd: "/project", signIn: { agent: "codex", instanceId: "work" } })
     expect(onProcessStarted).toHaveBeenCalledWith({ id: "pty_1", name: "Sign in to Codex", type: "terminal", status: "running", source: "/project" })
 
     unmount()
-    expect(startAgentSignIn("codex")).toBe(false)
+    expect(startAgentSignIn({ kind: "codex", instanceId: null })).toBe(false)
   })
 
   it("offers no sign-in runner on a phone", () => {
     render(<ProcessPanel {...defaultProps} collapsed mobile projectDir="/project" onProcessStarted={vi.fn()} />)
-    expect(startAgentSignIn("codex")).toBe(false)
+    expect(startAgentSignIn({ kind: "codex", instanceId: null })).toBe(false)
   })
 })

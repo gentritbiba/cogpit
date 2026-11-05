@@ -1,34 +1,52 @@
 import { useEffect, useSyncExternalStore } from "react"
 
 import type { AgentKind } from "../../../shared/session/agent-descriptors"
+import { deviceScopedKey } from "@/lib/device"
 import { fetchProviderUpdates, type ProviderUpdateInfo } from "@/lib/providerUpdates"
 
 /**
- * Which agent CLIs this server can run, from `/api/provider-updates`. One copy
- * for the whole renderer: the provider picker, the not-installed notice, the
- * sign-in action and the update banner all read it.
+ * Which agent CLIs the active machine can run, from `/api/provider-updates`.
+ * One copy per device and signed-in account, for the provider picker, the
+ * not-installed notice, the sign-in command and the update banner. Another
+ * machine's answer is never shown: the store is keyed by device scope, and an
+ * answer that arrives after the scope changed is dropped.
  */
 
-let providers: readonly ProviderUpdateInfo[] | null = null
-let inFlight: Promise<void> | null = null
+const snapshots = new Map<string, readonly ProviderUpdateInfo[]>()
+const inFlight = new Map<string, Promise<void>>()
 const listeners = new Set<() => void>()
 
-function publish(next: readonly ProviderUpdateInfo[]): void {
-  providers = next
+function currentScope(): string {
+  return deviceScopedKey("agent-availability")
+}
+
+function notify(): void {
   for (const listener of listeners) listener()
 }
 
-/** Ask the server again; concurrent callers share one request. A failed check keeps the last answer. */
+/** Ask the active machine again; concurrent callers share one request. A failed check keeps the last answer. */
 export function refreshAgentAvailability(): Promise<void> {
-  inFlight ??= fetchProviderUpdates()
-    .then(publish, () => undefined)
-    .finally(() => { inFlight = null })
-  return inFlight
+  const scope = currentScope()
+  const pending = inFlight.get(scope)
+  if (pending) return pending
+  const request = fetchProviderUpdates()
+    .then((next) => {
+      if (currentScope() !== scope) return
+      snapshots.set(scope, next)
+      notify()
+    }, () => undefined)
+    .finally(() => { inFlight.delete(scope) })
+  inFlight.set(scope, request)
+  return request
 }
 
 /** Replace one agent's entry, e.g. with the answer an update run came back with. */
 export function replaceAgentAvailability(info: ProviderUpdateInfo): void {
-  if (providers) publish(providers.map((entry) => (entry.provider === info.provider ? info : entry)))
+  const scope = currentScope()
+  const current = snapshots.get(scope)
+  if (!current) return
+  snapshots.set(scope, current.map((entry) => (entry.provider === info.provider ? info : entry)))
+  notify()
 }
 
 function subscribe(listener: () => void): () => void {
@@ -36,12 +54,15 @@ function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener) }
 }
 
-/** Every agent's entry, or null until the first check answers. */
+const readSnapshot = () => snapshots.get(currentScope()) ?? null
+
+/** Every agent's entry on the active machine, or null until its first check answers. */
 export function useAgentAvailability(): readonly ProviderUpdateInfo[] | null {
-  const current = useSyncExternalStore(subscribe, () => providers, () => providers)
+  const current = useSyncExternalStore(subscribe, readSnapshot, readSnapshot)
+  const scope = currentScope()
   useEffect(() => {
-    if (!providers) void refreshAgentAvailability()
-  }, [])
+    if (!snapshots.has(scope)) void refreshAgentAvailability()
+  }, [scope])
   return current
 }
 
@@ -58,14 +79,9 @@ export function isAgentInstalled(snapshot: readonly ProviderUpdateInfo[] | null,
   return agentAvailability(snapshot, kind)?.installed ?? true
 }
 
-/** The binary the server spawns for an agent, when it has reported one. */
-export function agentExecutable(kind: AgentKind): string | null {
-  return agentAvailability(providers, kind)?.binaryPath ?? null
-}
-
 /** @internal test-only */
 export function _resetAgentAvailabilityForTests(): void {
-  providers = null
-  inFlight = null
+  snapshots.clear()
+  inFlight.clear()
   listeners.clear()
 }

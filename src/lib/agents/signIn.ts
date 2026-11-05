@@ -1,22 +1,36 @@
-import { useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 
 import { descriptorFor, type AgentKind } from "../../../shared/session/agent-descriptors"
-import { agentSignInCommand } from "../../../shared/session/agentFailures"
-import { agentExecutable } from "./availability"
+import { splitInstanceDirName } from "../../../shared/session/instances"
+import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
+import { agentAvailability, useAgentAvailability } from "./availability"
 
 /**
- * Signing an agent in means running its own login in a terminal, with the
- * binary Cogpit spawns — which may be the SDK's bundled copy that no shell can
- * find by name. The terminal panel registers itself as the runner when it can
- * open one here; without it, callers show the command to copy instead.
+ * Signing an agent in means running its own login in a terminal, as the
+ * account a session runs under: the default one, or a provider-account
+ * instance with its own executable and home. The server works out the binary
+ * and environment from the agent and instance, so this side only names them.
+ * The terminal panel registers itself as the runner when it can open a
+ * terminal here; without it, callers show the command to copy instead.
  */
 
-export interface SignInLaunch {
+export interface SignInTarget {
   kind: AgentKind
+  /** The provider-account instance a session runs under; null for the default account. */
+  instanceId: string | null
+}
+
+/** Whose sign-in a session needs: its agent, and the account instance its dirName names. */
+export function signInTargetFor(kind: AgentKind, dirName?: string | null): SignInTarget {
+  const { instanceId } = splitInstanceDirName(dirName)
+  return { kind, instanceId: instanceId === "default" ? null : instanceId }
+}
+
+export interface SignInLaunch {
+  target: SignInTarget
   /** Window title for the terminal tab. */
   name: string
-  command: string
-  args: readonly string[]
 }
 
 type Runner = (launch: SignInLaunch) => void
@@ -48,18 +62,46 @@ export function useCanRunSignIn(): boolean {
   return useSyncExternalStore(subscribe, () => runner !== null, () => false)
 }
 
-/** The command to show for copying, spelled with the binary Cogpit actually runs. */
-export function signInCommandFor(kind: AgentKind): string | null {
-  return agentSignInCommand(kind, agentExecutable(kind))
+/**
+ * Open a terminal running the agent's sign-in for the target's account.
+ * Returns false when there is no terminal to open it in, or the agent has no
+ * sign-in of its own.
+ */
+export function startAgentSignIn(target: SignInTarget): boolean {
+  const { displayName, cli } = descriptorFor(target.kind)
+  if (!runner || !cli.signIn) return false
+  runner({ target, name: `Sign in to ${displayName}` })
+  return true
+}
+
+interface InstanceListing {
+  id: string
+  /** Only an administrator is shown how to sign an instance in. */
+  setupCommand?: string
 }
 
 /**
- * Open a terminal running the agent's sign-in. Returns false when there is no
- * terminal to open it in, or the agent has no sign-in of its own.
+ * The sign-in as a command to copy, as the active machine's server spells it
+ * for the target's account; null until it answers, or when it will not say.
  */
-export function startAgentSignIn(kind: AgentKind): boolean {
-  const { binName, displayName, cli } = descriptorFor(kind)
-  if (!runner || !cli.signIn) return false
-  runner({ kind, name: `Sign in to ${displayName}`, command: agentExecutable(kind) ?? binName, args: cli.signIn.args })
-  return true
+export function useSignInCommand(target: SignInTarget): string | null {
+  const availability = useAgentAvailability()
+  const [instanceCommand, setInstanceCommand] = useState<{ key: string; command: string | null } | null>(null)
+  const key = `${deviceScopedKey("agent-sign-in")}::${target.instanceId ?? ""}`
+
+  useEffect(() => {
+    if (!target.instanceId) return
+    let current = true
+    authFetch("/api/provider-instances")
+      .then((response) => (response.ok ? response.json() as Promise<{ instances?: InstanceListing[] }> : null))
+      .then((body) => {
+        const command = body?.instances?.find((instance) => instance.id === target.instanceId)?.setupCommand ?? null
+        if (current) setInstanceCommand({ key, command })
+      })
+      .catch(() => undefined)
+    return () => { current = false }
+  }, [key, target.instanceId])
+
+  if (!target.instanceId) return agentAvailability(availability, target.kind)?.signInCommand ?? null
+  return instanceCommand?.key === key ? instanceCommand.command : null
 }
