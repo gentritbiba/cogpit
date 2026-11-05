@@ -34,7 +34,7 @@ import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "../password-utils"
 import { findExecutableOnPath } from "../lib/binaryResolver"
 import { bundledExecutable } from "../agents/bundledExecutable"
-import { dirname, resolve, join } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import { asReaddirMock } from "./http-fixtures"
 
 const mockedReadFile = vi.mocked(readFile)
@@ -62,7 +62,7 @@ function freshMachine({ dirs = [], onPath = [], bundled = [] }: {
   mockedReadFile.mockRejectedValue(enoent())
   mockedStat.mockImplementation(async (path) => {
     const target = resolve(String(path))
-    if (dirs.some((dir) => resolve(dir) === target || resolve(dir).startsWith(`${target}/`))) {
+    if (dirs.some((dir) => resolve(dir) === target || resolve(dir).startsWith(`${target}${sep}`))) {
       return { isDirectory: () => true } as unknown as Stats
     }
     throw enoent()

@@ -170,6 +170,13 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
 
 const failureLog = vi.hoisted(() => ({ logAgentFailure: vi.fn() }))
 vi.mock("../agents/failureLog", () => failureLog)
+// claudeRuntime.start refuses to spawn without a Claude binary on this machine,
+// and CI runners do not all have one; the worktree tests below supply one.
+const claudeBinary = vi.hoisted(() => ({ path: undefined as string | undefined }))
+vi.mock("../agents/claudeExecutable", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agents/claudeExecutable")>()
+  return { ...actual, claudeCliPath: () => claudeBinary.path ?? actual.claudeCliPath() }
+})
 
 // subagentWatcher pulls in fs — stub it out
 vi.mock("../subagentWatcher", () => ({
@@ -2115,6 +2122,8 @@ describe("sdk-session user dialogs", () => {
 
 describe("sdk-session native worktree startup", () => {
   const worktree = "/project/.claude/worktrees/worker"
+  beforeEach(() => { claudeBinary.path = process.execPath })
+  afterEach(() => { claudeBinary.path = undefined })
 
   async function startWorktreeSession(gate: () => Promise<void>) {
     const { claudeRuntime } = await import("../agents/claudeRuntime")
