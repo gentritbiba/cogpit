@@ -29,10 +29,8 @@ export interface HomeModelControls {
   onModelChange: (model: string) => void
   selectedEffort: string
   onEffortChange: (effort: string) => void
-  /** The access a session of that agent starts with. */
+  /** The access a new session of that agent starts with unless the home chooses another. */
   permissionModeFor?: (agentKind: AgentKind) => PermissionMode
-  /** Store access chosen for a session of that agent. */
-  onPermissionModeChange?: (agentKind: AgentKind, mode: PermissionMode) => void
 }
 
 export interface HomeStart {
@@ -40,9 +38,10 @@ export interface HomeStart {
   model: HomeModelControls
   /**
    * Start a session in the project and send the message, with any pasted or
-   * dropped images, as its first turn. Resolves whether it was sent.
+   * dropped images, as its first turn, with the access chosen on the home if
+   * any. Resolves whether it was sent.
    */
-  onStart: (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => Promise<boolean>
+  onStart: (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>, permissionMode?: PermissionMode) => Promise<boolean>
 }
 
 /** What a getting-started guide above the composer can show and offer. */
@@ -74,6 +73,8 @@ export function HomeComposer({
 }) {
   const [picked, setPicked] = useState<HomeProject | null>(null)
   const [text, setText] = useState("")
+  // Access chosen here, per agent: a draft for the next session, never the open one's.
+  const [accessDraft, setAccessDraft] = useState<Partial<Record<AgentKind, PermissionMode>>>({})
   const fieldRef = useRef<HTMLTextAreaElement>(null)
   const project = picked ?? recent[0] ?? null
   const chips = (picked && !recent.some((candidate) => sameFolder(candidate, picked)) ? [picked, ...recent] : [...recent]).slice(0, MAX_CHIPS)
@@ -101,13 +102,12 @@ export function HomeComposer({
   const submit = async (event?: FormEvent) => {
     event?.preventDefault()
     if (!project || !canStart) return
-    const sent = await start.onStart(project.dirName, project.cwd, message, images.length > 0 ? images.map(({ data, mediaType }) => ({ data, mediaType })) : undefined)
+    const sent = await start.onStart(project.dirName, project.cwd, message, images.length > 0 ? images.map(({ data, mediaType }) => ({ data, mediaType })) : undefined, accessDraft[agentKind])
     if (!sent) return
     setText("")
     clearImages()
   }
-  // Access is chosen for the agent this composer starts, whichever session is open behind the home.
-  const onPermissionModeChange = start.model.onPermissionModeChange
+  const permissionModeFor = start.model.permissionModeFor
   const fill = (example: string) => {
     holdProject()
     setText(example)
@@ -194,8 +194,8 @@ export function HomeComposer({
               onModelChange={start.model.onModelChange}
               selectedEffort={start.model.selectedEffort}
               onEffortChange={start.model.onEffortChange}
-              permissionMode={start.model.permissionModeFor?.(agentKind)}
-              onPermissionModeChange={onPermissionModeChange && ((mode) => onPermissionModeChange(agentKind, mode))}
+              permissionMode={accessDraft[agentKind] ?? permissionModeFor?.(agentKind)}
+              onPermissionModeChange={permissionModeFor && ((mode) => setAccessDraft((draft) => ({ ...draft, [agentKind]: mode })))}
             />
             <Button type="submit" size="icon-xs" disabled={!canStart} aria-label="Start session" title="Start session (Enter)">
               <Send data-icon="icon" />

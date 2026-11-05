@@ -170,7 +170,7 @@ describe("MissionHome", () => {
     fireEvent.keyDown(field, { key: "Enter", shiftKey: true })
     expect(starter.onStart).not.toHaveBeenCalled()
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form", undefined)
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form", undefined, undefined)
     await waitFor(() => expect(field).toHaveValue(""))
   })
 
@@ -216,7 +216,7 @@ describe("MissionHome", () => {
       fireEvent.paste(field, { clipboardData: { items: [{ type: "image/png", getAsFile: () => file }] } })
       expect(await screen.findByRole("img", { name: "Upload 1" })).toHaveAttribute("src", "data:image/png;base64,cG5n")
       fireEvent.keyDown(field, { key: "Enter" })
-      expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "", [{ data: "cG5n", mediaType: "image/png" }])
+      expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "", [{ data: "cG5n", mediaType: "image/png" }], undefined)
       await waitFor(() => expect(screen.queryByRole("img", { name: "Upload 1" })).not.toBeInTheDocument())
     } finally {
       vi.unstubAllGlobals()
@@ -233,7 +233,7 @@ describe("MissionHome", () => {
     const field = screen.getByRole("textbox", { name: "First message" })
     fireEvent.change(field, { target: { value: "hello" } })
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith(expect.not.stringMatching(/^-workspace$/), "/workspace", "hello", undefined)
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith(expect.not.stringMatching(/^-workspace$/), "/workspace", "hello", undefined, undefined)
   })
 
   it("keeps the project shown when typing began, even as sessions reorder", () => {
@@ -246,7 +246,7 @@ describe("MissionHome", () => {
     expect(projectChip("workspace")).toHaveAttribute("aria-pressed", "true")
     expect(projectChip("elsewhere")).toHaveAttribute("aria-pressed", "false")
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "ship it", undefined)
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "ship it", undefined, undefined)
   })
 
   it("switches where the session starts from a recent-project chip", () => {
@@ -261,7 +261,7 @@ describe("MissionHome", () => {
     const field = screen.getByRole("textbox", { name: "First message" })
     fireEvent.change(field, { target: { value: "go" } })
     fireEvent.keyDown(field, { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-elsewhere", "/elsewhere", "go", undefined)
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-elsewhere", "/elsewhere", "go", undefined, undefined)
   })
 
   it("marks rows whose session or crew is working or waiting", () => {
@@ -282,7 +282,7 @@ describe("MissionHome", () => {
     expect(projectChip("repo")).toHaveAttribute("aria-pressed", "true")
     fireEvent.change(screen.getByRole("textbox", { name: "First message" }), { target: { value: "hi" } })
     fireEvent.keyDown(screen.getByRole("textbox", { name: "First message" }), { key: "Enter" })
-    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-repo", "/repo", "hi", undefined)
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-repo", "/repo", "hi", undefined, undefined)
   })
 
   it("offers to open a folder, straight in the folder browser, when no session suggests one", async () => {
@@ -295,21 +295,39 @@ describe("MissionHome", () => {
     expect(screen.getByRole("button", { name: /^Model claude/ })).toBeInTheDocument()
   })
 
-  it("sets access for the agent this composer starts, not the session open behind the home", () => {
-    const onPermissionModeChange = vi.fn()
+  it("keeps access chosen here as the next session's draft, per agent, and starts with it", () => {
     const starter = start()
-    const modes: Record<string, string> = { claude: "acceptEdits", codex: "default" }
     render(<MissionHome onOpenSession={vi.fn()} start={{
       ...starter,
-      model: { ...starter.model, permissionModeFor: (kind: string) => modes[kind], onPermissionModeChange },
-    } as typeof starter} />)
+      // Only a read of each agent's default: the home has no way to change the stored access.
+      model: { ...starter.model, permissionModeFor: () => "default" as const },
+    }} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Access acceptEdits" }))
-    expect(onPermissionModeChange).toHaveBeenLastCalledWith("claude", "acceptEdits")
-
-    fireEvent.click(screen.getByRole("button", { name: /^Model claude/ }))
     fireEvent.click(screen.getByRole("button", { name: "Access default" }))
-    expect(onPermissionModeChange).toHaveBeenLastCalledWith("codex", "acceptEdits")
+    expect(screen.getByRole("button", { name: "Access acceptEdits" })).toBeInTheDocument()
+
+    // Another agent has its own draft: Claude's choice does not start Codex.
+    fireEvent.click(screen.getByRole("button", { name: /^Model claude/ }))
+    expect(screen.getByRole("button", { name: "Access default" })).toBeInTheDocument()
+
+    const field = screen.getByRole("textbox", { name: "First message" })
+    fireEvent.change(field, { target: { value: "fix the login form" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith(expect.not.stringMatching(/^-workspace$/), "/workspace", "fix the login form", undefined, undefined)
+  })
+
+  it("starts the session with the access chosen for its agent", () => {
+    const starter = start()
+    render(<MissionHome onOpenSession={vi.fn()} start={{
+      ...starter,
+      model: { ...starter.model, permissionModeFor: () => "default" as const },
+    }} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Access default" }))
+    const field = screen.getByRole("textbox", { name: "First message" })
+    fireEvent.change(field, { target: { value: "fix the login form" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(starter.onStart).toHaveBeenCalledExactlyOnceWith("-workspace", "/workspace", "fix the login form", undefined, "acceptEdits")
   })
 
   it("explains itself and names its shortcuts", () => {

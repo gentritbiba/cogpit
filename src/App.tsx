@@ -40,6 +40,7 @@ import { useTheme } from "@/hooks/useTheme"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { useSessionAccessLoss } from "@/hooks/useSessionAccessLoss"
 import { usePermissions } from "@/hooks/usePermissions"
+import type { PermissionMode } from "@/lib/permissions"
 import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
@@ -529,10 +530,14 @@ export default function App() {
   // A first message that could not be sent lands back in the new session's
   // composer, where the user now is, instead of disappearing.
   const [queuedFirstMessage, setQueuedFirstMessage] = useState<{ message: string; images?: Array<{ data: string; mediaType: string }>; settle: (sent: boolean) => void } | null>(null)
-  const handleStartNewSessionWith = useCallback(async (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>) => {
+  const setPermissionModeFor = perms.setModeFor
+  const handleStartNewSessionWith = useCallback(async (dirName: string, cwd: string | undefined, message: string, images?: Array<{ data: string; mediaType: string }>, permissionMode?: PermissionMode) => {
     await handleStartNewSession(dirName, cwd)
+    // Access chosen on the home is the new session's: stored only once the
+    // session open behind the home is closed, so it never changes that one.
+    if (permissionMode) setPermissionModeFor(agentKindForDirName(dirName), permissionMode)
     return new Promise<boolean>((settle) => setQueuedFirstMessage({ message, images, settle }))
-  }, [handleStartNewSession])
+  }, [handleStartNewSession, setPermissionModeFor])
   const sendQueuedFirstMessage = agentChat.sendMessage
   useEffect(() => {
     if (!queuedFirstMessage || !state.pendingDirName) return
@@ -549,7 +554,6 @@ export default function App() {
     selectedEffort: effectiveEffort,
     onEffortChange: setSelectedEffort,
     permissionModeFor: perms.modeFor,
-    onPermissionModeChange: perms.setModeFor,
   }
 
   // Detect if session belongs to a team

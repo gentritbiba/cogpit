@@ -22,6 +22,7 @@ import {
   useAppServerFixture,
   userDataDir,
 } from "./appServerFixture"
+import { withUserHome } from "./userHome"
 
 type AppServerFactory = typeof createAppServer
 
@@ -42,23 +43,14 @@ const shellCases: ReadonlyArray<readonly [name: string, factory: AppServerFactor
 useAppServerFixture()
 
 describe.each(shellCases)("%s shell", (_name, factory) => {
-  /** Starts the shell with HOME in the fixture, so ~/.cogpit is whatever the test makes it. */
+  /** Starts the shell with the user's home in the fixture, so ~/.cogpit is whatever the test makes it. */
   async function startWithHome(cogpitHomeBefore: boolean) {
     const home = join(fixtureRoot, "user-home")
     await mkdir(cogpitHomeBefore ? join(home, ".cogpit") : home, { recursive: true })
-    const saved = { HOME: process.env.HOME, COGPIT_WORKSPACES_DIR: process.env.COGPIT_WORKSPACES_DIR, COGPIT_SLACK_DIR: process.env.COGPIT_SLACK_DIR }
-    process.env.HOME = home
-    delete process.env.COGPIT_WORKSPACES_DIR
-    delete process.env.COGPIT_SLACK_DIR
-    try {
+    await withUserHome(home, async () => {
       const { httpServer } = await factory(staticDir, userDataDir)
       await close(httpServer)
-    } finally {
-      for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key]
-        else process.env[key] = value
-      }
-    }
+    })
     return JSON.parse(await readFile(join(userDataDir, "install-state.json"), "utf8")) as { freshInstall: boolean }
   }
 
