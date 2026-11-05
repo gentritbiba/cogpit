@@ -37,7 +37,7 @@ const targets: AuditTarget[] = [
       // glob is fixed only in 14.0.2; cacache (under tuf-js) pins ^10.
       ["glob:1244013", "moderate"],
       // minimatch is fixed only in 11.0.1; electron-builder, typescript-eslint and filelist pin ^3, ^5, ^9 and ^10.
-      ["minimatch:1244012", "moderate"],
+      ["minimatch:1244623", "moderate"],
     ]),
   },
   {
