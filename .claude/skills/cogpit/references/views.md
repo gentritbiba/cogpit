@@ -63,7 +63,7 @@ Put the data the view needs in the block. These libraries are built in:
 | Library | Load | Then |
 | --- | --- | --- |
 | D3 7 | `<script src="cogpit:lib/d3"></script>` | global `d3` |
-| KaTeX 0.16 | `<script src="cogpit:lib/katex"></script>` | `katex.render(tex, element)`; `renderMathInElement(element)` typesets `\(…\)`, `\[…\]` and `$$…$$`. It draws native MathML: no stylesheet or fonts to add |
+| KaTeX 0.19 | `<script src="cogpit:lib/katex"></script>` | `katex.render(tex, element)`; `renderMathInElement(element)` typesets `\(…\)`, `\[…\]` and `$$…$$`. It draws native MathML: no stylesheet or fonts to add |
 | Three.js r180 | `import * as THREE from "three"` in a module script | `import { OrbitControls } from "three/addons/controls/OrbitControls.js"` |
 
 Anything else, write directly: SVG, canvas, WebGL, CSS animation and Web

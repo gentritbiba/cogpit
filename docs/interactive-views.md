@@ -27,8 +27,15 @@ reports its height and script errors, and routes link clicks to the parent.
 The frame has an opaque origin: no cookies, storage or access to Cogpit's DOM
 and API. The shell's policy allows inline and blob scripts but no network
 (`connect-src`, `img-src`, `font-src` and `media-src` take only `data:` and
-`blob:`), no forms, no nested frames and framing only by Cogpit itself. The
-desktop app also refuses any navigation of the frame away from the shell.
+`blob:`), no forms, no nested frames and framing only by Cogpit itself.
+
+A sandbox cannot stop a page from navigating its own frame, so the server
+refuses any request a browser marks as loading into a frame
+(`Sec-Fetch-Dest: iframe`) unless it is for the view or plugin shell
+(`server/security.ts`). The app's own policy keeps the frame on Cogpit's
+origin, and the desktop app also refuses any navigation of the frame away
+from the shell. The Vite dev server sends no policy on the app document, so
+during development a view can still navigate its frame to another site.
 
 The parent trusts nothing a view posts, because the view's own code can post
 the same messages as the kit: sizes are clamped, errors truncated, links must be

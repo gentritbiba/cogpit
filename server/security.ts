@@ -13,6 +13,8 @@ import { shareRequestAllowed } from "./share/allowlist"
 import { getShareWithHash, touchShare } from "./share/registry"
 import { markShareGuestRequest } from "./share/requestGuest"
 import { clearRequestAuthentication, setRequestAuthentication } from "./requestAuthentication"
+import { PLUGIN_SHELL_PATH } from "./plugins/shell"
+import { VIEW_SHELL_PATH } from "../shared/viewShell"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -826,13 +828,29 @@ function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
   }
 }
 
+/** The only Cogpit documents that render in a frame; every other response forbids framing. */
+const FRAMED_DOCUMENTS: ReadonlySet<string> = new Set([VIEW_SHELL_PATH, PLUGIN_SHELL_PATH])
+
+/**
+ * A sandboxed view or plugin can still navigate its own frame to any Cogpit
+ * URL, which a local install would answer as the user, so it never reaches a route.
+ */
+function isStrayFrameNavigation(req: IncomingMessage): boolean {
+  const destination = req.headers["sec-fetch-dest"]
+  if (destination !== "iframe" && destination !== "frame") return false
+  const path = requestTargetPath(req.url ?? "/")
+  return path === null || !FRAMED_DOCUMENTS.has(path)
+}
+
 export function securityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   setSecurityHeaders(req, res)
+  if (isStrayFrameNavigation(req)) return sendJson(res, 403, { error: "Not available in a frame" })
   next()
 }
 
 export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   if (isProtectedTransportRequest(req)) setSecurityHeaders(req, res)
+  if (isStrayFrameNavigation(req)) return sendJson(res, 403, { error: "Not available in a frame" })
   next()
 }
 
