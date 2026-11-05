@@ -1,37 +1,34 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { LaunchableExecutable } from "../../agents/executables"
+import type { AgentKind } from "../../../shared/session/types"
 
-vi.mock("../../agents/executables", () => ({
-  launchableExecutableFor: vi.fn(),
-  rediscoverExecutables: vi.fn(),
-}))
-vi.mock("../../lib/cliProcess", () => ({
+const mocks = vi.hoisted(() => ({
+  findLaunchableExecutable: vi.fn(),
   probeCliVersion: vi.fn(),
   runCli: vi.fn(),
 }))
+vi.mock("../../agents/executables", () => ({ findLaunchableExecutable: mocks.findLaunchableExecutable }))
+vi.mock("../../lib/cliProcess", () => ({ probeCliVersion: mocks.probeCliVersion, runCli: mocks.runCli }))
 
 import { checkAgents } from "../../agents/agentCheck"
-import { launchableExecutableFor, rediscoverExecutables } from "../../agents/executables"
-import { probeCliVersion, runCli } from "../../lib/cliProcess"
+import { agentReadiness } from "../../../shared/contracts/agentCheck"
 import { descriptorFor, installableDescriptors } from "../../../shared/session/agent-descriptors"
-import type { AgentKind } from "../../../shared/session/types"
-import type { ActiveExecutable } from "../../../shared/contracts/agentExecutable"
 
-const mockedLaunchable = vi.mocked(launchableExecutableFor)
-const mockedRunCli = vi.mocked(runCli)
-const mockedProbeVersion = vi.mocked(probeCliVersion)
+type Status = { code: number | null; stdout: string }
 
-type Binaries = Partial<Record<AgentKind, { path: string; source: ActiveExecutable["source"] }>>
-
-function machine(binaries: Binaries, status: Partial<Record<string, { code: number | null; stdout: string }>> = {}) {
-  mockedLaunchable.mockImplementation((kind) => binaries[kind])
-  mockedProbeVersion.mockResolvedValue("1.2.3")
-  mockedRunCli.mockImplementation(async (path) => ({
+/** What each agent's lookup finds, and what each binary's status command prints. */
+function machine(binaries: Partial<Record<AgentKind, LaunchableExecutable>>, status: Record<string, Status> = {}) {
+  mocks.findLaunchableExecutable.mockImplementation(async (kind: AgentKind) => binaries[kind] ?? { status: "absent" })
+  mocks.probeCliVersion.mockResolvedValue("1.2.3")
+  mocks.runCli.mockImplementation(async (path: string) => ({
     stderr: "",
     timedOut: false,
     ...(status[path] ?? { code: 1, stdout: "" }),
   }))
 }
+
+const onPath = (path: string): LaunchableExecutable => ({ status: "found", path, source: "path" })
 
 async function check(kind: AgentKind, environment: Parameters<typeof checkAgents>[0] = { env: {}, platform: "darwin" }) {
   const found = (await checkAgents(environment)).find((agent) => agent.kind === kind)
@@ -44,29 +41,28 @@ describe("checkAgents", () => {
     vi.clearAllMocks()
   })
 
-  it("covers each agent a person installs, default first, and forgets remembered binaries first", async () => {
+  it("covers each agent a person installs, default first", async () => {
     machine({})
     const agents = await checkAgents({ env: {}, platform: "darwin" })
 
     expect(agents.map((agent) => agent.kind)).toEqual(installableDescriptors().map((descriptor) => descriptor.kind))
     expect(agents[0].kind).toBe("claude")
     expect(agents.map((agent) => agent.kind)).not.toContain("acp")
-    expect(rediscoverExecutables).toHaveBeenCalledOnce()
   })
 
   it("reports a missing CLI with its install page and this platform's install command", async () => {
     machine({})
 
     const mac = await check("claude")
-    expect(mac).toMatchObject({ binary: null, version: null, signIn: null })
+    expect(mac).toMatchObject({ binary: null, unlaunchableChoice: null, version: null, signIn: null })
     expect(mac.install).toEqual({ page: "https://code.claude.com/docs/en/setup", command: "curl -fsSL https://claude.ai/install.sh | bash" })
     expect((await check("claude", { env: {}, platform: "win32" })).install.command).toBe("irm https://claude.ai/install.ps1 | iex")
-    expect(mockedRunCli).not.toHaveBeenCalled()
+    expect(mocks.runCli).not.toHaveBeenCalled()
   })
 
   it("reads the CLI's own offline status report for an installed agent", async () => {
     machine(
-      { claude: { path: "/usr/local/bin/claude", source: "path" } },
+      { claude: onPath("/usr/local/bin/claude") },
       { "/usr/local/bin/claude": { code: 1, stdout: JSON.stringify({ loggedIn: false, authMethod: "none" }) } },
     )
 
@@ -74,27 +70,62 @@ describe("checkAgents", () => {
 
     expect(claude).toMatchObject({ version: "1.2.3", signedIn: false })
     expect(claude.signIn).toEqual({ executable: "/usr/local/bin/claude", args: ["auth", "login"], command: "claude auth login" })
-    expect(mockedRunCli).toHaveBeenCalledWith("/usr/local/bin/claude", ["auth", "status", "--json"], 5_000)
+    expect(mocks.runCli).toHaveBeenCalledWith("/usr/local/bin/claude", ["auth", "status", "--json"], 5_000)
+  })
+
+  it("returns only the sign-in verdict, never the account the status report names", async () => {
+    machine(
+      { claude: onPath("/usr/local/bin/claude") },
+      { "/usr/local/bin/claude": { code: 0, stdout: JSON.stringify({
+        loggedIn: true,
+        email: "person@example.com",
+        orgName: "Example Org",
+        orgId: "org-123",
+      }) } },
+    )
+
+    const agents = await checkAgents({ env: {}, platform: "darwin" })
+    const body = JSON.stringify(agents)
+
+    expect(agents[0].signedIn).toBe(true)
+    for (const secret of ["person@example.com", "Example Org", "org-123"]) expect(body).not.toContain(secret)
   })
 
   it("spells out the bundled copy's path, which no terminal finds by name", async () => {
     const bundled = "/Users/me/Library/App Support/node_modules/sdk/claude"
-    machine({ claude: { path: bundled, source: "bundled" } })
+    machine({ claude: { status: "found", path: bundled, source: "bundled" } })
 
     expect((await check("claude")).signIn?.command).toBe(`'${bundled}' auth login`)
     expect((await check("claude", { env: {}, platform: "win32" })).signIn?.command).toBe(`& "${bundled}" auth login`)
   })
 
+  it("reports a deleted custom executable as not found, even with an account token set", async () => {
+    machine({ claude: { status: "unlaunchable-choice", path: "/opt/old/claude" } })
+
+    const claude = await check("claude", { env: { ANTHROPIC_API_KEY: "sk-test" }, platform: "darwin" })
+
+    expect(claude).toMatchObject({
+      binary: null,
+      unlaunchableChoice: { path: "/opt/old/claude" },
+      version: null,
+      signedIn: "unknown",
+      signIn: null,
+    })
+    expect(agentReadiness(claude)).toBe("not-found")
+    expect(mocks.probeCliVersion).not.toHaveBeenCalled()
+    expect(mocks.runCli).not.toHaveBeenCalled()
+  })
+
   it("trusts an account token in the environment without running anything", async () => {
-    machine({ claude: { path: "/usr/local/bin/claude", source: "path" } })
+    machine({ claude: onPath("/usr/local/bin/claude") })
 
     await expect(check("claude", { env: { ANTHROPIC_API_KEY: "sk-test" }, platform: "darwin" })).resolves.toMatchObject({ signedIn: true })
-    expect(mockedRunCli).not.toHaveBeenCalled()
+    expect(mocks.runCli).not.toHaveBeenCalled()
   })
 
   it("answers unknown when the status command times out or says nothing usable", async () => {
     machine(
-      { claude: { path: "/bin/claude", source: "path" }, codex: { path: "/bin/codex", source: "path" } },
+      { claude: onPath("/bin/claude"), codex: onPath("/bin/codex") },
       { "/bin/claude": { code: null, stdout: "" }, "/bin/codex": { code: 2, stdout: "error: unexpected argument" } },
     )
 
@@ -103,10 +134,57 @@ describe("checkAgents", () => {
   })
 
   it("answers unknown for a CLI with no status command and no token in the environment", async () => {
-    machine({ copilot: { path: "/opt/homebrew/bin/copilot", source: "path" } })
+    machine({ copilot: onPath("/opt/homebrew/bin/copilot") })
 
     await expect(check("copilot")).resolves.toMatchObject({ signedIn: "unknown", signIn: { command: "copilot login" } })
     await expect(check("copilot", { env: { GH_TOKEN: "gho_x" }, platform: "darwin" })).resolves.toMatchObject({ signedIn: true })
+  })
+})
+
+describe("sharedAgentCheck", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    vi.useFakeTimers({ toFake: ["Date"] })
+    machine({ claude: onPath("/usr/local/bin/claude") })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function freshModule() {
+    return import("../../agents/agentCheck")
+  }
+
+  it("runs once for callers that arrive while a check is in flight", async () => {
+    const { sharedAgentCheck } = await freshModule()
+    let release!: () => void
+    mocks.findLaunchableExecutable.mockImplementation(async (kind: AgentKind) => {
+      if (kind === "claude") await new Promise<void>((resolve) => { release = resolve })
+      return kind === "claude" ? onPath("/usr/local/bin/claude") : { status: "absent" }
+    })
+
+    const first = sharedAgentCheck()
+    const second = sharedAgentCheck()
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"))
+    release()
+
+    expect(await first).toBe(await second)
+    expect(mocks.findLaunchableExecutable).toHaveBeenCalledTimes(installableDescriptors().length)
+  })
+
+  it("answers a quick repeat from the finished check, and runs again once that has aged", async () => {
+    const { sharedAgentCheck } = await freshModule()
+    const first = await sharedAgentCheck()
+
+    vi.advanceTimersByTime(1_000)
+    expect(await sharedAgentCheck()).toBe(first)
+    expect(mocks.runCli).toHaveBeenCalledOnce()
+
+    vi.advanceTimersByTime(1_500)
+    expect(await sharedAgentCheck()).not.toBe(first)
+    expect(mocks.runCli).toHaveBeenCalledTimes(2)
   })
 })
 

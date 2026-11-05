@@ -12,9 +12,11 @@ import {
   type InstallableAgentDescriptor,
 } from "../../shared/session/agent-descriptors"
 import { probeCliVersion, runCli } from "../lib/cliProcess"
-import { launchableExecutableFor, rediscoverExecutables } from "./executables"
+import { findLaunchableExecutable } from "./executables"
 
 const STATUS_TIMEOUT_MS = 5_000
+/** How long a finished check answers repeat requests, so a burst of clicks runs it once. */
+const REUSE_MS = 2_000
 
 export interface AgentCheckEnvironment {
   platform?: NodeJS.Platform
@@ -44,14 +46,18 @@ export function signInCommand(
   return { executable: binary.path, args, command: [head, ...args].join(" ") }
 }
 
+/**
+ * Only the descriptor's verdict leaves here: a status report also names the
+ * account (email, organization), and that output is read and dropped.
+ */
 export async function signInState(
   descriptor: InstallableAgentDescriptor,
-  binaryPath: string | null,
+  binaryPath: string,
   env: NodeJS.ProcessEnv,
 ): Promise<SignInState> {
   const { signIn } = descriptor.cli
   if (signIn.envVars.some((name) => env[name]?.trim())) return true
-  if (!binaryPath || !signIn.statusArgs) return "unknown"
+  if (!signIn.statusArgs) return "unknown"
   return signIn.readStatus(await runCli(binaryPath, signIn.statusArgs, STATUS_TIMEOUT_MS))
 }
 
@@ -59,15 +65,19 @@ async function checkAgent(
   descriptor: InstallableAgentDescriptor,
   { platform = process.platform, env = process.env }: AgentCheckEnvironment,
 ): Promise<AgentCheck> {
-  const binary = launchableExecutableFor(descriptor.kind) ?? null
-  const [version, signedIn] = await Promise.all([
-    binary ? probeCliVersion(binary.path, descriptor.cli.versionArgs) : null,
-    signInState(descriptor, binary?.path ?? null, env),
-  ])
+  const found = await findLaunchableExecutable(descriptor.kind)
+  const binary = found.status === "found" ? { path: found.path, source: found.source } : null
+  const [version, signedIn] = binary
+    ? await Promise.all([
+        probeCliVersion(binary.path, descriptor.cli.versionArgs),
+        signInState(descriptor, binary.path, env),
+      ])
+    : [null, "unknown" as const]
   return {
     kind: descriptor.kind,
     displayName: descriptor.displayName,
     binary,
+    unlaunchableChoice: found.status === "unlaunchable-choice" ? { path: found.path } : null,
     version,
     signedIn,
     install: { page: descriptor.cli.install.page, command: descriptor.cli.install.command(platform) },
@@ -77,6 +87,22 @@ async function checkAgent(
 
 /** Every installable agent, probed fresh so a CLI installed a moment ago shows up. */
 export function checkAgents(environment: AgentCheckEnvironment = {}): Promise<AgentCheck[]> {
-  rediscoverExecutables()
   return Promise.all(installableDescriptors().map((descriptor) => checkAgent(descriptor, environment)))
+}
+
+let shared: { result: Promise<AgentCheck[]>; settledAt: number | null } | null = null
+
+/**
+ * The check every client asks for. Callers arriving while one runs, or within
+ * {@link REUSE_MS} of its end, share it instead of spawning the CLIs again.
+ */
+export function sharedAgentCheck(): Promise<AgentCheck[]> {
+  if (shared && (shared.settledAt === null || Date.now() - shared.settledAt < REUSE_MS)) return shared.result
+  const run = { result: checkAgents(), settledAt: null as number | null }
+  shared = run
+  run.result.then(
+    () => { run.settledAt = Date.now() },
+    () => { if (shared === run) shared = null },
+  )
+  return run.result
 }

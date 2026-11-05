@@ -6,6 +6,7 @@ export function agentCheck(overrides: Partial<AgentCheck> = {}): AgentCheck {
     kind: "claude",
     displayName: "Claude Code",
     binary: { path: "/usr/local/bin/claude", source: "path" },
+    unlaunchableChoice: null,
     version: "2.1.318",
     signedIn: true,
     install: { page: "https://code.claude.com/docs/en/setup", command: "curl -fsSL https://claude.ai/install.sh | bash" },

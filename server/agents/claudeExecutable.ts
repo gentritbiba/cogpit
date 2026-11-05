@@ -144,16 +144,20 @@ export function discoverClaudeExecutables(
 
 export type VersionReader = (binPath: string) => number[] | undefined
 
-/** `2.1.220 (Claude Code)` -> `[2, 1, 220]`; undefined if the binary won't answer. */
+/** `2.1.220 (Claude Code)` -> `[2, 1, 220]`. */
+function versionTuple(output: string | null): number[] | undefined {
+  const match = output?.match(/(\d+)\.(\d+)\.(\d+)/)
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
+}
+
+/** The binary's version; undefined if it won't answer. */
 function readCliVersionSync(binPath: string): number[] | undefined {
   try {
-    const output = execFileSync(binPath, ["--version"], {
+    return versionTuple(execFileSync(binPath, ["--version"], {
       encoding: "utf-8",
       timeout: 5_000,
       stdio: ["ignore", "pipe", "ignore"],
-    })
-    const match = output.match(/(\d+)\.(\d+)\.(\d+)/)
-    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
+    }))
   } catch {
     return undefined
   }
@@ -230,9 +234,30 @@ export function resolveClaudeExecutable(): ResolvedClaudeExecutable | undefined 
   return memo.resolved
 }
 
-/** Drop the memoized resolution, so a CLI installed since is found on the next call. */
-export function forgetClaudeExecutable(): void {
-  memo = undefined
+/**
+ * {@link resolveClaudeExecutable} for a caller that must not block: binaries
+ * are discovered afresh and their versions read without stopping the event
+ * loop. The result replaces the memo, so sessions started afterwards use what
+ * this found, a CLI installed since launch included.
+ */
+export async function refreshClaudeExecutable(): Promise<{
+  choice: ExecutableChoice
+  resolved: ResolvedClaudeExecutable | undefined
+}> {
+  const choice = configuredChoice()
+  const key = JSON.stringify(choice)
+  const found = discoverClaudeExecutables(resolveModule)
+  // Only the automatic choice compares versions.
+  const compared = choice.source === "auto" ? [found.installed, found.bundled] : []
+  const versions = new Map(await Promise.all(
+    compared
+      .filter((path): path is string => path !== undefined)
+      .map(async (path) => [path, versionTuple(await probeCliVersion(path, ["--version"]))] as const),
+  ))
+  const resolved = chooseClaudeExecutable(choice, found, (path) => versions.get(path))
+  // A setting saved while the probes ran makes this answer stale; the memo resolves that one itself.
+  if (JSON.stringify(configuredChoice()) === key) memo = { key, resolved }
+  return { choice, resolved }
 }
 
 /**

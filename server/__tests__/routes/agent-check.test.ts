@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const mockCheckAgents = vi.hoisted(() => vi.fn())
-vi.mock("../../agents/agentCheck", () => ({ checkAgents: mockCheckAgents }))
+const mockSharedAgentCheck = vi.hoisted(() => vi.fn())
+vi.mock("../../agents/agentCheck", () => ({ sharedAgentCheck: mockSharedAgentCheck }))
 
 import { registerAgentCheckRoutes } from "../../routes/agent-check"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
@@ -11,12 +11,12 @@ const handler = getRouteHandler(collectRoutes(registerAgentCheckRoutes), "/api/a
 
 describe("GET /api/agent-check", () => {
   beforeEach(() => {
-    mockCheckAgents.mockReset()
+    mockSharedAgentCheck.mockReset()
   })
 
-  it("answers every agent's check, never cached", async () => {
+  it("answers the shared check, never cached by the browser", async () => {
     const agents = [{ kind: "codex", binary: null }]
-    mockCheckAgents.mockResolvedValueOnce(agents)
+    mockSharedAgentCheck.mockResolvedValueOnce(agents)
     const { req, res, next } = createMockReqRes("GET", "/")
 
     await handler(req, res, next)
@@ -34,6 +34,6 @@ describe("GET /api/agent-check", () => {
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     }
-    expect(mockCheckAgents).not.toHaveBeenCalled()
+    expect(mockSharedAgentCheck).not.toHaveBeenCalled()
   })
 })

@@ -11,6 +11,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 import { AgentCheckList } from "../AgentCheckList"
 import { AgentCheckDialog } from "../AgentCheckDialog"
 import { BUNDLED_SIGNED_OUT, MISSING_CODEX, agentCheck } from "./fixtures"
+import { canContinueSetup } from "../../../../shared/contracts/agentCheck"
 
 function row(name: string): HTMLElement {
   return screen.getByText(name).closest("li")!
@@ -54,6 +55,24 @@ describe("AgentCheckList", () => {
 
     expect(onSignIn).toHaveBeenCalledWith(BUNDLED_SIGNED_OUT)
     expect(screen.getByText(BUNDLED_SIGNED_OUT.signIn!.command)).toBeInTheDocument()
+  })
+
+  it("sends a deleted custom executable back to Settings, and never counts it toward setup", () => {
+    const stale = agentCheck({
+      binary: null,
+      unlaunchableChoice: { path: "/opt/old/claude" },
+      version: null,
+      signedIn: "unknown",
+      signIn: null,
+    })
+    render(<AgentCheckList agents={[stale]} onSignIn={vi.fn()} />)
+
+    const claude = row("Claude Code")
+    expect(within(claude).getByText("Not found")).toBeInTheDocument()
+    expect(within(claude).getByText("/opt/old/claude")).toBeInTheDocument()
+    expect(claude).toHaveTextContent("Pick another under Settings → Claude Code executable.")
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument()
+    expect(canContinueSetup([stale])).toBe(false)
   })
 
   it("offers no Sign in button without a caller to start one", () => {

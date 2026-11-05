@@ -18,6 +18,7 @@ export type SignInHandler = (agent: AgentCheck) => void
 
 const STATUS: Record<AgentReadiness, { label: string; className: string }> = {
   "ready": { label: "Ready", className: "bg-success/10 text-success" },
+  "not-found": { label: "Not found", className: "bg-warning/10 text-warning" },
   "not-installed": { label: "Not installed", className: "border-border text-muted-foreground" },
   "signed-out": { label: "Not signed in", className: "bg-warning/10 text-warning" },
   "unknown": { label: "Unknown", className: "border-border text-muted-foreground" },
@@ -52,6 +53,17 @@ function foundText(agent: AgentCheck): string | null {
 function NextStep({ agent, onSignIn }: { agent: AgentCheck; onSignIn?: SignInHandler }) {
   const readiness = agentReadiness(agent)
   if (readiness === "ready") return null
+
+  if (agent.unlaunchableChoice) {
+    const { path } = agent.unlaunchableChoice
+    return (
+      <p className="text-xs text-muted-foreground">
+        Cogpit can't start the program chosen in Settings
+        {path && <> at <code className="break-all font-mono">{path}</code></>}. Pick another under
+        Settings → {agent.displayName} executable.
+      </p>
+    )
+  }
 
   if (readiness === "not-installed" || !agent.signIn) {
     return (

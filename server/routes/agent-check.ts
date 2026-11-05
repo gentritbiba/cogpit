@@ -1,5 +1,5 @@
 import type { AgentCheckResponse } from "../../shared/contracts/agentCheck"
-import { checkAgents } from "../agents/agentCheck"
+import { sharedAgentCheck } from "../agents/agentCheck"
 import { sendJson, type UseFn } from "../http"
 
 /**
@@ -14,7 +14,7 @@ export function registerAgentCheckRoutes(use: UseFn) {
     if (new URL(req.url || "/", "http://localhost").pathname !== "/") return next()
 
     const response: AgentCheckResponse = {
-      agents: await checkAgents(),
+      agents: await sharedAgentCheck(),
       checkedAt: new Date().toISOString(),
     }
     res.setHeader("Cache-Control", "no-store")

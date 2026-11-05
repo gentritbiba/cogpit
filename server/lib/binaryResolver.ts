@@ -85,6 +85,16 @@ export function hasExecutableExtension(fileName: string, env: NodeJS.ProcessEnv 
   return hasExtension(fileName, pathExtensions({ env }))
 }
 
+/** Whether `path` is a file this OS would run: an execute bit on POSIX, existence on Windows. */
+export function isExecutableFile(path: string, env: ResolveEnvironment = {}): boolean {
+  try {
+    if (!statSync(path).isFile()) return false
+  } catch {
+    return false
+  }
+  return probeExecutable(env)(path)
+}
+
 /** Whether Windows' CreateProcess can launch this file without cmd.exe. */
 export function isDirectlyLaunchable(fileName: string): boolean {
   return DIRECT_EXTENSIONS.includes(win32.extname(fileName).toLowerCase())

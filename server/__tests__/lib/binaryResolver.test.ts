@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
   findExecutableOnPath,
   hasExecutableExtension,
+  isExecutableFile,
   nativeBinaryName,
   resolveAgentCommand,
   type ResolveEnvironment,
@@ -209,5 +213,40 @@ describe("hasExecutableExtension", () => {
   it("falls back to the default PATHEXT when unset", () => {
     expect(hasExecutableExtension("runme.bat", {})).toBe(true)
     expect(hasExecutableExtension("runme.txt", {})).toBe(false)
+  })
+})
+
+describe("isExecutableFile", () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cogpit-exec-"))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("accepts a file the OS can run", () => {
+    const tool = join(dir, "tool")
+    writeFileSync(tool, "#!/bin/sh\n")
+    chmodSync(tool, 0o755)
+
+    expect(isExecutableFile(tool)).toBe(true)
+  })
+
+  it("rejects a path that is gone, or is a folder", () => {
+    mkdirSync(join(dir, "folder"))
+
+    expect(isExecutableFile(join(dir, "deleted"))).toBe(false)
+    expect(isExecutableFile(join(dir, "folder"))).toBe(false)
+  })
+
+  it.skipIf(process.platform === "win32")("rejects a file without an execute bit", () => {
+    const notes = join(dir, "notes")
+    writeFileSync(notes, "text")
+    chmodSync(notes, 0o644)
+
+    expect(isExecutableFile(notes)).toBe(false)
   })
 })

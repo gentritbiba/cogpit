@@ -1,13 +1,8 @@
 import type { AgentKind } from "../../shared/session/types"
 import type { ActiveExecutable, ExecutableReport } from "../../shared/contracts/agentExecutable"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
-import { findExecutableOnPath } from "../lib/binaryResolver"
-import {
-  claudeCliPath,
-  describeClaudeExecutable,
-  forgetClaudeExecutable,
-  resolveClaudeExecutable,
-} from "./claudeExecutable"
+import { findExecutableOnPath, isExecutableFile } from "../lib/binaryResolver"
+import { claudeCliPath, describeClaudeExecutable, refreshClaudeExecutable } from "./claudeExecutable"
 
 /**
  * Where each agent CLI is actually spawned from, for callers outside the agent
@@ -23,16 +18,24 @@ export function describeExecutableFor(kind: AgentKind): Promise<ExecutableReport
   return kind === "claude" ? describeClaudeExecutable() : null
 }
 
-/** The binary Cogpit would start for `kind`, and where it came from. */
-export function launchableExecutableFor(
-  kind: AgentKind,
-): { path: string; source: ActiveExecutable["source"] } | undefined {
-  if (kind === "claude") return resolveClaudeExecutable()
-  const path = findExecutableOnPath(descriptorFor(kind).binName)
-  return path ? { path, source: "path" } : undefined
-}
+export type LaunchableExecutable =
+  | { status: "found"; path: string; source: ActiveExecutable["source"] }
+  | { status: "absent" }
+  /** The binary chosen in Settings cannot be started; `path` is null when the choice names none. */
+  | { status: "unlaunchable-choice"; path: string | null }
 
-/** Forget remembered binaries, so one installed while Cogpit runs is found. */
-export function rediscoverExecutables(): void {
-  forgetClaudeExecutable()
+/**
+ * The binary Cogpit would start for `kind`, looked up afresh and only if the OS
+ * can run it, without blocking the event loop.
+ */
+export async function findLaunchableExecutable(kind: AgentKind): Promise<LaunchableExecutable> {
+  if (kind !== "claude") {
+    const path = findExecutableOnPath(descriptorFor(kind).binName)
+    return path ? { status: "found", path, source: "path" } : { status: "absent" }
+  }
+  const { choice, resolved } = await refreshClaudeExecutable()
+  if (resolved && isExecutableFile(resolved.path)) return { status: "found", ...resolved }
+  return choice.source === "auto"
+    ? { status: "absent" }
+    : { status: "unlaunchable-choice", path: resolved?.path ?? choice.path ?? null }
 }
