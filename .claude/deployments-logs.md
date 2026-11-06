@@ -5,6 +5,10 @@ Historical reference only. Use [deployments.md](deployments.md) for current reso
 Earlier Cogpit history is also retained in the [global deployment log](/Users/gentritbiba/project-manager/deployments-logs.md).
 
 
+## v3.5.5 release and agentbox upgrade, 2026-11-05
+
+Beginner-onboarding release (agent check, sign-in errors, first-run home, ask-first defaults for new installs, one layered `cogpit` skill). The tag was moved twice before anything published: the Windows test shard failed first on two new tests (POSIX separator in a config test helper; a missing Claude binary for the worktree startup tests), then on the worktree test's cold import inside `vi.waitFor`'s 1 s default (fixed with a `beforeAll` warm-up and 10 s waits). Third run [41956792386](https://github.com/gentritbiba/cogpit/actions/runs/41956792386) green; published 02:59:45Z. Also needed before tagging: `check:audit` allowance moved to minimatch's re-issued advisory id 1244623. agentbox upgraded 3.5.3 → 3.5.5 from the AUR PKGBUILD after confirming its two live Claude sessions were idle; the 3.5.5 skill installer retired the old standalone skills there. MacBook: 3.5.5 local build staged (installs on quit). Omarchy left to in-app OTA.
+
 ## workspaceEnvironment rollout, 2026-10-08 (030fd7a)
 
 Owner-approved; source archive SHA-256 `c59925c1…1370` verified. agentbox: idle (no agent processes, unit cgroup server-only) → drop-in switched from `~/cogpit-server-next` (2.7.5, instance `4f33a0a5089420db`) to `~/cogpit-server-030fd7a` (instance `87fd0c5996774da8`). Omarchy: only a completed idle session process (its caffeinate inhibitor is in a separate Hyprland scope and survived) → AUR app 3.1.0 (instance `480f870ac93473b9`) SIGTERMed, user copy `~/.local/opt/cogpit-030fd7a` with rebuilt `app.asar` (SHA-256 `e81630c8…de19`) relaunched (instance `ed3143573a63e751`). Both report version 3.1.0, sessionApi 2, workspaceEnvironment 1 via loopback and authenticated Mac hub proxy. Mac not restarted (many running sessions); staged build waits for Cmd+Q.
