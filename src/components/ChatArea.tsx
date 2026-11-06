@@ -11,6 +11,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
+import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { AllowanceRecovery } from "@/components/AllowanceRecovery"
 import { QueuedTurns } from "@/components/QueuedTurns"
@@ -55,6 +56,7 @@ export const ChatArea = memo(function ChatArea({
   const { pendingMessages } = chat
   const { chatScrollRef, observeChatContent, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
+  const timelineRef = useRef<TimelineHandle>(null)
 
   // Cmd/Ctrl+F (or the command palette) → open find-in-session
   const handleFindOpen = useCallback(() => findRef.current?.open(), [])
@@ -136,11 +138,12 @@ export const ChatArea = memo(function ChatArea({
         <StickyPromptBanner
           session={currentSession}
           scrollContainerRef={chatScrollRef}
+          timelineRef={timelineRef}
         />
         <div
           ref={chatScrollRef}
           onScroll={handleScroll}
-          className={cn("h-full overflow-x-hidden overflow-y-auto", isMobile && "mobile-scroll")}
+          className={cn("h-full overflow-x-hidden overflow-y-auto", isMobile ? "mobile-scroll" : rateLimit ? "scroll-pt-4" : "scroll-pt-14")}
         >
           <div
             ref={observeChatContent}
@@ -155,6 +158,7 @@ export const ChatArea = memo(function ChatArea({
                   isLoadingOlder={isLoadingOlder}
                   pagingEnabled={initialScrollDone}
                   onLoadMore={onLoadMore}
+                  timelineRef={timelineRef}
                 />
               )}
               <StreamingTurnOverlay />

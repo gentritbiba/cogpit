@@ -22,7 +22,8 @@ import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { Button } from "@/components/ui/button"
 import { LiveElapsed } from "./AgentStatusIndicator"
 import { collectActivity, segmentActivity, type ActivityItem } from "@/lib/timelineHelpers"
-import { promptSource } from "@/lib/userMessageContent"
+import { isReaderPrompt, promptSource, type PromptSource } from "@/lib/userMessageContent"
+import { InverseColorScheme } from "@/components/InverseColorScheme"
 import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
@@ -31,7 +32,7 @@ import { useSessionContext, useSessionContextOptional } from "@/contexts/Session
 import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
-import type { Turn, TurnContentBlock } from "../../../shared/session/types"
+import type { Turn, TurnContentBlock, UserContent } from "../../../shared/session/types"
 import { hasEditToolCalls } from "../../../shared/session/edit-calls"
 import { cn } from "@/lib/utils"
 import { getTurnDuration } from "@/lib/format"
@@ -39,8 +40,8 @@ import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
-/** What the reader typed: their side of the conversation, set apart on the right. */
-const PROMPT_BUBBLE = "ml-auto w-fit max-w-[min(85%,44rem)] rounded-2xl rounded-tr-md border border-border/70 bg-prompt-surface px-4 py-2.5"
+/** What the reader sent: their side of the conversation, set apart on the right. */
+const READER_BUBBLE = "ml-auto w-fit max-w-[min(85%,44rem)] rounded-2xl rounded-tr-md bg-background px-4 py-2.5 text-foreground"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -384,6 +385,39 @@ function TurnActions({ index, branchCount, isMobile, onRestoreToHere, onOpenBran
 }
 
 /**
+ * What the reader sent, drawn on the opposite theme so it is the first thing
+ * to find when scrolling back. `messageKey` is how the sticky prompt banner
+ * finds it again: "prompt" for the one that opened the turn, the block index
+ * for one sent mid-turn.
+ */
+function ReaderBubble({ messageKey, children }: { messageKey: string; children: React.ReactNode }) {
+  return (
+    <InverseColorScheme data-reader-prompt={messageKey} className={READER_BUBBLE}>
+      {children}
+    </InverseColorScheme>
+  )
+}
+
+/** A prompt nobody typed: a session reporting back, a background task or a teammate. */
+function GeneratedPrompt({ source, content, timestamp }: { source: PromptSource; content: UserContent; timestamp: string }) {
+  if (source.kind === "wakeup") {
+    return (
+      <div className="-mx-2">
+        <DelegatedResultRow wakeup={source.wakeup} timestamp={timestamp} />
+      </div>
+    )
+  }
+  if (source.kind === "attention") {
+    return (
+      <div className="-mx-2">
+        <DelegatedAttentionRow childSessionId={source.childSessionId} detail={source.detail} timestamp={timestamp} />
+      </div>
+    )
+  }
+  return <UserMessage content={content} timestamp={timestamp} compact />
+}
+
+/**
  * What started the turn. The reader's own words sit on the right as theirs;
  * a session reporting back, a background task or a teammate is something that
  * happened, so it runs full width with the rest of the conversation.
@@ -401,51 +435,50 @@ function TurnPrompt({
   const content = turn.userMessage!
   const source = useMemo(() => promptSource(getUserMessageText(content)), [content])
 
-  if (source.kind === "silent" && getUserMessageImages(content).length === 0) {
-    return <TurnActions {...actions} />
-  }
-
-  // Nobody typed these, so they carry no hover row: Restore stays on the
-  // context menu, and only branches, which are worth knowing about, show.
-  if (source.kind === "event" || source.kind === "wakeup" || source.kind === "attention") {
+  if (isReaderPrompt(source, getUserMessageImages(content).length)) {
     return (
       <div className="flex flex-col gap-0.5">
         <MaybePromptContextMenu index={actions.index}>
-          {source.kind === "event" && (
-            <div data-turn-prompt>
-              <UserMessage content={content} timestamp={turn.timestamp} compact />
-            </div>
-          )}
-          {source.kind === "wakeup" && (
-            <div data-turn-prompt className="-mx-2">
-              <DelegatedResultRow wakeup={source.wakeup} timestamp={turn.timestamp} />
-            </div>
-          )}
-          {source.kind === "attention" && (
-            <div data-turn-prompt className="-mx-2">
-              <DelegatedAttentionRow childSessionId={source.childSessionId} detail={source.detail} timestamp={turn.timestamp} />
-            </div>
-          )}
+          <ReaderBubble messageKey="prompt">
+            <UserMessage
+              content={content}
+              timestamp={turn.timestamp}
+              onEditCommand={onEditCommand}
+              onExpandCommand={onExpandCommand}
+              compact
+            />
+          </ReaderBubble>
         </MaybePromptContextMenu>
-        <TurnActions {...actions} onRestoreToHere={undefined} />
+        <TurnActions {...actions} time={turn.timestamp} />
       </div>
     )
   }
 
+  if (source.kind === "silent") return <TurnActions {...actions} />
+
+  // Nobody typed these, so they carry no hover row: Restore stays on the
+  // context menu, and only branches, which are worth knowing about, show.
   return (
     <div className="flex flex-col gap-0.5">
       <MaybePromptContextMenu index={actions.index}>
-        <div data-turn-prompt className={PROMPT_BUBBLE}>
-          <UserMessage
-            content={content}
-            timestamp={turn.timestamp}
-            onEditCommand={onEditCommand}
-            onExpandCommand={onExpandCommand}
-            compact
-          />
-        </div>
+        <GeneratedPrompt source={source} content={content} timestamp={turn.timestamp} />
       </MaybePromptContextMenu>
-      <TurnActions {...actions} time={turn.timestamp} />
+      <TurnActions {...actions} onRestoreToHere={undefined} />
+    </div>
+  )
+}
+
+/** A prompt that arrived while the turn was running, which is the reader's only when they sent it. */
+function QueuedPrompt({ content, timestamp, messageKey }: { content: string; timestamp: string; messageKey: string }) {
+  const source = useMemo(() => promptSource(content), [content])
+  if (source.kind === "silent") return null
+  if (!isReaderPrompt(source, 0)) return <GeneratedPrompt source={source} content={content} timestamp={timestamp} />
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="ml-auto text-xs text-muted-foreground">Sent while it was working</span>
+      <ReaderBubble messageKey={messageKey}>
+        <UserMessage content={content} timestamp={timestamp} compact />
+      </ReaderBubble>
     </div>
   )
 }
@@ -608,12 +641,12 @@ function ContentBlocks({
 
     if (block.kind === "queued_prompt") {
       elements.push(
-        <div key={keyFor(block, i)} className="flex flex-col gap-1">
-          <span className="ml-auto text-xs text-muted-foreground">Sent while it was working</span>
-          <div data-queued-prompt className={PROMPT_BUBBLE}>
-            <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact />
-          </div>
-        </div>
+        <QueuedPrompt
+          key={keyFor(block, i)}
+          content={block.content}
+          timestamp={block.timestamp ?? ""}
+          messageKey={String(originalBlocks.indexOf(block))}
+        />
       )
       i++
       continue

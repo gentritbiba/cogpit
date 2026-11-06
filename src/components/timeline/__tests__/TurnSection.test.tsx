@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
 import type { ParsedSession, SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
 import { formatTaskAttention, formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
+import { formatCrewChatDelivery } from "../../../../shared/contracts/crewChat"
 
 const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
@@ -289,7 +290,7 @@ describe("TurnSection prompts", () => {
     mocks.optionalContext = null
   })
 
-  const promptOf = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-turn-prompt]")
+  const bubblesOf = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>("[data-reader-prompt]")]
   const wakeup = formatTaskWakeup({
     id: "task-1",
     parentSessionId: "session-1",
@@ -298,11 +299,13 @@ describe("TurnSection prompts", () => {
     result: { turn: { reply: "Pricing copy fixed." } },
   })
 
-  it("sets the reader's own prompt apart as a bubble, with its time and Restore under it", () => {
+  it("sets the reader's own prompt apart as a bubble on the opposite theme, with its time and Restore under it", () => {
     const { container } = render(<TurnSection turn={{ ...turn, userMessage: "Do the thing" }} index={0} />)
 
-    expect(promptOf(container)).toHaveClass("ml-auto", "rounded-2xl")
-    expect(promptOf(container)).toHaveTextContent("Do the thing")
+    const [bubble] = bubblesOf(container)
+    expect(bubble).toHaveAttribute("data-reader-prompt", "prompt")
+    expect(bubble).toHaveClass("ml-auto", "rounded-2xl", "color-scheme-inverse")
+    expect(bubble).toHaveTextContent("Do the thing")
     expect(container.querySelector("time")).toHaveAttribute("datetime", turn.timestamp)
     expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
   })
@@ -310,13 +313,14 @@ describe("TurnSection prompts", () => {
   it("shows a session reporting back as its row, not as the reader's bubble", () => {
     const { container } = render(<TurnSection turn={{ ...turn, userMessage: wakeup }} index={0} />)
 
-    expect(promptOf(container)).not.toHaveClass("ml-auto")
-    expect(promptOf(container)?.querySelector("[data-session-row]")).toHaveAttribute("data-session-row", "finished")
+    expect(bubblesOf(container)).toEqual([])
+    const row = container.querySelector("[data-session-row]")
+    expect(row).toHaveAttribute("data-session-row", "finished")
     expect(screen.getByRole("button", { name: "Delegated session, Finished: Pricing copy fixed." })).toBeInTheDocument()
     expect(screen.queryByText(/Acknowledge receipt/)).toBeNull()
     // Nobody typed it: Restore stays on the context menu, with no hover row of its own.
     expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
-    expect(promptOf(container)?.closest("[data-slot='context-menu-trigger']")).not.toBeNull()
+    expect(row?.closest("[data-slot='context-menu-trigger']")).not.toBeNull()
   })
 
   it("names a reporting session after the start that launched it in this transcript", () => {
@@ -355,8 +359,8 @@ describe("TurnSection prompts", () => {
 
     const { container } = render(<TurnSection turn={{ ...turn, userMessage: notification }} index={0} />)
 
-    expect(promptOf(container)).not.toHaveClass("ml-auto")
-    expect(promptOf(container)?.querySelector("[data-task-notification]")).toHaveTextContent("Build finished")
+    expect(bubblesOf(container)).toEqual([])
+    expect(container.querySelector("[data-task-notification]")).toHaveTextContent("Build finished")
     expect(screen.queryByRole("button", { name: "Restore" })).toBeNull()
   })
 
@@ -365,7 +369,7 @@ describe("TurnSection prompts", () => {
       <TurnSection turn={{ ...turn, userMessage: "<system-reminder>The date changed.</system-reminder>" }} index={0} />,
     )
 
-    expect(promptOf(container)).toBeNull()
+    expect(bubblesOf(container)).toEqual([])
     expect(screen.queryByText(/The date changed/)).toBeNull()
     expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
   })
@@ -385,8 +389,33 @@ describe("TurnSection prompts", () => {
     const { container } = render(<TurnSection turn={queuedTurn} index={0} />)
 
     expect(screen.getByText("Sent while it was working")).toBeInTheDocument()
-    expect(container.querySelector("[data-queued-prompt]")).toHaveClass("ml-auto")
-    expect(container.querySelector("[data-queued-prompt]")).toHaveTextContent("Also check mobile")
+    const queued = bubblesOf(container).find((bubble) => bubble.dataset.readerPrompt === "1")
+    expect(queued).toHaveClass("ml-auto", "color-scheme-inverse")
+    expect(queued).toHaveTextContent("Also check mobile")
+  })
+
+  it("shows a crew chat post that arrived mid-turn as what happened, not as the reader's bubble", () => {
+    const post = formatCrewChatDelivery(
+      { sequence: 3, id: "m3", rootId: "root", author: { kind: "agent", name: "ring-deploy" }, text: "One correction on (B)", mentions: [], createdAt: 0 },
+      true,
+      "cogpit-session chat fetch 'root'",
+      "cogpit-session chat post 'root' <text>",
+    )
+    const crewTurn: Turn = {
+      ...turn,
+      id: "turn-crew-post",
+      contentBlocks: [
+        { kind: "text", text: ["Working on it"] },
+        { kind: "queued_prompt", content: post, timestamp: "2026-08-19T12:00:01.000Z" },
+      ],
+      toolCalls: [],
+    }
+
+    const { container } = render(<TurnSection turn={crewTurn} index={0} />)
+
+    expect(screen.getByRole("article", { name: "Crew chat message from ring-deploy" })).toHaveTextContent("One correction on (B)")
+    expect(screen.queryByText("Sent while it was working")).toBeNull()
+    expect(bubblesOf(container)).toEqual([])
   })
 })
 

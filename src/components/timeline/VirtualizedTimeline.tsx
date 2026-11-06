@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { Loader2, Redo2 } from "lucide-react"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
@@ -12,6 +12,12 @@ import { Button } from "@/components/ui/button"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/** Lets what sits over the timeline reach turns the virtualizer has not rendered. */
+export interface TimelineHandle {
+  /** Scrolls the turn to the top of the viewport at once. False when the turn is not in the list. */
+  scrollToTurn(turnIndex: number): boolean
+}
+
 interface VirtualizedTimelineProps {
   filteredTurns: { turn: Turn; index: number }[]
   scrollContainerRef: React.RefObject<HTMLElement | null>
@@ -20,6 +26,7 @@ interface VirtualizedTimelineProps {
   /** False until the initial bottom placement for this session has happened. */
   pagingEnabled?: boolean
   onLoadMore?: () => void
+  timelineRef?: React.Ref<TimelineHandle>
 }
 
 // ── Redo section ─────────────────────────────────────────────────────────────
@@ -101,6 +108,7 @@ export function VirtualizedTimeline({
   isLoadingOlder = false,
   pagingEnabled = false,
   onLoadMore,
+  timelineRef,
 }: VirtualizedTimelineProps) {
   const { state: { activeTurnIndex } } = useAppContext()
   const { undoRedo } = useSessionContext()
@@ -171,6 +179,14 @@ export function VirtualizedTimeline({
     for (let i = 0; i < keyedTurns.length; i++) map.set(keyedTurns[i].index, i)
     return map
   }, [keyedTurns])
+  useImperativeHandle(timelineRef, () => ({
+    scrollToTurn(turnIndex) {
+      const virtualIdx = turnIndexToVirtualIdx.get(turnIndex)
+      if (virtualIdx === undefined || !handleRef.current) return false
+      handleRef.current.scrollToIndex(virtualIdx, { align: "start" })
+      return true
+    },
+  }), [turnIndexToVirtualIdx])
   const lastScrolledTurnRef = useRef<number | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {

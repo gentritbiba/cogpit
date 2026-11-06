@@ -1,5 +1,5 @@
 import { useMemo, memo, type RefObject } from "react"
-import { VirtualizedTimeline } from "./timeline/VirtualizedTimeline"
+import { VirtualizedTimeline, type TimelineHandle } from "./timeline/VirtualizedTimeline"
 import { matchesSearch } from "@/lib/timelineHelpers"
 import { shouldShowEmptyState } from "@/lib/timelinePaging"
 import { useAppContext } from "@/contexts/AppContext"
@@ -22,6 +22,7 @@ interface ConversationTimelineProps {
   isLoadingOlder?: boolean
   pagingEnabled?: boolean
   onLoadMore?: () => void
+  timelineRef?: React.Ref<TimelineHandle>
 }
 
 export const ConversationTimeline = memo(function ConversationTimeline({
@@ -30,6 +31,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   isLoadingOlder,
   pagingEnabled,
   onLoadMore,
+  timelineRef,
 }: ConversationTimelineProps) {
   const { state: { searchQuery, sessionChangeKey } } = useAppContext()
   const { session } = useSessionContext()
@@ -79,6 +81,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
           isLoadingOlder={isLoadingOlder}
           pagingEnabled={pagingEnabled}
           onLoadMore={onLoadMore}
+          timelineRef={timelineRef}
         />
       )}
     </SessionImageGalleryProvider>

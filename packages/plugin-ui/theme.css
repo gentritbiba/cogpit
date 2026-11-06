@@ -1,4 +1,5 @@
-@custom-variant dark (&:is(.dark *));
+/* `.color-scheme-inverse` puts its content on the opposite theme, so `dark:` follows it there. */
+@custom-variant dark (&:is(.dark *:not(.color-scheme-inverse, .color-scheme-inverse *), :root:not(.dark) .color-scheme-inverse, :root:not(.dark) .color-scheme-inverse *));
 
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -53,7 +54,9 @@
   --default-transition-timing-function: var(--motion-ease-standard);
 }
 
-:root {
+:root,
+.dark .color-scheme-inverse {
+  color-scheme: light;
   --motion-duration-instant: 80ms;
   --motion-duration-fast: 120ms;
   --motion-duration-base: 180ms;
@@ -117,7 +120,9 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
-.dark {
+.dark,
+:root:not(.dark) .color-scheme-inverse {
+  color-scheme: dark;
   --selection: rgba(255, 255, 255, 0.2);
   --terminal-magenta: #e879f9;
   --terminal-cyan: #22d3ee;

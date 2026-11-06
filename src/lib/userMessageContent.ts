@@ -285,3 +285,8 @@ export function promptSource(text: string): PromptSource {
   if (words.trim() || extractCommandName(envelope.body)) return { kind: "reader" }
   return notifications.length > 0 || outputs.length > 0 || interrupts.length > 0 ? { kind: "event" } : { kind: "silent" }
 }
+
+/** Whether the reader sent this prompt: their words, a command, or images attached with nothing else. */
+export function isReaderPrompt(source: PromptSource, imageCount: number): boolean {
+  return source.kind === "reader" || (source.kind === "silent" && imageCount > 0)
+}

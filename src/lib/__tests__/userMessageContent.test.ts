@@ -4,6 +4,7 @@ import {
   extractCommandArgs,
   extractCommandName,
   hasSystemTags,
+  isReaderPrompt,
   parseInterrupts,
   parseLocalCommandOutputs,
   parseTaskNotifications,
@@ -261,5 +262,17 @@ describe("promptSource", () => {
   it("reads a prompt with only injected context as silent", () => {
     expect(promptSource("<system-reminder>The date changed.</system-reminder>")).toEqual({ kind: "silent" })
     expect(promptSource("")).toEqual({ kind: "silent" })
+  })
+})
+
+describe("isReaderPrompt", () => {
+  it("counts the reader's words, and images they attached with nothing else", () => {
+    expect(isReaderPrompt(promptSource("Fix the login bug"), 0)).toBe(true)
+    expect(isReaderPrompt(promptSource(""), 1)).toBe(true)
+  })
+
+  it("passes over what someone else wrote, even with images, and prompts with nothing to read", () => {
+    expect(isReaderPrompt(promptSource("<task-notification><summary>Build</summary></task-notification>"), 1)).toBe(false)
+    expect(isReaderPrompt(promptSource("<system-reminder>The date changed.</system-reminder>"), 0)).toBe(false)
   })
 })

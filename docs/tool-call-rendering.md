@@ -29,7 +29,9 @@ Sub-agents (`Task`, `Agent`, `spawn_agent`) run inside the session on its own pr
 
 ## Messages
 
-What the reader typed sits on the right as a bubble, with its time, Restore and branches under it on hover. Prompts nobody typed (background-task reports, crew chat deliveries, teammate messages, interrupts) run full width as events, and a prompt holding only context injected for the agent is not shown. Text the agent writes between steps carries copy and quote on hover only. The turn's last reply ends with the model, effort and time, and its copy and quote actions.
+What the reader typed sits on the right as a bubble, with its time, Restore and branches under it on hover. The bubble is drawn on the opposite theme (`InverseColorScheme`: white with black text on a dark page, the reverse on a light one), so it is the landmark to scroll back to; code inside it is highlighted for that theme. A prompt the reader sent while the turn was running gets the same bubble, labelled "Sent while it was working". Prompts nobody typed (background-task reports, crew chat deliveries, teammate messages, interrupts) run full width as events, including ones that arrive mid-turn, and a prompt holding only context injected for the agent is not shown. Text the agent writes between steps carries copy and quote on hover only. The turn's last reply ends with the model, effort and time, and its copy and quote actions.
+
+The sticky Turn pill at the top of the timeline names the reader's latest message above the viewport, opening or mid-turn, and passes over everything nobody typed. Clicking it lands on that message below the floating session chrome (the scroller's `scroll-padding-top`), asking the virtualizer to render its turn first when it is far away.
 
 ## Operation names
 
