@@ -124,7 +124,7 @@ describe("MarkdownCodeBlock with cogpit blocks", () => {
   it("draws a block in an agent's reply", async () => {
     const { CogpitBlockScope } = await import("../cogpit-blocks/kinds")
     render(
-      <CogpitBlockScope.Provider value={{ messageKey: "reply-1" }}>
+      <CogpitBlockScope.Provider value={{ messageKey: "reply-1", markdown: "" }}>
         <MarkdownCodeBlock className="language-cogpit-checklist">{source}</MarkdownCodeBlock>
       </CogpitBlockScope.Provider>,
     )
@@ -135,5 +135,40 @@ describe("MarkdownCodeBlock with cogpit blocks", () => {
     render(<MarkdownCodeBlock className="language-cogpit-checklist">{source}</MarkdownCodeBlock>)
     expect(screen.queryByText("1 of 2")).not.toBeInTheDocument()
     expect(screen.getByText(/Open the PR/)).toBeInTheDocument()
+  })
+})
+
+describe("MarkdownCodeBlock with an interactive view", () => {
+  const view = "<title>Orbit</title><p>Planets</p>"
+  const markdown = "Here it is:\n\n```cogpit-view\n" + view + "\n```\n"
+  /** The code element's position in `markdown`, as react-markdown hands it over. */
+  const node = (end: number) => ({ type: "element", tagName: "code", properties: {}, children: [], position: { start: { line: 3, column: 1, offset: 13 }, end: { line: 5, column: 4, offset: end } } }) as never
+
+  it("runs a closed block in an agent's reply as a view", async () => {
+    const { CogpitBlockScope } = await import("../cogpit-blocks/kinds")
+    render(
+      <CogpitBlockScope.Provider value={{ messageKey: "reply-1", markdown }}>
+        <MarkdownCodeBlock className="language-cogpit-view" node={node(markdown.length - 1)}>{view}</MarkdownCodeBlock>
+      </CogpitBlockScope.Provider>,
+    )
+    expect(await screen.findByTitle("Orbit")).toHaveAttribute("sandbox", "allow-scripts")
+  })
+
+  it("holds a block the reply is still writing", async () => {
+    const { CogpitBlockScope } = await import("../cogpit-blocks/kinds")
+    const streaming = "Here it is:\n\n```cogpit-view\n" + view
+    render(
+      <CogpitBlockScope.Provider value={{ messageKey: "reply-1", markdown: streaming }}>
+        <MarkdownCodeBlock className="language-cogpit-view" node={node(streaming.length)}>{view}</MarkdownCodeBlock>
+      </CogpitBlockScope.Provider>,
+    )
+    expect(await screen.findByText(/The view appears when the reply finishes/)).toBeInTheDocument()
+    expect(screen.queryByTitle("Orbit")).not.toBeInTheDocument()
+  })
+
+  it("shows the code outside a reply", () => {
+    render(<MarkdownCodeBlock className="language-cogpit-view">{view}</MarkdownCodeBlock>)
+    expect(screen.queryByTitle("Orbit")).not.toBeInTheDocument()
+    expect(screen.getByText(/Planets/)).toBeInTheDocument()
   })
 })

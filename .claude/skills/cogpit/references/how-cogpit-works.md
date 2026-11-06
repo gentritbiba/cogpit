@@ -25,7 +25,8 @@
   appear in the timeline under each turn, so a reply does not need to repeat
   them.
 - `![alt](/absolute/path)` shows images and videos inline, and the
-  [structured blocks](structure.md) render as cards. Enabled Cogpit plugins can
+  [structured blocks](structure.md) render as cards, and a
+  [`cogpit-view` block](views.md) runs as a live page. Enabled Cogpit plugins can
   add their own fenced blocks; their instructions appear in your context while
   they are installed.
 - Finishing a turn, or asking through your CLI's own question and approval

@@ -351,8 +351,20 @@ describe("devSecurityHeaders", () => {
     devSecurityHeaders(req, res, next)
 
     expect(headers["X-Content-Type-Options"]).toBeUndefined()
-    expect(headers["Content-Security-Policy"]).toBeUndefined()
+    expect(headers["Content-Security-Policy"]).not.toContain("script-src")
     expect(next).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a view's frame off other sites while local previews still load", () => {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: {}, url: "/" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+
+    devSecurityHeaders(req, res, vi.fn())
+
+    expect(headers["Content-Security-Policy"]).toBe("frame-src 'self' http://localhost:* http://127.0.0.1:*")
   })
 
   it("keeps the production policy on dev API responses", () => {
@@ -383,6 +395,47 @@ describe("devSecurityHeaders", () => {
 
     expect(headers["Content-Security-Policy"]).toContain("script-src 'self'")
     expect(headers["Cache-Control"]).toBe("no-store")
+  })
+})
+
+describe.each([
+  ["securityHeaders", securityHeaders],
+  ["devSecurityHeaders", devSecurityHeaders],
+])("%s on a navigation into a frame", (_name, middleware) => {
+  function run(url: string, destination?: string) {
+    const headers = destination ? { "sec-fetch-dest": destination } : {}
+    const req = { socket: {}, headers, url } as unknown as IncomingMessage
+    const response = mockRes()
+    const next = vi.fn()
+    middleware(req, response.res, next)
+    return { next, status: response.statusCode, body: response.body }
+  }
+
+  it("refuses an API route a view's frame navigated itself to", () => {
+    for (const destination of ["iframe", "frame"]) {
+      const result = run("/api/config", destination)
+      expect(result.next).not.toHaveBeenCalled()
+      expect(result.status).toBe(403)
+      expect(JSON.parse(result.body)).toEqual({ error: "Not available in a frame" })
+    }
+  })
+
+  it("refuses the app itself and any target it cannot reduce to a path", () => {
+    expect(run("/", "iframe").status).toBe(403)
+    expect(run("http://cogpit.local:19384/hub/dev_1/api/projects", "iframe").status).toBe(403)
+    expect(run("//evil.example/api/views/shell/v1", "iframe").status).toBe(403)
+  })
+
+  it("lets the view and plugin shells load in their frames", () => {
+    expect(run("/api/views/shell/v1", "iframe").next).toHaveBeenCalledOnce()
+    expect(run("/api/views/shell/v1?reload=1", "iframe").next).toHaveBeenCalledOnce()
+    expect(run("/api/plugins/shell/v1", "iframe").next).toHaveBeenCalledOnce()
+  })
+
+  it("leaves documents, fetches and clients without fetch metadata alone", () => {
+    expect(run("/api/config", "document").next).toHaveBeenCalledOnce()
+    expect(run("/api/config", "empty").next).toHaveBeenCalledOnce()
+    expect(run("/api/config").next).toHaveBeenCalledOnce()
   })
 })
 

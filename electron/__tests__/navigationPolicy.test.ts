@@ -38,6 +38,13 @@ describe("desktop plugin navigation boundary", () => {
     const preview = { frameTreeNodeId: 4, url: "http://localhost:3000", parent: main }
     expect(policy({ url: "http://localhost:3000/page", isMainFrame: false, frame: preview, initiator: preview })).toEqual({ allow: true })
   })
+  it("holds an interactive view's frame to the same boundary", () => {
+    const policy = createNavigationPolicy(origin, () => main)
+    const view = { frameTreeNodeId: 5, url: "about:blank", parent: main }
+    expect(policy({ url: `${origin}/api/views/shell/v1`, isMainFrame: false, frame: view, initiator: main })).toEqual({ allow: true })
+    expect(policy({ url: "https://example.test/?leak", isMainFrame: false, frame: view, initiator: view })).toEqual({ allow: false })
+    expect(policy({ url: "https://example.test/", isMainFrame: true, frame: main, initiator: view })).toEqual({ allow: false })
+  })
   it("does not let redirects or top-level navigation enter the shell", () => {
     const policy = createNavigationPolicy(origin, () => main)
     expect(policy({ url: shell, isMainFrame: true, frame: main, initiator: main })).toEqual({ allow: false })

@@ -12,26 +12,26 @@ export function externalBrowserUrl(value: string): string | null {
 
 export function createNavigationPolicy(appOrigin: string, mainFrame: () => Frame) {
   const origin = new URL(appOrigin).origin
-  const shell = new URL("/api/plugins/shell/v1", origin).href
-  const pluginFrames = new Set<number>()
-  const belongsToPlugin = (frame: Frame | null | undefined): boolean => {
+  const shells = new Set(["/api/plugins/shell/v1", "/api/views/shell/v1"].map((path) => new URL(path, origin).href))
+  const sandboxFrames = new Set<number>()
+  const belongsToSandbox = (frame: Frame | null | undefined): boolean => {
     for (let current = frame, depth = 0; current && depth < 64; current = current.parent, depth++) {
-      if (pluginFrames.has(current.frameTreeNodeId)) return true
+      if (sandboxFrames.has(current.frameTreeNodeId)) return true
     }
     return false
   }
   return (event: Navigation, redirect = false): { allow: boolean; external?: string } => {
     let target: URL
     try { target = new URL(event.url) } catch { return { allow: false } }
-    if (belongsToPlugin(event.initiator)) return { allow: false }
+    if (belongsToSandbox(event.initiator)) return { allow: false }
     const main = mainFrame()
     const initiatedByMain = event.initiator?.frameTreeNodeId === main.frameTreeNodeId
-    if (belongsToPlugin(event.frame)) {
-      return { allow: !redirect && initiatedByMain && (target.href === shell || target.href === "about:blank") }
+    if (belongsToSandbox(event.frame)) {
+      return { allow: !redirect && initiatedByMain && (shells.has(target.href) || target.href === "about:blank") }
     }
-    if (target.href === shell) {
+    if (shells.has(target.href)) {
       if (redirect || event.isMainFrame || !event.frame || event.frame.parent?.frameTreeNodeId !== main.frameTreeNodeId) return { allow: false }
-      pluginFrames.add(event.frame.frameTreeNodeId)
+      sandboxFrames.add(event.frame.frameTreeNodeId)
       return { allow: true }
     }
     if (!event.isMainFrame) return { allow: true }

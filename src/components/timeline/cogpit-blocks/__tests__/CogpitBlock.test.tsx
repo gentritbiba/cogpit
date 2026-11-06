@@ -14,7 +14,7 @@ import { setActiveIdentity, __resetIdentityForTest } from "@/lib/device"
 /** A decisions block as one reply carries it. */
 function inReply(messageKey: string, source = DECISIONS) {
   return (
-    <CogpitBlockScope.Provider value={{ messageKey }}>
+    <CogpitBlockScope.Provider value={{ messageKey, markdown: "" }}>
       <CogpitBlock kind="decisions" fallback={null} source={source} />
     </CogpitBlockScope.Provider>
   )
@@ -58,7 +58,7 @@ describe("CogpitBlock", () => {
 
   it("keeps repeated blocks in one reply independent", async () => {
     render(
-      <CogpitBlockScope.Provider value={{ messageKey: "reply-1" }}>
+      <CogpitBlockScope.Provider value={{ messageKey: "reply-1", markdown: "" }}>
         <CogpitBlock kind="decisions" fallback={null} source={DECISIONS} occurrence="10" />
         <CogpitBlock kind="decisions" fallback={null} source={DECISIONS} occurrence="200" />
       </CogpitBlockScope.Provider>,

@@ -6,6 +6,7 @@ import { registerAgentPromptRoutes } from "./routes/agent-prompts"
 import { registerAskUserRoutes } from "./routes/ask-user"
 import { registerBrowserRoutes } from "./routes/browser"
 import { registerPluginRoutes } from "./routes/plugins"
+import { registerViewRoutes } from "./routes/views"
 import { registerAgentRuntimeRoutes } from "./routes/agent-runtime"
 import { registerCopilotHistoryRoutes } from "./routes/copilot-history"
 import { registerSessionManageRoutes } from "./routes/session-manage"
@@ -173,6 +174,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("agent-check", registerAgentCheckRoutes),
   apiRoute("browser", registerBrowserRoutes),
   apiRoute("plugins", registerPluginRoutes),
+  apiRoute("views", registerViewRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 
 export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {
