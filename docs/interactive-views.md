@@ -39,7 +39,9 @@ tag, run by a small loader through indirect eval with a `sourceURL`, so runtime
 errors name the agent's file and line. The page needs no network and no other
 file, so it runs unchanged wherever it is shown.
 
-The kit is built by `scripts/build-view-kit.ts` (part of `build:plugin-api`)
+The kit is built by `scripts/build-view-kit.ts` (`build:generated`, which dev,
+the tests, the typechecks and the builds run first; not `postinstall`, since
+on Windows esbuild cannot list `node_modules` while `bun install` holds it)
 into `generated/view-kit/index.json` from the modules in
 `src/viewKit/modules.ts`. The build includes a module only in views that
 import one of its specifiers:

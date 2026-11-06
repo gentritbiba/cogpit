@@ -41,8 +41,9 @@ async function main(): Promise<void> {
       mac: { identity: null, notarize: false },
     }))
     console.log("Building the current checkout. Cogpit can stay open while this runs.")
-    await run(process.execPath, ["run", "typecheck:electron"])
+    // electron:build writes the generated files the typecheck reads.
     await run(process.execPath, ["run", "electron:build"])
+    await run(process.execPath, ["run", "typecheck:electron"])
     await run(join(root, "node_modules/.bin/electron-builder"), ["--dir", "--mac", `--${process.arch}`, "--publish", "never", "--config", config])
     const version = validateApp(stagedApp)
     const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version
