@@ -5,6 +5,10 @@ Historical reference only. Use [deployments.md](deployments.md) for current reso
 Earlier Cogpit history is also retained in the [global deployment log](/Users/gentritbiba/project-manager/deployments-logs.md).
 
 
+## v3.6.1 release, MacBook local build and Omarchy install, 2026-11-06
+
+Stored view apps (host-built React views, `cogpit/ui` kit plus charts/math/3D modules, sidebar Views list and panel, session-owned access; core `219d684d`, team `fd7df44` via cogpit-team PR #5). The first tag run at `862c4c11` failed on every Windows job: `bun install`'s postinstall ran the new esbuild-based `build:view-kit`, which cannot list `node_modules` while Bun holds it on Windows. Fixed in `66d5060d` (`build:generated` outside postinstall); the tag moved there and run [42210560898](https://github.com/gentritbiba/cogpit/actions/runs/42210560898) went green; published 11:48:05Z. MacBook runs a 3.6.1 local build from the feature worktree. Omarchy: `sudo` needs a password over SSH, so 3.6.1 runs from a user-owned copy of the release pacman package (`~/.local/opt/cogpit-3.6.1`, sha512 matched `latest-linux.yml`) through a launcher override; restarted while two agent sessions were mid-turn (with the owner's go-ahead), one of which kept running. iPhone got a Debug build of ios `feat/view-apps` (unmerged).
+
 ## v3.6.0 release, 2026-11-06
 
 Interactive views, usage credits and the timeline prompt-bubble/sticky-pill work. First tag at the bump commit `d0719c93` was cancelled mid-quality to include the timeline commit, then moved to `394b15ed`; run [42137957629](https://github.com/gentritbiba/cogpit/actions/runs/42137957629) green on the first try, published 00:53:57Z. No devices upgraded.
