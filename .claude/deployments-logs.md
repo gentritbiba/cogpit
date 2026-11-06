@@ -5,6 +5,10 @@ Historical reference only. Use [deployments.md](deployments.md) for current reso
 Earlier Cogpit history is also retained in the [global deployment log](/Users/gentritbiba/project-manager/deployments-logs.md).
 
 
+## v3.6.0 release, 2026-11-06
+
+Interactive views, usage credits and the timeline prompt-bubble/sticky-pill work. First tag at the bump commit `d0719c93` was cancelled mid-quality to include the timeline commit, then moved to `394b15ed`; run [42137957629](https://github.com/gentritbiba/cogpit/actions/runs/42137957629) green on the first try, published 00:53:57Z. No devices upgraded.
+
 ## v3.5.5 release and agentbox upgrade, 2026-11-05
 
 Beginner-onboarding release (agent check, sign-in errors, first-run home, ask-first defaults for new installs, one layered `cogpit` skill). The tag was moved twice before anything published: the Windows test shard failed first on two new tests (POSIX separator in a config test helper; a missing Claude binary for the worktree startup tests), then on the worktree test's cold import inside `vi.waitFor`'s 1 s default (fixed with a `beforeAll` warm-up and 10 s waits). Third run [41956792386](https://github.com/gentritbiba/cogpit/actions/runs/41956792386) green; published 02:59:45Z. Also needed before tagging: `check:audit` allowance moved to minimatch's re-issued advisory id 1244623. agentbox upgraded 3.5.3 → 3.5.5 from the AUR PKGBUILD after confirming its two live Claude sessions were idle; the 3.5.5 skill installer retired the old standalone skills there. MacBook: 3.5.5 local build staged (installs on quit). Omarchy left to in-app OTA.
