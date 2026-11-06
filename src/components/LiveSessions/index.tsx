@@ -33,6 +33,9 @@ import { ProjectScopePicker } from "./ProjectScopePicker"
 import { NewSessionButton } from "./NewSessionButton"
 import { mergeSessions, projectScopeOptions, scopeSessions } from "./projectScope"
 import { useOlderSessions, type OlderSessionsTarget } from "./useOlderSessions"
+import { SidebarPlaces, type SidebarPlace } from "./SidebarPlaces"
+import { useViewPanel } from "@/components/views/ViewPanelContext"
+import { ViewBrowser } from "@/components/views/ViewBrowser"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -109,6 +112,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     true,
   )
   const groupCrewsPreferred = groupCrewsSetting !== false
+  // Views open in the view panel, so the sidebar offers them only where the layout has one.
+  const canShowViews = useViewPanel() !== null
+  const [storedPlace, setPlace] = useLocalStorage<SidebarPlace>(deviceScopedKey("sidebar-place"), "sessions")
+  const place: SidebarPlace = canShowViews && storedPlace === "views" ? "views" : "sessions"
   const searching = Boolean(searchQuery.trim())
   const groupCrews = groupCrewsPreferred && !searching
   // A search looks through everything, so archived sessions join the list
@@ -370,8 +377,34 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     onResumeSession: canUseTerminal ? handleResumeSession : undefined,
   }
 
+  const scopePickerProps = {
+    options: scopeOptions,
+    value: projectScope,
+    focused: focusedProject,
+    totalSessions: listedUnits.length,
+    crewCount: groupCrewsPreferred ? crews.crewOf.size : 0,
+    onChange: setProjectScope,
+    onRenameProject: renameProject,
+    archivableCount: focusedArchivable.length,
+    onArchiveIdle: () => handleArchiveSessions(focusedArchivable),
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <SidebarPlaces
+      place={place}
+      onPlaceChange={canShowViews ? setPlace : undefined}
+      views={(
+        <>
+          <ProjectScopePicker {...scopePickerProps} />
+          <ViewBrowser
+            scope={projectScope}
+            scopeLabel={focusedProjectLabel}
+            labelFor={(key) => scopeOptions.find((option) => option.key === key)?.customName ?? key}
+            onShowAllProjects={() => setProjectScope(null)}
+          />
+        </>
+      )}
+    >
       <LiveSessionsToolbar
         loading={loading}
         isMobile={isMobile}
@@ -388,17 +421,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
       {FilterControl && <FilterControl />}
 
-      <ProjectScopePicker
-        options={scopeOptions}
-        value={projectScope}
-        focused={focusedProject}
-        totalSessions={listedUnits.length}
-        crewCount={groupCrewsPreferred ? crews.crewOf.size : 0}
-        onChange={setProjectScope}
-        onRenameProject={renameProject}
-        archivableCount={focusedArchivable.length}
-        onArchiveIdle={() => handleArchiveSessions(focusedArchivable)}
-      >
+      <ProjectScopePicker {...scopePickerProps}>
         {sessionStarts && (
           <NewSessionButton
             {...sessionStarts}
@@ -469,6 +492,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
         </div>
       </ScrollArea>
-    </div>
+    </SidebarPlaces>
   )
 })

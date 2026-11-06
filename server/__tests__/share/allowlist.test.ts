@@ -19,7 +19,25 @@ describe("share allowlist — permitted", () => {
     ["POST", "/api/share/interrupt"],
     ["POST", "/api/share/permission"],
     ["POST", "/api/share/answer"],
+    ["GET", "/api/views"],
+    ["GET", "/api/views?project=/Users/me/proj"],
+    ["GET", "/api/views/shell/v1"],
+    ["GET", "/api/views/sales-funnel/v/3"],
   ])("%s %s", (method, url) => expect(allow(method, url)).toBe(true))
+
+  it("reaches views only to list them, read one version's page or load the empty sandbox", () => {
+    for (const [method, url] of [
+      ["GET", "/api/views/sales-funnel"],
+      ["PATCH", "/api/views/sales-funnel"],
+      ["DELETE", "/api/views/sales-funnel"],
+      ["GET", "/api/views/sales-funnel/v/0"],
+      ["GET", "/api/views/sales-funnel/v/latest"],
+      ["POST", "/api/views/sales-funnel/v/3"],
+      ["GET", "/api/views/shell/v2"],
+    ] as const) {
+      expect(allow(method, url), `${method} ${url}`).toBe(false)
+    }
+  })
 
   it.each([
     // the shapes the real client sends

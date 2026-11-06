@@ -1,7 +1,7 @@
 // @vitest-environment node
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { describe, expect, it, vi } from "vitest"
-import { VIEW_SHELL_PATH } from "../../../shared/viewShell"
+import { VIEW_SHELL_PATH } from "../../../shared/views/shell"
 import type { Middleware } from "../../http"
 import { registerViewRoutes } from "../../routes/views"
 import { VIEW_SHELL_HEADERS, VIEW_SHELL_HTML } from "../../views/shell"
@@ -39,7 +39,9 @@ describe("interactive view shell", () => {
 
     call("POST", "/shell/v1")
     call("GET", "/shell/v2")
-    expect(next).toHaveBeenCalledTimes(2)
+    call("GET", "/Bad-Id/v/1")
+    call("GET", "/sales-funnel/v/0")
+    expect(next).toHaveBeenCalledTimes(4)
     expect(res.end).toHaveBeenCalledTimes(1)
   })
 })

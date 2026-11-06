@@ -6,6 +6,7 @@ export const BUILT_IN_WORKSPACE_PANEL_IDS = {
   worktrees: workspacePanelId(BUILT_IN_PLUGIN_ID, "worktrees"),
   projectFiles: workspacePanelId(BUILT_IN_PLUGIN_ID, "project-files"),
   browser: workspacePanelId(BUILT_IN_PLUGIN_ID, "browser"),
+  views: workspacePanelId(BUILT_IN_PLUGIN_ID, "views"),
   fileChanges: workspacePanelId(BUILT_IN_PLUGIN_ID, "file-changes"),
   sessionInfo: workspacePanelId(BUILT_IN_PLUGIN_ID, "session-info"),
   automations: workspacePanelId(BUILT_IN_PLUGIN_ID, "automations"),

@@ -1,93 +1,183 @@
 # Interactive views
 
-Cogpit runs a `cogpit-view` block in your reply as a live page: your HTML, CSS
-and JavaScript, drawn as a card inside the chat. Reach for one whenever seeing
-or touching an idea explains it better than prose: a slider that reshapes a
-curve, an algorithm the user can step through, a simulation, a chart of data
-you computed, a 3D shape to turn, a calculator, a quiz. Keep writing around
-it: the view shows, your sentences say what it means.
+Cogpit can show a live page inside your reply: sliders that reshape a curve,
+an algorithm the user steps through, a simulation, a chart of numbers you
+computed, a dashboard, a formula, a 3D shape to turn, a quiz. Reach for one
+whenever seeing or touching an idea explains it better than prose. Keep
+writing around it: the view shows, your sentences say what it means.
+
+A view is a small React app you keep as files on this machine. Cogpit builds
+it into one finished page, and your reply names the version to show. To change
+a view after the user sees it, edit its files and build again.
+
+## Make one
+
+```bash
+cogpit-session view new sales-funnel --title "Sales funnel"   # prints the view's folder
+# write App.tsx (and any other files) in that folder with your usual tools
+cogpit-session view build sales-funnel                        # prints problems, or the reply block
+```
+
+`build` checks every file and import first. A problem comes back as
+`App.tsx:12:5: …`; fix it and build again. A good build stores the next
+version and prints the block to put in your reply:
 
 ````markdown
 ```cogpit-view
-<title>Compound growth</title>
-<label>Rate <input id="rate" type="range" min="0" max="15" step="0.5" value="5"> <b id="shown"></b></label>
-<svg id="chart" width="100%" height="200"></svg>
-<p class="muted">After 30 years: <b id="total"></b></p>
-<script src="cogpit:lib/d3"></script>
-<script>
-  const svg = d3.select("#chart"), width = svg.node().clientWidth, height = 200
-  const x = d3.scaleLinear([0, 30], [30, width - 10])
-  const draw = () => {
-    const rate = +document.querySelector("#rate").value / 100
-    const points = d3.range(31).map((year) => [year, 1000 * (1 + rate) ** year])
-    const y = d3.scaleLinear([0, d3.max(points, (p) => p[1])], [height - 20, 10])
-    svg.selectAll("*").remove()
-    svg.append("path").attr("d", d3.line(([a]) => x(a), ([, b]) => y(b))(points))
-      .style("fill", "none").style("stroke", "var(--chart-1)").style("stroke-width", 2)
-    svg.append("g").attr("transform", `translate(0,${height - 20})`).call(d3.axisBottom(x))
-    document.querySelector("#shown").textContent = `${(rate * 100).toFixed(1)}%`
-    document.querySelector("#total").textContent = d3.format("$,.0f")(points[30][1])
-  }
-  document.querySelector("#rate").addEventListener("input", draw)
-  draw()
-</script>
+sales-funnel@1
 ```
 ````
 
-## What the page gets
+`App.tsx` default-exports the component to show. Kit components and your own
+mix freely:
 
-- Your markup becomes the page body: any elements, `<style>` and `<script>`,
-  including `<script type="module">`. `<title>` names the card.
-- Cogpit's theme as CSS variables: `--foreground`, `--card`, `--muted`,
-  `--muted-foreground`, `--border`, `--primary`, `--primary-foreground`,
-  `--accent`, `--destructive`, `--success`, `--warning`, `--chart-1` to
-  `--chart-5`, `--radius`, `--font-sans` and `--font-mono`. `<html>` has the
-  `dark` class in dark mode. Text, headings, buttons, inputs, sliders, tables
-  and code already look native, so style only what is particular to the view.
-  `<button class="primary">` is the filled button and `.muted` the secondary
-  text color.
-- `cogpit.color("--chart-2")` returns a theme color as hex for canvas, D3 or
-  Three.js. `cogpit.onTheme(redraw)` calls `redraw` when the user switches
-  between light and dark.
-- `cogpit.ask(text)` puts `text` in the user's composer to send to you, for a
-  button such as "Explain this step" or "Use these settings". It never sends on
-  its own, and works only from a click inside the view.
-- The card grows to fit the page, up to 1600px. The user can expand it to
-  nearly the full window, reload it, or read its source.
+```tsx
+import { useState } from "react"
+import { Card, Grid, Slider, Stack, Stat } from "cogpit/ui"
+import { BarChart } from "cogpit/charts"
+import data from "./data.json"
 
-## Libraries
+function Target({ goal }: { goal: number }) {
+  return <p className="muted">Goal: {goal.toLocaleString()} paid users</p>
+}
 
-The page has no network: CDN scripts, `fetch` and remote images do not load.
-Put the data the view needs in the block. These libraries are built in:
+export default function App() {
+  const [rate, setRate] = useState(12)
+  const rows = data.channels.map((c) => ({ ...c, paid: Math.round(c.visits * (rate / 100) * 0.13) }))
+  const paid = rows.reduce((sum, row) => sum + row.paid, 0)
+  return (
+    <Stack>
+      <Grid columns={2}>
+        <Stat label="Signup rate" value={`${rate}%`} />
+        <Stat label="Paid" value={paid} delta={paid - data.paidLastWeek} hint="vs last week" />
+      </Grid>
+      <Slider label="Signup rate" min={1} max={40} value={rate} onChange={setRate} format={(v) => `${v}%`} />
+      <Card title="Paid by channel">
+        <BarChart data={rows} x="channel" y="paid" height={200} />
+      </Card>
+      <Target goal={1000} />
+    </Stack>
+  )
+}
+```
 
-| Library | Load | Then |
-| --- | --- | --- |
-| D3 7 | `<script src="cogpit:lib/d3"></script>` | global `d3` |
-| KaTeX 0.19 | `<script src="cogpit:lib/katex"></script>` | `katex.render(tex, element)`; `renderMathInElement(element)` typesets `\(…\)`, `\[…\]` and `$$…$$`. It draws native MathML: no stylesheet or fonts to add |
-| Three.js r180 | `import * as THREE from "three"` in a module script | `import { OrbitControls } from "three/addons/controls/OrbitControls.js"` |
+## Updating a view
 
-Anything else, write directly: SVG, canvas, WebGL, CSS animation and Web
-Workers from blob URLs all work.
+Edit the files in the view's folder and run `view build` again, then put the new
+block (`sales-funnel@2`) in your reply. Earlier replies keep showing the
+version they named and offer the newer one. `cogpit-session view list` shows
+this project's views, and `view show ID` shows a view's folder and versions.
+The user also finds every view in the sidebar's Views list, where they can
+open it in the Views panel beside the chat, pick any version, pin, rename or
+delete it.
+
+A view belongs to the session that made it: whoever may see that session may
+see the view, including a guest of a shared session, and whoever may work in
+it may rebuild it.
+
+## What a view can use
+
+The page has no network: `fetch`, CDN scripts and npm packages do not load.
+Put the data in the view's files. Your own files are `.tsx`, `.ts`, `.jsx`,
+`.js`, `.css` and `.json`, in folders if you like, imported by relative path
+(`./components/Funnel`, `./data.json`, `./styles.css`); up to 40 files.
+
+Beyond those, a view imports from the kit. A module that is not imported is
+not sent, so import only what the view uses:
+
+<!-- view-kit:start -->
+<!-- Generated from src/viewKit/modules.ts by scripts/sync-cogpit-skill.ts. -->
+
+**`react`** (`useState`, `useEffect`, `useRef`, …; Preact underneath)
+and **`cogpit/ui`**, light components that look native in both themes. In
+every view:
+
+- layout: `Stack` (`gap`), `Row` (`gap`, `align`, `justify`), `Grid`
+  (`columns`, or `min` width per column), `Card` (`title`, `actions`),
+  `Section` (`title`, `description`)
+- text: `Heading` (`level`), `Text`, `Muted`, `Code` (`block`)
+- data: `Stat` (`label`, `value`, `delta`, `hint`), `Table` (`rows`,
+  optional `columns` of names or `{ key, label, align, format }`; or table
+  markup as children), `Badge` (`tone`: default, success, warning, danger,
+  muted), `Progress` (`value`, `max`, `label`, `tone`)
+- input: `Button` (`variant`: primary, secondary, ghost, danger; `size`),
+  `Slider` (`label`, `value`, `min`, `max`, `step`, `onChange(number)`,
+  `format`), `Select` (`options` as strings or `{ value, label }`), `Toggle`
+  (`checked`, `onChange(boolean)`), `Input` (`onChange(string)`), `Tabs`
+  (`tabs` of `{ id, label, content }`)
+- helpers: `useTheme()` (`mode`, `color`), `themeColor("--chart-1")`,
+  `useAnimationFrame((ms) => …)`, `ask(text)`, `formatValue(value)`
+
+Every component takes `className` and `style` and renders a real element.
+
+**`cogpit/charts`**: themed SVG charts with axes, a legend for several
+series and a hover tooltip.
+
+- `LineChart`, `AreaChart`, `BarChart`, `ScatterChart` take `data` (rows),
+  `x` (the key of numbers, dates as `Date` or ISO strings, or categories) and
+  `y` (a key, several keys, or `{ key, label, color }`). Options: `height`
+  (240), `stacked` (area, bar), `curve` (linear, smooth, step), `dots`,
+  `size` (scatter: a key sizing points), `yDomain`, `xFormat`, `yFormat`,
+  `colors`, `legend`, `title`.
+- For your own marks, pass a function as children: it gets
+  `{ x(value), y(number), width, height, bandwidth, data }` in plot
+  coordinates, e.g. `{({ x, y }) => <line x1={x("Mar")} x2={x("Mar")} y2={y(0)} />}`.
+- `PieChart` takes `data`, `label` and `value` keys; `donut` shows the
+  total in the middle.
+
+**`cogpit/math`**: `<Tex>{"\\frac{a}{b}"}</Tex>` inline, or with `block` on
+its own line. **`katex`** is KaTeX 0.19 (`render`, `renderToString`), drawn as
+the browser's MathML, so it needs no stylesheet or fonts.
+
+**`cogpit/scene`**: `<Scene3D setup={…} />`, a Three.js canvas that sizes
+itself, orbits with the mouse, pauses off screen and cleans up. `setup` runs
+once with `{ THREE, scene, camera, renderer, controls, color(name),
+onTheme(listener) }`; add objects and return a per-frame step
+`(timeMs, deltaMs) => …`, or `{ frame, cleanup }`. Options: `height` (320),
+`camera` position, `controls`, `lights`. **`three`** is Three.js r180, and
+`three/addons/controls/OrbitControls.js` its orbit controls.
+
+**`d3`**: all of D3 7, for drawing beyond the charts. Select a ref'd
+element in `useEffect`, and set colors with `.style("fill", "var(--chart-1)")`
+(attributes do not read CSS variables).
+
+<!-- view-kit:end -->
+
+The kit is there to be quick, not to limit you. When nothing in it fits, write
+the component yourself in the view's files, with SVG, canvas, WebGL, CSS
+animation or anything else the browser draws, and mix it with kit components.
+
+## Theme and the user
+
+- Plain HTML already looks native. Theme colors are CSS variables:
+  `--foreground`, `--card`, `--muted`, `--muted-foreground`, `--border`,
+  `--primary`, `--primary-foreground`, `--accent`, `--destructive`,
+  `--success`, `--warning`, `--chart-1` to `--chart-5`, `--radius`,
+  `--font-sans` and `--font-mono`. `<html>` has the `dark` class in dark mode.
+  Use `themeColor` where a CSS variable cannot go, such as canvas; the view
+  re-renders when the user switches between light and dark.
+- `ask(text)` puts `text` in the user's composer to send to you, for a button
+  such as "Explain this step". It never sends on its own and works only from a
+  click inside the view.
+- Links open in the user's browser when they click them.
+- A runtime error shows under the card with its file and line, and a button
+  the user can press to send it to you.
 
 ## Getting it right
 
-- Size by content. Do not set `height: 100%` or `100vh` on `html`, `body` or a
-  wrapper; give canvases, SVG and Three.js renderers an explicit height.
-- The width is laid out when your script runs, and changes when the user
-  resizes the window: redraw on `resize` if the drawing depends on it. Expanding
-  opens a fresh copy of the view at the larger size.
-- Animate with `requestAnimationFrame`; it slows or stops while the card is off
-  screen. State lasts while the card stays open; reloading, expanding or
-  reopening the session starts the view from its initial state.
-- Chat Markdown does not render TeX. Typeset formulas inside a view, or write
-  them in prose with Unicode.
-- In D3, set colors with `.style("fill", "var(--chart-1)")`, not `.attr`:
-  attributes do not read CSS variables. Use `cogpit.color` for scales.
-- Links open in the user's browser when they click them.
-- A script error shows under the card with a button the user can press to ask
-  you to fix it.
-- One idea per view, kept compact: usually well under 200 lines, and one or two
-  views in a reply. Build on an earlier view by writing a new block, not by
-  asking the user to edit one.
+- Size by content: give canvases and SVG an explicit height, never
+  `height: 100%` or `100vh` on the page. The card grows to fit, up to 1600px,
+  and the user can expand it.
+- Redraw on `resize` if your own drawing depends on the width; the charts do.
+- Animate with `useAnimationFrame` or `requestAnimationFrame`.
+- State lasts while the card stays open. Reloading or reopening starts over.
+- One idea per view, kept compact, and one or two views in a reply.
 - Not every Cogpit client runs views, so the prose around one must still make
   sense without it.
+
+If you are not running in a Cogpit session, so `cogpit-session view` cannot
+reach one, write the page's HTML, CSS and JavaScript straight into a
+`cogpit-view` block instead. It runs the same way, with
+`<script src="cogpit:lib/d3"></script>`, `<script src="cogpit:lib/katex"></script>`
+and `import … from "three"` in a module script available, but it cannot be
+updated.

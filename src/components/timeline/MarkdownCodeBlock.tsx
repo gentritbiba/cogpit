@@ -119,7 +119,7 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
     const complete = start !== undefined && end !== undefined && isFenceClosed(blockScope.markdown.slice(start, end))
     return (
       <Suspense fallback={plain}>
-        <CogpitView source={code} complete={complete} fallback={plain} />
+        <CogpitView source={code} complete={complete} fallback={plain} renderCode={(text, language) => <HighlightedCodeBlock code={text} lang={language} />} />
       </Suspense>
     )
   }
@@ -136,7 +136,7 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 
 // ── Highlighted code block with Shiki ───────────────────────────────────────
 
-function HighlightedCodeBlock({
+export function HighlightedCodeBlock({
   code,
   lang,
   ...rest

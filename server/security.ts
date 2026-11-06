@@ -14,7 +14,7 @@ import { getShareWithHash, touchShare } from "./share/registry"
 import { markShareGuestRequest } from "./share/requestGuest"
 import { clearRequestAuthentication, setRequestAuthentication } from "./requestAuthentication"
 import { PLUGIN_SHELL_PATH } from "./plugins/shell"
-import { VIEW_SHELL_PATH } from "../shared/viewShell"
+import { VIEW_SHELL_PATH } from "../shared/views/shell"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 

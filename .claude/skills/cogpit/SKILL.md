@@ -14,11 +14,11 @@ browser. You may be one of many sessions it is running.
 
 When seeing or touching an idea would explain it better than prose, such as a
 slider that reshapes a curve, an algorithm to step through, a simulation, a
-chart of numbers you computed or a 3D shape to turn, put a `cogpit-view` block
-in your reply. Cogpit runs its HTML, CSS and JavaScript as a live card in the
-chat, in the user's theme, with D3, KaTeX and Three.js built in. Read
+dashboard of numbers you computed or a 3D shape to turn, build a view: a small
+React app Cogpit keeps on this machine and shows as a live card in the chat, in
+the user's theme. You can update it after the user sees it. Read
 [Interactive views](references/views.md), which starts with a working example,
-before writing one.
+before making one.
 
 ## Guides
 

@@ -45,6 +45,7 @@ import { crewChatContext, postCrewChat, readCrewChat, setCrewChatListening } fro
 import { answerHints, CLI_NAME } from "./hints"
 import { EXIT, json, parseArgs, UsageError, type CliInvocation, type CliOutput, type ParsedArgs } from "./args"
 import { SLACK_USAGE, slackCommand } from "./slack"
+import { VIEW_USAGE, viewCommand } from "./views"
 
 export { EXIT, type CliInvocation, type CliOutput } from "./args"
 
@@ -137,6 +138,7 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
                             another member; --crew ID selects the crew.
                             Tagged members receive full messages even when off.
 ${SLACK_USAGE}
+${VIEW_USAGE}
   devices                   Machines this Cogpit can run sessions on.
   projects [--device NAME]  Project folders on this machine or a device.
 
@@ -905,6 +907,7 @@ const COMMANDS: Record<string, (inv: CliInvocation, rest: string[]) => Promise<C
   board: boardCommand,
   chat: chatCommand,
   slack: slackCommand,
+  view: (inv, rest) => viewCommand(inv, rest),
   fetch: fetchCommand,
   discard: discardCommand,
   devices: devicesCommand,

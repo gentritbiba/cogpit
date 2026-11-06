@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
-import { CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
+import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
 import { Spinner } from "@/components/ui/Spinner"
@@ -26,6 +26,9 @@ const CrewPanel = lazy(() =>
 )
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
+)
+const ViewPanel = lazy(() =>
+  import("@/components/views/ViewPanel").then((module) => ({ default: module.ViewPanel })),
 )
 const AutomationsPanel = lazy(() =>
   import("@/components/AutomationsPanel").then((module) => ({ default: module.AutomationsPanel })),
@@ -172,6 +175,10 @@ function WorktreesWorkspacePanel({ closePanel }: WorkspacePanelProps) {
   )
 }
 
+function ViewWorkspacePanel(props: WorkspacePanelProps) {
+  return <Suspense fallback={<PanelFallback />}><ViewPanel {...props} /></Suspense>
+}
+
 function AutomationsWorkspacePanel(props: WorkspacePanelProps) {
   return <Suspense fallback={<PanelFallback />}><AutomationsPanel {...props} /></Suspense>
 }
@@ -225,6 +232,17 @@ export const builtInWorkspacePlugin = definePlugin({
       maxSize: "75%",
       keepAlive: true,
       when: (context) => context.canUseBrowser,
+    },
+    {
+      id: "views",
+      title: "Views",
+      icon: AppWindow,
+      component: ViewWorkspacePanel,
+      order: 17,
+      defaultSize: "46%",
+      minSize: "340px",
+      maxSize: "75%",
+      keepAlive: true,
     },
     {
       id: "file-changes",

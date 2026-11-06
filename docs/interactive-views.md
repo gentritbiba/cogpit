@@ -1,10 +1,79 @@
 # Interactive views
 
-An agent can put a live page in its reply: a fenced `cogpit-view` block of
-HTML, CSS and JavaScript. Cogpit draws it as a card in the timeline, so an
-explanation can carry sliders, charts, simulations or a 3D scene without
-another app. Agents learn the syntax from the bundled `cogpit` skill
-(`.claude/skills/cogpit/references/views.md`).
+An agent can put a live page in its reply as a fenced `cogpit-view` block.
+Cogpit draws it as a card in the timeline, so an explanation can carry
+sliders, charts, simulations or a dashboard without another app. Agents learn
+it from the bundled `cogpit` skill (`.claude/skills/cogpit/references/views.md`).
+
+A block holds one of two things:
+
+- **A stored view**, `<id>@<n>`: a small React app kept as files on the
+  computer that runs the session, built there into one finished page per
+  version. This is the default; the agent can update it.
+- **An inline page**: the HTML, CSS and JavaScript itself. This was the first
+  form; the skill now offers it only to agents that cannot run `view` commands.
+
+## Stored views
+
+The agent runs `cogpit-session view new|build|list|show`
+(`server/sessionCli/views.ts`). Each view is a folder under `~/.cogpit/views`
+(`COGPIT_VIEWS_HOME` overrides it; `server/views/store.ts`):
+
+```
+<id>/view.json            title, project (worktrees fold into their parent), versions
+<id>/app/                 the source the agent edits, App.tsx first
+<id>/versions/<n>/        immutable: index.html and files.json
+```
+
+`view build` reads `app/` (no links, only .tsx/.ts/.jsx/.js/.css/.json, size
+limits in `VIEW_LIMITS`), then `server/views/build.ts` compiles each file
+reached from `App.tsx` with sucrase, which keeps line numbers. It resolves
+every import there: a relative file, or a specifier a kit module provides.
+Anything else fails the build with its file and line, so the agent fixes it
+before the user sees anything. A build identical to the latest version is not
+stored again.
+
+`server/views/document.ts` composes the finished page: base CSS, the frame kit
+with a theme placeholder, and every module (kit and app) as JSON in one script
+tag, run by a small loader through indirect eval with a `sourceURL`, so runtime
+errors name the agent's file and line. The page needs no network and no other
+file, so it runs unchanged wherever it is shown.
+
+The kit is built by `scripts/build-view-kit.ts` (part of `build:plugin-api`)
+into `generated/view-kit/index.json` from the modules in
+`src/viewKit/modules.ts`. The build includes a module only in views that
+import one of its specifiers:
+
+| Module | Provides | Size |
+| --- | --- | --- |
+| `base` (every view) | `react`, `react-dom`, `react-dom/client`, `react/jsx-runtime`, `cogpit/ui` (Preact compat underneath) | ~34 KB |
+| `charts` | `cogpit/charts`: line, area, bar, scatter and pie charts as themed SVG on d3-scale and d3-shape | ~78 KB |
+| `math` | `cogpit/math` (`Tex`) and `katex`, forced to MathML output | ~263 KB |
+| `scene` | `cogpit/scene` (`Scene3D`), `three` and its orbit controls | ~705 KB |
+| `d3` | `d3` | ~277 KB |
+
+Only `base` aliases React to Preact. Every other module leaves React's
+specifiers external, so it shares the base's instance, and bundles anything
+else it uses. Each module's `doc` is written into the skill's
+`references/views.md` between its `view-kit` markers by
+`bun run sync-cogpit-skill`, whose check fails CI when they drift.
+
+`server/routes/views.ts` serves `GET /api/views` (`?project=` filters; the
+sidebar's list), `GET /api/views/<id>/v/<n>`, and `PATCH` (rename, pin) and
+`DELETE` on `/api/views/<id>`. A view belongs to the session that made it
+(`view.json`'s `sessionId`): the list shows the views of sessions the caller
+may see, and the others authorize that session (`authorizeSession`, view to
+read, interact to change), so a team member reaches a view exactly as they
+reach its session. A view no session made is host-wide, an admin's. A missing
+view answers like a hidden one. Deleting removes the source and versions but
+keeps `view.json` as a tombstone, so the id stays tied to its session and a
+second delete answers the same. `cogpit-session view` applies the same rules.
+
+The card fetches `GET /api/views/<id>/v/<n>` through `authFetch`, which sends
+a hub device's session to that device, so the computer that owns a view
+always builds and serves it. It swaps the viewer's theme into the placeholder
+(`withViewTheme`) and posts the page into the shell. It shows the source files,
+and offers the newest version when the reply's is older.
 
 ## How a view runs
 
@@ -14,12 +83,13 @@ another app. Agents learn the syntax from the bundled `cogpit` skill
    the card says the view is being built instead of running half a page.
 2. The card frames `/api/views/shell/v1` (`server/views/shell.ts`) with
    `sandbox="allow-scripts"`. The shell answers `ready`; the card then posts the
-   composed page (`view/document.ts`: theme, base stylesheet, the in-frame kit
-   and the agent's markup as the body) and the code of the libraries it uses.
+   page: a stored view's finished page, or an inline view composed by
+   `view/document.ts` (theme, base stylesheet, the in-frame kit and the agent's
+   markup as the body) with the code of the libraries it uses.
 3. The shell's bridge turns each library into a blob URL, swaps the
    `cogpit:lib/<name>` placeholders for them, and writes the page over itself.
 
-The kit gives the page `window.cogpit` (`theme`, `color`, `onTheme`, `ask`),
+The frame kit (`shared/views/frame.ts`) gives the page `window.cogpit` (`theme`, `color`, `onTheme`, `ask`),
 reports its height and script errors, and routes link clicks to the parent.
 
 ## Security model
@@ -44,10 +114,11 @@ plain `http(s)` without credentials, and `open` and `ask` act only while the
 frame holds focus, which a page cannot take without the user's click. `ask` only
 fills the composer; the user still sends.
 
-Share guests cannot load the shell, so a view in a shared session shows that it
-could not load and offers its source.
+A share guest may load the shell and the pages of views its shared session
+made (`server/share/allowlist.ts` admits the paths; the route checks the
+session). Views another session made show that they could not load.
 
-## Libraries
+## Inline libraries
 
 D3, KaTeX (MathML output, so no fonts or stylesheet) and Three.js with
 `OrbitControls` ship with the renderer as lazily loaded raw chunks

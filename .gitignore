@@ -31,6 +31,7 @@ qa-notes.md
 
 /generated/runtime-plugins/
 /generated/runtime-plugin-seeds/
+/generated/view-kit/
 
 /plugin-host-classification/
 /install-state.json

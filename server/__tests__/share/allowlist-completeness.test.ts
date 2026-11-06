@@ -100,6 +100,10 @@ const SHARE_REACHABLE = new Set([
   "/api/share/interrupt",
   "/api/share/permission",
   "/api/share/answer",
+  // The view sandbox, which holds no data, the list of views and stored
+  // views' finished pages. The path names no session; the route shows a guest
+  // only the views its shared session made.
+  "/api/views",
 ])
 
 /**
@@ -178,6 +182,9 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
     tokenScoped: true,
   },
   { mount: "/api/share/answer", url: "/api/share/answer", methods: ["POST"], tokenScoped: true },
+  { mount: "/api/views", url: "/api/views", methods: ["GET"], tokenScoped: true },
+  { mount: "/api/views", url: "/api/views/shell/v1", methods: ["GET"], tokenScoped: true },
+  { mount: "/api/views", url: "/api/views/sales-funnel/v/3", methods: ["GET"], tokenScoped: true },
 ]
 
 /**

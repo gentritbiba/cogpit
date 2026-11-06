@@ -102,6 +102,14 @@ export function shareRequestAllowed(method: string, rawUrl: string, share: Share
     return identity.length === 1 && identity[0] === share.sessionId
   }
 
+  // The view sandbox holds no data. The list and a stored view's page show
+  // only views the shared session made, which the route checks against the share.
+  if (verb === "GET" && route === "views") {
+    return identity.length === 0
+      || (identity.length === 2 && identity[0] === "shell" && identity[1] === "v1")
+      || (identity.length === 3 && identity[1] === "v" && /^[1-9][0-9]{0,6}$/.test(identity[2]!))
+  }
+
   // Read-only. session-config shallow-merges whatever JSON it is handed, and
   // that file carries the session's permission mode and MCP selection — a
   // guest who could write it could switch the session to bypassPermissions.

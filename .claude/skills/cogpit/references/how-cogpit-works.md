@@ -47,6 +47,7 @@
 | `~/.cogpit/bin` | `cogpit-session` and the `agent-browser` shim, rewritten on every start |
 | `~/.cogpit/browser` | Browser profiles and their logins |
 | `~/.cogpit/workspaces` | Worktrees for tasks other devices sent to this one |
+| `~/.cogpit/views` | [Interactive views](views.md): each view's source and built versions |
 | `~/.cogpit/notifications.json` | The notification inbox |
 | `~/.cogpit/port` | Port of the running server |
 

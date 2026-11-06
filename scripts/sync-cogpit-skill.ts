@@ -3,13 +3,15 @@
  * The `cogpit` skill carries two references whose sources live elsewhere: the
  * standalone cogpit-memory skill (published with its npm package) and the
  * remote workspaces guide. This script copies them into
- * .claude/skills/cogpit/references/ and embeds the whole skill in
+ * .claude/skills/cogpit/references/, writes the view kit's module docs into
+ * the views reference, and embeds the whole skill in
  * server/agents/bundledSkills.ts, so every build can install it offline.
  *
  * Pass --check in CI to fail when a generated copy has drifted.
  */
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { VIEW_KIT_MODULES } from "../src/viewKit/modules"
 
 const ROOT = join(import.meta.dir, "..")
 const SKILL = join(ROOT, ".claude/skills/cogpit")
@@ -24,7 +26,22 @@ function render(from: string): string {
   return `<!-- Generated from ${from} by scripts/sync-cogpit-skill.ts. Edit the source, then run \`bun run sync-cogpit-skill\`. -->\n\n${body}`
 }
 
-const references = SOURCES.map(({ from, to }) => ({ to, path: join(SKILL, to), content: render(from) }))
+const KIT_START = "<!-- view-kit:start -->"
+const KIT_END = "<!-- view-kit:end -->"
+
+/** references/views.md with the region between its markers rewritten from the kit's module docs. */
+function renderViews(): { to: string; path: string; content: string } {
+  const path = join(SKILL, "references/views.md")
+  const source = readFileSync(path, "utf8")
+  const start = source.indexOf(KIT_START)
+  const end = source.indexOf(KIT_END)
+  if (start === -1 || end < start) throw new Error(`references/views.md needs the ${KIT_START} and ${KIT_END} markers`)
+  const docs = VIEW_KIT_MODULES.map((module) => module.doc).join("\n\n")
+  const region = `${KIT_START}\n<!-- Generated from src/viewKit/modules.ts by scripts/sync-cogpit-skill.ts. -->\n\n${docs}\n\n`
+  return { to: "references/views.md", path, content: source.slice(0, start) + region + source.slice(end) }
+}
+
+const references = [...SOURCES.map(({ from, to }) => ({ to, path: join(SKILL, to), content: render(from) })), renderViews()]
 
 function skillFiles(directory: string, prefix = ""): [string, string][] {
   return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry): [string, string][] => {

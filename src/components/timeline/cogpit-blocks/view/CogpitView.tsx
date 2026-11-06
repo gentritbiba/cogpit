@@ -1,29 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
-import { AppWindow, CircleAlert, Code, Maximize2, RotateCcw } from "lucide-react"
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { AppWindow, PanelRightOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/Spinner"
-import { cn } from "@/lib/utils"
-import { activeComposer } from "@/plugins/composerBridge"
-import { usePluginPresentation } from "@/plugins/runtimeContext"
-import { VIEW_SHELL_PATH } from "../../../../../shared/viewShell"
-import { composeViewDocument, librariesUsed, readViewMessage, viewTitle, type ViewTheme } from "./document"
+import { useViewPanel } from "@/components/views/ViewPanelContext"
+import { formatViewReference, parseViewReference, type ViewReference } from "../../../../../shared/views/stored"
+import { composeViewDocument, librariesUsed, viewTitle } from "./document"
 import { loadViewLibraries } from "./libraries"
-
-const DEFAULT_HEIGHT = 280
-const MIN_HEIGHT = 48
-const MAX_HEIGHT = 1600
-const LOAD_TIMEOUT_MS = 15_000
-
-/** Adds `text` to the end of the open composer's draft for the user to send. */
-function askInComposer(text: string): void {
-  const composer = activeComposer()
-  if (!composer) return
-  const { draft, token } = composer.snapshot()
-  const typed = draft.text.trimEnd()
-  composer.replace({ ...draft, text: typed ? `${typed}\n\n${text}` : text }, token)
-  composer.focus()
-}
+import {
+  DEFAULT_VIEW_HEIGHT, useViewControls, ViewErrorLine, ViewExpandDialog, ViewFrame, ViewRunButtons, ViewSourceToggle, type PreparedView,
+} from "./ViewFrame"
+import { StoredViewSource, storedViewPrepare, storedViewProblem, useNewestVersion, useStoredView } from "./storedView"
 
 /** True once `element` has come near the viewport; a view keeps running after that. */
 function useNearViewport(element: RefObject<HTMLElement | null>): boolean {
@@ -40,153 +26,132 @@ function useNearViewport(element: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
- * An interactive page an agent wrote into its reply, drawn in a sandbox that
- * has no origin and no network. Until the reply has closed the block, it
- * shows that the view is still being written.
+ * An interactive page an agent put in its reply, drawn in a sandbox that has
+ * no origin and no network. A block holding `<id>@<n>` names a stored view the
+ * session's computer built; anything else is the page's own markup.
  */
-export default function CogpitView({ source, complete, fallback }: { source: string; complete: boolean; fallback: ReactNode }) {
+export default function CogpitView({ source, complete, fallback, renderCode }: {
+  source: string
+  complete: boolean
+  fallback: ReactNode
+  renderCode: (code: string, lang: string) => ReactNode
+}) {
+  const reference = complete ? parseViewReference(source) : null
+  return reference
+    ? <StoredView reference={reference} renderCode={renderCode} />
+    : <InlineView source={source} complete={complete} fallback={fallback} />
+}
+
+function InlineView({ source, complete, fallback }: { source: string; complete: boolean; fallback: ReactNode }) {
   const title = viewTitle(source) ?? "Interactive view"
-  const [showSource, setShowSource] = useState(false)
-  const [expanded, setExpanded] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [generation, setGeneration] = useState(0)
+  const prepare = async (): Promise<PreparedView> => {
+    const used = librariesUsed(source)
+    const libraries = await loadViewLibraries(used)
+    return { libraries, compose: (theme) => composeViewDocument(source, theme, used) }
+  }
+  return (
+    <ViewCard
+      title={title}
+      prepareKey={source}
+      prepare={complete ? prepare : null}
+      sourceView={<div className="[&>div]:my-0 [&>div]:rounded-none [&>div]:border-0">{fallback}</div>}
+      status={!complete && (
+        <span className="mr-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Spinner className="size-3" /> Building · {source.split("\n").length} lines
+        </span>
+      )}
+      pending={<p className="flex h-24 items-center justify-center text-xs text-muted-foreground">The view appears when the reply finishes writing it.</p>}
+    />
+  )
+}
+
+function StoredView({ reference, renderCode }: { reference: ViewReference; renderCode: (code: string, lang: string) => ReactNode }) {
+  const [version, setVersion] = useState(reference.version)
+  const shown = { id: reference.id, version }
+  const state = useStoredView(shown)
+  const view = state.status === "ready" ? state.view : null
+  const title = view?.title ?? reference.id
+  const key = formatViewReference(shown)
+  const panel = useViewPanel()
+
+  const message = storedViewProblem(state, "This view is not on the computer that ran this session.")
+  const latest = Math.max(view?.latestVersion ?? 0, useNewestVersion(reference.id) ?? 0)
+
+  const versionSwitch = view && (latest > reference.version || version !== reference.version) && (
+    <Button
+      type="button" variant="ghost" size="xs" className="text-muted-foreground"
+      title={version === reference.version ? "Show the newest version" : "Show the version this reply made"}
+      onClick={() => setVersion(version === reference.version ? latest : reference.version)}
+    >
+      {version === reference.version ? `v${latest} available` : `Back to v${reference.version}`}
+    </Button>
+  )
+
+  return (
+    <ViewCard
+      title={title}
+      prepareKey={key}
+      prepare={view ? storedViewPrepare(view) : null}
+      fixHint={key}
+      status={<>{versionSwitch}<span className="mr-1 text-xs tabular-nums text-muted-foreground">v{version}</span></>}
+      actions={view && panel && (
+        <Button
+          type="button" variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="Open in panel" title="Open in panel"
+          data-testid="view-open-in-panel"
+          onClick={() => panel.open(shown)}
+        >
+          <PanelRightOpen data-icon="icon" />
+        </Button>
+      )}
+      sourceView={view
+        ? <StoredViewSource view={view} renderCode={renderCode} />
+        : <p className="p-3 text-xs text-muted-foreground">{message ?? "Loading…"}</p>}
+      pending={message
+        ? <p role="alert" className="p-3 text-xs text-muted-foreground">{message}</p>
+        : <div className="grid h-24 place-items-center text-muted-foreground"><Spinner className="size-4" /></div>}
+    />
+  )
+}
+
+/** The card around a view: title, source, reload, expand and the error line. `prepare` is null until the view can run. */
+function ViewCard({ title, prepareKey, prepare, sourceView, status, actions, pending, fixHint }: {
+  title: string
+  prepareKey: string
+  prepare: (() => Promise<PreparedView>) | null
+  sourceView: ReactNode
+  status?: ReactNode
+  /** Header buttons after the card's own. */
+  actions?: ReactNode
+  pending: ReactNode
+  fixHint?: string
+}) {
+  const controls = useViewControls()
+  const { showSource, expanded, setExpanded, error, setError, generation } = controls
   const container = useRef<HTMLElement>(null)
   const near = useNearViewport(container)
 
-  const body = showSource
-    ? <div className="[&>div]:my-0 [&>div]:rounded-none [&>div]:border-0">{fallback}</div>
-    : !complete
-      ? <p className="flex h-24 items-center justify-center text-xs text-muted-foreground">The view appears when the reply finishes writing it.</p>
-      : near
-        ? <ViewFrame key={generation} html={source} title={title} onError={setError} />
-        : <div style={{ height: DEFAULT_HEIGHT }} />
+  const body = (): ReactNode => {
+    if (showSource) return sourceView
+    if (!prepare) return pending
+    if (!near) return <div style={{ height: DEFAULT_VIEW_HEIGHT }} />
+    return <ViewFrame key={`${prepareKey}:${generation}`} prepare={prepare} title={title} onError={setError} />
+  }
 
   return (
     <section ref={container} aria-label={title} data-cogpit-block className="my-3 overflow-hidden rounded-lg border border-border bg-card text-sm">
       <header className="flex items-center gap-1 border-b border-border/70 py-1 pr-1.5 pl-3">
         <AppWindow className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <h4 className="ml-1 min-w-0 flex-1 truncate text-[13px] font-medium">{title}</h4>
-        {!complete && (
-          <span className="mr-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Spinner className="size-3" /> Building · {source.split("\n").length} lines
-          </span>
-        )}
-        <Button
-          type="button" variant="ghost" size="icon-xs" className="text-muted-foreground"
-          aria-pressed={showSource} aria-label="Show source" title={showSource ? "Show the view" : "Show source"}
-          onClick={() => setShowSource((shown) => !shown)}
-        >
-          <Code data-icon="icon" />
-        </Button>
-        {complete && (
-          <>
-            <Button
-              type="button" variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="Reload view" title="Reload"
-              onClick={() => { setError(null); setShowSource(false); setGeneration((value) => value + 1) }}
-            >
-              <RotateCcw data-icon="icon" />
-            </Button>
-            <Button
-              type="button" variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label="Expand view" title="Expand"
-              onClick={() => setExpanded(true)}
-            >
-              <Maximize2 data-icon="icon" />
-            </Button>
-          </>
-        )}
+        {status}
+        <ViewSourceToggle controls={controls} />
+        {prepare && <ViewRunButtons controls={controls} />}
+        {actions}
       </header>
-      {body}
-      {error && !showSource && (
-        <div role="alert" className="flex items-center gap-2 border-t border-border/70 py-1 pr-1.5 pl-3 text-xs text-destructive">
-          <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate" title={error}>{error}</span>
-          {activeComposer() && (
-            <Button type="button" variant="ghost" size="xs" onClick={() => askInComposer(`The interactive view "${title}" shows this error: ${error}\nPlease fix it.`)}>
-              Ask to fix
-            </Button>
-          )}
-        </div>
-      )}
-      {complete && (
-        <Dialog open={expanded} onOpenChange={setExpanded}>
-          <DialogContent className="flex h-[88vh] w-[min(1280px,96vw)] max-w-none flex-col gap-3 p-4 sm:max-w-none">
-            <DialogTitle className="pr-8 text-sm">{title}</DialogTitle>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
-              {expanded && <ViewFrame html={source} title={title} fill onError={setError} />}
-            </div>
-          </DialogContent>
-        </Dialog>
+      {body()}
+      {error && !showSource && <ViewErrorLine error={error} title={title} fixHint={fixHint} />}
+      {prepare && (
+        <ViewExpandDialog open={expanded} onOpenChange={setExpanded} title={title} prepareKey={prepareKey} prepare={prepare} onError={setError} />
       )}
     </section>
-  )
-}
-
-function ViewFrame({ html, title, fill = false, onError }: { html: string; title: string; fill?: boolean; onError: (message: string) => void }) {
-  const frame = useRef<HTMLIFrameElement>(null)
-  const { theme } = usePluginPresentation()
-  const latest = useRef<{ theme: ViewTheme; onError: (message: string) => void }>({ theme, onError })
-  const [height, setHeight] = useState(DEFAULT_HEIGHT)
-  const [state, setState] = useState<"loading" | "ready" | "failed">("loading")
-  useLayoutEffect(() => { latest.current = { theme, onError } })
-
-  useLayoutEffect(() => {
-    let disposed = false
-    let answered = false
-    const used = librariesUsed(html)
-    const libraries = loadViewLibraries(used)
-    libraries.catch(() => {})
-    const onMessage = (event: MessageEvent) => {
-      const target = frame.current?.contentWindow
-      if (!target || event.source !== target) return
-      const message = readViewMessage(event.data)
-      if (!message) return
-      switch (message.type) {
-        case "ready":
-          answered = true
-          libraries.then((loaded) => {
-            if (disposed) return
-            target.postMessage({ type: "cogpit-view:render", html: composeViewDocument(html, latest.current.theme, used), libraries: loaded }, "*")
-            setState("ready")
-          }, (failure: unknown) => {
-            if (disposed) return
-            setState("failed")
-            latest.current.onError(failure instanceof Error ? failure.message : String(failure))
-          })
-          return
-        case "resize":
-          setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, message.height)))
-          return
-        case "error":
-          latest.current.onError(message.message)
-          return
-      }
-      // Leaving the view needs the user's hand on it: the parent sees the frame focused only after a click inside.
-      if (document.activeElement !== frame.current) return
-      if (message.type === "open") window.open(message.href, "_blank", "noopener,noreferrer")
-      else askInComposer(message.text)
-    }
-    window.addEventListener("message", onMessage)
-    const timeout = window.setTimeout(() => { if (!answered && !disposed) setState("failed") }, LOAD_TIMEOUT_MS)
-    return () => {
-      disposed = true
-      window.removeEventListener("message", onMessage)
-      window.clearTimeout(timeout)
-    }
-  }, [html])
-
-  useEffect(() => {
-    if (state === "ready") frame.current?.contentWindow?.postMessage({ type: "cogpit-view:theme", theme }, "*")
-  }, [theme, state])
-
-  if (state === "failed") return <p role="alert" className="p-3 text-xs text-destructive">This view could not load. Show its source to read it.</p>
-  return (
-    <div className={cn("relative", fill && "h-full")}>
-      {state === "loading" && <div className="absolute inset-0 grid place-items-center text-muted-foreground"><Spinner className="size-4" /></div>}
-      <iframe
-        ref={frame} title={title} src={VIEW_SHELL_PATH} sandbox="allow-scripts" referrerPolicy="no-referrer"
-        className={cn("block w-full border-0", state !== "ready" && "invisible")}
-        style={{ height: fill ? "100%" : height }}
-      />
-    </div>
   )
 }
