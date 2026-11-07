@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { Bot, Maximize2, Minus, Network, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
@@ -41,6 +41,8 @@ const GROUP_VIEW_WIDTH = 900
 /** The panel draws the crew across only when all of it fits at this scale or larger; otherwise it stacks. */
 const ACROSS_MIN_SCALE = 0.85
 const STACKED_CARD_MAX = 320
+/** Maps with more cards than this draw only those near the view. */
+export const MAP_WINDOW_MIN = 150
 
 export interface CrewMapViewport {
   frame: Frame
@@ -188,6 +190,9 @@ function sessionCount(count: number): string {
 
 interface Size { width: number; height: number }
 
+/** Before the map's area is measured, which happens before it is first painted. */
+const UNMEASURED: Size = { width: 0, height: 0 }
+
 /** How the map is drawn: its zoom, and where its top-left corner sits in the scrolled area. */
 interface Frame {
   scale: number
@@ -226,6 +231,33 @@ function fitScale(layout: CrewMapLayout, size: Size, { widthOnly = false } = {})
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+/** A box in the map's own coordinates. */
+interface Region { left: number; top: number; right: number; bottom: number }
+
+/** The part of the map on screen, in its own coordinates. */
+function viewRegion(element: HTMLElement, frame: Frame): Region {
+  const left = (element.scrollLeft - frame.left) / frame.scale
+  const top = (element.scrollTop - frame.top) / frame.scale
+  return { left, top, right: left + element.clientWidth / frame.scale, bottom: top + element.clientHeight / frame.scale }
+}
+
+const contains = (outer: Region, inner: Region) =>
+  inner.left >= outer.left && inner.top >= outer.top && inner.right <= outer.right && inner.bottom <= outer.bottom
+
+/** A region a screen larger on every side, so ordinary scrolling stays inside what is drawn. */
+function drawnAround(view: Region): Region {
+  const width = view.right - view.left
+  const height = view.bottom - view.top
+  return { left: view.left - width, top: view.top - height, right: view.right + width, bottom: view.bottom + height }
+}
+
+/** Where to scroll along one axis so the span from `start` to `end` is in view, moving as little as possible. */
+function nearest(scroll: number, view: number, start: number, end: number): number {
+  if (start < scroll) return start
+  if (end > scroll + view) return Math.min(start, end - view)
+  return scroll
+}
 
 interface Scroll { left: number; top: number }
 
@@ -311,7 +343,7 @@ interface CanvasProps {
 
 function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf, memory, onOpen, onToggle, onShowAll }: CanvasProps) {
   const scroller = useRef<HTMLDivElement>(null)
-  const [size, setSize] = useState<Size>({ width: 0, height: 0 })
+  const [size, setSize] = useState<Size>(UNMEASURED)
   const group = groups && size.width >= GROUP_VIEW_WIDTH
   // The panel stacks a crew too deep to read across it; how deep is the whole crew's, so a filter or fold never flips it.
   const depth = useMemo(() => crewDepth(crew), [crew])
@@ -329,6 +361,7 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
   // The scroll position as last seen; when the crew shrinks, the browser clamps the live one before the map can re-anchor.
   const scrolled = useRef<Scroll>({ left: 0, top: 0 })
   const shown = useRef<Shown | null>(null)
+  const [drawn, setDrawn] = useState<Region | null>(null)
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null)
   const area = areaFor(layout, frame, size)
   const { scale } = frame
@@ -337,7 +370,7 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
     const element = scroller.current
     if (!element) return
     const measure = () => setSize((current) => (
-      current.width === element.clientWidth && current.height === element.clientHeight
+      current !== UNMEASURED && current.width === element.clientWidth && current.height === element.clientHeight
         ? current
         : { width: element.clientWidth, height: element.clientHeight }
     ))
@@ -406,10 +439,35 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
   useEffect(() => {
     if (lastHere.current === hereId) return
     lastHere.current = hereId
-    if (!hereId) return
-    scroller.current?.querySelector(`[data-crew-map-card="${CSS.escape(hereId)}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" })
-  }, [hereId])
+    const element = scroller.current
+    const node = hereId ? layout.nodes.find((value) => value.member.sessionId === hereId) : undefined
+    if (!element || !node) return
+    const left = frame.left + node.x * frame.scale
+    const top = frame.top + node.y * frame.scale
+    element.scrollTo?.({
+      left: nearest(element.scrollLeft, element.clientWidth, left, left + layout.cardWidth * frame.scale),
+      top: nearest(element.scrollTop, element.clientHeight, top, top + CARD_HEIGHT * frame.scale),
+      behavior: "smooth",
+    })
+  }, [frame, hereId, layout])
+
+  // A large map draws only the cards near the view, and draws more once scrolling nears the edge of what it drew.
+  const large = layout.nodes.length > MAP_WINDOW_MIN
+  // An area that measures empty (a test DOM) cannot be windowed, so it draws every card.
+  const windowed = large && size.width > 0 && size.height > 0
+  const followView = useCallback(() => {
+    const element = scroller.current
+    if (!element || !windowed) return
+    const view = viewRegion(element, frame)
+    setDrawn((current) => (current && contains(current, view) ? current : drawnAround(view)))
+  }, [frame, windowed])
+  useLayoutEffect(() => { followView() }, [followView, layout])
+  const nodes = useMemo(() => {
+    if (large && (size === UNMEASURED || (windowed && !drawn))) return []
+    if (!windowed || !drawn) return layout.nodes
+    return layout.nodes.filter((node) => node.x + layout.cardWidth >= drawn.left && node.x <= drawn.right
+      && node.y + CARD_HEIGHT >= drawn.top && node.y <= drawn.bottom)
+  }, [drawn, large, layout, size, windowed])
 
   /** Zoom by a factor around a point on screen, the viewport's centre by default. */
   const zoomBy = useCallback((factor: number, focus?: { clientX: number; clientY: number }) => {
@@ -467,6 +525,10 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
     setDragging(false)
   }
 
+  const toggleAnchored = useCallback((sessionId: string) => {
+    anchor.current = sessionId
+    onToggle(sessionId)
+  }, [onToggle])
   const trail = useMemo(() => trailTo(layout, hereId), [layout, hereId])
   const empty = layout.nodes.length === 0
   // Across, the fold toggle sits where the connector leaves the card; stacked, beside it.
@@ -482,6 +544,7 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
         onScroll={(event) => {
           scrolled.current = { left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }
           if (!pending.current) remember(frame)
+          followView()
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -528,7 +591,7 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
                 {trail && <path d={trail} className="stroke-foreground/55" strokeWidth={1.5} />}
               </svg>
               <ul aria-label="Sessions" className="absolute inset-0">
-                {layout.nodes.map((node) => (
+                {nodes.map((node) => (
                   <CrewMapItem
                     key={node.member.sessionId}
                     node={node}
@@ -538,10 +601,7 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
                     kind={kinds.get(node.member.sessionId)}
                     name={nameOf(node.member)}
                     onOpen={onOpen}
-                    onToggle={(sessionId) => {
-                      anchor.current = sessionId
-                      onToggle(sessionId)
-                    }}
+                    onToggle={toggleAnchored}
                   />
                 ))}
               </ul>
@@ -598,7 +658,7 @@ function cardMeta(member: CrewMember): string {
   ].filter(Boolean).join(" · ")
 }
 
-function CrewMapItem({
+const CrewMapItem = memo(function CrewMapItem({
   node,
   width,
   toggleLeft,
@@ -673,7 +733,7 @@ function CrewMapItem({
       {node.childCount > 0 && <FoldToggle node={node} name={name} left={toggleLeft} onToggle={onToggle} />}
     </li>
   )
-}
+})
 
 function FoldToggle({ node, name, left, onToggle }: { node: CrewMapNode; name: string; left: number; onToggle: (sessionId: string) => void }) {
   const { collapsed, hidden } = node

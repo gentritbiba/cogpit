@@ -63,17 +63,24 @@ function asListedRow(member: CrewMember, rootId: string): ActiveSessionInfo {
   }
 }
 
-export function crewMemberName(
-  member: CrewMember,
-  byId: ReadonlyMap<string, CrewMember>,
-  sessionNames: Record<string, string>,
-): string {
-  const rootId = [...byId.values()].find((value) => value.parentId === null)?.sessionId ?? member.sessionId
-  const customName = sessionNames[member.sessionId]
-  const row = asListedRow(member, rootId)
-  if (!member.parentId) return sessionTitle(row, customName)
-  const parent = byId.get(member.parentId)
-  return memberName(row, { customName, parent: parent && asListedRow(parent, rootId) })
+/** What each member is called, by session id: worked out once per crew rather than once per row. */
+export function crewMemberNames(crew: SessionCrew, sessionNames: Record<string, string>): Map<string, string> {
+  const byId = new Map(crew.members.map((member) => [member.sessionId, member]))
+  const rows = new Map<string, ActiveSessionInfo>()
+  const rowOf = (member: CrewMember) => {
+    let row = rows.get(member.sessionId)
+    if (!row) rows.set(member.sessionId, row = asListedRow(member, crew.rootId))
+    return row
+  }
+  const names = new Map<string, string>()
+  for (const member of crew.members) {
+    const customName = sessionNames[member.sessionId]
+    const parent = member.parentId ? byId.get(member.parentId) : undefined
+    names.set(member.sessionId, member.parentId
+      ? memberName(rowOf(member), { customName, parent: parent && rowOf(parent) })
+      : sessionTitle(rowOf(member), customName))
+  }
+  return names
 }
 
 export interface CrewTreeRow {
