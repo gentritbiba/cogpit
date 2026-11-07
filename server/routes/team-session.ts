@@ -56,18 +56,21 @@ async function detectTeamFromSessionFile(
  * rest, and only files modified after the team was created count, since a
  * teammate's session is always newer than its team. A team's name is reused
  * once it is deleted, so only a session the caller may see is taken.
+ * Also answers where the lead's transcript is, which the same listing holds.
  */
 async function findMemberTopLevelSession(
   teamName: string,
   memberName: string,
-  leadPath: string | null,
+  leadSessionId: string,
   teamCreatedAt: number,
   visible: VisibilityCheck,
-): Promise<{ dirName: string; fileName: string } | null> {
+): Promise<{ member: { dirName: string; fileName: string } | null; leadPath: string | null }> {
+  const sessions = await teamStore().listTopLevelSessions().catch(() => [])
+  const leadFileName = TEAM_AGENT.sessionFile.name(leadSessionId)
+  const leadPath = sessions.find((session) => session.fileName === leadFileName)?.filePath ?? null
   const leadDir = leadPath && dirname(leadPath)
   const inLeadDir = []
   const elsewhere = []
-  const sessions = await teamStore().listTopLevelSessions().catch(() => [])
   for (const session of [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs)) {
     if (session.mtimeMs < teamCreatedAt || session.filePath === leadPath) continue
     if (dirname(session.filePath) === leadDir) inLeadDir.push(session)
@@ -84,10 +87,10 @@ async function findMemberTopLevelSession(
       const sessionId = batch[i].sessionId ?? TEAM_AGENT.sessionFile.sessionId(fileName)
       if (!sessionId) continue
       const lineage = lineageFromMeta({ sessionId, parentSessionId: null }, filePath)
-      if ((await visible(sessionId, lineage)) !== "hidden") return addressOf(filePath)
+      if ((await visible(sessionId, lineage)) !== "hidden") return { member: addressOf(filePath), leadPath }
     }
   }
-  return null
+  return { member: null, leadPath }
 }
 
 export function registerTeamSessionRoutes(use: UseFn) {
@@ -198,9 +201,9 @@ export function registerTeamSessionRoutes(use: UseFn) {
     try {
       const members = config.members ?? []
       const member = members.find((m) => m.name === memberName)
-      const leadPath = await teamStore().findSessionFile(leadSessionId)
 
       if (member?.agentType === "team-lead") {
+        const leadPath = await teamStore().findSessionFile(leadSessionId)
         if (leadPath) sendJson(res, 200, addressOf(leadPath))
         else sendJson(res, 404, { error: "Lead session not found" })
         return
@@ -208,10 +211,10 @@ export function registerTeamSessionRoutes(use: UseFn) {
 
       // New format first (Claude Code 2.1.19x+): members run as their own
       // top-level sessions tagged with teamName/agentName — exact match.
-      const topLevel = await findMemberTopLevelSession(
+      const { member: topLevel, leadPath } = await findMemberTopLevelSession(
         teamName,
         memberName,
-        leadPath,
+        leadSessionId,
         typeof config.createdAt === "number" ? config.createdAt : 0,
         visibilityFor(req),
       )
