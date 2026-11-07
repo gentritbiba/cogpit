@@ -55,13 +55,6 @@ export function clearTurnError(sessionId: string): void {
   turnErrors.delete(sessionId)
 }
 
-/** A transcript the caller already found, so the read skips looking for it. */
-export interface KnownTranscript {
-  filePath: string
-  /** When the session last did something; the transcript's mtime when absent. */
-  lastActivityMs?: number
-}
-
 /**
  * Whether a mid-flight tail means the session is still working. A runtime
  * holding the session is trusted over the tail, which lags the turn boundary
@@ -165,15 +158,15 @@ export async function sessionStateFrom(sessionId: string, signals: SessionSignal
   }
 }
 
-export async function readSessionState(sessionId: string, known?: KnownTranscript): Promise<SessionState> {
-  const filePath = known?.filePath ?? await findJsonlPath(sessionId)
+export async function readSessionState(sessionId: string): Promise<SessionState> {
+  const filePath = await findJsonlPath(sessionId)
   const signals = await readSessionSignals(sessionId, filePath)
   if (!signals) return { sessionId, outcome: "not_found", live: false, running: false, waiting: [] }
   const statusInfo = filePath ? await getSessionStatus(filePath) : undefined
   const transcriptStore = storeForPath(filePath)
   const identity = filePath && transcriptStore?.readIdentity ? await transcriptStore.readIdentity(filePath).catch(() => null) : null
   const workspace = identity?.cwd ? await workspaceDetailsForCwd(identity.cwd) : {}
-  const state = await sessionStateFrom(sessionId, signals, filePath && statusInfo ? { filePath, statusInfo, lastActivityMs: known?.lastActivityMs } : null)
+  const state = await sessionStateFrom(sessionId, signals, filePath && statusInfo ? { filePath, statusInfo } : null)
   return { ...state, ...workspace }
 }
 
