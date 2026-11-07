@@ -161,7 +161,7 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=15&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=15")
   })
 
   it("passes an explicit snapshot byte offset to the watcher", () => {
@@ -174,7 +174,7 @@ describe("useLiveSession", () => {
 
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
-    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=4096&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=4096")
   })
 
   it("sets sseState to connecting initially", () => {
@@ -692,6 +692,55 @@ describe("useLiveSession", () => {
     }))
   })
 
+  describe("resuming the stream", () => {
+    const first = '{"type":"assistant","n":1}'
+    const second = '{"type":"assistant","n":2}'
+    const third = '{"type":"assistant","n":3}'
+
+    it("reconnects after the last line received and ignores a replay of it, without reloading", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      const streamed = [
+        { type: "lines", lines: [first], start: 100, end: 130 },
+        { type: "lines", lines: [second], start: 130, end: 160 },
+      ]
+      const before = getLastEventSource()
+      act(() => {
+        before.simulateOpen()
+        for (const event of streamed) before.simulateMessage(event)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      act(() => { before.simulateError() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+      const after = getLastEventSource()
+      expect(after).not.toBe(before)
+      expect(after.url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=160")
+
+      act(() => {
+        after.simulateOpen()
+        // A server that replays what was already applied, then moves on.
+        for (const event of streamed) after.simulateMessage(event)
+        after.simulateMessage({ type: "lines", lines: [third], start: 160, end: 190 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      const appended = workerAppend.mock.calls.map(([, text]) => text).join("")
+      expect(appended).toBe(`${first}\n${second}\n${third}\n`)
+      expect(onResync).not.toHaveBeenCalled()
+    })
+
+    it("reloads when the server says the stream cannot resume", () => {
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      expect(onResync).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("closes EventSource on unmount", () => {
     const source: SessionSource = {
       dirName: "dir",
@@ -732,7 +781,7 @@ describe("useLiveSession", () => {
     // Old ES should be closed, new one created
     expect(firstES.closed).toBe(true)
     expect(MockEventSource.instances).toHaveLength(2)
-    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl?offset=2&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl?projection=results-v1&stream=2&offset=2")
   })
 
   it("encodes dirName and fileName in URL", () => {
@@ -745,7 +794,7 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(getLastEventSource().url).toBe(
-      "/api/watch/dir%20with%20spaces/file%20name.jsonl?offset=2&projection=results-v1"
+      "/api/watch/dir%20with%20spaces/file%20name.jsonl?projection=results-v1&stream=2&offset=2"
     )
   })
 

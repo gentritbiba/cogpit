@@ -7,6 +7,7 @@ import type { SessionSource } from "@/lib/sessionSource"
 import { createStreamingOverlayStore } from "@/lib/streamingOverlayStore"
 import { sessionCache } from "@/lib/sessionCache"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
+import { WATCH_STREAM_VERSION } from "../../shared/contracts/watchStream"
 import {
   applyDeltas,
   applySnapshot,
@@ -29,7 +30,7 @@ export function useLiveSession(
   onUpdate: (session: ParsedSession) => void,
   workerParse: (text: string) => Promise<ParsedSession>,
   workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
-  /** Reload the session from disk: after a reconnect, or when a batch failed to parse. */
+  /** Reload the session from disk: when the stream cannot resume, or a batch keeps failing to parse. */
   onResync: (() => void) | undefined,
   /** The parsed session `source` loaded; streamed lines are appended to it. */
   initialSession: ParsedSession | null,
@@ -68,7 +69,6 @@ export function useLiveSession(
   // Read when a load lands, without re-running on every state.session change.
   const initialSessionRef = useRef(initialSession)
   initialSessionRef.current = initialSession
-  const wasDisconnectedRef = useRef(false)
   const lastResyncAtRef = useRef(0)
 
   const dirName = source?.dirName ?? null
@@ -94,8 +94,10 @@ export function useLiveSession(
 
     setSseState("connecting")
 
-    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?offset=${watchOffset}&projection=${RESULT_PROJECTION}`
-    const stream = openSessionStream(url)
+    // Every (re)connect resumes after the last line received, so nothing is replayed.
+    let appliedEnd = watchOffset
+    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?projection=${RESULT_PROJECTION}&stream=${WATCH_STREAM_VERSION}`
+    const stream = openSessionStream(url, { connectUrl: () => `${url}&offset=${appliedEnd}` })
     const es = stream.source
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -121,7 +123,6 @@ export function useLiveSession(
     // Ordering is preserved because text fragments are appended in arrival
     // order and only one worker call is in flight at a time.
     let pendingText = ""
-    let trackedOffset = watchOffset
     let workerBusy = false
     let closed = false
     let pendingUpdate = false
@@ -192,6 +193,7 @@ export function useLiveSession(
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
       const toFlush = pendingText
+      const flushedEnd = appliedEnd
       pendingText = ""
       workerBusy = true
 
@@ -209,7 +211,7 @@ export function useLiveSession(
           if (dirName && fileName) {
             sessionCache.update(dirName, fileName, {
               parsed: result,
-              source: { watchOffset: trackedOffset },
+              source: { watchOffset: flushedEnd },
             })
           }
           scheduleUpdate()
@@ -239,13 +241,8 @@ export function useLiveSession(
 
     es.onopen = () => {
       if (sseStateRef.current !== "connected") {
-        const wasDisconnected = wasDisconnectedRef.current
-        wasDisconnectedRef.current = false
         sseStateRef.current = "connected"
         setSseState("connected")
-        if (wasDisconnected) {
-          onResyncRef.current?.()
-        }
       }
     }
 
@@ -311,13 +308,20 @@ export function useLiveSession(
         } else if (data.type === "stream_clear") {
           clearOverlay()
           setIsCompacting(false)
+        } else if (data.type === "reset") {
+          // The file shrank under us, or we fell too far behind: load it again.
+          onResyncRef.current?.()
         } else if (data.type === "lines") {
-          // A projected stream states the native bytes it covers, since its
-          // lines are lighter; a native one moves the file on by its lines and
-          // the ones it left out.
-          const nativeBytes = typeof data.bytes === "number" ? data.bytes : null
-          if (nativeBytes !== null) trackedOffset += nativeBytes
-          else if (typeof data.skippedBytes === "number") trackedOffset += data.skippedBytes
+          if (typeof data.end === "number") {
+            if (data.end <= appliedEnd) return
+            appliedEnd = data.end
+          } else {
+            // A server without stream v2 states the native bytes of a projected
+            // event; an unprojected one covers its lines and the ones left out.
+            appliedEnd += typeof data.bytes === "number"
+              ? data.bytes
+              : (data.skippedBytes ?? 0) + new TextEncoder().encode(data.lines.map((line: string) => `${line}\n`).join("")).byteLength
+          }
           if (data.lines.length === 0) return
           setIsLive(true)
           setIsCompacting(false)
@@ -326,9 +330,7 @@ export function useLiveSession(
           // Drop overlay messages superseded by their complete JSONL line.
           setOverlay(reconcileWithLines(overlayRef.current, data.lines))
 
-          const newText = data.lines.join("\n") + "\n"
-          if (nativeBytes === null) trackedOffset += new TextEncoder().encode(newText).byteLength
-          pendingText += newText
+          pendingText += data.lines.join("\n") + "\n"
           flushToWorker()
         }
       } catch (err) {
@@ -339,7 +341,6 @@ export function useLiveSession(
     es.onerror = () => {
       setIsLive(false)
       setIsCompacting(false)
-      wasDisconnectedRef.current = sseStateRef.current === "connected"
       sseStateRef.current = "disconnected"
       setSseState("disconnected")
       // EventSource auto-reconnects; a fresh stream_snapshot will rebuild the

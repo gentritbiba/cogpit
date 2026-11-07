@@ -9,7 +9,16 @@ export interface ConnectionState {
   lastEventAt: number | null
 }
 export interface SessionStream { source: EventSource; close: () => void; state: () => ConnectionState }
-interface SessionStreamOptions { onLost?: () => void; onState?: (state: ConnectionState) => void }
+interface SessionStreamOptions {
+  onLost?: () => void
+  onState?: (state: ConnectionState) => void
+  /**
+   * The URL each connection opens, read again on every reconnect, so a stream
+   * resumes where its reader is instead of replaying from where it started.
+   * The stream is shared by its plain `url`.
+   */
+  connectUrl?: () => string
+}
 
 const owners = new Map<string, StreamOwner>()
 
@@ -59,7 +68,7 @@ class StreamOwner {
   }
   private readonly identityChanged = () => this.stop()
 
-  constructor(readonly key: string, readonly url: string) {
+  constructor(readonly key: string, readonly url: string, private readonly connectUrl?: () => string) {
     window.addEventListener("online", this.foreground)
     document.addEventListener("visibilitychange", this.foreground)
     window.addEventListener("cogpit-identity-changed", this.identityChanged)
@@ -109,7 +118,7 @@ class StreamOwner {
     this.retryingGeneration = null
     this.linked.clear()
     this.setHealth({ ...this.health, transport: "connecting" })
-    this.source = new EventSource(this.url)
+    this.source = new EventSource(this.connectUrl ? authUrl(this.connectUrl()) : this.url)
     this.stopFrames = [announceAccessFrames(this.source), announceConfigFrames(this.source)]
     for (const type of this.types) this.link(type)
   }
@@ -150,7 +159,7 @@ export function openSessionStream(url: string, options: SessionStreamOptions = {
   const resolved = authUrl(url)
   const key = JSON.stringify([getActiveDeviceScope(), getActiveIdentity(), resolved])
   let owner = owners.get(key)
-  if (!owner) { owner = new StreamOwner(key, resolved); owners.set(key, owner) }
+  if (!owner) { owner = new StreamOwner(key, resolved, options.connectUrl); owners.set(key, owner) }
   const source = owner.add(options)
   return { source: source as unknown as EventSource, close: () => source.close(), state: () => owner.health }
 }
