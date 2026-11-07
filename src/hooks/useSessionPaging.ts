@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { prependTurns } from "@/lib/timelinePaging"
+import type { HistoryBytes } from "@/lib/timelineScroll/controller"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 import type { ParsedSession, Turn } from "../../shared/session/types"
 
@@ -25,13 +26,22 @@ interface UseSessionPagingOpts {
 /** Number of complete records requested per older page (the server guarantees a minimum). */
 const PAGE_COUNT = 30
 
+const NO_HISTORY: HistoryBytes = { remaining: 0, loaded: 0 }
+
+/** Transcript bytes before the paging cursor, and between it and the live end. */
+function historyBytesOf(entry: { nextByteOffset: number; hasMore: boolean; source: { watchOffset?: number } } | undefined): HistoryBytes {
+  if (!entry?.hasMore) return NO_HISTORY
+  return { remaining: entry.nextByteOffset, loaded: Math.max(0, (entry.source.watchOffset ?? 0) - entry.nextByteOffset) }
+}
+
 /**
  * Pages older session content in via `?before=<byteOffset>&count=N`.
  *
  * `hasMore`/`isLoadingOlder` are real React state (reactive), while the byte
  * cursor and the pages it has already consumed live together in the shared
  * `sessionCache` entry — so prefetch, search hydration, and re-opens all agree
- * on both where paging left off and what it found there.
+ * on both where paging left off and what it found there. When to page is the
+ * timeline scroll engine's decision; this hook only fetches.
  */
 export function useSessionPaging({
   dirName,
@@ -42,6 +52,7 @@ export function useSessionPaging({
 }: UseSessionPagingOpts) {
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  const [historyBytes, setHistoryBytes] = useState<HistoryBytes>(NO_HISTORY)
   // Identity of the session the state above belongs to; guards against a
   // mid-flight session switch prepending turns into the wrong session.
   const identityRef = useRef("")
@@ -55,6 +66,7 @@ export function useSessionPaging({
     setIsLoadingOlder(false)
     const cached = dirName && fileName ? sessionCache.get(dirName, fileName) : undefined
     setHasMore(cached?.hasMore ?? false)
+    setHistoryBytes(historyBytesOf(cached))
     // Re-attach history paged in before this session was last closed. The
     // cached byte cursor already sits past those pages, so without this they
     // would be an unreachable gap in the transcript.
@@ -87,6 +99,7 @@ export function useSessionPaging({
           hasMore: hasMorePages,
           nextByteOffset: data.byteOffset,
         })
+        if (identityRef.current === key) setHistoryBytes(historyBytesOf(sessionCache.get(dirName, fileName)))
         return 0
       }
 
@@ -104,6 +117,7 @@ export function useSessionPaging({
       })
 
       if (identityRef.current !== key) return 0
+      setHistoryBytes(historyBytesOf(sessionCache.get(dirName, fileName)))
       onOlderTurns(history)
       return olderParsed.turns.length
     } finally {
@@ -114,5 +128,5 @@ export function useSessionPaging({
     }
   }, [dirName, fileName, sessionChangeKey, workerParse, onOlderTurns])
 
-  return { loadMore, hasMore, isLoadingOlder }
+  return { loadMore, hasMore, isLoadingOlder, historyBytes }
 }

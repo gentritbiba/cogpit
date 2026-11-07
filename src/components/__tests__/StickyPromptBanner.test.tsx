@@ -1,8 +1,8 @@
-import { useRef, useState } from "react"
+import { useRef } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
+import type { ScrollToTurnOptions, TimelineHandle } from "@/lib/timelineScroll/types"
 import { makeTurn } from "@/__tests__/fixtures"
 import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
 import { renderComposerMessage } from "../../../shared/session/composerContext"
@@ -255,25 +255,15 @@ describe("StickyPromptBanner", () => {
       userMessage: "Start the audit",
       contentBlocks: [{ kind: "queued_prompt", content: crewPost("Lane B is done") }],
     }
-    const scrollToTurn = vi.fn<(index: number) => boolean>(() => true)
-
-    function Virtualized() {
-      const [mounted, setMounted] = useState(false)
-      const session = makeSession("session-a", [earlier, crewPost("Lane C is done")])
-      return (
-        <Harness
-          session={session}
-          bubbles={[mounted ? ["prompt"] : null, []]}
-          timeline={{
-            scrollToTurn: (index) => {
-              setMounted(true)
-              return scrollToTurn(index)
-            },
-          }}
-        />
-      )
-    }
-    render(<Virtualized />)
+    const scrollToTurn = vi.fn<(key: string, opts?: ScrollToTurnOptions) => Promise<boolean>>(async () => true)
+    const session = makeSession("session-a", [earlier, crewPost("Lane C is done")])
+    render(
+      <Harness
+        session={session}
+        bubbles={[null, []]}
+        timeline={{ scrollToTurn } as unknown as TimelineHandle}
+      />,
+    )
 
     const container = screen.getByTestId("scroll-container")
     setRect(container, 100, 700)
@@ -285,11 +275,10 @@ describe("StickyPromptBanner", () => {
     flushAnimationFrame()
     fireEvent.click(banner(1))
 
-    expect(scrollToTurn).toHaveBeenCalledWith(0)
-    setRect(screen.getByTestId("bubble-0-prompt"), 150, 210)
-    flushAnimationFrame()
+    expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-0", { target: expect.any(Function) })
     expect(scrollTo).not.toHaveBeenCalled()
-    flushAnimationFrame()
-    expect(scrollTo).toHaveBeenCalledWith({ top: 5050 })
+    const row = document.createElement("div")
+    row.innerHTML = '<div data-reader-prompt="prompt"></div>'
+    expect(scrollToTurn.mock.calls[0][1]?.target?.(row)).toBe(row.firstElementChild)
   })
 })

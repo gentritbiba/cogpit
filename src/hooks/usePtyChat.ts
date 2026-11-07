@@ -75,7 +75,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   // When session changes, abort any in-flight request and reset state.
   // During session creation, the sessionId changes from null → UUID when
   // FINALIZE_SESSION fires. In that case, preserve pendingMessages so
-  // useChatScroll can consume them smoothly as turns render.
+  // usePendingPrompts can consume them smoothly as turns render.
   useEffect(() => {
     if (sessionIdRef.current !== sessionId) {
       if (creatingRef.current) {
@@ -132,7 +132,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             return false
           }
           // Session was created and first message was sent.
-          // Don't clear pendingMessages — useChatScroll will consume them
+          // Don't clear pendingMessages — usePendingPrompts will consume them
           // once the session's turns are rendered, ensuring a smooth transition.
           setStatus("idle")
         } catch (err) {

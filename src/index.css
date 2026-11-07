@@ -212,6 +212,24 @@ html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
   animation: motion-session-enter var(--motion-duration-slow) var(--motion-ease-enter) backwards;
 }
 
+/* Opacity only: the timeline measures row rects while this runs. */
+.motion-fade-enter {
+  animation: motion-fade-enter var(--motion-duration-slow) var(--motion-ease-enter) backwards;
+}
+
+/* Placeholder lines standing in for history not loaded yet. */
+.timeline-reserve {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 1.5rem,
+    color-mix(in oklab, var(--muted) 70%, transparent) 1.5rem 2.25rem,
+    transparent 2.25rem 3.5rem
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  background-position: 1rem 0;
+}
+
 .motion-list-item {
   --motion-list-index: 0;
   animation: motion-enter var(--motion-duration-base) var(--motion-ease-enter) backwards;
@@ -276,6 +294,10 @@ html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
 
 @keyframes motion-popover-in {
   from { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(0.985); }
+}
+
+@keyframes motion-fade-enter {
+  from { opacity: 0; }
 }
 
 @keyframes motion-session-enter {

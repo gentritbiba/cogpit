@@ -32,7 +32,7 @@ import { useSessionWorkflows } from "@/hooks/useSessionWorkflows"
 import { usePtyChat } from "@/hooks/usePtyChat"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useSessionState } from "@/hooks/useSessionState"
-import { useChatScroll } from "@/hooks/useChatScroll"
+import { useTimelineScroll } from "@/hooks/useTimelineScroll"
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
@@ -580,36 +580,22 @@ export default function App() {
     })
   }, [state.session, state.pendingDirName, state.mobileTab, isMobile, dispatch])
 
-  // Scroll management
-  const scroll = useChatScroll({
+  const scroll = useTimelineScroll({
     session: state.session,
-    isLive,
     pendingMessages: agentChat.pendingMessages,
     consumePending: agentChat.consumePending,
-    sessionChangeKey: state.sessionChangeKey,
+    historyBytes: chunkedSession.historyBytes,
   })
 
-  const chatScrollRef = scroll.chatScrollRef
   const resetFinalizedSessionTurnCount = scroll.resetTurnCount
   const scrollFinalizedSessionToBottom = scroll.scrollToBottomInstant
-
-  const handleTodosExpandedChange = useCallback((expanded: boolean) => {
-    setTodosExpanded(expanded)
-    // Scroll chat to compensate for padding change (pb-48 vs pb-32 = 64px)
-    requestAnimationFrame(() => {
-      const el = chatScrollRef.current
-      if (el) {
-        el.scrollTo({ top: el.scrollTop + (expanded ? 64 : -64), behavior: "smooth" })
-      }
-    })
-  }, [chatScrollRef])
 
   // Wire up the session-finalized bridge now that scroll is available. A layout
   // effect keeps render pure and installs the latest callback before user input
   // or passive effects can finalize a newly-created session.
   useLayoutEffect(() => {
     const handleSessionFinalized = (_parsed: ParsedSession) => {
-      // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
+      // Reset to 0 so usePendingPrompts detects "new turns" and clears pendingMessage
       resetFinalizedSessionTurnCount(0)
       scrollFinalizedSessionToBottom()
     }
@@ -1400,7 +1386,7 @@ export default function App() {
             pendingTurns: pendingPreviewList,
             todoProgress,
             todosExpanded,
-            onTodosExpandedChange: handleTodosExpandedChange,
+            onTodosExpandedChange: setTodosExpanded,
             hasMoreTurns: chunkedSession.hasMore,
             isLoadingOlderTurns: chunkedSession.isLoadingOlder,
             onLoadMoreTurns: chunkedSession.loadMore,

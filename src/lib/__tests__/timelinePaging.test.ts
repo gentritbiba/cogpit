@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
-  isNearTop,
-  isPrepend,
   prependTurns,
   shouldShowEmptyState,
-  NEAR_TOP_VIEWPORTS,
 } from "@/lib/timelinePaging"
 import { parseSession } from "../../../shared/session/parser"
 import {
@@ -22,22 +19,6 @@ import type { Turn, TurnContentBlock } from "../../../shared/session/types"
 const makeTurn = (id: string, overrides: Partial<Turn> = {}) =>
   emptyTurn({ id, userMessage: `msg-${id}`, timestamp: "2026-07-23T10:00:00Z", ...overrides })
 
-describe("isNearTop", () => {
-  it("is true when within the trigger distance of the top", () => {
-    expect(isNearTop(0, 800)).toBe(true)
-    expect(isNearTop(800 * NEAR_TOP_VIEWPORTS - 1, 800)).toBe(true)
-  })
-
-  it("is false beyond the trigger distance", () => {
-    expect(isNearTop(800 * NEAR_TOP_VIEWPORTS, 800)).toBe(false)
-    expect(isNearTop(10000, 800)).toBe(false)
-  })
-
-  it("is false for a hidden container", () => {
-    expect(isNearTop(0, 0)).toBe(false)
-  })
-})
-
 describe("shouldShowEmptyState", () => {
   it("shows the empty state once history is exhausted", () => {
     expect(shouldShowEmptyState(0, false)).toBe(true)
@@ -53,30 +34,6 @@ describe("shouldShowEmptyState", () => {
   it("never shows the empty state when there are turns", () => {
     expect(shouldShowEmptyState(3, true)).toBe(false)
     expect(shouldShowEmptyState(3, false)).toBe(false)
-  })
-})
-
-describe("isPrepend", () => {
-  it("detects items inserted at the front", () => {
-    expect(isPrepend({ firstKey: "b", length: 2 }, ["a", "b", "c"])).toBe(true)
-  })
-
-  it("is false on first render", () => {
-    expect(isPrepend(null, ["a"])).toBe(false)
-    expect(isPrepend({ firstKey: undefined, length: 0 }, ["a"])).toBe(false)
-  })
-
-  it("is false for appends", () => {
-    expect(isPrepend({ firstKey: "a", length: 2 }, ["a", "b", "c"])).toBe(false)
-  })
-
-  it("is false when the list shrank or stayed the same size (filtering)", () => {
-    expect(isPrepend({ firstKey: "b", length: 3 }, ["a", "c"])).toBe(false)
-    expect(isPrepend({ firstKey: "b", length: 2 }, ["a", "c"])).toBe(false)
-  })
-
-  it("is false when the previous first item disappeared (replacement)", () => {
-    expect(isPrepend({ firstKey: "x", length: 1 }, ["a", "b", "c"])).toBe(false)
   })
 })
 

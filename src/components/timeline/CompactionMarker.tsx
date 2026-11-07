@@ -11,6 +11,8 @@ interface Props {
   /** Summary written by the compacting model; absent when the transcript only recorded the boundary. */
   summary?: string
   meta?: CompactionMeta
+  /** Where its open state is kept: the list renders the marker outside the turn's row scope. */
+  disclosureKey?: string
 }
 
 const TRIGGER_LABELS: Partial<Record<string, string>> = {

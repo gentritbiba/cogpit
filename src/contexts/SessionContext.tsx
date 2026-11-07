@@ -1,5 +1,6 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useContext, type RefObject, type ReactNode } from "react"
+import type { TimelineScrollController } from "@/lib/timelineScroll/controller"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
@@ -32,11 +33,10 @@ export interface ChatState {
 // ── Scroll ──────────────────────────────────────────────────────────────────
 
 export interface ScrollState {
+  /** The timeline's scroll engine; the timeline and its chrome attach to it. */
+  controller: TimelineScrollController
   chatScrollRef: RefObject<HTMLDivElement | null>
-  observeChatContent?: RefCallback<HTMLDivElement>
   canScrollDown: boolean
-  initialScrollDone: boolean
-  handleScroll: () => void
   scrollToBottomInstant: () => void
   requestScrollToTop: () => void
   resetTurnCount: (count: number) => void

@@ -48,6 +48,10 @@ const READER_BUBBLE = "ml-auto w-fit max-w-[min(85%,44rem)] rounded-2xl rounded-
 interface TurnSectionProps {
   turn: Turn
   index: number
+  /** The row key the timeline addresses this turn by. */
+  turnKey?: string
+  /** This is the session's last turn, the only one an agent can still be working on. */
+  isLast?: boolean
   branchCount?: number
 }
 

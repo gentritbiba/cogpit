@@ -5,12 +5,12 @@ import {
   type SessionChatContextValue,
   type SessionContextValue,
 } from "@/contexts/SessionContext"
-import { useChatScroll } from "@/hooks/useChatScroll"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useSessionPaging } from "@/hooks/useSessionPaging"
 import { useSessionState } from "@/hooks/useSessionState"
+import { useTimelineScroll } from "@/hooks/useTimelineScroll"
 import { useShareChat } from "@/hooks/useShareChat"
 import { useSharePermissions } from "@/hooks/useSharePermissions"
 import { useTheme } from "@/hooks/useTheme"
@@ -129,12 +129,11 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     onOlderTurns: handleOlderTurns,
   })
 
-  const scroll = useChatScroll({
+  const scroll = useTimelineScroll({
     session: state.session,
-    isLive,
     pendingMessages: chat.pendingMessages,
     consumePending: chat.consumePending,
-    sessionChangeKey: state.sessionChangeKey,
+    historyBytes: paging.historyBytes,
   })
 
   // Disabled, not stubbed: rewinding a transcript writes to the host filesystem

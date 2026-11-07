@@ -1,4 +1,4 @@
-import { type RefObject, memo, useRef, useEffect, useCallback } from "react"
+import { type ReactNode, type RefObject, memo, useRef, useEffect, useCallback, useMemo } from "react"
 import {
   Search,
   ArrowDown,
@@ -11,7 +11,6 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { AllowanceRecovery } from "@/components/AllowanceRecovery"
 import { QueuedTurns } from "@/components/QueuedTurns"
@@ -27,6 +26,11 @@ import { cn } from "@/lib/utils"
 
 /** Opens find-in-conversation from outside the timeline (the command palette). */
 export const FIND_IN_CONVERSATION_EVENT = "cogpit:find-in-conversation"
+
+/** Per-session state of the timeline's rows mounts here (rows' TimelineRowsProvider). */
+function TimelineRowsScope({ children }: { sessionKey: string; children: ReactNode }) {
+  return children
+}
 
 interface ChatAreaProps {
   searchInputRef: RefObject<HTMLInputElement | null>
@@ -54,9 +58,9 @@ export const ChatArea = memo(function ChatArea({
 
   const { searchQuery } = state
   const { pendingMessages } = chat
-  const { chatScrollRef, observeChatContent, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
+  const { controller, chatScrollRef, canScrollDown, scrollToBottomInstant } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
-  const timelineRef = useRef<TimelineHandle>(null)
+  const timelineRef = useMemo(() => ({ current: controller }), [controller])
 
   // Cmd/Ctrl+F (or the command palette) → open find-in-session
   const handleFindOpen = useCallback(() => findRef.current?.open(), [])
@@ -133,6 +137,7 @@ export const ChatArea = memo(function ChatArea({
       )}
 
       {/* Scrollable chat area */}
+      <TimelineRowsScope sessionKey={currentSession.sessionId}>
       <div className="relative min-h-0 flex-1">
         <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
         <StickyPromptBanner
@@ -141,37 +146,39 @@ export const ChatArea = memo(function ChatArea({
           timelineRef={timelineRef}
         />
         <div
-          ref={chatScrollRef}
-          onScroll={handleScroll}
-          className={cn("h-full overflow-x-hidden overflow-y-auto", isMobile ? "mobile-scroll" : rateLimit ? "scroll-pt-4" : "scroll-pt-14")}
+          ref={controller.setScroller}
+          className={cn("h-full overflow-x-hidden overflow-y-auto [overflow-anchor:none]", isMobile ? "mobile-scroll" : rateLimit ? "scroll-pt-4" : "scroll-pt-14")}
         >
           <div
-            ref={observeChatContent}
-            className={isMobile ? "px-3 py-3 pb-5" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimit ? "pt-4" : "pt-14")}
-            style={isMobile ? undefined : { paddingBottom: `max(var(--session-footer-height, 0px), ${hasTodos ? 12 : 8}rem)` }}
+            className={isMobile ? "px-3 pt-3" : cn("mx-auto w-full max-w-[var(--chat-width)] px-6", rateLimit ? "pt-4" : "pt-14")}
           >
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
                 <ConversationTimeline
-                  chatScrollRef={chatScrollRef}
+                  controller={controller}
                   hasMore={hasMore}
                   isLoadingOlder={isLoadingOlder}
-                  pagingEnabled={initialScrollDone}
                   onLoadMore={onLoadMore}
-                  timelineRef={timelineRef}
                 />
               )}
-              <StreamingTurnOverlay />
-              <AgentStatusIndicator />
-              <QueuedTurns
-                sessionId={currentSession.sessionId}
-                turns={currentSession.turns}
-                pendingMessages={pendingMessages}
-                canManage={permissions.send && !isSubAgentView}
-                isMobile={isMobile}
-              />
+              <div
+                ref={controller.observeFooter}
+                className={isMobile ? "pb-5" : undefined}
+                style={isMobile ? undefined : { paddingBottom: `max(var(--session-footer-height, 0px), ${hasTodos ? 12 : 8}rem)` }}
+              >
+                <StreamingTurnOverlay />
+                <AgentStatusIndicator />
+                <QueuedTurns
+                  sessionId={currentSession.sessionId}
+                  turns={currentSession.turns}
+                  pendingMessages={pendingMessages}
+                  canManage={permissions.send && !isSubAgentView}
+                  isMobile={isMobile}
+                />
+              </div>
             </ErrorBoundary>
           </div>
+          <div ref={controller.setBottomSlack} aria-hidden />
         </div>
 
         {/* Scroll-to-bottom FAB */}
@@ -189,6 +196,7 @@ export const ChatArea = memo(function ChatArea({
           <ArrowDown data-icon="inline-start" />
         </Button>
       </div>
+      </TimelineRowsScope>
     </div>
   )
 })

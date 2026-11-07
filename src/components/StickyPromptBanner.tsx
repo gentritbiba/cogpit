@@ -1,7 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import type { ParsedSession, Turn, UserContent } from "../../shared/session/types"
 import { getUserMessageImages, getUserMessageText } from "../../shared/session/parser"
 import { composerPromptText } from "../../shared/session/composerContext"
@@ -37,8 +38,6 @@ const TURN_SELECTOR = "[data-turn-index]"
 const READER_SELECTOR = "[data-reader-prompt]"
 const POSITION_EPSILON = 1
 const PREVIEW_LENGTH = 180
-/** How long a jump past the rendered turns waits for the virtualizer to settle the message, in frames. */
-const SETTLE_FRAMES = 30
 
 function firstLine(text: string): string {
   const line = text.split("\n")[0]
@@ -133,19 +132,6 @@ function scrollTopOf(container: HTMLElement, element: HTMLElement): number {
   return Math.max(0, container.scrollTop + element.getBoundingClientRect().top - visibleTop(container))
 }
 
-/** Lands on a message once the virtualizer has rendered it and stopped moving it. */
-function landWhenSettled(container: HTMLElement, address: MessageAddress, framesLeft = SETTLE_FRAMES, lastTop?: number): void {
-  requestAnimationFrame(() => {
-    const bubble = bubbleAt(container, address)
-    const top = bubble ? scrollTopOf(container, bubble) : undefined
-    if (top !== undefined && lastTop !== undefined && Math.abs(top - lastTop) < POSITION_EPSILON) {
-      container.scrollTo({ top })
-      return
-    }
-    if (framesLeft > 0) landWhenSettled(container, address, framesLeft - 1, top)
-  })
-}
-
 export const StickyPromptBanner = memo(function StickyPromptBanner({
   session,
   scrollContainerRef,
@@ -213,7 +199,8 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       container.scrollTo({ top: scrollTopOf(container, bubble), behavior: "smooth" })
       return
     }
-    if (timelineRef.current?.scrollToTurn(message.turnIndex)) landWhenSettled(container, message)
+    const key = turnKeysOf(session.turns)[message.turnIndex]
+    if (key) void timelineRef.current?.scrollToTurn(key, { target: (row) => row.querySelector(`[data-reader-prompt="${message.key}"]`) })
   }
 
   return (

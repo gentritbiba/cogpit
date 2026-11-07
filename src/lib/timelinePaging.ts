@@ -5,19 +5,9 @@ import type { Turn } from "../../shared/session/types"
 import type { AgentKind } from "@/lib/agents"
 
 /**
- * Pure logic for timeline infinite scrolling. Kept out of the components so
- * the tricky parts (prepend detection, boundary-turn stitching, trigger
- * distance) are unit-testable without a DOM.
+ * Pure logic for paging older history into the timeline, kept out of the
+ * components so boundary-turn stitching is unit-testable without a DOM.
  */
-
-/** Load older content while the viewport top is within this many viewport-heights of the content top. */
-export const NEAR_TOP_VIEWPORTS = 1.5
-
-/** True when the scroll position is close enough to the top to page in older turns. */
-export function isNearTop(scrollTop: number, clientHeight: number): boolean {
-  if (clientHeight <= 0) return false
-  return scrollTop < clientHeight * NEAR_TOP_VIEWPORTS
-}
 
 /**
  * Whether the timeline should render its empty state instead of the list.
@@ -30,22 +20,6 @@ export function isNearTop(scrollTop: number, clientHeight: number): boolean {
  */
 export function shouldShowEmptyState(visibleTurnCount: number, hasMore: boolean): boolean {
   return visibleTurnCount === 0 && !hasMore
-}
-
-export interface TimelineSnapshot {
-  firstKey: string | undefined
-  length: number
-}
-
-/**
- * Detects whether the current render is a prepend (older turns inserted at the
- * front) relative to the previous committed render. Drives virtua's `shift`
- * prop so scroll position is preserved from the end during prepends.
- */
-export function isPrepend(prev: TimelineSnapshot | null, keys: readonly string[]): boolean {
-  if (!prev || !prev.firstKey || keys.length <= prev.length) return false
-  if (keys[0] === prev.firstKey) return false
-  return keys.includes(prev.firstKey)
 }
 
 /**
