@@ -90,6 +90,8 @@ export class OrchestrationStore {
   private readonly triggerListeners = new Set<TriggerListener>()
   private pendingEvents: ConversationEvent[] | null = null
   private pendingTriggerEvents: Parameters<TriggerListener>[0][] = []
+  private dataVersion: ReturnType<SqliteDatabase["prepare"]> | undefined
+  private knownInstances: { version: number; instances: ProviderInstance[] } | null = null
 
   constructor(readonly path: string, private readonly now: () => number = Date.now) {
     if (path !== ":memory:") {
@@ -661,9 +663,15 @@ export class OrchestrationStore {
       this.db.prepare("DELETE FROM execution_grants WHERE revoked_at IS NOT NULL AND revoked_at<?").run(cutoff)
     })
   }
-  instances(): ProviderInstance[] { return (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
-  putInstance(instance: ProviderInstance): void { this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
-  deleteInstance(id: string): void { this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
+  /** Read on every session lookup, so kept until this connection writes one or another connection commits. */
+  instances(): ProviderInstance[] {
+    this.dataVersion ??= this.db.prepare("PRAGMA data_version")
+    const version = Number((this.dataVersion.get() as Row).data_version)
+    if (this.knownInstances?.version !== version) this.knownInstances = { version, instances: (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
+    return this.knownInstances.instances
+  }
+  putInstance(instance: ProviderInstance): void { this.knownInstances = null; this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
+  deleteInstance(id: string): void { this.knownInstances = null; this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
   operation(scope: string, id: string): { fingerprint: string; input: Record<string, unknown>; result?: unknown } | null {
     const row = this.db.prepare("SELECT fingerprint,input,result FROM operations WHERE scope=? AND id=?").get(scope, id) as Row | undefined
     return row ? { fingerprint: String(row.fingerprint), input: decode(row.input), ...(row.result ? { result: decode(row.result) } : {}) } : null
