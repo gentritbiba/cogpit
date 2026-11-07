@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useDisclosure, useDisclosureKey, useTimelineDraft } from "./disclosure"
 import { Check } from "lucide-react"
 import type { ToolCall } from "../../../shared/session/types"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
@@ -66,12 +67,14 @@ export function AskUserAnswerForm({
   sessionId: string
 }): React.ReactElement | null {
   const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
-  const [answers, setAnswers] = useState<Record<string, string>>(() => (
+  // A half-typed answer and a sent one both outlive the row: scrolling away
+  // must neither lose the draft nor offer to send it twice.
+  const [answers, setAnswers] = useTimelineDraft<Record<string, string>>(useDisclosureKey(`answers:${toolCall.id}`), () => (
     Object.fromEntries(questions.map((question) => [question.question, ""]))
   ))
   const [submitting, setSubmitting] = useState(false)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
-  const [submitted, setSubmitted] = useState(false)
+  const [submitted, setSubmitted] = useDisclosure(useDisclosureKey(`answers:${toolCall.id}:sent`), false)
   const { chat: { sendMessage } } = useSessionChatContext()
 
   if (questions.length === 0) return null
@@ -158,7 +161,7 @@ export function AskUserAnswerForm({
                   const nextValue = question.multiSelect
                     ? nextSelected.join(", ")
                     : nextSelected[0]
-                  setAnswers({ ...answers, [question.question]: nextValue })
+                  setAnswers((current) => ({ ...current, [question.question]: nextValue }))
                 }}
                 className="grid w-full gap-1.5"
               >
@@ -193,7 +196,7 @@ export function AskUserAnswerForm({
                   id={answerInputId}
                   value={answers[question.question] ?? ""}
                   onChange={(event) => {
-                    setAnswers({ ...answers, [question.question]: event.target.value })
+                    setAnswers((current) => ({ ...current, [question.question]: event.target.value }))
                   }}
                   rows={2}
                   placeholder="Type your answer..."

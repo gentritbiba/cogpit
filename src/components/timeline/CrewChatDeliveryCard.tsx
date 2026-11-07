@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useDisclosure, useDisclosureKey, useTimelineState } from "./disclosure"
 import { ArrowRight, ChevronDown, ChevronRight, MessagesSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CrewAvatar, CrewChatBody } from "@/components/crew/CrewChatRun"
@@ -21,8 +22,9 @@ export function CrewChatDeliveryCard({ delivery }: { delivery: CrewChatDeliveryP
   const dirName = authorId && inventory?.sessions.find((session) => session.sessionId === authorId)?.dirName
   const kinds = useMemo(() => new Map<string, AgentKind>(authorId && dirName ? [[authorId, agentKindForDirName(dirName)]] : []), [authorId, dirName])
   const role: CrewChatRole = authorId ? (authorId === rootId ? "lead" : "agent") : delivery.author === "You" || members.length ? "user" : "agent"
-  const [open, setOpen] = useState(false)
-  const [fetched, setFetched] = useState<{ message: CrewChatMessage | null } | null>(null)
+  const [open, setOpen] = useDisclosure(useDisclosureKey(`delivery:${delivery.sequence}`), false)
+  // Kept with the disclosure, so a remounted card shows the message without refetching it.
+  const [fetched, setFetched] = useTimelineState<{ message: CrewChatMessage | null } | null>(useDisclosureKey(`delivery:${delivery.sequence}:message`), null)
   const message = delivery.text === null ? fetched?.message : undefined
   const text = delivery.text ?? message?.text ?? null
   const mentions = useMemo(() => message?.mentions ?? (text ? crewChatMentions(text, members) : []), [message, text, members])

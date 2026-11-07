@@ -6,6 +6,7 @@ import { useOptionalImageGallery } from "./SessionImageGallery"
 import { useCapability } from "@/hooks/useCapability"
 import { isLocalImagePath, resolveMediaSrc } from "./localMedia"
 import { Button } from "@/components/ui/button"
+import { ReservedImage } from "./ReservedImage"
 
 /**
  * Image component that proxies local file paths through /api/local-file
@@ -16,13 +17,14 @@ export function LocalImage({
   alt,
   id = "markdown-image",
   className,
-  thumbnailClassName,
+  maxHeightRem = 24,
 }: {
   src?: string
   alt?: string
   id?: string
   className?: string
-  thumbnailClassName?: string
+  /** The thumbnail's height cap, in rem. */
+  maxHeightRem?: number
 }): React.ReactElement | null {
   const canAccessHostFiles = useCapability("hostFiles")
   const [expanded, setExpanded] = useState(false)
@@ -69,13 +71,12 @@ export function LocalImage({
           className,
         )}
       >
-        <img
+        <ReservedImage
           src={resolved}
           alt={alt ?? ""}
-          loading="lazy"
-          decoding="async"
+          maxHeightRem={maxHeightRem}
           onError={() => setFailedSrc(resolved)}
-          className={cn("max-h-96 max-w-full rounded-lg object-contain", thumbnailClassName)}
+          className="rounded-lg"
         />
         <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-border bg-popover text-foreground/70 opacity-80 backdrop-blur transition-[color,opacity] group-hover/image:text-foreground sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
           <Maximize2 className="size-3.5" data-icon="icon" />

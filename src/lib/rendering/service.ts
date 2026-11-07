@@ -60,6 +60,12 @@ export class RenderWorkService {
     return this.request({ kind: "diff", oldString, newString }, signal) as Promise<DiffLine[] | null>
   }
 
+  /** A diff already computed, read synchronously so a remounted view never shows a preparing frame. */
+  peekDiff(oldString: string, newString: string): DiffLine[] | undefined {
+    if ((oldString.length + newString.length) * 2 > RENDER_LIMITS.jobBytes / 2) return undefined
+    return this.cache.get(JSON.stringify({ kind: "diff", oldString, newString }))?.value as DiffLine[] | undefined
+  }
+
   private request(input: RenderInput, signal?: AbortSignal): Promise<RenderOutput> {
     if (signal?.aborted) return Promise.reject(aborted())
     const key = JSON.stringify(input)

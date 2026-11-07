@@ -1,4 +1,5 @@
-import { memo, useMemo, useState } from "react"
+import { memo, useMemo } from "react"
+import { DisclosureScope, useDisclosure, useDisclosureKey } from "./disclosure"
 import { ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import type { ToolCall } from "../../../shared/session/types"
@@ -24,7 +25,7 @@ function Markdown({ text, className }: { text: string; className?: string }) {
 
 /** A labelled fold inside a row's detail: the command that started it. */
 function DetailFold({ label, children }: { label: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(useDisclosureKey(`fold:${label}`), false)
   return (
     <div className="min-w-0">
       <button
@@ -95,9 +96,11 @@ export const CrewStartRows = memo(function CrewStartRows(props: CrewStartProps) 
   const invocations = useMemo(() => crewStarts(command), [command])
   const ids = useMemo(() => startedIds(toolCall.result, command), [toolCall.result, command])
   return (
-    <div className="flex flex-col" data-tool-call-id={toolCall.id}>
+    <div className="flex flex-col" data-tool-call-id={toolCall.id} data-scroll-anchor="">
       {invocations.map((invocation, index) => (
-        <CrewStartRow key={ids[index] ?? `start-${index}`} {...props} invocation={invocation} sessionId={ids[index]} />
+        <DisclosureScope key={ids[index] ?? `start-${index}`} id={`start:${toolCall.id}:${index}`} underTurn>
+          <CrewStartRow {...props} invocation={invocation} sessionId={ids[index]} />
+        </DisclosureScope>
       ))}
     </div>
   )

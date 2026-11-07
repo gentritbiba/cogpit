@@ -1,4 +1,5 @@
-import { useId, useState } from "react"
+import { useId } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { Check, Circle, CircleDot } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -25,8 +26,8 @@ function fieldValue(key: string, value: unknown): string {
   return String(value)
 }
 
-function InputText({ value }: { value: string }): React.ReactElement {
-  const [expanded, setExpanded] = useState(false)
+function InputText({ value, name }: { value: string; name: string }): React.ReactElement {
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey(`text:${name}`), false)
   const id = useId()
   const readable = readableToolText(value)
   const long = readable.length > 800
@@ -69,7 +70,7 @@ function PlanInput({ steps }: { steps: PlanStep[] }): React.ReactElement {
           return (
             <li key={index} className="flex min-w-0 items-start gap-2 text-xs">
               <Icon role="img" aria-label={label} className={cn("mt-0.5 size-3 shrink-0 text-muted-foreground", active && "text-info")} />
-              <div className="min-w-0 flex-1"><InputText value={step.text} /></div>
+              <div className="min-w-0 flex-1"><InputText name={`step:${index}`} value={step.text} /></div>
               <span className="shrink-0 text-[10px] text-muted-foreground">{label}</span>
             </li>
           )
@@ -84,7 +85,7 @@ function QuestionInput({ questions }: { questions: Record<string, unknown>[] }):
     <section className="mt-2 flex min-w-0 flex-col gap-3" aria-label="Questions">
       {questions.map((question, index) => (
         <div key={index} className="min-w-0 text-xs">
-          <InputText value={String(question.question ?? question.title)} />
+          <InputText name={`question:${index}`} value={String(question.question ?? question.title)} />
           {Array.isArray(question.options) && (
             <ul className="mt-2 flex min-w-0 flex-col gap-1.5 border-l border-border pl-3">
               {question.options.map((option, optionIndex) => {
@@ -92,9 +93,9 @@ function QuestionInput({ questions }: { questions: Record<string, unknown>[] }):
                 if (!item || typeof item.label !== "string") return null
                 return (
                   <li key={optionIndex} className="min-w-0">
-                    <InputText value={item.label} />
+                    <InputText name={`option:${index}:${optionIndex}`} value={item.label} />
                     {typeof item.description === "string" && (
-                      <div className="mt-0.5 text-muted-foreground"><InputText value={item.description} /></div>
+                      <div className="mt-0.5 text-muted-foreground"><InputText name={`option:${index}:${optionIndex}:description`} value={item.description} /></div>
                     )}
                   </li>
                 )
@@ -137,7 +138,7 @@ export function ToolCallInput({ input }: { input: Record<string, unknown> }): Re
           {fields.map(([key, value]) => (
             <div key={key} className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-x-3 text-xs">
               <dt className="max-w-32 break-words text-muted-foreground">{fieldLabel(key)}</dt>
-              <dd className="min-w-0 leading-relaxed"><InputText value={fieldValue(key, value)} /></dd>
+              <dd className="min-w-0 leading-relaxed"><InputText name={`field:${key}`} value={fieldValue(key, value)} /></dd>
             </div>
           ))}
         </dl>

@@ -1,4 +1,4 @@
-import { useState, useMemo, memo, useId } from "react"
+import { useMemo, memo, useId } from "react"
 import {
   ChevronRight,
   ExternalLink,
@@ -15,7 +15,8 @@ import { ElidedResultImage } from "./ElidedResultImage"
 import { readElided } from "../../../shared/session/resultProjection"
 import { isLocalImagePath } from "./localMedia"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { DisclosureScope, useDisclosure, useDisclosureKey } from "./disclosure"
+import { useTimelineRowFacts } from "./TimelineRowsProvider"
 import { ToolCallInput } from "./ToolCallInput"
 import { CodexExecToolInput } from "./CodexExecToolInput"
 import {
@@ -139,15 +140,27 @@ interface ToolCallCardProps {
   skillMetadata?: Map<string, SkillMeta>
 }
 
-export const ToolCallCard = memo(function ToolCallCard({
+/**
+ * One tool call. Its disclosure state is keyed by the call's id, which is
+ * unique in the session, so it survives regrouping, folds and remounts.
+ */
+export const ToolCallCard = memo(function ToolCallCard(props: ToolCallCardProps) {
+  return (
+    <DisclosureScope id={`call:${props.toolCall.id}`} underTurn>
+      <ToolCallCardBody {...props} />
+    </DisclosureScope>
+  )
+})
+
+function ToolCallCardBody({
   toolCall,
   expandToolPayloads = false,
   isAgentActive,
   skillMetadata,
 }: ToolCallCardProps) {
-  const { session, pendingInteraction, permissions } = useSessionContext()
-  const [panelOpen, setPanelOpen] = useState(false)
-  const [inputOpen, setInputOpen] = useState(false)
+  const facts = useTimelineRowFacts()
+  const [panelOpen, setPanelOpen] = useDisclosure(useDisclosureKey("panel"), false)
+  const [inputOpen, setInputOpen] = useDisclosure(useDisclosureKey("input"), false)
   const panelId = useId()
   const inputId = useId()
   const statusId = useId()
@@ -211,12 +224,9 @@ export const ToolCallCard = memo(function ToolCallCard({
       <AskUserQuestionCard
         toolCall={toolCall}
         expandToolPayloads={expandToolPayloads}
-        isAwaitingAnswer={
-          pendingInteraction?.type === "question" &&
-          pendingInteraction.toolUseId === toolCall.id
-        }
-        sessionId={session?.sessionId}
-        canAnswer={permissions.answer}
+        isAwaitingAnswer={facts?.openQuestionId === toolCall.id}
+        sessionId={facts?.sessionId ?? undefined}
+        canAnswer={facts?.canAnswer ?? false}
       />
     )
   }
@@ -227,7 +237,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   const target = summary && summary !== verb ? summary : ""
 
   return (
-    <div className="min-w-0" data-tool-call-id={toolCall.id}>
+    <div className="min-w-0" data-tool-call-id={toolCall.id} data-scroll-anchor="">
       <button
         type="button"
         className={cn(
@@ -286,7 +296,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           alt={imagePath.slice(imagePath.lastIndexOf("/") + 1)}
           id={`tool-image:${toolCall.id}`}
           className="my-1.5"
-          thumbnailClassName="max-h-40"
+          maxHeightRem={10}
         />
       )}
 
@@ -307,7 +317,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             alt={`Tool result image ${index + 1}`}
             id={`tool-result-image:${toolCall.id}:${index}`}
             className="my-1.5"
-            thumbnailClassName="max-h-40"
+            maxHeightRem={10}
           />
         )
       })}
@@ -338,7 +348,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             {hasCommand ? (
               <BashCommandCard
                 toolCall={toolCall}
-                cwd={session?.cwd}
+                cwd={facts?.cwd}
                 expandAll={expandToolPayloads}
                 isAgentActive={Boolean(isAgentActive)}
               />
@@ -380,4 +390,4 @@ export const ToolCallCard = memo(function ToolCallCard({
       {streamsSubagentOnRow(toolCall) && <LiveSubagentTranscript toolUseId={toolCall.id} />}
     </div>
   )
-})
+}

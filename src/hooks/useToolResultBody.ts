@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ElidedResult } from "../../shared/session/types"
 import type { ToolResultUnavailable } from "../../shared/contracts/toolResults"
-import { BodyUnavailable, fetchBodyChunk } from "@/lib/toolResultBodies"
+import { BodyUnavailable, cachedBodyChunk, fetchBodyChunk, type BodyChunk } from "@/lib/toolResultBodies"
 
 export type ToolResultBodyState =
   | { status: "idle" }
@@ -14,8 +14,15 @@ export type ToolResultBodyState =
  * fetched on demand in chunks. Turning `active` off aborts what is in flight;
  * the fetched chunks stay in the shared cache for the next expansion.
  */
+function readyState(chunk: BodyChunk): ToolResultBodyState {
+  return { status: "ready", text: chunk.text, total: chunk.total, complete: chunk.end >= chunk.total, loadingMore: false }
+}
+
 export function useToolResultBody(stub: ElidedResult | undefined, active: boolean): ToolResultBodyState & { loadMore: () => void; retry: () => void } {
-  const [state, setState] = useState<ToolResultBodyState>({ status: "idle" })
+  const [state, setState] = useState<ToolResultBodyState>(() => {
+    const cached = stub && active ? cachedBodyChunk(stub, 0) : undefined
+    return cached ? readyState(cached) : { status: "idle" }
+  })
   const [attempt, setAttempt] = useState(0)
   const controllerRef = useRef<AbortController | null>(null)
   const ref = stub?.ref
@@ -30,15 +37,20 @@ export function useToolResultBody(stub: ElidedResult | undefined, active: boolea
     }
     const controller = new AbortController()
     controllerRef.current = controller
-    setState({ status: "loading" })
-    fetchBodyChunk(current, 0, controller.signal).then((chunk) => {
-      if (!controller.signal.aborted) setState({ status: "ready", text: chunk.text, total: chunk.total, complete: chunk.end >= chunk.total, loadingMore: false })
-    }, (error: unknown) => {
-      if (controller.signal.aborted) return
-      setState(error instanceof BodyUnavailable
-        ? { status: "unavailable", reason: error.reason, message: error.message }
-        : { status: "unavailable", reason: "error", message: "The output could not be loaded." })
-    })
+    const cached = cachedBodyChunk(current, 0)
+    if (cached) {
+      setState(readyState(cached))
+    } else {
+      setState({ status: "loading" })
+      fetchBodyChunk(current, 0, controller.signal).then((chunk) => {
+        if (!controller.signal.aborted) setState(readyState(chunk))
+      }, (error: unknown) => {
+        if (controller.signal.aborted) return
+        setState(error instanceof BodyUnavailable
+          ? { status: "unavailable", reason: error.reason, message: error.message }
+          : { status: "unavailable", reason: "error", message: "The output could not be loaded." })
+      })
+    }
     return () => {
       controller.abort()
       if (controllerRef.current === controller) controllerRef.current = null

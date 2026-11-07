@@ -49,6 +49,11 @@ function unavailable(status: number, state: unknown): BodyUnavailable {
   return new BodyUnavailable("error", "The output could not be loaded.")
 }
 
+/** A chunk already fetched, so a remounted reader shows it without a loading frame. */
+export function cachedBodyChunk(stub: ElidedResult, start: number): BodyChunk | undefined {
+  return cache.get(cacheKey(stub.ref, start))
+}
+
 /** One chunk of a body, from the cache or the server; `cache: false` reads the cache but leaves it as it is. */
 export async function fetchBodyChunk(stub: ElidedResult, start: number, signal?: AbortSignal, { cache: keep = true }: { cache?: boolean } = {}): Promise<BodyChunk> {
   const key = cacheKey(stub.ref, start)
