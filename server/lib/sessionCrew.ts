@@ -1,5 +1,5 @@
 import type { CrewMember, SessionCrew } from "../../shared/contracts/crew"
-import type { DelegatedTask } from "../../shared/contracts/orchestration"
+import type { DelegatedTaskState } from "../../shared/contracts/orchestration"
 import type { SessionPullRequest } from "../../shared/session/prLinks"
 import { crewRootOf } from "./crew"
 import type { CrewLink } from "./sessionOrigins"
@@ -16,6 +16,8 @@ export interface DescribedSession {
   host: { remote: boolean; id: string; name: string }
   state: SessionState
   address: { dirName: string; fileName: string } | null
+  /** What the session list knows about it; only for a session on this machine. */
+  listed?: ListedFacts | null
 }
 
 /** What the session list knows about a session on this machine. */
@@ -34,9 +36,9 @@ export interface CrewSources {
   parents: ReadonlyMap<string, CrewLink>
   canView: (sessionId: string) => Promise<boolean>
   /** Null for a session neither on disk nor held by anything, which the session list leaves out too. */
-  describe: (sessionId: string) => Promise<DescribedSession | null>
-  listed: (sessionId: string) => Promise<ListedFacts | null>
-  tasks: () => readonly DelegatedTask[]
+  describe: (sessionId: string, task: DelegatedTaskState | undefined) => Promise<DescribedSession | null>
+  /** The tasks carrying the given sessions' results. */
+  tasks: (sessionIds: readonly string[]) => readonly DelegatedTaskState[]
 }
 
 function childrenIndex(parents: ReadonlyMap<string, CrewLink>): Map<string, string[]> {
@@ -66,8 +68,8 @@ export async function crewSessionIds(rootId: string, sources: Pick<CrewSources, 
 }
 
 /** The newest task that carries each session's result to its parent. */
-function resultTasks(tasks: readonly DelegatedTask[]): Map<string, DelegatedTask> {
-  const byChild = new Map<string, DelegatedTask>()
+function resultTasks(tasks: readonly DelegatedTaskState[]): Map<string, DelegatedTaskState> {
+  const byChild = new Map<string, DelegatedTaskState>()
   for (const task of tasks) {
     const known = byChild.get(task.childSessionId)
     if (!known || task.createdAt > known.createdAt) byChild.set(task.childSessionId, task)
@@ -79,7 +81,7 @@ async function describeMember(
   sessionId: string,
   rootId: string,
   sources: CrewSources,
-  task: DelegatedTask | undefined,
+  task: DelegatedTaskState | undefined,
   required: boolean,
 ): Promise<CrewMember | null> {
   const link = sessionId === rootId ? undefined : sources.parents.get(sessionId)
@@ -92,7 +94,7 @@ async function describeMember(
   }
   let described: DescribedSession | null
   try {
-    described = await sources.describe(sessionId)
+    described = await sources.describe(sessionId, task)
   } catch (error) {
     return {
       ...place,
@@ -107,8 +109,7 @@ async function describeMember(
     // The root and the session asked about stay, so the crew keeps both ends.
     return required ? { ...place, device: null, address: null, outcome: "not_found", waiting: [] } : null
   }
-  const { host, state, address } = described
-  const listed = host.remote ? null : await sources.listed(sessionId)
+  const { host, state, address, listed } = described
   return {
     ...place,
     device: host.remote ? { id: host.id, name: host.name } : null,
@@ -128,7 +129,7 @@ export async function readSessionCrew(sessionId: string, sources: CrewSources): 
   // A root the caller may not see leaves the crew to start where they can.
   const rootId = root === sessionId || await sources.canView(root) ? root : sessionId
   const ids = await crewSessionIds(rootId, sources)
-  const tasks = resultTasks(sources.tasks())
+  const tasks = resultTasks(sources.tasks(ids))
   const members = await Promise.all(ids.map((id) => (
     describeMember(id, rootId, sources, tasks.get(id), id === rootId || id === sessionId)
   )))

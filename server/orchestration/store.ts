@@ -90,6 +90,8 @@ export class OrchestrationStore {
   private readonly triggerListeners = new Set<TriggerListener>()
   private pendingEvents: ConversationEvent[] | null = null
   private pendingTriggerEvents: Parameters<TriggerListener>[0][] = []
+  private dataVersion: ReturnType<SqliteDatabase["prepare"]> | undefined
+  private knownInstances: { version: number; instances: ProviderInstance[] } | null = null
 
   constructor(readonly path: string, private readonly now: () => number = Date.now) {
     if (path !== ":memory:") {
@@ -179,6 +181,14 @@ export class OrchestrationStore {
   chatListener(rootId: string, sessionId: string): { listening: boolean; cursor: number } {
     const row = this.db.prepare("SELECT listening,cursor FROM crew_chat_listeners WHERE root_id=? AND session_id=?").get(rootId, sessionId) as Row | undefined
     return { listening: row ? Boolean(row.listening) : true, cursor: Number(row?.cursor ?? 0) }
+  }
+  /** Who in a crew turned listening off or on; a member with no row listens. */
+  chatListeners(rootId: string): Map<string, boolean> {
+    return new Map((this.db.prepare("SELECT session_id,listening FROM crew_chat_listeners WHERE root_id=?").all(rootId) as Row[]).map((row) => [String(row.session_id), Boolean(row.listening)]))
+  }
+  /** Crews with a message still waiting to reach a member. */
+  chatRootsWithPendingDeliveries(scope: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT m.root_id FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE d.scope=? AND d.state='pending'").all(scope) as Row[]).map((row) => String(row.root_id))
   }
   setChatListening(rootId: string, sessionId: string, listening: boolean): void {
     this.transaction(() => this.db.prepare("INSERT INTO crew_chat_listeners(root_id,session_id,listening) VALUES(?,?,?) ON CONFLICT(root_id,session_id) DO UPDATE SET listening=excluded.listening").run(rootId, sessionId, Number(listening)))
@@ -447,6 +457,10 @@ export class OrchestrationStore {
     if (this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('held','unknown') LIMIT 1").get(conversationId)) return false
     return Boolean(this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('queued','dispatching') AND json_extract(payload,'$.onlyWhileRunning') IS NOT 1 LIMIT 1").get(conversationId))
   }
+  /** Every conversation `startsNext` holds for, in one read. */
+  conversationsStartingNext(): Set<string> {
+    return new Set((this.db.prepare("SELECT DISTINCT c.conversation_id id FROM commands c WHERE c.state IN ('queued','dispatching') AND json_extract(c.payload,'$.onlyWhileRunning') IS NOT 1 AND NOT EXISTS (SELECT 1 FROM commands h WHERE h.conversation_id=c.conversation_id AND h.state IN ('held','unknown'))").all() as Row[]).map((row) => String(row.id)))
+  }
   /** Cancels every message still waiting for a conversation, from any account, so a stop is final. */
   cancelWaiting(conversationId: string): number {
     return this.transaction(() => {
@@ -657,9 +671,15 @@ export class OrchestrationStore {
       this.db.prepare("DELETE FROM execution_grants WHERE revoked_at IS NOT NULL AND revoked_at<?").run(cutoff)
     })
   }
-  instances(): ProviderInstance[] { return (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
-  putInstance(instance: ProviderInstance): void { this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
-  deleteInstance(id: string): void { this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
+  /** Read on every session lookup, so kept until this connection writes one or another connection commits. */
+  instances(): ProviderInstance[] {
+    this.dataVersion ??= this.db.prepare("PRAGMA data_version")
+    const version = Number((this.dataVersion.get() as Row).data_version)
+    if (this.knownInstances?.version !== version) this.knownInstances = { version, instances: (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
+    return this.knownInstances.instances
+  }
+  putInstance(instance: ProviderInstance): void { this.knownInstances = null; this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
+  deleteInstance(id: string): void { this.knownInstances = null; this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
   operation(scope: string, id: string): { fingerprint: string; input: Record<string, unknown>; result?: unknown } | null {
     const row = this.db.prepare("SELECT fingerprint,input,result FROM operations WHERE scope=? AND id=?").get(scope, id) as Row | undefined
     return row ? { fingerprint: String(row.fingerprint), input: decode(row.input), ...(row.result ? { result: decode(row.result) } : {}) } : null

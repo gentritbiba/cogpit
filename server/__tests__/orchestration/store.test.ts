@@ -33,6 +33,43 @@ describe("durable orchestration", () => {
     expect(store.pending().map((command) => command.receipt.state).sort()).toEqual(["held", "queued", "queued", "unknown"])
   })
 
+  it("keeps provider instances between reads until this or another connection changes them", () => {
+    const root = mkdtempSync(join(tmpdir(), "cogpit-instances-")); roots.push(root)
+    const path = join(root, "state.sqlite")
+    const store = open(path)
+    const instance = { id: "account-1", agent: "codex" as const, label: "Work", homeDir: "/home/work", createdAt: 1 }
+    store.putInstance(instance)
+    const first = store.instances()
+    expect(first).toEqual([instance])
+    expect(store.instances()).toBe(first)
+    store.putInstance({ ...instance, label: "Renamed" })
+    expect(store.instances()[0]?.label).toBe("Renamed")
+    const other = new DatabaseSync(path)
+    try { other.prepare("DELETE FROM instances WHERE id=?").run("account-1") } finally { other.close() }
+    expect(store.instances()).toEqual([])
+    store.putInstance(instance)
+    store.deleteInstance("account-1")
+    expect(store.instances()).toEqual([])
+  })
+
+  it("lists the conversations a queued message starts next, as startsNext tells each one", () => {
+    const store = open()
+    const lease = store.acquire("host")!
+    const conversation = (sessionId: string) => store.ensureConversation({ ...binding, sessionId })
+    const queued = conversation("native-queued")
+    const behindHeld = conversation("native-behind-held")
+    const notice = conversation("native-notice")
+    const idle = conversation("native-idle")
+    store.admit("owner", "queued-turn", queued.id, { message: "next" })
+    store.admit("owner", "held-turn", behindHeld.id, { message: "held" })
+    store.finish(store.claim("owner", "held-turn", lease)!, lease, "held")
+    store.admit("owner", "after-held", behindHeld.id, { message: "waits" })
+    store.admit("owner", "notice-only", notice.id, { message: "New crew message", onlyWhileRunning: true }, "steer")
+    const starting = store.conversationsStartingNext()
+    expect([...starting]).toEqual([queued.id])
+    for (const { id } of [queued, behindHeld, notice, idle]) expect(starting.has(id)).toBe(store.startsNext(id))
+  })
+
   it("cancels what still waits for a stopped session, from every account, and mutes its children's results", () => {
     const store = open()
     const lease = store.acquire("host")!
