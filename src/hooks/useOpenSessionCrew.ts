@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { countCrew, memberStatus, NO_PENDING_INPUT, type CrewPendingInput } from "@/components/LiveSessions/crew"
 import { usePendingHumanInputOptional } from "@/contexts/PendingHumanInputContext"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
-import { useDelegatedTasks } from "@/hooks/useDelegatedTasks"
+import { useDelegatedTaskCounts } from "@/hooks/useDelegatedTaskCounts"
 import type { OpenSessionCrew } from "@/plugin-api"
 
 /**
@@ -15,7 +15,7 @@ import type { OpenSessionCrew } from "@/plugin-api"
 export function useOpenSessionCrew(sessionId: string | null): OpenSessionCrew | null {
   const inventory = useSessionInventoryOptional()
   const pending = usePendingHumanInputOptional()
-  const tasks = useDelegatedTasks(sessionId)
+  const delegated = useDelegatedTaskCounts(sessionId)
   const sessions = inventory?.sessions
   const procBySession = inventory?.procBySession
   const pendingSets = useMemo<CrewPendingInput>(() => (pending
@@ -33,10 +33,10 @@ export function useOpenSessionCrew(sessionId: string | null): OpenSessionCrew | 
     const rootId = own?.crew?.rootId ?? sessionId
     const members = sessions.filter((session) => session.crew?.rootId === rootId)
     if (members.length === 0) {
-      if (tasks.length === 0) return null
-      return { rootId, size: tasks.length, needsYou: 0, working: tasks.filter((task) => task.state === "running").length }
+      if (delegated.total === 0) return null
+      return { rootId, size: delegated.total, needsYou: 0, working: delegated.running }
     }
     const counts = countCrew(members, (member) => memberStatus(member, procBySession, pendingSets))
     return { rootId, size: counts.size, needsYou: counts.needsYou, working: counts.working }
-  }, [sessionId, sessions, procBySession, pendingSets, tasks])
+  }, [sessionId, sessions, procBySession, pendingSets, delegated])
 }
