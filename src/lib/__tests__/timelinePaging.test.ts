@@ -58,6 +58,13 @@ describe("prependTurns", () => {
     expect(prependTurns(existing, [])).toBe(existing)
   })
 
+  it("keeps a promptless head whole when the boundary falls between turns", () => {
+    const older = [makeTurn("a")]
+    const head = makeTurn("b", { userMessage: null })
+    const result = prependTurns([head], older, "claude", { stitch: false })
+    expect(result.map((turn) => turn.id)).toEqual(["a", "b"])
+  })
+
   it("stitches a boundary-cut turn back together for Claude sessions", () => {
     // The tail started mid-turn: its first fragment has no user message.
     const newerFragment = makeTurn("synthetic-assistant-uuid", {

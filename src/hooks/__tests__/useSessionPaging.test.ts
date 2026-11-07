@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import type { ParsedSession, Turn } from "../../../shared/session/types"
+import { emptyTurn } from "@/__tests__/fixtures"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
@@ -84,7 +85,7 @@ describe("useSessionPaging", () => {
       added = await result.current.loadMore()
     })
 
-    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?before=500&count=30&projection=results-v1")
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?before=500&count=30&unit=turns&projection=results-v1")
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
     expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
     expect(added).toBe(1)
@@ -97,7 +98,63 @@ describe("useSessionPaging", () => {
     expect(result.current.isLoadingOlder).toBe(false)
   })
 
-  it("does not parse page records that overlap the header", async () => {
+  it("parses a turn page as sent, header records and all", async () => {
+    mockAuthFetch.mockResolvedValue(beforeResponse({ unit: "turns", lines: ['{"h":1}', '{"l":1}'] }))
+    const { result, workerParse } = setup()
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"h":1}\n{"l":1}')
+  })
+
+  describe("stitching across the page boundary", () => {
+    // A compaction opens a turn without a prompt; between whole turns it is
+    // a turn of its own, but at a cut it is the tail half of the turn before.
+    const compactionTurn = emptyTurn({ id: "compaction", userMessage: null, compactionSummary: "summary" })
+    const olderWhole = emptyTurn({ id: "older", userMessage: "older prompt" })
+
+    async function pageTwice(firstPage: Record<string, unknown>, secondPage: Record<string, unknown>) {
+      const { result, onOlderTurns, workerParse } = setup()
+      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as ParsedSession)
+      mockAuthFetch.mockResolvedValueOnce(beforeResponse(firstPage))
+      mockGet.mockReturnValue(cachedEntry({ olderTurns: [] }))
+      await act(async () => { await result.current.loadMore() })
+
+      mockAuthFetch.mockResolvedValueOnce(beforeResponse(secondPage))
+      mockGet.mockReturnValue(cachedEntry({ olderTurns: [compactionTurn] }))
+      await act(async () => { await result.current.loadMore() })
+      return onOlderTurns.mock.calls.at(-1)![0] as Turn[]
+    }
+
+    it("keeps a promptless head as its own turn after a whole-turn page", async () => {
+      const history = await pageTwice({ unit: "turns" }, { unit: "turns" })
+      expect(history.map((turn) => turn.id)).toEqual(["older", "compaction"])
+    })
+
+    it("stitches onto the head a cut-turn page left behind", async () => {
+      const history = await pageTwice({ unit: "turns", cutTurn: true }, { unit: "turns" })
+      expect(history.map((turn) => turn.id)).toEqual(["compaction"])
+      expect(history[0].userMessage).toBe("older prompt")
+    })
+
+    it("stitches after a line page from an older server", async () => {
+      const history = await pageTwice({}, {})
+      expect(history.map((turn) => turn.id)).toEqual(["compaction"])
+    })
+
+    it("stitches the first page onto a tail that may have cut a turn", async () => {
+      const { result, onOlderTurns, workerParse } = setup()
+      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as ParsedSession)
+      mockAuthFetch.mockResolvedValueOnce(beforeResponse({ unit: "turns" }))
+      mockGet.mockReturnValue(cachedEntry({ olderTurns: [compactionTurn] }))
+      await act(async () => { await result.current.loadMore() })
+      expect((onOlderTurns.mock.calls.at(-1)![0] as Turn[]).map((turn) => turn.id)).toEqual(["compaction"])
+    })
+  })
+
+  it("does not parse line-page records that overlap the header", async () => {
     mockAuthFetch.mockResolvedValue(beforeResponse({
       lines: ['{"h":1}', '{"l":1}', '{"l":2}'],
     }))

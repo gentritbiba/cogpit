@@ -11,6 +11,10 @@ interface BeforeResponse {
   lines: string[]
   byteOffset: number
   hasMore: boolean
+  /** Set by servers that honour `unit=turns`: the page holds whole turns. */
+  unit?: "turns"
+  /** A turn too large for one page: this page starts partway into it. */
+  cutTurn?: boolean
 }
 
 interface UseSessionPagingOpts {
@@ -35,7 +39,8 @@ function historyBytesOf(entry: { nextByteOffset: number; hasMore: boolean; sourc
 }
 
 /**
- * Pages older session content in via `?before=<byteOffset>&count=N`.
+ * Pages older session content in via `?before=<byteOffset>&count=N&unit=turns`.
+ * Servers that predate `unit=turns` ignore it and answer with line pages.
  *
  * `hasMore`/`isLoadingOlder` are real React state (reactive), while the byte
  * cursor and the pages it has already consumed live together in the shared
@@ -57,12 +62,16 @@ export function useSessionPaging({
   // mid-flight session switch prepending turns into the wrong session.
   const identityRef = useRef("")
   const flightRef = useRef<symbol | null>(null)
+  // Whether the paging cursor sits between two whole turns. Unknown at first:
+  // the tail (or an older server) may have cut a turn there.
+  const cursorOnTurnRef = useRef(false)
 
   const identity = `${dirName ?? ""}::${fileName ?? ""}::${sessionChangeKey}`
 
   useEffect(() => {
     identityRef.current = identity
     flightRef.current = null
+    cursorOnTurnRef.current = false
     setIsLoadingOlder(false)
     const cached = dirName && fileName ? sessionCache.get(dirName, fileName) : undefined
     setHasMore(cached?.hasMore ?? false)
@@ -87,7 +96,7 @@ export function useSessionPaging({
     setIsLoadingOlder(true)
     try {
       const res = await authFetch(
-        `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}&projection=${RESULT_PROJECTION}`,
+        `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}&unit=turns&projection=${RESULT_PROJECTION}`,
       )
       if (!res.ok) return 0
 
@@ -103,13 +112,18 @@ export function useSessionPaging({
         return 0
       }
 
+      // A line page can repeat header records at its start; a turn page never does.
+      const byTurns = data.unit === "turns"
       const headerLineSet = new Set(data.headerLines)
-      const pageLines = data.lines.filter((line) => !headerLineSet.has(line))
+      const pageLines = byTurns ? data.lines : data.lines.filter((line) => !headerLineSet.has(line))
       const olderParsed = await workerParse([...data.headerLines, ...pageLines].join("\n"))
 
       // The byte cursor and the pages it consumed advance together: a cursor
       // that moves without them strands that history behind it forever.
-      const history = prependTurns(cached.olderTurns, olderParsed.turns, cached.source.agentKind)
+      const history = prependTurns(cached.olderTurns, olderParsed.turns, cached.source.agentKind, {
+        stitch: !cursorOnTurnRef.current,
+      })
+      if (identityRef.current === key) cursorOnTurnRef.current = byTurns && !data.cutTurn
       sessionCache.update(dirName, fileName, {
         hasMore: hasMorePages,
         nextByteOffset: data.byteOffset,

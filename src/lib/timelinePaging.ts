@@ -110,7 +110,9 @@ function dedupeAgentMessages(turns: readonly Turn[]): Turn[] {
 
 /**
  * Prepends older turns onto the existing list, deduplicating by turn id and
- * stitching a turn that a byte-boundary read cut in half.
+ * stitching a turn that a byte-boundary read cut in half. `stitch` is false
+ * when the boundary is known to fall between whole turns, where a head without
+ * a prompt (a compaction's turn) is a turn of its own, not a cut half.
  *
  * Merging collapses the two halves into one row instead of leaving a promptless
  * fragment stranded at the top of the page.
@@ -126,6 +128,7 @@ export function prependTurns(
   existing: Turn[],
   older: readonly Turn[],
   agentKind?: AgentKind,
+  { stitch = true }: { stitch?: boolean } = {},
 ): Turn[] {
   const existingIds = new Set(existing.map((t) => t.id))
   const fresh = older.filter((t) => !existingIds.has(t.id))
@@ -136,7 +139,7 @@ export function prependTurns(
 
   const head = existing[0]
   const lastOlder = unique[unique.length - 1]
-  const merged = head && lastOlder && isCutFragment(head, agentKind)
+  const merged = stitch && head && lastOlder && isCutFragment(head, agentKind)
     ? [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
     : [...unique, ...existing]
 
