@@ -30,8 +30,8 @@ export interface CrewChatPage {
   rootId: string
   messages: CrewChatMessage[]
   members: CrewChatMember[]
-  /** Changes whenever `members` does. */
-  membersVersion: string
+  /** Changes whenever `members` does; absent from older servers. */
+  membersVersion?: string
   nextCursor: number
   hasMore: boolean
   canPost: boolean
