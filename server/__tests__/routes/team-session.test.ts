@@ -1,515 +1,240 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Dirent } from "node:fs"
-import type { FileHandle } from "node:fs/promises"
-
-vi.mock("../../lib/agentTeamIdentity", () => ({
-  matchSubagentToMember: vi.fn(),
-  readSessionTeamTags: vi.fn(),
-}))
-
-vi.mock("../../helpers", () => ({
-  dirs: {
-    TEAMS_DIR: "/tmp/test-teams",
-    PROJECTS_DIR: "/tmp/test-projects",
-  },
-  isWithinDir: (parent: string, child: string) => child.startsWith(parent),
-  readdir: vi.fn(),
-  readFile: vi.fn(),
-  open: vi.fn(),
-  stat: vi.fn(),
-  join: (...parts: string[]) => parts.join("/"),
-}))
-
-import {
-  readdir,
-  readFile,
-  open,
-  stat,
-} from "../../helpers"
-import { matchSubagentToMember, readSessionTeamTags } from "../../lib/agentTeamIdentity"
-
-const mockedMatchSubagent = vi.mocked(matchSubagentToMember)
-const mockedReadSessionTeamTags = vi.mocked(readSessionTeamTags)
-const mockedReaddir = asReaddirMock(vi.mocked(readdir))
-const mockedReadFile = vi.mocked(readFile)
-const mockedOpen = vi.mocked(open)
-const mockedStat = vi.mocked(stat)
-
-const NO_TAGS = { teamName: null, agentName: null }
-
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { dirs } from "../../dirs"
 import type { Middleware } from "../../helpers"
-import { asReaddirMock, collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
+import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 import { registerTeamSessionRoutes } from "../../routes/team-session"
 
-describe("team-session routes", () => {
-  let handlers: Map<string, Middleware>
+const TEAM = "my-team"
+const LEAD = "11111111-1111-4111-8111-111111111111"
+const WORKER = "22222222-2222-4222-8222-222222222222"
+const LEAD_DIR = "-work-lead"
+const OTHER_DIR = "-work-other"
+const CREATED_AT = Date.parse("2026-10-01T00:00:00Z")
 
-  beforeEach(() => {
-    vi.resetAllMocks()
-    handlers = collectRoutes(registerTeamSessionRoutes)
+let root: string
+let saved: typeof dirs
+let handlers: Map<string, Middleware>
+
+const line = (value: object) => `${JSON.stringify(value)}\n`
+
+async function writeTranscript(dirName: string, fileName: string, lines: object[], mtimeMs = CREATED_AT + 60_000) {
+  const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+  await mkdir(dirname(filePath), { recursive: true })
+  await writeFile(filePath, lines.map(line).join(""))
+  await utimes(filePath, mtimeMs / 1000, mtimeMs / 1000)
+  return filePath
+}
+
+function memberLines(sessionId: string, teamName: string, agentName: string) {
+  return [
+    { type: "agent-setting", agentSetting: "general-purpose", sessionId },
+    { type: "user", sessionId, teamName, agentName, message: { role: "user", content: `You are ${agentName}` } },
+  ]
+}
+
+async function writeTeam(name: string, config: object) {
+  await mkdir(join(dirs.TEAMS_DIR, name), { recursive: true })
+  await writeFile(join(dirs.TEAMS_DIR, name, "config.json"), JSON.stringify(config))
+}
+
+async function get(prefix: string, url: string) {
+  const { req, res, next } = createMockReqRes("GET", url)
+  await getRouteHandler(handlers, prefix)(req, res, next)
+  const body = res._getData()
+  return { status: res._getStatus(), body: body ? JSON.parse(body) : undefined, next }
+}
+
+const memberSession = (team: string, member: string) => get("/api/team-member-session/", `${team}/${member}`)
+const sessionTeam = (query: string) => get("/api/session-team", `?${query}`)
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "cogpit-team-session-"))
+  saved = { ...dirs }
+  dirs.PROJECTS_DIR = join(root, "projects")
+  dirs.TEAMS_DIR = join(root, "teams")
+  dirs.TASKS_DIR = join(root, "tasks")
+  await mkdir(dirs.PROJECTS_DIR, { recursive: true })
+  await writeTeam(TEAM, {
+    name: TEAM,
+    createdAt: CREATED_AT,
+    leadSessionId: LEAD,
+    members: [
+      { name: "boss", agentType: "team-lead" },
+      { name: "worker", agentType: "general-purpose", prompt: "Build the worker queue" },
+    ],
+  })
+  await writeTranscript(LEAD_DIR, `${LEAD}.jsonl`, [{ type: "user", sessionId: LEAD, message: { role: "user", content: "lead" } }])
+  handlers = collectRoutes(registerTeamSessionRoutes)
+})
+
+afterEach(async () => {
+  Object.assign(dirs, saved)
+  await rm(root, { recursive: true, force: true })
+})
+
+describe("GET /api/session-team", () => {
+  it("passes on other methods and sub-paths, and needs a session id", async () => {
+    const { req, res, next } = createMockReqRes("POST", "/")
+    await getRouteHandler(handlers, "/api/session-team")(req, res, next)
+    expect(next).toHaveBeenCalled()
+    expect((await get("/api/session-team", "/something")).next).toHaveBeenCalled()
+    expect((await sessionTeam("other=value")).status).toBe(400)
   })
 
-  // ── GET /api/session-team ─────────────────────────────────────────────
+  it("answers 404 when there is no teams directory", async () => {
+    await rm(dirs.TEAMS_DIR, { recursive: true })
+    expect((await sessionTeam(`leadSessionId=${LEAD}`)).status).toBe(404)
+  })
 
-  describe("GET /api/session-team", () => {
-    it("calls next for non-GET methods", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("POST", "/")
-      await handler(req, res, next)
-      expect(next).toHaveBeenCalled()
+  it("names the lead as the current member of the team it leads", async () => {
+    const answer = await sessionTeam(`leadSessionId=${LEAD}`)
+    expect(answer.status).toBe(200)
+    expect(answer.body).toMatchObject({ teamName: TEAM, currentMemberName: "boss", config: { leadSessionId: LEAD } })
+  })
+
+  it("picks the most recently created team when several name the lead", async () => {
+    await writeTeam("older-team", { createdAt: CREATED_AT - 1000, leadSessionId: LEAD, members: [] })
+    await writeTeam("newer-team", { createdAt: CREATED_AT + 1000, leadSessionId: LEAD, members: [] })
+    expect((await sessionTeam(`leadSessionId=${LEAD}`)).body.teamName).toBe("newer-team")
+  })
+
+  it("sees a config rewritten after it was first read", async () => {
+    expect((await sessionTeam(`leadSessionId=${LEAD}`)).body.config.members).toHaveLength(2)
+    await writeTeam(TEAM, {
+      name: TEAM,
+      createdAt: CREATED_AT,
+      leadSessionId: LEAD,
+      members: [{ name: "boss", agentType: "team-lead" }, { name: "worker" }, { name: "late-joiner" }],
     })
+    expect((await sessionTeam(`leadSessionId=${LEAD}`)).body.config.members).toHaveLength(3)
+  })
 
-    it("calls next for sub-paths", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "/something")
-      await handler(req, res, next)
-      expect(next).toHaveBeenCalled()
+  it("names the member a legacy sub-agent transcript of the lead belongs to", async () => {
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-a1.jsonl`, [{ message: { content: "Build the worker queue, please" } }])
+    const answer = await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-a1.jsonl`)
+    expect(answer.body.currentMemberName).toBe("worker")
+  })
+
+  it.each([`dirName=${OTHER_DIR}&`, ""])("finds the team of a teammate's own session from its tags (%s)", async (hint) => {
+    await writeTranscript(OTHER_DIR, `${WORKER}.jsonl`, memberLines(WORKER, TEAM, "worker"))
+    const answer = await sessionTeam(`${hint}leadSessionId=${WORKER}`)
+    expect(answer.status).toBe(200)
+    expect(answer.body).toMatchObject({ teamName: TEAM, currentMemberName: "worker" })
+  })
+
+  it("answers 404 for a session that carries no team tags", async () => {
+    await writeTranscript(OTHER_DIR, `${WORKER}.jsonl`, [{ type: "user", sessionId: WORKER }])
+    expect((await sessionTeam(`dirName=${OTHER_DIR}&leadSessionId=${WORKER}`)).status).toBe(404)
+  })
+
+  it("refuses a dirName hint that leaves the projects dir", async () => {
+    await writeTranscript(OTHER_DIR, `${WORKER}.jsonl`, memberLines(WORKER, TEAM, "worker"))
+    expect((await sessionTeam(`dirName=..&leadSessionId=${WORKER}`)).status).toBe(404)
+  })
+})
+
+describe("GET /api/team-member-session/:team/:member", () => {
+  it("passes on other methods and malformed paths", async () => {
+    const { req, res, next } = createMockReqRes("POST", "team/member")
+    await getRouteHandler(handlers, "/api/team-member-session/")(req, res, next)
+    expect(next).toHaveBeenCalled()
+    expect((await get("/api/team-member-session/", "team-only")).next).toHaveBeenCalled()
+  })
+
+  it("answers 404 for a team it cannot read, without the error", async () => {
+    expect(await memberSession("missing", "worker")).toMatchObject({ status: 404, body: { error: "Team not found" } })
+  })
+
+  it("answers 404 for a team whose config names no lead", async () => {
+    await writeTeam("leaderless", { members: [{ name: "worker" }] })
+    expect((await memberSession("leaderless", "worker")).status).toBe(404)
+  })
+
+  it("addresses the lead's own transcript for the team lead", async () => {
+    expect((await memberSession(TEAM, "boss")).body).toEqual({ dirName: LEAD_DIR, fileName: `${LEAD}.jsonl` })
+  })
+
+  it("answers 404 when the lead's transcript is gone", async () => {
+    await rm(join(dirs.PROJECTS_DIR, LEAD_DIR), { recursive: true })
+    expect((await memberSession(TEAM, "boss")).status).toBe(404)
+  })
+
+  it("finds a member's own tagged session, even outside the lead's project", async () => {
+    await writeTranscript(LEAD_DIR, "33333333-3333-4333-8333-333333333333.jsonl", memberLines("33333333-3333-4333-8333-333333333333", "other-team", "worker"))
+    await writeTranscript(OTHER_DIR, `${WORKER}.jsonl`, memberLines(WORKER, TEAM, "worker"))
+    expect((await memberSession(TEAM, "worker")).body).toEqual({ dirName: OTHER_DIR, fileName: `${WORKER}.jsonl` })
+  })
+
+  it("passes over sessions written before the team was created", async () => {
+    await writeTranscript(LEAD_DIR, `${WORKER}.jsonl`, memberLines(WORKER, TEAM, "worker"), CREATED_AT - 60_000)
+    expect((await memberSession(TEAM, "worker")).status).toBe(404)
+  })
+
+  it("finds a member whose session starts after an earlier lookup missed it", async () => {
+    expect((await memberSession(TEAM, "worker")).status).toBe(404)
+    await writeTranscript(LEAD_DIR, `${WORKER}.jsonl`, memberLines(WORKER, TEAM, "worker"))
+    expect((await memberSession(TEAM, "worker")).body).toEqual({ dirName: LEAD_DIR, fileName: `${WORKER}.jsonl` })
+  })
+
+  it("finds a member whose tags reach the transcript after the first lookup", async () => {
+    const filePath = await writeTranscript(LEAD_DIR, `${WORKER}.jsonl`, [{ type: "agent-setting", sessionId: WORKER }])
+    expect((await memberSession(TEAM, "worker")).status).toBe(404)
+    await writeFile(filePath, memberLines(WORKER, TEAM, "worker").map(line).join(""))
+    expect((await memberSession(TEAM, "worker")).body).toEqual({ dirName: LEAD_DIR, fileName: `${WORKER}.jsonl` })
+  })
+
+  it("finds a legacy member's sub-agent transcript under the lead by its spawn prompt", async () => {
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-zz.jsonl`, [{ message: { content: "Someone else entirely" } }])
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-a1.jsonl`, [{ message: { content: "Build the worker queue" } }])
+    expect((await memberSession(TEAM, "worker")).body).toEqual({ dirName: LEAD_DIR, fileName: `${LEAD}/subagents/agent-a1.jsonl` })
+  })
+
+  it("tells apart legacy members whose names contain one another", async () => {
+    await writeTeam("legacy", {
+      createdAt: CREATED_AT + 1,
+      leadSessionId: LEAD,
+      members: [{ name: "boss", agentType: "team-lead" }, { name: "dev-1" }, { name: "dev-10" }],
     })
+    // dev-10's files come before dev-1's in name, creation and reverse-creation order
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-0ten.jsonl`, [{ message: { content: "You are dev-10" } }])
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-one.jsonl`, [{ message: { content: "You are dev-1" } }])
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-zten.jsonl`, [{ message: { content: "You are dev-10" } }])
+    expect((await memberSession("legacy", "dev-1")).body.fileName).toBe(`${LEAD}/subagents/agent-one.jsonl`)
+    expect((await memberSession("legacy", "dev-10")).body.fileName).toMatch(/agent-(0|z)ten\.jsonl$/)
+    expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-0ten.jsonl`)).body.currentMemberName).toBe("dev-10")
+  })
 
-    it("returns 400 when leadSessionId is missing", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?other=value")
-      await handler(req, res, next)
-      expect(res._getStatus()).toBe(400)
-    })
-
-    it("returns 404 when TEAMS_DIR does not exist", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("returns 404 when no team matches the leadSessionId", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "team-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "different-session",
-        members: [],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("returns team config with lead as currentMemberName when no subagentFile", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "my-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "abc-123",
-        createdAt: 1000,
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent" },
-        ],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.teamName).toBe("my-team")
-      expect(response.currentMemberName).toBe("boss")
-    })
-
-    it("uses matchSubagentToMember when subagentFile is provided", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes(
-        "GET", "?leadSessionId=abc-123&subagentFile=agent-xyz.jsonl"
-      )
-
-      const members = [
+  it("matches a legacy spawn prompt that spans lines, over another member the prompt mentions", async () => {
+    await writeTeam("legacy", {
+      createdAt: CREATED_AT + 1,
+      leadSessionId: LEAD,
+      members: [
         { name: "boss", agentType: "team-lead" },
-        { name: "worker", agentType: "agent" },
-      ]
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "my-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "abc-123",
-        createdAt: 1000,
-        members,
-      }) as unknown as Buffer)
-      mockedMatchSubagent.mockResolvedValueOnce("worker")
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.currentMemberName).toBe("worker")
-      expect(mockedMatchSubagent).toHaveBeenCalledWith(
-        "abc-123", "agent-xyz.jsonl", members
-      )
+        { name: "frontend-builder", prompt: "Build the settings page" },
+        { name: "tester", prompt: "Test what\nfrontend-builder ships" },
+      ],
     })
-
-    it("detects membership from the session's own teamName tags (new team format)", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes(
-        "GET", "?leadSessionId=member-sess-999&dirName=proj-a"
-      )
-
-      // no team config has member-sess-999 as its lead
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "my-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        createdAt: 1000,
-        members: [],
-      }) as unknown as Buffer)
-
-      // the session file itself is tagged with its team
-      mockedReadSessionTeamTags.mockResolvedValueOnce({
-        teamName: "my-team",
-        agentName: "worker",
-      })
-      // team config load for the tagged team
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        name: "my-team",
-        leadSessionId: "lead-sess-123",
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent" },
-        ],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.teamName).toBe("my-team")
-      expect(response.currentMemberName).toBe("worker")
-      expect(mockedReadSessionTeamTags).toHaveBeenCalledWith(
-        "/tmp/test-projects/proj-a/member-sess-999.jsonl"
-      )
-    })
-
-    it("scans project dirs for the session file when dirName is not provided", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?leadSessionId=member-sess-999")
-
-      // no team config matches
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "my-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        createdAt: 1000,
-        members: [],
-      }) as unknown as Buffer)
-
-      // project dir scan: first dir has no tags, second has them
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-        { name: "proj-b", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadSessionTeamTags.mockResolvedValueOnce(NO_TAGS)
-      mockedReadSessionTeamTags.mockResolvedValueOnce({
-        teamName: "my-team",
-        agentName: "worker",
-      })
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        name: "my-team",
-        leadSessionId: "lead-sess-123",
-        members: [{ name: "worker", agentType: "agent" }],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.teamName).toBe("my-team")
-      expect(response.currentMemberName).toBe("worker")
-    })
-
-    it("returns 404 when the session has no team tags", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes(
-        "GET", "?leadSessionId=plain-sess&dirName=proj-a"
-      )
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "my-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        createdAt: 1000,
-        members: [],
-      }) as unknown as Buffer)
-      mockedReadSessionTeamTags.mockResolvedValueOnce(NO_TAGS)
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("picks the most recently created team when multiple match", async () => {
-      const handler = getRouteHandler(handlers, "/api/session-team")
-      const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "old-team", isDirectory: () => true },
-        { name: "new-team", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "abc-123",
-        createdAt: 1000,
-        members: [{ name: "old-lead", agentType: "team-lead" }],
-      }) as unknown as Buffer)
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "abc-123",
-        createdAt: 2000,
-        members: [{ name: "new-lead", agentType: "team-lead" }],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.teamName).toBe("new-team")
-      expect(response.currentMemberName).toBe("new-lead")
-    })
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-t1.jsonl`, [{ message: { content: "Test what\nfrontend-builder ships" } }])
+    expect((await memberSession("legacy", "tester")).body.fileName).toBe(`${LEAD}/subagents/agent-t1.jsonl`)
+    expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-t1.jsonl`)).body.currentMemberName).toBe("tester")
   })
 
-  // ── GET /api/team-member-session/:teamName/:memberName ────────────────
-
-  describe("GET /api/team-member-session/:teamName/:memberName", () => {
-    it("calls next for non-GET methods", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("POST", "team/member")
-      await handler(req, res, next)
-      expect(next).toHaveBeenCalled()
+  it("still names a shorter member whose name also appears on its own beside a longer one", async () => {
+    await writeTeam("legacy", {
+      createdAt: CREATED_AT + 1,
+      leadSessionId: LEAD,
+      members: [{ name: "boss", agentType: "team-lead" }, { name: "dev-1" }, { name: "dev-10" }],
     })
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-one.jsonl`, [{ message: { content: "You are dev-1. Hand off to dev-10 when done" } }])
+    expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-one.jsonl`)).body.currentMemberName).toBe("dev-1")
+  })
 
-    it("calls next when path parts != 2", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "team-only")
-      await handler(req, res, next)
-      expect(next).toHaveBeenCalled()
-    })
-
-    it("returns 404 when team has no leadSessionId", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        members: [{ name: "worker", agentType: "agent" }],
-      }) as unknown as Buffer)
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("finds lead session file directly for team-lead members", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/boss")
-
-      // config
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        members: [{ name: "boss", agentType: "team-lead" }],
-      }) as unknown as Buffer)
-
-      // readdir PROJECTS_DIR
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      // readdir project dir
-      mockedReaddir.mockResolvedValueOnce(["lead-sess-123.jsonl", "other.jsonl"] as unknown as Dirent[])
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.dirName).toBe("proj-a")
-      expect(response.fileName).toBe("lead-sess-123.jsonl")
-    })
-
-    it("returns 404 when lead session file not found", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/boss")
-
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        members: [{ name: "boss", agentType: "team-lead" }],
-      }) as unknown as Buffer)
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce(["other.jsonl"] as unknown as Dirent[])
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("returns 404 when non-lead member session not found", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent", prompt: "do work" },
-        ],
-      }) as unknown as Buffer)
-
-      // new-format scan: readdir PROJECTS_DIR → project dir has only the lead file
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce(["lead-sess-123.jsonl"] as unknown as Dirent[])
-      // legacy scan: readdir PROJECTS_DIR → subagent dir doesn't exist
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-    })
-
-    it("finds member session stored as its own top-level session (new team format)", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent", prompt: "do work" },
-        ],
-      }) as unknown as Buffer)
-
-      // new-format scan: PROJECTS_DIR → project files (lead + two candidates)
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce([
-        "lead-sess-123.jsonl",
-        "other-sess-111.jsonl",
-        "member-sess-999.jsonl",
-      ] as unknown as Dirent[])
-      // lead file is skipped; both candidates pass the mtime filter
-      mockedStat.mockResolvedValue({ mtimeMs: 2000 } as Awaited<ReturnType<typeof stat>>)
-      // tags read for the two candidates
-      mockedReadSessionTeamTags.mockResolvedValueOnce({ teamName: "other-team", agentName: "worker" })
-      mockedReadSessionTeamTags.mockResolvedValueOnce({ teamName: "my-team", agentName: "worker" })
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.dirName).toBe("proj-a")
-      expect(response.fileName).toBe("member-sess-999.jsonl")
-      // never touched the legacy subagents path
-      expect(mockedOpen).not.toHaveBeenCalled()
-    })
-
-    it("skips sessions older than the team when scanning for members", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        createdAt: 5000,
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent" },
-        ],
-      }) as unknown as Buffer)
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce([
-        "lead-sess-123.jsonl",
-        "stale-sess-111.jsonl",
-        "fresh-sess-999.jsonl",
-      ] as unknown as Dirent[])
-      // stale session predates the team; only the fresh one is tag-scanned
-      mockedStat.mockResolvedValueOnce({ mtimeMs: 1000 } as Awaited<ReturnType<typeof stat>>)
-      mockedStat.mockResolvedValueOnce({ mtimeMs: 9000 } as Awaited<ReturnType<typeof stat>>)
-      mockedReadSessionTeamTags.mockResolvedValueOnce({ teamName: "my-team", agentName: "worker" })
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.fileName).toBe("fresh-sess-999.jsonl")
-      expect(mockedReadSessionTeamTags).toHaveBeenCalledTimes(1)
-      expect(mockedReadSessionTeamTags).toHaveBeenCalledWith(
-        "/tmp/test-projects/proj-a/fresh-sess-999.jsonl"
-      )
-    })
-
-    it("answers 404 without the error for a config it cannot read", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-
-      mockedReadFile.mockRejectedValueOnce(new Error("EPERM: /home/cogpit/.claude/teams/my-team/config.json"))
-
-      await handler(req, res, next)
-
-      expect(res._getStatus()).toBe(404)
-      expect(JSON.parse(res._getData())).toEqual({ error: "Team not found" })
-    })
-
-    it("finds subagent session by matching member name in first line", async () => {
-      const handler = getRouteHandler(handlers, "/api/team-member-session/")
-      const { req, res, next } = createMockReqRes("GET", "my-team/worker")
-
-      mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-        leadSessionId: "lead-sess-123",
-        members: [
-          { name: "boss", agentType: "team-lead" },
-          { name: "worker", agentType: "agent", prompt: "do work" },
-        ],
-      }) as unknown as Buffer)
-
-      // new-format scan finds nothing (only the lead file exists top-level)
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce(["lead-sess-123.jsonl"] as unknown as Dirent[])
-
-      // legacy scan: readdir PROJECTS_DIR
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-
-      // subagent dir files
-      mockedReaddir.mockResolvedValueOnce(["agent-1.jsonl"] as unknown as Dirent[])
-
-      // open and read first line of subagent file
-      const firstLineContent = `{"type":"user","message":{"content":"worker do work"}}`
-      const buf = Buffer.from(firstLineContent)
-      const mockFh = {
-        read: vi.fn().mockResolvedValue({ bytesRead: buf.length }),
-        close: vi.fn().mockResolvedValue(undefined),
-      }
-      mockedOpen.mockResolvedValueOnce(mockFh as unknown as FileHandle)
-
-      // The read call fills the buffer - we need to simulate it
-      mockFh.read.mockImplementation(async (buffer: Buffer) => {
-        buf.copy(buffer, 0, 0, buf.length)
-        return { bytesRead: buf.length }
-      })
-
-      await handler(req, res, next)
-
-      const response = JSON.parse(res._getData())
-      expect(response.dirName).toBe("proj-a")
-      expect(response.fileName).toBe("lead-sess-123/subagents/agent-1.jsonl")
-    })
+  it("answers 404 when no session belongs to the member", async () => {
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-a1.jsonl`, [{ message: { content: "unrelated" } }])
+    expect(await memberSession(TEAM, "worker")).toMatchObject({ status: 404, body: { error: "Member session not found" } })
   })
 })

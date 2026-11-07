@@ -1,6 +1,6 @@
-import { memo, useCallback, useLayoutEffect, useRef, useState } from "react"
-import { useAgentProgress, useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
-import { messagesForToolUse } from "@/lib/streamingOverlay"
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useAgentProgress, useToolUseOverlay } from "@/contexts/StreamingOverlayContext"
+import type { OverlayMessage } from "@/lib/streamingOverlay"
 import type { ToolCall } from "../../../shared/session/types"
 import { StreamingMarkdown } from "./StreamingMarkdown"
 
@@ -24,8 +24,34 @@ export function streamsSubagentOnRow(toolCall: ToolCall): boolean {
  * that finish inside one window, so it is never given reserved space.
  */
 
-/** Caps the DOM: the pane re-renders on every overlay flush (~13 Hz). */
+/** Caps the DOM: the pane re-renders on every flush of its sub-agent (~13 Hz). */
 const MAX_TAIL_LINES = 400
+
+/** Visible text of one overlay message; a flush replaces only the messages it touches. */
+const messageTextCache = new WeakMap<OverlayMessage, string>()
+
+function messageText(message: OverlayMessage): string {
+  let text = messageTextCache.get(message)
+  if (text === undefined) {
+    text = message.blocks
+      .filter((b) => b.blockType !== "tool_use" && b.text)
+      .map((b) => b.text)
+      .join("\n")
+    messageTextCache.set(message, text)
+  }
+  return text
+}
+
+/** Where the last `maxLines` lines of `text` start, or 0 when it has no more than that. */
+function tailStart(text: string, maxLines: number): number {
+  let at = text.length
+  for (let newlines = 0; newlines < maxLines; newlines++) {
+    if (at === 0) return 0
+    at = text.lastIndexOf("\n", at - 1)
+    if (at < 0) return 0
+  }
+  return at + 1
+}
 
 /** Distance from the bottom, in px, still counted as "following". */
 const FOLLOW_THRESHOLD_PX = 24
@@ -35,24 +61,20 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
 }: {
   toolUseId: string
 }) {
-  const overlay = useStreamingOverlay()
+  const messages = useToolUseOverlay(toolUseId)
   const summary = useAgentProgress(toolUseId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
 
-  // Join all visible block text in arrival order, keep the tail.
-  const text = messagesForToolUse(overlay, toolUseId)
-    .flatMap((m) => m.blocks)
-    .filter((b) => b.blockType !== "tool_use" && b.text)
-    .map((b) => b.text)
-    .join("\n")
+  // All visible block text in arrival order.
+  const text = useMemo(() => messages.map(messageText).filter(Boolean).join("\n"), [messages])
 
   // Dropping lines off the top while the reader has scrolled up would slide the
   // text out from under them, so the cap only applies when we're following the
   // tail anyway — where trimming is invisible because we re-pin to the bottom.
-  const lines = text.split("\n")
-  const isTrimmed = following && lines.length > MAX_TAIL_LINES
-  const markdownText = isTrimmed ? lines.slice(-MAX_TAIL_LINES).join("\n") : text
+  const start = useMemo(() => (following ? tailStart(text, MAX_TAIL_LINES) : 0), [text, following])
+  const isTrimmed = start > 0
+  const markdownText = isTrimmed ? text.slice(start) : text
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
