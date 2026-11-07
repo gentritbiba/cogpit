@@ -1,6 +1,6 @@
 import { memo } from "react"
-import { useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
-import { mainThreadMessages, type OverlayBlock } from "@/lib/streamingOverlay"
+import { useMainThreadOverlay } from "@/contexts/StreamingOverlayContext"
+import type { OverlayBlock } from "@/lib/streamingOverlay"
 import { StreamingMarkdown } from "./StreamingMarkdown"
 
 /**
@@ -49,8 +49,7 @@ function StreamCursor() {
 }
 
 export const StreamingTurnOverlay = memo(function StreamingTurnOverlay() {
-  const overlay = useStreamingOverlay()
-  const messages = mainThreadMessages(overlay)
+  const messages = useMainThreadOverlay()
   if (messages.length === 0) return null
   const messageOccurrences = new Map<string, number>()
 
