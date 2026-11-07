@@ -10,6 +10,15 @@ import { WebSocket } from "ws"
 import type { ViteDevServer } from "vite"
 
 vi.mock("../browser/platform", () => ({ browserUnsupportedReason: () => null }))
+const resumed = vi.hoisted(() => ({ delegations: vi.fn(), crewChat: vi.fn() }))
+vi.mock("../lib/delegationAuthority", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/delegationAuthority")>(),
+  resumeLocalDelegations: resumed.delegations,
+}))
+vi.mock("../lib/crewChat", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/crewChat")>(),
+  resumeLocalCrewChat: resumed.crewChat,
+}))
 
 import { ptyPlugin } from "../pty-plugin"
 import { profilesDir, sharedRunDir } from "../browser/paths"
@@ -84,6 +93,14 @@ describe("Vite PTY plugin authorization lifecycle", () => {
 
     expect(existsSync(profilesDir())).toBe(true)
     expect(existsSync(sharedRunDir())).toBe(true)
+  })
+
+  it("resumes delegated results and crew chat deliveries at startup, as the packaged shell does", async () => {
+    resumed.delegations.mockClear()
+    resumed.crewChat.mockClear()
+    await mountPlugin()
+    expect(resumed.delegations).toHaveBeenCalledOnce()
+    expect(resumed.crewChat).toHaveBeenCalledOnce()
   })
 
   it("closes an established remote PTY when its session is revoked", async () => {
