@@ -14,11 +14,13 @@ import {
 
 export interface SessionListEventHandlers {
   onVersion: (version: number) => void
-  /** The server has no list stream (an older hub device), so the caller polls. */
+  /** The server has no list stream for this caller (an older hub device, or one that refuses it), so the caller polls. */
   onUnsupported: () => void
 }
 
 const MAX_RETRY_MS = 30_000
+/** No stream (an older server) or none for this caller (an edition that keeps it from them): poll instead. */
+const UNAVAILABLE = new Set([401, 403, 404])
 const owners = new Map<string, ListEventsOwner>()
 
 class ListEventsOwner {
@@ -73,7 +75,7 @@ class ListEventsOwner {
     try {
       const response = await authFetch(this.url, { signal: probe.signal })
       void response.body?.cancel()
-      missing = response.status === 404
+      missing = UNAVAILABLE.has(response.status)
         || (response.ok && !response.headers.get("content-type")?.includes("text/event-stream"))
     } catch {
       // Offline or refused: retry below.

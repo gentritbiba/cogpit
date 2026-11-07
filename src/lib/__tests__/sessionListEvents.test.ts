@@ -92,6 +92,19 @@ describe("subscribeSessionListEvents", () => {
     expect(FakeEventSource.instances).toHaveLength(1)
   })
 
+  it.each([401, 403])("falls back to polling when the server refuses the stream with %i", async (status) => {
+    vi.useFakeTimers()
+    mocks.authFetch.mockResolvedValue(new Response("{}", { status }))
+    const listener = handlers()
+    subscribeSessionListEvents(listener)
+    FakeEventSource.instances[0].giveUp()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(listener.onUnsupported).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeEventSource.instances).toHaveLength(1)
+  })
+
   it("reconnects with a delay after a stream that failed for another reason", async () => {
     vi.useFakeTimers()
     mocks.authFetch.mockResolvedValue(new Response("", { status: 503 }))
