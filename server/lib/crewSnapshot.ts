@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http"
 import type { SessionCrew } from "../../shared/contracts/crew"
 import type { DelegatedTaskState } from "../../shared/contracts/orchestration"
 import { accessAtLeast } from "../../shared/contracts/sessionAccess"
-import { WORKING_STATUSES } from "../../shared/sessionActivity"
+import { RECENT_ACTIVITY_MS, WORKING_STATUSES } from "../../shared/sessionActivity"
 import { allTopLevelSessions } from "../agents"
 import { listedSessionId } from "../agents/listedSession"
 import { runtimeForSession } from "../agents/runtimes"
@@ -26,8 +26,9 @@ import { readSessionSignals, readSessionState, sessionStateFrom, type SessionSig
  * `/api/session-crew/:id` for crews of hundreds of members, polled every few
  * seconds. A member that has settled is described again only once something
  * it can change by moves: its transcript, the runtime holding it, what it
- * waits on, its queue or its task. A working member, or one with a turn
- * error, is read fresh every time, since it changes with the clock.
+ * waits on, its queue or its task. A member the clock can still change (a
+ * recent mid-turn tail, agents still writing) or with a turn error is read
+ * fresh every time.
  */
 
 /** How long a member on a hub device answers from its last description. */
@@ -55,6 +56,16 @@ function changeKey(candidate: TopLevelSessionInfo, signals: SessionSignals, task
   ])
 }
 
+/**
+ * Whether time alone can still change what a tail means. A mid-turn tail
+ * reads as working while the transcript was written recently, and one
+ * waiting on agents while they write; past that only a write changes it.
+ */
+function clockCanChange(status: string | undefined, lastActivityMs: number): boolean {
+  if (!status || !WORKING_STATUSES.has(status)) return false
+  return status === "awaiting_agents" || Date.now() - lastActivityMs < RECENT_ACTIVITY_MS
+}
+
 const listedMeta = (filePath: string, mtimeMs: number) => getOrLoadSessionMeta(filePath, mtimeMs, async () => {
   const [meta, status] = await Promise.all([getSessionMeta(filePath), getSessionStatus(filePath)])
   return { meta, status }
@@ -67,8 +78,9 @@ async function describeListed(id: string, candidate: TopLevelSessionInfo, signal
   const cached = await listedMeta(candidate.filePath, candidate.mtimeMs).catch(() => null)
   const statusInfo = cached?.status ?? await getSessionStatus(candidate.filePath)
   const lastActivityAt = cached ? lastActivityOf(cached.meta, candidate.mtimeMs) : undefined
+  const lastActivityMs = Date.parse(lastActivityAt ?? "") || candidate.mtimeMs
   const state = signals
-    ? await sessionStateFrom(id, signals, { filePath: candidate.filePath, statusInfo, lastActivityMs: Date.parse(lastActivityAt ?? "") || candidate.mtimeMs })
+    ? await sessionStateFrom(id, signals, { filePath: candidate.filePath, statusInfo, lastActivityMs })
     : { sessionId: id, outcome: "not_found" as const, live: false, running: false, waiting: [] }
   if (!cached) return { described: { host, state, address, listed: null }, settled: false }
   const { meta } = cached
@@ -90,7 +102,7 @@ async function describeListed(id: string, candidate: TopLevelSessionInfo, signal
       },
     },
     settled: Boolean(signals) && state.outcome !== "running" && !signals?.turnError
-      && !WORKING_STATUSES.has(statusInfo.status ?? "")
+      && !clockCanChange(statusInfo.status, lastActivityMs)
       // A long transcript's pull requests are found over several reads.
       && getScannedSessionPullRequests(candidate.filePath, candidate.size) !== null,
   }

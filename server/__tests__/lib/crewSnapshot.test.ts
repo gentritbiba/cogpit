@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
     tasks: [] as Array<{ id: string; parentSessionId: string; childSessionId: string; state: string; createdAt: number; updatedAt: number; acknowledgedAt?: number }>,
     getSessionMeta: vi.fn(),
     getSessionStatus: vi.fn(),
-    getSessionPullRequests: vi.fn(async () => []),
+    getSessionPullRequests: vi.fn(async (_filePath: string, _size: number) => [] as unknown[]),
     readSessionState: vi.fn(),
     deviceState: vi.fn(),
   }
@@ -143,6 +143,18 @@ describe("readCrewSnapshot", () => {
       vi.setSystemTime(Date.now() + 5 * 60_000)
       expect((await member("busy"))?.outcome).toBe("completed")
     } finally { vi.useRealTimers() }
+  })
+
+  it("reads a session killed mid-turn once it is past the clock, and keeps one waiting on its agents fresh", async () => {
+    mocks.status.set("done", { status: "thinking" })
+    mocks.status.set("busy", { status: "awaiting_agents" })
+    expect((await member("done"))?.outcome).toBe("completed")
+    const reads = (id: string) => mocks.getSessionPullRequests.mock.calls.filter(([path]) => path === `/work/${id}.jsonl`).length
+    await read("lead")
+    expect(reads("done")).toBe(1)
+    expect(reads("busy")).toBe(2)
+    mocks.signals.set("done", { activity: { live: true, running: true, agentsRunning: false } })
+    expect((await member("done"))?.outcome).toBe("running")
   })
 
   it("shows a request appearing and being answered on a settled member", async () => {
