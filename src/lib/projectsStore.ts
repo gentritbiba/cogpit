@@ -119,6 +119,10 @@ class ProjectsStore {
         clearInterval(poll)
         poll = setInterval(() => this.invalidate(), FALLBACK_POLL_INTERVAL)
       },
+      onSupported: () => {
+        clearInterval(poll)
+        this.invalidate()
+      },
     })
     this.stopFollowing = () => {
       document.removeEventListener("visibilitychange", onVisible)

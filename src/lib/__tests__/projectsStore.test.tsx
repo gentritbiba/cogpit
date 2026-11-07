@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ProjectInfo } from "@/components/Dashboard/types"
 import { __resetProjectsStoreForTest, loadProjects, useProjects } from "@/lib/projectsStore"
 import { clearSessionListCache, sessionListCacheKeys, writeCachedList } from "@/lib/sessionListCache"
-import { __resetSessionListEventsForTest } from "@/lib/sessionListEvents"
+import { REFUSED_RETRY_MS, __resetSessionListEventsForTest } from "@/lib/sessionListEvents"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
@@ -134,5 +134,31 @@ describe("projects store", () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(projectCalls()).toEqual([null, "p1"])
+  })
+
+  it("stops polling and revalidates once a stream the server refused comes back", async () => {
+    vi.useFakeTimers()
+    mocks.authFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url !== "/api/projects") return new Response("{}", { status: 403 })
+      if (new Headers(init?.headers).get("If-None-Match") === served.etag) return new Response(null, { status: 304 })
+      return Response.json(served.projects, { headers: { ETag: served.etag } })
+    })
+    render(<Consumer onProjects={vi.fn()} />)
+    await act(async () => {
+      FakeEventSource.last!.readyState = FakeEventSource.CLOSED
+      FakeEventSource.last!.dispatchEvent(new Event("error"))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS) })
+    const polled = projectCalls().length
+    expect(polled).toBe(1 + REFUSED_RETRY_MS / 60_000)
+
+    await act(async () => {
+      FakeEventSource.last!.dispatchEvent(new Event("open"))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(projectCalls()).toHaveLength(polled + 1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000) })
+    expect(projectCalls()).toHaveLength(polled + 1)
   })
 })

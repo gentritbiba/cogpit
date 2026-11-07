@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 
-import { __resetSessionListEventsForTest, subscribeSessionListEvents } from "@/lib/sessionListEvents"
+import { REFUSED_RETRY_MS, __resetSessionListEventsForTest, subscribeSessionListEvents } from "@/lib/sessionListEvents"
+import type { SessionListVersionEvent } from "../../../shared/contracts/sessionList"
 
 class FakeEventSource extends EventTarget {
   static readonly CLOSED = 2
@@ -21,8 +22,12 @@ class FakeEventSource extends EventTarget {
     this.readyState = FakeEventSource.CLOSED
   }
 
-  version(version: number): void {
-    this.dispatchEvent(new MessageEvent("version", { data: JSON.stringify({ version }) }))
+  version(version: number, epoch?: string): void {
+    this.dispatchEvent(new MessageEvent("version", { data: JSON.stringify({ version, epoch }) }))
+  }
+
+  open(): void {
+    this.dispatchEvent(new Event("open"))
   }
 
   giveUp(): void {
@@ -32,7 +37,11 @@ class FakeEventSource extends EventTarget {
 }
 
 function handlers() {
-  return { onVersion: vi.fn<(version: number) => void>(), onUnsupported: vi.fn<() => void>() }
+  return {
+    onVersion: vi.fn<(event: SessionListVersionEvent) => void>(),
+    onUnsupported: vi.fn<() => void>(),
+    onSupported: vi.fn<() => void>(),
+  }
 }
 
 async function flush(): Promise<void> {
@@ -60,9 +69,11 @@ describe("subscribeSessionListEvents", () => {
 
     expect(FakeEventSource.instances).toHaveLength(1)
     expect(FakeEventSource.instances[0].url).toBe("/api/session-list/events")
-    FakeEventSource.instances[0].version(7)
-    expect(first.onVersion).toHaveBeenCalledWith(7)
-    expect(second.onVersion).toHaveBeenCalledWith(7)
+    FakeEventSource.instances[0].version(7, "run-1")
+    expect(first.onVersion).toHaveBeenCalledWith({ version: 7, epoch: "run-1" })
+    expect(second.onVersion).toHaveBeenCalledWith({ version: 7, epoch: "run-1" })
+    FakeEventSource.instances[0].version(8)
+    expect(first.onVersion).toHaveBeenLastCalledWith({ version: 8 })
 
     stopFirst()
     expect(FakeEventSource.instances[0].closed).toBe(false)
@@ -92,7 +103,7 @@ describe("subscribeSessionListEvents", () => {
     expect(FakeEventSource.instances).toHaveLength(1)
   })
 
-  it.each([401, 403])("falls back to polling when the server refuses the stream with %i", async (status) => {
+  it.each([401, 403])("polls while the server refuses the stream with %i, and asks again every 5 min", async (status) => {
     vi.useFakeTimers()
     mocks.authFetch.mockResolvedValue(new Response("{}", { status }))
     const listener = handlers()
@@ -101,8 +112,38 @@ describe("subscribeSessionListEvents", () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(listener.onUnsupported).toHaveBeenCalledOnce()
-    await vi.advanceTimersByTimeAsync(60_000)
+    await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS - 1)
     expect(FakeEventSource.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(FakeEventSource.instances).toHaveLength(2)
+
+    // Still refused: no second report, another wait.
+    FakeEventSource.instances[1].giveUp()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(listener.onUnsupported).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS)
+    expect(FakeEventSource.instances).toHaveLength(3)
+
+    FakeEventSource.instances[2].open()
+    expect(listener.onSupported).toHaveBeenCalledOnce()
+  })
+
+  it("asks a refusing server again at once when a new subscriber comes", async () => {
+    vi.useFakeTimers()
+    mocks.authFetch.mockResolvedValue(new Response("{}", { status: 403 }))
+    const first = handlers()
+    subscribeSessionListEvents(first)
+    FakeEventSource.instances[0].giveUp()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const later = handlers()
+    subscribeSessionListEvents(later)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(later.onUnsupported).toHaveBeenCalledOnce()
+    expect(FakeEventSource.instances).toHaveLength(2)
+    FakeEventSource.instances[1].open()
+    expect(first.onSupported).toHaveBeenCalledOnce()
+    expect(later.onSupported).toHaveBeenCalledOnce()
   })
 
   it("reconnects with a delay after a stream that failed for another reason", async () => {

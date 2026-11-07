@@ -4,6 +4,7 @@ import {
   type SessionListVersionEvent,
 } from "../../shared/contracts/sessionList"
 import { visibilityFor } from "../edition"
+import { LIST_EPOCH } from "./revalidate"
 import type { NextFn } from "../http"
 import { catalogVersion, subscribeCatalog, type CatalogChangeKind } from "../sessionCatalog"
 import { followVersionInputs, stopFollowingVersionInputs } from "./versionInputs"
@@ -15,8 +16,9 @@ export const TOUCH_GAP_MS = 15_000
 export const HEARTBEAT_MS = 25_000
 
 interface Client {
+  req: IncomingMessage
   res: ServerResponse
-  /** Sees no session, so it hears the version once and nothing after. */
+  /** Sees no session for now, so it hears no changes until it does. */
   quiet: boolean
 }
 
@@ -29,7 +31,7 @@ let lastSentAt = -Infinity
 let sentVersion = -1
 
 function versionFrame(version: number): string {
-  const event: SessionListVersionEvent = { version }
+  const event: SessionListVersionEvent = { version, epoch: LIST_EPOCH }
   return `event: ${SESSION_LIST_VERSION_EVENT}\ndata: ${JSON.stringify(event)}\n\n`
 }
 
@@ -41,7 +43,17 @@ function flush(): void {
   if (version === sentVersion) return
   sentVersion = version
   const frame = versionFrame(version)
-  for (const client of clients) if (!client.quiet) client.res.write(frame)
+  for (const client of clients) {
+    if (client.quiet) noticeAccess(client)
+    else client.res.write(frame)
+  }
+}
+
+/** A caller who saw no session may since have been given one; tell them the version once they have. */
+function noticeAccess(client: Client): void {
+  if (!client.quiet || visibilityFor(client.req).nothing) return
+  client.quiet = false
+  client.res.write(versionFrame(catalogVersion()))
 }
 
 function schedule(kind: CatalogChangeKind): void {
@@ -57,7 +69,10 @@ function follow(): void {
   const unsubscribe = subscribeCatalog((change) => schedule(change.kind))
   followVersionInputs()
   heartbeat = setInterval(() => {
-    for (const client of clients) client.res.write(": heartbeat\n\n")
+    for (const client of clients) {
+      client.res.write(": heartbeat\n\n")
+      noticeAccess(client)
+    }
   }, HEARTBEAT_MS)
   heartbeat.unref?.()
   sentVersion = catalogVersion()
@@ -88,6 +103,8 @@ export function handleSessionListEvents(req: IncomingMessage, res: ServerRespons
   if (req.url && !req.url.startsWith("?") && !req.url.startsWith("/?") && req.url !== "/" && req.url !== "") return next()
 
   const quiet = visibilityFor(req).nothing
+  // A caller gone before the stream starts would never be heard leaving.
+  if (req.destroyed || res.destroyed || res.writableEnded) return
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -96,11 +113,11 @@ export function handleSessionListEvents(req: IncomingMessage, res: ServerRespons
   // The hub proxy gives up on a device that sends nothing for 7 s.
   res.flushHeaders()
 
-  const client: Client = { res, quiet }
+  const client: Client = { req, res, quiet }
+  res.once("close", () => leave(client))
   if (clients.size === 0) follow()
   clients.add(client)
   res.write(versionFrame(catalogVersion()))
-  res.once("close", () => leave(client))
 }
 
 export function __resetSessionListEventsForTest(): void {

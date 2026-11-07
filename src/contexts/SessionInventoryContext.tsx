@@ -34,7 +34,7 @@ import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter
 import { learnListedAccess, onListsStale, sessionAccessTicket } from "@/lib/sessionAccess"
 import { subscribeSessionListEvents } from "@/lib/sessionListEvents"
 import { shareList } from "@/lib/structuralShare"
-import { SESSION_LIST_VERSION_HEADER } from "../../shared/contracts/sessionList"
+import { SESSION_LIST_EPOCH_HEADER, SESSION_LIST_VERSION_HEADER } from "../../shared/contracts/sessionList"
 
 const LIVE_POLL_INTERVAL = 20_000
 const FALLBACK_POLL_INTERVAL = 60_000
@@ -172,9 +172,11 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const writtenRef = useRef({ key: initialCacheKey, sessions, processes })
   const filterRef = useRef(filter)
   const wantArchivedRef = useRef(wantArchived)
-  // List versions: the newest the server announced, and the one the rows show.
+  // List versions: the newest the server announced, the one the rows show,
+  // and the server run they count in.
   const announcedVersionRef = useRef(0)
   const heldVersionRef = useRef(0)
+  const epochRef = useRef<string | null>(null)
   const staleRef = useRef(false)
   const lastListFetchRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -279,13 +281,19 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
         validatorRef.current = etag ? { url, etag } : null
       }
       loadedKeyRef.current = cacheKey
+      const epoch = response.headers.get(SESSION_LIST_EPOCH_HEADER)
+      if (epoch && epoch !== epochRef.current) {
+        if (epochRef.current !== null) announcedVersionRef.current = heldVersionRef.current = 0
+        epochRef.current = epoch
+      }
       heldVersionRef.current = Math.max(heldVersionRef.current, listVersion(response) ?? versionAtStart)
       setError(null)
       if (mode === "list" && changed) void loadProcesses()
       abortRef.current = null
-      // Something changed while this request ran: read the list once more.
-      if (announcedVersionRef.current > heldVersionRef.current && document.visibilityState === "visible") {
-        void fetchInventory("list")
+      // Something changed while this request ran: read the list once more, now or once it shows.
+      if (announcedVersionRef.current > heldVersionRef.current) {
+        if (document.visibilityState === "visible") void fetchInventory("list")
+        else staleRef.current = true
       }
     } catch (err) {
       if (!isCurrentRequest()) return
@@ -332,14 +340,23 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   // The server announces each list change; a hidden window reads it once it shows again.
   useEffect(() => {
     if (gated) return
+    setPushUnsupported(false)
     return subscribeSessionListEvents({
-      onVersion: (version) => {
+      onVersion: ({ version, epoch }) => {
+        // The server restarted: its versions count from 0 again.
+        const restarted = epoch === undefined
+          ? version < announcedVersionRef.current
+          : epochRef.current !== null && epoch !== epochRef.current
+        if (epoch !== undefined) epochRef.current = epoch
+        if (restarted) announcedVersionRef.current = heldVersionRef.current = 0
         announcedVersionRef.current = Math.max(announcedVersionRef.current, version)
-        if (version <= heldVersionRef.current || abortRef.current) return
-        if (document.visibilityState === "visible") void fetchRef.current("list")
+        if (!restarted && version <= heldVersionRef.current) return
+        if (abortRef.current && !restarted) staleRef.current = true
+        else if (document.visibilityState === "visible") void fetchRef.current("list")
         else staleRef.current = true
       },
       onUnsupported: () => setPushUnsupported(true),
+      onSupported: () => setPushUnsupported(false),
     })
   }, [gated])
 

@@ -20,7 +20,7 @@ import { installFakeEdition } from "../edition/fakeEdition"
 import { setRequestPrincipal } from "../../requestPrincipal"
 import { catalogVersion, markCatalogChanged } from "../../sessionCatalog"
 import { handleSessionListEvents } from "../../sessionList/events"
-import { sendListResponse } from "../../sessionList/revalidate"
+import { LIST_EPOCH, sendListResponse } from "../../sessionList/revalidate"
 import { SESSION_LIST_EVENTS_PATH } from "../../../shared/contracts/sessionList"
 import type { SessionPrincipal } from "../../sessionConstants"
 
@@ -620,11 +620,11 @@ describe("createHubProxyHandler — streaming", () => {
     const reader = response.body!.getReader()
     const decoder = new TextDecoder()
     const connected = decoder.decode((await reader.read()).value)
-    expect(connected).toContain(`event: version\ndata: {"version":${catalogVersion()}}`)
+    expect(connected).toContain(`event: version\ndata: {"version":${catalogVersion()},"epoch":"${LIST_EPOCH}"}`)
 
     markCatalogChanged("visible")
     const changed = decoder.decode((await reader.read()).value)
-    expect(changed).toContain(`data: {"version":${catalogVersion()}}`)
+    expect(changed).toContain(`data: {"version":${catalogVersion()},"epoch":"${LIST_EPOCH}"}`)
     await reader.cancel()
   })
 

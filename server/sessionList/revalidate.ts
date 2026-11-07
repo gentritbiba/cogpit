@@ -1,8 +1,11 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { SESSION_LIST_VERSION_HEADER } from "../../shared/contracts/sessionList"
+import { SESSION_LIST_EPOCH_HEADER, SESSION_LIST_VERSION_HEADER } from "../../shared/contracts/sessionList"
 import { getRequestPrincipal } from "../edition"
 import { catalogVersion } from "../sessionCatalog"
+
+/** This server run: list versions start again from 0 in every one. */
+export const LIST_EPOCH = randomUUID()
 
 /** A list answer for one caller: its JSON body and the headers that describe it. */
 export interface ListBody {
@@ -37,6 +40,7 @@ export function sendListResponse(req: IncomingMessage, res: ServerResponse, resp
   const tag = entityTag(response)
   res.setHeader("ETag", tag)
   res.setHeader(SESSION_LIST_VERSION_HEADER, String(response.version))
+  res.setHeader(SESSION_LIST_EPOCH_HEADER, LIST_EPOCH)
   for (const [name, value] of Object.entries(response.headers)) res.setHeader(name, value)
   if (notModified(req, tag)) {
     res.statusCode = 304

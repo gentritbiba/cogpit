@@ -19,6 +19,7 @@ import {
   handleSessionListEvents,
 } from "../../sessionList/events"
 import { installFakeEdition } from "../edition/fakeEdition"
+import { LIST_EPOCH } from "../../sessionList/revalidate"
 import { asIncomingMessage, asServerResponse } from "../http-fixtures"
 
 class StreamResponse extends EventEmitter {
@@ -142,13 +143,46 @@ describe("GET /api/session-list/events", () => {
     expect(hasCatalogListeners()).toBe(false)
   })
 
-  it("tells a caller who sees no session the version once and nothing after", () => {
-    const nothing = Object.assign(async () => "hidden" as const, { everything: false, nothing: true })
-    installFakeEdition({ access: { ...PERSONAL_EDITION.access, visibilityFor: () => nothing } })
+  it("tells a caller who sees no session the version, then nothing until they see one", () => {
+    let seesNothing = true
+    const visibility = () => Object.assign(async () => "hidden" as const, { everything: false, nothing: seesNothing })
+    installFakeEdition({ access: { ...PERSONAL_EDITION.access, visibilityFor: visibility } })
     const { res } = connect()
     expect(res.versions()).toEqual([catalogVersion()])
     markCatalogChanged("visible")
     vi.advanceTimersByTime(VISIBLE_GAP_MS)
     expect(res.versions()).toEqual([])
+
+    seesNothing = false
+    markCatalogChanged("visible")
+    vi.advanceTimersByTime(VISIBLE_GAP_MS)
+    expect(res.versions()).toEqual([catalogVersion()])
+    markCatalogChanged("visible")
+    vi.advanceTimersByTime(VISIBLE_GAP_MS)
+    expect(res.versions()).toEqual([catalogVersion()])
+  })
+
+  it("tells a caller given their first session the version at the next heartbeat", () => {
+    let seesNothing = true
+    const visibility = () => Object.assign(async () => "hidden" as const, { everything: false, nothing: seesNothing })
+    installFakeEdition({ access: { ...PERSONAL_EDITION.access, visibilityFor: visibility } })
+    const { res } = connect()
+    res.versions()
+    seesNothing = false
+    vi.advanceTimersByTime(HEARTBEAT_MS)
+    expect(res.versions()).toEqual([catalogVersion()])
+  })
+
+  it("names this server run in every frame", () => {
+    const { res } = connect()
+    expect(res.chunks[0]).toBe(`event: version\ndata: {"version":${catalogVersion()},"epoch":"${LIST_EPOCH}"}\n\n`)
+  })
+
+  it("starts nothing for a caller gone before the stream opens", () => {
+    const res = Object.assign(new StreamResponse(), { destroyed: true })
+    handleSessionListEvents(asIncomingMessage({ method: "GET", url: "/", headers: {} }), asServerResponse(res), vi.fn())
+    expect(res.head).toBeNull()
+    expect(inputs.follow).not.toHaveBeenCalled()
+    expect(hasCatalogListeners()).toBe(false)
   })
 })

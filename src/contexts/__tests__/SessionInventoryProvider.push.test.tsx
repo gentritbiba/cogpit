@@ -9,7 +9,7 @@ import {
 import { __resetEditionUiForTest } from "@/edition/registry"
 import { __resetSessionAccessForTest } from "@/lib/sessionAccess"
 import { activeSessionsCacheKey, clearSessionListCache, readCachedList } from "@/lib/sessionListCache"
-import { __resetSessionListEventsForTest } from "@/lib/sessionListEvents"
+import { REFUSED_RETRY_MS, __resetSessionListEventsForTest } from "@/lib/sessionListEvents"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
@@ -28,8 +28,12 @@ class FakeEventSource extends EventTarget {
     this.readyState = FakeEventSource.CLOSED
   }
 
-  version(version: number): void {
-    this.dispatchEvent(new MessageEvent("version", { data: JSON.stringify({ version }) }))
+  version(version: number, epoch?: string): void {
+    this.dispatchEvent(new MessageEvent("version", { data: JSON.stringify({ version, epoch }) }))
+  }
+
+  open(): void {
+    this.dispatchEvent(new Event("open"))
   }
 
   giveUp(): void {
@@ -60,6 +64,11 @@ interface Served {
   processes: RunningProcess[]
   etag: string | null
   archivedCount: number
+  /** The list version and server run the answers name, when the server sends them. */
+  version?: number
+  epoch?: string
+  /** What the stream's probe answers. */
+  streamStatus?: number
 }
 
 let served: Served
@@ -67,12 +76,14 @@ let served: Served
 /** A server with ETags: answers `If-None-Match` with 304 while the list is unchanged. */
 function serve(): void {
   mocks.authFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-    if (url === "/api/session-list/events") return new Response("{}", { status: 404 })
+    if (url === "/api/session-list/events") return new Response("{}", { status: served.streamStatus ?? 404 })
     if (url === "/api/running-processes") return Response.json(served.processes)
     const archived = url.includes("archived=include")
     const etag = served.etag && `${served.etag}${archived ? "-a" : ""}`
     const asked = new Headers(init?.headers).get("If-None-Match")
     const headers: Record<string, string> = { "X-Cogpit-Archived-Count": String(served.archivedCount) }
+    if (served.version !== undefined) headers["X-Cogpit-List-Version"] = String(served.version)
+    if (served.epoch) headers["X-Cogpit-List-Epoch"] = served.epoch
     if (etag) headers.ETag = etag
     if (etag && asked === etag) return new Response(null, { status: 304, headers })
     return Response.json(archived ? [...served.rows, ...served.archivedRows] : served.rows, { headers })
@@ -241,6 +252,81 @@ describe("SessionInventoryProvider push and revalidation", () => {
     act(() => setVisibility("visible"))
     await settle()
     expect(listCalls()).toHaveLength(reads + 1)
+  })
+
+  it("reads the list again after the server restarted and its versions started over", async () => {
+    served.version = 10
+    served.epoch = "run-1"
+    renderInventory()
+    await settle()
+    const reads = listCalls().length
+    await act(async () => FakeEventSource.last!.version(10, "run-1"))
+    await settle()
+    expect(listCalls()).toHaveLength(reads)
+
+    served.version = 1
+    served.epoch = "run-2"
+    await act(async () => FakeEventSource.last!.version(1, "run-2"))
+    await settle()
+    expect(listCalls()).toHaveLength(reads + 1)
+    await act(async () => FakeEventSource.last!.version(1, "run-2"))
+    await settle()
+    expect(listCalls()).toHaveLength(reads + 1)
+    served.version = 2
+    await act(async () => FakeEventSource.last!.version(2, "run-2"))
+    await settle()
+    expect(listCalls()).toHaveLength(reads + 2)
+  })
+
+  it("takes a version going down from a server that names no run as a restart", async () => {
+    served.version = 10
+    renderInventory()
+    await settle()
+    await act(async () => FakeEventSource.last!.version(10))
+    await settle()
+    const reads = listCalls().length
+
+    served.version = 2
+    await act(async () => FakeEventSource.last!.version(2))
+    await settle()
+    expect(listCalls()).toHaveLength(reads + 1)
+  })
+
+  it("remembers a change announced during a request that ends while hidden", async () => {
+    let answer!: (response: Response) => void
+    mocks.authFetch.mockImplementation((url: string) => {
+      if (url.startsWith("/api/active-sessions")) return new Promise<Response>((resolve) => { answer = resolve })
+      return Promise.resolve(Response.json([]))
+    })
+    renderInventory()
+    await settle()
+    await act(async () => FakeEventSource.last!.version(4))
+    act(() => setVisibility("hidden"))
+    await act(async () => answer(Response.json([row("a")])))
+    await settle()
+    expect(listCalls()).toHaveLength(1)
+
+    act(() => setVisibility("visible"))
+    await settle()
+    expect(listCalls()).toHaveLength(2)
+  })
+
+  it("stops polling once a stream the server refused comes back", async () => {
+    vi.useFakeTimers()
+    served.processes = []
+    served.streamStatus = 403
+    renderInventory()
+    await act(async () => FakeEventSource.last!.giveUp())
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const reads = listCalls().length
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(listCalls()).toHaveLength(reads + 1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS - 60_000) })
+    const polled = listCalls().length
+    await act(async () => FakeEventSource.last!.open())
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000) })
+    expect(listCalls()).toHaveLength(polled)
   })
 
   it("polls every 60 s while visible when the server has no stream and nothing is live", async () => {

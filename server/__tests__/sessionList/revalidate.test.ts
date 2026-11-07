@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { setRequestPrincipal } from "../../requestPrincipal"
 import { catalogVersion, markCatalogChanged } from "../../sessionCatalog"
-import { __resetListBuildsForTest, sendListResponse, sharedListBuild, type ListBody } from "../../sessionList/revalidate"
+import { LIST_EPOCH, __resetListBuildsForTest, sendListResponse, sharedListBuild, type ListBody } from "../../sessionList/revalidate"
 import { asIncomingMessage, asServerResponse, createMockReqRes } from "../http-fixtures"
 
 const list = (body: string, archived = "0"): ListBody & { version: number } => ({
@@ -26,6 +26,7 @@ describe("sendListResponse", () => {
     expect(res._getHeaders()).toMatchObject({
       ETag: expect.stringMatching(/^W\/".+"$/),
       "X-Cogpit-List-Version": "3",
+      "X-Cogpit-List-Epoch": LIST_EPOCH,
       "X-Cogpit-Archived-Count": "4",
       "Content-Type": "application/json",
     })
