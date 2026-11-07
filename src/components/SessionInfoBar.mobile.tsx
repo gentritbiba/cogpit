@@ -29,7 +29,8 @@ import { ContextBadge, LiveIndicator } from "@/components/header-shared"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
 import type { SessionSource } from "@/lib/sessionSource"
 import { projectName } from "@/lib/format"
-import type { ParsedSession, RawMessage } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
+import type { ContextUsage } from "../../shared/session/contextWindow"
 
 export interface SessionInfoBarProps {
   /** What the shell's header carries on the right, kept in reach while the chat header replaces it. */
@@ -48,13 +49,14 @@ export interface SessionInfoBarProps {
 }
 
 interface MobileSessionInfoBarProps extends SessionInfoBarProps {
-  session: ParsedSession
+  session: SessionView
   sessionSource: SessionSource | null
   isSubAgentView: boolean
   isLive: boolean
   canArchive: boolean
   onProviderHandoff?: () => void
-  claudeRawMessages: readonly RawMessage[]
+  /** Shown only for an agent whose transcript reports its context window. */
+  contextUsage: ContextUsage | null
 }
 
 export function MobileSessionInfoBar({
@@ -64,7 +66,7 @@ export function MobileSessionInfoBar({
   isLive,
   canArchive,
   onProviderHandoff,
-  claudeRawMessages,
+  contextUsage,
   headerAccessory,
   creatingSession,
   onNewSession,
@@ -101,7 +103,7 @@ export function MobileSessionInfoBar({
 
       <DeviceSwitcher compact />
       <Separator orientation="vertical" className="h-4" />
-      <ContextBadge rawMessages={claudeRawMessages} warnOnly />
+      <ContextBadge usage={contextUsage} warnOnly />
 
       <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
         <span className="truncate text-xs font-medium text-muted-foreground">

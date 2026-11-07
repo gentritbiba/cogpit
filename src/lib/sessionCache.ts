@@ -1,10 +1,11 @@
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 import { rootSessionIdOf } from "@/lib/agents"
 import type { SessionSource } from "@/lib/sessionSource"
 
 export interface CacheEntry {
-  parsed: ParsedSession
+  parsed: SessionView
   /**
    * Turns paged in above the loaded window, oldest first. Stored next to
    * `nextByteOffset` so the cursor and the history it consumed can never
@@ -44,7 +45,7 @@ class SessionCache {
     return entry
   }
 
-  set(parsed: ParsedSession, source: SessionSource, nextByteOffset: number, hasMore: boolean): void {
+  set(parsed: SessionView, source: SessionSource, nextByteOffset: number, hasMore: boolean): void {
     const key = makeKey(source.dirName, source.fileName)
 
     if (!this.cache.has(key) && this.cache.size >= MAX_ENTRIES) {

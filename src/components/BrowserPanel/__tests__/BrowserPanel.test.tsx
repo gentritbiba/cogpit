@@ -9,7 +9,8 @@ import type { WorkspacePanelContext } from "@/plugin-api"
 import type { BrowserClientMessage, BrowserTab } from "../../../../shared/browser/protocol"
 import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../../shared/browser/types"
 import { AGENT_KINDS } from "../../../../shared/session/agent-descriptors"
-import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
+import type { ToolCall, Turn } from "../../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../../shared/session/sessionDigest"
 
 vi.mock("@/hooks/useBrowserSessions", () => ({
   useBrowserSessions: (enabled: boolean) => sessionsDouble(enabled),
@@ -135,7 +136,7 @@ function browserOf(overrides: Partial<BrowserSessionInfo> = {}): BrowserSessionI
 const WORK = browserOf({ name: "work", isDefault: false })
 const SHOP = browserOf({ name: "shop", isDefault: false })
 
-function sessionDriving(command: string, done = true): ParsedSession {
+function sessionDriving(command: string, done = true): SessionView {
   const call: ToolCall = {
     id: "tool-1",
     name: "Bash",
@@ -176,11 +177,11 @@ function sessionDriving(command: string, done = true): ParsedSession {
       totalDurationMs: 0,
       turnCount: 1,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
-function contextOf(session: ParsedSession | null = null): WorkspacePanelContext {
+function contextOf(session: SessionView | null = null): WorkspacePanelContext {
   return {
     session,
     sessionChangeKey: 0,

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
-import type { ParsedSession, UndoState, Branch, Turn } from "../../shared/session/types"
+import type { UndoState, Branch, Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
@@ -49,7 +50,7 @@ export interface UseUndoRedoResult {
 }
 
 export function useUndoRedo(
-  session: ParsedSession | null,
+  session: SessionView | null,
   sessionSource: SessionSource | null,
   onReloadSession: () => Promise<void>,
   enabled = true,

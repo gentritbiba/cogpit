@@ -66,7 +66,8 @@ import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import type { ParsedSession, Turn } from "../shared/session/types"
+import type { Turn } from "../shared/session/types"
+import type { SessionView } from "../shared/session/sessionDigest"
 import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
 import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
 import { hasEditToolCalls } from "../shared/session/edit-calls"
@@ -121,7 +122,7 @@ export default function App() {
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
   const { procBySession } = useSessionInventory()
-  const { parse: workerParse, append: workerAppend } = useParserWorker()
+  const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
     dispatch({ type: "SET_OLDER_TURNS", turns: olderTurns })
@@ -140,7 +141,7 @@ export default function App() {
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
-    workerParse,
+    workerParse: parsePage,
     onOlderTurns: handleOlderTurns,
   })
 
@@ -608,7 +609,7 @@ export default function App() {
   // effect keeps render pure and installs the latest callback before user input
   // or passive effects can finalize a newly-created session.
   useLayoutEffect(() => {
-    const handleSessionFinalized = (_parsed: ParsedSession) => {
+    const handleSessionFinalized = (_parsed: SessionView) => {
       // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
       resetFinalizedSessionTurnCount(0)
       scrollFinalizedSessionToBottom()

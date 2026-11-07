@@ -83,10 +83,6 @@ const SKIP_PROMPT_PREFIXES = [
   "<skills_instructions>",
 ]
 
-function randomTurnId(prefix: string): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${prefix}-${Math.random().toString(36).slice(2, 10)}`
-}
-
 function safeParseLine(line: string): CodexRecord | null {
   try {
     return JSON.parse(line) as CodexRecord
@@ -496,9 +492,9 @@ function parseMcpEventResult(value: unknown): CodexToolOutput {
  * A turn Codex never labelled falls back to a random id, which is stable
  * within one parse but not across them.
  */
-function createTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
+function createTurn(id: string, timestamp: string, model: string | null): Turn {
   return {
-    id: turnId ? `${turnId}@${timestamp}` : randomTurnId("codex-turn"),
+    id,
     userMessage: null,
     contentBlocks: [],
     thinking: [],
@@ -833,6 +829,7 @@ function walkCodexRecords(
   // prompt — cutting at the prompt would strand a context record belonging to a
   // turn that no longer exists.
   const turnStartIndices: number[] = []
+  const usedTurnIds = new Set<string>()
   let recordIndex = 0
   let pendingContextIndex: number | null = null
   let pendingTurnStart: number | null = null
@@ -853,8 +850,16 @@ function walkCodexRecords(
     return result
   }
 
+  /**
+   * A turn's id is its CLI turn id and start time, or, for a turn the window
+   * opened inside without one, its start time alone, so parsing the same
+   * records again names it the same.
+   */
   function createActiveTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
-    const turn = createTurn(turnId, timestamp, model)
+    let id = turnId ? `${turnId}@${timestamp}` : `codex-turn@${timestamp}`
+    for (let n = 2; usedTurnIds.has(id); n++) id = `${turnId ?? "codex-turn"}@${timestamp}#${n}`
+    usedTurnIds.add(id)
+    const turn = createTurn(id, timestamp, model)
     pendingTurnStart = pendingContextIndex ?? recordIndex
     pendingContextIndex = null
     if (!sawTurnStart) turn.isFragment = true

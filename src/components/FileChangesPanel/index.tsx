@@ -3,7 +3,7 @@ import { FileCode2, ChevronsDownUp, ChevronsUpDown, Layers, Clock, X, Sigma, Lis
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import type { ParsedSession } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import type { ChangeBreakdownRow } from "../../../shared/changedFileKind"
 import { cn } from "@/lib/utils"
 import { GroupedFileCard, type DiffMode } from "./GroupedFileCard"
@@ -37,7 +37,7 @@ const PREFS_DEFAULTS: FileChangesPrefs = {
 type Scope = "last" | "all" | number
 
 interface FileChangesPanelProps {
-  session: ParsedSession
+  session: SessionView
   sessionChangeKey: number
 }
 

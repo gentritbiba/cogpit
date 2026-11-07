@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
-import type { ParsedSession } from "../../../shared/session/types"
 import type { SessionSource } from "@/lib/sessionSource"
 import { makeTurn } from "@/__tests__/fixtures"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "test-session",
     version: "1.0",
@@ -28,7 +28,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     ...overrides,
   }
 }
@@ -50,7 +50,7 @@ function getState(hook: ReturnType<typeof renderState>): SessionState {
   return hook.result.current[0]
 }
 
-function getSession(hook: ReturnType<typeof renderState>): ParsedSession {
+function getSession(hook: ReturnType<typeof renderState>): SessionView {
   const session = getState(hook).session
   if (!session) throw new Error("expected a session to be loaded")
   return session

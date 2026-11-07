@@ -30,15 +30,16 @@ import { useSessionActions } from "@/hooks/useSessionActions"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope } from "@/lib/device"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockSessionCache = vi.mocked(sessionCache)
 const mockGetActiveDeviceScope = vi.mocked(getActiveDeviceScope)
 
-function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
+function makeParsedSession(overrides?: Partial<SessionView>): SessionView {
   return {
     sessionId: "test-session",
     version: "1",
@@ -58,12 +59,12 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     ...overrides,
   }
 }
 
-function makeDefaultOpts(session?: ParsedSession): Parameters<typeof useSessionActions>[0] {
+function makeDefaultOpts(session?: SessionView): Parameters<typeof useSessionActions>[0] {
   const parsedSession = session ?? makeParsedSession()
   const workerParse = vi.fn(() => Promise.resolve(parsedSession))
   return {

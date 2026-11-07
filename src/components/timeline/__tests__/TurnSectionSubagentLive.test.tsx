@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { EMPTY_SESSION_DIGEST } from "../../../../shared/session/sessionDigest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import type { StreamingOverlay } from "@/lib/streamingOverlay"
@@ -20,7 +21,7 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionContext: () => ({
-    session: { sessionId: "session-1", turns: mocks.turns, rawMessages: [], cwd: "/workspace" },
+    session: { sessionId: "session-1", turns: mocks.turns, digest: { ...EMPTY_SESSION_DIGEST, status: { status: "thinking" } }, cwd: "/workspace" },
     sessionSource: null,
     isLive: true,
     isSubAgentView: false,
@@ -32,7 +33,6 @@ vi.mock("@/contexts/SessionContext", () => ({
 }))
 
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => new Map() }))
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 
 const TIME = "2026-11-05T10:00:00.000Z"

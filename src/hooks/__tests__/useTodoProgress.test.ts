@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
-import type { ParsedSession, Turn, ToolCall } from "../../../shared/session/types"
+import type { Turn, ToolCall } from "../../../shared/session/types"
 import { emptyTurn } from "@/__tests__/fixtures"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
   return {
@@ -19,7 +20,7 @@ function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
 const makeTurn = (toolCalls: ToolCall[] = []) =>
   emptyTurn({ toolCalls, userMessage: "test", timestamp: "" })
 
-function makeSession(turns: Turn[]): ParsedSession {
+function makeSession(turns: Turn[]): SessionView {
   return {
     sessionId: "test-session",
     version: "1",
@@ -39,7 +40,7 @@ function makeSession(turns: Turn[]): ParsedSession {
       totalDurationMs: 0,
       turnCount: turns.length,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 

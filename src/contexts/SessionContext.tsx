@@ -1,6 +1,6 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SseConnectionState } from "@/hooks/useLiveSession"
 import type { SessionSource } from "@/lib/sessionSource"
@@ -47,7 +47,7 @@ export interface ScrollState {
 
 export interface SessionContextValue {
   /** The parsed session data (null when no session is loaded) */
-  session: ParsedSession | null
+  session: SessionView | null
   /** Source metadata for the loaded session */
   sessionSource: SessionSource | null
   /** Whether the session is actively streaming */

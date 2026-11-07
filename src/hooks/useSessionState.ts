@@ -1,7 +1,8 @@
 import { useReducer } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
 import type { AgentKind } from "@/lib/agents"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { MobileTab } from "@/components/MobileNav"
 
@@ -9,7 +10,7 @@ import type { MobileTab } from "@/components/MobileNav"
 export type MainView = "sessions" | "config" | "mission" | "extension"
 
 export interface SessionState {
-  session: ParsedSession | null
+  session: SessionView | null
   /**
    * Turns exactly as the live pipeline last emitted them. Sessions open
    * bottom-first, so this is only the loaded tail window — never the history
@@ -40,26 +41,26 @@ export interface SessionState {
 }
 
 export type SessionAction =
-  | { type: "LOAD_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
+  | { type: "LOAD_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
   | { type: "GO_HOME"; isMobile: boolean }
   /** Leaves the open session only: a view it was open behind stays on screen. */
   | { type: "CLOSE_SESSION"; isMobile: boolean }
-  | { type: "SWITCH_TEAM_MEMBER"; session: ParsedSession; source: SessionSource; memberName: string }
+  | { type: "SWITCH_TEAM_MEMBER"; session: SessionView; source: SessionSource; memberName: string }
   | { type: "JUMP_TO_TURN"; index: number; toolCallId?: string }
   | { type: "SET_SEARCH_QUERY"; value: string }
   | { type: "SET_EXPAND_ALL"; value: boolean }
   | { type: "SET_EXPAND_TOOL_PAYLOADS"; value: boolean }
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
-  | { type: "UPDATE_SESSION"; session: ParsedSession }
+  | { type: "UPDATE_SESSION"; session: SessionView }
   | { type: "SET_OLDER_TURNS"; turns: Turn[] }
-  | { type: "RELOAD_SESSION_CONTENT"; session: ParsedSession; source: SessionSource }
+  | { type: "RELOAD_SESSION_CONTENT"; session: SessionView; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
   | { type: "GUARD_MOBILE_TAB"; hasSession: boolean }
   | { type: "SET_LOADING_MEMBER"; name: string | null }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
-  | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
+  | { type: "FINALIZE_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
   | { type: "OPEN_CONFIG"; filePath?: string }
   | { type: "CLOSE_CONFIG" }
   | { type: "OPEN_MISSION" }
@@ -102,17 +103,17 @@ const initialState: SessionState = {
  * safe.
  */
 function composeSession(
-  session: ParsedSession,
+  session: SessionView,
   windowTurns: Turn[],
   olderTurns: Turn[],
   agentKind?: AgentKind,
-): ParsedSession {
+): SessionView {
   const turns = prependTurns(windowTurns, olderTurns, agentKind)
   return turns === session.turns ? session : { ...session, turns }
 }
 
 /** Opening a different session discards the paging state of the previous one. */
-function openSession(session: ParsedSession | null) {
+function openSession(session: SessionView | null) {
   return { session, windowTurns: session?.turns ?? [], olderTurns: [] }
 }
 

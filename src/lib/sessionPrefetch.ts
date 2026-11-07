@@ -1,4 +1,4 @@
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { sessionCache } from "./sessionCache"
 import { loadSessionTailCached } from "./sessionLoader"
 import { getActiveDeviceScope, getActiveIdentity } from "./device"
@@ -29,7 +29,7 @@ function makeKey(dirName: string, fileName: string): string {
 export async function prefetchSession(
   dirName: string,
   fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
+  workerParse: (text: string) => Promise<SessionView>,
 ): Promise<void> {
   const key = makeKey(dirName, fileName)
   if (inflight.has(key)) return

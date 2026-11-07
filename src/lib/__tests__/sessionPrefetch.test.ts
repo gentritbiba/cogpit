@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { ParsedSession } from "../../../shared/session/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
@@ -14,6 +13,7 @@ import { prefetchSession } from "@/lib/sessionPrefetch"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
@@ -34,7 +34,7 @@ function tailResponse() {
   )
 }
 
-const parsed = { turns: [] } as unknown as ParsedSession
+const parsed = { turns: [] } as unknown as SessionView
 
 beforeEach(() => {
   vi.clearAllMocks()

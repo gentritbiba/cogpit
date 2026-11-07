@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { QuoteSource } from "../../shared/session/composerContext"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 
 /** Older pages a jump loads looking for its turn before it calls the source missing. */
@@ -18,7 +18,7 @@ interface Pending {
 }
 
 interface Inputs {
-  session: ParsedSession | null
+  session: SessionView | null
   sessionSource: SessionSource | null
   loadSession: (dirName: string, fileName: string) => void
   jumpToTurn: (index: number) => void
@@ -27,7 +27,7 @@ interface Inputs {
 }
 
 /** The turn a quote came from: by its id, or by the quoted text when the parser renumbered turns. */
-export function quoteTurnIndex(session: ParsedSession, source: QuoteSource, text: string): number {
+export function quoteTurnIndex(session: SessionView, source: QuoteSource, text: string): number {
   const byId = session.turns.findIndex((turn) => turn.id === source.turnId)
   if (byId >= 0) return byId
   const probe = text.slice(0, 200)

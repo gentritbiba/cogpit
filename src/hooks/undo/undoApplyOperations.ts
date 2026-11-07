@@ -2,7 +2,8 @@
  * Undo/redo apply operations — file mutation + JSONL truncation/append.
  */
 
-import type { ParsedSession, UndoState, Branch } from "../../../shared/session/types"
+import type { UndoState, Branch } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import {
   anchorChildBranches,
@@ -40,7 +41,7 @@ const TURN_NOT_FOUND = "Unable to locate the selected turn in the current sessio
 
 /** The cut that keeps the first `keepTurnCount` loaded turns, or an aborted apply when it cannot be placed. */
 function locateCut(
-  session: ParsedSession,
+  session: SessionView,
   sessionSource: SessionSource,
   allLines: string[],
   keepTurnCount: number,
@@ -63,7 +64,7 @@ function locateCut(
 
 export async function applyUndo(
   confirmState: UndoConfirmState,
-  session: ParsedSession,
+  session: SessionView,
   sessionSource: SessionSource,
   state: UndoState,
   freshRawText: string,
@@ -185,7 +186,7 @@ export async function applyRedo(
 }
 
 export async function applyBranchSwitch(
-  session: ParsedSession,
+  session: SessionView,
   sessionSource: SessionSource,
   state: UndoState,
   branch: Branch,

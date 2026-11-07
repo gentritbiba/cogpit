@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import type { ParsedSession } from "../../../shared/session/types"
 import { sessionCache } from "@/lib/sessionCache"
 import {
   __resetDeviceRevisionsForTest,
@@ -7,6 +6,7 @@ import {
   recordDeviceConnectionRevision,
   setActiveIdentity,
 } from "@/lib/device"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 function setPath(pathname: string) {
   Object.defineProperty(window, "location", {
@@ -16,7 +16,7 @@ function setPath(pathname: string) {
   })
 }
 
-const parsed = { turns: [] } as unknown as ParsedSession
+const parsed = { turns: [] } as unknown as SessionView
 
 function seed(dirName: string, fileName: string) {
   sessionCache.set(parsed, { dirName, fileName, watchOffset: 3, loadId: 1 }, 0, false)

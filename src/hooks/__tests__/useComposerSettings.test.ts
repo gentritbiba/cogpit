@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { ParsedSession } from "../../../shared/session/types"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { AgentKind } from "@/lib/agents"
 import type { ModelOption } from "@/lib/utils"
@@ -32,6 +31,7 @@ vi.mock("@/hooks/useModelOptions", () => ({
 }))
 
 import { useComposerSettings } from "@/hooks/useComposerSettings"
+import { type SessionView, computeSessionDigest, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 const sessionSource: SessionSource = {
   dirName: "-repo",
@@ -39,7 +39,7 @@ const sessionSource: SessionSource = {
   watchOffset: 0, loadId: 1,
 }
 
-function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "session-id",
     version: "1",
@@ -59,7 +59,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     agentKind: "claude",
     ...overrides,
   }
@@ -67,7 +67,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
 
 function renderSettings(initial: {
   agentKind?: AgentKind
-  session?: ParsedSession | null
+  session?: SessionView | null
   source?: SessionSource | null
   pendingDirName?: string | null
   isLive?: boolean
@@ -202,7 +202,7 @@ describe("useComposerSettings", () => {
 
   it("reports the latest live Claude fallback once and supports dismissal", async () => {
     const session = makeSession({
-      rawMessages: [
+      digest: computeSessionDigest([
         {
           type: "system",
           subtype: "model_refusal_fallback",
@@ -211,7 +211,7 @@ describe("useComposerSettings", () => {
           fallback_model: "Opus",
           api_refusal_explanation: "Capacity was unavailable.",
         },
-      ],
+      ]),
     })
     const { result, rerender } = renderSettings({
       agentKind: "claude",
@@ -236,13 +236,13 @@ describe("useComposerSettings", () => {
   it("auto-dismisses fallback notices after twelve seconds", () => {
     vi.useFakeTimers()
     const session = makeSession({
-      rawMessages: [{
+      digest: computeSessionDigest([{
         type: "system",
         subtype: "model_refusal_fallback",
         uuid: "fallback-timer",
         original_model: "Fable",
         fallback_model: "Opus",
-      }],
+      }]),
     })
     const { result } = renderSettings({
       agentKind: "claude",

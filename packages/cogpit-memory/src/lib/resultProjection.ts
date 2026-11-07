@@ -14,7 +14,7 @@
  * when the server serves its body.
  */
 
-import type { ElidedResult, ParsedSession, ToolCall } from "./types"
+import type { ElidedResult, ParsedSession, ToolCall, Turn } from "./types"
 
 /** Opens an elided body. Never produced by a CLI; U+2063 is an invisible separator. */
 export const ELIDED_MARK = "\u2063cogpit-elided-v1:"
@@ -120,13 +120,16 @@ function liftCalls(calls: readonly ToolCall[]): void {
  * and idempotent: a lifted call carries no marker.
  */
 export function liftElidedResults(session: ParsedSession): ParsedSession {
-  for (const turn of session.turns) {
-    liftCalls(turn.toolCalls)
-    for (const message of turn.subAgentActivity) liftCalls(message.toolCalls)
-    for (const block of turn.contentBlocks) {
-      if (block.kind === "tool_calls" || block.kind === "plan_mode") liftCalls(block.toolCalls)
-      else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftCalls(message.toolCalls)
-    }
-  }
+  for (const turn of session.turns) liftElidedTurn(turn)
   return session
+}
+
+/** `liftElidedResults` for one turn. */
+export function liftElidedTurn(turn: Turn): void {
+  liftCalls(turn.toolCalls)
+  for (const message of turn.subAgentActivity) liftCalls(message.toolCalls)
+  for (const block of turn.contentBlocks) {
+    if (block.kind === "tool_calls" || block.kind === "plan_mode") liftCalls(block.toolCalls)
+    else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftCalls(message.toolCalls)
+  }
 }

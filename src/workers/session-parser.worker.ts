@@ -1,63 +1,162 @@
 import { parseSession, parseSessionAppend } from "../../shared/session/parser"
-import { liftElidedResults } from "../../shared/session/resultProjection"
-import type { ParsedSession } from "../../shared/session/types"
+import { liftElidedTurn } from "../../shared/session/resultProjection"
+import { computeSessionDigest, toSessionView, type SessionDigest, type SessionView } from "../../shared/session/sessionDigest"
+import type { ParsedSession, SessionStats, Turn } from "../../shared/session/types"
 
 /**
- * `keep` names the version under which this worker keeps the session it
- * answers with, so the next append to it sends only the new text instead of a
- * copy of the whole session. An append naming a version the worker no longer
- * holds (it restarted, let the session go, or a later append replaced it) is
- * answered `missing`, and the caller resends it whole.
+ * The worker keeps the sessions it parsed, raw records included, and the
+ * renderer holds only a `SessionView` of each. `KeptVersion` names one: an
+ * append to it answers with what changed, and the kept session moves on to the
+ * next version. An append naming a version the worker no longer holds (it
+ * restarted, let the session go, or another append moved it on) is answered
+ * `missing`, and the renderer loads the session again.
  */
 export interface KeptVersion { handle: number; version: number }
 
+/** Everything in a view but its turns, stats and digest. */
+export type SessionMeta = Omit<SessionView, "turns" | "stats" | "digest">
+
+/**
+ * The turns from `fromTurn` on, which replace the ones from there in the view
+ * the append was made to; the turns before `fromTurn` did not change. A turn's
+ * version changes whenever the turn does.
+ */
+export interface SessionDelta {
+  fromTurn: number
+  turns: Turn[]
+  turnVersions: number[]
+  stats: SessionStats
+  digest: SessionDigest
+  meta: SessionMeta
+}
+
 export type WorkerRequest =
-  | { type: "parse"; id: number; text: string }
-  | { type: "append"; id: number; existing: ParsedSession; newText: string; keep?: KeptVersion }
-  | { type: "append"; id: number; base: KeptVersion; newText: string; keep?: KeptVersion }
+  | { type: "parse"; id: number; text: string; keep: boolean }
+  | { type: "append"; id: number; base: KeptVersion; newText: string }
 
 export type WorkerResponse =
-  | { type: "result"; id: number; session: ParsedSession }
+  | { type: "parsed"; id: number; view: SessionView; turnVersions: number[]; kept: KeptVersion | null }
+  | { type: "delta"; id: number; delta: SessionDelta; kept: KeptVersion }
   | { type: "missing"; id: number }
   | { type: "error"; id: number; error: string }
 
-/** Sessions kept for appends; the oldest goes first. */
-const KEPT_SESSIONS = 4
-const kept = new Map<number, { version: number; session: ParsedSession }>()
+interface Held {
+  version: number
+  session: ParsedSession
+  turnVersions: number[]
+  digest: SessionDigest
+  /** Records the digest has already looked at. */
+  scannedTo: number
+}
 
-function keep(version: KeptVersion | undefined, session: ParsedSession): void {
-  if (!version) return
-  kept.delete(version.handle)
-  kept.set(version.handle, { version: version.version, session })
+/** As many sessions as the renderer's session cache holds; the least recently used goes first. */
+export const KEPT_SESSIONS = 5
+const kept = new Map<number, Held>()
+let nextHandle = 0
+let lastStamp = 0
+const stamp = () => ++lastStamp
+
+function hold(handle: number, held: Held): void {
+  kept.delete(handle)
+  kept.set(handle, held)
   while (kept.size > KEPT_SESSIONS) kept.delete(kept.keys().next().value!)
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    for (let index = 0; index < a.length; index++) if (!sameValue(a[index], b[index])) return false
+    return true
+  }
+  if (Array.isArray(b)) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  for (const key of keys) if (!(key in right) || !sameValue(left[key], right[key])) return false
+  return true
+}
+
+function metaOf(session: ParsedSession): SessionMeta {
+  const { turns: _turns, stats: _stats, rawMessages: _records, ...meta } = session
+  return meta
+}
+
+function parse(text: string, keep: boolean): WorkerResponse & { type: "parsed" } {
+  const session = parseSession(text)
+  for (const turn of session.turns) liftElidedTurn(turn)
+  const digest = computeSessionDigest(session.rawMessages)
+  const turnVersions = session.turns.map(stamp)
+  let keptVersion: KeptVersion | null = null
+  if (keep) {
+    keptVersion = { handle: nextHandle++, version: 1 }
+    hold(keptVersion.handle, { version: 1, session, turnVersions, digest, scannedTo: session.rawMessages.length })
+  }
+  return { type: "parsed", id: 0, view: toSessionView(session, digest), turnVersions, kept: keptVersion }
+}
+
+/**
+ * Appends to a kept session. Turns the append left alone are the same objects;
+ * a rebuilt turn that came out equal to the one it replaces is swapped back for
+ * it, so only turns that really changed get a new version.
+ */
+function append(base: KeptVersion, newText: string): (WorkerResponse & { type: "delta" }) | null {
+  const held = kept.get(base.handle)
+  if (!held || held.version !== base.version) return null
+  const before = held.session.turns
+  const scannedTo = held.session.rawMessages.length
+  const session = parseSessionAppend(held.session, newText)
+  const turns = session.turns
+  const turnVersions: number[] = []
+  let fromTurn = turns.length
+  for (let index = 0; index < turns.length; index++) {
+    const turn = turns[index]!
+    const previous = before[index]
+    if (turn === previous) {
+      turnVersions.push(held.turnVersions[index]!)
+      continue
+    }
+    liftElidedTurn(turn)
+    if (previous && previous.id === turn.id && sameValue(previous, turn)) {
+      turns[index] = previous
+      turnVersions.push(held.turnVersions[index]!)
+      continue
+    }
+    turnVersions.push(stamp())
+    fromTurn = Math.min(fromTurn, index)
+  }
+  if (turns.length < before.length) fromTurn = Math.min(fromTurn, turns.length)
+
+  const digest = computeSessionDigest(session.rawMessages, { digest: held.digest, scannedTo })
+  const version = held.version + 1
+  hold(base.handle, { version, session, turnVersions, digest, scannedTo: session.rawMessages.length })
+  return {
+    type: "delta",
+    id: 0,
+    kept: { handle: base.handle, version },
+    delta: {
+      fromTurn,
+      turns: turns.slice(fromTurn),
+      turnVersions: turnVersions.slice(fromTurn),
+      stats: session.stats,
+      digest,
+      meta: metaOf(session),
+    },
+  }
 }
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data
   try {
-    let session: ParsedSession
-    if (msg.type === "parse") {
-      session = parseSession(msg.text)
-    } else {
-      let existing: ParsedSession | undefined
-      if ("base" in msg) {
-        const held = kept.get(msg.base.handle)
-        if (held?.version === msg.base.version) {
-          existing = held.session
-          // Appending may change the kept session in place; it is only ever used once.
-          kept.delete(msg.base.handle)
-        }
-      } else existing = msg.existing
-      if (!existing) {
-        self.postMessage({ type: "missing", id: msg.id } satisfies WorkerResponse)
-        return
-      }
-      session = parseSessionAppend(existing, msg.newText)
-      keep(msg.keep, session)
-    }
-    liftElidedResults(session)
-    self.postMessage({ type: "result", id: msg.id, session } satisfies WorkerResponse)
+    const response: WorkerResponse = msg.type === "parse"
+      ? parse(msg.text, msg.keep)
+      : append(msg.base, msg.newText) ?? { type: "missing", id: msg.id }
+    self.postMessage({ ...response, id: msg.id } satisfies WorkerResponse)
   } catch (err) {
+    // A failed append may have left the kept session half-extended.
+    if (msg.type === "append") kept.delete(msg.base.handle)
     self.postMessage({
       type: "error",
       id: msg.id,

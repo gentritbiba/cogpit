@@ -3,7 +3,8 @@ import { render, screen } from "@testing-library/react"
 import { builtInWorkspacePlugin } from "../builtInWorkspacePlugin"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import { collectWorkspacePanels, type WorkspacePanelContext } from "@/plugin-api"
-import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
+import type { ToolCall, Turn } from "../../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../../shared/session/sessionDigest"
 
 const panels = collectWorkspacePanels([builtInWorkspacePlugin])
 
@@ -19,7 +20,7 @@ function contextOf(overrides: Partial<WorkspacePanelContext> = {}): WorkspacePan
   }
 }
 
-function sessionDrivingAt(timestamp: string): ParsedSession {
+function sessionDrivingAt(timestamp: string): SessionView {
   const call: ToolCall = {
     id: "tool-1",
     name: "Bash",
@@ -60,7 +61,7 @@ function sessionDrivingAt(timestamp: string): ParsedSession {
       totalDurationMs: 0,
       turnCount: 1,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 

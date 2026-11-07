@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { computeSessionDigest, type SessionView } from "../../../shared/session/sessionDigest"
 import { cleanup, render, screen } from "@testing-library/react"
-import type { ParsedSession } from "../../../shared/session/types"
 import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 
 const mocks = vi.hoisted(() => ({
-  session: null as ParsedSession | null,
+  session: null as SessionView | null,
   dirName: null as string | null,
 }))
 
@@ -24,18 +24,18 @@ vi.mock("@/contexts/SessionContext", () => ({
 }))
 
 vi.mock("@/components/SessionInfoBar.mobile", () => ({
-  MobileSessionInfoBar: ({ claudeRawMessages }: { claudeRawMessages: unknown[] }) => (
-    <div data-testid="claude-raw-count">{claudeRawMessages.length}</div>
+  MobileSessionInfoBar: ({ contextUsage }: { contextUsage: unknown }) => (
+    <div data-testid="context-usage">{contextUsage ? "shown" : "none"}</div>
   ),
 }))
 
 import { SessionInfoBar } from "../SessionInfoBar"
 
-function makeSession(agentKind: ParsedSession["agentKind"]): ParsedSession {
+function makeSession(agentKind: SessionView["agentKind"]): SessionView {
   return {
     agentKind,
-    rawMessages: [{ type: "assistant" }],
-  } as ParsedSession
+    digest: computeSessionDigest([{ type: "assistant" }]),
+  } as SessionView
 }
 
 beforeEach(() => {
@@ -49,13 +49,13 @@ afterEach(() => {
 })
 
 describe("SessionInfoBar", () => {
-  it("passes records to the context badge for an agent that tracks context", () => {
+  it("passes context usage to the badge for an agent that tracks context", () => {
     mocks.session = makeSession("claude")
     mocks.dirName = "-Users-me-proj"
 
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 
-    expect(screen.getByTestId("claude-raw-count")).toHaveTextContent("1")
+    expect(screen.getByTestId("context-usage")).toHaveTextContent("shown")
   })
 
   it.each([
@@ -67,7 +67,7 @@ describe("SessionInfoBar", () => {
 
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 
-    expect(screen.getByTestId("claude-raw-count")).toHaveTextContent("0")
+    expect(screen.getByTestId("context-usage")).toHaveTextContent("none")
   })
 
   it("follows the project directory, not the parser's own guess", () => {
@@ -77,6 +77,6 @@ describe("SessionInfoBar", () => {
 
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 
-    expect(screen.getByTestId("claude-raw-count")).toHaveTextContent("0")
+    expect(screen.getByTestId("context-usage")).toHaveTextContent("none")
   })
 })

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { ParsedSession } from "../../../shared/session/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
@@ -18,6 +17,7 @@ import {
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
@@ -40,7 +40,7 @@ function tailResponse(overrides: Record<string, unknown> = {}) {
   )
 }
 
-const parsed = { turns: [] } as unknown as ParsedSession
+const parsed = { turns: [] } as unknown as SessionView
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -112,7 +112,7 @@ describe("loadSessionTailCached", () => {
     // hover-prefetch) populated the cache — and a live SSE watcher may have
     // advanced its watchOffset past our snapshot. The existing entry must win.
     const racedEntry = {
-      parsed: { turns: [{}] } as unknown as ParsedSession,
+      parsed: { turns: [{}] } as unknown as SessionView,
       source: { dirName: "-dir", fileName: "sess.jsonl", loadId: 1, watchOffset: 999 },
       olderTurns: [],
       nextByteOffset: 50,

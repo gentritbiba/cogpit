@@ -6,9 +6,10 @@ import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
 import { makeTurn } from "@/__tests__/fixtures"
 import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
 import { renderComposerMessage } from "../../../shared/session/composerContext"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
-function makeSession(sessionId: string, turns: Array<string | null | Partial<Turn>>): ParsedSession {
+function makeSession(sessionId: string, turns: Array<string | null | Partial<Turn>>): SessionView {
   return {
     sessionId,
     version: "1",
@@ -31,7 +32,7 @@ function makeSession(sessionId: string, turns: Array<string | null | Partial<Tur
       totalDurationMs: 0,
       turnCount: turns.length,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
@@ -52,7 +53,7 @@ function Harness({
   bubbles,
   timeline,
 }: {
-  session: ParsedSession
+  session: SessionView
   bubbles: Array<string[] | null>
   timeline?: TimelineHandle
 }) {

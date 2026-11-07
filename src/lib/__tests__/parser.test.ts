@@ -1116,15 +1116,14 @@ describe("parseSessionAppend", () => {
       ]),
     ])
 
+    const recordsBefore = existing.rawMessages.length
     const updated = parseSessionAppend(existing, newPart)
     // The rebuild starts from turn 0 (since it owns the referenced tool call),
     // but the progress message appears chronologically after turn 1's user message,
     // so buildTurns attaches it to the current turn at that point (turn 1).
     // The key thing is that both turns are rebuilt and rawMessages accumulate correctly.
     expect(updated.turns).toHaveLength(2)
-    expect(updated.rawMessages.length).toBe(
-      existing.rawMessages.length + 1
-    )
+    expect(updated.rawMessages.length).toBe(recordsBefore + 1)
     // The late progress ends up on the last turn since it arrives after turn 1 starts
     const lastTurn = updated.turns[updated.turns.length - 1]
     expect(lastTurn.subAgentActivity.length).toBeGreaterThan(0)

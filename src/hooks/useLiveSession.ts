@@ -1,7 +1,7 @@
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { openSessionStream } from "@/lib/sessionStream"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionDigest, SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SessionSource } from "@/lib/sessionSource"
 import { createStreamingOverlayStore } from "@/lib/streamingOverlayStore"
@@ -22,18 +22,21 @@ export type SseConnectionState = "connecting" | "connected" | "disconnected"
 /** Shared empty map so an unchanged "no progress" state never re-renders consumers. */
 const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
 
-/** A parse that keeps failing would otherwise reload the session on every batch. */
+/** A parse that keeps failing, or a session the worker lost, would otherwise reload on every batch. */
 export const RESYNC_COOLDOWN_MS = 10_000
 
 export function useLiveSession(
   source: SessionSource | null,
-  onUpdate: (session: ParsedSession) => void,
-  workerParse: (text: string) => Promise<ParsedSession>,
-  workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
-  /** Reload the session from disk: when the stream cannot resume, or a batch keeps failing to parse. */
+  onUpdate: (session: SessionView) => void,
+  workerParse: (text: string) => Promise<SessionView>,
+  workerAppend: (existing: SessionView, newText: string) => Promise<SessionView>,
+  /** Reload the session from disk: when the stream cannot resume, the worker lost the session, or a batch keeps failing. */
   onResync: (() => void) | undefined,
-  /** The parsed session `source` loaded; streamed lines are appended to it. */
-  initialSession: ParsedSession | null,
+  /**
+   * The session on screen: the one `source` loaded when the stream starts,
+   * and later the committed result of each update.
+   */
+  initialSession: SessionView | null,
 ) {
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
@@ -53,9 +56,9 @@ export function useLiveSession(
   // it and lift only when the allowance comes back or a later turn runs.
   const [rateLimit, setRateLimit] = useState<RateLimitBlock | null>(null)
   // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
-  // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
+  // touches the worker/SessionView pipeline — see src/lib/streamingOverlay.
   const [streamingOverlayStore] = useState(createStreamingOverlayStore)
-  const sessionRef = useRef<ParsedSession | null>(null)
+  const sessionRef = useRef<SessionView | null>(null)
   const overlayRef = useRef<StreamingOverlay>(EMPTY_OVERLAY)
   const sseStateRef = useRef<SseConnectionState>("disconnected")
   const onUpdateRef = useRef(onUpdate)
@@ -70,6 +73,21 @@ export function useLiveSession(
   const initialSessionRef = useRef(initialSession)
   initialSessionRef.current = initialSession
   const lastResyncAtRef = useRef(0)
+  // Streamed lines whose overlay messages go once the update holding them is on screen.
+  const landingRef = useRef<{ digest: SessionDigest; lines: string[] } | null>(null)
+
+  // Dropping an overlay message when its line arrives would blank its text for
+  // as long as the worker and the render take; dropping it with the commit that
+  // shows the parsed line hands the text over in one frame.
+  useLayoutEffect(() => {
+    const landing = landingRef.current
+    if (!landing || initialSession?.digest !== landing.digest) return
+    landingRef.current = null
+    const next = reconcileWithLines(overlayRef.current, landing.lines)
+    if (next === overlayRef.current) return
+    overlayRef.current = next
+    streamingOverlayStore.publish(next)
+  }, [initialSession, streamingOverlayStore])
 
   const dirName = source?.dirName ?? null
   const fileName = source?.fileName ?? null
@@ -114,7 +132,7 @@ export function useLiveSession(
     // ── SSE burst coalescing ────────────────────────────────────────────
     // Heavy bash output produces many SSE messages per second. If we send
     // each one to the parser worker individually, every postMessage pays the
-    // cost of a structured-clone of the entire ParsedSession on BOTH ends —
+    // cost of a structured-clone of the entire SessionView on BOTH ends —
     // ~O(session size) per message. For a 5 MB session that burst can starve
     // the renderer for seconds.
     //
@@ -123,6 +141,7 @@ export function useLiveSession(
     // Ordering is preserved because text fragments are appended in arrival
     // order and only one worker call is in flight at a time.
     let pendingText = ""
+    let pendingLines: string[] = []
     let workerBusy = false
     let closed = false
     let pendingUpdate = false
@@ -193,8 +212,10 @@ export function useLiveSession(
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
       const toFlush = pendingText
+      const flushedLines = pendingLines
       const flushedEnd = appliedEnd
       pendingText = ""
+      pendingLines = []
       workerBusy = true
 
       const base = sessionRef.current
@@ -208,6 +229,7 @@ export function useLiveSession(
           const result = scopeParsedSession(parsedResult, splitInstanceDirName(dirName).instanceId)
           if (closed) return
           sessionRef.current = result
+          landingRef.current = { digest: result.digest, lines: [...(landingRef.current?.lines ?? []), ...flushedLines] }
           if (dirName && fileName) {
             sessionCache.update(dirName, fileName, {
               parsed: result,
@@ -222,6 +244,7 @@ export function useLiveSession(
           // replaces this stream with one that starts after them.
           failed = true
           pendingText = toFlush + pendingText
+          pendingLines = [...flushedLines, ...pendingLines]
           const now = Date.now()
           if (onResyncRef.current && now - lastResyncAtRef.current >= RESYNC_COOLDOWN_MS) {
             lastResyncAtRef.current = now
@@ -327,10 +350,8 @@ export function useLiveSession(
           setIsCompacting(false)
           resetStaleTimer()
 
-          // Drop overlay messages superseded by their complete JSONL line.
-          setOverlay(reconcileWithLines(overlayRef.current, data.lines))
-
           pendingText += data.lines.join("\n") + "\n"
+          pendingLines.push(...data.lines)
           flushToWorker()
         }
       } catch (err) {
@@ -361,6 +382,7 @@ export function useLiveSession(
       if (overlayRafId !== null) cancelAnimationFrame(overlayRafId)
       if (staleSweep) clearInterval(staleSweep)
       overlayRef.current = EMPTY_OVERLAY
+      landingRef.current = null
       streamingOverlayStore.publish(EMPTY_OVERLAY)
     }
   }, [dirName, fileName, loadId, watchOffset, streamingOverlayStore])

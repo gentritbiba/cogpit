@@ -62,7 +62,7 @@ function activityOf(call: ToolCall): BrowserAgentActivity | null {
  * call is skipped rather than ending the scan, so a subagent working in the
  * background cannot hide the browser the main agent is driving.
  */
-export function latestBrowserActivity(session: ParsedSession | null): BrowserAgentActivity | null {
+export function latestBrowserActivity(session: Pick<ParsedSession, "turns"> | null): BrowserAgentActivity | null {
   const turns = session?.turns ?? []
   for (let turn = turns.length - 1; turn >= 0; turn--) {
     const calls = turns[turn].toolCalls

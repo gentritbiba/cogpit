@@ -25,7 +25,6 @@ import { collectActivity, segmentActivity, type ActivityItem } from "@/lib/timel
 import { isReaderPrompt, promptSource, type PromptSource } from "@/lib/userMessageContent"
 import { InverseColorScheme } from "@/components/InverseColorScheme"
 import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
-import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext, useSessionContextOptional } from "@/contexts/SessionContext"
@@ -71,9 +70,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
   // For all other turns, they're done by definition.
   let isTurnDone = !isAgentActive
   if (isAgentActive && session) {
-    const { status } = deriveSessionStatus(
-      session.rawMessages as Array<{ type: string; [key: string]: unknown }>
-    )
+    const { status } = session.digest.status
     isTurnDone = !WORKING_STATUSES.has(status)
   }
 

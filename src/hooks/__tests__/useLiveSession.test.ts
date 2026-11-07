@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { renderHook, act } from "@testing-library/react"
 import { RESYNC_COOLDOWN_MS, useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "@/lib/sessionSource"
-import type { ParsedSession } from "../../../shared/session/types"
 import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 import { sessionCache } from "@/lib/sessionCache"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // Mock auth
 vi.mock("@/lib/auth", () => ({
@@ -25,7 +25,7 @@ vi.mock("@/lib/sessionCache", () => ({
   },
 }))
 
-const mockParsedSession: ParsedSession = {
+const mockParsedSession: SessionView = {
   sessionId: "s1",
   version: "1",
   gitBranch: "main",
@@ -58,7 +58,7 @@ const mockParsedSession: ParsedSession = {
     totalDurationMs: 0,
     turnCount: 1,
   },
-  rawMessages: [],
+  digest: EMPTY_SESSION_DIGEST,
 }
 
 // Mock EventSource
@@ -106,8 +106,8 @@ class MockEventSource extends EventTarget {
 describe("useLiveSession", () => {
   const onUpdate = vi.fn()
   let rafCallbacks: Array<() => void> = []
-  let workerParse: Mock<(text: string) => Promise<ParsedSession>>
-  let workerAppend: Mock<(existing: ParsedSession, newText: string) => Promise<ParsedSession>>
+  let workerParse: Mock<(text: string) => Promise<SessionView>>
+  let workerAppend: Mock<(existing: SessionView, newText: string) => Promise<SessionView>>
 
   beforeEach(() => {
     __resetStreamsForTest()
@@ -828,7 +828,7 @@ describe("useLiveSession", () => {
   it("coalesces rapid SSE messages into ≤ 2 worker calls (burst compression)", async () => {
     // Regression guard for the bash-output lag: without burst compression the
     // hook used to chain one workerAppend per SSE message, which scaled with
-    // structured-clone cost of the whole ParsedSession per message. The
+    // structured-clone cost of the whole SessionView per message. The
     // current design flushes to the worker only when it's idle, so N rapid
     // arrivals collapse to at most ~2 worker calls (one in-flight, one
     // drain pass).
@@ -1334,9 +1334,12 @@ describe("useLiveSession", () => {
       expect(result.current.streamingOverlayStore.snapshot()[0].blocks[0].text).toBe("mid-flight text")
     })
 
-    it("incoming lines reconcile away the landed overlay message", () => {
-      const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+    it("drops a landed overlay message in the commit that shows its parsed line, not before", async () => {
+      const landed = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      workerAppend.mockResolvedValue(landed)
+      const { result, rerender } = renderHook(
+        ({ shown }) => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, shown),
+        { initialProps: { shown: mockParsedSession } },
       )
 
       act(() => {
@@ -1350,10 +1353,18 @@ describe("useLiveSession", () => {
         getLastEventSource().simulateMessage({
           type: "lines",
           lines: ['{"type":"assistant","message":{"id":"msg_landed","content":[]}}'],
+          start: 15,
+          end: 80,
         })
         flushRAF()
       })
+      await act(async () => { await Promise.resolve() })
+      act(() => { flushRAF() })
+      // The worker answered and the update went out, but it is not on screen yet.
+      expect(onUpdate).toHaveBeenLastCalledWith(landed)
+      expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(2)
 
+      rerender({ shown: landed })
       expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_pending"])
     })
 
@@ -1412,9 +1423,9 @@ describe("useLiveSession", () => {
     })
 
     it("keeps the existing worker coalescing regression intact alongside streaming", () => {
-      let resolveAppend: ((s: ParsedSession) => void) | null = null
+      let resolveAppend: ((s: SessionView) => void) | null = null
       workerAppend.mockImplementation(
-        () => new Promise<ParsedSession>((resolve) => { resolveAppend = resolve }),
+        () => new Promise<SessionView>((resolve) => { resolveAppend = resolve }),
       )
 
       renderHook(() =>

@@ -25,15 +25,15 @@ import {
 } from "@/lib/sessionAccess"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
-import type { ParsedSession } from "../../../shared/session/types"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { SESSION_ACCESS_HEADER, SESSION_ID_HEADER } from "../../../shared/contracts/sessionAccess"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const ALICE = { id: "u_alice", username: "alice", displayName: "Alice" }
 const COPY = "22222222-2222-4222-8222-222222222222"
 
 function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<typeof useAppHandlers>[0] {
-  const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as ParsedSession
+  const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as SessionView
   return {
     state: {
       session: parsed,

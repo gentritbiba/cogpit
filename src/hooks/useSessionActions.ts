@@ -1,7 +1,7 @@
 import { useState, useCallback, startTransition, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
@@ -16,7 +16,7 @@ interface UseSessionActionsOpts {
   teamContext: SessionTeamContext | null
   scrollToBottomInstant: () => void
   resetTurnCount: (count: number) => void
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
   /** Called before fetching a new session to free connections held by the
    *  current session (e.g. long-lived send-message POST, session creation). */
   onBeforeSwitch?: () => void
@@ -35,7 +35,7 @@ export function useSessionActions({
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const handleLoadSession = useCallback(
-    (parsed: ParsedSession, source: SessionSource) => {
+    (parsed: SessionView, source: SessionSource) => {
       setLoadError(null)
       // Wrap the heavy re-render (new session timeline, virtualizer re-measure,
       // undo graph rebuild) in a transition so React can keep interaction input

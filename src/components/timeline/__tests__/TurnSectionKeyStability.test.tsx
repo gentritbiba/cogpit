@@ -14,7 +14,7 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionContext: () => ({
-    session: { turns: [], rawMessages: [], cwd: "/tmp" },
+    session: { turns: [], digest: { status: { status: "thinking" } }, cwd: "/tmp" },
     isLive: true,
     isSubAgentView: false,
     undoRedo: { enabled: false },
@@ -24,7 +24,6 @@ vi.mock("@/contexts/SessionContext", () => ({
 
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => new Map() }))
 
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 

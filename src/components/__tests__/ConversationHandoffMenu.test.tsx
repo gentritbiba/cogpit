@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ConversationComposer } from "../ConversationComposer"
 import { MobileSessionInfoBar } from "../SessionInfoBar.mobile"
-import type { ParsedSession } from "../../../shared/session/types"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 vi.mock("../DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
 vi.mock("../header-shared", () => ({ ContextBadge: () => null }))
@@ -18,7 +18,7 @@ vi.mock("@/lib/conversationState", () => {
 function Host({ sessionId, readOnly = false }: { sessionId: string; readOnly?: boolean }) {
   const [open, setOpen] = useState(false)
   return <>
-    <MobileSessionInfoBar session={{ sessionId, cwd: "/workspace" } as ParsedSession} sessionSource={null} isSubAgentView={false} isLive={false} canArchive={false} claudeRawMessages={[]} creatingSession={false} onNewSession={vi.fn()} onProviderHandoff={readOnly ? undefined : () => setOpen(true)} />
+    <MobileSessionInfoBar session={{ sessionId, cwd: "/workspace" } as SessionView} sessionSource={null} isSubAgentView={false} isLive={false} canArchive={false} contextUsage={null} creatingSession={false} onNewSession={vi.fn()} onProviderHandoff={readOnly ? undefined : () => setOpen(true)} />
     <ConversationComposer sessionId={sessionId} readOnly={readOnly} onOpen={vi.fn()} handoffOpen={open} onHandoffOpenChange={setOpen}><textarea aria-label="Composer" /></ConversationComposer>
   </>
 }

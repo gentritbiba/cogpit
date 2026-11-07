@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { SessionAction } from "./useSessionState"
 import { toast } from "sonner"
@@ -21,7 +21,7 @@ import type { SessionSettingField } from "../../shared/contracts/sessionSettings
 
 interface AppHandlersDeps {
   state: {
-    session: ParsedSession | null
+    session: SessionView | null
     sessionSource: SessionSource | null
   }
   dispatch: React.Dispatch<SessionAction>
@@ -43,7 +43,7 @@ interface AppHandlersDeps {
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
   /** Off-main-thread session parser from App's `useParserWorker`. */
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
   /** Whether the user may stop the session and change its settings. */
   canInteract: boolean
 }

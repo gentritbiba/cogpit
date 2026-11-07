@@ -1,7 +1,7 @@
 import { Flag } from "lucide-react"
 import type { ReactNode } from "react"
 import { capabilitiesFor, type AgentKind } from "@/lib/agents"
-import type { ParsedSession } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { Button } from "@/components/ui/button"
 import { ThreadGoalProvider } from "./ThreadGoalProvider"
 import { TranscriptGoalProvider } from "./TranscriptGoalProvider"
@@ -9,7 +9,7 @@ import { useGoalControls } from "./context"
 
 interface GoalProviderProps {
   agentKind: AgentKind
-  session: ParsedSession
+  session: SessionView
   /** Resolves false when the session refused the command. */
   onSendCommand: (command: string) => Promise<boolean>
   children: ReactNode

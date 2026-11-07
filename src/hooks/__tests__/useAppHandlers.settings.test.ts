@@ -8,7 +8,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, jsonFetch: vi.fn() })
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionSettingField } from "../../../shared/contracts/sessionSettings"
-import type { ParsedSession } from "../../../shared/session/types"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const PICKED: PermissionsConfig = { mode: "plan", allowedTools: ["Read"], disallowedTools: [] }
 
@@ -21,7 +21,7 @@ interface Picks {
 function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChangeSent = vi.fn() }: Picks) {
   return renderHook(() => useAppHandlers({
     state: {
-      session: { sessionId: "s1", turns: [] } as unknown as ParsedSession,
+      session: { sessionId: "s1", turns: [] } as unknown as SessionView,
       sessionSource: { dirName: "-work-app", fileName: "s1.jsonl", watchOffset: 0, loadId: 1 },
     },
     dispatch: vi.fn(),
