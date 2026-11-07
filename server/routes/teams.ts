@@ -13,6 +13,7 @@ import {
   join,
   watch,
 } from "../helpers"
+import { statSync } from "node:fs"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import {
   authorizeTeam,
@@ -47,11 +48,21 @@ const UPDATE_DEBOUNCE_MS = 500
 
 interface TeamWatch {
   listeners: Set<() => void>
+  /** Re-open watchers whose directory appeared, vanished or was replaced since they opened. */
+  refresh(): void
   close(): void
 }
 
 /** One pair of watchers per team, shared by every stream open on it. */
 const teamWatches = new Map<string, TeamWatch>()
+
+function dirIdentity(dir: string): number | null {
+  try {
+    return statSync(dir).ino
+  } catch {
+    return null
+  }
+}
 
 /**
  * Hear about changes to a team's config, inboxes and tasks, debounced. The
@@ -61,7 +72,7 @@ function subscribeToTeam(teamName: string, onUpdate: () => void): () => void {
   let entry = teamWatches.get(teamName)
   if (!entry) {
     const listeners = new Set<() => void>()
-    const watchers = new Map<string, ReturnType<typeof watch>>()
+    const watchers = new Map<string, { watcher: ReturnType<typeof watch>; ino: number | null }>()
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     const changed = () => {
       // The tasks dir is often created after the team is.
@@ -74,25 +85,37 @@ function subscribeToTeam(teamName: string, onUpdate: () => void): () => void {
         for (const listener of listeners) listener()
       }, UPDATE_DEBOUNCE_MS)
     }
+    const forget = (dir: string) => {
+      watchers.get(dir)?.watcher.close()
+      watchers.delete(dir)
+    }
     const watchMissing = () => {
       for (const dir of [join(dirs.TEAMS_DIR, teamName), join(dirs.TASKS_DIR, teamName)]) {
         if (watchers.has(dir)) continue
         try {
           const watcher = watch(dir, { recursive: true }, changed)
-          watcher.on("error", () => {}) // the directory may be removed
-          watchers.set(dir, watcher)
+          watcher.on("error", () => { if (watchers.get(dir)?.watcher === watcher) forget(dir) })
+          watchers.set(dir, { watcher, ino: dirIdentity(dir) })
         } catch { /* dir may not exist */ }
       }
     }
     watchMissing()
     entry = {
       listeners,
+      refresh: () => {
+        for (const [dir, { ino }] of watchers) {
+          if (dirIdentity(dir) !== ino) forget(dir)
+        }
+        watchMissing()
+      },
       close: () => {
-        for (const watcher of watchers.values()) watcher.close()
+        for (const dir of [...watchers.keys()]) forget(dir)
         if (debounceTimer) clearTimeout(debounceTimer)
       },
     }
     teamWatches.set(teamName, entry)
+  } else {
+    entry.refresh()
   }
   const shared = entry
   shared.listeners.add(onUpdate)

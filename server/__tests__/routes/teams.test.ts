@@ -376,6 +376,44 @@ describe("team routes", () => {
       stream.close()
     })
 
+    it("re-opens a shared watcher whose directory failed or was replaced, for the next stream", async () => {
+      const { mkdir, mkdtemp, rename, rm } = await import("node:fs/promises")
+      const { existsSync } = await import("node:fs")
+      const { tmpdir } = await import("node:os")
+      const helpers = await import("../../helpers")
+      const root = await mkdtemp(`${tmpdir()}/cogpit-team-watch-`)
+      const saved = { ...helpers.dirs }
+      Object.assign(helpers.dirs, { TEAMS_DIR: `${root}/teams`, TASKS_DIR: `${root}/tasks` })
+      try {
+        await mkdir(`${root}/teams/t`, { recursive: true })
+        await mkdir(`${root}/tasks/t`, { recursive: true })
+        const opened: Array<{ dir: string; fail: () => void }> = []
+        mockedWatch.mockImplementation(((dir: string) => {
+          if (!existsSync(dir)) throw new Error("ENOENT")
+          let fail = () => {}
+          const watcher = { on: vi.fn((_event: string, cb: () => void) => { fail = cb }), close: vi.fn() }
+          opened.push({ dir, fail: () => fail() })
+          return watcher as unknown as FSWatcher
+        }) as unknown as typeof watch)
+
+        const first = await openStream("t")
+        expect(opened.map((o) => o.dir)).toEqual([`${root}/teams/t`, `${root}/tasks/t`])
+
+        opened[1].fail()
+        await rename(`${root}/teams/t`, `${root}/teams/t-old`)
+        await mkdir(`${root}/teams/t`)
+        const second = await openStream("t")
+        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([`${root}/tasks/t`, `${root}/teams/t`])
+
+        const third = await openStream("t")
+        expect(opened).toHaveLength(4)
+        for (const stream of [first, second, third]) stream.close()
+      } finally {
+        Object.assign(helpers.dirs, saved)
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+
     it("opens nothing for a caller who went away while access was checked", async () => {
       const handler = getRouteHandler(handlers, "/api/team-watch/")
       const { req, res, next } = createMockReqRes("GET", "my-team")
