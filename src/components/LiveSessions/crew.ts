@@ -176,9 +176,14 @@ function briefTitle(brief: string | undefined): string | undefined {
   return line.length > BRIEF_TITLE_LENGTH ? `${line.slice(0, BRIEF_TITLE_LENGTH - 1)}…` : line
 }
 
-/** How many members a member started itself. */
-export function directReports(sessionId: string, members: readonly ActiveSessionInfo[]): number {
-  return members.filter((value) => value.crew?.parentId === sessionId).length
+/** How many members each member started itself, by session id; absent for none. */
+export function reportCounts(members: readonly ActiveSessionInfo[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const value of members) {
+    const parentId = value.crew?.parentId
+    if (parentId) counts.set(parentId, (counts.get(parentId) ?? 0) + 1)
+  }
+  return counts
 }
 
 /**

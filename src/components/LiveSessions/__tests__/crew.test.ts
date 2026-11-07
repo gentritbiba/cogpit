@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   countCrew,
   crewActivityAt,
-  directReports,
+  reportCounts,
   foldCrewRows,
   memberName,
   memberStatus,
@@ -180,10 +180,12 @@ describe("memberName from a brief", () => {
   })
 })
 
-describe("directReports", () => {
-  it("counts the members a member started itself", () => {
+describe("reportCounts", () => {
+  it("counts the members each member started itself", () => {
     const members = [member("lane", "coordinator", 1), member("r1", "lane", 2), member("r2", "lane", 3)]
-    expect(directReports("lane", members)).toBe(2)
-    expect(directReports("r1", members)).toBe(0)
+    const counts = reportCounts(members)
+    expect(counts.get("lane")).toBe(2)
+    expect(counts.get("coordinator")).toBe(1)
+    expect(counts.get("r1")).toBeUndefined()
   })
 })
