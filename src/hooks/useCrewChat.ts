@@ -7,10 +7,8 @@ import type { CrewChatMessage, CrewChatPage, CrewChatPageResponse } from "../../
 
 const POLL_MS = 2_000
 
-/** A page as read; servers older than membersVersion send members every time and no version. */
-type PolledPage = Omit<CrewChatPageResponse, "membersVersion"> & { membersVersion?: string }
 /** What the chat shows beside its messages. */
-export type CrewChatView = Omit<CrewChatPage, "messages" | "membersVersion"> & { membersVersion?: string }
+export type CrewChatView = Omit<CrewChatPage, "messages">
 
 async function checked(response: Response): Promise<Response> {
   if (response.ok) return response
@@ -24,7 +22,7 @@ function mergeMessages(current: CrewChatMessage[], incoming: readonly CrewChatMe
 }
 
 /** The page to show after a read, keeping the members, and the page itself, when they did not change. */
-export function nextChatPage(current: CrewChatView | null, next: PolledPage): CrewChatView {
+export function nextChatPage(current: CrewChatView | null, next: CrewChatPageResponse): CrewChatView {
   let members = next.members ?? current?.members ?? []
   if (current && next.members) {
     const unchanged = next.membersVersion !== undefined && current.membersVersion !== undefined
@@ -80,7 +78,7 @@ export function useCrewChat(rootId: string, active = true) {
     const request = ++requestCounter.current
     try {
       const cursor = latestCursor.current
-      const result = await fetchIfChanged<PolledPage>(
+      const result = await fetchIfChanged<CrewChatPageResponse>(
         cursor === null ? `/api/crew-chat/${encodeURIComponent(rootId)}` : query({ after: cursor, limit: 100 }),
         etag.current,
       )
@@ -139,7 +137,7 @@ export function useCrewChat(rootId: string, active = true) {
     setLoadingOlder(true)
     try {
       const response = await checked(await authFetch(query({ before: messages[0]!.sequence })))
-      const next = await response.json() as PolledPage
+      const next = await response.json() as CrewChatPageResponse
       setMessages((current) => mergeMessages(current, next.messages))
       setHasOlder(next.hasMore)
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Couldn't load older messages.") }
