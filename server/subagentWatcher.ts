@@ -222,8 +222,16 @@ export function watchSubagents(
     if (closed) return Promise.resolve()
     if (fileName === undefined) scanWanted = true
     else changedFiles.add(fileName)
-    draining ??= drain().finally(() => { draining = null })
+    draining ??= startDrain()
     return draining
+  }
+
+  function startDrain(): Promise<void> {
+    return drain().finally(() => {
+      draining = null
+      // Work queued after the loop's last check but before this ran.
+      if (!closed && (scanWanted || changedFiles.size > 0)) draining = startDrain()
+    })
   }
 
   function attachDirectoryWatcher(): void {

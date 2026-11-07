@@ -398,4 +398,31 @@ describe("watchSubagents", () => {
     expect(appendFile).toHaveBeenCalledOnce()
     watcher.close()
   })
+
+  it("handles a file event that lands while a drain is finishing, without waiting for the backstop", async () => {
+    for (let ticks = 0; ticks <= 12; ticks++) {
+      appendFile.mockClear()
+      const body = Buffer.from(`${userLine("late event")}\n`)
+      stat.mockImplementation(async () => ({ size: body.length }))
+      open.mockImplementation(async () => ({
+        read: vi.fn(async (buffer: Buffer, _o: number, length: number, position: number) => ({ bytesRead: body.copy(buffer, 0, position, position + length) })),
+        close: vi.fn().mockResolvedValue(undefined),
+      }))
+      let changed!: (event: string, fileName: string | null) => void
+      watch.mockImplementation((_path, _options, callback) => {
+        changed = callback
+        return { close: vi.fn(), on: vi.fn() }
+      })
+      readdir.mockImplementationOnce(async () => {
+        let chain = Promise.resolve()
+        for (let i = 0; i < ticks; i++) chain = chain.then(() => {})
+        void chain.then(() => changed("change", "agent-a1.jsonl"))
+        return []
+      })
+      const watcher = watchSubagents("/tmp/session.jsonl", "session", tasks({ a1: { toolUseId: "tool-1" } }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(appendFile, `event ${ticks} microtasks after the scan`).toHaveBeenCalledOnce()
+      watcher.close()
+    }
+  })
 })
