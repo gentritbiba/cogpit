@@ -873,10 +873,10 @@ export default function App() {
     session: state.session,
     sessionSource: state.sessionSource,
     loadSession: handlers.handleLoadSessionScrollAware,
-    jumpToTurn: useCallback((index: number) => {
+    jumpToTurn: useCallback((turnKey: string) => {
       if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-      actions.handleJumpToTurn(index)
-    }, [actions, isMobile, dispatch]),
+      return scroll.controller.scrollToTurn(turnKey, { align: "start" })
+    }, [scroll.controller, isMobile, dispatch]),
     hasMore: chunkedSession.hasMore,
     loadMore: chunkedSession.loadMore,
   })
