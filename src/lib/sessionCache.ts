@@ -29,7 +29,8 @@ function activeScope(): string {
   return identity === null ? device : `${device}:${identity}`
 }
 
-function makeKey(dirName: string, fileName: string): string {
+/** The cache key of a transcript on the active device and identity. */
+export function sessionCacheKey(dirName: string, fileName: string): string {
   return `${activeScope()}:${dirName}/${fileName}`
 }
 
@@ -37,7 +38,7 @@ class SessionCache {
   private cache = new Map<string, CacheEntry>()
 
   get(dirName: string, fileName: string): CacheEntry | undefined {
-    const key = makeKey(dirName, fileName)
+    const key = sessionCacheKey(dirName, fileName)
     const entry = this.cache.get(key)
     if (entry) {
       entry.lastAccessed = Date.now()
@@ -46,7 +47,7 @@ class SessionCache {
   }
 
   set(parsed: SessionView, source: SessionSource, nextByteOffset: number, hasMore: boolean): void {
-    const key = makeKey(source.dirName, source.fileName)
+    const key = sessionCacheKey(source.dirName, source.fileName)
 
     if (!this.cache.has(key) && this.cache.size >= MAX_ENTRIES) {
       this.evictLRU()
@@ -63,7 +64,7 @@ class SessionCache {
   }
 
   update(dirName: string, fileName: string, partial: Partial<Omit<CacheEntry, "source">> & { source?: Partial<CacheEntry["source"]> }): void {
-    const key = makeKey(dirName, fileName)
+    const key = sessionCacheKey(dirName, fileName)
     const entry = this.cache.get(key)
     if (!entry) return
 
@@ -79,7 +80,7 @@ class SessionCache {
 
   evict(dirName?: string, fileName?: string): void {
     if (dirName !== undefined && fileName !== undefined) {
-      this.cache.delete(makeKey(dirName, fileName))
+      this.cache.delete(sessionCacheKey(dirName, fileName))
     } else {
       this.evictLRU()
     }

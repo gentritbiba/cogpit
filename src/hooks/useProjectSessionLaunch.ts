@@ -5,6 +5,7 @@ import { authFetch } from "@/lib/auth"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
+import type { SessionController } from "@/lib/sessionLoader"
 import {
   DISCOVERED_DIRNAME_KIND,
   agentKindForDirName,
@@ -16,6 +17,7 @@ import {
 interface UseProjectSessionLaunchOptions {
   permissionsConfig: PermissionsConfig
   dispatch: Dispatch<SessionAction>
+  sessions: SessionController
   isMobile: boolean
   defaultAgentKind: AgentKind
   pendingDirName: string | null
@@ -40,6 +42,7 @@ interface UseProjectSessionLaunchOptions {
 export function useProjectSessionLaunch({
   permissionsConfig,
   dispatch,
+  sessions,
   isMobile,
   defaultAgentKind,
   pendingDirName,
@@ -59,6 +62,7 @@ export function useProjectSessionLaunch({
   const newSession = useNewSession({
     permissionsConfig,
     dispatch,
+    sessions,
     isMobile,
     onSessionFinalized: (parsed) => {
       sessionFinalizedRef.current?.(parsed)

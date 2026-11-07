@@ -1,11 +1,10 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
-import { EMPTY_SESSION_DIGEST, toSessionView, type SessionView } from "../../shared/session/sessionDigest"
-import { parseSession } from "../../shared/session/parser"
+import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../shared/session/sessionDigest"
 import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
 import { agentKindForDirName, descriptorFor } from "@/lib/agents"
@@ -22,6 +21,7 @@ import {
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
   dispatch: Dispatch<SessionAction>
+  sessions: SessionController
   isMobile: boolean
   onSessionFinalized: (parsed: SessionView, source: SessionSource) => void
   /** Called when the user sends the first message and session creation begins */
@@ -40,7 +40,6 @@ interface CreateSessionResponse {
   fileName: string
   sessionId: string
   cwd?: string
-  initialContent?: string
 }
 
 interface SessionsListResponse {
@@ -73,17 +72,7 @@ const EMPTY_SESSION_STATS = {
   turnCount: 0,
 } as const
 
-function buildSessionSource(response: CreateSessionResponse, rawText: string): SessionSource {
-  return {
-    dirName: response.dirName,
-    fileName: response.fileName,
-    agentKind: agentKindForDirName(response.dirName),
-    watchOffset: new TextEncoder().encode(rawText).byteLength,
-    loadId: nextLoadId(),
-  }
-}
-
-function buildEmptyParsedSession(response: CreateSessionResponse): SessionView {
+function buildEmptySession(response: CreateSessionResponse): SessionView {
   return {
     sessionId: response.sessionId,
     version: "",
@@ -99,104 +88,18 @@ function buildEmptyParsedSession(response: CreateSessionResponse): SessionView {
   }
 }
 
-function parseInitialSessionContent(rawText: string | undefined, dirName?: string): { rawText: string; parsed: SessionView } | null {
-  if (!rawText?.trim()) return null
-  try {
-    return {
-      rawText,
-      parsed: scopeParsedSession(toSessionView(parseSession(rawText)), splitInstanceDirName(dirName).instanceId),
-    }
-  } catch {
-    return null
+/** A new session whose transcript is not readable yet; the live stream fills it in from the start. */
+function emptyCreatedSession(response: CreateSessionResponse): LoadedSession {
+  return {
+    parsed: buildEmptySession(response),
+    source: {
+      dirName: response.dirName,
+      fileName: response.fileName,
+      agentKind: agentKindForDirName(response.dirName),
+      watchOffset: 0,
+      loadId: nextLoadId(),
+    },
   }
-}
-
-async function tryLoadSessionContent(
-  response: CreateSessionResponse,
-  controller: AbortController,
-  maxAttempts = 3,
-  delayMs = 100,
-  allowInitialContent = true,
-): Promise<{ rawText: string; parsed: SessionView } | null> {
-  if (allowInitialContent) {
-    const initialContent = parseInitialSessionContent(response.initialContent, response.dirName)
-    if (initialContent) {
-      return initialContent
-    }
-  }
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError")
-    const contentRes = await authFetch(
-      `/api/sessions/${encodeURIComponent(response.dirName)}/${encodeURIComponent(response.fileName)}`,
-      { signal: controller.signal }
-    )
-    if (contentRes.ok) {
-      const rawText = await contentRes.text()
-      if (rawText.trim()) {
-        try {
-          return {
-            rawText,
-            parsed: scopeParsedSession(toSessionView(parseSession(rawText)), splitInstanceDirName(response.dirName).instanceId),
-          }
-        } catch {
-          // Try again if the file is still mid-write
-        }
-      }
-    }
-    if (attempt < maxAttempts - 1) {
-      await new Promise(r => setTimeout(r, delayMs))
-    }
-  }
-
-  return null
-}
-
-async function hydrateSessionContent(
-  response: CreateSessionResponse,
-  controller: AbortController,
-  dispatch: Dispatch<SessionAction>,
-  initialRawText: string
-): Promise<void> {
-  let lastRawText = initialRawText
-
-  for (let attempt = 0; attempt < 30; attempt++) {
-    if (controller.signal.aborted) return
-    const loaded = await tryLoadSessionContent(response, controller, 1, 0, false)
-    if (loaded && loaded.rawText !== lastRawText) {
-      dispatch({
-        type: "RELOAD_SESSION_CONTENT",
-        session: loaded.parsed,
-        source: buildSessionSource(response, loaded.rawText),
-      })
-      return
-    }
-    lastRawText = loaded?.rawText ?? lastRawText
-    await new Promise(r => setTimeout(r, 200))
-  }
-}
-
-async function finalizeDiscoveredSession(
-  response: CreateSessionResponse,
-  controller: AbortController,
-  dispatch: Dispatch<SessionAction>,
-  isMobile: boolean,
-  onSessionFinalized: (parsed: SessionView, source: SessionSource) => void
-): Promise<string> {
-  const loaded = parseInitialSessionContent(response.initialContent, response.dirName)
-  const rawText = loaded?.rawText ?? ""
-  const parsed = loaded?.parsed ?? buildEmptyParsedSession(response)
-  const source = buildSessionSource(response, rawText)
-
-  dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
-  onSessionFinalized(parsed, source)
-
-  // Always reconcile against the on-disk JSONL after promotion. This closes
-  // the gap where the create response is missing lines that were flushed just
-  // before the SSE watcher connects.
-  void hydrateSessionContent(response, controller, dispatch, rawText)
-
-  return response.sessionId
 }
 
 /**
@@ -247,6 +150,7 @@ async function recoverCodexSession(
 export function useNewSession({
   permissionsConfig,
   dispatch,
+  sessions,
   isMobile,
   onSessionFinalized,
   onCreateStarted,
@@ -311,13 +215,21 @@ export function useNewSession({
         pendingCwdRef.current = null
         rememberCreatedSession(created.sessionId)
         rememberStartPrompt(created.sessionId, message)
-        const sessionId = await finalizeDiscoveredSession(created, controller, dispatch, isMobile, (parsed, source) => {
-          onCreated?.({ sessionId: parsed.sessionId, cwd: parsed.cwd, dirName: source.dirName })
-          onSessionFinalized(parsed, source)
+        // A tail read through the worker, like every other open: its offset
+        // is where the live stream picks up whatever the agent writes next.
+        await sessions.openSession({ dirName: created.dirName, fileName: created.fileName }, {
+          reason: "finalize",
+          recover: () => emptyCreatedSession(created),
+          commit: (loaded) => {
+            const { parsed, source } = loaded.parsed.sessionId ? loaded : { ...loaded, parsed: buildEmptySession(created) }
+            dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
+            onCreated?.({ sessionId: parsed.sessionId, cwd: parsed.cwd, dirName: source.dirName })
+            onSessionFinalized(parsed, source)
+          },
         })
         // Auto-store the derived session name so it appears in sidebar/lists
-        if (sessionName && sessionId) renameSession(sessionId, sessionName)
-        return sessionId
+        if (sessionName) renameSession(created.sessionId, sessionName)
+        return created.sessionId
       }
 
       try {
@@ -377,7 +289,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
+    [permissionsConfig, model, effort, contextWindowTokens, fastMode, ultracode, mcpConfig, worktreeEnabled, dispatch, sessions, isMobile, onSessionFinalized, onCreateStarted, onModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

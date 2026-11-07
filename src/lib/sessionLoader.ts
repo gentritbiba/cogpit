@@ -1,23 +1,38 @@
 /**
- * Unified lazy session loader — the single pipeline every open path uses.
+ * The open controller: the one way a session gets onto the screen.
  *
- * Fetches the tail of a session file (`?tail=30`), parses it in the worker,
- * and caches the result in `sessionCache`. Older turns load on demand via
- * `useSessionPaging` (`?before=&count=`), which reads the same cache.
+ * Every open path (dashboard and sidebar, command palette, URL and popstate,
+ * preview, team member, copy, reload, resync, share, new-session finalize)
+ * calls `openSession`. Each open takes the controller's current token, and a
+ * result whose token is no longer current is never committed, so a slow open
+ * can never replace the session the user moved on to.
  *
- * Loading the tail instead of the whole file is what makes long sessions open
- * instantly; `watchOffset = totalSize` ensures the live SSE watcher resumes
- * exactly where the tail ended instead of re-streaming the file.
+ * Loads are the turn-aligned tail of the transcript, parsed in the worker and
+ * kept in `sessionCache`. Concurrent loads of one transcript share a single
+ * request and parse, whether a hover prefetch or a click started it.
  */
 
+import type { Dispatch } from "react"
 import type { SessionView } from "../../shared/session/sessionDigest"
+import type { SessionAction } from "@/hooks/useSessionState"
 import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
-import { authFetch, type AuthFetchInit } from "@/lib/auth"
-import { sessionCache } from "@/lib/sessionCache"
+import { authFetch } from "@/lib/auth"
+import { sessionCache, sessionCacheKey } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
-import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
+
+export interface SessionAddress {
+  dirName: string
+  fileName: string
+}
+
+export type OpenReason = "click" | "url" | "team" | "copy" | "finalize" | "share" | "reload"
+
+export interface LoadedSession {
+  parsed: SessionView
+  source: SessionSource
+}
 
 export interface TailResponse {
   headerLines: string[]
@@ -25,128 +40,242 @@ export interface TailResponse {
   byteOffset: number
   totalSize: number
   hasMore: boolean
+  /** Present when the server cut the page on turn boundaries; older servers send a line page. */
+  unit?: "turns"
+  /** The byte after the page's last complete line. Older servers leave it out. */
+  end?: number
 }
 
-export interface LoadedSessionTail {
-  parsed: SessionView
-  source: SessionSource
-  byteOffset: number
-  hasMore: boolean
+type Parse = (text: string) => Promise<SessionView>
+
+/** An address, or a lookup that resolves one (a team member, a preview id, a new copy). */
+export type OpenTarget = SessionAddress | ((signal: AbortSignal) => Promise<SessionAddress>)
+
+export interface OpenRequest {
+  reason: Exclude<OpenReason, "reload">
+  /** Puts the load on screen. Runs only while this open is still the current one. */
+  commit: (loaded: LoadedSession) => void
+  /** Turns a failed load into one to show anyway. */
+  recover?: (error: unknown, address: SessionAddress) => LoadedSession
 }
 
-/** Whether the user asked for a load; a hover prefetch did not. */
-export type TailLoadOptions = Pick<AuthFetchInit, "background">
+/** An open that failed while current throws; one that lost to a later open resolves "superseded". */
+export type OpenOutcome = "opened" | "superseded"
 
-/** Fetch the tail of a session file and parse it via worker. Uses the ?tail=30 endpoint. */
-export async function fetchTailAndParse(
-  dirName: string,
-  fileName: string,
-  workerParse: (text: string) => Promise<SessionView>,
-  errorLabel: string,
-  { background = false }: TailLoadOptions = {},
-): Promise<LoadedSessionTail> {
-  const res = await authFetch(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30&projection=${RESULT_PROJECTION}`,
-    { background },
-  )
-  if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
-  const data: TailResponse = await res.json()
+export interface SessionController {
+  openSession(target: OpenTarget, request: OpenRequest): Promise<OpenOutcome>
+  /** Warm the cache for a likely next open. Best-effort and never aborted. */
+  prefetchSession(address: SessionAddress): void
+  /**
+   * Re-read the session on screen from disk, dropping the history paged in
+   * above it. A no-op with nothing on screen or while another open is landing.
+   */
+  reloadCurrent(): Promise<void>
+  /** The user left the session on screen; nothing pending may land after this. */
+  leave(): void
+}
 
-  // Combine header + tail lines, deduplicating overlap for small files
+/** Turns a tail page asks for; the server stops earlier at its byte budget. */
+export const TAIL_TURNS = 10
+
+/** Opens that read the transcript from disk even when it is cached. */
+const FRESH: ReadonlySet<OpenReason> = new Set(["reload", "finalize", "share"])
+
+function tailUrl({ dirName, fileName }: SessionAddress): string {
+  return `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=${TAIL_TURNS}&unit=turns&projection=${RESULT_PROJECTION}`
+}
+
+/**
+ * Header plus tail. A turn page's header holds only the lines before the
+ * first turn, so the two are joined exactly as sent; an older server's line
+ * page can repeat a small file's header in its tail.
+ */
+function tailText(data: TailResponse): string {
+  if (data.unit === "turns") return [...data.headerLines, ...data.tailLines].join("\n")
   const headerSet = new Set(data.headerLines)
-  const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
-  const text = [...data.headerLines, ...uniqueTail].join("\n")
+  return [...data.headerLines, ...data.tailLines.filter((line) => !headerSet.has(line))].join("\n")
+}
 
-  const parsed = scopeParsedSession(await workerParse(text), splitInstanceDirName(dirName).instanceId)
+// ── Shared loads ─────────────────────────────────────────────────────────────
+
+interface Flight {
+  key: string
+  /** Resolves null when the device or identity changed while it ran. */
+  promise: Promise<LoadedSession | null>
+  abort: AbortController
+  /** Opens waiting on this load. */
+  holders: number
+  /** A prefetch waits on it, so it always runs to the end. */
+  pinned: boolean
+  /** The response is in; what is left is the parse, which is worth caching. */
+  fetched: boolean
+}
+
+const flights = new Map<string, Flight>()
+
+function startFlight(key: string, address: SessionAddress, parse: Parse, fresh: boolean, background: boolean): Flight {
+  const { dirName, fileName } = address
+  const abort = new AbortController()
+  const flight: Flight = { key, abort, holders: 0, pinned: false, fetched: false, promise: Promise.resolve(null) }
+  flight.promise = (async () => {
+    try {
+      if (fresh) sessionCache.evict(dirName, fileName)
+      const res = await authFetch(tailUrl(address), { background, signal: abort.signal })
+      if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
+      const data: TailResponse = await res.json()
+      flight.fetched = true
+      const parsed = scopeParsedSession(await parse(tailText(data)), splitInstanceDirName(dirName).instanceId)
+      // Never write one device's or identity's transcript under another's key.
+      if (sessionCacheKey(dirName, fileName) !== key) return null
+      // A load that finished first, which a live stream may have advanced since, wins.
+      const raced = fresh ? undefined : sessionCache.get(dirName, fileName)
+      if (raced) return { parsed: raced.parsed, source: raced.source }
+      const source: SessionSource = {
+        dirName,
+        fileName,
+        agentKind: agentKindForDirName(dirName),
+        watchOffset: data.end ?? data.totalSize,
+        loadId: nextLoadId(),
+      }
+      sessionCache.set(parsed, source, data.byteOffset, data.hasMore)
+      return { parsed, source }
+    } finally {
+      forget(flight)
+    }
+  })()
+  flights.set(key, flight)
+  return flight
+}
+
+function forget(flight: Flight): void {
+  if (flights.get(flight.key) === flight) flights.delete(flight.key)
+}
+
+/** A fresh load never joins one that may have read the transcript before it changed. */
+function joinFlight(address: SessionAddress, parse: Parse, fresh: boolean, background: boolean): Flight {
+  const key = sessionCacheKey(address.dirName, address.fileName)
+  const running = fresh ? undefined : flights.get(key)
+  return running ?? startFlight(key, address, parse, fresh, background)
+}
+
+/** Stops the request once no open waits on it; a load already past the network finishes into the cache. */
+function release(flight: Flight): void {
+  flight.holders -= 1
+  if (flight.holders > 0 || flight.pinned || flight.fetched) return
+  forget(flight)
+  flight.abort.abort()
+}
+
+// ── Controller ───────────────────────────────────────────────────────────────
+
+interface PendingOpen {
+  lookup: AbortController
+  flight: Flight | null
+}
+
+export function createSessionController({
+  parse,
+  dispatch,
+}: {
+  parse: Parse
+  /** Receives the reload that `reloadCurrent` lands. */
+  dispatch: Dispatch<SessionAction>
+}): SessionController {
+  let token = 0
+  let pending: PendingOpen | null = null
+  /** The session the last committed open put on screen. */
+  let shown: SessionAddress | null = null
+
+  const dropPending = () => {
+    if (!pending) return
+    pending.lookup.abort()
+    if (pending.flight) release(pending.flight)
+    pending = null
+  }
+
+  async function open(
+    target: OpenTarget,
+    reason: OpenReason,
+    commit: (loaded: LoadedSession) => void,
+    recover?: OpenRequest["recover"],
+  ): Promise<OpenOutcome> {
+    dropPending()
+    const mine = ++token
+    const self: PendingOpen = { lookup: new AbortController(), flight: null }
+    pending = self
+    const isCurrent = () => token === mine
+
+    const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
+      pending = null
+      shown = address
+      commit(loaded)
+      return "opened"
+    }
+
+    let address: SessionAddress
+    try {
+      address = typeof target === "function" ? await target(self.lookup.signal) : target
+    } catch (error) {
+      if (!isCurrent()) return "superseded"
+      pending = null
+      throw error
+    }
+    if (!isCurrent()) return "superseded"
+
+    if (!FRESH.has(reason)) {
+      const hit = sessionCache.get(address.dirName, address.fileName)
+      if (hit) return land(address, { parsed: hit.parsed, source: hit.source })
+    }
+
+    const flight = joinFlight(address, parse, FRESH.has(reason), false)
+    flight.holders += 1
+    self.flight = flight
+    let loaded: LoadedSession | null
+    try {
+      loaded = await flight.promise
+    } catch (error) {
+      if (!isCurrent()) return "superseded"
+      release(flight)
+      pending = null
+      if (!recover) throw error
+      return land(address, recover(error, address))
+    }
+    if (!isCurrent()) return "superseded"
+    release(flight)
+    if (!loaded) {
+      pending = null
+      return "superseded"
+    }
+    return land(address, loaded)
+  }
 
   return {
-    parsed,
-    source: {
-      dirName,
-      fileName,
-      agentKind: agentKindForDirName(dirName),
-      watchOffset: data.totalSize,
-      loadId: nextLoadId(),
+    openSession: (target, { reason, commit, recover }) => open(target, reason, commit, recover),
+
+    prefetchSession(address) {
+      if (sessionCache.get(address.dirName, address.fileName)) return
+      const flight = joinFlight(address, parse, false, true)
+      flight.pinned = true
+      flight.promise.catch(() => {
+        // Best-effort: the click that follows reports a load that keeps failing.
+      })
     },
-    byteOffset: data.byteOffset,
-    hasMore: data.hasMore,
-  }
-}
 
-/**
- * Resolve a session via the cache or the tail endpoint and populate the cache.
- * Use this for every open path (dashboard, team, sidebar browser, live list,
- * URL deep-link, branch/duplicate) so switches are always bottom-first and
- * cached — the biggest win for session-switch latency.
- */
-export async function loadSessionTailCached(
-  dirName: string,
-  fileName: string,
-  workerParse: (text: string) => Promise<SessionView>,
-  errorLabel: string,
-  options: TailLoadOptions = {},
-): Promise<{ parsed: SessionView; source: SessionSource }> {
-  const cached = sessionCache.get(dirName, fileName)
-  if (cached) {
-    return { parsed: cached.parsed, source: cached.source }
-  }
-  const deviceScope = getActiveDeviceScope()
-  const identity = getActiveIdentity()
-  const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
-    dirName,
-    fileName,
-    workerParse,
-    errorLabel,
-    options,
-  )
-  // The old App subtree may finish after a login/logout remount. Never read a
-  // raced entry from, or write this response into, the newly active identity.
-  if (getActiveDeviceScope() !== deviceScope || getActiveIdentity() !== identity) {
-    return { parsed, source }
-  }
-  // Another load (hover-prefetch vs click) may have populated the cache while
-  // we were fetching — and if that session is open and live, the SSE watcher
-  // has been advancing the entry's watchOffset. Never clobber a mid-flight
-  // entry with our older snapshot; return the existing entry instead.
-  const raced = sessionCache.get(dirName, fileName)
-  if (raced) {
-    return { parsed: raced.parsed, source: raced.source }
-  }
-  // Only populate the cache if we're still on the same device as when the
-  // fetch started (see loadSessionTailFresh for why).
-  sessionCache.set(parsed, source, byteOffset, hasMore)
-  return { parsed, source }
-}
+    async reloadCurrent() {
+      if (pending || !shown) return
+      try {
+        await open(shown, "reload", ({ parsed, source }) => {
+          dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
+        })
+      } catch {
+        // The session already on screen stays there.
+      }
+    },
 
-/**
- * Bypass the cache and tail-fetch fresh, repopulating the cache on success.
- * Use for reload, where the file may have been rewritten (rewind, compaction)
- * and cached turns would be stale.
- */
-export async function loadSessionTailFresh(
-  dirName: string,
-  fileName: string,
-  workerParse: (text: string) => Promise<SessionView>,
-  errorLabel: string,
-): Promise<{ parsed: SessionView; source: SessionSource }> {
-  sessionCache.evict(dirName, fileName)
-  // Snapshot the active device BEFORE the network round-trip. The cache key is
-  // device-scoped and computed at set-time; if the user switches devices while
-  // this tail-load is in flight, caching now would write device B's data under
-  // device A's key (or vice-versa).
-  const deviceScope = getActiveDeviceScope()
-  const identity = getActiveIdentity()
-  const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
-    dirName,
-    fileName,
-    workerParse,
-    errorLabel,
-  )
-  // Only populate the cache if we're still on the same device. On a mid-flight
-  // switch we skip the write but still return the parsed data so the caller can
-  // render what it fetched.
-  if (getActiveDeviceScope() === deviceScope && getActiveIdentity() === identity) {
-    sessionCache.set(parsed, source, byteOffset, hasMore)
+    leave() {
+      dropPending()
+      token += 1
+      shown = null
+    },
   }
-  return { parsed, source }
 }
