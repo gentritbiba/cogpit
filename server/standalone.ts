@@ -8,7 +8,6 @@ import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { join } from "node:path"
 import { hostname, networkInterfaces } from "node:os"
 import { removePortFile } from "./lib/portFile"
-import { detachFromParentCogpit } from "./lib/parentCogpit"
 import {
   buildBootBanner,
   resolveDataDir,
@@ -17,7 +16,6 @@ import {
 import { editionModule, editionOwnsSignIn } from "./edition"
 import { startStandaloneServer } from "./standalone-runtime"
 
-detachFromParentCogpit()
 const host = process.env.COGPIT_HOST || "127.0.0.1"
 const port = parseInt(process.env.COGPIT_PORT || "19384", 10)
 const dataDir = resolveDataDir()
