@@ -51,6 +51,10 @@ export interface SubagentWatcher {
  * @param sessionId        The parent session UUID
  * @param tasks            Subagents of this session by task id, owned by the caller
  */
+function isAgentFile(fileName: string): boolean {
+  return fileName.startsWith("agent-") && fileName.endsWith(".jsonl") && !/[/\\]/.test(fileName)
+}
+
 export function watchSubagents(
   parentJsonlPath: string,
   sessionId: string,
@@ -77,8 +81,10 @@ export function watchSubagents(
 
   let dirWatcher: ReturnType<typeof watch> | null = null
   let pollTimer: ReturnType<typeof setTimeout> | null = null
-  let scanInFlight: Promise<void> | null = null
-  let scanRequested = false
+  /** Work waiting for the drain: a full directory scan, and single files fs events named. */
+  let scanWanted = false
+  const changedFiles = new Set<string>()
+  let draining: Promise<void> | null = null
 
   async function forwardLine(line: string, agentId: string, task: SubagentTask): Promise<boolean> {
     let msg: Record<string, unknown>
@@ -178,43 +184,55 @@ export function watchSubagents(
     }
   }
 
-  function scanDir(): Promise<void> {
-    if (closed) return Promise.resolve()
-    if (scanInFlight) {
-      scanRequested = true
-      return scanInFlight
+  async function scanDir(): Promise<void> {
+    recordActivity("Subagent directory scans")
+    let files: string[]
+    try {
+      files = await readdir(subagentsDir)
+    } catch {
+      return // Directory may not exist yet.
     }
+    if (files.length > 0) {
+      recordActivity("Subagent files checked", { count: files.length })
+    }
+    for (const fileName of files) {
+      if (isAgentFile(fileName)) await processAgentFile(join(subagentsDir, fileName), fileName)
+    }
+  }
 
-    scanInFlight = (async () => {
-      recordActivity("Subagent directory scans")
-      try {
-        const files = await readdir(subagentsDir)
-        if (files.length > 0) {
-          recordActivity("Subagent files checked", { count: files.length })
-        }
-        for (const fileName of files) {
-          if (fileName.startsWith("agent-") && fileName.endsWith(".jsonl")) {
-            await processAgentFile(join(subagentsDir, fileName), fileName)
-          }
-        }
-      } catch {
-        // Directory may not exist yet.
+  /** One file or scan at a time, so a transcript's forwarded offset never races itself. */
+  async function drain(): Promise<void> {
+    while (!closed && (scanWanted || changedFiles.size > 0)) {
+      if (scanWanted) {
+        scanWanted = false
+        changedFiles.clear()
+        await scanDir()
+        continue
       }
-    })().finally(() => {
-      scanInFlight = null
-      if (scanRequested && !closed) {
-        scanRequested = false
-        void scanDir()
+      const fileNames = [...changedFiles]
+      changedFiles.clear()
+      for (const fileName of fileNames) {
+        await processAgentFile(join(subagentsDir, fileName), fileName)
       }
-    })
-    return scanInFlight
+    }
+  }
+
+  /** Read `fileName` when given, else every transcript in the directory. */
+  function request(fileName?: string): Promise<void> {
+    if (closed) return Promise.resolve()
+    if (fileName === undefined) scanWanted = true
+    else changedFiles.add(fileName)
+    draining ??= drain().finally(() => { draining = null })
+    return draining
   }
 
   function attachDirectoryWatcher(): void {
     if (closed || dirWatcher) return
     try {
-      const watcher = watch(subagentsDir, { recursive: true }, () => {
-        if (!closed) void scanDir()
+      const watcher = watch(subagentsDir, { recursive: true }, (_event, fileName) => {
+        const name = typeof fileName === "string" ? fileName : null
+        // Only the named transcript changed; anything else gets a full look.
+        void request(name && isAgentFile(name) ? name : undefined)
       })
       dirWatcher = watcher
       watcher.on("error", () => {
@@ -234,7 +252,7 @@ export function watchSubagents(
     pollTimer = setTimeout(() => {
       pollTimer = null
       attachDirectoryWatcher()
-      void scanDir().finally(() => {
+      void request().finally(() => {
         if (!closed) schedulePoll()
       })
     }, dirWatcher ? WATCH_BACKSTOP_MS : WATCH_RETRY_MS)
@@ -243,11 +261,11 @@ export function watchSubagents(
 
   attachDirectoryWatcher()
   schedulePoll()
-  void scanDir()
+  void request()
 
   return {
     rescan() {
-      void scanDir()
+      void request()
     },
     close() {
       closed = true
