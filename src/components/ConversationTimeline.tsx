@@ -1,6 +1,6 @@
 import { useMemo, memo } from "react"
 import { TimelineList } from "./timeline/TimelineList"
-import { matchesSearch } from "@/lib/timelineHelpers"
+import { turnMatches } from "@/lib/sessionFind"
 import { shouldShowEmptyState } from "@/lib/timelinePaging"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import type { TimelineScrollController } from "@/lib/timelineScroll/controller"
@@ -42,7 +42,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   }, [turns])
   const filteredTurns = useMemo(
     () => searchQuery
-      ? allTurns.filter(({ turn }) => matchesSearch(turn, searchQuery))
+      ? allTurns.filter(({ turn }) => turnMatches(turn, searchQuery))
       : allTurns,
     [allTurns, searchQuery]
   )

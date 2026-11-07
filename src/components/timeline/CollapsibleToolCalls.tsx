@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
-import { useDisclosureKey, useScopeTurnKey, useTimelineState } from "./disclosure"
+import { useDisclosureKey, useRevealTarget, useScopeTurnKey, useTimelineState } from "./disclosure"
 import { useTimelineNavigation } from "./TimelineRowsProvider"
 import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
 
@@ -61,6 +61,15 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     const selector = `[data-tool-call-id="${CSS.escape(callId)}"]`
     void timeline.scrollToTurn(turnKey, { align: "center", target: (row) => row.querySelector(selector) })
   }, [activeToolCallId, isOpen, turnKey, timeline])
+
+  // Find opens the group holding the match it navigates to.
+  const revealTarget = useRevealTarget()
+  const holdsRevealTarget = revealTarget !== null && (typeof revealTarget === "string"
+    ? toolCalls.some((call) => call.id === revealTarget)
+    : activityItems?.some((item) => item.kind === "thinking" && item.blocks === revealTarget) === true)
+  useEffect(() => {
+    if (holdsRevealTarget) setOpenOverride(true)
+  }, [holdsRevealTarget, setOpenOverride])
 
   function renderCall(call: ToolCall) {
     const isActive = activeToolCallId === call.id

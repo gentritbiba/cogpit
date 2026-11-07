@@ -104,6 +104,20 @@ describe("timeline disclosure store", () => {
     expect(screen.getByRole("button", { name: "panel" })).toHaveAttribute("aria-expanded", "true")
   })
 
+  it("opens every closed disclosure under a prefix that the filter accepts, and nothing else", () => {
+    const store = timelineStoreFor("disclosure-test-open-closed")
+    store.init("t:call:c:result", false)
+    store.init("t:call:c:input", false)
+    store.init("t:call:c:panel", true)
+    store.init("t:call:c:separators", [] as number[])
+    store.init("t:call:other:result", false)
+    expect(store.openClosed("t:call:c:", (key) => !key.endsWith(":input"))).toBe(1)
+    expect(store.get("t:call:c:result")).toBe(true)
+    expect(store.get("t:call:c:input")).toBe(false)
+    expect(store.get("t:call:c:separators")).toEqual([])
+    expect(store.get("t:call:other:result")).toBe(false)
+  })
+
   it("keys nested scopes under their turn, and ids unique in the turn directly under it", () => {
     render(
       <DisclosureProvider>

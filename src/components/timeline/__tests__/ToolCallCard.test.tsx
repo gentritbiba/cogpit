@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
-import { render as renderUi, screen, fireEvent, waitFor, within, type RenderOptions } from "@testing-library/react"
+import { act, render as renderUi, screen, fireEvent, waitFor, within, type RenderOptions } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ToolCallCard } from "../ToolCallCard"
 import { getToolSummary } from "../../../../shared/session/toolSummary"
@@ -8,6 +8,7 @@ import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 import { TimelineRowsProvider } from "../TimelineRowsProvider"
+import { DisclosureScope, revealKey, useTimelineStore, type TimelineStateStore } from "../disclosure"
 
 /** Cards read the session through the timeline's rows provider, as they do in the app. */
 const render = (ui: React.ReactElement, options?: RenderOptions) => renderUi(ui, { wrapper: TimelineRowsProvider, ...options })
@@ -1308,6 +1309,40 @@ describe("ToolCallCard AskUserQuestion history", () => {
 })
 
 describe("CollapsibleToolCalls", () => {
+  it("opens the group that holds what find asks its turn to reveal, and only that group", () => {
+    const first: ToolCall = { ...makeToolCall("Read", { file_path: "src/a.ts" }), id: "read-a", result: "a" }
+    const second: ToolCall = { ...makeToolCall("Read", { file_path: "src/b.ts" }), id: "read-b", result: "b" }
+    const thinking = [{ type: "thinking" as const, thinking: "a buried idea", signature: "s" }]
+    let store: TimelineStateStore | null = null
+    function Capture() {
+      store = useTimelineStore()
+      return null
+    }
+    render(
+      <DisclosureScope id="turn-1" root>
+        <Capture />
+        <DisclosureScope id="lead">
+          <CollapsibleToolCalls toolCalls={[first]} activityItems={[{ kind: "thinking", blocks: thinking }, { kind: "tool_calls", toolCalls: [first] }]} thinkingCount={1} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />
+        </DisclosureScope>
+        <DisclosureScope id="after">
+          <CollapsibleToolCalls toolCalls={[second]} activityItems={[{ kind: "tool_calls", toolCalls: [second] }]} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />
+        </DisclosureScope>
+      </DisclosureScope>,
+    )
+    const [lead, after] = screen.getAllByRole("button", { name: /Expand 1 tool call/ })
+
+    act(() => store!.set(revealKey("turn-1"), "read-b"))
+    expect(after).toHaveAttribute("aria-expanded", "true")
+    expect(lead).toHaveAttribute("aria-expanded", "false")
+
+    act(() => store!.set(revealKey("turn-1"), thinking))
+    expect(lead).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("a buried idea")).toBeInTheDocument()
+    // Opened for good: clearing the request does not fold the group again.
+    act(() => store!.set(revealKey("turn-1"), null))
+    expect(after).toHaveAttribute("aria-expanded", "true")
+  })
+
   it("keeps adjacent shell calls independently readable in one activity group", () => {
     const first: ToolCall = {
       ...makeToolCall("Bash", { command: "bun test", description: "Run tests" }),
