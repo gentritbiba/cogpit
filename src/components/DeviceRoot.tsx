@@ -75,7 +75,7 @@ function problemFromTest(result: TestResult): DeviceProblem | null {
  * subscriptions, in-flight fetches. Switching devices therefore starts from a
  * clean slate instead of leaking one device's live state into another. Module
  * caches survive the remount but are device-scoped by key (see sessionCache /
- * sessionPrefetch / useSessionHistory / usePermissions), so a switch-back stays
+ * sessionLoader / useSessionHistory / usePermissions), so a switch-back stays
  * warm without cross-device collisions.
  *
  * The device id is derived from the URL ("/d/:id/..." → id, else "local"). We
