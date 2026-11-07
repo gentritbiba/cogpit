@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { zstdCompressSync } from "node:zlib"
 import { createClaudeStore } from "../../agents/claudeStore"
 import { createCodexStore } from "../../agents/codexStore"
+import { createCopilotStore } from "../../agents/copilotStore"
 import type { AgentStore } from "../../agents/types"
 import { subscribeCatalog, type CatalogChange } from "../../sessionCatalog/changes"
 import { resetFacts } from "../../sessionCatalog/facts"
@@ -317,5 +318,131 @@ describe("restarted mtimes", () => {
     await change
     const [session] = await store.listTopLevelSessions()
     expect(session.mtimeMs).toBe(statSync(file).mtimeMs)
+  })
+})
+
+describe("review fixes (perf/session-list @ cf7f7f18)", () => {
+  it("does not report untouched files as written when their directory is listed again", async () => {
+    const { store, root } = claudeStore()
+    const project = join(root, "-work-app")
+    writeFileSync(join(project, `${ID_A}.jsonl`), claudeLine(ID_A, "/work/app"))
+    await store.listTopLevelSessions()
+    await settle()
+    const change = nextChange(800)
+    // A session's tool-results directory appears beside the transcripts.
+    mkdirSync(join(project, ID_A))
+    expect(await change).toBeNull()
+  })
+
+  it("watches a directory created while the watchers are still being opened", async () => {
+    const { store, root } = claudeStore()
+    for (let i = 0; i < 150; i += 1) mkdirSync(join(root, `-work-p${i}`))
+    await store.listTopLevelSessions()
+    mkdirSync(join(root, "-work-late"))
+    writeFileSync(join(root, "-work-late", `${ID_A}.jsonl`), claudeLine(ID_A, "/work/late"))
+    await vi.waitFor(async () => {
+      expect((await store.listTopLevelSessions()).map((s) => s.dirName)).toEqual(["-work-late"])
+    }, { timeout: 3_000 })
+    await settle()
+    const change = nextChange()
+    appendFileSync(join(root, "-work-late", `${ID_A}.jsonl`), claudeLine(ID_A, "/work/late", "more"))
+    expect(await change).not.toBeNull()
+  })
+
+  it("keeps watching a project directory deleted and created again within one debounce", async () => {
+    const { store, root } = claudeStore()
+    const project = join(root, "-work-app")
+    writeFileSync(join(project, `${ID_A}.jsonl`), claudeLine(ID_A, "/work/app"))
+    await store.listTopLevelSessions()
+    await settle()
+    let change = nextChange()
+    rmSync(project, { recursive: true })
+    mkdirSync(project)
+    writeFileSync(join(project, `${ID_B}.jsonl`), claudeLine(ID_B, "/work/app"))
+    await change
+    await vi.waitFor(async () => {
+      expect((await store.listTopLevelSessions()).map((s) => s.fileName)).toEqual([`${ID_B}.jsonl`])
+    })
+    await settle()
+    change = nextChange()
+    appendFileSync(join(project, `${ID_B}.jsonl`), claudeLine(ID_B, "/work/app", "more"))
+    expect((await change)?.kind).toBe("touch")
+  })
+
+  it("starts watching a root created after the first listing, without waiting for the backstop", async () => {
+    const store = createCodexStore(join(home, "codex"))
+    stores.push(store)
+    expect(await store.listTopLevelSessions()).toEqual([])
+    await settle()
+    const day = join(home, "codex", "sessions", "2026", "11", "08")
+    mkdirSync(day, { recursive: true })
+    writeFileSync(join(day, `rollout-2026-11-08T10-00-00-${ID_A}.jsonl`), codexLines(ID_A, "/work/app"))
+    await vi.waitFor(async () => {
+      expect((await store.listTopLevelSessions()).map((s) => s.sessionId)).toEqual([ID_A])
+    }, { timeout: 3_000 })
+    // Watched now: a write is announced by an event.
+    await vi.waitFor(async () => {
+      const change = nextChange(500)
+      appendFileSync(join(day, `rollout-2026-11-08T10-00-00-${ID_A}.jsonl`), codexLines(ID_A, "/work/app"))
+      expect(await change).not.toBeNull()
+    }, { timeout: 5_000 })
+  })
+
+  it("reads a Copilot identity again when only its workspace sidecar changed", async () => {
+    const sessionDir = join(home, "copilot", "session-state", ID_A)
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(join(sessionDir, "events.jsonl"), `${JSON.stringify({ type: "session.start", data: { sessionId: ID_A } })}\n`)
+    writeFileSync(join(sessionDir, "workspace.yaml"), "cwd: /work/first\nbranch: main\n")
+    const store = createCopilotStore(join(home, "copilot"))
+    stores.push(store)
+    expect((await store.listTopLevelSessions())[0]?.projectPath).toBe("/work/first")
+    await settle()
+    const change = nextChange()
+    writeFileSync(join(sessionDir, "workspace.yaml"), "cwd: /work/second\nbranch: main\n")
+    expect((await change)?.kind).toBe("visible")
+    expect((await store.listTopLevelSessions())[0]?.projectPath).toBe("/work/second")
+  })
+
+  it("ignores a walk that started before the root changed", async () => {
+    const roots = { a: join(home, "a"), b: join(home, "b") }
+    for (const root of Object.values(roots)) mkdirSync(join(root, "p"), { recursive: true })
+    writeFileSync(join(roots.a, "p", "old.jsonl"), "x")
+    writeFileSync(join(roots.b, "p", "new.jsonl"), "x")
+    let current = roots.a
+    let releaseA!: () => void
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve })
+    const { source } = countingSource(roots.a)
+    const listDir = source.listDir
+    const catalog = createStoreCatalog({
+      ...source,
+      root: () => current,
+      async listDir(root, dir, depth) {
+        if (root === roots.a) await gateA
+        return listDir(root, dir, depth)
+      },
+    })
+    try {
+      const first = catalog.topLevelSessions()
+      current = roots.b
+      expect((await catalog.topLevelSessions()).map((s) => s.fileName)).toEqual(["new.jsonl"])
+      releaseA()
+      await first
+      expect((await catalog.topLevelSessions()).map((s) => s.fileName)).toEqual(["new.jsonl"])
+    } finally {
+      catalog.close()
+    }
+  })
+
+  it("shares one walk between concurrent reads before the catalog runs, and lists files without identities", async () => {
+    disableSessionCatalogs()
+    const root = join(home, "root")
+    mkdirSync(join(root, "p"), { recursive: true })
+    writeFileSync(join(root, "p", "a.jsonl"), "x")
+    const { source, calls } = countingSource(root, async () => ({ sessionId: "a", cwd: "/w", gitBranch: "", isSubagent: false, parentSessionId: null }))
+    const catalog = createStoreCatalog(source)
+    await Promise.all([catalog.topLevelSessions(), catalog.topLevelSessions(), catalog.projects()])
+    expect(calls).toEqual({ listDir: 2, readIdentity: 1 })
+    await Promise.all([catalog.files(), catalog.files()])
+    expect(calls).toEqual({ listDir: 4, readIdentity: 1 })
   })
 })

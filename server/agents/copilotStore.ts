@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
@@ -66,6 +66,7 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
     readSessionMeta: readCopilotSessionMeta,
     // The identity may come from a later resume record or the workspace sidecar, so it is never final.
     identityIsFinal: () => false,
+    identitySidecars: (filePath) => [join(dirname(filePath), "workspace.yaml")],
   }
   const catalog = createStoreCatalog(catalogSource)
 
