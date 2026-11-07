@@ -2,20 +2,15 @@ import {
   matchesPullRequestTarget,
   type PullRequestSearch,
 } from "../../../shared/session/sessionSearch"
-import {
-  getSessionMeta,
-  getSessionStatus,
-  searchSessionMessages,
-} from "../../helpers"
+import { searchSessionMessages } from "../../helpers"
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { teamLeadFor, type TeamConfigCache } from "../../agents/lineage"
 import { listedSessionId } from "../../agents/listedSession"
 import { sessionAgentsRunning } from "../../agents/agentsRunning"
 import { runtimeFor } from "../../agents/runtimes"
 import type { TopLevelSessionInfo } from "../../agents/types"
-import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
-import { getSessionPullRequests } from "../../lib/sessionPrIndex"
-import type { SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
+import { catalogRow } from "../../sessionCatalog"
+import { peekSessionPullRequests, type SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import type { ArchiveReason } from "../../lib/sessionArchive"
 import { projectLabel } from "./projectLabel"
 
@@ -30,23 +25,12 @@ export interface ActiveSessionQuery {
   teamConfigs: TeamConfigCache
 }
 
-/** A listed session's metadata and status, shared with every route that lists it through the meta cache. */
-function listedMeta(c: TopLevelSessionInfo) {
-  return getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
-    const [meta, status] = await Promise.all([
-      getSessionMeta(c.filePath),
-      getSessionStatus(c.filePath),
-    ])
-    return { meta, status }
-  })
-}
-
 const TITLE_LENGTH = 80
 
 /** What a session is called where its row is not listed: its own title, else its first prompt. */
 export async function readSessionTitle(c: TopLevelSessionInfo): Promise<string | undefined> {
   try {
-    const { meta } = await listedMeta(c)
+    const { meta } = await catalogRow(c)
     const title = meta.customTitle || meta.aiTitle || meta.firstUserMessage || meta.slug
     const line = title?.split("\n").map((part) => part.trim()).find(Boolean)
     return line ? line.slice(0, TITLE_LENGTH) : undefined
@@ -61,10 +45,10 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
   try {
     const indexedPullRequestData = pullRequestIndex?.byFile.get(c.filePath)
     const [cached, pullRequests] = await Promise.all([
-      listedMeta(c),
+      catalogRow(c),
       indexedPullRequestData
         ? Promise.resolve(indexedPullRequestData.pullRequests)
-        : getSessionPullRequests(c.filePath, c.size),
+        : peekSessionPullRequests(c).then((data) => data?.pullRequests ?? []),
     ])
     const references = indexedPullRequestData?.references ?? pullRequests
     const { meta, status: statusInfo } = cached

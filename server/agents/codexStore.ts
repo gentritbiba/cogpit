@@ -10,7 +10,9 @@ import { isCompressedTranscript, isListableTranscript, uncompressedTranscriptNam
 import { HEAD_BYTES } from "./transcriptHead"
 import { addressFromTranscript, projectSessionFilesFromCatalog } from "./transcriptProjects"
 import {
+  catalogListings,
   createStoreCatalog,
+  descriptorAddressing,
   rootRelativeName,
   walkStore,
   type CatalogDirListing,
@@ -73,9 +75,7 @@ export function createCodexStore(homeDir = process.env.CODEX_HOME || join(homedi
   const catalogSource: StoreCatalogSource = {
     root: () => SESSIONS_DIR,
     listDir,
-    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
-    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
-    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+    ...descriptorAddressing(descriptor),
     readIdentity: readCodexSessionIdentity,
     readSessionMeta: readCodexSessionMeta,
     // A rollout is only appended to, so once its head is written whole the identity in it is fixed.
@@ -134,17 +134,9 @@ export function createCodexStore(homeDir = process.env.CODEX_HOME || join(homedi
 
     readSessionMeta: readCodexSessionMeta,
 
-    listProjects: () => catalog.projects(),
+    ...catalogListings(catalog),
 
     listProjectSessionFiles: (dirName) => projectSessionFilesFromCatalog(codexStore, catalog, dirName),
-
-    listTopLevelSessions: () => catalog.topLevelSessions(),
-
-    listedSessionFiles: () => catalog.files(),
-
-    knownSessionFile: (sessionId) => catalog.sessionFileFor(sessionId),
-
-    dispose: () => catalog.close(),
 
     async listSubagentFiles(_dirName: string, parentSessionId: string): Promise<SubagentFileInfo[]> {
       // Rollouts are flat: a sub-agent is any rollout whose header names this

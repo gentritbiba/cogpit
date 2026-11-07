@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     agentsRunning: vi.fn(),
     teamLeadFor: vi.fn(),
     getSessionPrSearchSnapshot: vi.fn(),
+    peekSessionPullRequests: vi.fn(),
     archived: new Map<string, number>(),
     sessionParents: vi.fn(),
     kept: new Set<string>(),
@@ -49,6 +50,16 @@ vi.mock("../../helpers", () => ({
   open: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
+
+// The catalog reads rows straight from sessionMetadata; route them to the helpers fakes.
+vi.mock("../../sessionMetadata", async (importOriginal) => {
+  const helpers = await import("../../helpers")
+  return {
+    ...await importOriginal<typeof import("../../sessionMetadata")>(),
+    getSessionMeta: helpers.getSessionMeta,
+    getSessionStatus: helpers.getSessionStatus,
+  }
+})
 
 vi.mock("../../lib/projectNames", () => ({
   projectDirToReadableName: vi.fn(),
@@ -120,6 +131,7 @@ vi.mock("../../lib/sessionOrigins", async (importOriginal) => ({
 
 vi.mock("../../lib/sessionPrSearchIndex", () => ({
   getSessionPrSearchSnapshot: mocks.getSessionPrSearchSnapshot,
+  peekSessionPullRequests: mocks.peekSessionPullRequests,
 }))
 
 vi.mock("../../lib/sessionArchive", async () => {
@@ -174,6 +186,7 @@ describe("project routes", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
+    mocks.peekSessionPullRequests.mockResolvedValue(null)
     for (const kind of ["acp", "claude", "codex", "copilot"]) {
       mocks.listProjects[kind].mockResolvedValue([])
       mocks.listProjectSessionFiles[kind].mockResolvedValue([])

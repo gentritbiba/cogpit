@@ -5,9 +5,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   getCompleteSessionPullRequestData,
-  getSessionPullRequests,
   resetSessionPrIndex,
 } from "../../lib/sessionPrIndex"
+
+const getSessionPullRequests = async (filePath: string, size: number) =>
+  (await getCompleteSessionPullRequestData(filePath, size)).pullRequests
 
 let dir: string
 let file: string
@@ -49,7 +51,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("getSessionPullRequests", () => {
+describe("getCompleteSessionPullRequestData", () => {
   it("returns nothing for a transcript without pull requests", async () => {
     write(create("t1", "ls -la"), result("t1", "file.txt"))
     expect(await getSessionPullRequests(file, size())).toEqual([])
@@ -140,7 +142,7 @@ describe("getSessionPullRequests", () => {
     expect((await getSessionPullRequests(other, statSync(other).size)).map((pr) => pr.number)).toEqual([2])
   })
 
-  it("indexes a file larger than the per-call byte cap across successive calls", async () => {
+  it("scans a transcript larger than one read in a single call, yielding to the event loop between reads", async () => {
     const filler = JSON.stringify({
       type: "user",
       message: { content: [{ type: "text", text: "x".repeat(1000) }] },
@@ -148,36 +150,19 @@ describe("getSessionPullRequests", () => {
     write(
       create("t1", "gh pr create --fill"),
       result("t1", "https://github.com/o/r/pull/1"),
-      ...Array.from({ length: 4600 }, () => filler),
+      ...Array.from({ length: 1200 }, () => filler),
       create("t2", "gh pr create --fill"),
       result("t2", "https://github.com/o/r/pull/2"),
     )
-    expect(size()).toBeGreaterThan(4 * 1024 * 1024)
-
-    // The first call folds in only the capped prefix …
-    expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1])
-    // … and the next resumes where it stopped rather than restarting.
-    expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1, 2])
-  })
-
-  it("keeps scanning a long transcript while more sidebars poll other sessions in between than one fills", async () => {
-    const filler = JSON.stringify({
-      type: "user",
-      message: { content: [{ type: "text", text: "x".repeat(1000) }] },
-    })
-    write(
-      ...Array.from({ length: 4600 }, () => filler),
-      create("t1", "gh pr create --fill"),
-      result("t1", "https://github.com/o/r/pull/1"),
-    )
-    const others = Array.from({ length: 250 }, (_, index) => join(dir, `other-${index}.jsonl`))
-    for (const other of others) writeFileSync(other, `${create("t", "ls")}\n`)
-
-    for (let poll = 0; poll < 2; poll += 1) {
-      await getSessionPullRequests(file, size())
-      for (const other of others) await getSessionPullRequests(other, statSync(other).size)
+    expect(size()).toBeGreaterThan(1024 * 1024)
+    let ticks = 0
+    const ticker = setInterval(() => { ticks += 1 }, 0)
+    try {
+      expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1, 2])
+    } finally {
+      clearInterval(ticker)
     }
-    expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1])
+    expect(ticks).toBeGreaterThan(0)
   })
 
   it("handles multi-byte characters split across an append boundary", async () => {

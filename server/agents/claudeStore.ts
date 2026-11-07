@@ -14,7 +14,9 @@ import {
 import { HEAD_BYTES, readHeadLines, readTranscriptHead } from "./transcriptHead"
 import { isClaudeNoiseLine } from "../../shared/session/claude"
 import {
+  catalogListings,
   createStoreCatalog,
+  descriptorAddressing,
   walkStore,
   type CatalogDirListing,
   type StoreCatalogSource,
@@ -98,9 +100,7 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
   const catalogSource: StoreCatalogSource = {
     root: sessionsRoot,
     listDir,
-    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
-    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
-    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+    ...descriptorAddressing(descriptor),
     readIdentity: async () => null,
     readSessionMeta: readClaudeSessionMeta,
     identityIsFinal: () => false,
@@ -250,19 +250,11 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
 
     readSessionMeta: readClaudeSessionMeta,
 
-    listProjects: () => catalog.projects(),
+    // The path names the project and the file names the session, so every
+    // listed file is a top-level session.
+    ...catalogListings(catalog),
 
     listProjectSessionFiles,
-
-    // The path names the project and the file names the session, so the listing
-    // is already every top-level session.
-    listTopLevelSessions: () => catalog.topLevelSessions(),
-
-    listedSessionFiles: () => catalog.files(),
-
-    knownSessionFile: (sessionId) => catalog.sessionFileFor(sessionId),
-
-    dispose: () => catalog.close(),
 
     listSubagentFiles,
     agentsWroteSince,

@@ -113,7 +113,7 @@ describe("share registry initialization parity", () => {
     setDataRoot(userDataDir)
     try {
       await configureServer({
-        httpServer: { on: () => {} },
+        httpServer: { on: () => {}, once: () => {} },
         middlewares: { use: () => {} },
       } as unknown as ViteDevServer)
 

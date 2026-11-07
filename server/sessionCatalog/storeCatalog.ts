@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from "node:fs"
 import { dirname, join, relative, sep } from "node:path"
+import type { AgentDescriptor } from "../../shared/session/agent-descriptors"
 import { statContainedFile } from "../agents/containment"
 import { readTranscriptHead } from "../agents/transcriptHead"
 import type {
@@ -12,7 +13,7 @@ import type {
   TranscriptHead,
 } from "../agents/types"
 import { markCatalogChanged, reportTouchedFiles } from "./changes"
-import { factsFor, factsLoaded, forgetFacts, isStillTrue, recordFact } from "./facts"
+import { factsFor, factsLoaded, forgetFacts, isStillTrue, pruneFactsUnder, recordFact } from "./facts"
 
 /**
  * One store's session files, kept current by file-system events so a listing
@@ -183,7 +184,13 @@ class CatalogImpl implements StoreCatalog {
     if (root !== this.root) this.reset(root)
     if (!root) return this
     this.started ??= this.start(root)
-    await this.started
+    try {
+      await this.started
+    } catch (error) {
+      // An unreadable root fails this read as a walk would, and the next read tries again.
+      this.close()
+      throw error
+    }
     if (!this.watching && Date.now() - this.listedAt > UNWATCHED_REUSE_MS) await this.serially(() => this.rescan())
     else if (this.dirty.size > 0) await this.serially(() => this.flush())
     await this.pending
@@ -248,11 +255,11 @@ class CatalogImpl implements StoreCatalog {
   /** The project cwd of a path-addressed session, read from its head once per file. */
   private async projectPath(session: TopLevelSessionInfo): Promise<string | null> {
     if (!this.source.readProjectPath) return null
-    const known = factsFor(session.filePath)?.project
+    const known = this.live ? factsFor(session.filePath)?.project : undefined
     if (isStillTrue(known, session)) return known!.path
     try {
       const { path, final } = await this.source.readProjectPath(session.filePath)
-      recordFact(session.filePath, "project", { path, final, mtimeMs: session.mtimeMs, size: session.size })
+      if (this.live) recordFact(session.filePath, "project", { path, final, mtimeMs: session.mtimeMs, size: session.size })
       return path
     } catch {
       return null
@@ -491,6 +498,7 @@ class CatalogImpl implements StoreCatalog {
     for (const filePath of [...this.entriesByPath.keys()]) {
       if (!listed.has(filePath)) this.remove(filePath, changes)
     }
+    if (this.live) pruneFactsUnder(root, listed)
     await eachLimited(files, async (file) => {
       const entry = this.entriesByPath.get(file.filePath)
       if (entry && entry.file.mtimeMs === file.mtimeMs && entry.file.size === file.size) return
@@ -591,6 +599,26 @@ class Changes {
 
 export function createStoreCatalog(source: StoreCatalogSource): StoreCatalog {
   return new CatalogImpl(source, !isAgentWorker())
+}
+
+/** The parts of a catalog source every store reads off its descriptor. */
+export function descriptorAddressing(descriptor: AgentDescriptor): Pick<StoreCatalogSource, "sessionIdOf" | "encodeDirName" | "decodeDirName"> {
+  return {
+    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
+    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
+    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+  }
+}
+
+/** The store listings a catalog answers directly. */
+export function catalogListings(catalog: StoreCatalog) {
+  return {
+    listProjects: () => catalog.projects(),
+    listTopLevelSessions: () => catalog.topLevelSessions(),
+    listedSessionFiles: () => catalog.files(),
+    knownSessionFile: (sessionId: string) => catalog.sessionFileFor(sessionId),
+    dispose: () => catalog.close(),
+  }
 }
 
 /** The `fileName` a transcript at `filePath` is addressed by, relative to the root and forward-slashed. */

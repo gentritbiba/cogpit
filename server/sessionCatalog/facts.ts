@@ -1,5 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, sep } from "node:path"
 import type { SessionStatusInfo } from "../../shared/session/sessionStatus"
 import type { SessionIdentity, SessionMeta } from "../agents/types"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
@@ -69,6 +69,19 @@ export function recordFact<K extends keyof FileFacts>(filePath: string, kind: K,
 
 export function forgetFacts(filePath: string): void {
   if (facts.delete(filePath)) scheduleSave()
+}
+
+/** Drop facts about files under `root` that a full listing no longer found, such as ones deleted while the server was down. */
+export function pruneFactsUnder(root: string, listed: ReadonlySet<string>): void {
+  const prefix = root.endsWith(sep) ? root : root + sep
+  let pruned = false
+  for (const filePath of facts.keys()) {
+    if (filePath.startsWith(prefix) && !listed.has(filePath)) {
+      facts.delete(filePath)
+      pruned = true
+    }
+  }
+  if (pruned) scheduleSave()
 }
 
 /** A fact read at exactly this size and mtime. */

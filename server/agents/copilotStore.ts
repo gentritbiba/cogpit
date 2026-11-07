@@ -8,7 +8,9 @@ import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile
 import { readCopilotSessionIdentity, readCopilotSessionMeta } from "./copilotMetadata"
 import { addressFromTranscript, projectSessionFilesFromCatalog } from "./transcriptProjects"
 import {
+  catalogListings,
   createStoreCatalog,
+  descriptorAddressing,
   walkStore,
   type CatalogDirListing,
   type StoreCatalogSource,
@@ -59,9 +61,7 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
   const catalogSource: StoreCatalogSource = {
     root: () => SESSIONS_DIR,
     listDir,
-    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
-    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
-    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+    ...descriptorAddressing(descriptor),
     readIdentity: readCopilotSessionIdentity,
     readSessionMeta: readCopilotSessionMeta,
     // The identity may come from a later resume record or the workspace sidecar, so it is never final.
@@ -103,17 +103,9 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
 
     readSessionMeta: readCopilotSessionMeta,
 
-    listProjects: () => catalog.projects(),
+    ...catalogListings(catalog),
 
     listProjectSessionFiles: (dirName) => projectSessionFilesFromCatalog(copilotStore, catalog, dirName),
-
-    listTopLevelSessions: () => catalog.topLevelSessions(),
-
-    listedSessionFiles: () => catalog.files(),
-
-    knownSessionFile: (sessionId) => catalog.sessionFileFor(sessionId),
-
-    dispose: () => catalog.close(),
 
     // Sub-agents are `subagent.*` events inside the parent transcript, not files.
     listSubagentFiles: async () => [],

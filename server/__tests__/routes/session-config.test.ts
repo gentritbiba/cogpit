@@ -174,7 +174,7 @@ describe("session-config routes", () => {
 
   it("refuses keys naming a file another store keeps beside the configs, in any case", async () => {
     await mkdir(mockDirs.SESSION_CONFIG_DIR, { recursive: true })
-    for (const store of ["archived-sessions", "pr-search-index"]) {
+    for (const store of ["archived-sessions", "pr-search-index", "session-catalog"]) {
       const storePath = join(mockDirs.SESSION_CONFIG_DIR, `${store}.json`)
       await writeFile(storePath, JSON.stringify({ version: 2, sessions: {} }))
 
