@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useTeamLive } from "./useTeamLive"
 import { authFetch } from "@/lib/auth"
+import { jsonEqual } from "@/lib/jsonEqual"
 import type { TeamConfig } from "@/lib/team-types"
 
 export interface SessionTeamContext {
@@ -65,7 +66,7 @@ export function useSessionTeam(
     // The session changed while this answer was in flight
     if (paramsRef.current !== params) return
     // Team updates arrive on every inbox and task write; an unchanged answer keeps its identity
-    setCtx((prev) => (prev && next && JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    setCtx((prev) => (prev && next && jsonEqual(prev, next) ? prev : next))
   }, [])
 
   // Initial fetch when sessionFileName changes

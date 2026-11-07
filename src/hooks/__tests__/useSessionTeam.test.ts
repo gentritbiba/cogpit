@@ -278,6 +278,20 @@ describe("useSessionTeam", () => {
     expect(result.current!.config.members).toEqual([{ name: "joiner" }])
   })
 
+  it("keeps the same context when an unchanged team comes back with its keys in another order", async () => {
+    const answer = (config: object) => ({ ok: true, json: () => Promise.resolve({ teamName: "steady-team", config, currentMemberName: "lead" }) }) as Response
+    mockedAuthFetch.mockResolvedValue(answer({ name: "steady-team", members: [{ name: "lead" }], createdAt: 0 }))
+    const { result } = renderHook(() => useSessionTeam("session.jsonl"))
+    await waitFor(() => expect(result.current?.teamName).toBe("steady-team"))
+    const first = result.current
+    const onUpdate = mockedUseTeamLive.mock.calls.at(-1)![1]
+
+    mockedAuthFetch.mockResolvedValue(answer({ createdAt: 0, members: [{ name: "lead" }], name: "steady-team" }))
+    await act(async () => { onUpdate() })
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(2)
+    expect(result.current).toBe(first)
+  })
+
   it("drops an answer for a session the view has already left", async () => {
     let answerOld: (response: Response) => void = () => {}
     mockedAuthFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { answerOld = resolve }))
