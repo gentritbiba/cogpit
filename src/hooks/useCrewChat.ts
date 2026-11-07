@@ -83,7 +83,7 @@ export function useCrewChat(rootId: string, active = true) {
         etag.current,
       )
       if (!isActive() || request !== requestCounter.current) return
-      if (result.kind === "failed") throw new Error("Couldn't load crew chat.")
+      if (result.kind === "failed") throw new Error(result.error || "Couldn't load crew chat.")
       if (result.kind === "changed") {
         const next = result.value
         etag.current = result.etag

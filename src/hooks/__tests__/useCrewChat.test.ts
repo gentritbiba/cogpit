@@ -56,6 +56,18 @@ describe("useCrewChat", () => {
     expect(result.current.error).toBeNull()
   })
 
+  it("shows the server's reason when the chat cannot be read", async () => {
+    mocks.fetch.mockResolvedValue(Response.json({ error: "Crew chat requires access to its lead session" }, { status: 403 }))
+    const { result } = renderHook(() => useCrewChat("lead"))
+    await waitFor(() => expect(result.current.error).toBe("Crew chat requires access to its lead session"))
+  })
+
+  it("falls back to a generic message when the server gives no reason", async () => {
+    mocks.fetch.mockResolvedValue(new Response("Bad gateway", { status: 502 }))
+    const { result } = renderHook(() => useCrewChat("lead"))
+    await waitFor(() => expect(result.current.error).toBe("Couldn't load crew chat."))
+  })
+
   it("never names known members to a server that sent no version", async () => {
     mocks.fetch.mockResolvedValue(Response.json(page()))
     const { result } = renderHook(() => useCrewChat("lead"))
