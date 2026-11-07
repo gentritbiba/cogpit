@@ -43,6 +43,66 @@ async function appendToInbox(inboxPath: string, message: string): Promise<void> 
   await writeFile(inboxPath, JSON.stringify(inbox, null, 2), "utf-8")
 }
 
+const UPDATE_DEBOUNCE_MS = 500
+
+interface TeamWatch {
+  listeners: Set<() => void>
+  close(): void
+}
+
+/** One pair of watchers per team, shared by every stream open on it. */
+const teamWatches = new Map<string, TeamWatch>()
+
+/**
+ * Hear about changes to a team's config, inboxes and tasks, debounced. The
+ * watchers open with the first subscriber and close with the last.
+ */
+function subscribeToTeam(teamName: string, onUpdate: () => void): () => void {
+  let entry = teamWatches.get(teamName)
+  if (!entry) {
+    const listeners = new Set<() => void>()
+    const watchers = new Map<string, ReturnType<typeof watch>>()
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const changed = () => {
+      // The tasks dir is often created after the team is.
+      watchMissing()
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        // A change to a running team is often a member joining.
+        observeAgentTeam(teamName)
+        for (const listener of listeners) listener()
+      }, UPDATE_DEBOUNCE_MS)
+    }
+    const watchMissing = () => {
+      for (const dir of [join(dirs.TEAMS_DIR, teamName), join(dirs.TASKS_DIR, teamName)]) {
+        if (watchers.has(dir)) continue
+        try {
+          const watcher = watch(dir, { recursive: true }, changed)
+          watcher.on("error", () => {}) // the directory may be removed
+          watchers.set(dir, watcher)
+        } catch { /* dir may not exist */ }
+      }
+    }
+    watchMissing()
+    entry = {
+      listeners,
+      close: () => {
+        for (const watcher of watchers.values()) watcher.close()
+        if (debounceTimer) clearTimeout(debounceTimer)
+      },
+    }
+    teamWatches.set(teamName, entry)
+  }
+  const shared = entry
+  shared.listeners.add(onUpdate)
+  return () => {
+    if (!shared.listeners.delete(onUpdate) || shared.listeners.size > 0) return
+    shared.close()
+    if (teamWatches.get(teamName) === shared) teamWatches.delete(teamName)
+  }
+}
+
 export function registerTeamRoutes(use: UseFn) {
   // GET /api/teams - list all teams with task progress summary
   use("/api/teams", async (req, res, next) => {
@@ -172,8 +232,6 @@ export function registerTeamRoutes(use: UseFn) {
     const teamName = decodeTeamPathSegment(parts[0])
     if (!teamName) return sendInvalidTeamName(res)
     if (!(await authorizeTeamAccess(req, res, teamName, (lead) => authorizeStreamSession(req, res, lead)))) return
-    const teamDir = join(dirs.TEAMS_DIR, teamName)
-    const taskDir = join(dirs.TASKS_DIR, teamName)
     // The caller may have gone, or lost its login, while access was checked.
     if (res.destroyed || res.writableEnded) return
 
@@ -182,39 +240,17 @@ export function registerTeamRoutes(use: UseFn) {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     })
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
-    const sendUpdate = () => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        // A change to a running team is often a member joining.
-        observeAgentTeam(teamName)
-        res.write(`data: ${JSON.stringify({ type: "update" })}\n\n`)
-      }, 500)
-    }
-
-    const watchers: ReturnType<typeof watch>[] = []
-    try {
-      const w = watch(teamDir, { recursive: true }, sendUpdate)
-      w.on("error", () => {}) // prevent uncaught crash when dir is removed
-      watchers.push(w)
-    } catch { /* dir may not exist */ }
-    try {
-      const w = watch(taskDir, { recursive: true }, sendUpdate)
-      w.on("error", () => {}) // prevent uncaught crash when dir is removed
-      watchers.push(w)
-    } catch { /* dir may not exist */ }
-
     res.write(`data: ${JSON.stringify({ type: "init" })}\n\n`)
 
+    const unsubscribe = subscribeToTeam(teamName, () => {
+      res.write(`data: ${JSON.stringify({ type: "update" })}\n\n`)
+    })
     const heartbeat = setInterval(() => {
       res.write(": heartbeat\n\n")
     }, 15000)
 
     req.on("close", () => {
-      for (const w of watchers) w.close()
-      if (debounceTimer) clearTimeout(debounceTimer)
+      unsubscribe()
       clearInterval(heartbeat)
     })
   })
