@@ -260,8 +260,9 @@ function freezeOrder(sessions: readonly ActiveSessionInfo[], buckets: readonly s
 
 /**
  * The rows in their display order with the shelf label each one opens. Frozen,
- * rows keep the order and shelf they had when the pointer arrived, and rows
- * that joined since wait at the end.
+ * the rows that were there when the pointer arrived keep their order and
+ * shelf; rows that joined since take their natural place (usually the top).
+ * A shelf label shows once, at its first row.
  */
 function placeRows(
   sessions: readonly ActiveSessionInfo[],
@@ -271,14 +272,28 @@ function placeRows(
   let shown: ActiveSessionInfo[] = [...sessions]
   let shownBuckets: string[] = [...buckets]
   if (frozen) {
-    const byKey = new Map(sessions.map((session, index) => [sessionKey(session), index]))
+    const byKey = new Map(sessions.map((session) => [sessionKey(session), session]))
     const held = frozen.keys.filter((key) => byKey.has(key))
-    const heldKeys = new Set(held)
-    const joined = sessions.map((_, index) => index).filter((index) => !heldKeys.has(sessionKey(sessions[index])))
-    shown = [...held.map((key) => sessions[byKey.get(key)!]), ...joined.map((index) => sessions[index])]
-    shownBuckets = [...held.map((key) => frozen.bucketOf.get(key)!), ...joined.map((index) => buckets[index])]
+    let nextHeld = 0
+    shown = []
+    shownBuckets = []
+    sessions.forEach((session, index) => {
+      if (!frozen.bucketOf.has(sessionKey(session))) {
+        shown.push(session)
+        shownBuckets.push(buckets[index])
+        return
+      }
+      const key = held[nextHeld++]
+      shown.push(byKey.get(key)!)
+      shownBuckets.push(frozen.bucketOf.get(key)!)
+    })
   }
-  const shelves = shownBuckets.map((bucket, i) => (bucket === shownBuckets[i - 1] ? null : bucket))
+  const labelled = new Set<string>()
+  const shelves = shownBuckets.map((bucket) => {
+    if (labelled.has(bucket)) return null
+    labelled.add(bucket)
+    return bucket
+  })
   return { shown, shelves }
 }
 

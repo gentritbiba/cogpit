@@ -128,7 +128,7 @@ describe("SessionCardList", () => {
     expect(order).toEqual(["card-new", "card-old"])
   })
 
-  it("holds the order while the pointer is over the list and applies the new one when it leaves", () => {
+  describe("while the pointer is over the list", () => {
     const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
     const props = {
       older: { canLoad: false, loading: false, load: vi.fn() },
@@ -141,22 +141,53 @@ describe("SessionCardList", () => {
       onSelectSession: vi.fn(),
     }
     const order = () => [...document.querySelectorAll("[data-testid^=card-]")].map((el) => el.getAttribute("data-testid"))
-    const { rerender } = render(
-      <SessionCardList {...props} sessions={[session("a", { lastModified: at(1) }), session("b", { lastModified: at(5) })]} />,
-    )
-    const list = document.querySelector("[data-session-card-list]")!
+    const labels = () => [...document.querySelectorAll("[data-recency-divider]")].map((el) => el.textContent)
 
-    fireEvent.pointerEnter(list)
-    rerender(
-      <SessionCardList
-        {...props}
-        sessions={[session("a", { lastModified: at(1) }), session("b", { lastModified: at(0) }), session("c", { lastModified: at(0) })]}
-      />,
-    )
-    expect(order()).toEqual(["card-a", "card-b", "card-c"])
+    it("holds the rows it showed in place, puts a new one where it belongs, and reorders on leave", () => {
+      const { rerender } = render(
+        <SessionCardList {...props} sessions={[session("a", { lastModified: at(1) }), session("b", { lastModified: at(5) })]} />,
+      )
+      const list = document.querySelector("[data-session-card-list]")!
 
-    fireEvent.pointerLeave(list)
-    expect(order()).toEqual(["card-b", "card-c", "card-a"])
+      fireEvent.pointerEnter(list)
+      rerender(
+        <SessionCardList
+          {...props}
+          sessions={[
+            session("a", { lastModified: at(1) }),
+            session("b", { lastModified: at(0.5) }),
+            session("c", { lastModified: at(0) }),
+          ]}
+        />,
+      )
+      expect(order()).toEqual(["card-c", "card-a", "card-b"])
+
+      fireEvent.pointerLeave(list)
+      expect(order()).toEqual(["card-c", "card-b", "card-a"])
+    })
+
+    it("never shows a shelf label twice", () => {
+      const threeDaysAgo = at(3 * 24 * 60)
+      const { rerender } = render(
+        <SessionCardList {...props} sessions={[session("a", { lastModified: at(1) }), session("o", { lastModified: threeDaysAgo })]} />,
+      )
+      expect(labels()).toEqual(["Today", "Last 7 days"])
+
+      fireEvent.pointerEnter(document.querySelector("[data-session-card-list]")!)
+      rerender(
+        <SessionCardList
+          {...props}
+          sessions={[
+            session("a", { lastModified: at(1) }),
+            session("o", { lastModified: at(0) }),
+            session("n", { lastModified: at(2) }),
+          ]}
+        />,
+      )
+
+      expect(order()).toEqual(["card-a", "card-o", "card-n"])
+      expect(labels()).toEqual(["Today", "Last 7 days"])
+    })
   })
 
   it("tells each card whether to name its project", () => {
