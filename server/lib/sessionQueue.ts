@@ -63,7 +63,7 @@ export function applyQueueAction(ctx: QueueContext, sessionId: string, body: Rec
     default: throw new OrchestrationError(400, "Unknown queue action")
   }
   void dispatcher.tick()
-  return dispatcher.store.commands(conversation.id, scope)
+  return dispatcher.store.openCommands(conversation.id, scope, id ? [id] : [])
 }
 
 /**

@@ -7,7 +7,7 @@ import { makeTurn } from "@/__tests__/fixtures"
 
 const owner = vi.hoisted(() => ({ state: {} as ConversationState, action: vi.fn(async () => {}), subscribed: 0 }))
 vi.mock("@/lib/conversationState", () => ({
-  EMPTY_CONVERSATION: { conversation: null, commands: [], cursor: 0, freshness: "waiting" },
+  EMPTY_CONVERSATION: { conversation: null, commands: [], freshness: "waiting" },
   conversationStateFor: () => ({ snapshot: () => owner.state, subscribe: () => { owner.subscribed++; return () => {} }, action: owner.action }),
 }))
 import { QueuedTurns, waitingCommands } from "../QueuedTurns"
@@ -17,7 +17,7 @@ function command(patch: Partial<CommandReceipt>): CommandReceipt {
   return { id: "c1", conversationId: "conversation", sessionId: "s1", bindingRevision: 1, state: "queued", intent: "queue", message: "test", createdAt: turnStartedAt + 60_000, updatedAt: 1, position: 1, ...patch }
 }
 function withCommands(commands: CommandReceipt[]) {
-  owner.state = { conversation: { id: "conversation", revision: 1, binding: { hostId: "local", agent: "claude", instanceId: "default", sessionId: "s1" }, createdAt: 1, updatedAt: 1 }, commands, cursor: 1, freshness: "current" }
+  owner.state = { conversation: { id: "conversation", revision: 1, binding: { hostId: "local", agent: "claude", instanceId: "default", sessionId: "s1" }, createdAt: 1, updatedAt: 1 }, commands, freshness: "current" }
 }
 
 beforeEach(() => {

@@ -8,7 +8,7 @@ import { __resetIdentityForTest, setActiveIdentity } from "@/lib/device"
 
 const owner = vi.hoisted(() => ({ state: {} as ConversationState, action: vi.fn(), listeners: new Set<() => void>() }))
 vi.mock("@/lib/conversationState", () => ({
-  EMPTY_CONVERSATION: { conversation: null, commands: [], cursor: 0, freshness: "waiting" },
+  EMPTY_CONVERSATION: { conversation: null, commands: [], freshness: "waiting" },
   conversationStateFor: () => ({ snapshot: () => owner.state, subscribe: (listener: () => void) => { owner.listeners.add(listener); return () => owner.listeners.delete(listener) }, action: owner.action }),
 }))
 vi.mock("@/hooks/useSessionNamer", () => ({ useSessionNamer: () => () => undefined }))
@@ -19,7 +19,7 @@ function failure(id: string): CommandReceipt {
   return { id, conversationId: "conversation", sessionId: "session", bindingRevision: 1, state: "failed", intent: "queue", message: `Request ${id}`, error: diagnostic, position: 1, createdAt: 1, updatedAt: 1 }
 }
 function update(commands: CommandReceipt[], conversationId = "conversation") {
-  owner.state = { conversation: { id: conversationId, revision: 1, binding: { hostId: "local", agent: AGENT_KINDS[0], instanceId: "default", sessionId: "session" }, createdAt: 1, updatedAt: 1 }, commands, cursor: 1, freshness: "current" }
+  owner.state = { conversation: { id: conversationId, revision: 1, binding: { hostId: "local", agent: AGENT_KINDS[0], instanceId: "default", sessionId: "session" }, createdAt: 1, updatedAt: 1 }, commands, freshness: "current" }
   for (const listener of owner.listeners) listener()
 }
 beforeEach(() => { localStorage.clear(); owner.action.mockReset(); owner.listeners.clear(); __resetIdentityForTest(); window.history.replaceState(null, "", "/"); update([failure("one"), failure("two")]) })
@@ -58,7 +58,7 @@ describe("message delivery problems", () => {
     const view = render(<ConversationQueue sessionId="session" />)
     await userEvent.click(screen.getByRole("button", { name: "Dismiss failed message" }))
     view.unmount()
-    owner.state = { conversation: null, commands: [], cursor: 0, freshness: "waiting" }
+    owner.state = { conversation: null, commands: [], freshness: "waiting" }
     render(<ConversationQueue sessionId="session" />)
     act(() => update([failure("one")]))
     expect(screen.queryByRole("region")).not.toBeInTheDocument()

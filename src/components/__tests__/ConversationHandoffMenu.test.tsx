@@ -11,7 +11,7 @@ vi.mock("../header-shared", () => ({ ContextBadge: () => null }))
 vi.mock("@/hooks/useSessionArchive", () => ({ useSessionArchiveToggle: () => null }))
 vi.mock("@/lib/auth", () => ({ authFetch: async () => ({ ok: true, json: async () => ({ instances: [], tasks: [] }) }) }))
 vi.mock("@/lib/conversationState", () => {
-  const state = { conversation: null, commands: [], cursor: 0, freshness: "current" }
+  const state = { conversation: null, commands: [], freshness: "current" }
   return { EMPTY_CONVERSATION: state, conversationStateFor: () => ({ subscribe: () => () => {}, snapshot: () => state }) }
 })
 
