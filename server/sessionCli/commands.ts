@@ -406,7 +406,7 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
       if (task) {
         const report = JSON.parse(output.stdout) as { outcome?: string; timedOut?: boolean }
         if (!report.timedOut && (report.outcome === "completed" || report.outcome === "error")) {
-          const current = orchestrationStore().tasks(inv.scope).find((value) => value.id === task.id)
+          const current = orchestrationStore().task(inv.scope, task.id)
           if (current && current.state !== "cancelled") orchestrationStore().updateTask(inv.scope, task.id, { state: report.outcome, result: report, acknowledgedAt: Date.now() }, current.state)
         }
       }

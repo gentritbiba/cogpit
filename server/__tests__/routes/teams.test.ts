@@ -9,6 +9,7 @@ vi.mock("../../helpers", () => ({
   },
   readdir: vi.fn(),
   readFile: vi.fn(),
+  stat: vi.fn(),
   writeFile: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
   watch: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("../../helpers", () => ({
 import {
   readdir,
   readFile,
+  stat,
   writeFile,
   watch,
 } from "../../helpers"
@@ -25,6 +27,8 @@ const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedWatch = vi.mocked(watch)
+const mockedStat = vi.mocked(stat)
+let configVersion = 0
 
 import type { Middleware } from "../../helpers"
 import { asReaddirMock, collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
@@ -35,6 +39,8 @@ describe("team routes", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    // Every read sees a new version of each config, so none is served from the memo.
+    mockedStat.mockImplementation(async () => ({ mtimeMs: ++configVersion, size: 1 }) as Awaited<ReturnType<typeof stat>>)
     handlers = collectRoutes(registerTeamRoutes)
   })
 
@@ -295,6 +301,117 @@ describe("team routes", () => {
         `data: ${JSON.stringify({ type: "init" })}\n\n`
       )
       expect(mockedReadFile).not.toHaveBeenCalled()
+    })
+
+    function closeOf(req: { on: ReturnType<typeof vi.fn> }): () => void {
+      const call = req.on.mock.calls.find(([event]) => event === "close")
+      if (!call) throw new Error("no close handler")
+      return call[1] as () => void
+    }
+
+    async function openStream(teamName: string) {
+      const handler = getRouteHandler(handlers, "/api/team-watch/")
+      const stream = createMockReqRes("GET", teamName)
+      await handler(stream.req, stream.res, stream.next)
+      return { res: stream.res, close: closeOf(stream.req as unknown as { on: ReturnType<typeof vi.fn> }) }
+    }
+
+    const updateEvent = `data: ${JSON.stringify({ type: "update" })}\n\n`
+
+    it("shares one pair of watchers between every stream on a team and closes them with the last", async () => {
+      vi.useFakeTimers()
+      try {
+        const watchers: Array<{ on: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = []
+        const onChange: Array<() => void> = []
+        mockedWatch.mockImplementation(((_dir: string, _options: unknown, listener: () => void) => {
+          const watcher = { on: vi.fn(), close: vi.fn() }
+          watchers.push(watcher)
+          onChange.push(listener)
+          return watcher as unknown as FSWatcher
+        }) as unknown as typeof watch)
+
+        const first = await openStream("shared-team")
+        const second = await openStream("shared-team")
+        expect(mockedWatch).toHaveBeenCalledTimes(2)
+
+        onChange[0]()
+        onChange[1]()
+        await vi.advanceTimersByTimeAsync(500)
+        expect(vi.mocked(first.res.write).mock.calls.filter(([data]) => data === updateEvent)).toHaveLength(1)
+        expect(vi.mocked(second.res.write).mock.calls.filter(([data]) => data === updateEvent)).toHaveLength(1)
+
+        first.close()
+        expect(watchers.every((watcher) => watcher.close.mock.calls.length === 0)).toBe(true)
+        onChange[0]()
+        await vi.advanceTimersByTimeAsync(500)
+        expect(vi.mocked(first.res.write).mock.calls.filter(([data]) => data === updateEvent)).toHaveLength(1)
+        expect(vi.mocked(second.res.write).mock.calls.filter(([data]) => data === updateEvent)).toHaveLength(2)
+
+        second.close()
+        expect(watchers.every((watcher) => watcher.close.mock.calls.length === 1)).toBe(true)
+
+        await openStream("shared-team")
+        expect(mockedWatch).toHaveBeenCalledTimes(4)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("starts watching a team's tasks once their directory appears", async () => {
+      const onChange: Array<() => void> = []
+      let tasksDirExists = false
+      mockedWatch.mockImplementation(((dir: string, _options: unknown, listener: () => void) => {
+        if (dir.startsWith("/tmp/test-tasks") && !tasksDirExists) throw new Error("ENOENT")
+        onChange.push(listener)
+        return { on: vi.fn(), close: vi.fn() } as unknown as FSWatcher
+      }) as unknown as typeof watch)
+
+      const stream = await openStream("late-tasks")
+      expect(mockedWatch).toHaveBeenCalledTimes(2)
+      tasksDirExists = true
+      onChange[0]()
+      expect(mockedWatch).toHaveBeenLastCalledWith("/tmp/test-tasks/late-tasks", { recursive: true }, expect.any(Function))
+      onChange[0]()
+      expect(mockedWatch).toHaveBeenCalledTimes(3)
+      stream.close()
+    })
+
+    it("re-opens a shared watcher whose directory failed or was replaced, for the next stream", async () => {
+      const { mkdir, mkdtemp, rename, rm } = await import("node:fs/promises")
+      const { existsSync } = await import("node:fs")
+      const { tmpdir } = await import("node:os")
+      const helpers = await import("../../helpers")
+      const root = await mkdtemp(`${tmpdir()}/cogpit-team-watch-`)
+      const saved = { ...helpers.dirs }
+      Object.assign(helpers.dirs, { TEAMS_DIR: `${root}/teams`, TASKS_DIR: `${root}/tasks` })
+      try {
+        await mkdir(`${root}/teams/t`, { recursive: true })
+        await mkdir(`${root}/tasks/t`, { recursive: true })
+        const opened: Array<{ dir: string; fail: () => void }> = []
+        mockedWatch.mockImplementation(((dir: string) => {
+          if (!existsSync(dir)) throw new Error("ENOENT")
+          let fail = () => {}
+          const watcher = { on: vi.fn((_event: string, cb: () => void) => { fail = cb }), close: vi.fn() }
+          opened.push({ dir, fail: () => fail() })
+          return watcher as unknown as FSWatcher
+        }) as unknown as typeof watch)
+
+        const first = await openStream("t")
+        expect(opened.map((o) => o.dir)).toEqual([`${root}/teams/t`, `${root}/tasks/t`])
+
+        opened[1].fail()
+        await rename(`${root}/teams/t`, `${root}/teams/t-old`)
+        await mkdir(`${root}/teams/t`)
+        const second = await openStream("t")
+        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([`${root}/tasks/t`, `${root}/teams/t`])
+
+        const third = await openStream("t")
+        expect(opened).toHaveLength(4)
+        for (const stream of [first, second, third]) stream.close()
+      } finally {
+        Object.assign(helpers.dirs, saved)
+        await rm(root, { recursive: true, force: true })
+      }
     })
 
     it("opens nothing for a caller who went away while access was checked", async () => {

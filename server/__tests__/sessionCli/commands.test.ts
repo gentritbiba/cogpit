@@ -208,6 +208,23 @@ describe("new", () => {
     expect((await run(["new", "work", "--wait", "--timeout", "0"], { invocationId: "timed-out" })).exitCode).toBe(EXIT.timedOut)
     expect(orchestrationStore().tasks("local", "parent-1").find((task) => task.sourceId === "timed-out")).toMatchObject({ state: "running", deliveryDisposition: "async" })
   })
+  it("settles a blocking invocation's own task by id, leaving one cancelled during the wait cancelled", async () => {
+    const store = orchestrationStore()
+    const scopeReads = vi.spyOn(store, "tasks")
+    mocks.waitAcrossHosts.mockResolvedValueOnce({ timedOut: false, sessions: [state("child-1", "completed")] })
+    expect((await run(["new", "work", "--wait"], { invocationId: "settled-by-id" })).exitCode).toBe(EXIT.ok)
+    expect(scopeReads).not.toHaveBeenCalled()
+    scopeReads.mockRestore()
+
+    mocks.waitAcrossHosts.mockImplementationOnce(async () => {
+      const task = store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")!
+      store.updateTask("local", task.id, { state: "cancelled" })
+      return { timedOut: false, sessions: [state("child-1", "completed")] }
+    })
+    await run(["new", "work", "--wait"], { invocationId: "cancelled-meanwhile" })
+    expect(store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")).toMatchObject({ state: "cancelled" })
+    expect(store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")).not.toHaveProperty("acknowledgedAt")
+  })
   it("warns that a session started outside a Cogpit session has no parent to notify", async () => {
     expect(out(await run(["new", "work"], { callerSessionId: undefined })).warning).toContain("COGPIT_SESSION_ID is not set")
     expect(out(await run(["new", "work"], { invocationId: "with-parent" }))).not.toHaveProperty("warning")

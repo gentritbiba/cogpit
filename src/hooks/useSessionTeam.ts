@@ -48,25 +48,24 @@ export function useSessionTeam(
     const params = paramsRef.current
     if (!params) return
 
+    let next: SessionTeamContext | null = null
     try {
       const res = await authFetch(`/api/session-team?${params}`)
-      if (!res.ok) {
-        setCtx(null)
-        return
-      }
-      const data = await res.json()
+      const data = res.ok ? await res.json() : null
       if (data) {
-        setCtx({
+        next = {
           teamName: data.teamName,
           config: data.config,
           currentMemberName: data.currentMemberName || null,
-        })
-      } else {
-        setCtx(null)
+        }
       }
     } catch {
-      setCtx(null)
+      next = null
     }
+    // The session changed while this answer was in flight
+    if (paramsRef.current !== params) return
+    // Team updates arrive on every inbox and task write; an unchanged answer keeps its identity
+    setCtx((prev) => (prev && next && JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
   }, [])
 
   // Initial fetch when sessionFileName changes
