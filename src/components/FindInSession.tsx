@@ -8,10 +8,9 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { useSessionContext } from "@/contexts/SessionContext"
-import { revealKey, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
+import { openWorkFoldFor, revealKey, revealToolCall, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
 import { findInTurns, turnSegments, type FindHit, type FindPart } from "@/lib/sessionFind"
 import { activeScopeRanges, FindPainter, rangeElement, type ActiveMatch } from "@/lib/sessionFindDom"
-import { planTurnFold } from "@/lib/turnFold"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { QUOTE_SEARCH_PAGES } from "@/hooks/useQuoteNavigation"
@@ -68,13 +67,13 @@ function scopeOf(part: FindPart): string | null {
 /** Opens what hides `part` so its row renders it: the work fold, the group, the tool's panel. */
 function revealStructure(store: TimelineStateStore, turnKey: string, turn: Turn, part: FindPart): void {
   if (part.kind === "compaction") store.open(`${turnKey}:compaction`)
-  if ("block" in part && planTurnFold(turn.contentBlocks).foldedIndices.includes(part.block)) store.open(`${turnKey}:work`)
   if (part.kind === "tool") {
-    store.set(revealKey(turnKey), part.callId)
+    revealToolCall(store, turnKey, turn, part.callId)
     store.open(`${turnKey}:call:${part.callId}:panel`)
-  } else if (part.kind === "thinking") {
-    store.set(revealKey(turnKey), part.blocks)
+    return
   }
+  if ("block" in part) openWorkFoldFor(store, turnKey, turn, part.block)
+  if (part.kind === "thinking") store.set(revealKey(turnKey), part.blocks)
 }
 
 /** Opens what cuts long text short where `part` renders; returns how many opened. */

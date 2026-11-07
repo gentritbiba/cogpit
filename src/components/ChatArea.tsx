@@ -133,7 +133,7 @@ export const ChatArea = memo(function ChatArea({
       )}
 
       {/* Scrollable chat area */}
-      <TimelineRowsProvider sessionKey={currentSession.sessionId} timelineRef={timelineRef}>
+      <TimelineRowsProvider sessionKey={currentSession.sessionId}>
       <div className="relative min-h-0 flex-1">
         <FindInSession
           ref={findRef}

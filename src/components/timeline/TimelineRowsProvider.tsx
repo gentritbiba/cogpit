@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react"
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
@@ -6,7 +6,6 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 import type { Branch } from "../../../shared/session/types"
 import type { ComposerAttachment, ComposerContextItem, QuoteSource } from "../../../shared/session/composerContext"
 import { DisclosureProvider } from "./disclosure"
-import type { TimelineHandle } from "@/lib/timelineScroll/types"
 
 /**
  * The session facts rows need. Unlike the session context, which is rebuilt on
@@ -41,19 +40,11 @@ export interface TimelineLiveStatus {
   working: boolean
 }
 
-type TimelineNavigation = Pick<TimelineHandle, "scrollToTurn">
-
 const RowFactsContext = createContext<TimelineRowFacts | null>(null)
-const NavigationContext = createContext<TimelineNavigation | null>(null)
 const LiveStatusContext = createContext<TimelineLiveStatus>({ live: false, working: false })
 
 export function useTimelineRowFacts(): TimelineRowFacts | null {
   return useContext(RowFactsContext)
-}
-
-/** Moves the timeline to a turn, for rows that reveal something navigation pointed at. */
-export function useTimelineNavigation(): TimelineNavigation | null {
-  return useContext(NavigationContext)
 }
 
 export function useTimelineLiveStatus(): TimelineLiveStatus {
@@ -75,9 +66,8 @@ function useStable<F extends Fn>(fn: F | undefined): F | undefined {
   )
 }
 
-export function TimelineRowsProvider({ sessionKey, timelineRef, children }: {
+export function TimelineRowsProvider({ sessionKey, children }: {
   sessionKey?: string
-  timelineRef?: RefObject<TimelineHandle | null>
   children: ReactNode
 }) {
   const { session, sessionSource, isLive, isSubAgentView, permissions, pendingInteraction, undoRedo, actions } = useSessionContext()
@@ -125,15 +115,12 @@ export function TimelineRowsProvider({ sessionKey, timelineRef, children }: {
     editCommand, expandCommand, addComposerContext, openQuoteSource,
   ])
   const status = useMemo(() => ({ live, working }), [live, working])
-  const navigation = useMemo<TimelineNavigation | null>(() => timelineRef ? {
-    scrollToTurn: (turnKey, opts) => timelineRef.current?.scrollToTurn(turnKey, opts) ?? Promise.resolve(false),
-  } : null, [timelineRef])
 
   return (
     <DisclosureProvider sessionKey={sessionKey}>
       <RowFactsContext.Provider value={facts}>
         <LiveStatusContext.Provider value={status}>
-          <NavigationContext.Provider value={navigation}>{children}</NavigationContext.Provider>
+          {children}
         </LiveStatusContext.Provider>
       </RowFactsContext.Provider>
     </DisclosureProvider>

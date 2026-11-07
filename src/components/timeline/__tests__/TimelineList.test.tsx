@@ -7,7 +7,7 @@ import type { Turn } from "../../../../shared/session/types"
 
 // ── Contexts and rows ────────────────────────────────────────────────────────
 
-const appState = { activeTurnIndex: null as number | null, expandAll: false }
+const appState = { activeTurnIndex: null as number | null, activeToolCallId: null as string | null, expandAll: false }
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ state: appState }),
 }))
@@ -72,6 +72,7 @@ beforeEach(() => {
   rawScrollTop = 0
   writes.length = 0
   appState.activeTurnIndex = null
+  appState.activeToolCallId = null
   patch("scrollTop", {
     get(this: Element) { return isScroller(this) ? scrollTop() : 0 },
     set(this: Element, value: number) {
@@ -399,6 +400,25 @@ describe("TimelineList with the scroll engine", () => {
     appState.activeTurnIndex = 10
     rerender({ turns: makeTurns(ids(80, 200)) })
     expect(jump).toHaveBeenCalledWith("t90", { align: "start" })
+  })
+
+  it("jumps to a tool call by key: asks its turn to reveal it, then centres its card", () => {
+    const { rerender, controller } = mount({ turns: makeTurns(ids(0, 200)) })
+    const jump = vi.spyOn(controller, "scrollToTurn")
+    appState.activeTurnIndex = 40
+    appState.activeToolCallId = "call-7"
+    rerender({ turns: makeTurns(ids(0, 200)) })
+    expect(jump).toHaveBeenCalledTimes(1)
+    const [key, opts] = jump.mock.calls[0]
+    expect(key).toBe("t40")
+    expect(opts!.align).toBe("center")
+    const row = document.createElement("div")
+    row.innerHTML = '<div data-tool-call-id="call-6"></div><div data-tool-call-id="call-7"></div>'
+    expect(opts!.target!(row)).toBe(row.lastElementChild)
+    // Another call in the same turn is a new selection.
+    appState.activeToolCallId = "call-6"
+    rerender({ turns: makeTurns(ids(0, 200)) })
+    expect(jump).toHaveBeenCalledTimes(2)
   })
 
   it("loads older history once the first row is within three viewports", () => {

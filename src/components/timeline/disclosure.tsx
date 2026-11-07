@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
-import type { ThinkingBlock } from "../../../shared/session/types"
+import type { ThinkingBlock, Turn } from "../../../shared/session/types"
+import { planTurnFold } from "@/lib/turnFold"
 
 type Listener = () => void
 type Initial<T> = T | (() => T)
@@ -129,6 +130,18 @@ export type RevealTarget = string | readonly ThinkingBlock[]
 
 export function revealKey(turnKey: string): string {
   return `${turnKey}:reveal`
+}
+
+/** Opens the turn's work fold when it hides `turn.contentBlocks[block]`. */
+export function openWorkFoldFor(store: TimelineStateStore, turnKey: string, turn: Turn, block: number): void {
+  if (planTurnFold(turn.contentBlocks).foldedIndices.includes(block)) store.open(`${turnKey}:work`)
+}
+
+/** Makes a turn render one of its tool calls: unfolds the work and has the group holding it open. */
+export function revealToolCall(store: TimelineStateStore, turnKey: string, turn: Turn, callId: string): void {
+  const block = turn.contentBlocks.findIndex((b) => (b.kind === "tool_calls" || b.kind === "plan_mode") && b.toolCalls.some((call) => call.id === callId))
+  if (block >= 0) openWorkFoldFor(store, turnKey, turn, block)
+  store.set(revealKey(turnKey), callId)
 }
 
 function resolve<T>(initial: Initial<T>): T {
