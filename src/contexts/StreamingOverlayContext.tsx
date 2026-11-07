@@ -1,5 +1,5 @@
-import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react"
-import { EMPTY_OVERLAY, type StreamingOverlay } from "@/lib/streamingOverlay"
+import { createContext, useCallback, useContext, useRef, useSyncExternalStore, type ReactNode } from "react"
+import { EMPTY_OVERLAY, mainThreadMessages, messagesForToolUse, type OverlayMessage, type StreamingOverlay } from "@/lib/streamingOverlay"
 import type { StreamingOverlayStore } from "@/lib/streamingOverlayStore"
 
 const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
@@ -51,6 +51,40 @@ export function useStreamingOverlay(): StreamingOverlay {
   const source = useContext(StreamingOverlayContext)
   const store = "snapshot" in source ? source : null
   return useSyncExternalStore(store?.subscribe ?? noSubscribe, store?.snapshot ?? (() => source as StreamingOverlay))
+}
+
+function sameMessages(a: readonly OverlayMessage[], b: readonly OverlayMessage[]): boolean {
+  return a.length === b.length && a.every((message, i) => message === b[i])
+}
+
+/**
+ * A slice of the overlay that keeps its reference while none of its messages
+ * changed, so a flush for one stream does not re-render readers of another.
+ * Relies on `applyDeltas` copying only the messages it touches.
+ */
+function useOverlayMessages(select: (overlay: StreamingOverlay) => OverlayMessage[]): OverlayMessage[] {
+  const source = useContext(StreamingOverlayContext)
+  const store = "snapshot" in source ? source : null
+  const lastRef = useRef<OverlayMessage[] | null>(null)
+  const getSnapshot = useCallback(() => {
+    const next = select(store ? store.snapshot() : source as StreamingOverlay)
+    const last = lastRef.current
+    if (last && sameMessages(last, next)) return last
+    lastRef.current = next
+    return next
+  }, [select, source, store])
+  return useSyncExternalStore(store?.subscribe ?? noSubscribe, getSnapshot)
+}
+
+/** In-flight main-thread messages, the running turn's continuation. */
+export function useMainThreadOverlay(): OverlayMessage[] {
+  return useOverlayMessages(mainThreadMessages)
+}
+
+/** In-flight messages of one Task/Agent tool call's subagent. */
+export function useToolUseOverlay(toolUseId: string): OverlayMessage[] {
+  const select = useCallback((overlay: StreamingOverlay) => messagesForToolUse(overlay, toolUseId), [toolUseId])
+  return useOverlayMessages(select)
 }
 
 /** The running subagent's current progress line, or null before the first fork lands. */
