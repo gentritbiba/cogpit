@@ -15,11 +15,13 @@ import { beginServerStart } from "./lib/installState"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
+import { detachFromParentCogpit } from "./lib/parentCogpit"
 
 export function sessionApiPlugin(): Plugin {
   return {
     name: "session-api",
     async configureServer(server) {
+      detachFromParentCogpit()
       // The checkout is the dev shell's data root. First, before anything writes.
       const dataDir = getDataRoot()
       await beginServerStart(dataDir)
