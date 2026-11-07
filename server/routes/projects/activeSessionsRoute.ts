@@ -5,6 +5,7 @@ import { allTopLevelSessions } from "../../agents"
 import type { TopLevelSessionInfo } from "../../agents/types"
 import {
   allVisible,
+  getRequestPrincipal,
   parseScope,
   takeVisible,
   visibilityFor,
@@ -24,7 +25,7 @@ import {
   type ArchiveSnapshot,
 } from "../../lib/sessionArchive"
 import { sendListResponse, sharedListBuild, type ListBody } from "../../sessionList/revalidate"
-import { noteNextArchiveCrossing } from "../../sessionList/versionInputs"
+import { noteListedAgents, noteNextArchiveCrossing, type AwaitingRow } from "../../sessionList/versionInputs"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readActiveSessionRow, type ActiveSessionQuery } from "./activeSessionRow"
 import { listedSession, listedSessionId } from "../../agents/listedSession"
@@ -163,6 +164,7 @@ async function buildActiveSessions(
   check: VisibilityCheck,
   lineageCheck: VisibilityCheck,
   signal: AbortSignal,
+  list: string,
 ): Promise<ListBody> {
   const { search, pullRequestSearch, perProject, totalLimit, projectFilter, includeArchived } = request
   const headers: Record<string, string> = {}
@@ -241,6 +243,7 @@ async function buildActiveSessions(
     archivedById,
     teamConfigs: new Map(),
     signal,
+    awaitingAgents: [] as AwaitingRow[],
   }
   // A row may name a session the caller can open outside the scope listed.
   const lineage = visibleLineage(lineageCheck)
@@ -276,6 +279,7 @@ async function buildActiveSessions(
     ...sortByCrewRecency(withCrews.filter((row) => row.archived)).slice(0, totalLimit),
   ]
   const activeSessions = [...listed, ...listed.flatMap((unit) => membersOf.get(unit.sessionId) ?? [])]
+  noteListedAgents(list, query.awaitingAgents ?? [])
   return { headers, body: JSON.stringify(activeSessions) }
 }
 
@@ -308,13 +312,16 @@ export async function handleActiveSessions(
   const check = visibilityFor(req, scope)
   const lineageCheck = scope === "all" ? check : visibilityFor(req)
   const request = readActiveSessionsRequest(url.searchParams)
+  const query = `${scope}\n${url.search}`
 
   try {
     const response = await sharedListBuild(
       req,
       res,
-      { route: "active-sessions", query: `${scope}\n${url.search}`, seesEverything: check.everything },
-      (signal) => check.nothing ? Promise.resolve(NOTHING_VISIBLE) : buildActiveSessions(request, check, lineageCheck, signal),
+      { route: "active-sessions", query, seesEverything: check.everything },
+      (signal) => check.nothing
+        ? Promise.resolve(NOTHING_VISIBLE)
+        : buildActiveSessions(request, check, lineageCheck, signal, `${getRequestPrincipal(req)?.userId ?? ""}\n${query}`),
     )
     if (response) sendListResponse(req, res, response)
   } catch (err) {

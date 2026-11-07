@@ -4,7 +4,7 @@ import type { CrewLink } from "../../lib/sessionOrigins"
 
 const mocks = vi.hoisted(() => ({
   active: [] as Array<{ sessionId: string }>,
-  agentsRunning: vi.fn(async () => true),
+  agentsRunning: vi.fn(async (_dirName: string, _sessionId: string) => true),
   archiveListeners: new Set<() => void>(),
   parents: new Map<string, CrewLink>(),
 }))
@@ -28,7 +28,12 @@ import {
   noteListedAgents,
   noteNextArchiveCrossing,
   stopFollowingVersionInputs,
+  type AwaitingRow,
 } from "../../sessionList/versionInputs"
+
+function awaiting(sessionId: string, row: Partial<AwaitingRow> = {}): AwaitingRow {
+  return { sessionId, dirName: "proj", running: true, mtimeMs: Date.now(), ...row }
+}
 
 describe("list version inputs without file events", () => {
   let changes: CatalogChange[]
@@ -77,7 +82,7 @@ describe("list version inputs without file events", () => {
     await vi.advanceTimersByTimeAsync(10_000)
     expect(mocks.agentsRunning).not.toHaveBeenCalled()
 
-    noteListedAgents("s1", { dirName: "proj", running: true })
+    noteListedAgents("list", [awaiting("s1")])
     await vi.advanceTimersByTimeAsync(5_000)
     expect(mocks.agentsRunning).toHaveBeenCalledWith("proj", "s1")
     expect(bumps()).toBe(0)
@@ -90,12 +95,34 @@ describe("list version inputs without file events", () => {
     expect(mocks.agentsRunning).not.toHaveBeenCalled()
   })
 
-  it("forgets a row that no longer awaits agents", async () => {
+  it("forgets rows the next build of the same list no longer reports", async () => {
     followVersionInputs()
-    noteListedAgents("s1", { dirName: "proj", running: true })
-    noteListedAgents("s1", null)
+    noteListedAgents("list", [awaiting("s1"), awaiting("s2")])
+    noteListedAgents("list", [awaiting("s2")])
+    noteListedAgents("other list", [awaiting("s3")])
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(mocks.agentsRunning.mock.calls.map(([, sessionId]) => sessionId).sort()).toEqual(["s2", "s3"])
+
+    mocks.agentsRunning.mockClear()
+    noteListedAgents("list", [])
+    noteListedAgents("other list", [])
     await vi.advanceTimersByTimeAsync(10_000)
     expect(mocks.agentsRunning).not.toHaveBeenCalled()
+  })
+
+  it("leaves orphans alone and checks only the newest rows", async () => {
+    followVersionInputs()
+    const now = Date.now()
+    mocks.agentsRunning.mockResolvedValue(false)
+    noteListedAgents("list", [
+      awaiting("orphan", { running: false, mtimeMs: now - 60 * 60_000 }),
+      ...Array.from({ length: 40 }, (_, i) => awaiting(`s${i}`, { mtimeMs: now - i * 1000, running: false })),
+    ])
+    await vi.advanceTimersByTimeAsync(5_000)
+    const checked = mocks.agentsRunning.mock.calls.map(([, sessionId]) => sessionId)
+    expect(checked).toHaveLength(32)
+    expect(checked).not.toContain("orphan")
+    expect(checked).not.toContain("s39")
   })
 
   it("bumps on every archive write", () => {
@@ -139,7 +166,7 @@ describe("list version inputs without file events", () => {
   it("does nothing once nobody follows", async () => {
     mocks.active = [{ sessionId: "a" }]
     followVersionInputs()
-    noteListedAgents("s1", { dirName: "proj", running: true })
+    noteListedAgents("list", [awaiting("s1")])
     stopFollowingVersionInputs()
     mocks.active = []
     mocks.agentsRunning.mockResolvedValue(false)

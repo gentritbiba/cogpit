@@ -12,7 +12,7 @@ import { catalogRow } from "../../sessionCatalog"
 import { peekSessionPullRequests, type SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import type { ArchiveReason } from "../../lib/sessionArchive"
 import { searchTranscript } from "../../sessionList/searchMemo"
-import { noteListedAgents } from "../../sessionList/versionInputs"
+import type { AwaitingRow } from "../../sessionList/versionInputs"
 import { projectLabel } from "./projectLabel"
 
 /** What every row of one /api/active-sessions request is read against. */
@@ -26,6 +26,8 @@ export interface ActiveSessionQuery {
   teamConfigs: TeamConfigCache
   /** Aborted once nobody waits for the list any more. */
   signal?: AbortSignal
+  /** Collects the rows read that await their agents. */
+  awaitingAgents?: AwaitingRow[]
 }
 
 const TITLE_LENGTH = 80
@@ -100,10 +102,9 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
     // untouched while its agents work, which is exactly what it cannot see.
     const hasRunningAgents = statusInfo.status === "awaiting_agents"
       && await sessionAgentsRunning(c.dirName, sessionId)
-    noteListedAgents(
-      sessionId,
-      statusInfo.status === "awaiting_agents" ? { dirName: c.dirName, running: hasRunningAgents } : null,
-    )
+    if (statusInfo.status === "awaiting_agents") {
+      query.awaitingAgents?.push({ sessionId, dirName: c.dirName, running: hasRunningAgents, mtimeMs: c.mtimeMs })
+    }
     const archivedReason = query.archivedById.get(sessionId)
 
     return {

@@ -64,21 +64,51 @@ function armRuntimeCheck(): void {
 
 // ── Agents of sessions awaiting them ────────────────────────────────
 
-interface AwaitingRow {
+/** A listed row awaiting its agents, with whether the list showed them running. */
+export interface AwaitingRow {
+  sessionId: string
   dirName: string
   running: boolean
+  /** When its transcript last changed. */
+  mtimeMs: number
 }
 
-/** Listed rows awaiting their agents, with whether the list showed those agents running. */
-const awaiting = new Map<string, AwaitingRow>()
+/** The lists remembered, most recent last; each build's rows replace what that list reported before. */
+const MAX_LISTS = 16
+/** Agents stopped and the transcript untouched this long: an orphan nothing will finish. */
+const ORPHANED_AFTER_MS = 15 * 60_000
+const MAX_WATCHED = 32
+
+const awaitingByList = new Map<string, readonly AwaitingRow[]>()
 let agentsTimer: ReturnType<typeof setInterval> | null = null
 let checkingAgents = false
 
-/** What a list build read for one row; only rows awaiting agents are watched. */
-export function noteListedAgents(sessionId: string, row: AwaitingRow | null): void {
-  if (row) awaiting.set(sessionId, row)
-  else awaiting.delete(sessionId)
+/** The rows one list build read that await agents; `list` names that list for that caller. */
+export function noteListedAgents(list: string, rows: readonly AwaitingRow[]): void {
+  awaitingByList.delete(list)
+  if (rows.length > 0) awaitingByList.set(list, rows)
+  if (awaitingByList.size > MAX_LISTS) awaitingByList.delete(awaitingByList.keys().next().value!)
   syncAgentsTimer()
+}
+
+/** The newest rows worth checking, once each. */
+function watchedRows(now: number): AwaitingRow[] {
+  const bySession = new Map<string, AwaitingRow>()
+  for (const rows of awaitingByList.values()) {
+    for (const row of rows) {
+      if (!row.running && now - row.mtimeMs > ORPHANED_AFTER_MS) continue
+      bySession.set(row.sessionId, row)
+    }
+  }
+  return [...bySession.values()].sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, MAX_WATCHED)
+}
+
+function forgetAwaiting(sessionId: string): void {
+  for (const [list, rows] of awaitingByList) {
+    const kept = rows.filter((row) => row.sessionId !== sessionId)
+    if (kept.length === 0) awaitingByList.delete(list)
+    else if (kept.length < rows.length) awaitingByList.set(list, kept)
+  }
 }
 
 async function checkAgents(): Promise<void> {
@@ -86,10 +116,10 @@ async function checkAgents(): Promise<void> {
   checkingAgents = true
   try {
     let changed = false
-    for (const [sessionId, row] of [...awaiting]) {
-      if (await sessionAgentsRunning(row.dirName, sessionId) === row.running) continue
+    for (const row of watchedRows(Date.now())) {
+      if (await sessionAgentsRunning(row.dirName, row.sessionId) === row.running) continue
       // The next build reads the row again and reports what it shows.
-      awaiting.delete(sessionId)
+      forgetAwaiting(row.sessionId)
       changed = true
     }
     if (changed) bump()
@@ -100,7 +130,7 @@ async function checkAgents(): Promise<void> {
 }
 
 function syncAgentsTimer(): void {
-  const wanted = following && awaiting.size > 0
+  const wanted = following && watchedRows(Date.now()).length > 0
   if (wanted && !agentsTimer) {
     agentsTimer = setInterval(() => void checkAgents(), AGENTS_CHECK_MS)
     agentsTimer.unref?.()
@@ -194,7 +224,7 @@ export function stopFollowingVersionInputs(): void {
 
 export function __resetVersionInputsForTest(): void {
   stopFollowingVersionInputs()
-  awaiting.clear()
+  awaitingByList.clear()
   crossingAt = Infinity
   runtimeSignature = ""
   originsSignature = null
