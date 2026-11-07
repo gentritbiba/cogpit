@@ -105,7 +105,8 @@ export function visitJoinedText(
   return parts.flatMap((part, index) => index === first ? [withText(part, replacement)] : texts[index] === undefined ? [part] : [])
 }
 
-function liftCalls(calls: readonly ToolCall[]): void {
+/** Moves the stub of each call's elided result onto it as `resultRef`, leaving the preview as `result`. */
+export function liftElidedCalls(calls: readonly ToolCall[]): void {
   for (const call of calls) {
     const elided = readElided(call.result)
     if (!elided) continue
@@ -126,10 +127,10 @@ export function liftElidedResults(session: ParsedSession): ParsedSession {
 
 /** `liftElidedResults` for one turn. */
 export function liftElidedTurn(turn: Turn): void {
-  liftCalls(turn.toolCalls)
-  for (const message of turn.subAgentActivity) liftCalls(message.toolCalls)
+  liftElidedCalls(turn.toolCalls)
+  for (const message of turn.subAgentActivity) liftElidedCalls(message.toolCalls)
   for (const block of turn.contentBlocks) {
-    if (block.kind === "tool_calls" || block.kind === "plan_mode") liftCalls(block.toolCalls)
-    else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftCalls(message.toolCalls)
+    if (block.kind === "tool_calls" || block.kind === "plan_mode") liftElidedCalls(block.toolCalls)
+    else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftElidedCalls(message.toolCalls)
   }
 }

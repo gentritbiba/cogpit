@@ -17,3 +17,34 @@ export function cutsBeforeBoundaries(
     return cut
   })
 }
+
+/** A transcript line as page cuts read it: a JSON object, or null. */
+export function parsePageRecord(line: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(line)
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The leading lines of a transcript's header that come before its first turn:
+ * what every page is parsed after. Header lines past that point belong to the
+ * first turn, and prepending them to a later page would open a phantom turn.
+ */
+export function linesBeforeFirstTurn(
+  format: { pageCuts(records: readonly Record<string, unknown>[]): number[] },
+  lines: readonly string[],
+): string[] {
+  const records: Record<string, unknown>[] = []
+  const lineOf: number[] = []
+  lines.forEach((line, index) => {
+    const record = parsePageRecord(line)
+    if (!record) return
+    records.push(record)
+    lineOf.push(index)
+  })
+  const [firstCut] = format.pageCuts(records)
+  return firstCut === undefined ? [...lines] : lines.slice(0, lineOf[firstCut])
+}

@@ -3,8 +3,13 @@ import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isSharedPath } from "@/lib/sharePath"
+import type { TailResponse } from "@/lib/sessionLoader"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "../../shared/session/types"
 import { isCodexSessionText, parseCodexSession } from "../../shared/session/codex"
+import { liftElidedCalls } from "../../shared/session/resultProjection"
+import { linesBeforeFirstTurn } from "../../shared/session/pageCuts"
+import { agentKindForDirName, formatFor, type AgentFormat } from "../../shared/session/agents"
+import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 
 function extractToolResultText(content: string | ContentBlock[] | undefined | null): string {
   if (!content) return ""
@@ -127,6 +132,50 @@ export function parseSubagentJsonl(jsonlText: string, agentId: string): SubAgent
   return messages
 }
 
+interface OlderPage {
+  lines: string[]
+  byteOffset: number
+  hasMore: boolean
+  unit?: "turns"
+  cutTurn?: boolean
+}
+
+/**
+ * The end of a finished sub-agent's transcript, back to its return: the last
+ * message carrying text, all the panel shows of it. A short tail usually
+ * holds it. Pages go back a turn at a time while there is none yet, or while
+ * it is the page's first message and so may have begun above the page.
+ */
+export async function loadSubagentReturn(
+  transcriptUrl: string,
+  agentId: string,
+  format: Pick<AgentFormat, "pageCuts">,
+): Promise<SubAgentMessage[] | null> {
+  const tailRes = await authFetch(`${transcriptUrl}?tail=1&projection=${RESULT_PROJECTION}`)
+  if (!tailRes.ok) return null
+  const tail = await tailRes.json() as TailResponse
+  const prologue = linesBeforeFirstTurn(format, tail.headerLines)
+  const inPrologue = new Set(prologue)
+  let lines = tail.tailLines.filter((line) => !inPrologue.has(line))
+  let { byteOffset, hasMore } = tail
+  let startsOnTurn = false
+
+  for (;;) {
+    const messages = parseSubagentJsonl([...prologue, ...lines].join("\n"), agentId)
+    const shown = messages.findLastIndex((message) => message.text.length > 0)
+    if (!hasMore || (shown >= 0 && (shown > 0 || startsOnTurn))) {
+      for (const message of messages) liftElidedCalls(message.toolCalls)
+      return messages
+    }
+    const olderRes = await authFetch(`${transcriptUrl}?before=${byteOffset}&count=1&unit=turns&projection=${RESULT_PROJECTION}`)
+    if (!olderRes.ok) return null
+    const older = await olderRes.json() as OlderPage
+    lines = [...older.lines.filter((line) => !inPrologue.has(line)), ...lines]
+    ;({ byteOffset, hasMore } = older)
+    startsOnTurn = older.unit === "turns" && !older.cutTurn
+  }
+}
+
 // Module-level cache: keyed by "dirName/sessionId/agentId"
 const subagentCache = new Map<string, SubAgentMessage[]>()
 
@@ -134,8 +183,8 @@ const subagentCache = new Map<string, SubAgentMessage[]>()
  * Lazy-loads subagent JSONL content when background agents only have
  * an async_launched summary (v2.1.63+ format without inline agent_progress).
  *
- * Returns the original messages if they already have content,
- * or enriched messages from the subagent JSONL file.
+ * Returns the original messages if they already have content, or enriched
+ * messages from the end of the subagent transcript (`loadSubagentReturn`).
  *
  * A share guest cannot load any of it: the subagent URL names four identity
  * segments and the guest allowlist admits exactly two, which is the same rule
@@ -202,10 +251,8 @@ export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean
           try {
             const url = `/api/sessions/${encodeURIComponent(dirName!)}/${encodeURIComponent(sessionId!)}` +
               `/subagents/agent-${encodeURIComponent(agentId)}.jsonl`
-            const res = await authFetch(url)
-            if (!res.ok) return
-            const text = await res.text()
-            const parsed = parseSubagentJsonl(text, agentId)
+            const parsed = await loadSubagentReturn(url, agentId, formatFor(agentKindForDirName(dirName!)))
+            if (!parsed) return
             subagentCache.set(cacheKey, parsed)
             fetchedRef.current.add(cacheKey)
             results.set(agentId, parsed)

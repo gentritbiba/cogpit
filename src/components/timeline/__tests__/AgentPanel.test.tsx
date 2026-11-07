@@ -58,7 +58,7 @@ function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()]) {
 
 beforeEach(() => {
   authFetch.mockReset()
-  authFetch.mockResolvedValue({ ok: true, text: async () => "" })
+  authFetch.mockResolvedValue({ ok: true, json: async () => ({ headerLines: [], tailLines: [], byteOffset: 0, hasMore: false }) })
   window.history.pushState({}, "", "/")
 })
 
@@ -90,7 +90,7 @@ describe("AgentPanel on a shared session", () => {
     renderPanel()
     expect(screen.queryByText(UNAVAILABLE)).toBeNull()
     expect(authFetch).toHaveBeenCalledWith(
-      "/api/sessions/-Users-me-proj/sess-1/subagents/agent-ag1.jsonl",
+      "/api/sessions/-Users-me-proj/sess-1/subagents/agent-ag1.jsonl?tail=1&projection=results-v1",
     )
   })
 
