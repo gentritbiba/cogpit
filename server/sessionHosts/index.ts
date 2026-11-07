@@ -120,32 +120,34 @@ async function stateOrError(host: SessionHost, sessionId: string): Promise<Sessi
  * about the others, so hundreds of sessions on a dead device cost one request.
  */
 export async function statesAcrossHosts(sessions: readonly HostedSession[]): Promise<SessionState[]> {
-  const groups = new Map<SessionHost, string[]>()
-  for (const { host, sessionId } of sessions) groups.set(host, [...(groups.get(host) ?? []), sessionId])
-  const states = new Map<string, SessionState>()
-  await Promise.all([...groups].map(async ([host, ids]) => {
+  // By position: a device may spell a session's id differently in its answer.
+  const groups = new Map<SessionHost, number[]>()
+  sessions.forEach(({ host }, index) => groups.set(host, [...(groups.get(host) ?? []), index]))
+  const states: SessionState[] = new Array(sessions.length)
+  await Promise.all([...groups].map(async ([host, indexes]) => {
     if (!host.remote) {
-      for (const state of await Promise.all(ids.map((id) => stateOrError(host, id)))) states.set(state.sessionId, state)
+      await Promise.all(indexes.map(async (index) => { states[index] = await stateOrError(host, sessions[index]!.sessionId) }))
       return
     }
     let failure: string | undefined
-    const ask = async (sessionId: string): Promise<SessionState> => {
+    const ask = async (index: number): Promise<void> => {
+      const { sessionId } = sessions[index]!
       if (failure === undefined) {
         try {
           const state = await host.state(sessionId)
-          if (state.outcome !== "unreachable") return state
+          if (state.outcome !== "unreachable") { states[index] = state; return }
           failure ??= state.error ?? `${host.name} did not answer`
         } catch (error) {
           failure ??= errorMessage(error)
         }
       }
-      return { sessionId, outcome: "unreachable", live: false, running: false, waiting: [], error: failure }
+      states[index] = { sessionId, outcome: "unreachable", live: false, running: false, waiting: [], error: failure }
     }
-    const [first, ...rest] = ids
-    states.set(first!, await ask(first!))
-    for (const state of await Promise.all(rest.map(ask))) states.set(state.sessionId, state)
+    const [first, ...rest] = indexes
+    await ask(first!)
+    await Promise.all(rest.map(ask))
   }))
-  return sessions.map(({ sessionId }) => states.get(sessionId)!)
+  return states
 }
 
 /**

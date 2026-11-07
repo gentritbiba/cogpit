@@ -233,4 +233,16 @@ describe("session host resolution", () => {
     expect(states[1]!.error).toBeTruthy()
     expect(dead.seen.filter((entry) => entry.url.startsWith("/api/session-status/"))).toHaveLength(1)
   })
+
+  it("answers each session in the order asked, however a device spells its id", async () => {
+    const device = await fakeDevice((req, res) => send(res, 200, state(req.url.split("/").pop()!.toUpperCase(), "running")))
+    const { localHost } = await import("../../sessionHosts/localHost")
+    const host = createRemoteHost(device.device.id)
+    const states = await statesAcrossHosts([
+      { host, sessionId: "abc" },
+      { host: localHost, sessionId: "here" },
+      { host, sessionId: "def" },
+    ])
+    expect(states.map(({ sessionId, outcome }) => [sessionId, outcome])).toEqual([["ABC", "running"], ["here", "completed"], ["DEF", "running"]])
+  })
 })
