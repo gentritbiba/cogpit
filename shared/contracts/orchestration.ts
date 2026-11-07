@@ -75,6 +75,36 @@ export interface DelegatedTask {
   notified?: string[]
 }
 
+/** Where a delegated task stands, without its result: what readers that only count or place tasks need. */
+export type DelegatedTaskState = Pick<DelegatedTask, "id" | "parentSessionId" | "childSessionId" | "state" | "createdAt" | "updatedAt" | "acknowledgedAt">
+
+/**
+ * `GET /api/delegated-tasks?sessionId=<id>&view=counts`: the tasks a session
+ * handed out, counted. Unread tasks are neither acknowledged nor cancelled.
+ * Answers with a weak ETag; send it back as `If-None-Match` for a 304.
+ */
+export interface DelegatedTaskCounts {
+  total: number
+  running: number
+  unread: number
+  unreadRunning: number
+}
+
+export const isUnreadTask = (task: Pick<DelegatedTask, "state" | "acknowledgedAt">) => !task.acknowledgedAt && task.state !== "cancelled"
+
+export function countDelegatedTasks(tasks: Iterable<Pick<DelegatedTask, "state" | "acknowledgedAt">>): DelegatedTaskCounts {
+  const counts = { total: 0, running: 0, unread: 0, unreadRunning: 0 }
+  for (const task of tasks) {
+    const running = task.state === "running"
+    const unread = isUnreadTask(task)
+    counts.total++
+    if (running) counts.running++
+    if (unread) counts.unread++
+    if (unread && running) counts.unreadRunning++
+  }
+  return counts
+}
+
 export interface ProviderInstance {
   setupCommand?: string
   retired?: boolean

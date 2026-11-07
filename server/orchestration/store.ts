@@ -2,11 +2,33 @@ import { createHash, randomUUID } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { openDatabase, type SqliteDatabase } from "./database"
-import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
+import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, DelegatedTaskState, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
 import type { CrewChatAuthor, CrewChatDelivery, CrewChatMessage } from "../../shared/contracts/crewChat"
 import { isTerminalOccurrence, occurrenceCommandId, occurrenceCreationId, type ExecutionGrant, type GrantRef, type OccurrenceHold, type OccurrenceInput, type OccurrenceState, type TriggerOccurrence, type TriggerRecord, type UnattendedAction } from "../../shared/contracts/triggers"
 
 type Row = Record<string, unknown>
+/** Task fields the indexes hold, so reads that need only these never parse a task's result. */
+const TASK_FIELD = {
+  parent: "json_extract(data,'$.parentSessionId')",
+  child: "json_extract(data,'$.childSessionId')",
+  state: "json_extract(data,'$.state')",
+  acknowledgedAt: "json_extract(data,'$.acknowledgedAt')",
+  createdAt: "json_extract(data,'$.createdAt')",
+  updatedAt: "json_extract(data,'$.updatedAt')",
+} as const
+const UNREAD_TASK = `${TASK_FIELD.acknowledgedAt} IS NULL AND ${TASK_FIELD.state}<>'cancelled'`
+const TASK_STATE_COLUMNS = `id,${TASK_FIELD.parent} parent,${TASK_FIELD.child} child,${TASK_FIELD.state} state,${TASK_FIELD.acknowledgedAt} acknowledged_at,${TASK_FIELD.createdAt} created_at,${TASK_FIELD.updatedAt} updated_at`
+function taskState(row: Row): DelegatedTaskState {
+  return {
+    id: String(row.id),
+    parentSessionId: String(row.parent),
+    childSessionId: String(row.child),
+    state: row.state as DelegatedTask["state"],
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    ...(row.acknowledged_at == null ? {} : { acknowledgedAt: Number(row.acknowledged_at) }),
+  }
+}
 export interface StoredCommand {
   receipt: CommandReceipt
   scope: string
@@ -91,7 +113,10 @@ export class OrchestrationStore {
           CREATE INDEX IF NOT EXISTS event_conversation ON events(conversation_id,sequence);
           CREATE TABLE IF NOT EXISTS dispatcher(id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, epoch INTEGER NOT NULL, expires_at INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, scope TEXT NOT NULL, source_id TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(scope,source_id));
-          CREATE INDEX IF NOT EXISTS task_parent ON tasks(scope,json_extract(data,'$.parentSessionId'));
+          DROP INDEX IF EXISTS task_parent;
+          CREATE INDEX IF NOT EXISTS task_by_parent ON tasks(scope,${TASK_FIELD.parent},${TASK_FIELD.child},${TASK_FIELD.state},${TASK_FIELD.acknowledgedAt},${TASK_FIELD.createdAt},${TASK_FIELD.updatedAt},id);
+          CREATE INDEX IF NOT EXISTS task_by_child ON tasks(scope,${TASK_FIELD.child},${TASK_FIELD.parent},${TASK_FIELD.state},${TASK_FIELD.acknowledgedAt},${TASK_FIELD.createdAt},${TASK_FIELD.updatedAt},id);
+          CREATE INDEX IF NOT EXISTS task_unread ON tasks(scope,${TASK_FIELD.parent}) WHERE ${UNREAD_TASK};
           CREATE TABLE IF NOT EXISTS instances(id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS transitions(conversation_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS operations(scope TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,input TEXT NOT NULL,result TEXT,PRIMARY KEY(scope,id));
@@ -546,6 +571,27 @@ export class OrchestrationStore {
       ? this.db.prepare("SELECT data FROM tasks WHERE scope=?").all(scope)
       : this.db.prepare("SELECT data FROM tasks WHERE scope=? AND json_extract(data,'$.parentSessionId')=?").all(scope, parentSessionId)) as Row[]
     return rows.map((row) => decode<DelegatedTask>(row.data))
+  }
+  task(scope: string, id: string): DelegatedTask | null {
+    const row = this.db.prepare("SELECT data FROM tasks WHERE scope=? AND id=?").get(scope, id) as Row | undefined
+    return row ? decode<DelegatedTask>(row.data) : null
+  }
+  /** Tasks without their results, for one parent or for the given children. */
+  taskStates(scope: string, by: { parentSessionId: string } | { childSessionIds: readonly string[] }): DelegatedTaskState[] {
+    const rows = ("parentSessionId" in by
+      ? this.db.prepare(`SELECT ${TASK_STATE_COLUMNS} FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=?`).all(scope, by.parentSessionId)
+      : this.db.prepare(`SELECT ${TASK_STATE_COLUMNS} FROM tasks WHERE scope=? AND ${TASK_FIELD.child} IN (SELECT value FROM json_each(?))`).all(scope, JSON.stringify(by.childSessionIds))) as Row[]
+    return rows.map(taskState)
+  }
+  /** A parent's tasks it has not acknowledged and nobody cancelled, without their results. */
+  unreadTasks(scope: string, parentSessionId: string): Omit<DelegatedTask, "result">[] {
+    return (this.db.prepare(`SELECT json_remove(data,'$.result') data FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=? AND ${UNREAD_TASK}`).all(scope, parentSessionId) as Row[])
+      .map((row) => decode<Omit<DelegatedTask, "result">>(row.data))
+  }
+  /** What a parent has been told about one child, across all its tasks for it. */
+  taskNotices(scope: string, parentSessionId: string, childSessionId: string): string[] {
+    return (this.db.prepare(`SELECT json_extract(data,'$.notified') notified FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=? AND ${TASK_FIELD.child}=?`).all(scope, parentSessionId, childSessionId) as Row[])
+      .flatMap((row) => (row.notified ? decode<string[]>(row.notified) : []))
   }
   updateTask(scope: string, id: string, patch: Partial<Pick<DelegatedTask, "state" | "result" | "wakeupCommandId" | "acknowledgedAt" | "deliveryDisposition" | "blockingDeadline" | "notified">>, expectedState?: DelegatedTask["state"]): DelegatedTask {
     return this.transaction(() => {
