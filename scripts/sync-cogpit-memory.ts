@@ -36,6 +36,7 @@ const FILES = [
   "turnContent.ts",
   "toolResults.ts",
   "resultProjection.ts",
+  "pageCuts.ts",
   "codex-results.ts",
   "composerContext.ts",
   "sessionStatus.ts",

@@ -24,6 +24,7 @@ import { getCodexExecCalls, isCodexExecCall, type CodexExecCall } from "./codex-
 import {
   appendClaudeSession,
   brandClaudeBranch,
+  claudePageCuts,
   claudeTurnBoundaries,
   deriveClaudeSessionStatus,
   extractClaudeMetadataFromLines,
@@ -35,6 +36,7 @@ import {
 import {
   appendCodexSession,
   brandCodexBranch,
+  codexPageCuts,
   codexPageHeaderLine,
   codexTurnBoundaries,
   deriveCodexSessionStatus,
@@ -157,6 +159,13 @@ export interface AgentFormat {
    */
   turnBoundaries(records: readonly Record<string, unknown>[]): number[]
   /**
+   * Indexes of the records at which a page of the transcript may start, one
+   * per turn boundary: the boundary moved back over the records written ahead
+   * of it that its turn owns, so a page cut there holds whole turns. Paging
+   * only; undo cuts on `turnBoundaries`.
+   */
+  pageCuts(records: readonly Record<string, unknown>[]): number[]
+  /**
    * Visits the tool-result bodies a record carries, in a fixed order, and
    * writes back what the visitor returns (result projection v1). Must leave
    * everything the parser reads besides those bodies as it was.
@@ -188,6 +197,7 @@ const codexFormat: AgentFormat = {
   pageHeaderLine: codexPageHeaderLine,
   brandBranch: brandCodexBranch,
   turnBoundaries: codexTurnBoundaries,
+  pageCuts: codexPageCuts,
   projectResults: projectCodexResults,
 }
 
@@ -203,6 +213,7 @@ const copilotFormat: AgentFormat = {
   isNoiseLine: hasNoNoiseLines,
   brandBranch: brandCopilotBranch,
   turnBoundaries: copilotTurnBoundaries,
+  pageCuts: copilotTurnBoundaries,
   projectResults: projectCopilotResults,
 }
 
@@ -219,6 +230,7 @@ const claudeFormat: AgentFormat = {
   isNoiseLine: isClaudeNoiseLine,
   brandBranch: brandClaudeBranch,
   turnBoundaries: claudeTurnBoundaries,
+  pageCuts: claudePageCuts,
   projectResults: projectClaudeResults,
 }
 

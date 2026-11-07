@@ -4,6 +4,7 @@ import { appendAssistantText } from "./turnContent"
 import { agentSignedOutTitle, classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
 import { linkAsyncAnswers } from "./asyncAnswers"
+import { cutsBeforeBoundaries } from "./pageCuts"
 import { composerPromptText } from "./composerContext"
 import {
   findFailedNestedPatchCallIds,
@@ -1656,4 +1657,17 @@ export function codexTurnBoundaries(
   // never land somewhere the parser does not consider a turn start. Stats are
   // skipped because only the indexes are wanted.
   return walkCodexRecords(records, { skipStats: true }).turnStartIndices
+}
+
+/**
+ * Where a page may start: each turn boundary, moved back over a `compacted`
+ * record, whose note the next turn carries, and the world-state snapshots the
+ * walk skips.
+ */
+export function codexPageCuts(records: readonly Record<string, unknown>[]): number[] {
+  return cutsBeforeBoundaries(
+    codexTurnBoundaries(records),
+    records,
+    (record) => record.type === "compacted" || record.type === "world_state",
+  )
 }
