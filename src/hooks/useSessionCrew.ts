@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { authFetch, jsonFetch } from "@/lib/auth"
-import { useVisiblePolling } from "@/hooks/useVisiblePolling"
+import { jsonFetch } from "@/lib/auth"
+import { fetchIfChanged } from "@/lib/conditionalFetch"
+import { jsonEqual } from "@/lib/jsonEqual"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import type { CrewMember, SessionCrew } from "../../shared/contracts/crew"
 import type { PendingInputResponse } from "../../shared/contracts/pendingInput"
 
-const POLL_INTERVAL = 4_000
+/** While a member works or waits on the user. */
+export const ACTIVE_POLL_MS = 4_000
+/** While every member has settled. */
+export const SETTLED_POLL_MS = 15_000
 
 export interface SessionCrewState {
   crew: SessionCrew | null
@@ -17,9 +21,30 @@ export interface SessionCrewState {
   stop: (member: CrewMember) => Promise<void>
 }
 
+const isBusy = (member: CrewMember) => member.outcome === "running" || member.outcome === "needs_input" || member.status === "deferred"
+
+/**
+ * The next crew, reusing every member object that did not change, and the
+ * current crew itself when nothing did, so memoized rows keep their identity.
+ */
+export function shareCrew(current: SessionCrew | null, next: SessionCrew): SessionCrew {
+  if (!current) return next
+  const previous = new Map(current.members.map((member) => [member.sessionId, member]))
+  let same = current.sessionId === next.sessionId && current.rootId === next.rootId && current.members.length === next.members.length
+  const members = next.members.map((member, index) => {
+    const old = previous.get(member.sessionId)
+    const kept = old && jsonEqual(old, member) ? old : member
+    if (kept !== current.members[index]) same = false
+    return kept
+  })
+  return same ? current : { ...next, members }
+}
+
 /**
  * The crew a session belongs to, kept current while the tab is visible, with
- * the actions the Crew panel takes on its members. Moving to another session
+ * the actions the Crew panel takes on its members. It is read every few
+ * seconds while a member works or waits on the user and less often once all
+ * have settled, and again right after an action. Moving to another session
  * of the same crew keeps the crew on screen while the next read runs.
  */
 export function useSessionCrew(sessionId: string | null): SessionCrewState {
@@ -29,6 +54,9 @@ export function useSessionCrew(sessionId: string | null): SessionCrewState {
   const refreshList = useSessionInventoryOptional()?.refresh
   const currentSession = useRef(sessionId)
   const inFlight = useRef(new Set<string>())
+  const etag = useRef<string | null>(null)
+  const latestRequest = useRef(0)
+  const crewBusy = useRef(true)
   useLayoutEffect(() => {
     currentSession.current = sessionId
     return () => { currentSession.current = null }
@@ -36,28 +64,53 @@ export function useSessionCrew(sessionId: string | null): SessionCrewState {
 
   const poll = useCallback(async (isActive: () => boolean) => {
     if (!sessionId) return
+    const request = ++latestRequest.current
+    const current = () => isActive() && request === latestRequest.current
     try {
-      const response = await authFetch(`/api/session-crew/${encodeURIComponent(sessionId)}`)
-      if (!isActive()) return
-      if (!response.ok) {
-        setError(response.status === 404 ? "This session is no longer available." : "Couldn't load the crew.")
+      const result = await fetchIfChanged<SessionCrew>(`/api/session-crew/${encodeURIComponent(sessionId)}?brief=1`, etag.current)
+      if (!current()) return
+      if (result.kind === "failed") {
+        setError(result.status === 404 ? "This session is no longer available." : "Couldn't load the crew.")
         return
       }
-      const next = await response.json() as SessionCrew
-      if (!isActive()) return
-      setCrew((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next))
+      if (result.kind === "changed") {
+        etag.current = result.etag
+        crewBusy.current = result.value.members.some(isBusy)
+        setCrew((previous) => shareCrew(previous, result.value))
+      }
       setError(null)
     } catch {
-      if (isActive()) setError("Couldn't load the crew.")
+      if (current()) setError("Couldn't load the crew.")
     }
   }, [sessionId])
-  useVisiblePolling(sessionId ? poll : null, POLL_INTERVAL)
 
   useEffect(() => {
     setCrew((current) => (current?.members.some((member) => member.sessionId === sessionId) ? current : null))
     setError(null)
     setBusy(new Set())
-  }, [sessionId])
+    etag.current = null
+    crewBusy.current = true
+    if (!sessionId) return
+    let active = true
+    let running = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const run = () => {
+      clearTimeout(timer)
+      if (!active || running || document.visibilityState !== "visible") return
+      running = true
+      void poll(() => active).finally(() => {
+        running = false
+        if (active) timer = setTimeout(run, crewBusy.current ? ACTIVE_POLL_MS : SETTLED_POLL_MS)
+      })
+    }
+    run()
+    document.addEventListener("visibilitychange", run)
+    return () => {
+      active = false
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", run)
+    }
+  }, [poll, sessionId])
 
   const act = useCallback(async (key: string, request: () => Promise<Response>, failure: string) => {
     const actionKey = `${sessionId}:${key}`
