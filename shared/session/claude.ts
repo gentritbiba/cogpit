@@ -152,27 +152,30 @@ export function parseClaudeSession(jsonlText: string, options?: ParseSessionOpti
  * Avoids re-parsing all turns from scratch — only re-processes the last
  * (potentially incomplete) turn and any new messages.
  *
- * Takes over `existing`: its records are extended in place and shared with
- * the result, so the caller keeps using the result, not `existing`.
+ * `existing` is left as it was, unless `inPlace`: then its records are
+ * extended in place and shared with the result, which saves copying them for
+ * a caller that keeps only the result.
  */
 export function appendClaudeSession(
   existing: ParsedSession,
   newJsonlText: string,
+  inPlace = false,
 ): ParsedSession {
   const newMessages = parseLines(newJsonlText)
   if (newMessages.length === 0) return existing
 
   // Only this format's records reach here, so they use Claude's discriminated
   // message union and are safe to pass to the Claude turn builder.
-  const allRawMessages = existing.rawMessages as RawMessage[]
-  const existingCount = allRawMessages.length
+  const existingRawMessages = existing.rawMessages as RawMessage[]
+  const allRawMessages = inPlace ? existingRawMessages : [...existingRawMessages]
+  const existingCount = existingRawMessages.length
 
   // Only the last turn can still change, so keep every turn before it and
   // rebuild from where it started. Both the cut point and the keep-count come
   // from `turnStarts` so they cannot disagree — even for a window that begins
   // mid-turn (bottom-first loading) and therefore has no turn-starting user
   // record to walk back to.
-  const turnStarts = turnStartsByRecords.get(allRawMessages) ?? findTurnStartIndices(allRawMessages)
+  const turnStarts = turnStartsByRecords.get(existingRawMessages) ?? findTurnStartIndices(existingRawMessages)
   // Turns paged in above the loaded window have no raw messages behind them.
   const historyTurnCount = Math.max(0, existing.turns.length - turnStarts.length)
   let rebuildFromTurn = Math.max(0, turnStarts.length - 1)

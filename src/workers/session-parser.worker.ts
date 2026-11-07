@@ -1,4 +1,4 @@
-import { parseSession, parseSessionAppend } from "../../shared/session/parser"
+import { appendSessionInPlace, parseSession } from "../../shared/session/parser"
 import { liftElidedTurn } from "../../shared/session/resultProjection"
 import { computeSessionDigest, toSessionView, type SessionDigest, type SessionView } from "../../shared/session/sessionDigest"
 import type { ParsedSession, SessionStats, Turn } from "../../shared/session/types"
@@ -107,7 +107,7 @@ function append(base: KeptVersion, newText: string): (WorkerResponse & { type: "
   if (!held || held.version !== base.version) return null
   const before = held.session.turns
   const scannedTo = held.session.rawMessages.length
-  const session = parseSessionAppend(held.session, newText)
+  const session = appendSessionInPlace(held.session, newText)
   const turns = session.turns
   const turnVersions: number[] = []
   let fromTurn = turns.length
