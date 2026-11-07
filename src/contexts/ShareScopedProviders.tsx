@@ -11,13 +11,13 @@ import { useLiveSession } from "@/hooks/useLiveSession"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useSessionPaging } from "@/hooks/useSessionPaging"
 import { useSessionState } from "@/hooks/useSessionState"
+import { useSessionController } from "@/hooks/useSessionController"
 import { useShareChat } from "@/hooks/useShareChat"
 import { useSharePermissions } from "@/hooks/useSharePermissions"
 import { useTheme } from "@/hooks/useTheme"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { setMe } from "@/lib/capabilities"
 import { detectPendingInteraction } from "../../shared/session/parser"
-import { loadSessionTailFresh } from "@/lib/sessionLoader"
 import { agentKindForDirName } from "@/lib/agents"
 import { stopShare, type SharedSessionInfo } from "@/lib/shareApi"
 import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
@@ -66,8 +66,9 @@ interface ShareScopedProvidersProps {
 export function ShareScopedProviders({ info, children }: ShareScopedProvidersProps) {
   const isMobile = useIsMobile()
   const theme = useTheme()
-  const [state, dispatch] = useSessionState()
+  const [state, dispatchState] = useSessionState()
   const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
+  const { sessions, dispatch } = useSessionController(dispatchState, workerParse)
   const [loadState, setLoadState] = useState<ShareLoadState>("loading")
 
   // Host affordances read this module cell directly (useCapability), not the
@@ -82,18 +83,17 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
 
   const loadSession = useCallback(async () => {
     try {
-      const { parsed, source } = await loadSessionTailFresh(
-        info.dirName,
-        info.fileName,
-        workerParse,
-        "shared session",
-      )
-      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
-      setLoadState("ready")
+      await sessions.openSession({ dirName: info.dirName, fileName: info.fileName }, {
+        reason: "share",
+        commit: ({ parsed, source }) => {
+          dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
+          setLoadState("ready")
+        },
+      })
     } catch {
       setLoadState("failed")
     }
-  }, [dispatch, info.dirName, info.fileName, isMobile, workerParse])
+  }, [dispatch, info.dirName, info.fileName, isMobile, sessions])
 
   // Once, for the life of the shell. A guest has exactly one session, so the
   // only thing that could re-trigger this is an incidental dependency change
@@ -114,7 +114,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     handleLiveUpdate,
     workerParse,
     workerAppend,
-    undefined,
+    sessions.reloadCurrent,
     state.session,
   )
 

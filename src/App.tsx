@@ -34,6 +34,7 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { useSessionState } from "@/hooks/useSessionState"
 import { useChatScroll } from "@/hooks/useChatScroll"
 import { useSessionActions } from "@/hooks/useSessionActions"
+import { useSessionController } from "@/hooks/useSessionController"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useTheme } from "@/hooks/useTheme"
@@ -60,7 +61,6 @@ import { useSessionConfigSync } from "@/hooks/useSessionConfigSync"
 import type { SessionConfig } from "@/lib/sessionConfig"
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
 import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
-import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
 import { detectPendingInteraction } from "../shared/session/parser"
 import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
@@ -120,9 +120,10 @@ export default function App() {
   const terminalEnabled = identityReady && me.capabilities.terminal
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
-  const [state, dispatch] = useSessionState()
+  const [state, dispatchState] = useSessionState()
   const { procBySession } = useSessionInventory()
   const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
+  const { sessions, dispatch } = useSessionController(dispatchState, workerParse)
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
     dispatch({ type: "SET_OLDER_TURNS", turns: olderTurns })
@@ -131,10 +132,8 @@ export default function App() {
   // Stable prefetch callback bound to the current worker. Used by sidebar rows
   // to warm the LRU cache on hover-intent so a subsequent click is synchronous.
   const prefetchSession = useCallback(
-    (dirName: string, fileName: string) => {
-      void prefetchSessionFn(dirName, fileName, workerParse)
-    },
-    [workerParse],
+    (dirName: string, fileName: string) => sessions.prefetchSession({ dirName, fileName }),
+    [sessions],
   )
 
   const chunkedSession = useSessionPaging({
@@ -350,8 +349,7 @@ export default function App() {
   // After a reconnect or a failed parse, reload the session to catch missed messages.
   // state.session is passed as `initialSession` so the hook can skip the
   // duplicate worker parse on every source change (the session was already
-  // parsed by useSessionActions / useNewSession before dispatch).
-  const resyncHandlerRef = useRef<(() => void) | null>(null)
+  // parsed by the open controller before dispatch).
   const {
     isLive, sseState, isCompacting, streamingOverlayStore, turnError, agentProgress, promptSuggestion, rateLimit,
   } = useLiveSession(
@@ -363,7 +361,7 @@ export default function App() {
     },
     workerParse,
     workerAppend,
-    () => resyncHandlerRef.current?.(),
+    sessions.reloadCurrent,
     state.session,
   )
 
@@ -484,6 +482,7 @@ export default function App() {
   } = useProjectSessionLaunch({
     permissionsConfig: perms.config,
     dispatch,
+    sessions,
     isMobile,
     defaultAgentKind: config.defaultAgentKind,
     pendingDirName: state.pendingDirName,
@@ -630,7 +629,7 @@ export default function App() {
     teamContext,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
     resetTurnCount: scroll.resetTurnCount,
-    workerParse,
+    sessions,
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
@@ -648,7 +647,7 @@ export default function App() {
     isMobile,
     resetTurnCount: scroll.resetTurnCount,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
-    workerParse,
+    sessions,
   })
 
   // MRU session history for Ctrl+Tab switching
@@ -688,7 +687,7 @@ export default function App() {
     mcpConfig: mcpEnabled ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
-    workerParse,
+    sessions,
     canInteract: sessionPermissions.canInteract,
   })
 
@@ -709,23 +708,11 @@ export default function App() {
     }
   }, [mcpData.loaded, mcpHasRestrictions, hasSettingsChanges, handleApplySettings, state.session?.sessionId])
 
-  // Wire the resync bridge after reloadSession is available. Layout timing
-  // guarantees useLiveSession's passive EventSource effect observes the latest
-  // committed handler, without leaking a discarded render through the ref.
-  useLayoutEffect(() => {
-    resyncHandlerRef.current = handlers.reloadSession
-    return () => {
-      if (resyncHandlerRef.current === handlers.reloadSession) {
-        resyncHandlerRef.current = null
-      }
-    }
-  }, [handlers.reloadSession])
-
   // Undo/redo system
   const undoRedo = useUndoRedo(
     state.session,
     state.sessionSource,
-    handlers.reloadSession,
+    sessions.reloadCurrent,
     hostFilesEnabled && sessionPermissions.undo,
   )
 

@@ -1,13 +1,11 @@
-import { useState, useCallback, startTransition, type Dispatch } from "react"
+import { useState, useCallback, useRef, startTransition, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
-import type { SessionView } from "../../shared/session/sessionDigest"
-import type { SessionSource } from "@/lib/sessionSource"
 import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
 import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
-import { loadSessionTailCached } from "@/lib/sessionLoader"
+import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -16,7 +14,7 @@ interface UseSessionActionsOpts {
   teamContext: SessionTeamContext | null
   scrollToBottomInstant: () => void
   resetTurnCount: (count: number) => void
-  workerParse: (text: string) => Promise<SessionView>
+  sessions: SessionController
   /** Called before fetching a new session to free connections held by the
    *  current session (e.g. long-lived send-message POST, session creation). */
   onBeforeSwitch?: () => void
@@ -29,13 +27,16 @@ export function useSessionActions({
   teamContext,
   scrollToBottomInstant,
   resetTurnCount,
-  workerParse,
+  sessions,
   onBeforeSwitch,
 }: UseSessionActionsOpts) {
   const [loadError, setLoadError] = useState<string | null>(null)
+  // The team switch whose loading indicator is up; an older one that lost
+  // to it must not take that indicator down.
+  const memberSwitchRef = useRef(0)
 
-  const handleLoadSession = useCallback(
-    (parsed: SessionView, source: SessionSource) => {
+  const showSession = useCallback(
+    ({ parsed, source }: LoadedSession) => {
       setLoadError(null)
       // Wrap the heavy re-render (new session timeline, virtualizer re-measure,
       // undo graph rebuild) in a transition so React can keep interaction input
@@ -57,18 +58,12 @@ export function useSessionActions({
       onBeforeSwitch?.()
       setLoadError(null)
       try {
-        const { parsed, source } = await loadSessionTailCached(
-          dirName,
-          fileName,
-          workerParse,
-          "session",
-        )
-        handleLoadSession(parsed, source)
+        await sessions.openSession({ dirName, fileName }, { reason: "click", commit: showSession })
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Failed to load session")
       }
     },
-    [handleLoadSession, workerParse, onBeforeSwitch]
+    [sessions, showSession, onBeforeSwitch]
   )
 
   const handleTeamMemberSwitch = useCallback(
@@ -76,38 +71,42 @@ export function useSessionActions({
       if (!teamContext) return
       onBeforeSwitch?.()
       setLoadError(null)
+      const switchId = ++memberSwitchRef.current
       dispatch({ type: "SET_LOADING_MEMBER", name: member.name })
       try {
-        const lookupRes = await authFetch(
-          `/api/team-member-session/${encodeURIComponent(teamContext.teamName)}/${encodeURIComponent(member.name)}`
+        await sessions.openSession(
+          async (signal) => {
+            const lookupRes = await authFetch(
+              `/api/team-member-session/${encodeURIComponent(teamContext.teamName)}/${encodeURIComponent(member.name)}`,
+              { signal },
+            )
+            if (!lookupRes.ok) throw new Error(`Failed to find session for ${member.name}`)
+            const { dirName, fileName } = await lookupRes.json()
+            return { dirName, fileName }
+          },
+          {
+            reason: "team",
+            commit: ({ parsed, source }) => {
+              startTransition(() => {
+                dispatch({
+                  type: "SWITCH_TEAM_MEMBER",
+                  session: parsed,
+                  source,
+                  memberName: member.name,
+                })
+              })
+              resetTurnCount(parsed.turns.length)
+              scrollToBottomInstant()
+            },
+          },
         )
-        if (!lookupRes.ok) throw new Error(`Failed to find session for ${member.name}`)
-        const { dirName, fileName } = await lookupRes.json()
-
-        const { parsed, source } = await loadSessionTailCached(
-          dirName,
-          fileName,
-          workerParse,
-          `session for ${member.name}`,
-        )
-
-        startTransition(() => {
-          dispatch({
-            type: "SWITCH_TEAM_MEMBER",
-            session: parsed,
-            source,
-            memberName: member.name,
-          })
-        })
-        resetTurnCount(parsed.turns.length)
-        scrollToBottomInstant()
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Failed to switch team member")
       } finally {
-        dispatch({ type: "SET_LOADING_MEMBER", name: null })
+        if (memberSwitchRef.current === switchId) dispatch({ type: "SET_LOADING_MEMBER", name: null })
       }
     },
-    [dispatch, teamContext, resetTurnCount, scrollToBottomInstant, workerParse, onBeforeSwitch]
+    [dispatch, teamContext, resetTurnCount, scrollToBottomInstant, sessions, onBeforeSwitch]
   )
 
   const clearLoadError = useCallback(() => setLoadError(null), [])
@@ -142,7 +141,6 @@ export function useSessionActions({
   return {
     loadError,
     clearLoadError,
-    handleLoadSession,
     handleDashboardSelect,
     handleTeamMemberSwitch,
     handleGoHome,

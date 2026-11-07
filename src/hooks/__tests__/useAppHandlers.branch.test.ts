@@ -1,17 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 
-const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), loadSessionTailCached: vi.fn(), toastError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), toastError: vi.fn() }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({ useSessionInventory: () => ({ removeSession: vi.fn() }) }))
 vi.mock("@/lib/auth", () => ({
   authFetch: mocks.authFetch,
   jsonFetch: (url: string, body: unknown) => mocks.authFetch(url, { method: "POST", body: JSON.stringify(body) }),
 }))
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
-vi.mock("@/lib/sessionLoader", () => ({
-  loadSessionTailCached: mocks.loadSessionTailCached,
-  loadSessionTailFresh: vi.fn(),
-}))
 
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { ACCESS_LOST_MESSAGE, useSessionAccessLoss } from "@/hooks/useSessionAccessLoss"
@@ -25,12 +21,25 @@ import {
 } from "@/lib/sessionAccess"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
+import type { SessionController } from "@/lib/sessionLoader"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { SESSION_ACCESS_HEADER, SESSION_ID_HEADER } from "../../../shared/contracts/sessionAccess"
-import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const ALICE = { id: "u_alice", username: "alice", displayName: "Alice" }
 const COPY = "22222222-2222-4222-8222-222222222222"
+
+/** Opens whatever the copy request resolves; the controller's own behaviour has its own suite. */
+const sessions: SessionController = {
+  openSession: async (target, { commit }) => {
+    const address = typeof target === "function" ? await target(new AbortController().signal) : target
+    commit({ parsed: { sessionId: COPY } as unknown as SessionView, source: { ...address, watchOffset: 0, loadId: 2 } })
+    return "opened"
+  },
+  prefetchSession: vi.fn(),
+  reloadCurrent: vi.fn(),
+  leave: vi.fn(),
+}
 
 function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<typeof useAppHandlers>[0] {
   const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as SessionView
@@ -54,7 +63,7 @@ function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<type
     mcpConfig: null,
     scrollRequestScrollToTop: vi.fn(),
     handleDashboardSelect: vi.fn(),
-    workerParse: vi.fn(),
+    sessions,
     canInteract: false,
   }
 }
@@ -77,7 +86,6 @@ describe("useAppHandlers copies", () => {
       fileName: `${COPY}.jsonl`,
       sessionId: COPY,
     })))
-    mocks.loadSessionTailCached.mockResolvedValue({ parsed: { sessionId: COPY }, source: { dirName: "-work-app" } })
   })
 
   afterEach(() => {

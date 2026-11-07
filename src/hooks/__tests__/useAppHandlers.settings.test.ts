@@ -39,7 +39,7 @@ function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChan
     mcpConfig: null,
     scrollRequestScrollToTop: vi.fn(),
     handleDashboardSelect: vi.fn(),
-    workerParse: vi.fn(),
+    sessions: { openSession: vi.fn(), prefetchSession: vi.fn(), reloadCurrent: vi.fn(), leave: vi.fn() },
     canInteract: true,
   }))
 }
