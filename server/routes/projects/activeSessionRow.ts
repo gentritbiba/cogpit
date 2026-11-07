@@ -2,18 +2,14 @@ import {
   matchesPullRequestTarget,
   type PullRequestSearch,
 } from "../../../shared/session/sessionSearch"
-import {
-  getSessionMeta,
-  getSessionStatus,
-  searchSessionMessages,
-} from "../../helpers"
+import { searchSessionMessages } from "../../helpers"
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { teamLeadFor, type TeamConfigCache } from "../../agents/lineage"
 import { listedSessionId } from "../../agents/listedSession"
 import { sessionAgentsRunning } from "../../agents/agentsRunning"
 import { runtimeFor } from "../../agents/runtimes"
 import type { TopLevelSessionInfo } from "../../agents/types"
-import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
+import { lastActivityOf, listedMeta } from "../../lib/listedSessionMeta"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import type { SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import type { ArchiveReason } from "../../lib/sessionArchive"
@@ -28,22 +24,6 @@ export interface ActiveSessionQuery {
   archivedById: ReadonlyMap<string, ArchiveReason>
   /** Teammate sessions carry a teamName; each team's config is read once per request. */
   teamConfigs: TeamConfigCache
-}
-
-/** A listed session's metadata and status, shared with every route that lists it through the meta cache. */
-function listedMeta(c: TopLevelSessionInfo) {
-  return getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
-    const [meta, status] = await Promise.all([
-      getSessionMeta(c.filePath),
-      getSessionStatus(c.filePath),
-    ])
-    return { meta, status }
-  })
-}
-
-/** When a listed session last did something: its newest record's time, else its transcript's mtime. */
-export function lastActivityOf(meta: { lastTimestamp?: string }, mtimeMs: number): string {
-  return meta.lastTimestamp || new Date(mtimeMs).toISOString()
 }
 
 const TITLE_LENGTH = 80

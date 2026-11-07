@@ -8,16 +8,15 @@ import { listedSessionId } from "../agents/listedSession"
 import { runtimeForSession } from "../agents/runtimes"
 import type { TopLevelSessionInfo } from "../agents/types"
 import { accessLevelOf } from "../edition"
-import { getSessionMeta, getSessionStatus } from "../helpers"
+import { getSessionStatus } from "../helpers"
 import { orchestrationStore } from "../orchestration/storage"
-import { lastActivityOf } from "../routes/projects/activeSessionRow"
 import { hostForOrigin, localHost } from "../sessionHosts"
 import { crewRootOf } from "./crew"
 import { commandScope } from "./durableSend"
 import { recencyCache } from "./recencyCache"
 import { archiveReason, readArchive } from "./sessionArchive"
 import { readSessionCrew, type CrewSources, type DescribedSession } from "./sessionCrew"
-import { getOrLoadSessionMeta } from "./sessionMetaCache"
+import { lastActivityOf, listedMeta } from "./listedSessionMeta"
 import { sessionOrigin, sessionParents } from "./sessionOrigins"
 import { getScannedSessionPullRequests, getSessionPullRequests } from "./sessionPrIndex"
 import { readSessionSignals, readSessionState, sessionStateFrom, type SessionSignals } from "./sessionWait"
@@ -66,16 +65,11 @@ function clockCanChange(status: string | undefined, lastActivityMs: number): boo
   return status === "awaiting_agents" || Date.now() - lastActivityMs < RECENT_ACTIVITY_MS
 }
 
-const listedMeta = (filePath: string, mtimeMs: number) => getOrLoadSessionMeta(filePath, mtimeMs, async () => {
-  const [meta, status] = await Promise.all([getSessionMeta(filePath), getSessionStatus(filePath)])
-  return { meta, status }
-})
-
 /** A member this machine lists, from the session list's cached tail and metadata. */
 async function describeListed(id: string, candidate: TopLevelSessionInfo, signals: SessionSignals | null): Promise<{ described: DescribedSession; settled: boolean }> {
   const host = { remote: false, id: localHost.id, name: localHost.name }
   const address = { dirName: candidate.dirName, fileName: candidate.fileName }
-  const cached = await listedMeta(candidate.filePath, candidate.mtimeMs).catch(() => null)
+  const cached = await listedMeta(candidate).catch(() => null)
   const statusInfo = cached?.status ?? await getSessionStatus(candidate.filePath)
   const lastActivityAt = cached ? lastActivityOf(cached.meta, candidate.mtimeMs) : undefined
   const lastActivityMs = Date.parse(lastActivityAt ?? "") || candidate.mtimeMs
