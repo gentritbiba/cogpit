@@ -59,6 +59,7 @@ describe("projects store", () => {
 
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     __resetSessionListEventsForTest()
   })
@@ -98,10 +99,40 @@ describe("projects store", () => {
     expect(projectCalls()).toEqual([null, "p1"])
   })
 
-  it("answers a one-off lookup from the followed list while it is current", async () => {
+  it("revalidates a one-off lookup while the list is followed, so a folder opened since is found", async () => {
     render(<Consumer onProjects={vi.fn()} />)
     await settle()
-    expect(await loadProjects()).toEqual([project("a")])
+    served = { projects: [project("a"), project("fresh")], etag: "p2" }
+
+    expect(await loadProjects()).toEqual([project("a"), project("fresh")])
+    expect(projectCalls()).toEqual([null, "p1"])
+  })
+
+  it("revalidates when another surface opens while the list is already followed", async () => {
+    function Switcher({ open }: { open: boolean }) {
+      useProjects(open)
+      return null
+    }
+    const view = render(<><Consumer onProjects={vi.fn()} /><Switcher open={false} /></>)
+    await settle()
     expect(projectCalls()).toEqual([null])
+
+    view.rerender(<><Consumer onProjects={vi.fn()} /><Switcher open /></>)
+    await settle()
+    expect(projectCalls()).toEqual([null, "p1"])
+  })
+
+  it("reads again every 60 s while followed when the server has no list stream", async () => {
+    vi.useFakeTimers()
+    render(<Consumer onProjects={vi.fn()} />)
+    await act(async () => {
+      FakeEventSource.last!.readyState = FakeEventSource.CLOSED
+      FakeEventSource.last!.dispatchEvent(new Event("error"))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(projectCalls()).toEqual([null])
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(projectCalls()).toEqual([null, "p1"])
   })
 })

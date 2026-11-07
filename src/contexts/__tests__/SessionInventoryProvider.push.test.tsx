@@ -243,8 +243,9 @@ describe("SessionInventoryProvider push and revalidation", () => {
     expect(listCalls()).toHaveLength(reads + 1)
   })
 
-  it("polls every 60 s while visible when the server has no stream", async () => {
+  it("polls every 60 s while visible when the server has no stream and nothing is live", async () => {
     vi.useFakeTimers()
+    served.processes = []
     renderInventory()
     await act(async () => FakeEventSource.last!.giveUp())
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -256,6 +257,24 @@ describe("SessionInventoryProvider push and revalidation", () => {
     act(() => setVisibility("hidden"))
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(listCalls()).toHaveLength(reads + 1)
+  })
+
+  it("re-reads the list and processes every 20 s while something is live and the server has no stream", async () => {
+    vi.useFakeTimers()
+    served.rows = [row("a", { agentStatus: "thinking" })]
+    renderInventory()
+    await act(async () => FakeEventSource.last!.giveUp())
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const lists = listCalls().length
+    const processReads = urlsCalled().filter((url) => url === "/api/running-processes").length
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(listCalls()).toHaveLength(lists + 1)
+    expect(urlsCalled().filter((url) => url === "/api/running-processes")).toHaveLength(processReads + 1)
+
+    act(() => setVisibility("hidden"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(listCalls()).toHaveLength(lists + 1)
   })
 
   it("refreshes only the running processes on the live timer", async () => {
