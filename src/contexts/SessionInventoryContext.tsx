@@ -351,16 +351,6 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     return () => document.removeEventListener("visibilitychange", onVisible)
   }, [])
 
-  // Without the stream (an older server) the list is read on a slow, visible-only timer.
-  useEffect(() => {
-    if (!pushUnsupported) return
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") void fetchRef.current("list")
-      else staleRef.current = true
-    }, FALLBACK_POLL_INTERVAL)
-    return () => clearInterval(interval)
-  }, [pushUnsupported])
-
   const procBySession = useMemo(() => buildProcMap(processes), [processes])
 
   // Spawning `ps` on a timer once consumed a full CPU core in bursts, so the
@@ -378,13 +368,21 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     return () => window.removeEventListener("focus", onFocus)
   }, [refresh])
 
+  // Without the stream (an older server) the list is read on a visible-only
+  // timer: every 20 s while something is live, every 60 s otherwise. With the
+  // stream, the live timer only follows the processes.
   useEffect(() => {
-    if (!hasLiveWork) return
+    if (!hasLiveWork && !pushUnsupported) return
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") void loadProcesses()
-    }, LIVE_POLL_INTERVAL)
+      if (document.visibilityState !== "visible") {
+        if (pushUnsupported) staleRef.current = true
+        return
+      }
+      if (!pushUnsupported) void loadProcesses()
+      else void fetchRef.current(hasLiveWork ? "full" : "list")
+    }, hasLiveWork ? LIVE_POLL_INTERVAL : FALLBACK_POLL_INTERVAL)
     return () => clearInterval(interval)
-  }, [hasLiveWork, loadProcesses])
+  }, [hasLiveWork, pushUnsupported, loadProcesses])
 
   // The cache follows the lists once they changed, in one write after paint.
   // Archived rows a search brought in are not kept: a cold start reads them

@@ -1,11 +1,11 @@
 // ── Projects ────────────────────────────────────────────────────────────
 //
 // One `/api/projects` list per device and signed-in user, shared by every
-// surface that offers projects. It shows the cached list at once, revalidates
-// with `If-None-Match` when the session list changes while anyone shows it,
-// and is read once more whenever its first viewer arrives.
+// surface that offers projects. It shows the cached list at once and
+// revalidates with `If-None-Match` whenever a surface opens, a lookup asks,
+// or the session list changes while anyone shows it.
 
-import { useCallback, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
 import type { ProjectInfo } from "@/components/Dashboard/types"
 import { authFetch } from "@/lib/auth"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
@@ -20,6 +20,7 @@ export interface ProjectsSnapshot {
   error: string | null
 }
 
+const FALLBACK_POLL_INTERVAL = 60_000
 const projectKeyOf = (project: ProjectInfo) => project.dirName
 const noSubscription = () => () => {}
 
@@ -27,8 +28,8 @@ class ProjectsStore {
   snapshot: ProjectsSnapshot
   private readonly listeners = new Set<() => void>()
   private etag: string | null = null
-  private stale = true
-  private changedDuringLoad = false
+  // A change was announced while nothing could read it (hidden, or mid-request).
+  private stale = false
   private inFlight: Promise<ProjectInfo[]> | null = null
   private stopFollowing: (() => void) | null = null
 
@@ -51,30 +52,23 @@ class ProjectsStore {
     }
   }
 
-  /** The projects, read again only when they may have changed since the last answer. */
-  load(): Promise<ProjectInfo[]> {
+  /** Ask the server again; with its ETag an unchanged list costs a 304. */
+  revalidate(): Promise<ProjectInfo[]> {
     if (this.inFlight) return this.inFlight
-    if (!this.stale) return Promise.resolve(this.snapshot.projects)
     this.stale = false
     const request = this.request().finally(() => {
       this.inFlight = null
-      // Unfollowed, nothing tells the store when the projects change.
-      if (this.listeners.size === 0) this.stale = true
-      if (!this.changedDuringLoad) return
-      this.changedDuringLoad = false
-      this.invalidate()
+      if (this.stale) this.invalidate()
     })
     this.inFlight = request
     return request
   }
 
+  /** The projects may have changed: read them now if anyone shows them, otherwise once someone does. */
   invalidate(): void {
     this.stale = true
-    if (this.inFlight) {
-      this.changedDuringLoad = true
-      return
-    }
-    if (this.listeners.size > 0 && document.visibilityState === "visible") void this.load()
+    if (this.inFlight) return
+    if (this.listeners.size > 0 && document.visibilityState === "visible") void this.revalidate()
   }
 
   private async request(): Promise<ProjectInfo[]> {
@@ -96,7 +90,6 @@ class ProjectsStore {
       this.publish({ projects, loaded: true, error: null })
       return projects
     } catch (error) {
-      this.stale = true
       this.publish({
         ...this.snapshot,
         loaded: true,
@@ -115,16 +108,23 @@ class ProjectsStore {
 
   private follow(): void {
     const onVisible = () => {
-      if (document.visibilityState === "visible" && this.stale) void this.load()
+      if (document.visibilityState === "visible" && this.stale) void this.revalidate()
     }
     document.addEventListener("visibilitychange", onVisible)
-    const stopEvents = subscribeSessionListEvents({ onVersion: () => this.invalidate(), onUnsupported: () => {} })
+    let poll: ReturnType<typeof setInterval> | undefined
+    const stopEvents = subscribeSessionListEvents({
+      onVersion: () => this.invalidate(),
+      // An older server pushes nothing: read again on a slow timer instead.
+      onUnsupported: () => {
+        clearInterval(poll)
+        poll = setInterval(() => this.invalidate(), FALLBACK_POLL_INTERVAL)
+      },
+    })
     this.stopFollowing = () => {
       document.removeEventListener("visibilitychange", onVisible)
+      clearInterval(poll)
       stopEvents()
     }
-    // Nothing followed the server while nobody showed the projects.
-    this.invalidate()
   }
 
   private unfollow(): void {
@@ -141,7 +141,10 @@ function currentStore(): ProjectsStore {
   return store
 }
 
-/** Every project on the active device; followed while `enabled`, the last known list otherwise. */
+/**
+ * Every project on the active device: the last known list at once, read again
+ * whenever a surface showing it opens (`enabled` turns on) and followed while open.
+ */
 export function useProjects(enabled = true): ProjectsSnapshot & { refresh: () => Promise<void> } {
   const projects = currentStore()
   const snapshot = useSyncExternalStore(
@@ -149,16 +152,18 @@ export function useProjects(enabled = true): ProjectsSnapshot & { refresh: () =>
     projects.getSnapshot,
     projects.getSnapshot,
   )
+  useEffect(() => {
+    if (enabled) void projects.revalidate()
+  }, [enabled, projects])
   const refresh = useCallback(async () => {
-    projects.invalidate()
-    await projects.load()
+    await projects.revalidate()
   }, [projects])
   return { ...snapshot, refresh }
 }
 
-/** The projects for a one-off lookup: the followed list when it is current, otherwise read again. */
+/** The projects for a one-off lookup, revalidated so a folder opened since is in it. */
 export function loadProjects(): Promise<ProjectInfo[]> {
-  return currentStore().load()
+  return currentStore().revalidate()
 }
 
 export function __resetProjectsStoreForTest(): void {
