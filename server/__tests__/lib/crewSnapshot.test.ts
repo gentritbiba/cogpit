@@ -21,9 +21,11 @@ const mocks = vi.hoisted(() => {
     getSessionPullRequests: vi.fn(async (_filePath: string, _size: number) => [] as unknown[]),
     readSessionState: vi.fn(),
     deviceState: vi.fn(),
+    watchCrewChat: vi.fn(),
   }
 })
 
+vi.mock("../../lib/crewChat", () => ({ watchCrewChat: mocks.watchCrewChat }))
 vi.mock("../../lib/sessionOrigins", () => ({
   sessionParents: async () => mocks.parents,
   sessionOrigin: async (id: string) => mocks.origins.get(id) ?? null,
@@ -212,6 +214,14 @@ describe("readCrewSnapshot", () => {
     } finally { vi.useRealTimers() }
     // A device asking for itself has no transcript or runtime for it here.
     expect((await read("lead", { localOnly: true }))?.members.map((entry) => entry.sessionId)).not.toContain("remote")
+  })
+
+  it("re-arms the crew chat's pending deliveries on every read, in the reader's scope", async () => {
+    const reader = req()
+    await readCrewSnapshot(reader, "busy", { brief: true, localOnly: false })
+    expect(mocks.watchCrewChat).toHaveBeenCalledWith("lead", reader)
+    mocks.watchCrewChat.mockImplementationOnce(() => { throw new Error("A signed-in account is required") })
+    expect((await read("lead"))?.members).toHaveLength(3)
   })
 
   it("clips first prompts to a one-paragraph preview only when asked for a brief crew", async () => {

@@ -154,7 +154,12 @@ export function closeCrewChatMonitor(): void {
   delivering.clear()
 }
 
-function watchCrewChat(rootId: string, req?: IncomingMessage): void {
+/**
+ * Keeps delivering a crew's pending messages in the background, in the
+ * reader's scope; nothing when none is pending. One indexed read, so any
+ * poll of the crew can call it.
+ */
+export function watchCrewChat(rootId: string, req?: IncomingMessage): void {
   const scope = commandScope(req)
   if (!orchestrationStore().chatDeliveries(rootId, scope).length) return
   watched.set(JSON.stringify([rootId, scope]), { rootId, req })

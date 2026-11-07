@@ -15,15 +15,16 @@ const mocks = vi.hoisted(() => ({
   access: vi.fn<(req: IncomingMessage, id: string) => Promise<SessionAccessLevel | null>>(),
   state: vi.fn(), send: vi.fn(), host: vi.fn(),
   revision: 1,
+  auth: null as unknown,
 }))
 vi.mock("../../orchestration/storage", () => ({ orchestrationStore: () => mocks.store, closeOrchestrationStore: vi.fn(), beforeOrchestrationClose: vi.fn() }))
 vi.mock("../../lib/sessionOrigins", () => ({ sessionParents: async () => mocks.parents, sessionOriginsRevision: () => mocks.revision }))
 vi.mock("../../lib/durableSend", () => ({ commandScope: () => "local", refreshExecutionRequest: (req: IncomingMessage) => req }))
-vi.mock("../../edition", () => ({ accessLevelOf: mocks.access, editionModule: () => ({ auth: null }), getRequestPrincipal: () => null }))
+vi.mock("../../edition", () => ({ accessLevelOf: mocks.access, editionModule: () => ({ auth: mocks.auth }), getRequestPrincipal: () => null }))
 vi.mock("../../sessionHosts", () => ({ hostForSession: mocks.host }))
 vi.mock("../../routes/hello", () => ({ getDeviceName: () => "coordinator-box" }))
 
-import { closeCrewChatMonitor, crewChatReadContext, deliverCrewChat, postCrewChat, readCrewChat, resumeLocalCrewChat, setCrewChatListening } from "../../lib/crewChat"
+import { closeCrewChatMonitor, crewChatReadContext, deliverCrewChat, postCrewChat, readCrewChat, resumeLocalCrewChat, setCrewChatListening, watchCrewChat } from "../../lib/crewChat"
 const req = {} as IncomingMessage
 const post = (text: string, commandId = "chat-message-001", senderSessionId = "parser", mentions?: string[]) => postCrewChat("parser", { text, commandId, senderSessionId, mentions }, req)
 
@@ -31,6 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.store = new OrchestrationStore(":memory:")
   mocks.revision++
+  mocks.auth = null
   mocks.access.mockResolvedValue("own")
   mocks.state.mockImplementation(async (id: string) => ({ outcome: id === "idle" ? "completed" : "running", running: id !== "idle", live: id !== "idle", activeNotifications: true }))
   mocks.send.mockResolvedValue({ delivery: "queued" })
@@ -249,5 +251,28 @@ describe("crew chat", () => {
     await vi.advanceTimersByTimeAsync(1_000)
     expect(mocks.send.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining(["reviewer", "lead"]))
     expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+  })
+
+  it("lets any crew poll re-arm deliveries a restart left pending, where startup cannot (team edition)", async () => {
+    vi.useFakeTimers()
+    mocks.send.mockRejectedValue(new Error("offline"))
+    await post("@reviewer After the restart", "rearm-chat-001")
+    closeCrewChatMonitor()
+    mocks.auth = {}
+    mocks.send.mockReset().mockResolvedValue({ delivery: "queued" })
+    resumeLocalCrewChat()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mocks.send).not.toHaveBeenCalled()
+    watchCrewChat("lead", req)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(mocks.send.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining(["reviewer"]))
+    expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+  })
+
+  it("arms nothing for a crew with nothing on its way", async () => {
+    vi.useFakeTimers()
+    watchCrewChat("lead", req)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(mocks.host).not.toHaveBeenCalled()
   })
 })

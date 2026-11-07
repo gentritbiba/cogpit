@@ -12,6 +12,7 @@ import { getSessionStatus } from "../helpers"
 import { orchestrationStore } from "../orchestration/storage"
 import { hostForOrigin, localHost } from "../sessionHosts"
 import { crewRootOf } from "./crew"
+import { watchCrewChat } from "./crewChat"
 import { commandScope } from "./durableSend"
 import { recencyCache } from "./recencyCache"
 import { archiveReason, readArchive } from "./sessionArchive"
@@ -177,7 +178,10 @@ const preview = (text: string) => {
 /** The crew `sessionId` belongs to; `brief` clips each first prompt to a preview. */
 export async function readCrewSnapshot(req: IncomingMessage, sessionId: string, options: { localOnly: boolean; brief: boolean }): Promise<SessionCrew | null> {
   const crew = await readSessionCrew(sessionId, await crewSources(req, sessionId, options.localOnly))
-  if (!crew || !options.brief) return crew
+  if (!crew) return null
+  // The Crew panel reads chat only on its Chat tab; this poll runs on every tab, so it re-arms deliveries after a restart.
+  try { watchCrewChat(crew.rootId, req) } catch { /* Chat delivery waits for the crew's next chat read. */ }
+  if (!options.brief) return crew
   return {
     ...crew,
     members: crew.members.map((member) => (member.firstUserMessage ? { ...member, firstUserMessage: preview(member.firstUserMessage) } : member)),
