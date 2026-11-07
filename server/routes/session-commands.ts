@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { initializeAllowanceRecovery, recoveryStatus, optInRecovery, cancelRecovery, reauthorizeRecovery } from "../lib/allowanceRecovery"
 import { resolveConversationTransition, transitionConversation, type TransitionInput, type TransitionResolution } from "../lib/conversationTransition"
 import type { IncomingMessage, ServerResponse } from "node:http"
@@ -8,6 +9,23 @@ import { sendJson, withJsonBody, type UseFn } from "../http"
 import { sendAgentError } from "./agentErrors"
 import { localHost } from "../sessionHosts/localHost"
 import { OrchestrationError } from "../orchestration/store"
+
+/** Sends `data` with a weak ETag of its body, or a bodiless 304 when the client already holds that body. */
+function sendTagged(req: IncomingMessage, res: ServerResponse, data: unknown): void {
+  const body = JSON.stringify(data)
+  const etag = `W/"${createHash("sha1").update(body).digest("base64url")}"`
+  res.setHeader("ETag", etag)
+  res.setHeader("Cache-Control", "no-store")
+  const held = req.headers["if-none-match"]?.split(",").map((tag) => tag.trim().replace(/^W\//, ""))
+  if (held?.includes(etag.slice(2))) {
+    res.statusCode = 304
+    res.end()
+    return
+  }
+  res.statusCode = 200
+  res.setHeader("Content-Type", "application/json")
+  res.end(body)
+}
 
 async function context(req: IncomingMessage, res: ServerResponse, sessionId: unknown, mutate: boolean) {
   if (typeof sessionId !== "string" || !sessionId) throw new OrchestrationError(400, "sessionId is required")
@@ -58,7 +76,14 @@ export function registerSessionCommandRoutes(use: UseFn): void {
         const ctx = await context(req, res, query.get("sessionId"), false)
         if (!ctx) return
         const { dispatcher, conversation, scope } = ctx
-        sendJson(res, 200, { conversation, currentAddress: await localHost.address(conversation.binding.sessionId), pendingTransition: dispatcher.store.pendingTransition(conversation.id, scope), commands: dispatcher.store.commands(conversation.id, scope), replay: dispatcher.store.events(conversation.id, Number(query.get("after") ?? 0), 200, scope) })
+        const after = query.get("after")
+        sendTagged(req, res, {
+          conversation,
+          currentAddress: await localHost.address(conversation.binding.sessionId),
+          pendingTransition: dispatcher.store.pendingTransition(conversation.id, scope),
+          commands: dispatcher.store.openCommands(conversation.id, scope, query.getAll("commandId")),
+          ...(after !== null && { replay: dispatcher.store.events(conversation.id, Number(after), 200, scope) }),
+        })
       } catch (error) { sendAgentError(res, error, "Failed to read the queue") }
       return
     }
