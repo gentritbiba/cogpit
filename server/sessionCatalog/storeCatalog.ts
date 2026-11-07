@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from "node:fs"
+import { stat } from "node:fs/promises"
 import { dirname, join, relative, sep } from "node:path"
 import type { AgentDescriptor } from "../../shared/session/agent-descriptors"
 import { statContainedFile } from "../agents/containment"
@@ -56,6 +57,8 @@ export interface StoreCatalogSource {
   readSessionMeta(filePath: string, head: TranscriptHead): Promise<SessionMeta>
   /** Whether an identity read from this file's head can no longer change. */
   identityIsFinal(filePath: string, size: number): boolean
+  /** Files beside a transcript its identity may also be read from. */
+  identitySidecars?(filePath: string): string[]
   /** The cwd recorded at the head of a transcript whose path names its project. */
   readProjectPath?(filePath: string): Promise<{ path: string | null; final: boolean }>
 }
@@ -151,6 +154,14 @@ interface DirState {
 interface Entry extends CatalogEntry {
   dir: string
   top: TopLevelSessionInfo | null
+  /** Size and mtime of the identity's side files when it was placed. */
+  sidecars?: string
+}
+
+/** Size and mtime of each side file, "-" for one that is missing. */
+async function sidecarStamp(paths: readonly string[]): Promise<string> {
+  const stamps = await Promise.all(paths.map((path) => stat(path).then((info) => `${info.mtimeMs}:${info.size}`, () => "-")))
+  return stamps.join(",")
 }
 
 class CatalogImpl implements StoreCatalog {
@@ -167,6 +178,15 @@ class CatalogImpl implements StoreCatalog {
   private backstop: ReturnType<typeof setInterval> | null = null
   private pending: Promise<void> = Promise.resolve()
   private generation = 0
+  /** Watchers are being opened; directories found from now on get one too. */
+  private watchWanted = false
+  /** Known directories whose parent reported them replaced, so their watcher may be dead. */
+  private readonly rewatch = new Set<string>()
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private ancestorWatcher: FSWatcher | null = null
+  /** Before the catalog runs, concurrent reads share one walk. */
+  private sharedWalk: Promise<CatalogImpl> | null = null
+  private sharedFiles: Promise<SessionFileInfo[]> | null = null
 
   constructor(private readonly source: StoreCatalogSource, private readonly live: boolean) {}
 
@@ -175,10 +195,8 @@ class CatalogImpl implements StoreCatalog {
   private async current(): Promise<CatalogImpl> {
     if (!this.live || !catalogsEnabled) {
       if (this.started) this.close()
-      const snapshot = new CatalogImpl(this.source, false)
-      const root = this.source.root()
-      if (root) await snapshot.applyWalk(root)
-      return snapshot
+      this.sharedWalk ??= this.snapshot().finally(() => { this.sharedWalk = null })
+      return this.sharedWalk
     }
     const root = this.source.root()
     if (root !== this.root) this.reset(root)
@@ -197,7 +215,23 @@ class CatalogImpl implements StoreCatalog {
     return this
   }
 
+  /** A plain walk with every identity placed, for reads before the catalog runs. */
+  private async snapshot(): Promise<CatalogImpl> {
+    const snapshot = new CatalogImpl(this.source, false)
+    const root = this.source.root()
+    snapshot.root = root
+    if (root) await snapshot.applyWalk(root)
+    return snapshot
+  }
+
   async files(): Promise<SessionFileInfo[]> {
+    if (!this.live || !catalogsEnabled) {
+      // Stat-level: nothing here needs an identity.
+      const root = this.source.root()
+      if (!root) return []
+      this.sharedFiles ??= walkStore(this.source, root).then(({ files }) => files).finally(() => { this.sharedFiles = null })
+      return this.sharedFiles
+    }
     return [...(await this.current()).entriesByPath.values()].map((entry) => entry.file)
   }
 
@@ -288,15 +322,22 @@ class CatalogImpl implements StoreCatalog {
     this.byId.clear()
     this.started = null
     this.watching = false
+    this.watchWanted = false
+    this.rewatch.clear()
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = null
+    this.ancestorWatcher?.close()
+    this.ancestorWatcher = null
     this.listedAt = 0
     liveCatalogs.delete(this)
   }
 
   private async start(root: string): Promise<void> {
+    const generation = this.generation
     liveCatalogs.add(this)
     await factsLoaded()
     await this.applyWalk(root)
-    const generation = this.generation
+    if (generation !== this.generation) return
     setImmediate(() => { void this.watchAll(generation) })
   }
 
@@ -312,19 +353,25 @@ class CatalogImpl implements StoreCatalog {
   private async watchAll(generation: number): Promise<void> {
     const root = this.root
     if (!root || generation !== this.generation) return
+    this.watchWanted = true
     try {
       if (useRecursiveWatch) {
         this.recursiveWatcher = this.openWatcher(root, true)
       } else {
         const dirs = [...this.dirStates.keys()]
+        this.watchDir(root)
         for (let i = 0; i < dirs.length; i += WATCH_BATCH) {
           if (generation !== this.generation) return
-          for (const dir of dirs.slice(i, i + WATCH_BATCH)) this.watchDir(dir)
+          for (const dir of dirs.slice(i, i + WATCH_BATCH)) this.watchFound(dir)
           await yieldToLoop()
         }
+        // Directories found while the batches ran.
+        if (generation !== this.generation) return
+        for (const dir of this.dirStates.keys()) this.watchFound(dir)
       }
     } catch {
       this.unwatchAll()
+      this.retryWatching(generation)
       return
     }
     if (generation !== this.generation) return
@@ -333,6 +380,47 @@ class CatalogImpl implements StoreCatalog {
     this.backstop.unref?.()
     // Writes made while the watchers were being opened went unseen.
     void this.serially(() => this.rescan())
+  }
+
+  /**
+   * Watching failed, typically because the root does not exist yet (an agent
+   * installed later). Try again on the backstop, and at once when the nearest
+   * existing parent of the root reports a change.
+   */
+  private retryWatching(generation: number): void {
+    if (generation !== this.generation || this.retryTimer) return
+    const retry = () => {
+      if (generation !== this.generation) return
+      if (this.retryTimer) clearTimeout(this.retryTimer)
+      this.retryTimer = null
+      this.ancestorWatcher?.close()
+      this.ancestorWatcher = null
+      void this.serially(() => this.rescan()).then(() => this.watchAll(generation))
+    }
+    this.retryTimer = setTimeout(retry, BACKSTOP_MS)
+    this.retryTimer.unref?.()
+    void this.watchNearestAncestor(generation, retry)
+  }
+
+  private async watchNearestAncestor(generation: number, retry: () => void): Promise<void> {
+    let dir = this.root
+    while (dir) {
+      const parent = dirname(dir)
+      if (parent === dir) return
+      dir = parent
+      if (!(await stat(dir).then((info) => info.isDirectory(), () => false))) continue
+      if (generation !== this.generation || !this.retryTimer) return
+      try {
+        const watcher = watch(dir, { persistent: false }, () => {
+          if (this.ancestorWatcher === watcher) retry()
+        })
+        watcher.on("error", () => watcher.close())
+        this.ancestorWatcher = watcher
+      } catch {
+        // The backstop retry still runs.
+      }
+      return
+    }
   }
 
   private openWatcher(dir: string, recursive: boolean): FSWatcher {
@@ -350,6 +438,17 @@ class CatalogImpl implements StoreCatalog {
     state.watcher = this.openWatcher(dir, false)
   }
 
+  /** Watch a directory below the root once watching began. One already gone is left to its parent's relist. */
+  private watchFound(dir: string): void {
+    if (!this.watchWanted) return
+    try {
+      this.watchDir(dir)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== "ENOENT" && code !== "ENOTDIR") this.onWatcherError()
+    }
+  }
+
   private unwatchAll(): void {
     for (const state of this.dirStates.values()) {
       state.watcher?.close()
@@ -358,6 +457,7 @@ class CatalogImpl implements StoreCatalog {
     this.recursiveWatcher?.close()
     this.recursiveWatcher = null
     this.watching = false
+    this.watchWanted = false
     if (this.backstop) clearInterval(this.backstop)
     this.backstop = null
   }
@@ -385,6 +485,7 @@ class CatalogImpl implements StoreCatalog {
   }
 
   private markDirty(dir: string, name: string | null, event: string): void {
+    if (event === "rename" && name && this.dirStates.has(join(dir, name))) this.rewatch.add(join(dir, name))
     const known = this.dirty.get(dir)
     if (known !== "all") {
       if (event === "change" && name && this.entriesByPath.has(join(dir, name))) {
@@ -407,6 +508,7 @@ class CatalogImpl implements StoreCatalog {
   private async flush(): Promise<void> {
     const root = this.root
     if (!root || this.dirty.size === 0) return
+    const generation = this.generation
     const work = [...this.dirty]
     this.dirty.clear()
     const changes = new Changes()
@@ -414,7 +516,7 @@ class CatalogImpl implements StoreCatalog {
       const state = this.dirStates.get(dir)
       if (!state) continue
       if (names === "all") {
-        await this.relistDir(root, dir, state.depth, changes)
+        await this.relistDir(root, dir, state.depth, changes, generation)
         continue
       }
       for (const name of names) {
@@ -422,41 +524,49 @@ class CatalogImpl implements StoreCatalog {
         const entry = this.entriesByPath.get(filePath)
         if (!entry) continue
         const stats = await statContainedFile(root, filePath)
+        if (generation !== this.generation) return
         if (!stats) {
-          await this.relistDir(root, dir, state.depth, changes)
+          await this.relistDir(root, dir, state.depth, changes, generation)
           break
         }
         if (stats.mtimeMs !== entry.file.mtimeMs || stats.size !== entry.file.size) {
-          await this.place({ ...entry.file, ...stats }, dir, changes)
+          await this.place({ ...entry.file, ...stats }, dir, changes, generation)
         }
       }
     }
-    changes.publish()
+    if (generation === this.generation) changes.publish()
   }
 
   /** List one directory again; a new subdirectory is walked and watched, a gone one dropped. */
-  private async relistDir(root: string, dir: string, depth: number, changes: Changes): Promise<void> {
+  private async relistDir(root: string, dir: string, depth: number, changes: Changes, generation: number): Promise<void> {
     let listing: CatalogDirListing
     try {
       listing = await this.source.listDir(root, dir, depth)
     } catch {
-      if (dir !== root) this.dropDir(dir, changes)
+      if (generation === this.generation && dir !== root) this.dropDir(dir, changes)
       return
     }
+    if (generation !== this.generation) return
     const listed = new Set(listing.files.map((file) => file.filePath))
     for (const [filePath, entry] of this.entriesByPath) {
       if (entry.dir === dir && !listed.has(filePath)) this.remove(filePath, changes)
     }
-    await eachLimited(listing.files, (file) => this.place(file, dir, changes))
+    await eachLimited(listing.files, (file) => this.placeIfChanged(file, dir, changes, generation))
+    if (generation !== this.generation) return
     const children = new Set(listing.dirs)
     for (const known of [...this.dirStates.keys()]) {
       if (known !== dir && dirname(known) === dir && !children.has(known)) this.dropDir(known, changes)
     }
     for (const child of listing.dirs) {
-      if (this.dirStates.has(child)) continue
+      const known = this.dirStates.get(child)
+      // A directory replaced under the same name has a watcher on the old one.
+      const replaced = this.rewatch.delete(child)
+      if (known && !replaced) continue
+      known?.watcher?.close()
       this.dirStates.set(child, { depth: depth + 1, watcher: null })
-      if (this.watching) this.watchDir(child)
-      await this.relistDir(root, child, depth + 1, changes)
+      this.watchFound(child)
+      await this.relistDir(root, child, depth + 1, changes, generation)
+      if (generation !== this.generation) return
     }
   }
 
@@ -475,14 +585,17 @@ class CatalogImpl implements StoreCatalog {
   private async rescan(): Promise<void> {
     const root = this.root
     if (!root) return
+    const generation = this.generation
     const changes = new Changes()
     await this.applyWalk(root, changes)
-    changes.publish()
+    if (generation === this.generation) changes.publish()
   }
 
+  /** Walk everything and apply it, unless the root changed or the catalog closed meanwhile. */
   private async applyWalk(root: string, changes = new Changes()): Promise<void> {
-    this.root = root
+    const generation = this.generation
     const { files, dirs } = await walkStore(this.source, root)
+    if (generation !== this.generation || root !== this.root) return
     this.listedAt = Date.now()
     for (const [dir, state] of [...this.dirStates]) {
       if (dirs.has(dir)) continue
@@ -492,18 +605,14 @@ class CatalogImpl implements StoreCatalog {
     for (const [dir, depth] of dirs) {
       if (this.dirStates.has(dir)) continue
       this.dirStates.set(dir, { depth, watcher: null })
-      if (this.watching) this.watchDir(dir)
+      this.watchFound(dir)
     }
     const listed = new Set(files.map((file) => file.filePath))
     for (const filePath of [...this.entriesByPath.keys()]) {
       if (!listed.has(filePath)) this.remove(filePath, changes)
     }
     if (this.live) pruneFactsUnder(root, listed)
-    await eachLimited(files, async (file) => {
-      const entry = this.entriesByPath.get(file.filePath)
-      if (entry && entry.file.mtimeMs === file.mtimeMs && entry.file.size === file.size) return
-      await this.place(file, dirname(file.filePath), changes)
-    })
+    await eachLimited(files, (file) => this.placeIfChanged(file, dirname(file.filePath), changes, generation))
   }
 
   private remove(filePath: string, changes: Changes): void {
@@ -516,11 +625,23 @@ class CatalogImpl implements StoreCatalog {
     if (entry.top) changes.visible = true
   }
 
+  /** Place a listed file unless it, and the side files its identity came from, are unchanged. */
+  private async placeIfChanged(file: SessionFileInfo, dir: string, changes: Changes, generation: number): Promise<void> {
+    const entry = this.entriesByPath.get(file.filePath)
+    if (entry && entry.file.mtimeMs === file.mtimeMs && entry.file.size === file.size) {
+      const sidecars = file.dirName === null ? this.source.identitySidecars?.(file.filePath) : undefined
+      if (!sidecars || await sidecarStamp(sidecars) === entry.sidecars) return
+    }
+    if (generation === this.generation) await this.place(file, dir, changes, generation)
+  }
+
   /** Add or update one listed file, reading its identity when its path does not place it. */
-  private async place(file: SessionFileInfo, dir: string, changes: Changes): Promise<void> {
+  private async place(file: SessionFileInfo, dir: string, changes: Changes, generation: number): Promise<void> {
     const previous = this.entriesByPath.get(file.filePath)
-    const identity = file.dirName === null ? await this.identityOf(file) : null
-    const entry: Entry = { file, dir, identity, top: this.topLevel(file, identity) }
+    const placed = file.dirName === null ? await this.identityOf(file) : null
+    if (generation !== this.generation) return
+    const identity = placed?.identity ?? null
+    const entry: Entry = { file, dir, identity, top: this.topLevel(file, identity), sidecars: placed?.sidecars }
     this.entriesByPath.set(file.filePath, entry)
     const id = this.source.sessionIdOf(file.fileName)
     if (id) {
@@ -551,9 +672,11 @@ class CatalogImpl implements StoreCatalog {
     }
   }
 
-  private async identityOf(file: SessionFileInfo): Promise<SessionIdentity | null> {
+  private async identityOf(file: SessionFileInfo): Promise<{ identity: SessionIdentity | null; sidecars?: string }> {
+    const sidecarPaths = this.source.identitySidecars?.(file.filePath)
+    const sidecars = sidecarPaths ? await sidecarStamp(sidecarPaths) : undefined
     const known = this.live ? factsFor(file.filePath)?.identity : undefined
-    if (isStillTrue(known, file)) return known!.identity
+    if (isStillTrue(known, file) && known!.sidecars === sidecars) return { identity: known!.identity, sidecars }
     let identity = await this.source.readIdentity(file.filePath).catch(() => null)
     let final = identity !== null && this.source.identityIsFinal(file.filePath, file.size)
     // Unusual or legacy transcripts whose head lacks the identity pay for the full metadata parse.
@@ -571,8 +694,10 @@ class CatalogImpl implements StoreCatalog {
     // The path wins over the header where the layout encodes the id: a forked
     // or resumed session can carry a header id from the session it came from.
     if (identity) identity = { ...identity, sessionId: this.source.sessionIdOf(file.fileName) ?? identity.sessionId }
-    if (this.live) recordFact(file.filePath, "identity", { identity, final, mtimeMs: file.mtimeMs, size: file.size })
-    return identity
+    if (this.live) {
+      recordFact(file.filePath, "identity", { identity, final, mtimeMs: file.mtimeMs, size: file.size, ...(sidecars !== undefined && { sidecars }) })
+    }
+    return { identity, sidecars }
   }
 }
 

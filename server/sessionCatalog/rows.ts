@@ -14,6 +14,7 @@ export interface CatalogRow {
 /**
  * A session's row data at the size and mtime given: from memory or the saved
  * catalog when either was read at exactly that state, else read and kept.
+ * Prompts are capped at 2000 characters, the same before and after a restart.
  */
 export async function catalogRow(file: TouchedFile): Promise<CatalogRow> {
   const known = factsFor(file.filePath)?.row
@@ -22,8 +23,7 @@ export async function catalogRow(file: TouchedFile): Promise<CatalogRow> {
     const [meta, status] = await Promise.all([getSessionMeta(file.filePath), getSessionStatus(file.filePath)])
     return { meta, status }
   })
-  recordFact(file.filePath, "row", { meta, status, mtimeMs: file.mtimeMs, size: file.size })
-  return { meta, status }
+  return recordFact(file.filePath, "row", { meta, status, mtimeMs: file.mtimeMs, size: file.size })
 }
 
 /** The row data already known for exactly this size and mtime, without reading anything. */

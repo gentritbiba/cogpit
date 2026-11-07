@@ -6,7 +6,7 @@ import { instanceDirName, instanceSessionId } from "../../../shared/session/inst
 const mocks = vi.hoisted(() => ({ runtimeFor: vi.fn(), activity: vi.fn().mockReturnValue({ running: true }) }))
 vi.mock("../../sessionMetadata", async (original) => ({
   ...await original<typeof import("../../sessionMetadata")>(),
-  getSessionMeta: async () => ({ sessionId: "native-thread", cwd: "/work/repo", isSubagent: false }),
+  getSessionMeta: async () => ({ sessionId: "native-thread", cwd: "/work/repo", isSubagent: false, firstUserMessage: "", lastUserMessage: "" }),
   getSessionStatus: async () => ({ status: "tool_use" }),
 }))
 vi.mock("../../lib/sessionOrigins", () => ({ sessionParents: async () => new Map() }))

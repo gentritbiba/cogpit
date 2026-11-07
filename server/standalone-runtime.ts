@@ -25,7 +25,7 @@ import {
 } from "./lib/standalone-bootstrap"
 import { validatePasswordStrength } from "./security"
 import { editionOwnsSignIn, loadEdition } from "./edition"
-import { startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
+import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 
 export interface StartStandaloneServerOptions {
   staticDir: string
@@ -162,6 +162,7 @@ export async function startStandaloneServer({
       if (publishPort) removePortFile()
       if (slack) await stopSlack()
       await composition.dispose()
+      await flushSessionCatalog()
     },
   }
 }

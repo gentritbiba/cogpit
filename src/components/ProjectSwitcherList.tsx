@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from "react"
+import { useState, useMemo, type ReactNode } from "react"
 import { FolderOpen, FolderPlus, FolderSearch } from "lucide-react"
 import {
   Empty,
@@ -17,10 +17,10 @@ import {
 import { FolderBrowser } from "@/components/FolderBrowser"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { useFolderHostName } from "@/hooks/useFolderHostName"
-import { authFetch } from "@/lib/auth"
 import { fetchFolderListing, isHomeRelativePath, isTypedFolderPath } from "@/lib/folders"
 import { parseWorktreePath, shortPath } from "@/lib/format"
 import { nestWorktreeProjects } from "@/lib/projectWorktrees"
+import { useProjects } from "@/lib/projectsStore"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import type { AgentKind } from "@/lib/agents"
 import { agentSwitcherName } from "@/lib/agents/presentation"
@@ -32,21 +32,9 @@ function normalizePath(path: string): string {
   return path.replace(/[\\/]+$/, "") || path
 }
 
-/** Every project the server knows, fetched fresh each time `enabled` turns on. */
+/** Every project the server knows, revalidated each time `enabled` turns on. */
 export function useProjectList(enabled: boolean): ProjectInfo[] {
-  const [projects, setProjects] = useState<ProjectInfo[]>([])
-
-  useEffect(() => {
-    if (!enabled) return
-    const controller = new AbortController()
-    authFetch("/api/projects", { signal: controller.signal })
-      .then(async (res): Promise<ProjectInfo[]> => (res.ok ? await res.json() : []))
-      .then(setProjects)
-      .catch(() => { if (!controller.signal.aborted) setProjects([]) })
-    return () => controller.abort()
-  }, [enabled])
-
-  return projects
+  return useProjects(enabled).projects
 }
 
 /** The project list, or the folder browser in its place. */
