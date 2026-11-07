@@ -11,9 +11,15 @@ import {
   resolveCanonicalFileWithinRoot,
   statContainedFile,
 } from "./containment"
-import { readTranscriptHead } from "./transcriptHead"
+import { HEAD_BYTES, readHeadLines, readTranscriptHead } from "./transcriptHead"
+import { isClaudeNoiseLine } from "../../shared/session/claude"
+import {
+  createStoreCatalog,
+  walkStore,
+  type CatalogDirListing,
+  type StoreCatalogSource,
+} from "../sessionCatalog/storeCatalog"
 import type {
-  AgentProjectEntry,
   AgentStore,
   ProjectSessionFileInfo,
   SessionFileInfo,
@@ -62,59 +68,49 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
       .map((entry) => entry.name)
   }
 
-  async function listSessionFiles(): Promise<SessionFileInfo[]> {
-    const root = sessionsRoot()
-    if (!root) return []
-
+  /** The root holds project directories; each project directory holds its sessions. */
+  async function listDir(root: string, dir: string, depth: number): Promise<CatalogDirListing> {
+    if (depth === 0) return { files: [], dirs: (await listProjectDirNames(root)).map((dirName) => join(root, dirName)) }
+    const dirName = basename(dir)
     const files: SessionFileInfo[] = []
-    for (const dirName of await listProjectDirNames(root)) {
-      const projectDir = join(root, dirName)
-      let names: string[]
-      try {
-        names = await readdir(projectDir)
-      } catch {
-        continue
-      }
-      for (const name of names) {
-        if (!name.endsWith(".jsonl")) continue
-        const filePath = join(projectDir, name)
-        const stats = await statContainedFile(root, filePath)
-        if (!stats) continue
-        files.push({ filePath, fileName: name, dirName, ...stats })
-      }
+    for (const name of await readdir(dir)) {
+      if (!name.endsWith(".jsonl")) continue
+      const filePath = join(dir, name)
+      const stats = await statContainedFile(root, filePath)
+      if (stats) files.push({ filePath, fileName: name, dirName, ...stats })
     }
-    return files
+    return { files, dirs: [] }
   }
 
-  /** The project directories, each carrying the sessions listed under it. */
-  async function listProjects(): Promise<AgentProjectEntry[]> {
-    const byDirName = new Map<string, SessionFileInfo[]>()
-    for (const file of await listSessionFiles()) {
-      if (file.dirName === null) continue
-      const bucket = byDirName.get(file.dirName)
-      if (bucket) bucket.push(file)
-      else byDirName.set(file.dirName, [file])
-    }
-
-    const projects: AgentProjectEntry[] = []
-    for (const [dirName, files] of byDirName) {
-      const newest = files.reduce((a, b) => a.mtimeMs >= b.mtimeMs ? a : b)
-      // The dirName encoding is lossy for paths containing hyphens, so the cwd
-      // the newest session recorded is the better answer when readable.
-      let cwd: string | null = null
+  async function readProjectPath(filePath: string): Promise<{ path: string | null; final: boolean }> {
+    for (const line of await readHeadLines(filePath, HEAD_BYTES)) {
+      if (isClaudeNoiseLine(line)) continue
       try {
-        const meta = await readClaudeSessionMeta(newest.filePath, await readTranscriptHead(newest.filePath))
-        cwd = meta.cwd || null
-      } catch { /* ignore, fall back to the derived path */ }
-
-      projects.push({
-        dirName,
-        path: cwd ?? descriptor.dirName.decode(dirName) ?? dirName,
-        sessionCount: files.length,
-        lastModified: newest.mtimeMs ? new Date(newest.mtimeMs).toISOString() : null,
-      })
+        const record = JSON.parse(line) as { cwd?: unknown }
+        if (typeof record.cwd === "string" && record.cwd) return { path: record.cwd, final: true }
+      } catch { /* skip malformed */ }
     }
-    return projects
+    // A head without one leaves the full read, which also scans the tail.
+    const meta = await readClaudeSessionMeta(filePath, await readTranscriptHead(filePath))
+    return { path: meta.cwd || null, final: false }
+  }
+
+  const catalogSource: StoreCatalogSource = {
+    root: sessionsRoot,
+    listDir,
+    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
+    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
+    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+    readIdentity: async () => null,
+    readSessionMeta: readClaudeSessionMeta,
+    identityIsFinal: () => false,
+    readProjectPath,
+  }
+  const catalog = createStoreCatalog(catalogSource)
+
+  async function listSessionFiles(): Promise<SessionFileInfo[]> {
+    const root = sessionsRoot()
+    return root ? (await walkStore(catalogSource, root)).files : []
   }
 
   async function listProjectSessionFiles(dirName: string): Promise<ProjectSessionFileInfo[] | null> {
@@ -122,6 +118,8 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
     if (!root || !isSinglePathSegment(dirName)) return null
     const projectDir = join(root, dirName)
     if (!isWithinDir(root, projectDir)) return null
+    const listed = await catalog.projectSessionFiles(dirName)
+    if (listed.length > 0) return listed
 
     const names = await readdir(projectDir)
     return Promise.all(names.filter((name) => name.endsWith(".jsonl")).map(async (fileName) => {
@@ -252,17 +250,19 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
 
     readSessionMeta: readClaudeSessionMeta,
 
-    listProjects,
+    listProjects: () => catalog.projects(),
 
     listProjectSessionFiles,
 
     // The path names the project and the file names the session, so the listing
     // is already every top-level session.
-    async listTopLevelSessions() {
-      return (await listSessionFiles()).flatMap((file) =>
-        file.dirName === null ? [] : [{ ...file, dirName: file.dirName }],
-      )
-    },
+    listTopLevelSessions: () => catalog.topLevelSessions(),
+
+    listedSessionFiles: () => catalog.files(),
+
+    knownSessionFile: (sessionId) => catalog.sessionFileFor(sessionId),
+
+    dispose: () => catalog.close(),
 
     listSubagentFiles,
     agentsWroteSince,

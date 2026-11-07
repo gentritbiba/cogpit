@@ -11,6 +11,7 @@ import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "../server/sessionHosts/delegatedRequests"
 import { startSlack } from "../server/slack"
+import { startSessionCatalogAfterFirstResponse } from "../server/sessionCatalog"
 import { LOCAL_READER, markNotificationsRead } from "../server/lib/notificationHistory"
 import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
@@ -35,6 +36,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
     const listenPort = (isDev || networkEnabled) ? 19384 : 0
 
+    startSessionCatalogAfterFirstResponse(httpServer)
     await new Promise<void>((resolve) => {
       httpServer.listen(listenPort, listenHost, () => resolve())
     })

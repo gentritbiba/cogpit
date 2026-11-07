@@ -25,6 +25,7 @@ import {
 } from "./lib/standalone-bootstrap"
 import { validatePasswordStrength } from "./security"
 import { editionOwnsSignIn, loadEdition } from "./edition"
+import { startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 
 export interface StartStandaloneServerOptions {
   staticDir: string
@@ -130,6 +131,7 @@ export async function startStandaloneServer({
     legacyClickUpPath,
     viteDevUrl: process.env.ELECTRON_RENDERER_URL,
   })
+  startSessionCatalogAfterFirstResponse(composition.httpServer)
   let boundPort: number
   try {
     boundPort = await listen(composition.httpServer, port, host)

@@ -15,6 +15,7 @@ import { beginServerStart } from "./lib/installState"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
+import { startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -80,6 +81,7 @@ export function sessionApiPlugin(): Plugin {
         next()
       })
 
+      if (server.httpServer) startSessionCatalogAfterFirstResponse(server.httpServer)
       const use = server.middlewares.use.bind(server.middlewares)
       registerApiRoutes(use, { mode: "dev" })
       use("/api", apiNotFound)

@@ -1,4 +1,4 @@
-import { getSessionMeta, getSessionStatus } from "../helpers"
+import { getSessionMeta } from "../helpers"
 import { findJsonlPath } from "../sessionPaths"
 import { crewRootOf } from "./crew"
 import { editionModule } from "../edition"
@@ -11,11 +11,10 @@ import {
 } from "../../shared/session/agent-descriptors"
 import { allStores } from "../agents"
 import { runtimeFor } from "../agents/runtimes"
-import { getOrLoadSessionMeta } from "./sessionMetaCache"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
 import { instanceDirName, instanceSessionId, splitInstanceSessionId } from "../../shared/session/instances"
-import { SessionFileMonitor } from "./sessionFileMonitor"
+import { catalogRow } from "../sessionCatalog"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -27,9 +26,9 @@ import { SessionFileMonitor } from "./sessionFileMonitor"
  * itself by sweeping recently-modified transcripts and deriving their status
  * from the tail, exactly like /api/active-sessions does.
  *
- * Filesystem events invalidate cached listings, with a periodic fallback.
- * Transcripts are read through the shared mtime-keyed metadata cache only
- * when they change; runtime liveness is checked on every sweep.
+ * Listings come from the session catalog, and transcripts are read through
+ * its row cache only when they change; runtime liveness is checked on every
+ * sweep.
  *
  * Deliberate limits:
  * - A turn shorter than one sweep interval may never be observed "working" and
@@ -66,6 +65,7 @@ interface Candidate {
   fileName: string
   filePath: string
   mtimeMs: number
+  size: number
   agentKind: AgentKind
   instanceId?: string
 }
@@ -75,7 +75,6 @@ interface Candidate {
  * remembers "not notifiable" (subagent, unreadable) without re-parsing.
  */
 const known = new Map<string, { mtimeMs: number; snapshot: SessionSnapshot | null }>()
-const fileMonitor = new SessionFileMonitor()
 const tracker = new SessionAlertTracker()
 let started = false
 let sweeping = false
@@ -123,19 +122,17 @@ async function sweep(): Promise<void> {
 async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  // Stat-level listing only — never the session inventory, whose identity reads
-  // would re-open every transcript on every sweep.
-  const stores = allStores()
-  fileMonitor.retain(stores)
-  for (const store of stores) {
+  // Stat-level listing from the session catalog, which only re-reads what changed.
+  for (const store of allStores()) {
     try {
-      for (const file of await fileMonitor.list(store)) {
+      for (const file of await store.listedSessionFiles()) {
         if (file.mtimeMs < minMtimeMs) continue
         candidates.push({
           dirName: file.dirName,
           fileName: file.fileName,
           filePath: file.filePath,
           mtimeMs: file.mtimeMs,
+          size: file.size,
           agentKind: store.kind,
           instanceId: store.instanceId,
         })
@@ -162,13 +159,7 @@ async function snapshotCandidate(candidate: Candidate): Promise<SessionSnapshot 
 
 export async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | null> {
   try {
-    const { meta, status } = await getOrLoadSessionMeta(candidate.filePath, candidate.mtimeMs, async () => {
-      const [meta, status] = await Promise.all([
-        getSessionMeta(candidate.filePath),
-        getSessionStatus(candidate.filePath),
-      ])
-      return { meta, status }
-    })
+    const { meta, status } = await catalogRow(candidate)
 
     // A transcript whose path does not name the project derives its project
     // key — and its label — from the recorded cwd.

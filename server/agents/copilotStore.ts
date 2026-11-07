@@ -1,18 +1,19 @@
 import type { Dirent } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { basename, join, resolve } from "node:path"
 import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descriptors"
 import { isWithinDir } from "../pathSafety"
 import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
 import { readCopilotSessionIdentity, readCopilotSessionMeta } from "./copilotMetadata"
+import { addressFromTranscript, projectSessionFilesFromCatalog } from "./transcriptProjects"
 import {
-  addressFromTranscript,
-  projectSessionFilesFromInventory,
-  projectsFromInventory,
-  topLevelSessionsFromInventory,
-} from "./transcriptProjects"
-import type { AgentStore, SessionFileInfo } from "./types"
+  createStoreCatalog,
+  walkStore,
+  type CatalogDirListing,
+  type StoreCatalogSource,
+} from "../sessionCatalog/storeCatalog"
+import type { AgentStore } from "./types"
 
 /**
  * Copilot gives every session its own directory: `<session-state>/<uuid>/`,
@@ -35,6 +36,39 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
     return { sessionDir, filePath: join(sessionDir, "events.jsonl") }
   }
 
+  /** The root holds one directory per session; each holds its transcript beside other files. */
+  async function listDir(root: string, dir: string, depth: number): Promise<CatalogDirListing> {
+    if (depth === 0) {
+      let entries: Dirent[]
+      try {
+        entries = await readdir(root, { withFileTypes: true })
+      } catch {
+        return { files: [], dirs: [] }
+      }
+      return { files: [], dirs: entries.filter((entry) => entry.isDirectory() && isSessionUuid(entry.name)).map((entry) => join(root, entry.name)) }
+    }
+    const sessionId = basename(dir)
+    const { filePath } = transcriptPath(sessionId)
+    const stats = await statContainedFile(root, filePath)
+    return {
+      files: stats ? [{ filePath, fileName: descriptor.sessionFile.name(sessionId), dirName: null, ...stats }] : [],
+      dirs: [],
+    }
+  }
+
+  const catalogSource: StoreCatalogSource = {
+    root: () => SESSIONS_DIR,
+    listDir,
+    sessionIdOf: (fileName) => descriptor.sessionFile.sessionId(fileName),
+    encodeDirName: (cwd) => descriptor.dirName.encode(cwd),
+    decodeDirName: (dirName) => descriptor.dirName.decode(dirName),
+    readIdentity: readCopilotSessionIdentity,
+    readSessionMeta: readCopilotSessionMeta,
+    // The identity may come from a later resume record or the workspace sidecar, so it is never final.
+    identityIsFinal: () => false,
+  }
+  const catalog = createStoreCatalog(catalogSource)
+
   const copilotStore: AgentStore = {
     kind: "copilot",
     descriptor,
@@ -45,28 +79,7 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
       return resolve(filePath) !== resolve(SESSIONS_DIR) && isWithinDir(SESSIONS_DIR, filePath)
     },
 
-    async listSessionFiles(): Promise<SessionFileInfo[]> {
-      let entries: Dirent[]
-      try {
-        entries = await readdir(SESSIONS_DIR, { withFileTypes: true })
-      } catch {
-        return []
-      }
-
-      const results = await Promise.all(entries.map(async (entry): Promise<SessionFileInfo | null> => {
-        if (!entry.isDirectory() || !isSessionUuid(entry.name)) return null
-        const { filePath } = transcriptPath(entry.name)
-        const stats = await statContainedFile(SESSIONS_DIR, filePath)
-        if (!stats) return null
-        return {
-          filePath,
-          fileName: descriptor.sessionFile.name(entry.name),
-          dirName: null,
-          ...stats,
-        }
-      }))
-      return results.flatMap((entry) => entry ? [entry] : [])
-    },
+    listSessionFiles: async () => (await walkStore(catalogSource, SESSIONS_DIR)).files,
 
     async resolveSessionFile(_dirName: string, fileName: string): Promise<string | null> {
       // Only the exact `<uuid>/events.jsonl` shape addresses a Copilot session;
@@ -90,11 +103,17 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
 
     readSessionMeta: readCopilotSessionMeta,
 
-    listProjects: () => projectsFromInventory(copilotStore),
+    listProjects: () => catalog.projects(),
 
-    listProjectSessionFiles: (dirName) => projectSessionFilesFromInventory(copilotStore, dirName),
+    listProjectSessionFiles: (dirName) => projectSessionFilesFromCatalog(copilotStore, catalog, dirName),
 
-    listTopLevelSessions: () => topLevelSessionsFromInventory(copilotStore),
+    listTopLevelSessions: () => catalog.topLevelSessions(),
+
+    listedSessionFiles: () => catalog.files(),
+
+    knownSessionFile: (sessionId) => catalog.sessionFileFor(sessionId),
+
+    dispose: () => catalog.close(),
 
     // Sub-agents are `subagent.*` events inside the parent transcript, not files.
     listSubagentFiles: async () => [],
