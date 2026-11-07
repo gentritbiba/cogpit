@@ -182,6 +182,14 @@ export class OrchestrationStore {
     const row = this.db.prepare("SELECT listening,cursor FROM crew_chat_listeners WHERE root_id=? AND session_id=?").get(rootId, sessionId) as Row | undefined
     return { listening: row ? Boolean(row.listening) : true, cursor: Number(row?.cursor ?? 0) }
   }
+  /** Who in a crew turned listening off or on; a member with no row listens. */
+  chatListeners(rootId: string): Map<string, boolean> {
+    return new Map((this.db.prepare("SELECT session_id,listening FROM crew_chat_listeners WHERE root_id=?").all(rootId) as Row[]).map((row) => [String(row.session_id), Boolean(row.listening)]))
+  }
+  /** Crews with a message still waiting to reach a member. */
+  chatRootsWithPendingDeliveries(scope: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT m.root_id FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE d.scope=? AND d.state='pending'").all(scope) as Row[]).map((row) => String(row.root_id))
+  }
   setChatListening(rootId: string, sessionId: string, listening: boolean): void {
     this.transaction(() => this.db.prepare("INSERT INTO crew_chat_listeners(root_id,session_id,listening) VALUES(?,?,?) ON CONFLICT(root_id,session_id) DO UPDATE SET listening=excluded.listening").run(rootId, sessionId, Number(listening)))
   }
