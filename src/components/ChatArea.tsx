@@ -11,7 +11,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
+import { TimelineRowsProvider } from "@/components/timeline/TimelineRowsProvider"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { AllowanceRecovery } from "@/components/AllowanceRecovery"
 import { QueuedTurns } from "@/components/QueuedTurns"
@@ -133,6 +134,7 @@ export const ChatArea = memo(function ChatArea({
       )}
 
       {/* Scrollable chat area */}
+      <TimelineRowsProvider sessionKey={currentSession.sessionId} timelineRef={timelineRef}>
       <div className="relative min-h-0 flex-1">
         <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
         <StickyPromptBanner
@@ -189,6 +191,7 @@ export const ChatArea = memo(function ChatArea({
           <ArrowDown data-icon="inline-start" />
         </Button>
       </div>
+      </TimelineRowsProvider>
     </div>
   )
 })

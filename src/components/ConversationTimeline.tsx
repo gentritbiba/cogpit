@@ -1,5 +1,6 @@
 import { useMemo, memo, type RefObject } from "react"
-import { VirtualizedTimeline, type TimelineHandle } from "./timeline/VirtualizedTimeline"
+import { VirtualizedTimeline } from "./timeline/VirtualizedTimeline"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { matchesSearch } from "@/lib/timelineHelpers"
 import { shouldShowEmptyState } from "@/lib/timelinePaging"
 import { useAppContext } from "@/contexts/AppContext"
