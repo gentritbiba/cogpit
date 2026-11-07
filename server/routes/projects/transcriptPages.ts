@@ -1,12 +1,13 @@
 import type { ServerResponse } from "node:http"
 import type { AgentFormat } from "../../../shared/session/agents"
 import { RESULT_PROJECTION } from "../../../shared/contracts/toolResults"
+import { linesBeforeFirstTurn } from "../../../shared/session/pageCuts"
 import { projectLine, type TranscriptAddress } from "../../agents/resultRefs"
 import { openTranscript, readTranscriptText } from "../../agents/transcriptFile"
 import { sendJson } from "../../http"
 import { DEFAULT_PAGE_BYTE_BUDGET, DEFAULT_TAIL_BYTE_BUDGET, lineBytes, oldestKeptLine, parseByteBudget } from "./tailBudget"
 import { extractCompleteLines, splitLines, type LineRun } from "./transcriptLines"
-import { linesBeforeFirstTurn, readTurnPage } from "./turnPages"
+import { readTurnPage } from "./turnPages"
 
 const HEADER_BYTES = 4096
 /** Upper bound for growing the header read when the first line is oversized. */

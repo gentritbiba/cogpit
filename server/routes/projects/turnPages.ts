@@ -1,4 +1,5 @@
 import type { AgentFormat } from "../../../shared/session/agents"
+import { parsePageRecord } from "../../../shared/session/pageCuts"
 import { openTranscript } from "../../agents/transcriptFile"
 import { lineBytes } from "./tailBudget"
 import { extractCompleteLines, type LineRun } from "./transcriptLines"
@@ -38,15 +39,6 @@ export interface TurnPage {
   hasMore: boolean
 }
 
-function parseRecord(line: string): Record<string, unknown> | null {
-  try {
-    const value: unknown = JSON.parse(line)
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
-  } catch {
-    return null
-  }
-}
-
 /**
  * Indexes into `run.lines` at which a page may start. Boundaries come from
  * the format, run over the header and the window as a reader parses them.
@@ -66,7 +58,7 @@ function pageStarts(
   const lineOf: number[] = []
   run.lines.forEach((line, index) => {
     if (format.isNoiseLine(line) || isHeaderLine(line, run.starts[index])) return
-    const record = parseRecord(line)
+    const record = parsePageRecord(line)
     if (!record) return
     records.push(record)
     lineOf.push(index)
@@ -83,24 +75,6 @@ function pageStarts(
 }
 
 /**
- * The leading lines of a transcript's header that come before its first turn:
- * what every page is parsed after. Header lines past that point belong to the
- * first turn, and prepending them to a later page would open a phantom turn.
- */
-export function linesBeforeFirstTurn(format: Pick<AgentFormat, "pageCuts">, lines: readonly string[]): string[] {
-  const records: Record<string, unknown>[] = []
-  const lineOf: number[] = []
-  lines.forEach((line, index) => {
-    const record = parseRecord(line)
-    if (!record) return
-    records.push(record)
-    lineOf.push(index)
-  })
-  const [firstCut] = format.pageCuts(records)
-  return firstCut === undefined ? [...lines] : lines.slice(0, lineOf[firstCut])
-}
-
-/**
  * The page of whole turns that ends at `before`: the newest `turns` turns, or
  * fewer once the next would take it past `budget`, but always at least one.
  * Reads backward in doubling windows until it finds where its oldest turn
@@ -111,7 +85,7 @@ export async function readTurnPage(filePath: string, format: PageFormat, request
   const { turns, budget, send } = request
   const hardCap = Math.max(TURN_HARD_CAP_BYTES, budget)
   const headerLines = new Set(request.headerLines)
-  const headerRecords = request.headerLines.map(parseRecord).filter((record) => record !== null)
+  const headerRecords = request.headerLines.map(parsePageRecord).filter((record) => record !== null)
   const sizes = new Map<number, number>()
   const sentLines = new Map<number, string>()
   const sentAt = (line: string, offset: number): string => {
