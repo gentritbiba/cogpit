@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
-import type { ParsedSession } from "../../shared/session/types"
+import { EMPTY_SESSION_DIGEST, toSessionView, type SessionView } from "../../shared/session/sessionDigest"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
@@ -23,7 +23,7 @@ interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
   dispatch: Dispatch<SessionAction>
   isMobile: boolean
-  onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
+  onSessionFinalized: (parsed: SessionView, source: SessionSource) => void
   /** Called when the user sends the first message and session creation begins */
   onCreateStarted?: (message: string) => void
   onModelRejected?: (model: string) => void
@@ -83,7 +83,7 @@ function buildSessionSource(response: CreateSessionResponse, rawText: string): S
   }
 }
 
-function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession {
+function buildEmptyParsedSession(response: CreateSessionResponse): SessionView {
   return {
     sessionId: response.sessionId,
     version: "",
@@ -94,17 +94,17 @@ function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession
     model: "",
     turns: [],
     stats: { ...EMPTY_SESSION_STATS },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     agentKind: agentKindForDirName(response.dirName),
   }
 }
 
-function parseInitialSessionContent(rawText: string | undefined, dirName?: string): { rawText: string; parsed: ParsedSession } | null {
+function parseInitialSessionContent(rawText: string | undefined, dirName?: string): { rawText: string; parsed: SessionView } | null {
   if (!rawText?.trim()) return null
   try {
     return {
       rawText,
-      parsed: scopeParsedSession(parseSession(rawText), splitInstanceDirName(dirName).instanceId),
+      parsed: scopeParsedSession(toSessionView(parseSession(rawText)), splitInstanceDirName(dirName).instanceId),
     }
   } catch {
     return null
@@ -117,7 +117,7 @@ async function tryLoadSessionContent(
   maxAttempts = 3,
   delayMs = 100,
   allowInitialContent = true,
-): Promise<{ rawText: string; parsed: ParsedSession } | null> {
+): Promise<{ rawText: string; parsed: SessionView } | null> {
   if (allowInitialContent) {
     const initialContent = parseInitialSessionContent(response.initialContent, response.dirName)
     if (initialContent) {
@@ -137,7 +137,7 @@ async function tryLoadSessionContent(
         try {
           return {
             rawText,
-            parsed: scopeParsedSession(parseSession(rawText), splitInstanceDirName(response.dirName).instanceId),
+            parsed: scopeParsedSession(toSessionView(parseSession(rawText)), splitInstanceDirName(response.dirName).instanceId),
           }
         } catch {
           // Try again if the file is still mid-write
@@ -181,7 +181,7 @@ async function finalizeDiscoveredSession(
   controller: AbortController,
   dispatch: Dispatch<SessionAction>,
   isMobile: boolean,
-  onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
+  onSessionFinalized: (parsed: SessionView, source: SessionSource) => void
 ): Promise<string> {
   const loaded = parseInitialSessionContent(response.initialContent, response.dirName)
   const rawText = loaded?.rawText ?? ""

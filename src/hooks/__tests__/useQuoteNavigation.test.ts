@@ -1,11 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { QUOTE_SEARCH_PAGES, useQuoteNavigation } from "../useQuoteNavigation"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
 import type { SessionSource } from "@/lib/sessionSource"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const turn = (id: string, reply = `reply ${id}`) => ({ id, assistantText: [reply] }) as unknown as Turn
-const session = (turns: Turn[]) => ({ turns }) as unknown as ParsedSession
+const session = (turns: Turn[]) => ({ turns }) as unknown as SessionView
 const source = (turnId: string, fileName = "a.jsonl") => ({ dirName: "-repo", fileName, sessionId: "s", turnId })
 const open = (fileName = "a.jsonl") => ({ dirName: "-repo", fileName, watchOffset: 0, loadId: 1 }) as SessionSource
 

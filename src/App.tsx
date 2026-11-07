@@ -66,10 +66,11 @@ import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import type { ParsedSession, Turn } from "../shared/session/types"
+import type { Turn } from "../shared/session/types"
+import type { SessionView } from "../shared/session/sessionDigest"
 import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
 import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
-import { hasEditToolCalls } from "../shared/session/edit-calls"
+import { turnsChangeFiles, workflowCallCount } from "@/lib/turnFacts"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
@@ -121,7 +122,7 @@ export default function App() {
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
   const { procBySession } = useSessionInventory()
-  const { parse: workerParse, append: workerAppend } = useParserWorker()
+  const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
     dispatch({ type: "SET_OLDER_TURNS", turns: olderTurns })
@@ -140,7 +141,7 @@ export default function App() {
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
-    workerParse,
+    workerParse: parsePage,
     onOlderTurns: handleOlderTurns,
   })
 
@@ -289,26 +290,18 @@ export default function App() {
 
   // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
   // Bash writes that bypass-permissions sessions produce instead.
-  const hasFileChanges = useMemo(() => {
-    const session = state.session
-    if (!session) return false
-    return session.turns.some((turn) =>
-      hasEditToolCalls(turn.toolCalls, session.cwd)
-      || turn.subAgentActivity.some((msg) => hasEditToolCalls(msg.toolCalls, session.cwd))
-    )
-  }, [state.session])
+  const hasFileChanges = useMemo(
+    () => state.session ? turnsChangeFiles(state.session.turns, state.session.cwd) : false,
+    [state.session],
+  )
 
   // Cheaply detect workflow runs from already-parsed turns (Workflow tool calls).
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
-  const workflowToolCallCount = useMemo(() => {
-    if (!state.session || !agentCapabilities.workflows) return 0
-    let n = 0
-    for (const turn of state.session.turns)
-      for (const tc of turn.toolCalls)
-        if (tc.name === "Workflow") n++
-    return n
-  }, [state.session, agentCapabilities.workflows])
+  const workflowToolCallCount = useMemo(
+    () => state.session && agentCapabilities.workflows ? workflowCallCount(state.session.turns) : 0,
+    [state.session, agentCapabilities.workflows],
+  )
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
   // Workflows live under the top-level session dir; not shown on sub-agent views.
@@ -608,7 +601,7 @@ export default function App() {
   // effect keeps render pure and installs the latest callback before user input
   // or passive effects can finalize a newly-created session.
   useLayoutEffect(() => {
-    const handleSessionFinalized = (_parsed: ParsedSession) => {
+    const handleSessionFinalized = (_parsed: SessionView) => {
       // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
       resetFinalizedSessionTurnCount(0)
       scrollFinalizedSessionToBottom()

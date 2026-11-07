@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
-import type { ParsedSession, Turn, Branch, UndoState } from "../../../shared/session/types"
+import type { Turn, Branch, UndoState } from "../../../shared/session/types"
 import type { SessionSource } from "@/lib/sessionSource"
 
 // Mock authFetch before importing useUndoRedo
@@ -46,6 +46,7 @@ vi.mock("../../../shared/session/parser", () => ({
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { authFetch, jsonFetch } from "@/lib/auth"
 import { buildUndoOperations, type FileOperation } from "@/lib/undo-engine"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockJsonFetch = vi.mocked(jsonFetch)
@@ -70,7 +71,7 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
   }
 }
 
-function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(turnCount = 3, overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "test-session",
     version: "1.0",
@@ -90,7 +91,7 @@ function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): Par
       totalDurationMs: 0,
       turnCount,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     ...overrides,
   }
 }
@@ -261,7 +262,7 @@ describe("useUndoRedo", () => {
 
       const { result, rerender } = renderHook(
         ({ s }) => useUndoRedo(s, s ? makeSource() : null, vi.fn()),
-        { initialProps: { s: session as ParsedSession | null } }
+        { initialProps: { s: session as SessionView | null } }
       )
 
       await waitFor(() => {
@@ -385,6 +386,21 @@ describe("useUndoRedo", () => {
       )
       act(() => result.current.requestUndo(1))
       expect(result.current.confirmState).toBeNull()
+    })
+
+    it("stays the same callback while the session streams, and restores against the latest turns", async () => {
+      const source = makeSource()
+      const { result, rerender } = renderHook(({ session }) => useUndoRedo(session, source, vi.fn()), {
+        initialProps: { session: makeSession(3) },
+      })
+      await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled())
+      const first = result.current.requestUndo
+
+      rerender({ session: makeSession(5) })
+      expect(result.current.requestUndo).toBe(first)
+
+      act(() => result.current.requestUndo(4))
+      expect(result.current.confirmState?.targetTurnIndex).toBe(3)
     })
 
     it("sets confirmState for valid undo request", async () => {

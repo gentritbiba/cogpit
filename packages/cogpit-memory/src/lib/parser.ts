@@ -47,9 +47,25 @@ export function parseSessionAppend(
   existing: ParsedSession,
   newJsonlText: string
 ): ParsedSession {
+  return appendSession(existing, newJsonlText, false)
+}
+
+/**
+ * `parseSessionAppend` for a caller that keeps only the result: `existing`'s
+ * records may be extended in place rather than copied. The parser worker,
+ * which owns the sessions it appends to, is the one caller.
+ */
+export function appendSessionInPlace(
+  existing: ParsedSession,
+  newJsonlText: string
+): ParsedSession {
+  return appendSession(existing, newJsonlText, true)
+}
+
+function appendSession(existing: ParsedSession, newJsonlText: string, inPlace: boolean): ParsedSession {
   const byRecords = formatForRecords(existing.rawMessages)
   const format = byRecords.kind === TERMINAL_AGENT_KIND ? formatForText(newJsonlText) : byRecords
-  const appended = format.append(existing, newJsonlText)
+  const appended = format.append(existing, newJsonlText, inPlace)
   return existing.instanceId ? scopeParsedSession(appended, existing.instanceId) : appended
 }
 

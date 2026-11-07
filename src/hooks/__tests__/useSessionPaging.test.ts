@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
@@ -10,6 +10,7 @@ vi.mock("@/lib/sessionCache", () => ({
 import { useSessionPaging } from "../useSessionPaging"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
@@ -29,7 +30,7 @@ function beforeResponse(overrides: Record<string, unknown> = {}) {
 }
 
 const olderTurns = [{ id: "old-1", userMessage: "old", contentBlocks: [], toolCalls: [] }] as unknown as Turn[]
-const parsed = { turns: olderTurns } as unknown as ParsedSession
+const parsed = { turns: olderTurns } as unknown as SessionView
 
 function cachedEntry(overrides: Record<string, unknown> = {}) {
   return {

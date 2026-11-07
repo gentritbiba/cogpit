@@ -137,7 +137,7 @@ function detectBlockingPrompt(turns: Turn[], lastTurn: Turn): PendingInteraction
  * A blocking prompt wins over an async question asked earlier in the same turn:
  * it is the one holding the agent up.
  */
-export function detectPendingInteraction(session: ParsedSession): PendingInteraction {
+export function detectPendingInteraction(session: Pick<ParsedSession, "turns">): PendingInteraction {
   const { turns } = session
   if (turns.length === 0) return null
 

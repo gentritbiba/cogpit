@@ -205,13 +205,21 @@ function extractMetadata(events: CopilotEvent[]): CopilotMetadata {
   return metadata
 }
 
+/** How many records detection reads before it decides; a paged read may open on a partial line. */
+const DETECTION_RECORDS = 3
+
 export function isCopilotSessionText(jsonlText: string): boolean {
-  for (const line of jsonlText.split("\n")) {
-    const trimmed = line.trim()
+  let read = 0
+  let start = 0
+  while (start < jsonlText.length && read < DETECTION_RECORDS) {
+    const newline = jsonlText.indexOf("\n", start)
+    const end = newline < 0 ? jsonlText.length : newline
+    const trimmed = jsonlText.slice(start, end).trim()
+    start = end + 1
     if (!trimmed) continue
+    read++
     try {
-      const value: unknown = JSON.parse(trimmed)
-      if (isCopilotEvent(value)) return true
+      if (isCopilotEvent(JSON.parse(trimmed))) return true
     } catch {
       // A partial first line can occur in paged reads. Keep looking.
     }

@@ -9,10 +9,20 @@ import { __resetCapabilitiesForTest, can } from "@/lib/capabilities"
 // implementation, so only the postMessage hop is replaced.
 vi.mock("@/hooks/useParserWorker", async () => {
   const { parseSession, parseSessionAppend } = await import("../../../../shared/session/parser")
+  const { toSessionView } = await import("../../../../shared/session/sessionDigest")
+  // Stands in for the worker, which keeps each parsed session to append to.
+  const kept = new WeakMap<object, ReturnType<typeof parseSession>>()
+  const view = (session: ReturnType<typeof parseSession>) => {
+    const shown = toSessionView(session)
+    kept.set(shown.turns, session)
+    return shown
+  }
+  const parse = async (text: string) => view(parseSession(text))
   return {
     useParserWorker: () => ({
-      parse: async (text: string) => parseSession(text),
-      append: async (existing: never, newText: string) => parseSessionAppend(existing, newText),
+      parse,
+      parsePage: parse,
+      append: async (existing: { turns: object }, newText: string) => view(parseSessionAppend(kept.get(existing.turns)!, newText)),
     }),
   }
 })

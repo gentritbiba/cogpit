@@ -2,7 +2,7 @@ import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch } from "react"
 import { useNewSession } from "@/hooks/useNewSession"
 import { authFetch } from "@/lib/auth"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import {
@@ -52,7 +52,7 @@ export function useProjectSessionLaunch({
   mcpConfig,
   onModelRejected,
 }: UseProjectSessionLaunchOptions) {
-  const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
+  const sessionFinalizedRef = useRef<((parsed: SessionView) => void) | null>(null)
   const liveSessionsRefreshRef = useRef<(() => void) | null>(null)
   const [pendingFirstMessage, setPendingFirstMessage] = useState<string | null>(null)
 

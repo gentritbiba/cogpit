@@ -116,8 +116,11 @@ export interface AgentFormat {
   detectsRecords(records: readonly { type?: unknown }[]): boolean
   /** Full parse into the shared session model. */
   parse(jsonlText: string, options?: ParseSessionOptions): ParsedSession
-  /** Incremental append of newly written lines. */
-  append(existing: ParsedSession, newJsonlText: string): ParsedSession
+  /**
+   * Incremental append of newly written lines. Leaves `existing` as it was,
+   * unless `inPlace` lets the format extend its records instead of copying them.
+   */
+  append(existing: ParsedSession, newJsonlText: string, inPlace?: boolean): ParsedSession
   /** Cheap header metadata read from already-split transcript lines. */
   metadataFromLines(lines: readonly string[]): AgentSessionMetadata
   /** Status derived from raw records. */
@@ -240,7 +243,7 @@ const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({
     detectsText: (text) => text.split("\n", 1)[0]?.includes('"type":"acp_session"') ?? false,
     detectsRecords: (records) => records[0]?.type === "acp_session",
     parse: (text, options) => ({ ...parseClaudeSession(text, options), agentKind: "acp" }),
-    append: (session, text) => ({ ...appendClaudeSession(session, text), agentKind: "acp" }),
+    append: (session, text, inPlace) => ({ ...appendClaudeSession(session, text, inPlace), agentKind: "acp" }),
   },
   claude: claudeFormat,
   codex: codexFormat,

@@ -1,8 +1,8 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface UseChatScrollOpts {
-  session: ParsedSession | null
+  session: SessionView | null
   isLive: boolean
   pendingMessages: string[]
   consumePending: (count?: number) => void

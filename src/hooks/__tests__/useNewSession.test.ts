@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react"
 import { useNewSession } from "../useNewSession"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { ParsedSession } from "../../../shared/session/types"
+import { toSessionView } from "../../../shared/session/sessionDigest"
 import { ALL_CAPABILITIES, NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
@@ -169,7 +170,7 @@ describe("useNewSession", () => {
       expect(dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "RELOAD_SESSION_CONTENT",
-          session: mockParsedSession,
+          session: toSessionView(mockParsedSession),
         })
       )
     })

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
   parseSession,
+  appendSessionInPlace,
   parseSessionAppend,
   getUserMessageText,
   getUserMessageImages,
@@ -1044,6 +1045,29 @@ describe("compaction", () => {
 // ── parseSessionAppend ──────────────────────────────────────────────────
 
 describe("parseSessionAppend", () => {
+  it("leaves the session it appends to untouched", () => {
+    const existing = parseSession(toJsonl([userMsg("hello"), textAssistant("hi")]))
+    const records = existing.rawMessages
+    const snapshot = structuredClone(existing)
+    const turns = existing.turns
+
+    const updated = parseSessionAppend(existing, toJsonl([userMsg("next"), textAssistant("sure")]))
+
+    expect(updated.turns).toHaveLength(2)
+    expect(updated.rawMessages).toHaveLength(4)
+    expect(existing.rawMessages).toBe(records)
+    expect(existing.turns).toBe(turns)
+    expect(existing).toEqual(snapshot)
+  })
+
+  it("extends the records in place only when asked to", () => {
+    const existing = parseSession(toJsonl([userMsg("hello"), textAssistant("hi")]))
+    const records = existing.rawMessages
+    const updated = appendSessionInPlace(existing, toJsonl([userMsg("next")]))
+    expect(updated.rawMessages).toBe(records)
+    expect(records).toHaveLength(3)
+  })
+
   it("appends new messages to an existing session", () => {
     const existing = parseSession(simpleSession())
     expect(existing.turns).toHaveLength(1)
@@ -1116,15 +1140,14 @@ describe("parseSessionAppend", () => {
       ]),
     ])
 
+    const recordsBefore = existing.rawMessages.length
     const updated = parseSessionAppend(existing, newPart)
     // The rebuild starts from turn 0 (since it owns the referenced tool call),
     // but the progress message appears chronologically after turn 1's user message,
     // so buildTurns attaches it to the current turn at that point (turn 1).
     // The key thing is that both turns are rebuilt and rawMessages accumulate correctly.
     expect(updated.turns).toHaveLength(2)
-    expect(updated.rawMessages.length).toBe(
-      existing.rawMessages.length + 1
-    )
+    expect(updated.rawMessages.length).toBe(recordsBefore + 1)
     // The late progress ends up on the last turn since it arrives after turn 1 starts
     const lastTurn = updated.turns[updated.turns.length - 1]
     expect(lastTurn.subAgentActivity.length).toBeGreaterThan(0)

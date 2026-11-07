@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useChatScroll } from "../useChatScroll"
-import type { ParsedSession } from "../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // Minimal parsed session factory
-function makeSession(turnCount: number): ParsedSession {
+function makeSession(turnCount: number): SessionView {
   return {
     sessionId: "s1",
     version: "1",
@@ -36,7 +36,7 @@ function makeSession(turnCount: number): ParsedSession {
       totalDurationMs: 0,
       turnCount,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
@@ -59,7 +59,7 @@ describe("useChatScroll", () => {
   })
 
   const defaultOpts = {
-    session: null as ParsedSession | null,
+    session: null as SessionView | null,
     isLive: false,
     pendingMessages: [] as string[],
     consumePending,

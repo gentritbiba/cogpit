@@ -1,7 +1,8 @@
 import { useReducer } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
 import type { AgentKind } from "@/lib/agents"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
 import type { MobileTab } from "@/components/MobileNav"
 
@@ -9,7 +10,7 @@ import type { MobileTab } from "@/components/MobileNav"
 export type MainView = "sessions" | "config" | "mission" | "extension"
 
 export interface SessionState {
-  session: ParsedSession | null
+  session: SessionView | null
   /**
    * Turns exactly as the live pipeline last emitted them. Sessions open
    * bottom-first, so this is only the loaded tail window — never the history
@@ -18,6 +19,13 @@ export interface SessionState {
   windowTurns: Turn[]
   /** Older pages loaded by scroll-up paging, oldest first, unstitched. */
   olderTurns: Turn[]
+  /**
+   * Whether the merge of the older pages reached past the window's first turn,
+   * or left a message or question open that a streamed turn could answer
+   * across the seam. While it holds, every update merges the pages again;
+   * otherwise an update replaces only the window turns that changed.
+   */
+  seamOpen: boolean
   sessionSource: SessionSource | null
   /** dirName of a pending (not-yet-created) session, set before first message */
   pendingDirName: string | null
@@ -40,26 +48,26 @@ export interface SessionState {
 }
 
 export type SessionAction =
-  | { type: "LOAD_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
+  | { type: "LOAD_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
   | { type: "GO_HOME"; isMobile: boolean }
   /** Leaves the open session only: a view it was open behind stays on screen. */
   | { type: "CLOSE_SESSION"; isMobile: boolean }
-  | { type: "SWITCH_TEAM_MEMBER"; session: ParsedSession; source: SessionSource; memberName: string }
+  | { type: "SWITCH_TEAM_MEMBER"; session: SessionView; source: SessionSource; memberName: string }
   | { type: "JUMP_TO_TURN"; index: number; toolCallId?: string }
   | { type: "SET_SEARCH_QUERY"; value: string }
   | { type: "SET_EXPAND_ALL"; value: boolean }
   | { type: "SET_EXPAND_TOOL_PAYLOADS"; value: boolean }
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
-  | { type: "UPDATE_SESSION"; session: ParsedSession }
+  | { type: "UPDATE_SESSION"; session: SessionView }
   | { type: "SET_OLDER_TURNS"; turns: Turn[] }
-  | { type: "RELOAD_SESSION_CONTENT"; session: ParsedSession; source: SessionSource }
+  | { type: "RELOAD_SESSION_CONTENT"; session: SessionView; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
   | { type: "GUARD_MOBILE_TAB"; hasSession: boolean }
   | { type: "SET_LOADING_MEMBER"; name: string | null }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
-  | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
+  | { type: "FINALIZE_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
   | { type: "OPEN_CONFIG"; filePath?: string }
   | { type: "CLOSE_CONFIG" }
   | { type: "OPEN_MISSION" }
@@ -76,6 +84,7 @@ const initialState: SessionState = {
   session: null,
   windowTurns: [],
   olderTurns: [],
+  seamOpen: false,
   sessionSource: null,
   pendingDirName: null,
   pendingCwd: null,
@@ -93,27 +102,54 @@ const initialState: SessionState = {
   dashboardProject: null,
 }
 
+/** A peer message nothing answered yet, or a question still waiting for its reply. */
+function leavesSomethingOpen(turns: readonly Turn[]): boolean {
+  return turns.some((turn) => turn.contentBlocks.some((block) => block.kind === "agent_message" && !block.reply)
+    || turn.toolCalls.some((call) => call.asyncQuestion === true && call.asyncAnswer === undefined))
+}
+
 /**
  * Rebuilds the rendered session from the live window plus the history paged in
- * above it. The live pipeline re-emits only its own window on every appended
- * line, so the paged-in turns have to be re-applied each time or one streamed
- * line wipes everything the user scrolled up to. `prependTurns` dedupes by id
- * and re-stitches the turn a page boundary cut in half, so replaying it is
- * safe.
+ * above it. `prependTurns` dedupes by id, re-stitches the turn a page boundary
+ * cut in half and re-pairs replies across the join, so replaying it is safe.
  */
 function composeSession(
-  session: ParsedSession,
+  session: SessionView,
   windowTurns: Turn[],
   olderTurns: Turn[],
   agentKind?: AgentKind,
-): ParsedSession {
+): Pick<SessionState, "session" | "seamOpen"> {
+  if (olderTurns.length === 0) return { session, seamOpen: false }
   const turns = prependTurns(windowTurns, olderTurns, agentKind)
-  return turns === session.turns ? session : { ...session, turns }
+  const offset = turns.length - windowTurns.length
+  const seamOpen = offset < 0
+    || windowTurns.some((turn, index) => index > 0 && turns[offset + index] !== turn)
+    || leavesSomethingOpen(turns.slice(0, Math.max(0, offset) + 1))
+  return { session: turns === session.turns ? session : { ...session, turns }, seamOpen }
+}
+
+/**
+ * The live pipeline re-emits its window on every streamed batch, keeping each
+ * turn that did not change. When the paged history is not affected, only the
+ * window turns from the first changed one on are replaced, instead of merging
+ * every page again.
+ */
+function updateSession(state: SessionState, session: SessionView): Pick<SessionState, "session" | "windowTurns" | "seamOpen"> {
+  const windowTurns = session.turns
+  const previous = state.windowTurns
+  if (state.olderTurns.length > 0 && !state.seamOpen && state.session && windowTurns[0] === previous[0]) {
+    let from = 1
+    while (from < previous.length && from < windowTurns.length && windowTurns[from] === previous[from]) from++
+    const offset = state.session.turns.length - previous.length
+    const turns = state.session.turns.slice(0, offset + from).concat(windowTurns.slice(from))
+    return { windowTurns, session: { ...session, turns }, seamOpen: false }
+  }
+  return { windowTurns, ...composeSession(session, windowTurns, state.olderTurns, state.sessionSource?.agentKind) }
 }
 
 /** Opening a different session discards the paging state of the previous one. */
-function openSession(session: ParsedSession | null) {
-  return { session, windowTurns: session?.turns ?? [], olderTurns: [] }
+function openSession(session: SessionView | null) {
+  return { session, windowTurns: session?.turns ?? [], olderTurns: [], seamOpen: false }
 }
 
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
@@ -211,23 +247,14 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       return { ...state, mobileTab: action.tab }
 
     case "UPDATE_SESSION":
-      return {
-        ...state,
-        windowTurns: action.session.turns,
-        session: composeSession(
-          action.session,
-          action.session.turns,
-          state.olderTurns,
-          state.sessionSource?.agentKind,
-        ),
-      }
+      return { ...state, ...updateSession(state, action.session) }
 
     case "SET_OLDER_TURNS": {
       if (!state.session || action.turns === state.olderTurns) return state
       return {
         ...state,
         olderTurns: action.turns,
-        session: composeSession(
+        ...composeSession(
           state.session,
           state.windowTurns,
           action.turns,

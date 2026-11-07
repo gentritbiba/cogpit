@@ -23,6 +23,14 @@ import { sendJson, type UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
+import {
+  WATCH_GAP_RESET_BYTES,
+  WATCH_STREAM_VERSION,
+  type WatchInitEvent,
+  type WatchLinesEvent,
+  type WatchResetEvent,
+  type WatchResetReason,
+} from "../../shared/contracts/watchStream"
 
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
@@ -208,13 +216,15 @@ export function registerFileWatchRoutes(use: UseFn) {
     const { isNoiseLine } = format
     const url = new URL(req.url || "/", "http://localhost")
     const projected = url.searchParams.get("projection") === RESULT_PROJECTION
+    const v2 = url.searchParams.get("stream") === WATCH_STREAM_VERSION
     /**
-     * A `lines` event. Noise lines are not sent, but a client advances its
-     * resume offset by the bytes of the lines it receives, so their bytes are.
-     * A projected stream sends lighter lines, so it states every native byte
-     * the event accounts for as `bytes` instead.
+     * A `lines` event for native bytes `start` to `end`. Noise lines are not
+     * sent. v2 states the range itself; v1 clients advance their resume offset
+     * by the bytes of the lines they receive, so v1 states the bytes it left
+     * out, or, for a projected stream whose lines are lighter, every native
+     * byte the event accounts for as `bytes`.
      */
-    const writeLines = (rawLines: readonly { line: string; offset: number }[]) => {
+    const writeLines = (rawLines: readonly { line: string; offset: number }[], start: number, end: number) => {
       const lines: string[] = []
       let skippedBytes = 0
       let bytes = 0
@@ -226,7 +236,9 @@ export function registerFileWatchRoutes(use: UseFn) {
         else lines.push(projected ? projectLine(format, line, { dirName, fileName }, offset) : line)
       }
       if (lines.length === 0 && skippedBytes === 0) return
-      const event = projected ? { type: "lines", lines, bytes } : { type: "lines", lines, ...(skippedBytes > 0 ? { skippedBytes } : {}) }
+      const event = v2
+        ? { type: "lines", lines, start, end } satisfies WatchLinesEvent
+        : projected ? { type: "lines", lines, bytes } : { type: "lines", lines, ...(skippedBytes > 0 ? { skippedBytes } : {}) }
       res.write(`data: ${JSON.stringify(event)}\n\n`)
     }
 
@@ -246,8 +258,10 @@ export function registerFileWatchRoutes(use: UseFn) {
     let throttleTimer: ReturnType<typeof setTimeout> | null = null
     let trailingTimer: ReturnType<typeof setTimeout> | null = null
     let remainder = "" // partial line buffer
-    // Native byte offset where `remainder` starts, for projected lines' references.
+    // Native byte offset where `remainder` starts: the resume offset of everything sent.
     let lineStart = offset
+    // A complete line went out before its newline was written; `lineStart` already counts it.
+    let newlineOwed = false
     let decoder = new StringDecoder("utf8")
     let flushInFlight: Promise<void> | null = null
     let flushRequested = false
@@ -271,10 +285,12 @@ export function registerFileWatchRoutes(use: UseFn) {
           try {
             const s = await statTranscript(sessionFilePath)
             if (s.size < offset) {
-              // File was truncated (e.g. by undo). Reset to current size.
+              // File was truncated (e.g. by undo or a rewind).
+              if (v2) return reset("truncated")
               offset = s.size
               lineStart = offset
               remainder = ""
+              newlineOwed = false
               decoder = new StringDecoder("utf8")
               return
             }
@@ -284,10 +300,12 @@ export function registerFileWatchRoutes(use: UseFn) {
                 try {
                   JSON.parse(remainder)
                   const line = remainder
+                  const start = lineStart
                   remainder = ""
-                  writeLines([{ line, offset: lineStart }])
-                  // Its newline, still to come, arrives as an empty line.
-                  lineStart += Buffer.byteLength(line, "utf8")
+                  // Its newline, still to come, is counted now and skipped when it arrives.
+                  lineStart += Buffer.byteLength(line, "utf8") + 1
+                  newlineOwed = true
+                  writeLines([{ line, offset: start }], start, lineStart)
                 } catch {
                   // Not valid JSON yet -- still a partial line, keep waiting.
                 }
@@ -304,7 +322,14 @@ export function registerFileWatchRoutes(use: UseFn) {
               offset += bytesRead
               recordActivity("Session JSONL reads", { bytes: bytesRead })
 
-              const raw = remainder + decoder.write(buf.subarray(0, bytesRead))
+              let raw = remainder + decoder.write(buf.subarray(0, bytesRead))
+              if (newlineOwed && raw) {
+                newlineOwed = false
+                if (raw.startsWith("\n")) raw = raw.slice(1)
+                // The line sent early was not complete after all; what follows is a line of its own.
+                else lineStart -= 1
+              }
+              const start = lineStart
               const rawParts = raw.split("\n")
 
               // Last element may be a partial line (no trailing \n).
@@ -315,7 +340,7 @@ export function registerFileWatchRoutes(use: UseFn) {
                 lineStart += Buffer.byteLength(line, "utf8") + 1
                 return { line, offset: at }
               })
-              writeLines(located)
+              writeLines(located, start, lineStart)
             } finally {
               await fh.close()
             }
@@ -359,6 +384,9 @@ export function registerFileWatchRoutes(use: UseFn) {
         sendCompacting(true)
       } else if (runtimeTurnActive()) {
         res.write(`data: ${JSON.stringify({ type: "runtime_activity" })}\n\n`)
+      } else if (v2) {
+        // A data event, so a client's freshness clock sees an idle stream as alive.
+        res.write(`data: ${JSON.stringify({ type: "heartbeat" })}\n\n`)
       } else {
         res.write(": heartbeat\n\n")
       }
@@ -404,6 +432,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     })
 
     function cleanup() {
+      if (closed) return
       closed = true
       endLiveSessionStream()
       watcher?.close()
@@ -417,18 +446,35 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (agentsPoller) clearInterval(agentsPoller)
     }
 
+    /** Tells a v2 client it has to reload, then stops sending until it reconnects with a new offset. */
+    function reset(reason: WatchResetReason) {
+      if (closed) return
+      res.write(`data: ${JSON.stringify({ type: "reset", reason } satisfies WatchResetEvent)}\n\n`)
+      cleanup()
+    }
+
     // Establish the baseline after the client snapshot. When the client sends
     // its snapshot byte offset, replay anything written between that snapshot
     // and this connection. Without this, a line written in that race window
     // is skipped and the UI stays one response behind until the next write.
     statTranscript(sessionFilePath)
       .then((s) => {
+        if (closed) return
         if (!hasRequestedOffset) offset = s.size
+        else if (v2 && offset === s.size + 1) {
+          // The client holds a line whose newline is not written yet.
+          offset = s.size
+          newlineOwed = true
+        } else if (v2 && offset > s.size) return reset("truncated")
+        else if (v2 && s.size - offset > WATCH_GAP_RESET_BYTES) return reset("gap")
         else if (offset > s.size) offset = s.size
-        lineStart = offset
+        lineStart = newlineOwed ? offset + 1 : offset
         initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
-        res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
+        const init = v2
+          ? { type: "init", offset: lineStart, size: s.size, recentlyActive } satisfies WatchInitEvent
+          : { type: "init", offset, recentlyActive }
+        res.write(`data: ${JSON.stringify(init)}\n\n`)
         if (runtimeTurnActive()) sendHeartbeat()
         void announceRunningAgents()
         void flushNewLines()

@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 export interface TodoItem {
   id?: string
@@ -28,7 +28,7 @@ export interface TodoProgress {
  * panel then does not render at all. Kept for older sessions and for anyone
  * who opts the tools back in.
  */
-export function useTodoProgress(session: ParsedSession | null): TodoProgress | null {
+export function useTodoProgress(session: SessionView | null): TodoProgress | null {
   return useMemo(() => {
     if (!session) return null
 

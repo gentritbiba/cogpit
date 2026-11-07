@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parseSession } from "../../../../shared/session/parser"
+import { toSessionView } from "../../../../shared/session/sessionDigest"
 import { makeEditToolCall, simpleSession } from "@/__tests__/fixtures"
 
 const api = vi.hoisted(() => ({ fetch: vi.fn(), source: { dirName: "project", watchOffset: 7, loadId: 1 } }))
@@ -13,7 +14,7 @@ import { useFileChangesData } from "../useFileChangesData"
 afterEach(() => { api.fetch.mockReset(); api.source.loadId = 1 })
 describe("useFileChangesData", () => {
   it("reuses unchanged file contents, refreshes edited files, and reloads on focus or explicit session reload", async () => {
-    const session = parseSession(simpleSession())
+    const session = toSessionView(parseSession(simpleSession()))
     const firstEdit = makeEditToolCall("/project/a.ts", "old", "new")
     const secondEdit = makeEditToolCall("/project/b.ts", "old", "new")
     session.turns[0].toolCalls = [firstEdit, secondEdit]
@@ -43,7 +44,7 @@ describe("useFileChangesData", () => {
   })
 
   it("accepts empty files and drops responses from the previous session", async () => {
-    const session = parseSession(simpleSession())
+    const session = toSessionView(parseSession(simpleSession()))
     session.turns[0].toolCalls = [makeEditToolCall("/project/a.ts", "old", "new")]
     let finish!: (response: Response) => void
     api.fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve }))

@@ -10,9 +10,9 @@ vi.mock("@/lib/auth", () => ({
 
 import { authFetch } from "@/lib/auth"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
-import type { ParsedSession } from "../../../shared/session/types"
 import { useUrlSync } from "../useUrlSync"
 import type { SessionState } from "../useSessionState"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const mockedLoadTail = vi.mocked(loadSessionTailCached)
 const mockedAuthFetch = vi.mocked(authFetch)
@@ -31,7 +31,7 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
 
 function loadedSession(dirName: string, fileName: string) {
   return {
-    parsed: { turns: [{ index: 0 }] } as unknown as ParsedSession,
+    parsed: { turns: [{ index: 0 }] } as unknown as SessionView,
     source: { dirName, fileName, loadId: 1, watchOffset: 100 },
   }
 }

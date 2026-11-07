@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
 import { devicePathPrefix, getActiveDeviceId, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
@@ -15,7 +15,7 @@ interface UseUrlSyncOpts {
   resetTurnCount: (count: number) => void
   scrollToBottomInstant: () => void
   /** Off-main-thread session parser from App's `useParserWorker`. */
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
 }
 
 // ── URL scheme ──────────────────────────────────────────────────────────────

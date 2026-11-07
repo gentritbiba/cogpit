@@ -10,7 +10,7 @@
  * exactly where the tail ended instead of re-streaming the file.
  */
 
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import { authFetch, type AuthFetchInit } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
@@ -28,7 +28,7 @@ export interface TailResponse {
 }
 
 export interface LoadedSessionTail {
-  parsed: ParsedSession
+  parsed: SessionView
   source: SessionSource
   byteOffset: number
   hasMore: boolean
@@ -41,7 +41,7 @@ export type TailLoadOptions = Pick<AuthFetchInit, "background">
 export async function fetchTailAndParse(
   dirName: string,
   fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
+  workerParse: (text: string) => Promise<SessionView>,
   errorLabel: string,
   { background = false }: TailLoadOptions = {},
 ): Promise<LoadedSessionTail> {
@@ -82,10 +82,10 @@ export async function fetchTailAndParse(
 export async function loadSessionTailCached(
   dirName: string,
   fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
+  workerParse: (text: string) => Promise<SessionView>,
   errorLabel: string,
   options: TailLoadOptions = {},
-): Promise<{ parsed: ParsedSession; source: SessionSource }> {
+): Promise<{ parsed: SessionView; source: SessionSource }> {
   const cached = sessionCache.get(dirName, fileName)
   if (cached) {
     return { parsed: cached.parsed, source: cached.source }
@@ -126,9 +126,9 @@ export async function loadSessionTailCached(
 export async function loadSessionTailFresh(
   dirName: string,
   fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
+  workerParse: (text: string) => Promise<SessionView>,
   errorLabel: string,
-): Promise<{ parsed: ParsedSession; source: SessionSource }> {
+): Promise<{ parsed: SessionView; source: SessionSource }> {
   sessionCache.evict(dirName, fileName)
   // Snapshot the active device BEFORE the network round-trip. The cache key is
   // device-scoped and computed at set-time; if the user switches devices while

@@ -21,7 +21,8 @@ import { loadSessionTailFresh } from "@/lib/sessionLoader"
 import { agentKindForDirName } from "@/lib/agents"
 import { stopShare, type SharedSessionInfo } from "@/lib/shareApi"
 import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { NO_CAPABILITIES, type MeResponse } from "../../shared/contracts/identity"
 
 /**
@@ -66,7 +67,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
   const isMobile = useIsMobile()
   const theme = useTheme()
   const [state, dispatch] = useSessionState()
-  const { parse: workerParse, append: workerAppend } = useParserWorker()
+  const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
   const [loadState, setLoadState] = useState<ShareLoadState>("loading")
 
   // Host affordances read this module cell directly (useCapability), not the
@@ -104,7 +105,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     void loadSession()
   }, [loadSession])
 
-  const handleLiveUpdate = useCallback((session: ParsedSession) => {
+  const handleLiveUpdate = useCallback((session: SessionView) => {
     dispatch({ type: "UPDATE_SESSION", session })
   }, [dispatch])
 
@@ -125,7 +126,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
-    workerParse,
+    workerParse: parsePage,
     onOlderTurns: handleOlderTurns,
   })
 

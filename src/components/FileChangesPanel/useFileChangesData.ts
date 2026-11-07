@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react"
-import type { ParsedSession, ToolCall } from "../../../shared/session/types"
+import type { ToolCall } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { computeNetDiff, type EditOp } from "../../../shared/diff-utils"
 import { expandEditToolCalls } from "../../../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
@@ -18,7 +19,7 @@ interface FileChange {
 // Module-level cache for background agent file changes
 const bgAgentCache = new Map<string, ToolCall[]>()
 
-export function useFileChangesData(session: ParsedSession) {
+export function useFileChangesData(session: SessionView) {
   const canAccessHostFiles = useCapability("hostFiles")
   const { sessionSource } = useSessionContext()
   const dirName = sessionSource?.dirName

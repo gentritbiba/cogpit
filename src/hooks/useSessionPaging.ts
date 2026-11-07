@@ -3,7 +3,8 @@ import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { prependTurns } from "@/lib/timelinePaging"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface BeforeResponse {
   headerLines: string[]
@@ -17,7 +18,7 @@ interface UseSessionPagingOpts {
   fileName: string | null
   /** Bumped by the reducer on every session (re)load; resyncs paging state from the cache. */
   sessionChangeKey: number
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
   /** Receives every turn loaded above the live window, oldest first. */
   onOlderTurns: (olderTurns: Turn[]) => void
 }

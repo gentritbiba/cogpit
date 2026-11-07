@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { renderHook, act } from "@testing-library/react"
 import { RESYNC_COOLDOWN_MS, useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "@/lib/sessionSource"
-import type { ParsedSession } from "../../../shared/session/types"
 import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 import { sessionCache } from "@/lib/sessionCache"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // Mock auth
 vi.mock("@/lib/auth", () => ({
@@ -25,7 +25,7 @@ vi.mock("@/lib/sessionCache", () => ({
   },
 }))
 
-const mockParsedSession: ParsedSession = {
+const mockParsedSession: SessionView = {
   sessionId: "s1",
   version: "1",
   gitBranch: "main",
@@ -58,7 +58,7 @@ const mockParsedSession: ParsedSession = {
     totalDurationMs: 0,
     turnCount: 1,
   },
-  rawMessages: [],
+  digest: EMPTY_SESSION_DIGEST,
 }
 
 // Mock EventSource
@@ -106,8 +106,8 @@ class MockEventSource extends EventTarget {
 describe("useLiveSession", () => {
   const onUpdate = vi.fn()
   let rafCallbacks: Array<() => void> = []
-  let workerParse: Mock<(text: string) => Promise<ParsedSession>>
-  let workerAppend: Mock<(existing: ParsedSession, newText: string) => Promise<ParsedSession>>
+  let workerParse: Mock<(text: string) => Promise<SessionView>>
+  let workerAppend: Mock<(existing: SessionView, newText: string) => Promise<SessionView>>
 
   beforeEach(() => {
     __resetStreamsForTest()
@@ -161,7 +161,7 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=15&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=15")
   })
 
   it("passes an explicit snapshot byte offset to the watcher", () => {
@@ -174,7 +174,7 @@ describe("useLiveSession", () => {
 
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
-    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=4096&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=4096")
   })
 
   it("sets sseState to connecting initially", () => {
@@ -692,6 +692,55 @@ describe("useLiveSession", () => {
     }))
   })
 
+  describe("resuming the stream", () => {
+    const first = '{"type":"assistant","n":1}'
+    const second = '{"type":"assistant","n":2}'
+    const third = '{"type":"assistant","n":3}'
+
+    it("reconnects after the last line received and ignores a replay of it, without reloading", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      const streamed = [
+        { type: "lines", lines: [first], start: 100, end: 130 },
+        { type: "lines", lines: [second], start: 130, end: 160 },
+      ]
+      const before = getLastEventSource()
+      act(() => {
+        before.simulateOpen()
+        for (const event of streamed) before.simulateMessage(event)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      act(() => { before.simulateError() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+      const after = getLastEventSource()
+      expect(after).not.toBe(before)
+      expect(after.url).toBe("/api/watch/dir/file.jsonl?projection=results-v1&stream=2&offset=160")
+
+      act(() => {
+        after.simulateOpen()
+        // A server that replays what was already applied, then moves on.
+        for (const event of streamed) after.simulateMessage(event)
+        after.simulateMessage({ type: "lines", lines: [third], start: 160, end: 190 })
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      const appended = workerAppend.mock.calls.map(([, text]) => text).join("")
+      expect(appended).toBe(`${first}\n${second}\n${third}\n`)
+      expect(onResync).not.toHaveBeenCalled()
+    })
+
+    it("reloads when the server says the stream cannot resume", () => {
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      expect(onResync).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("closes EventSource on unmount", () => {
     const source: SessionSource = {
       dirName: "dir",
@@ -732,7 +781,7 @@ describe("useLiveSession", () => {
     // Old ES should be closed, new one created
     expect(firstES.closed).toBe(true)
     expect(MockEventSource.instances).toHaveLength(2)
-    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl?offset=2&projection=results-v1")
+    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl?projection=results-v1&stream=2&offset=2")
   })
 
   it("encodes dirName and fileName in URL", () => {
@@ -745,7 +794,7 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(getLastEventSource().url).toBe(
-      "/api/watch/dir%20with%20spaces/file%20name.jsonl?offset=2&projection=results-v1"
+      "/api/watch/dir%20with%20spaces/file%20name.jsonl?projection=results-v1&stream=2&offset=2"
     )
   })
 
@@ -779,7 +828,7 @@ describe("useLiveSession", () => {
   it("coalesces rapid SSE messages into ≤ 2 worker calls (burst compression)", async () => {
     // Regression guard for the bash-output lag: without burst compression the
     // hook used to chain one workerAppend per SSE message, which scaled with
-    // structured-clone cost of the whole ParsedSession per message. The
+    // structured-clone cost of the whole SessionView per message. The
     // current design flushes to the worker only when it's idle, so N rapid
     // arrivals collapse to at most ~2 worker calls (one in-flight, one
     // drain pass).
@@ -1285,9 +1334,12 @@ describe("useLiveSession", () => {
       expect(result.current.streamingOverlayStore.snapshot()[0].blocks[0].text).toBe("mid-flight text")
     })
 
-    it("incoming lines reconcile away the landed overlay message", () => {
-      const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+    it("drops a landed overlay message in the commit that shows its parsed line, not before", async () => {
+      const landed = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      workerAppend.mockResolvedValue(landed)
+      const { result, rerender } = renderHook(
+        ({ shown }) => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, shown),
+        { initialProps: { shown: mockParsedSession } },
       )
 
       act(() => {
@@ -1301,10 +1353,18 @@ describe("useLiveSession", () => {
         getLastEventSource().simulateMessage({
           type: "lines",
           lines: ['{"type":"assistant","message":{"id":"msg_landed","content":[]}}'],
+          start: 15,
+          end: 80,
         })
         flushRAF()
       })
+      await act(async () => { await Promise.resolve() })
+      act(() => { flushRAF() })
+      // The worker answered and the update went out, but it is not on screen yet.
+      expect(onUpdate).toHaveBeenLastCalledWith(landed)
+      expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(2)
 
+      rerender({ shown: landed })
       expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_pending"])
     })
 
@@ -1363,9 +1423,9 @@ describe("useLiveSession", () => {
     })
 
     it("keeps the existing worker coalescing regression intact alongside streaming", () => {
-      let resolveAppend: ((s: ParsedSession) => void) | null = null
+      let resolveAppend: ((s: SessionView) => void) | null = null
       workerAppend.mockImplementation(
-        () => new Promise<ParsedSession>((resolve) => { resolveAppend = resolve }),
+        () => new Promise<SessionView>((resolve) => { resolveAppend = resolve }),
       )
 
       renderHook(() =>

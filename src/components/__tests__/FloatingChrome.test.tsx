@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { computeSessionDigest, EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
@@ -10,7 +11,7 @@ import { permissionsForAccess, type SessionAccessState } from "@/lib/sessionAcce
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
     defaultAgentKind: "claude" as const,
     networkAccessDisabled: false,
   },
-  session: null as ParsedSession | null,
+  session: null as SessionView | null,
   sessionSource: null as {
     dirName: string
     fileName: string
@@ -130,7 +131,7 @@ function prTurn(id: string, command: string, result: string): Turn {
   }
 }
 
-function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "test-session-id",
     version: "1.0",
@@ -150,7 +151,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     agentKind: "claude",
     ...overrides,
   }
@@ -331,7 +332,7 @@ describe("FloatingChrome", () => {
       gitBranch: "feat/clean-header",
       turns: [thinkingTurn],
       branchedFrom: { sessionId: "parent-session", turnIndex: 2 },
-      rawMessages: [{
+      digest: computeSessionDigest([{
         type: "assistant",
         message: {
           model: "claude-opus-4-5",
@@ -342,7 +343,7 @@ describe("FloatingChrome", () => {
             cache_read_input_tokens: 5_000,
           },
         },
-      }],
+      }]),
     })
     mocks.isLive = true
 
@@ -369,7 +370,7 @@ describe("FloatingChrome", () => {
     const user = userEvent.setup()
     mocks.session = makeSession({
       agentKind: "copilot",
-      rawMessages: [{
+      digest: computeSessionDigest([{
         type: "assistant",
         message: {
           model: "claude-sonnet-4.6",
@@ -380,7 +381,7 @@ describe("FloatingChrome", () => {
             cache_read_input_tokens: 5_000,
           },
         },
-      }],
+      }]),
     })
     mocks.sessionSource = {
       dirName: "copilot__L3RtcC9wcm9qZWN0",

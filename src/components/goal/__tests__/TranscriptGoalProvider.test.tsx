@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { ParsedSession } from "../../../../shared/session/types"
 import { TranscriptGoalProvider } from "@/components/goal/TranscriptGoalProvider"
 import { GoalSection, GoalTrigger } from "@/components/goal"
+import { computeSessionDigest, type SessionView } from "../../../../shared/session/sessionDigest"
+import type { RawRecord } from "../../../../shared/session/types"
 
-function sessionWith(rawMessages: Array<Record<string, unknown>>): ParsedSession {
-  return { rawMessages } as unknown as ParsedSession
+function sessionWith(records: RawRecord[]): SessionView {
+  return { digest: computeSessionDigest(records) } as unknown as SessionView
 }
 
 const ACTIVE_GOAL = { type: "attachment", attachment: { type: "goal_status", condition: "Ship the release" } }
@@ -16,7 +17,7 @@ function deferred(): { promise: Promise<boolean>; resolve: (sent: boolean) => vo
   return { promise, resolve }
 }
 
-function renderGoalUi(session: ParsedSession, onSendCommand: (command: string) => Promise<boolean>) {
+function renderGoalUi(session: SessionView, onSendCommand: (command: string) => Promise<boolean>) {
   return render(
     <TranscriptGoalProvider agentKind="claude" session={session} onSendCommand={onSendCommand}>
       <GoalSection />
