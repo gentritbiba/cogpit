@@ -18,6 +18,8 @@ interface Watch {
   listeners: Set<() => void>
   timer?: ReturnType<typeof setTimeout>
   controller?: AbortController
+  inFlight: boolean
+  onVisible: () => void
 }
 
 /** One poll per session, shared by everything that shows its delegated work. */
@@ -30,6 +32,7 @@ function poll(sessionId: string, watch: Watch): void {
     if (!controller.signal.aborted) watch.timer = setTimeout(() => poll(sessionId, watch), POLL_MS)
   }
   if (document.visibilityState !== "visible") return next()
+  watch.inFlight = true
   fetchIfChanged<CountsResponse>(
     `/api/delegated-tasks?sessionId=${encodeURIComponent(sessionId)}&view=counts`,
     watch.etag,
@@ -44,14 +47,30 @@ function poll(sessionId: string, watch: Watch): void {
       for (const listener of watch.listeners) listener()
     })
     .catch(() => { /* The next poll retries. */ })
-    .finally(next)
+    .finally(() => {
+      watch.inFlight = false
+      next()
+    })
 }
 
 function subscribe(sessionId: string, listener: () => void): () => void {
   let watch = watches.get(sessionId)
   if (!watch) {
-    watch = { counts: NO_DELEGATED_TASKS, etag: null, listeners: new Set() }
+    const created: Watch = {
+      counts: NO_DELEGATED_TASKS,
+      etag: null,
+      listeners: new Set(),
+      inFlight: false,
+      // Coming back to the tab reads at once instead of waiting out the timer.
+      onVisible: () => {
+        if (document.visibilityState !== "visible" || created.inFlight) return
+        clearTimeout(created.timer)
+        poll(sessionId, created)
+      },
+    }
+    watch = created
     watches.set(sessionId, watch)
+    document.addEventListener("visibilitychange", watch.onVisible)
     poll(sessionId, watch)
   }
   watch.listeners.add(listener)
@@ -61,6 +80,7 @@ function subscribe(sessionId: string, listener: () => void): () => void {
     if (owned.listeners.size > 0) return
     owned.controller?.abort()
     clearTimeout(owned.timer)
+    document.removeEventListener("visibilitychange", owned.onVisible)
     watches.delete(sessionId)
   }
 }

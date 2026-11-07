@@ -48,6 +48,29 @@ describe("useDelegatedTaskCounts", () => {
     await waitFor(() => expect(result.current).toEqual({ total: 2, running: 1, unread: 1, unreadRunning: 1 }))
   })
 
+  it("reads at once when the tab becomes visible again, keeping one loop", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
+    try {
+      mocks.fetch.mockResolvedValue(counted({ total: 1, running: 1, unread: 1, unreadRunning: 1 }))
+      const { result } = renderHook(() => useDelegatedTaskCounts("lead-visible"))
+      await waitFor(() => expect(result.current.total).toBe(1))
+      visibility.mockReturnValue("hidden")
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+
+      mocks.fetch.mockResolvedValue(counted({ total: 2, running: 2, unread: 2, unreadRunning: 2 }, '"v2"'))
+      visibility.mockReturnValue("visible")
+      act(() => { document.dispatchEvent(new Event("visibilitychange")) })
+      await waitFor(() => expect(result.current.total).toBe(2))
+      expect(mocks.fetch).toHaveBeenCalledTimes(2)
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+      expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    } finally {
+      visibility.mockRestore()
+    }
+  })
+
   it("polls once for every place that shows the same session", async () => {
     mocks.fetch.mockResolvedValue(counted({ total: 1, running: 0, unread: 1, unreadRunning: 0 }))
     const first = renderHook(() => useDelegatedTaskCounts("lead-shared"))
