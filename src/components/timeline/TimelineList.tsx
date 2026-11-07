@@ -157,17 +157,23 @@ export function TimelineList({
     if (controller.getPlan() !== plan) forceRender()
   })
 
-  // Jump to the turn selected in the stats and sidebar panels.
-  const jumpedRef = useRef<number | null>(null)
+  // Jump to the turn selected in the stats and sidebar panels. The selection
+  // is an index, so a prepend either leaves it pointing at another turn or
+  // moves it with its turn; neither is a new selection to jump to.
+  const jumpedRef = useRef<{ index: number; key: string } | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {
       jumpedRef.current = null
       return
     }
-    if (activeTurnIndex === jumpedRef.current) return
     const target = rows.find((row) => row.index === activeTurnIndex)
+    const jumped = jumpedRef.current
+    if (jumped && (activeTurnIndex === jumped.index || target?.key === jumped.key)) {
+      jumped.index = activeTurnIndex
+      return
+    }
     if (!target) return
-    jumpedRef.current = activeTurnIndex
+    jumpedRef.current = { index: activeTurnIndex, key: target.key }
     void controller.scrollToTurn(target.key, { align: "start" })
   }, [activeTurnIndex, rows, controller])
 

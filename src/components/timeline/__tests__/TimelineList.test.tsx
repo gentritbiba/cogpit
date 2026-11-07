@@ -382,6 +382,25 @@ describe("TimelineList with the scroll engine", () => {
     expect(viewportTopOf('[data-row-key="t40"]')).toBeCloseTo(0)
   })
 
+  it("does not jump again when a prepend shifts the selected turn's index", () => {
+    const { rerender, controller } = mount({ turns: makeTurns(ids(100, 200)) })
+    appState.activeTurnIndex = 40
+    rerender({ turns: makeTurns(ids(100, 200)) })
+    expect(viewportTopOf('[data-row-key="t140"]')).toBeCloseTo(0)
+    const jump = vi.spyOn(controller, "scrollToTurn")
+    userScrollTo(scrollTop() + 3000)
+    // The selection keeps its index while older turns arrive: it now names another turn.
+    rerender({ turns: makeTurns(ids(80, 200)) })
+    // Or it moves with its turn.
+    appState.activeTurnIndex = 60
+    rerender({ turns: makeTurns(ids(80, 200)) })
+    expect(jump).not.toHaveBeenCalled()
+    // A new selection still jumps.
+    appState.activeTurnIndex = 10
+    rerender({ turns: makeTurns(ids(80, 200)) })
+    expect(jump).toHaveBeenCalledWith("t90", { align: "start" })
+  })
+
   it("loads older history once the first row is within three viewports", () => {
     const onLoadMore = vi.fn()
     const turns = makeTurns(ids(0, 200))
