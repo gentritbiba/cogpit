@@ -13,7 +13,15 @@
  */
 import { classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
-import { isAssistantMessage } from "./messageTypeGuards"
+import {
+  isAssistantMessage,
+  isAttachmentMessage,
+  isCompactBoundary,
+  isQueueOperationMessage,
+  isSummaryMessage,
+  isSystemMessage,
+} from "./messageTypeGuards"
+import { cutsBeforeBoundaries } from "./pageCuts"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
 import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
@@ -525,6 +533,25 @@ export function claudeTurnBoundaries(
   // `<task-notification>` wake-ups as new turns, while `buildTurns` folds them
   // into the turn in flight, so every boundary after one was off by a turn.
   return buildTurnsWithStarts(records as unknown as RawMessage[]).turnStartIndices
+}
+
+/**
+ * Records the turn builder holds for the turn after them: a compaction or a
+ * recap it attaches to that turn, and the queue records and attachments
+ * written ahead of the prompt that opens it.
+ */
+function travelsWithNextClaudeTurn(record: Record<string, unknown>): boolean {
+  const message = record as unknown as RawMessage
+  return isSummaryMessage(message)
+    || isCompactBoundary(message)
+    || (isSystemMessage(message) && message.subtype === "away_summary")
+    || isQueueOperationMessage(message)
+    || isAttachmentMessage(message)
+}
+
+/** Where a page may start: each turn boundary, moved back over what the turn builder holds for that turn. */
+export function claudePageCuts(records: readonly Record<string, unknown>[]): number[] {
+  return cutsBeforeBoundaries(claudeTurnBoundaries(records), records, travelsWithNextClaudeTurn)
 }
 
 // ── Result projection ───────────────────────────────────────────────────────
