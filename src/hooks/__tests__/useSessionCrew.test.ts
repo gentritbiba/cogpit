@@ -2,9 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CrewMember, SessionCrew } from "../../../shared/contracts/crew"
 
-const api = vi.hoisted(() => ({ authFetch: vi.fn(), jsonFetch: vi.fn(), refresh: vi.fn() }))
+const api = vi.hoisted(() => ({ authFetch: vi.fn(), jsonFetch: vi.fn(), refresh: vi.fn(), sessions: [] as Array<{ sessionId: string; lastActivityAt?: string }> }))
 vi.mock("@/lib/auth", () => ({ authFetch: api.authFetch, jsonFetch: api.jsonFetch }))
-vi.mock("@/contexts/SessionInventoryContext", () => ({ useSessionInventoryOptional: () => ({ refresh: api.refresh }) }))
+vi.mock("@/contexts/SessionInventoryContext", () => ({ useSessionInventoryOptional: () => ({ refresh: api.refresh, sessions: api.sessions }) }))
 import { ACTIVE_POLL_MS, SETTLED_POLL_MS, shareCrew, useSessionCrew } from "../useSessionCrew"
 
 const member = (sessionId: string, patch: Partial<CrewMember> = {}): CrewMember => ({
@@ -19,6 +19,7 @@ beforeEach(() => {
   api.authFetch.mockReset().mockImplementation(async () => answer(crewOf(member("lead"))))
   api.jsonFetch.mockReset()
   api.refresh.mockReset()
+  api.sessions = []
 })
 afterEach(() => { vi.useRealTimers() })
 
@@ -51,6 +52,17 @@ describe("useSessionCrew polling", () => {
     expect(api.authFetch).toHaveBeenCalledTimes(3)
     await act(async () => { await vi.advanceTimersByTimeAsync(SETTLED_POLL_MS - ACTIVE_POLL_MS) })
     expect(api.authFetch).toHaveBeenCalledTimes(4)
+  })
+
+  it("reads a settled crew at once when the list sees the open session active again", async () => {
+    api.sessions = [{ sessionId: "lead", lastActivityAt: "2026-11-07T10:00:00Z" }]
+    const { result, rerender } = renderHook(() => useSessionCrew("lead"))
+    await waitFor(() => expect(result.current.crew).not.toBeNull())
+    rerender()
+    expect(api.authFetch).toHaveBeenCalledOnce()
+    api.sessions = [{ sessionId: "lead", lastActivityAt: "2026-11-07T10:05:00Z" }]
+    rerender()
+    await waitFor(() => expect(api.authFetch).toHaveBeenCalledTimes(2))
   })
 
   it("says when the session is gone", async () => {

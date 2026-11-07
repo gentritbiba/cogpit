@@ -242,10 +242,12 @@ function viewRegion(element: HTMLElement, frame: Frame): Region {
   return { left, top, right: left + element.clientWidth / frame.scale, bottom: top + element.clientHeight / frame.scale }
 }
 
+const regionArea = (region: Region) => (region.right - region.left) * (region.bottom - region.top)
+
 const contains = (outer: Region, inner: Region) =>
   inner.left >= outer.left && inner.top >= outer.top && inner.right <= outer.right && inner.bottom <= outer.bottom
 
-/** A region a screen larger on every side, so ordinary scrolling stays inside what is drawn. */
+/** A region a screen larger on every side, so ordinary scrolling stays inside what is drawn; zooming back in shrinks it again. */
 function drawnAround(view: Region): Region {
   const width = view.right - view.left
   const height = view.bottom - view.top
@@ -459,9 +461,9 @@ function CrewMapCanvas({ crew, collapsed, groups, filter, hereId, kinds, nameOf,
     const element = scroller.current
     if (!element || !windowed) return
     const view = viewRegion(element, frame)
-    setDrawn((current) => (current && contains(current, view) ? current : drawnAround(view)))
+    setDrawn((current) => (current && contains(current, view) && regionArea(current) <= 2 * regionArea(drawnAround(view)) ? current : drawnAround(view)))
   }, [frame, windowed])
-  useLayoutEffect(() => { followView() }, [followView, layout])
+  useLayoutEffect(() => { followView() }, [followView, layout, size])
   const nodes = useMemo(() => {
     if (large && (size === UNMEASURED || (windowed && !drawn))) return []
     if (!windowed || !drawn) return layout.nodes

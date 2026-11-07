@@ -1,6 +1,6 @@
 import { authFetch, type AuthFetchInit } from "@/lib/auth"
 
-export type Conditional<T> =
+type Conditional<T> =
   | { kind: "unchanged" }
   | { kind: "changed"; value: T; etag: string | null }
   | { kind: "failed"; status: number }

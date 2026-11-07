@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
@@ -50,7 +50,7 @@ export function CrewFold({
   onSelectSession,
 }: CrewFoldProps) {
   const [showAllDone, setShowAllDone] = useState(false)
-  const fold = useMemo(() => (open ? foldOrder(host, members, statusOf) : null), [open, host, members, statusOf])
+  const fold = open ? foldOrder(host, members, statusOf) : null
   const summary = `Crew of ${counts.size}${counts.needsYou ? `, ${counts.needsYou} need you` : ""}${counts.working ? `, ${counts.working} working` : ""}`
 
   return (

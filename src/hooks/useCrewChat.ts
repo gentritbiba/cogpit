@@ -122,6 +122,9 @@ export function useCrewChat(rootId: string, active = true) {
     try {
       await checked(await jsonFetch(`/api/crew-chat/${encodeURIComponent(rootId)}`, { sessionId, listening }, { method: "PATCH" }))
       requestCounter.current++
+      // The members shown no longer match any version the server sent; read them in full next time.
+      membersVersion.current = null
+      etag.current = null
       setPage((current) => current && ({ ...current, members: current.members.map((member) => member.sessionId === sessionId ? { ...member, listening } : member) }))
       setError(null)
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Couldn't change listening.") }

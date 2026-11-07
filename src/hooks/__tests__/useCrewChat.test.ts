@@ -63,6 +63,18 @@ describe("useCrewChat", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
     expect(urls()[1]).toBe("/api/crew-chat/lead?after=1&limit=100")
   })
+
+  it("reads members in full after changing who listens", async () => {
+    mocks.fetch.mockResolvedValue(Response.json(page({ membersVersion: "m1" }), { headers: { ETag: '"p1"' } }))
+    mocks.json.mockResolvedValue(Response.json({ listening: false }))
+    const { result } = renderHook(() => useCrewChat("lead"))
+    await waitFor(() => expect(result.current.page).not.toBeNull())
+    await act(() => result.current.setListening("lead", false))
+    expect(result.current.page?.members[0]!.listening).toBe(false)
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(urls().at(-1)).toBe("/api/crew-chat/lead?after=1&limit=100")
+    expect(new Headers(mocks.fetch.mock.calls.at(-1)![1].headers).has("If-None-Match")).toBe(false)
+  })
 })
 
 describe("nextChatPage", () => {

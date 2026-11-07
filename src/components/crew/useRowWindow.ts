@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from "react"
+import { useLayoutEffect, useRef, useState, type RefObject } from "react"
 
 /** Lists this long or shorter render every row. */
 export const WINDOW_MIN = 80
@@ -33,6 +33,7 @@ function scrollerOf(element: HTMLElement): HTMLElement | null {
  */
 export function useRowWindow(list: RefObject<HTMLElement | null>, count: number): RowWindow {
   const [range, setRange] = useState<RowWindow>(() => ALL(Math.min(count, WINDOW_MIN)))
+  const follow = useRef<() => void>(() => {})
 
   useLayoutEffect(() => {
     const element = list.current
@@ -54,15 +55,20 @@ export function useRowWindow(list: RefObject<HTMLElement | null>, count: number)
       const end = Math.max(start, Math.min(count, Math.ceil((scroller.clientHeight - top) / rowHeight) + OVERSCAN))
       setRange(keep({ start, end, before: start * rowHeight, after: (count - end) * rowHeight }))
     }
+    follow.current = update
     update()
     scroller.addEventListener("scroll", update, { passive: true })
     const observer = new ResizeObserver(update)
     observer.observe(scroller)
     return () => {
+      follow.current = () => {}
       scroller.removeEventListener("scroll", update)
       observer.disconnect()
     }
   }, [count, list])
+
+  // Content above the list in the same scroller can grow or shrink without a scroll or resize.
+  useLayoutEffect(() => { follow.current() })
 
   return range.end > count ? ALL(count) : range
 }

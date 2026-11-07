@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CrewMember, SessionCrew } from "../../../../shared/contracts/crew"
 import { CrewMap, MAP_WINDOW_MIN, useCrewMapControls } from "../CrewMap"
@@ -232,6 +232,42 @@ describe("CrewMap", () => {
       expect(cards()).toContain("lane-250")
       expect(cards()).not.toContain("lead")
     } finally {
+      width.mockRestore()
+      height.mockRestore()
+    }
+  })
+
+  it("draws fewer cards again after zooming back in, and fills a taller view", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(360)
+    let viewHeight = 1_000
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => viewHeight)
+    const resized: Array<() => void> = []
+    const Observer = globalThis.ResizeObserver
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: () => void) {}
+      observe() { resized.push(this.callback) }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver
+    try {
+      renderMap({
+        sessionId: "lead",
+        rootId: "lead",
+        members: [member("lead", null, 0), ...Array.from({ length: 300 }, (_, index) => member(`lane-${index}`, "lead", index + 1))],
+      })
+      const opened = cards().length
+      for (let step = 0; step < 8; step++) fireEvent.click(screen.getByRole("button", { name: "Zoom out" }))
+      const zoomedOut = cards().length
+      expect(zoomedOut).toBeGreaterThan(opened)
+      fireEvent.click(screen.getByRole("button", { name: "Actual size" }))
+      expect(cards().length).toBeLessThan(zoomedOut)
+
+      const before = cards().length
+      viewHeight = 10_000
+      act(() => { for (const callback of resized) callback() })
+      expect(cards().length).toBeGreaterThan(before)
+    } finally {
+      globalThis.ResizeObserver = Observer
       width.mockRestore()
       height.mockRestore()
     }

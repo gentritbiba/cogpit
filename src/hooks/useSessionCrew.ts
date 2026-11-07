@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { jsonFetch } from "@/lib/auth"
 import { fetchIfChanged } from "@/lib/conditionalFetch"
 import { jsonEqual } from "@/lib/jsonEqual"
@@ -51,7 +51,12 @@ export function useSessionCrew(sessionId: string | null): SessionCrewState {
   const [crew, setCrew] = useState<SessionCrew | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
-  const refreshList = useSessionInventoryOptional()?.refresh
+  const inventory = useSessionInventoryOptional()
+  const refreshList = inventory?.refresh
+  const sessions = inventory?.sessions
+  // The list sees the open session start again (the user wrote to it) before a settled crew's slow read would.
+  const ownActivity = useMemo(() => sessions?.find((session) => session.sessionId === sessionId)?.lastActivityAt, [sessions, sessionId])
+  const wake = useRef<() => void>(() => {})
   const currentSession = useRef(sessionId)
   const inFlight = useRef(new Set<string>())
   const etag = useRef<string | null>(null)
@@ -103,14 +108,18 @@ export function useSessionCrew(sessionId: string | null): SessionCrewState {
         if (active) timer = setTimeout(run, crewBusy.current ? ACTIVE_POLL_MS : SETTLED_POLL_MS)
       })
     }
+    wake.current = run
     run()
     document.addEventListener("visibilitychange", run)
     return () => {
+      wake.current = () => {}
       active = false
       clearTimeout(timer)
       document.removeEventListener("visibilitychange", run)
     }
   }, [poll, sessionId])
+
+  useEffect(() => { wake.current() }, [ownActivity])
 
   const act = useCallback(async (key: string, request: () => Promise<Response>, failure: string) => {
     const actionKey = `${sessionId}:${key}`

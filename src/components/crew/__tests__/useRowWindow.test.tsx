@@ -56,6 +56,16 @@ describe("useRowWindow", () => {
     expect(container.querySelector("ul")).toHaveAttribute("data-before", String((250 - 12) * ROW))
   })
 
+  it("follows the list when content above it in the scroller changes height", () => {
+    let top = 0
+    layout(() => top)
+    const { container, rerender } = render(<List count={600} />)
+    expect(shown(container)[0]).toBe(0)
+    top = 4_000
+    rerender(<List count={600} />)
+    expect(shown(container)[0]).toBe(100 - 12)
+  })
+
   it("renders everything when nothing can be measured", () => {
     const { container } = render(<List count={300} />)
     expect(shown(container)).toHaveLength(300)
