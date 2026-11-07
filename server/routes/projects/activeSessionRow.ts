@@ -2,7 +2,6 @@ import {
   matchesPullRequestTarget,
   type PullRequestSearch,
 } from "../../../shared/session/sessionSearch"
-import { searchSessionMessages } from "../../helpers"
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { teamLeadFor, type TeamConfigCache } from "../../agents/lineage"
 import { listedSessionId } from "../../agents/listedSession"
@@ -12,6 +11,8 @@ import type { TopLevelSessionInfo } from "../../agents/types"
 import { catalogRow } from "../../sessionCatalog"
 import { peekSessionPullRequests, type SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import type { ArchiveReason } from "../../lib/sessionArchive"
+import { searchTranscript } from "../../sessionList/searchMemo"
+import { noteListedAgents } from "../../sessionList/versionInputs"
 import { projectLabel } from "./projectLabel"
 
 /** What every row of one /api/active-sessions request is read against. */
@@ -23,6 +24,8 @@ export interface ActiveSessionQuery {
   archivedById: ReadonlyMap<string, ArchiveReason>
   /** Teammate sessions carry a teamName; each team's config is read once per request. */
   teamConfigs: TeamConfigCache
+  /** Aborted once nobody waits for the list any more. */
+  signal?: AbortSignal
 }
 
 const TITLE_LENGTH = 80
@@ -77,7 +80,8 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       if (metaMatch) {
         matchedMessage = meta.lastUserMessage || meta.firstUserMessage || meta.slug || ""
       } else {
-        const found = await searchSessionMessages(c.filePath, search)
+        query.signal?.throwIfAborted()
+        const found = await searchTranscript(c, search)
         if (!found) return null
         matchedMessage = found
       }
@@ -96,6 +100,10 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
     // untouched while its agents work, which is exactly what it cannot see.
     const hasRunningAgents = statusInfo.status === "awaiting_agents"
       && await sessionAgentsRunning(c.dirName, sessionId)
+    noteListedAgents(
+      sessionId,
+      statusInfo.status === "awaiting_agents" ? { dirName: c.dirName, running: hasRunningAgents } : null,
+    )
     const archivedReason = query.archivedById.get(sessionId)
 
     return {
@@ -131,7 +139,8 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       }),
       ...(matchedMessage !== undefined && { matchedMessage }),
     }
-  } catch {
+  } catch (error) {
+    if (query.signal?.aborted) throw error
     return null
   }
 }

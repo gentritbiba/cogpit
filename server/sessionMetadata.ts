@@ -8,7 +8,7 @@ import {
   type AgentTailFormat,
   type TailMatch,
 } from "./agents/tailRecords"
-import { openTranscript, readTranscriptText, statTranscript } from "./agents/transcriptFile"
+import { openTranscript, readTranscriptBuffer, statTranscript } from "./agents/transcriptFile"
 import { readTranscriptHead } from "./agents/transcriptHead"
 import type { SessionMeta } from "./agents/types"
 
@@ -232,6 +232,39 @@ function snippetAround(text: string, query: string): string {
 }
 
 /**
+ * Whether `query` is printable ASCII that no JSON writer escapes, so a record whose text holds
+ * such a query holds it verbatim in its line, in some letter case.
+ */
+function verbatimInJson(query: string): boolean {
+  return /^[\x20-\x7e]+$/.test(query) && !/["\\/<>&']/.test(query)
+}
+/** The only characters whose lower case holds ASCII letters (İ, the Kelvin sign). */
+const LOWERING_INTO_ASCII = [Buffer.from("\u0130"), Buffer.from("\u212a")]
+
+function firstMatchingPrompt(lines: Iterable<string>, query: string): string | null {
+  const q = query.toLowerCase()
+  for (const line of lines) {
+    const text = userMessageTextFromLine(line)
+    if (text !== null && text.toLowerCase().includes(q)) return snippetAround(text, query)
+  }
+  return null
+}
+
+/** The lines holding `query` in any case, found in the raw bytes: one latin1 character per byte keeps offsets. */
+function* linesHolding(content: Buffer, query: string): Generator<string> {
+  const bytes = content.toString("latin1")
+  const global = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+  let match: RegExpExecArray | null
+  while ((match = global.exec(bytes)) !== null) {
+    const start = bytes.lastIndexOf("\n", match.index) + 1
+    const newline = bytes.indexOf("\n", match.index)
+    const end = newline < 0 ? bytes.length : newline
+    yield content.toString("utf-8", start, end)
+    global.lastIndex = end + 1
+  }
+}
+
+/**
  * Search all user messages in a session file for a query string.
  * Returns the first matching message snippet, or null if no match.
  */
@@ -239,19 +272,17 @@ export async function searchSessionMessages(
   filePath: string,
   query: string
 ): Promise<string | null> {
-  const q = query.toLowerCase()
-
-  let content: string
+  let content: Buffer
   try {
-    content = await readTranscriptText(filePath)
+    content = await readTranscriptBuffer(filePath)
   } catch {
     return null
   }
 
-  for (const line of content.split("\n")) {
-    const text = userMessageTextFromLine(line)
-    if (text !== null && text.toLowerCase().includes(q)) return snippetAround(text, query)
+  // Only lines holding the query are decoded and parsed.
+  const q = query.toLowerCase()
+  if (verbatimInJson(q) && !LOWERING_INTO_ASCII.some((bytes) => content.includes(bytes))) {
+    return firstMatchingPrompt(linesHolding(content, q), query)
   }
-
-  return null
+  return firstMatchingPrompt(content.toString("utf-8").split("\n"), query)
 }

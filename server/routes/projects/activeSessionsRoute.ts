@@ -3,10 +3,28 @@ import { compareSessionsByRecency } from "../../../shared/session-ordering"
 import { parsePullRequestSearch } from "../../../shared/session/sessionSearch"
 import { allTopLevelSessions } from "../../agents"
 import type { TopLevelSessionInfo } from "../../agents/types"
-import { allVisible, parseScope, takeVisible, visibilityFor, visibleInOrder, type VisibleItem } from "../../edition"
-import { sendJson, type NextFn } from "../../http"
+import {
+  allVisible,
+  parseScope,
+  takeVisible,
+  visibilityFor,
+  visibleInOrder,
+  type VisibilityCheck,
+  type VisibleItem,
+} from "../../edition"
+import type { NextFn } from "../../http"
+import { mapWithConcurrency } from "../../lib/mapWithConcurrency"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
-import { archiveReason, readArchive, setSessionsArchived, type ArchiveReason } from "../../lib/sessionArchive"
+import {
+  AUTO_ARCHIVE_AFTER_MS,
+  archiveReason,
+  readArchive,
+  setSessionsArchived,
+  type ArchiveReason,
+  type ArchiveSnapshot,
+} from "../../lib/sessionArchive"
+import { sendListResponse, sharedListBuild, type ListBody } from "../../sessionList/revalidate"
+import { noteNextArchiveCrossing } from "../../sessionList/versionInputs"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readActiveSessionRow, type ActiveSessionQuery } from "./activeSessionRow"
 import { listedSession, listedSessionId } from "../../agents/listedSession"
@@ -98,6 +116,171 @@ function sortByCrewRecency<T extends RecencyRow>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => compareSessionsByRecency(placed(a), placed(b)))
 }
 
+/** What one /api/active-sessions request asks for, read from its query string. */
+interface ActiveSessionsRequest {
+  search: string
+  pullRequestSearch: ReturnType<typeof parsePullRequestSearch>
+  perProject: number
+  /** An explicit `perProject` is a hard cap; left unset, it is a fairness floor. */
+  perProjectIsCap: boolean
+  totalLimit: number
+  /** Optional: load sessions for a specific project only (used by "show more") */
+  projectFilter: string
+  includeArchived: boolean
+}
+
+function readActiveSessionsRequest(params: URLSearchParams): ActiveSessionsRequest {
+  const search = params.get("search")?.trim() || ""
+  return {
+    search,
+    pullRequestSearch: parsePullRequestSearch(search),
+    perProject: Math.min(parseInt(params.get("perProject") || String(DEFAULT_PER_PROJECT), 10), 100),
+    perProjectIsCap: params.has("perProject"),
+    totalLimit: Math.min(parseInt(params.get("limit") || String(search ? 50 : DEFAULT_TOTAL), 10), 200),
+    projectFilter: params.get("project")?.trim() || "",
+    // Archived sessions stay out of the default list so they never crowd the
+    // per-project cap; a search always looks through them.
+    includeArchived: Boolean(search) || params.get("archived") === "include",
+  }
+}
+
+/** Searches read whole transcripts; a few at a time, so a request that went stops soon. */
+const SEARCH_READS = 8
+
+/** When the first listed session not kept would cross into idle archiving. */
+function nextArchiveCrossing(sessions: readonly TopLevelSessionInfo[], archive: ArchiveSnapshot, now: number): number {
+  let next = Infinity
+  for (const session of sessions) {
+    if (archive.kept.has(listedSessionId(session))) continue
+    const at = session.mtimeMs + AUTO_ARCHIVE_AFTER_MS
+    if (at > now && at < next) next = at
+  }
+  return next
+}
+
+async function buildActiveSessions(
+  request: ActiveSessionsRequest,
+  check: VisibilityCheck,
+  lineageCheck: VisibilityCheck,
+  signal: AbortSignal,
+): Promise<ListBody> {
+  const { search, pullRequestSearch, perProject, totalLimit, projectFilter, includeArchived } = request
+  const headers: Record<string, string> = {}
+
+  // First pass: every session file with its mtime (cheap stat only), newest first.
+  // Crews are placed across every project, so a root brings members that live elsewhere.
+  const everySession = await allTopLevelSessions()
+  const inProject = (session: TopLevelSessionInfo) => !projectFilter || session.dirName === projectFilter
+  const candidates = everySession.filter(inProject)
+
+  const archive = await readArchive()
+  const now = Date.now()
+  const resumedSessionIds: string[] = []
+  const archivedById = new Map<string, ArchiveReason>()
+  for (const c of everySession) {
+    const id = listedSessionId(c)
+    const reason = archiveReason(archive, id, c.mtimeMs, now)
+    if (reason) archivedById.set(id, reason)
+    else if (archive.archived.has(id)) resumedSessionIds.push(id)
+  }
+  noteNextArchiveCrossing(nextArchiveCrossing(everySession, archive, now))
+  // A transcript written after archiving means the session was resumed —
+  // it comes back on its own, so the stale entry is dropped.
+  if (resumedSessionIds.length > 0) {
+    setSessionsArchived(resumedSessionIds, false).catch(() => {})
+  }
+  const isArchived = (c: TopLevelSessionInfo) => archivedById.has(listedSessionId(c))
+  const plan = await planCrews(everySession, {
+    grouped: !search,
+    canHost: (sessionId) => !archivedById.has(sessionId),
+    listsMember: (sessionId) => includeArchived || !archivedById.has(sessionId),
+    check,
+  })
+  const units = plan.units.filter(inProject)
+  const unitIds = new Set(units.map(listedSessionId))
+  // Archived rows are picked separately from the live list so they never
+  // take a listed session's place under the per-project cap.
+  const live = units.filter((c) => !isArchived(c))
+  const archived = await allVisible(candidates.filter(isArchived), check, listedSession)
+  headers["X-Cogpit-Archived-Count"] = String(new Set(archived.map(({ item }) => listedSessionId(item))).size)
+  const archivedPool = includeArchived ? archived.filter(({ item }) => unitIds.has(listedSessionId(item))) : []
+
+  // A pull-request search filters on the index, which covers every visible candidate.
+  const visibleLive = pullRequestSearch ? await allVisible(live, check, listedSession) : null
+  const pullRequestIndex = visibleLive
+    ? await getSessionPrSearchSnapshot([...visibleLive, ...archivedPool].map(({ item }) => item))
+    : null
+  if (pullRequestIndex) {
+    headers["X-Cogpit-PR-Index-Pending"] = String(pullRequestIndex.pending)
+    headers["X-Cogpit-PR-Index-Total"] = String(pullRequestIndex.total)
+  }
+
+  const rule: PoolRule = pullRequestSearch && pullRequestIndex
+    ? {
+        limit: Infinity,
+        matches: (candidate) => pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
+          (reference) => reference.number === pullRequestSearch.number,
+        ) === true,
+      }
+    : search ? { limit: SEARCH_POOL }
+    // Loading more for a specific project — use totalLimit directly
+    : projectFilter ? { limit: totalLimit }
+    // Left unset, the per-project cap only keeps one project from crowding out
+    // the rest; an explicit perProject stays a hard cap.
+    : { limit: totalLimit, perProject, fill: !request.perProjectIsCap }
+  const scanPool = [
+    ...await selectPool(visibleLive ?? visibleInOrder(live, check, listedSession), rule),
+    ...await selectPool(archivedPool, rule),
+  ]
+
+  // Second pass: read metadata (+ search) in parallel for speed
+  const query: ActiveSessionQuery = {
+    search,
+    pullRequestSearch,
+    pullRequestIndex,
+    archivedById,
+    teamConfigs: new Map(),
+    signal,
+  }
+  // A row may name a session the caller can open outside the scope listed.
+  const lineage = visibleLineage(lineageCheck)
+  const readRow = async (item: TopLevelSessionInfo, session: VisibleItem<TopLevelSessionInfo>["session"], onItsOwn: boolean) => {
+    signal.throwIfAborted()
+    const row = await readActiveSessionRow(item, query)
+    if (!row) return null
+    const crew = await plan.membership(row.sessionId, onItsOwn)
+    return session.annotate(await lineage(crew ? { ...row, crew } : row))
+  }
+  const results = await mapWithConcurrency(
+    scanPool,
+    search ? SEARCH_READS : Math.max(1, scanPool.length),
+    ({ item, session }) => readRow(item, session, true),
+  )
+  const loaded = results.flatMap((row) => row ? [row] : [])
+
+  // Every member a listed session carries comes along, whatever the caps.
+  const membersOf = new Map(await Promise.all(loaded.map(async (unit) => {
+    const riding = (plan.membersOf.get(unit.sessionId) ?? [])
+      .filter((member) => includeArchived || !isArchived(member))
+    const visible = riding.length > 0 ? await allVisible(riding, check, listedSession) : []
+    const rows = await Promise.all(visible.map(({ item, session }) => readRow(item, session, false)))
+    return [unit.sessionId, rows.flatMap((row) => row ? [row] : [])] as const
+  })))
+  const withCrews = loaded.map((unit) => {
+    const summary = crewSummary(unit, membersOf.get(unit.sessionId) ?? [])
+    return summary ? { ...unit, crewSummary: summary } : unit
+  })
+
+  const listed = [
+    ...sortByCrewRecency(withCrews.filter((row) => !row.archived)).slice(0, totalLimit),
+    ...sortByCrewRecency(withCrews.filter((row) => row.archived)).slice(0, totalLimit),
+  ]
+  const activeSessions = [...listed, ...listed.flatMap((unit) => membersOf.get(unit.sessionId) ?? [])]
+  return { headers, body: JSON.stringify(activeSessions) }
+}
+
+const NOTHING_VISIBLE: ListBody = { headers: { "X-Cogpit-Archived-Count": "0" }, body: "[]" }
+
 /**
  * GET /api/active-sessions — the sessions the caller may see in `scope`,
  * newest first. Visibility is decided in recency order before any limit, so
@@ -108,6 +291,9 @@ function sortByCrewRecency<T extends RecencyRow>(rows: readonly T[]): T[] {
  * root: the root takes one place under the caps, ordered by the crew's latest
  * activity, and its members follow the listed sessions. A search lists every
  * match on its own, each carrying where it sits in its crew.
+ *
+ * The answer carries a content ETag and the list version it was built at;
+ * callers asking the same at the same version share one build.
  */
 export async function handleActiveSessions(
   req: IncomingMessage,
@@ -120,127 +306,18 @@ export async function handleActiveSessions(
   const url = new URL((req.url || "/").replace(/^\/?/, "/"), "http://localhost")
   const scope = parseScope(req, url.searchParams.get("scope"))
   const check = visibilityFor(req, scope)
-  if (check.nothing) {
-    res.setHeader("X-Cogpit-Archived-Count", "0")
-    sendJson(res, 200, [])
-    return
-  }
-  const search = url.searchParams.get("search")?.trim() || ""
-  const pullRequestSearch = parsePullRequestSearch(search)
-  const perProject = Math.min(parseInt(url.searchParams.get("perProject") || String(DEFAULT_PER_PROJECT), 10), 100)
-  const totalLimit = Math.min(parseInt(url.searchParams.get("limit") || String(search ? 50 : DEFAULT_TOTAL), 10), 200)
-  // Optional: load sessions for a specific project only (used by "show more")
-  const projectFilter = url.searchParams.get("project")?.trim() || ""
-  // Archived sessions stay out of the default list so they never crowd the
-  // per-project cap; a search always looks through them.
-  const includeArchived = Boolean(search) || url.searchParams.get("archived") === "include"
+  const lineageCheck = scope === "all" ? check : visibilityFor(req)
+  const request = readActiveSessionsRequest(url.searchParams)
 
   try {
-    // First pass: every session file with its mtime (cheap stat only), newest first.
-    // Crews are placed across every project, so a root brings members that live elsewhere.
-    const everySession = await allTopLevelSessions()
-    const inProject = (session: TopLevelSessionInfo) => !projectFilter || session.dirName === projectFilter
-    const candidates = everySession.filter(inProject)
-
-    const archive = await readArchive()
-    const now = Date.now()
-    const resumedSessionIds: string[] = []
-    const archivedById = new Map<string, ArchiveReason>()
-    for (const c of everySession) {
-      const id = listedSessionId(c)
-      const reason = archiveReason(archive, id, c.mtimeMs, now)
-      if (reason) archivedById.set(id, reason)
-      else if (archive.archived.has(id)) resumedSessionIds.push(id)
-    }
-    // A transcript written after archiving means the session was resumed —
-    // it comes back on its own, so the stale entry is dropped.
-    if (resumedSessionIds.length > 0) {
-      setSessionsArchived(resumedSessionIds, false).catch(() => {})
-    }
-    const isArchived = (c: TopLevelSessionInfo) => archivedById.has(listedSessionId(c))
-    const plan = await planCrews(everySession, {
-      grouped: !search,
-      canHost: (sessionId) => !archivedById.has(sessionId),
-      listsMember: (sessionId) => includeArchived || !archivedById.has(sessionId),
-      check,
-    })
-    const units = plan.units.filter(inProject)
-    const unitIds = new Set(units.map(listedSessionId))
-    // Archived rows are picked separately from the live list so they never
-    // take a listed session's place under the per-project cap.
-    const live = units.filter((c) => !isArchived(c))
-    const archived = await allVisible(candidates.filter(isArchived), check, listedSession)
-    res.setHeader("X-Cogpit-Archived-Count", String(new Set(archived.map(({ item }) => listedSessionId(item))).size))
-    const archivedPool = includeArchived ? archived.filter(({ item }) => unitIds.has(listedSessionId(item))) : []
-
-    // A pull-request search filters on the index, which covers every visible candidate.
-    const visibleLive = pullRequestSearch ? await allVisible(live, check, listedSession) : null
-    const pullRequestIndex = visibleLive
-      ? await getSessionPrSearchSnapshot([...visibleLive, ...archivedPool].map(({ item }) => item))
-      : null
-    if (pullRequestIndex) {
-      res.setHeader("X-Cogpit-PR-Index-Pending", String(pullRequestIndex.pending))
-      res.setHeader("X-Cogpit-PR-Index-Total", String(pullRequestIndex.total))
-    }
-
-    const rule: PoolRule = pullRequestSearch && pullRequestIndex
-      ? {
-          limit: Infinity,
-          matches: (candidate) => pullRequestIndex.byFile.get(candidate.filePath)?.references.some(
-            (reference) => reference.number === pullRequestSearch.number,
-          ) === true,
-        }
-      : search ? { limit: SEARCH_POOL }
-      // Loading more for a specific project — use totalLimit directly
-      : projectFilter ? { limit: totalLimit }
-      // Left unset, the per-project cap only keeps one project from crowding out
-      // the rest; an explicit perProject stays a hard cap.
-      : { limit: totalLimit, perProject, fill: !url.searchParams.has("perProject") }
-    const scanPool = [
-      ...await selectPool(visibleLive ?? visibleInOrder(live, check, listedSession), rule),
-      ...await selectPool(archivedPool, rule),
-    ]
-
-    // Second pass: read metadata (+ search) in parallel for speed
-    const query: ActiveSessionQuery = {
-      search,
-      pullRequestSearch,
-      pullRequestIndex,
-      archivedById,
-      teamConfigs: new Map(),
-    }
-    // A row may name a session the caller can open outside the scope listed.
-    const lineage = visibleLineage(scope === "all" ? check : visibilityFor(req))
-    const readRow = async (item: TopLevelSessionInfo, session: VisibleItem<TopLevelSessionInfo>["session"], onItsOwn: boolean) => {
-      const row = await readActiveSessionRow(item, query)
-      if (!row) return null
-      const crew = await plan.membership(row.sessionId, onItsOwn)
-      return session.annotate(await lineage(crew ? { ...row, crew } : row))
-    }
-    const results = await Promise.all(scanPool.map(({ item, session }) => readRow(item, session, true)))
-    const loaded = results.flatMap((row) => row ? [row] : [])
-
-    // Every member a listed session carries comes along, whatever the caps.
-    const membersOf = new Map(await Promise.all(loaded.map(async (unit) => {
-      const riding = (plan.membersOf.get(unit.sessionId) ?? [])
-        .filter((member) => includeArchived || !isArchived(member))
-      const visible = riding.length > 0 ? await allVisible(riding, check, listedSession) : []
-      const rows = await Promise.all(visible.map(({ item, session }) => readRow(item, session, false)))
-      return [unit.sessionId, rows.flatMap((row) => row ? [row] : [])] as const
-    })))
-    const withCrews = loaded.map((unit) => {
-      const summary = crewSummary(unit, membersOf.get(unit.sessionId) ?? [])
-      return summary ? { ...unit, crewSummary: summary } : unit
-    })
-
-    const listed = [
-      ...sortByCrewRecency(withCrews.filter((row) => !row.archived)).slice(0, totalLimit),
-      ...sortByCrewRecency(withCrews.filter((row) => row.archived)).slice(0, totalLimit),
-    ]
-    const activeSessions = [...listed, ...listed.flatMap((unit) => membersOf.get(unit.sessionId) ?? [])]
-
-    sendJson(res, 200, activeSessions)
+    const response = await sharedListBuild(
+      req,
+      res,
+      { route: "active-sessions", query: `${scope}\n${url.search}`, seesEverything: check.everything },
+      (signal) => check.nothing ? Promise.resolve(NOTHING_VISIBLE) : buildActiveSessions(request, check, lineageCheck, signal),
+    )
+    if (response) sendListResponse(req, res, response)
   } catch (err) {
-    sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))
+    if (!res.headersSent && !res.destroyed) sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))
   }
 }

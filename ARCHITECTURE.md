@@ -185,7 +185,9 @@ owned zone, that file is the bug, not the plan.
    same directory, and the live model catalog in `<agent>Models.ts`.
    `activity().agentsRunning` comes from the process itself, never from
    transcript timing: `sessionAgentsRunning` in `./agentsRunning` already falls
-   back to the store for sessions no runtime holds.
+   back to the store for sessions no runtime holds. `listActive()` is read every
+   2 s while a client follows the session list (`server/sessionList/`), so it
+   stays an in-memory answer.
    Register it in `server/agents/runtimes.ts`.
 7. **Per-record tables in `server/agents/`** — add a row to `tailRecords.ts`
    (status from the tail), `summaryFolds.ts` (Mission Control cards),

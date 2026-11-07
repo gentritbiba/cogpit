@@ -337,6 +337,7 @@ export function isAuthenticatedHttpStreamRequest(req: IncomingMessage): boolean 
     || path?.startsWith("/api/team-watch/") === true
     || path === "/api/workflow-watch"
     || path?.startsWith("/api/workflow-watch/") === true
+    || path === "/api/session-list/events"
 }
 
 /** An edition's hold on a stream's session access, kept in step with the token's. */

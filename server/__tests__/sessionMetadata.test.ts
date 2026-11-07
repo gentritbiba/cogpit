@@ -675,3 +675,59 @@ describe("getSessionStatus background agents", () => {
     expect(status.status).toBe("completed")
   })
 })
+
+describe("searchSessionMessages", () => {
+  const assistantLine = (text: string) => ({
+    type: "assistant",
+    sessionId: "s1",
+    timestamp: "2026-06-10T10:00:01Z",
+    message: { role: "assistant", content: [{ type: "text", text }] },
+  })
+
+  it("matches prompts case-insensitively and only prompts", async () => {
+    const filePath = await writeSession([
+      assistantLine("the Perf budget"),
+      userLine("Please profile the PERF hot path"),
+    ])
+    await expect(searchSessionMessages(filePath, "perf")).resolves.toContain("PERF hot path")
+    await expect(searchSessionMessages(filePath, "budget")).resolves.toBeNull()
+  })
+
+  it("finds text a transcript stores escaped", async () => {
+    const filePath = await writeSession([userLine("run \"bun test\" in C:\\work/app <now> & then 'stop'\nsecond line")])
+    await expect(searchSessionMessages(filePath, "\"bun test\"")).resolves.toContain("bun test")
+    await expect(searchSessionMessages(filePath, "c:\\work/app")).resolves.toContain("work/app")
+    await expect(searchSessionMessages(filePath, "<now> & then 'stop'")).resolves.toContain("<now>")
+    await expect(searchSessionMessages(filePath, "'stop'\nsecond")).resolves.toContain("second")
+  })
+
+  it("finds non-ASCII text whatever its case", async () => {
+    const filePath = await writeSession([userLine("Überprüfe die ÄNDERUNG")])
+    await expect(searchSessionMessages(filePath, "änderung")).resolves.toContain("ÄNDERUNG")
+  })
+})
+
+describe("searchSessionMessages over raw bytes", () => {
+  it("finds a prompt by letters a regex would read as syntax, after earlier non-matching lines", async () => {
+    const filePath = await writeSession([
+      userLine("nothing to see"),
+      userLine("ÄÖÜ before the fix (v1.2) [draft]?"),
+    ])
+    await expect(searchSessionMessages(filePath, "FIX (V1.2) [draft]?")).resolves.toContain("fix (v1.2)")
+    await expect(searchSessionMessages(filePath, "v1x2")).resolves.toBeNull()
+  })
+
+  it("finds a query in a prompt whose other letters lower into ASCII", async () => {
+    const filePath = await writeSession([userLine("Key İd")])
+    await expect(searchSessionMessages(filePath, "key")).resolves.toBe("\u212Aey İd")
+    await expect(searchSessionMessages(filePath, "i")).resolves.not.toBeNull()
+  })
+
+  it("skips the query where it appears outside prompts and finds it in a later prompt", async () => {
+    const filePath = await writeSession([
+      { type: "assistant", sessionId: "s1", timestamp: "2026-06-10T10:00:01Z", message: { role: "assistant", content: [{ type: "text", text: "needle" }] } },
+      userLine("the needle is here"),
+    ])
+    await expect(searchSessionMessages(filePath, "Needle")).resolves.toBe("the needle is here")
+  })
+})

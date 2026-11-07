@@ -44,6 +44,7 @@ vi.mock("../../helpers", () => ({
   isWithinDir: vi.fn(),
   getSessionMeta: vi.fn(),
   getSessionStatus: vi.fn().mockResolvedValue({ status: "idle" }),
+  searchSessionMessages: vi.fn(),
   readdir: vi.fn(),
   readFile: vi.fn(),
   stat: vi.fn(),
@@ -137,6 +138,8 @@ vi.mock("../../lib/sessionPrSearchIndex", () => ({
 vi.mock("../../lib/sessionArchive", async () => {
   const actual = await vi.importActual<typeof import("../../lib/sessionArchive")>("../../lib/sessionArchive")
   return {
+    AUTO_ARCHIVE_AFTER_MS: actual.AUTO_ARCHIVE_AFTER_MS,
+    subscribeArchiveChanges: actual.subscribeArchiveChanges,
     archiveReason: actual.archiveReason,
     readArchive: async () => ({ archived: mocks.archived, kept: mocks.kept }),
     setSessionsArchived: mocks.setSessionsArchived,
@@ -147,7 +150,9 @@ import {
   getSessionMeta,
   getSessionStatus,
   readFile,
+  searchSessionMessages,
 } from "../../helpers"
+import { __resetSearchMemoForTest } from "../../sessionList/searchMemo"
 import { projectDirToReadableName } from "../../lib/projectNames"
 import { findJsonlPath, resolveSessionFilePath } from "../../sessionPaths"
 
@@ -185,6 +190,7 @@ describe("project routes", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    __resetSearchMemoForTest()
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     mocks.peekSessionPullRequests.mockResolvedValue(null)
     for (const kind of ["acp", "claude", "codex", "copilot"]) {
@@ -252,6 +258,22 @@ describe("project routes", () => {
         expect.objectContaining({ dirName: "proj-b", shortName: "b", sessionCount: 2 }),
         expect.objectContaining({ dirName: "proj-a", shortName: "a", sessionCount: 1 }),
       ])
+    })
+
+    it("answers a caller holding the same projects with 304", async () => {
+      const handler = getRouteHandler(handlers, "/api/projects")
+      mocks.listProjects.claude.mockResolvedValue([
+        { dirName: "proj-a", path: "/proj/a", sessionCount: 1, lastModified: new Date(1000).toISOString() },
+      ])
+      mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+      const first = createMockReqRes("GET", "/")
+      await handler(first.req, first.res, first.next)
+      const etag = first.res._getHeaders().ETag!
+
+      const again = createMockReqRes("GET", "/", { headers: { "if-none-match": etag } })
+      await handler(again.req, again.res, again.next)
+      expect(again.res._getStatus()).toBe(304)
+      expect(again.res._getData()).toBe("")
     })
 
     it("labels Copilot projects with their suffix", async () => {
@@ -618,6 +640,58 @@ describe("project routes", () => {
       const { req, res, next } = createMockReqRes("POST", "/")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
+    })
+
+    it("answers a caller holding the same list with 304, and again with the list once a row changed", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const NOW = Date.now()
+      mocks.listTopLevelSessions.claude.mockResolvedValue([claudeFile("proj-a", "s1.jsonl", NOW, 500)])
+      mockedGetSessionMeta.mockResolvedValue(makeSessionMeta({ sessionId: "s1", firstUserMessage: "hello" }))
+      mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+
+      const first = createMockReqRes("GET", "/")
+      await handler(first.req, first.res, first.next)
+      const etag = first.res._getHeaders().ETag!
+      expect(etag).toMatch(/^W\//)
+      expect(first.res._getHeaders()["X-Cogpit-List-Version"]).toMatch(/^\d+$/)
+
+      const again = createMockReqRes("GET", "/", { headers: { "if-none-match": etag } })
+      await handler(again.req, again.res, again.next)
+      expect(again.res._getStatus()).toBe(304)
+      expect(again.res._getData()).toBe("")
+      expect(again.res._getHeaders()["X-Cogpit-Archived-Count"]).toBe("0")
+
+      mocks.listTopLevelSessions.claude.mockResolvedValue([claudeFile("proj-a", "s1.jsonl", NOW, 600)])
+      const changed = createMockReqRes("GET", "/", { headers: { "if-none-match": etag } })
+      await handler(changed.req, changed.res, changed.next)
+      expect(changed.res._getStatus()).toBe(200)
+      expect(JSON.parse(changed.res._getData())[0].size).toBe(600)
+    })
+
+    it("stops reading transcripts for a search once its caller has gone", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const NOW = Date.now()
+      mocks.listTopLevelSessions.claude.mockResolvedValue(
+        Array.from({ length: 30 }, (_, i) => claudeFile("proj-a", `s${i}.jsonl`, NOW - i, 500)),
+      )
+      mockedGetSessionMeta.mockResolvedValue(makeSessionMeta({ firstUserMessage: "nothing here" }))
+      mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+      const reads: Array<() => void> = []
+      vi.mocked(searchSessionMessages).mockImplementation(() => new Promise((resolve) => {
+        reads.push(() => resolve(null))
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "?search=needle")
+      const answered = handler(req, res, next)
+      await vi.waitFor(() => expect(reads.length).toBeGreaterThan(0))
+      const started = reads.length
+      res.emit("close")
+      for (const read of reads.splice(0)) read()
+      await answered
+
+      expect(started).toBeLessThan(30)
+      expect(reads).toHaveLength(0)
+      expect(res.end).not.toHaveBeenCalled()
     })
 
     it("returns active sessions sorted by mtime", async () => {
