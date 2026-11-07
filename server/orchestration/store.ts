@@ -447,6 +447,10 @@ export class OrchestrationStore {
     if (this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('held','unknown') LIMIT 1").get(conversationId)) return false
     return Boolean(this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('queued','dispatching') AND json_extract(payload,'$.onlyWhileRunning') IS NOT 1 LIMIT 1").get(conversationId))
   }
+  /** Every conversation `startsNext` holds for, in one read. */
+  conversationsStartingNext(): Set<string> {
+    return new Set((this.db.prepare("SELECT DISTINCT c.conversation_id id FROM commands c WHERE c.state IN ('queued','dispatching') AND json_extract(c.payload,'$.onlyWhileRunning') IS NOT 1 AND NOT EXISTS (SELECT 1 FROM commands h WHERE h.conversation_id=c.conversation_id AND h.state IN ('held','unknown'))").all() as Row[]).map((row) => String(row.id)))
+  }
   /** Cancels every message still waiting for a conversation, from any account, so a stop is final. */
   cancelWaiting(conversationId: string): number {
     return this.transaction(() => {

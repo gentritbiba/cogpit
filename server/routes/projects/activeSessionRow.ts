@@ -41,6 +41,11 @@ function listedMeta(c: TopLevelSessionInfo) {
   })
 }
 
+/** When a listed session last did something: its newest record's time, else its transcript's mtime. */
+export function lastActivityOf(meta: { lastTimestamp?: string }, mtimeMs: number): string {
+  return meta.lastTimestamp || new Date(mtimeMs).toISOString()
+}
+
 const TITLE_LENGTH = 80
 
 /** What a session is called where its row is not listed: its own title, else its first prompt. */
@@ -129,7 +134,7 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       gitBranch: meta.gitBranch,
       cwd: meta.cwd,
       lastModified,
-      lastActivityAt: meta.lastTimestamp || lastModified,
+      lastActivityAt: lastActivityOf(meta, c.mtimeMs),
       turnCount: meta.turnCount,
       size: c.size,
       isActive: isRuntimeActive || hasRunningAgents,
