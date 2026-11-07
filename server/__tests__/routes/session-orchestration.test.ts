@@ -24,7 +24,8 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock("../../sessionHosts", () => ({
+vi.mock("../../sessionHosts", async (importOriginal) => ({
+  statesAcrossHosts: (await importOriginal<typeof import("../../sessionHosts")>()).statesAcrossHosts,
   SESSION_SCOPE_HEADER: "x-cogpit-session-scope",
   hostForSession: mocks.hostForSession,
   hostForOrigin: (origin: { deviceId?: string } | null) => (origin?.deviceId ? mocks.remote : null),
@@ -166,6 +167,30 @@ describe("/api/session-children", () => {
         { sessionId: "r2", outcome: "needs_input", device: { id: "dev_1", name: "agentbox" } },
       ],
     })
+  })
+
+  it("still lists the children here when their device is offline, asking it once (2026-11-07 23:02, e59cd71c)", async () => {
+    mocks.sessionChildren.mockResolvedValue(["c1", "r2", "r3"])
+    mocks.host.state.mockResolvedValue({ sessionId: "c1", outcome: "completed", waiting: [] })
+    mocks.remote.state.mockRejectedValue(new DeviceRequestError("dev_1", 530, "Device answered HTTP 530"))
+    const { status, body } = await call("/api/session-children/", "GET", "/p1")
+    expect(status).toBe(200)
+    expect(body.children).toEqual([
+      { sessionId: "c1", outcome: "completed", waiting: [] },
+      { sessionId: "r2", outcome: "unreachable", live: false, running: false, waiting: [], error: "Device answered HTTP 530", device: { id: "dev_1", name: "agentbox" } },
+      { sessionId: "r3", outcome: "unreachable", live: false, running: false, waiting: [], error: "Device answered HTTP 530", device: { id: "dev_1", name: "agentbox" } },
+    ])
+    expect(mocks.remote.state).toHaveBeenCalledOnce()
+  })
+
+  it("answers only for this machine when a hub asks with the local scope", async () => {
+    mocks.sessionChildren.mockResolvedValue(["c1", "r2"])
+    mocks.hostForSession.mockImplementation(async (id: string, options?: { localOnly?: boolean }) => (options?.localOnly || !id.startsWith("r") ? mocks.host : mocks.remote))
+    mocks.host.state.mockImplementation(async (id: string) => ({ sessionId: id, outcome: id === "c1" ? "completed" : "not_found", waiting: [] }))
+    const { status, body } = await call("/api/session-children/", "GET", "/p1", undefined, { "x-cogpit-session-scope": "local" })
+    expect(status).toBe(200)
+    expect(body.children).toEqual([{ sessionId: "c1", outcome: "completed", waiting: [] }, { sessionId: "r2", outcome: "not_found", waiting: [] }])
+    expect(mocks.remote.state).not.toHaveBeenCalled()
   })
 })
 

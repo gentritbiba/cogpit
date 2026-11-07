@@ -11,7 +11,7 @@ import { readCrewSnapshot } from "../lib/crewSnapshot"
 import { sendJsonWithEtag } from "../lib/jsonEtag"
 import { sendJson, singlePathParam, withJsonBody, type UseFn } from "../http"
 import { runSessionCli } from "../sessionCli/commands"
-import { hostForSession, locateSessions, SESSION_SCOPE_HEADER, waitAcrossHosts } from "../sessionHosts"
+import { hostForSession, locateSessions, SESSION_SCOPE_HEADER, statesAcrossHosts, waitAcrossHosts } from "../sessionHosts"
 import {
   listDelegatedRequests,
   markDelegatedRequestAnswered,
@@ -150,11 +150,12 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
     if (await authorizeSession(req, res, { sessionId }, "view") === null) return
     const visibleChildren = []
     for (const child of await sessionChildren(sessionId)) { const level = await accessLevelOf(req, child); if (level && accessAtLeast(level, "view")) visibleChildren.push(child) }
-    const located = await locateSessions(visibleChildren)
-    const children = await Promise.all(located.map(async ({ host, sessionId: childId }) => ({
-      ...await host.state(childId),
+    const located = await locateSessions(visibleChildren, scopeOf(req))
+    const states = await statesAcrossHosts(located)
+    const children = located.map(({ host }, index) => ({
+      ...states[index]!,
       ...(host.remote ? { device: { id: host.id, name: host.name } } : {}),
-    })))
+    }))
     sendJson(res, 200, { sessionId, children })
   })
 
