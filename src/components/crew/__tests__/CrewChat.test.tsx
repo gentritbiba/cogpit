@@ -7,7 +7,7 @@ import { CrewChat } from "../CrewChat"
 import { OpenAIIcon } from "@/lib/agents/brandIcons"
 
 const initial: CrewChatPage = {
-  rootId: "lead", canPost: true, nextCursor: 1, hasMore: false,
+  rootId: "lead", canPost: true, nextCursor: 1, hasMore: false, membersVersion: "m1",
   members: [{ sessionId: "lead", name: "Lead", handle: "lead", listening: true, canInteract: true }, { sessionId: "parser", name: "Parser", handle: "parser", listening: false, canInteract: true }],
   messages: [{ sequence: 1, id: "message-001", rootId: "lead", author: { kind: "agent", name: "Parser", sessionId: "parser" }, text: "Found the issue", mentions: ["lead"], createdAt: Date.now() }],
 }
@@ -73,7 +73,7 @@ describe("CrewChat", () => {
     mocks.fetch.mockResolvedValueOnce(response({ ...initial, hasMore: true, messages: [{ ...initial.messages[0], sequence: 2 }] }))
     render(<CrewChat rootId="lead" />)
     fireEvent.click(await screen.findByRole("button", { name: "Load earlier messages" }))
-    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledWith("/api/crew-chat/lead?before=2"))
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledWith("/api/crew-chat/lead?before=2&knownMembers=m1"))
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(2))
   })
   it("keeps read-only crew access read-only", async () => {

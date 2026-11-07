@@ -3,14 +3,14 @@ import { authFetch, jsonFetch } from "@/lib/auth"
 import { fetchIfChanged } from "@/lib/conditionalFetch"
 import { jsonEqual } from "@/lib/jsonEqual"
 import { useVisiblePolling } from "./useVisiblePolling"
-import type { CrewChatMember, CrewChatMessage, CrewChatPage } from "../../shared/contracts/crewChat"
+import type { CrewChatMessage, CrewChatPage, CrewChatPageResponse } from "../../shared/contracts/crewChat"
 
 const POLL_MS = 2_000
 
-/** A page read with `knownMembers`: members are left out while they still match that version. */
-type PolledPage = Omit<CrewChatPage, "members"> & { members?: CrewChatMember[]; membersVersion?: string }
+/** A page as read; servers older than membersVersion send members every time and no version. */
+type PolledPage = Omit<CrewChatPageResponse, "membersVersion"> & { membersVersion?: string }
 /** What the chat shows beside its messages. */
-export type CrewChatView = Omit<CrewChatPage, "messages"> & { membersVersion?: string }
+export type CrewChatView = Omit<CrewChatPage, "messages" | "membersVersion"> & { membersVersion?: string }
 
 async function checked(response: Response): Promise<Response> {
   if (response.ok) return response
