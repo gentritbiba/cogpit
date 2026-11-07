@@ -61,6 +61,10 @@ export function useUndoRedo(
   const [applyError, setApplyError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const rewindPreviewRequestRef = useRef(0)
+  // Read when a turn asks to restore, so the callback every row holds stays the
+  // same object while the session streams.
+  const latestSessionRef = useRef(session)
+  latestSessionRef.current = session
 
   // Load undo state when session changes
   useEffect(() => {
@@ -176,6 +180,7 @@ export function useUndoRedo(
 
   // Request undo: "Restore to here" on turn N keeps turns 0..(N-1)
   const requestUndo = useCallback((targetTurnIndex: number) => {
+    const session = latestSessionRef.current
     if (!enabled || !session) return
     const effectiveTarget = targetTurnIndex - 1
     if (effectiveTarget >= session.turns.length - 1 || effectiveTarget < -1) return
@@ -230,7 +235,7 @@ export function useUndoRedo(
       summary: buildSummary(ops, session.turns.length - 1 - effectiveTarget),
       targetTurnIndex: effectiveTarget,
     })
-  }, [enabled, session, sessionSource?.dirName])
+  }, [enabled, sessionSource?.dirName])
 
   // Request redo: restore the entire most recent branch
   const requestRedoAll = useCallback(() => {

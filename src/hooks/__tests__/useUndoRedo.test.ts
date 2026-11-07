@@ -388,6 +388,21 @@ describe("useUndoRedo", () => {
       expect(result.current.confirmState).toBeNull()
     })
 
+    it("stays the same callback while the session streams, and restores against the latest turns", async () => {
+      const source = makeSource()
+      const { result, rerender } = renderHook(({ session }) => useUndoRedo(session, source, vi.fn()), {
+        initialProps: { session: makeSession(3) },
+      })
+      await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled())
+      const first = result.current.requestUndo
+
+      rerender({ session: makeSession(5) })
+      expect(result.current.requestUndo).toBe(first)
+
+      act(() => result.current.requestUndo(4))
+      expect(result.current.confirmState?.targetTurnIndex).toBe(3)
+    })
+
     it("sets confirmState for valid undo request", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
