@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { QuoteSource } from "../../shared/session/composerContext"
 import type { ParsedSession } from "../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 
 /** Older pages a jump loads looking for its turn before it calls the source missing. */
 export const QUOTE_SEARCH_PAGES = 20

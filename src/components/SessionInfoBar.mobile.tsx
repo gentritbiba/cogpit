@@ -27,7 +27,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ContextBadge, LiveIndicator } from "@/components/header-shared"
 import { useSessionArchiveToggle } from "@/hooks/useSessionArchive"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import { projectName } from "@/lib/format"
 import type { ParsedSession, RawMessage } from "../../shared/session/types"
 

@@ -3,7 +3,7 @@
  */
 
 import type { ParsedSession, UndoState, Branch } from "../../../shared/session/types"
-import type { SessionSource } from "../useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import {
   anchorChildBranches,
   buildUndoOperations,

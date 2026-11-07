@@ -2,7 +2,7 @@ import { useReducer } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
 import type { AgentKind } from "@/lib/agents"
 import type { ParsedSession, Turn } from "../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { MobileTab } from "@/components/MobileNav"
 
 /** "extension" is a main view an edition registers, named by `extensionViewId`. */

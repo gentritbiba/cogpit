@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import type { ParsedSession, UndoState, Branch, Turn } from "../../shared/session/types"
-import type { SessionSource } from "./useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { capabilitiesForDirName } from "@/lib/agents"
@@ -311,8 +311,8 @@ export function useUndoRedo(
         branches,
       }
 
-      // Fetch the current JSONL content from disk. sessionSource.rawText may
-      // be stale if SSE streaming added lines after the session was loaded.
+      // Fetch the current JSONL content from disk: streaming may have added
+      // lines since the session was loaded.
       const freshRes = await authFetch(
         `/api/sessions/${encodeURIComponent(sessionSource.dirName)}/${encodeURIComponent(sessionSource.fileName)}`
       )

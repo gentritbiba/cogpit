@@ -19,7 +19,7 @@ function setPath(pathname: string) {
 const parsed = { turns: [] } as unknown as ParsedSession
 
 function seed(dirName: string, fileName: string) {
-  sessionCache.set(dirName, fileName, parsed, "raw", 0, false)
+  sessionCache.set(parsed, { dirName, fileName, watchOffset: 3, loadId: 1 }, 0, false)
 }
 
 describe("sessionCache device scoping", () => {

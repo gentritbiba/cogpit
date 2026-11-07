@@ -152,7 +152,7 @@ function setContexts({
     sessionSource: session ? {
       dirName: "-workspace-current",
       fileName: "session-1.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
     } : null,
     isSubAgentView: false,
   } as ReturnType<typeof useSessionContext>)

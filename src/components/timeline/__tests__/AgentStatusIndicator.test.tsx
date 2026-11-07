@@ -93,7 +93,7 @@ function indicatorWithContext({
 } = {}) {
   const value = {
     session: session as unknown as ParsedSession,
-    sessionSource: dirName ? { dirName, fileName: "s.jsonl", rawText: "" } : null,
+    sessionSource: dirName ? { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 } : null,
     isLive,
     sseState: "connected",
     isCompacting,

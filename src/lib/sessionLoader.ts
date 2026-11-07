@@ -11,7 +11,7 @@
  */
 
 import type { ParsedSession } from "../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import { authFetch, type AuthFetchInit } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
@@ -64,9 +64,9 @@ export async function fetchTailAndParse(
     source: {
       dirName,
       fileName,
-      rawText: text,
       agentKind: agentKindForDirName(dirName),
       watchOffset: data.totalSize,
+      loadId: nextLoadId(),
     },
     byteOffset: data.byteOffset,
     hasMore: data.hasMore,
@@ -114,16 +114,7 @@ export async function loadSessionTailCached(
   }
   // Only populate the cache if we're still on the same device as when the
   // fetch started (see loadSessionTailFresh for why).
-  sessionCache.set(
-    dirName,
-    fileName,
-    parsed,
-    source.rawText,
-    byteOffset,
-    hasMore,
-    source.agentKind,
-    source.watchOffset,
-  )
+  sessionCache.set(parsed, source, byteOffset, hasMore)
   return { parsed, source }
 }
 
@@ -155,16 +146,7 @@ export async function loadSessionTailFresh(
   // switch we skip the write but still return the parsed data so the caller can
   // render what it fetched.
   if (getActiveDeviceScope() === deviceScope && getActiveIdentity() === identity) {
-    sessionCache.set(
-      dirName,
-      fileName,
-      parsed,
-      source.rawText,
-      byteOffset,
-      hasMore,
-      source.agentKind,
-      source.watchOffset,
-    )
+    sessionCache.set(parsed, source, byteOffset, hasMore)
   }
   return { parsed, source }
 }

@@ -14,7 +14,7 @@ vi.mock("@/contexts/SessionContext", () => ({
     sessionSource: {
       dirName: "project",
       fileName: "session.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: mocks.agentKind,
     },
     actions: { handleStopSession: mocks.stopSession },

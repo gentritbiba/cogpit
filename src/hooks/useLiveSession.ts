@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { openSessionStream } from "@/lib/sessionStream"
 import type { ParsedSession } from "../../shared/session/types"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
-import type { AgentKind } from "@/lib/agents"
+import type { SessionSource } from "@/lib/sessionSource"
 import { createStreamingOverlayStore } from "@/lib/streamingOverlayStore"
 import { sessionCache } from "@/lib/sessionCache"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
@@ -15,15 +15,6 @@ import {
   EMPTY_OVERLAY,
   type StreamingOverlay,
 } from "@/lib/streamingOverlay"
-
-export interface SessionSource {
-  dirName: string
-  fileName: string
-  rawText: string
-  agentKind?: AgentKind
-  /** Byte position in the on-disk JSONL file represented by rawText. */
-  watchOffset?: number
-}
 
 export type SseConnectionState = "connecting" | "connected" | "disconnected"
 
@@ -39,15 +30,9 @@ export function useLiveSession(
   workerParse: (text: string) => Promise<ParsedSession>,
   workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
   /** Reload the session from disk: after a reconnect, or when a batch failed to parse. */
-  onResync?: () => void,
-  /**
-   * Optional already-parsed session matching `source.rawText`. When provided,
-   * `useLiveSession` seeds its internal `sessionRef` synchronously instead of
-   * re-parsing `rawText` on the main thread / in the worker. This eliminates
-   * a duplicate parse on every session switch (the caller typically already
-   * parsed rawText once to build `source`).
-   */
-  initialSession?: ParsedSession | null,
+  onResync: (() => void) | undefined,
+  /** The parsed session `source` loaded; streamed lines are appended to it. */
+  initialSession: ParsedSession | null,
 ) {
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
@@ -69,7 +54,6 @@ export function useLiveSession(
   // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
   // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
   const [streamingOverlayStore] = useState(createStreamingOverlayStore)
-  const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
   const overlayRef = useRef<StreamingOverlay>(EMPTY_OVERLAY)
   const sseStateRef = useRef<SseConnectionState>("disconnected")
@@ -81,42 +65,21 @@ export function useLiveSession(
   workerParseRef.current = workerParse
   const workerAppendRef = useRef(workerAppend)
   workerAppendRef.current = workerAppend
-  // Track the most recently provided initialSession so the rawText-reset
-  // effect can use it without re-running on every state.session change.
-  const initialSessionRef = useRef(initialSession ?? null)
-  initialSessionRef.current = initialSession ?? null
+  // Read when a load lands, without re-running on every state.session change.
+  const initialSessionRef = useRef(initialSession)
+  initialSessionRef.current = initialSession
   const wasDisconnectedRef = useRef(false)
   const lastResyncAtRef = useRef(0)
 
   const dirName = source?.dirName ?? null
   const fileName = source?.fileName ?? null
-  const rawText = source?.rawText ?? ""
-  const watchOffset = source?.watchOffset ?? new TextEncoder().encode(rawText).byteLength
+  const watchOffset = source?.watchOffset ?? 0
+  const loadId = source?.loadId ?? 0
 
-  // Reset accumulated text and cached session when source changes
+  // The stream restarts on every load from disk (a switch, a reload after undo),
+  // never while it streams.
   useEffect(() => {
-    textRef.current = rawText
-    if (!rawText) {
-      sessionRef.current = null
-      setIsLive(false)
-      return
-    }
-    // Fast path: caller already parsed rawText and handed us the result.
-    // Avoid a duplicate worker parse on every session switch.
-    const seeded = initialSessionRef.current
-    if (seeded) {
-      sessionRef.current = seeded
-      return
-    }
-    // Fallback: no pre-parsed session available — parse rawText ourselves.
-    workerParseRef.current(rawText).then((parsed) => {
-      sessionRef.current = scopeParsedSession(parsed, splitInstanceDirName(source?.dirName).instanceId)
-    })
-  }, [rawText, source?.dirName])
-
-  // SSE reconnects when rawText changes (e.g. after JSONL truncation from undo).
-  // rawText only changes on explicit session load/reload, not during SSE streaming.
-  useEffect(() => {
+    sessionRef.current = initialSessionRef.current
     // A prediction belongs to the turn that produced it — never to whatever
     // session is loaded next. A block or a failed turn belongs to the session
     // that hit it; the watcher replays a standing block on connect.
@@ -235,7 +198,7 @@ export function useLiveSession(
       const base = sessionRef.current
       const parsePromise = base
         ? workerAppendRef.current(base, toFlush)
-        : workerParseRef.current(textRef.current)
+        : workerParseRef.current(toFlush)
       let failed = false
 
       parsePromise
@@ -246,10 +209,7 @@ export function useLiveSession(
           if (dirName && fileName) {
             sessionCache.update(dirName, fileName, {
               parsed: result,
-              source: {
-                rawText: textRef.current,
-                watchOffset: trackedOffset,
-              },
+              source: { watchOffset: trackedOffset },
             })
           }
           scheduleUpdate()
@@ -368,7 +328,6 @@ export function useLiveSession(
 
           const newText = data.lines.join("\n") + "\n"
           if (nativeBytes === null) trackedOffset += new TextEncoder().encode(newText).byteLength
-          textRef.current += newText
           pendingText += newText
           flushToWorker()
         }
@@ -403,7 +362,7 @@ export function useLiveSession(
       overlayRef.current = EMPTY_OVERLAY
       streamingOverlayStore.publish(EMPTY_OVERLAY)
     }
-  }, [dirName, fileName, rawText, watchOffset, streamingOverlayStore])
+  }, [dirName, fileName, loadId, watchOffset, streamingOverlayStore])
 
   return { isLive, sseState, isCompacting, streamingOverlayStore, turnError, agentProgress, promptSuggestion, rateLimit }
 }

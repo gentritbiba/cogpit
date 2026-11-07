@@ -37,7 +37,7 @@ function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<type
   return {
     state: {
       session: parsed,
-      sessionSource: { dirName: "-work-app", fileName: "original.jsonl", rawText: "" },
+      sessionSource: { dirName: "-work-app", fileName: "original.jsonl", watchOffset: 0, loadId: 1 },
     },
     dispatch,
     isMobile: false,

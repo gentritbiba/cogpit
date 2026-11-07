@@ -89,7 +89,7 @@ describe("loadSessionTailCached", () => {
   it("returns the cached entry without fetching", async () => {
     const cachedEntry = {
       parsed,
-      source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "x", watchOffset: 50 },
+      source: { dirName: "-dir", fileName: "sess.jsonl", loadId: 1, watchOffset: 50 },
       olderTurns: [],
       nextByteOffset: 10,
       hasMore: false,
@@ -113,7 +113,7 @@ describe("loadSessionTailCached", () => {
     // advanced its watchOffset past our snapshot. The existing entry must win.
     const racedEntry = {
       parsed: { turns: [{}] } as unknown as ParsedSession,
-      source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "live", watchOffset: 999 },
+      source: { dirName: "-dir", fileName: "sess.jsonl", loadId: 1, watchOffset: 999 },
       olderTurns: [],
       nextByteOffset: 50,
       hasMore: true,
@@ -138,12 +138,10 @@ describe("loadSessionTailCached", () => {
 
     expect(result.parsed).toBe(parsed)
     expect(mockSet).toHaveBeenCalledOnce()
-    const setArgs = mockSet.mock.calls[0]
-    expect(setArgs[0]).toBe("-dir")
-    expect(setArgs[1]).toBe("sess.jsonl")
-    expect(setArgs[4]).toBe(100) // nextByteOffset
-    expect(setArgs[5]).toBe(true) // hasMore
-    expect(setArgs[7]).toBe(200) // watchOffset
+    const [, source, nextByteOffset, hasMore] = mockSet.mock.calls[0]
+    expect(source).toMatchObject({ dirName: "-dir", fileName: "sess.jsonl", watchOffset: 200 })
+    expect(nextByteOffset).toBe(100)
+    expect(hasMore).toBe(true)
   })
 })
 

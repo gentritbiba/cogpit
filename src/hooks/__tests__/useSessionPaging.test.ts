@@ -37,7 +37,7 @@ function cachedEntry(overrides: Record<string, unknown> = {}) {
     hasMore: true,
     nextByteOffset: 500,
     olderTurns: [],
-    source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "" },
+    source: { dirName: "-dir", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
     lastAccessed: 0,
     ...overrides,
   } as ReturnType<typeof sessionCache.get>

@@ -1,6 +1,7 @@
 import type { ParsedSession, Turn } from "../../shared/session/types"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
-import { rootSessionIdOf, type AgentKind } from "@/lib/agents"
+import { rootSessionIdOf } from "@/lib/agents"
+import type { SessionSource } from "@/lib/sessionSource"
 
 export interface CacheEntry {
   parsed: ParsedSession
@@ -10,13 +11,7 @@ export interface CacheEntry {
    * disagree — a cursor without its pages leaves an ungettable gap.
    */
   olderTurns: Turn[]
-  source: {
-    dirName: string
-    fileName: string
-    rawText: string
-    agentKind?: AgentKind
-    watchOffset?: number
-  }
+  source: SessionSource
   nextByteOffset: number
   hasMore: boolean
   lastAccessed: number
@@ -49,17 +44,8 @@ class SessionCache {
     return entry
   }
 
-  set(
-    dirName: string,
-    fileName: string,
-    parsed: ParsedSession,
-    rawText: string,
-    nextByteOffset: number,
-    hasMore: boolean,
-    agentKind?: AgentKind,
-    watchOffset?: number,
-  ): void {
-    const key = makeKey(dirName, fileName)
+  set(parsed: ParsedSession, source: SessionSource, nextByteOffset: number, hasMore: boolean): void {
+    const key = makeKey(source.dirName, source.fileName)
 
     if (!this.cache.has(key) && this.cache.size >= MAX_ENTRIES) {
       this.evictLRU()
@@ -68,13 +54,7 @@ class SessionCache {
     this.cache.set(key, {
       parsed,
       olderTurns: [],
-      source: {
-        dirName,
-        fileName,
-        rawText,
-        agentKind,
-        ...(watchOffset !== undefined ? { watchOffset } : {}),
-      },
+      source,
       nextByteOffset,
       hasMore,
       lastAccessed: Date.now(),

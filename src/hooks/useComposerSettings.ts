@@ -1,7 +1,7 @@
 import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelCapabilities } from "@/hooks/useModelCapabilities"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { ParsedSession } from "../../shared/session/types"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind, descriptorFor } from "@/lib/agents"
 import { isUltracodeCapableModel } from "@/lib/utils"

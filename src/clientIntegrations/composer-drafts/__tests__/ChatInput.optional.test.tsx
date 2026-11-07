@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
-  source: null as { dirName: string; fileName: string; rawText: string } | null,
+  source: null as { dirName: string; fileName: string; watchOffset: number; loadId: number } | null,
   session: { sessionId: "session-1" } as { sessionId: string } | null,
 }))
 
@@ -186,7 +186,7 @@ describe("optional Saved drafts composer integration", () => {
     type("new pending typing")
     const identity = { sessionId: "created-a", cwd: "/actual-worktree", dirName: "actual-project" }
     if (ordering === "before") act(() => { created(identity) })
-    mocks.session = { sessionId: "created-a" }; mocks.source = { dirName: "actual-project", fileName: "created-a.jsonl", rawText: "" }
+    mocks.session = { sessionId: "created-a" }; mocks.source = { dirName: "actual-project", fileName: "created-a.jsonl", watchOffset: 0, loadId: 1 }
     view.rerender(<ChatInput ref={view.ref} projectCwd="/actual-worktree" />)
     type("new target typing")
     await act(async () => { accepted(true) })

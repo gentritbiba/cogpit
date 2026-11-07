@@ -2,12 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { QUOTE_SEARCH_PAGES, useQuoteNavigation } from "../useQuoteNavigation"
 import type { ParsedSession, Turn } from "../../../shared/session/types"
-import type { SessionSource } from "../useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 
 const turn = (id: string, reply = `reply ${id}`) => ({ id, assistantText: [reply] }) as unknown as Turn
 const session = (turns: Turn[]) => ({ turns }) as unknown as ParsedSession
 const source = (turnId: string, fileName = "a.jsonl") => ({ dirName: "-repo", fileName, sessionId: "s", turnId })
-const open = (fileName = "a.jsonl") => ({ dirName: "-repo", fileName, rawText: "" }) as SessionSource
+const open = (fileName = "a.jsonl") => ({ dirName: "-repo", fileName, watchOffset: 0, loadId: 1 }) as SessionSource
 
 function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource }) {
   const state = { turns: initial.turns, older: [...initial.older], sessionSource: initial.open ?? open() }

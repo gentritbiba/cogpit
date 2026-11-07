@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   sessionSource: null as {
     dirName: string
     fileName: string
-    rawText: string
+    watchOffset: number
+    loadId: number
     agentKind?: AgentKind
   } | null,
   isLive: false,
@@ -194,7 +195,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     mocks.isLive = false
@@ -384,7 +385,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "copilot__L3RtcC9wcm9qZWN0",
       fileName: "test-session-id/events.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "copilot",
     }
 
@@ -400,7 +401,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "parent/subagents/agent-a1b2c3d4e5.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
 
@@ -503,7 +504,7 @@ describe("FloatingChrome", () => {
     ["codex__L3RtcC9wcm9qZWN0", true],
     ["copilot__L3RtcC9wcm9qZWN0", false],
   ])("offers the share control in %s only when the agent can be shared", (dirName, shareable) => {
-    mocks.sessionSource = { dirName, fileName: "s.jsonl", rawText: "" }
+    mocks.sessionSource = { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 }
 
     renderChrome()
 
@@ -540,7 +541,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id/subagents/agent-abc.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     renderChrome()
@@ -605,7 +606,7 @@ describe("FloatingChrome", () => {
 describe("FloatingChrome archive", () => {
   beforeEach(() => {
     mocks.session = makeSession()
-    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", rawText: "", agentKind: "claude" }
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
     mocks.isLive = false
     mocks.level = "own"
     mocks.inventorySessions = []
@@ -675,7 +676,7 @@ describe("FloatingChrome archive", () => {
   })
 
   it("withholds archiving from a sub-agent view", () => {
-    mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", rawText: "", agentKind: "claude" }
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
     renderChrome()
 
     expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
@@ -699,7 +700,7 @@ describe("FloatingChrome pull requests", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     mocks.isLive = false

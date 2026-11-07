@@ -131,14 +131,14 @@ describe("useSessionActions", () => {
         result.current.handleLoadSession(session, {
           dirName: "dir",
           fileName: "file.jsonl",
-          rawText: "raw",
+          watchOffset: 3, loadId: 1,
         })
       })
 
       expect(opts.dispatch).toHaveBeenCalledWith({
         type: "LOAD_SESSION",
         session,
-        source: { dirName: "dir", fileName: "file.jsonl", rawText: "raw" },
+        source: { dirName: "dir", fileName: "file.jsonl", watchOffset: 3, loadId: 1 },
         isMobile: false,
       })
       expect(opts.resetTurnCount).toHaveBeenCalledWith(2)
@@ -181,7 +181,7 @@ describe("useSessionActions", () => {
     it("uses cache hit for instant switch without fetching", async () => {
       const session = makeParsedSession()
       const opts = makeDefaultOpts(session)
-      const cachedSource = { dirName: "my-dir", fileName: "session.jsonl", rawText: "cached" }
+      const cachedSource = { dirName: "my-dir", fileName: "session.jsonl", watchOffset: 6, loadId: 1 }
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
         source: cachedSource,
@@ -278,14 +278,10 @@ describe("useSessionActions", () => {
       })
 
       expect(mockSessionCache.set).toHaveBeenCalledWith(
-        "my-dir",
-        "session.jsonl",
         session,
-        expect.any(String),
+        expect.objectContaining({ dirName: "my-dir", fileName: "session.jsonl", watchOffset: 200 }),
         150,
         false,
-        expect.anything(),
-        200,
       )
     })
 
@@ -447,7 +443,7 @@ describe("useSessionActions", () => {
       // After the first switch, simulate a cache hit on the same session.
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
-        source: { dirName: "d", fileName: "f.jsonl", rawText: "cached" },
+        source: { dirName: "d", fileName: "f.jsonl", watchOffset: 6, loadId: 1 },
         olderTurns: [],
         nextByteOffset: 100,
         hasMore: false,
@@ -654,7 +650,7 @@ describe("useSessionActions", () => {
       const session = makeParsedSession()
 
       act(() => {
-        result.current.handleLoadSession(session, { dirName: "d", fileName: "f.jsonl", rawText: "" })
+        result.current.handleLoadSession(session, { dirName: "d", fileName: "f.jsonl", watchOffset: 0, loadId: 1 })
       })
 
       expect(opts.dispatch).toHaveBeenCalledWith(

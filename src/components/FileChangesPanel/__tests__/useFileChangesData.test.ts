@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { parseSession } from "../../../../shared/session/parser"
 import { makeEditToolCall, simpleSession } from "@/__tests__/fixtures"
 
-const api = vi.hoisted(() => ({ fetch: vi.fn(), source: { dirName: "project", rawText: "initial" } }))
+const api = vi.hoisted(() => ({ fetch: vi.fn(), source: { dirName: "project", watchOffset: 7, loadId: 1 } }))
 vi.mock("@/lib/auth", () => ({ authFetch: api.fetch }))
 vi.mock("@/contexts/SessionContext", () => ({ useSessionContext: () => ({ sessionSource: api.source }) }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
 vi.mock("@/lib/device", () => ({ deviceScopedKey: (key: string) => key }))
 import { useFileChangesData } from "../useFileChangesData"
 
-afterEach(() => { api.fetch.mockReset(); api.source.rawText = "initial" })
+afterEach(() => { api.fetch.mockReset(); api.source.loadId = 1 })
 describe("useFileChangesData", () => {
   it("reuses unchanged file contents, refreshes edited files, and reloads on focus or explicit session reload", async () => {
     const session = parseSession(simpleSession())
@@ -35,7 +35,7 @@ describe("useFileChangesData", () => {
     expect(api.fetch.mock.calls.at(-1)?.[0]).toContain(encodeURIComponent("/project/a.ts"))
     await act(async () => { window.dispatchEvent(new Event("focus")) })
     expect(api.fetch).toHaveBeenCalledTimes(5)
-    api.source.rawText = "explicit reload"
+    api.source.loadId = 2
     rerender({ value: { ...next } })
     await act(async () => {})
     expect(api.fetch).toHaveBeenCalledTimes(7)

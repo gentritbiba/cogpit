@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { ParsedSession } from "../../shared/session/types"
-import type { SessionSource } from "./useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { SessionAction } from "./useSessionState"
 import { toast } from "sonner"
 import { authFetch, jsonFetch } from "@/lib/auth"

@@ -22,7 +22,7 @@ function renderHandlers({ permissionsConfig, settingsChange = [], onSettingsChan
   return renderHook(() => useAppHandlers({
     state: {
       session: { sessionId: "s1", turns: [] } as unknown as ParsedSession,
-      sessionSource: { dirName: "-work-app", fileName: "s1.jsonl", rawText: "" },
+      sessionSource: { dirName: "-work-app", fileName: "s1.jsonl", watchOffset: 0, loadId: 1 },
     },
     dispatch: vi.fn(),
     isMobile: false,

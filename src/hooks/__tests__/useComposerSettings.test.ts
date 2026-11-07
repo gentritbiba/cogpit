@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ParsedSession } from "../../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { AgentKind } from "@/lib/agents"
 import type { ModelOption } from "@/lib/utils"
 
@@ -36,7 +36,7 @@ import { useComposerSettings } from "@/hooks/useComposerSettings"
 const sessionSource: SessionSource = {
   dirName: "-repo",
   fileName: "session.jsonl",
-  rawText: "",
+  watchOffset: 0, loadId: 1,
 }
 
 function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {

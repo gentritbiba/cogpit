@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import type { ParsedSession, Turn, Branch, UndoState } from "../../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 
 // Mock authFetch before importing useUndoRedo
 vi.mock("@/lib/auth", () => ({
@@ -96,7 +96,7 @@ function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): Par
 }
 
 function makeSource(dirName = "test-dir"): SessionSource {
-  return { dirName, fileName: "test.jsonl", rawText: "" }
+  return { dirName, fileName: "test.jsonl", watchOffset: 0, loadId: 1 }
 }
 
 /** A project directory owned by the agent with the native rewind RPC. */

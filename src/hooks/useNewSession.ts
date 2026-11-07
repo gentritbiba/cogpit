@@ -3,7 +3,7 @@ import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/i
 import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import type { ParsedSession } from "../../shared/session/types"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
@@ -77,8 +77,9 @@ function buildSessionSource(response: CreateSessionResponse, rawText: string): S
   return {
     dirName: response.dirName,
     fileName: response.fileName,
-    rawText,
     agentKind: agentKindForDirName(response.dirName),
+    watchOffset: new TextEncoder().encode(rawText).byteLength,
+    loadId: nextLoadId(),
   }
 }
 

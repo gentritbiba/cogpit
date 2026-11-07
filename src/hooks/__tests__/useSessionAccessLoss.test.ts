@@ -65,7 +65,7 @@ describe("useSessionAccessLoss", () => {
 
   it("forgets a lost session everywhere, says so once, and leaves it when it is open", async () => {
     renderListener(OPEN)
-    sessionCache.set("-work", `${OPEN}.jsonl`, { turns: [] } as unknown as ParsedSession, "", 0, false)
+    sessionCache.set({ turns: [] } as unknown as ParsedSession, { dirName: "-work", fileName: `${OPEN}.jsonl`, watchOffset: 0, loadId: 1 }, 0, false)
     writeCachedList(activeSessionsCacheKey("shared"), [{ sessionId: OPEN }, { sessionId: OTHER }])
     learnListedAccess([{ sessionId: OPEN, access: { level: "view", mine: false } }], sessionAccessTicket())
 
@@ -136,7 +136,7 @@ describe("useSessionAccessLoss", () => {
 
   it("closes a session the caller deleted and forgets it everywhere, without a word of lost access", async () => {
     renderListener(DELETED)
-    sessionCache.set("-work", `${DELETED}.jsonl`, { turns: [] } as unknown as ParsedSession, "", 0, false)
+    sessionCache.set({ turns: [] } as unknown as ParsedSession, { dirName: "-work", fileName: `${DELETED}.jsonl`, watchOffset: 0, loadId: 1 }, 0, false)
     writeCachedList(activeSessionsCacheKey("mine"), [{ sessionId: DELETED }, { sessionId: OTHER }])
 
     await act(() => trackDeletion(DELETED, Promise.resolve(true)))

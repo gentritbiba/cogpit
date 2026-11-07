@@ -32,7 +32,7 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
 function loadedSession(dirName: string, fileName: string) {
   return {
     parsed: { turns: [{ index: 0 }] } as unknown as ParsedSession,
-    source: { dirName, fileName, rawText: "", watchOffset: 100 },
+    source: { dirName, fileName, loadId: 1, watchOffset: 100 },
   }
 }
 
@@ -176,7 +176,7 @@ describe("useUrlSync", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const state = makeState({
-      sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
+      sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", watchOffset: 0, loadId: 1 },
     })
 
     renderUrlSync(state)
@@ -192,7 +192,7 @@ describe("useUrlSync", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const { unmount } = renderUrlSync(makeState({
-      sessionSource: { dirName, fileName, rawText: "" },
+      sessionSource: { dirName, fileName, watchOffset: 0, loadId: 1 },
     }))
 
     expect(pushStateSpy).toHaveBeenCalledWith(
@@ -219,7 +219,7 @@ describe("useUrlSync", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const { unmount } = renderUrlSync(makeState({
-      sessionSource: { dirName, fileName, rawText: "" },
+      sessionSource: { dirName, fileName, watchOffset: 0, loadId: 1 },
     }))
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", `/${dirName}/${sessionId}`)
@@ -342,7 +342,7 @@ describe("useUrlSync", () => {
       const pushStateSpy = vi.spyOn(window.history, "pushState")
 
       const state = makeState({
-        sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", watchOffset: 0, loadId: 1 },
       })
 
       renderUrlSync(state)

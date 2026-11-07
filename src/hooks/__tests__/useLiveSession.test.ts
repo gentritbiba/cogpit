@@ -2,7 +2,7 @@ import { __resetStreamsForTest } from "@/lib/sessionStream"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { RESYNC_COOLDOWN_MS, useLiveSession } from "../useLiveSession"
-import type { SessionSource } from "../useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { ParsedSession } from "../../../shared/session/types"
 import { SESSION_ACCESS_LOST_EVENT } from "@/lib/sessionAccessEvents"
 import { sessionCache } from "@/lib/sessionCache"
@@ -141,13 +141,13 @@ describe("useLiveSession", () => {
   }
 
   it("returns initial disconnected state with null source", () => {
-    const { result } = renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
     expect(result.current.isLive).toBe(false)
     expect(result.current.sseState).toBe("disconnected")
   })
 
   it("does not create EventSource with null source", () => {
-    renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
     expect(MockEventSource.instances).toHaveLength(0)
   })
 
@@ -155,10 +155,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "my-project",
       fileName: "session.jsonl",
-      rawText: '{"type":"user"}',
+      watchOffset: 15, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(MockEventSource.instances).toHaveLength(1)
     expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=15&projection=results-v1")
@@ -168,11 +168,11 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "my-project",
       fileName: "session.jsonl",
-      rawText: "stale snapshot",
+      loadId: 1,
       watchOffset: 4096,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=4096&projection=results-v1")
   })
@@ -181,10 +181,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
     expect(result.current.sseState).toBe("connecting")
   })
 
@@ -192,10 +192,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -208,10 +208,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -229,7 +229,7 @@ describe("useLiveSession", () => {
   it("passes on what the server says about the caller's access to the watched session", () => {
     const lost = vi.fn()
     window.addEventListener(SESSION_ACCESS_LOST_EVENT, lost)
-    renderHook(() => useLiveSession({ dirName: "dir", fileName: "file.jsonl", rawText: "{}" }, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession({ dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().dispatchEvent(new MessageEvent("access", { data: JSON.stringify({ sessionId: "s1", level: "none" }) }))
@@ -245,10 +245,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "turn_error", message: "CLI exited with code 1" })
@@ -262,8 +262,8 @@ describe("useLiveSession", () => {
   })
 
   it("collects subagent progress summaries by tool_use id and drops them when the turn clears", () => {
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(result.current.agentProgress).toEqual({})
 
@@ -303,8 +303,8 @@ describe("useLiveSession", () => {
   it("surfaces a prompt suggestion and drops it once the next turn produces tokens", () => {
     // The suggestion arrives after `result`, i.e. after stream_clear, so a
     // clear must not wipe it — only a new turn's tokens supersede it.
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(result.current.promptSuggestion).toBeNull()
 
@@ -323,9 +323,9 @@ describe("useLiveSession", () => {
   it("does not carry a suggestion across a session switch", () => {
     // The prediction is for the turn that produced it; showing it in the next
     // session would put an unrelated prompt in that composer.
-    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -334,14 +334,14 @@ describe("useLiveSession", () => {
     })
     expect(result.current.promptSuggestion).toBe("Run the tests")
 
-    rerender({ src: { dirName: "dir", fileName: "b.jsonl", rawText: "{}" } })
+    rerender({ src: { dirName: "dir", fileName: "b.jsonl", watchOffset: 2, loadId: 1 } })
     expect(result.current.promptSuggestion).toBeNull()
   })
 
   it("raises a rate-limit block and lifts it when the allowance returns", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(result.current.rateLimit).toBeNull()
 
@@ -362,8 +362,8 @@ describe("useLiveSession", () => {
    */
   it("keeps the block across the stream_clear the refused turn triggers", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "rate_limit", block })
@@ -374,8 +374,8 @@ describe("useLiveSession", () => {
 
   it("drops the block once a later turn produces tokens", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "rate_limit", block })
@@ -386,9 +386,9 @@ describe("useLiveSession", () => {
 
   it("does not carry a block across a session switch", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
-    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -397,14 +397,14 @@ describe("useLiveSession", () => {
     })
     expect(result.current.rateLimit).toEqual(block)
 
-    rerender({ src: { dirName: "dir", fileName: "b.jsonl", rawText: "{}" } })
+    rerender({ src: { dirName: "dir", fileName: "b.jsonl", watchOffset: 2, loadId: 1 } })
     expect(result.current.rateLimit).toBeNull()
   })
 
   it("does not carry a failed turn's error into the next session", () => {
-    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -413,7 +413,7 @@ describe("useLiveSession", () => {
     })
     expect(result.current.turnError).toBe("Not logged in · Please run /login")
 
-    rerender({ src: { dirName: "codex__dir", fileName: "b.jsonl", rawText: "{}" } })
+    rerender({ src: { dirName: "codex__dir", fileName: "b.jsonl", watchOffset: 2, loadId: 1 } })
     expect(result.current.turnError).toBeNull()
   })
 
@@ -421,10 +421,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "compacting", active: true })
@@ -445,10 +445,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "compacting", active: true })
@@ -469,10 +469,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -487,10 +487,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -506,10 +506,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -524,10 +524,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -555,12 +555,12 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: '{"type":"user"}',
+      watchOffset: 15, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
-    // Wait for initial workerParse to resolve (rawText effect)
+    // Let the mount effects settle
     await act(async () => {
       await Promise.resolve()
     })
@@ -584,7 +584,7 @@ describe("useLiveSession", () => {
   })
 
   describe("when a batch fails to parse", () => {
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
     const settle = () => act(async () => {
       for (let i = 0; i < 5; i++) await Promise.resolve()
     })
@@ -637,10 +637,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: [] })
@@ -653,8 +653,8 @@ describe("useLiveSession", () => {
   })
 
   it("advances its resume offset over lines the server left out", async () => {
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}", watchOffset: 100 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: [], skippedBytes: 500 })
@@ -676,8 +676,8 @@ describe("useLiveSession", () => {
   })
 
   it("advances its resume offset by the native bytes a projected stream states, not by its lighter lines", async () => {
-    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}", watchOffset: 100 }
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: ['{"elided":true}'], bytes: 90_000 })
@@ -696,10 +696,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
     const es = getLastEventSource()
     expect(es.closed).toBe(false)
 
@@ -711,16 +711,16 @@ describe("useLiveSession", () => {
     const source1: SessionSource = {
       dirName: "dir1",
       fileName: "a.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
     const source2: SessionSource = {
       dirName: "dir2",
       fileName: "b.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { source: source1 } }
     )
 
@@ -739,10 +739,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir with spaces",
       fileName: "file name.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     expect(getLastEventSource().url).toBe(
       "/api/watch/dir%20with%20spaces/file%20name.jsonl?offset=2&projection=results-v1"
@@ -753,11 +753,11 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
     const { result, rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { source: source as SessionSource | null } }
     )
 
@@ -786,7 +786,7 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
     // Provide an initialSession so the mount-time parse is skipped — this
@@ -823,10 +823,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     // Send multiple messages rapidly
     act(() => {
@@ -851,12 +851,12 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     // Send invalid JSON via onmessage directly
     act(() => {
@@ -872,25 +872,11 @@ describe("useLiveSession", () => {
     consoleSpy.mockRestore()
   })
 
-  it("calls workerParse with initial rawText on mount when no initialSession provided", async () => {
-    const source: SessionSource = {
-      dirName: "dir",
-      fileName: "f.jsonl",
-      rawText: '{"type":"user","message":{"role":"user","content":"hi"}}',
-    }
-
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
-
-    await act(async () => { await Promise.resolve() })
-
-    expect(workerParse).toHaveBeenCalledWith(source.rawText)
-  })
-
   it("skips the mount-time worker parse when initialSession is provided (fast path)", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: '{"type":"user","message":{"role":"user","content":"hi"}}',
+      watchOffset: 56, loadId: 1,
     }
 
     renderHook(() =>
@@ -907,7 +893,7 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: '{"type":"user"}',
+      watchOffset: 15, loadId: 1,
     }
 
     renderHook(() =>
@@ -935,38 +921,38 @@ describe("useLiveSession", () => {
     expect(workerParse).not.toHaveBeenCalled()
   })
 
-  it("sets isLive=false when rawText is empty", () => {
+  it("is not live before the stream reports activity", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
     expect(result.current.isLive).toBe(false)
   })
 
-  it("reconnects when rawText changes (e.g. after undo truncation)", () => {
+  it("reconnects when the session is loaded from disk again (e.g. after undo truncation)", () => {
     const source1: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "original-content",
+      watchOffset: 16, loadId: 1,
     }
     const source2: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "truncated-content",
+      watchOffset: 16, loadId: 2,
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { source: source1 } }
     )
 
     expect(MockEventSource.instances).toHaveLength(1)
     const firstES = getLastEventSource()
 
-    // Same dirName and fileName, but rawText changed
+    // Same transcript and offset, loaded again
     rerender({ source: source2 })
 
     // Old ES closed, new one opened
@@ -981,10 +967,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     // Send a message to schedule a rAF
     act(() => {
@@ -1007,10 +993,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "", // empty rawText means sessionRef starts as null
+      watchOffset: 0, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, null))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -1033,11 +1019,11 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(source, props.onUpdate, workerParse, workerAppend),
+      (props) => useLiveSession(source, props.onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
       { initialProps: { onUpdate: onUpdate1 } }
     )
 
@@ -1067,10 +1053,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     // Before any message, it's connecting
     expect(result.current.sseState).toBe("connecting")
@@ -1088,10 +1074,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -1114,10 +1100,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "copilot__project",
       fileName: "11111111-2222-3333-4444-555555555555/events.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "runtime_activity" })
@@ -1140,10 +1126,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -1164,10 +1150,10 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
-      rawText: "{}",
+      watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -1205,7 +1191,7 @@ describe("useLiveSession", () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "session-1.jsonl",
-      rawText: '{"type":"user"}',
+      watchOffset: 15, loadId: 1,
     }
 
     function textDeltaEvent(messageId: string, delta: string, parentToolUseId: string | null = null) {

@@ -159,7 +159,7 @@ export function useFileChangesData(session: ParsedSession) {
     window.addEventListener("focus", refresh)
     return () => window.removeEventListener("focus", refresh)
   }, [])
-  useEffect(() => { fetchedFiles.current = new Map() }, [scope, sessionSource?.rawText, refreshVersion])
+  useEffect(() => { fetchedFiles.current = new Map() }, [scope, sessionSource?.loadId, refreshVersion])
 
   useEffect(() => {
     const revisions = JSON.parse(fileRevisions) as [string, string][]
@@ -188,7 +188,7 @@ export function useFileChangesData(session: ParsedSession) {
       setFileContents((current) => current.size === next.size && [...next].every(([path, text]) => current.get(path) === text) ? current : next)
     })
     return () => { cancelled = true }
-  }, [canAccessHostFiles, fileRevisions, scope, sessionSource?.rawText, refreshVersion])
+  }, [canAccessHostFiles, fileRevisions, scope, sessionSource?.loadId, refreshVersion])
 
   const lastTurnIndex = session.turns.length - 1
 

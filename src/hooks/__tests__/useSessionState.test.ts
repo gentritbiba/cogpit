@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react"
 import { useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
 import type { ParsedSession } from "../../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import { makeTurn } from "@/__tests__/fixtures"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ function makeSource(overrides: Partial<SessionSource> = {}): SessionSource {
   return {
     dirName: "test-dir",
     fileName: "test.jsonl",
-    rawText: "",
+    watchOffset: 0, loadId: 1,
     ...overrides,
   }
 }

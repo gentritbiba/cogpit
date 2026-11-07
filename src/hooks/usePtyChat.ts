@@ -1,6 +1,6 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { PermissionsConfig } from "@/lib/permissions"
 import { authFetch } from "@/lib/auth"
 import { deliverCommand } from "@/lib/commandDelivery"
