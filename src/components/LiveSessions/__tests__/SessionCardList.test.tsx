@@ -128,6 +128,37 @@ describe("SessionCardList", () => {
     expect(order).toEqual(["card-new", "card-old"])
   })
 
+  it("holds the order while the pointer is over the list and applies the new one when it leaves", () => {
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+    const props = {
+      older: { canLoad: false, loading: false, load: vi.fn() },
+      activeSessionKey: null,
+      procBySession: new Map(),
+      killingPids: new Set<number>(),
+      newlyCompleted: new Set<string>(),
+      sessionNames: {},
+      projectNames: {},
+      onSelectSession: vi.fn(),
+    }
+    const order = () => [...document.querySelectorAll("[data-testid^=card-]")].map((el) => el.getAttribute("data-testid"))
+    const { rerender } = render(
+      <SessionCardList {...props} sessions={[session("a", { lastModified: at(1) }), session("b", { lastModified: at(5) })]} />,
+    )
+    const list = document.querySelector("[data-session-card-list]")!
+
+    fireEvent.pointerEnter(list)
+    rerender(
+      <SessionCardList
+        {...props}
+        sessions={[session("a", { lastModified: at(1) }), session("b", { lastModified: at(0) }), session("c", { lastModified: at(0) })]}
+      />,
+    )
+    expect(order()).toEqual(["card-a", "card-b", "card-c"])
+
+    fireEvent.pointerLeave(list)
+    expect(order()).toEqual(["card-b", "card-c", "card-a"])
+  })
+
   it("tells each card whether to name its project", () => {
     renderList([session("a")], undefined, undefined, true)
     expect(screen.getByTestId("card-a")).toHaveTextContent("project:App")

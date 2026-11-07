@@ -1,7 +1,7 @@
 import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch } from "react"
 import { useNewSession } from "@/hooks/useNewSession"
-import { authFetch } from "@/lib/auth"
+import { loadProjects } from "@/lib/projectsStore"
 import type { ParsedSession } from "../../shared/session/types"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
@@ -88,15 +88,7 @@ export function useProjectSessionLaunch({
   } | null>(null)
   const discoveredDirNameCacheRef = useRef(new Map<string, string | null>())
 
-  const fetchProjects = useCallback(async (): Promise<Array<{ dirName: string; path: string }>> => {
-    try {
-      const response = await authFetch("/api/projects")
-      if (!response.ok) return []
-      return await response.json() as Array<{ dirName: string; path: string }>
-    } catch {
-      return []
-    }
-  }, [])
+  const fetchProjects = useCallback(() => loadProjects(), [])
 
   const resolveDiscoveredDirName = useCallback(async (cwd: string): Promise<string | null> => {
     if (DISCOVERED_DIRNAME_KIND === null) return null

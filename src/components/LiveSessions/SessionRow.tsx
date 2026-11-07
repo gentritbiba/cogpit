@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import { X, GitBranch, Play, Bot, Users, ChevronRight, Archive, ArchiveRestore } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,8 +30,8 @@ export interface SessionRowProps {
   teammateCount?: number
   /** Whether the nested teammate group is currently collapsed. */
   teammatesCollapsed?: boolean
-  /** Toggles the nested teammate group open/closed. */
-  onToggleTeammates?: () => void
+  /** Toggles the nested teammate group of the session with this id open/closed. */
+  onToggleTeammates?: (sessionId: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onArchiveSession?: (session: ActiveSessionInfo) => void
@@ -46,7 +46,7 @@ export interface SessionRowProps {
   onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
 }
 
-export function SessionRow({
+export const SessionRow = memo(function SessionRow({
   session: s,
   isActiveSession,
   proc,
@@ -180,7 +180,7 @@ export function SessionRow({
           type="button"
           variant="ghost"
           size="xs"
-          onClick={onToggleTeammates}
+          onClick={() => onToggleTeammates(s.sessionId)}
           className="shrink-0"
           title={teammatesCollapsed ? "Show team agents" : "Hide team agents"}
           aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
@@ -278,7 +278,7 @@ export function SessionRow({
   }
 
   return sessionRow
-}
+})
 
 // -- Helpers --
 

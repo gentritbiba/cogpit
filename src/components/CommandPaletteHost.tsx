@@ -6,6 +6,7 @@ import {
   type CommandPaletteSession,
 } from "@/components/CommandPalette"
 import { usePty } from "@/contexts/PtyContext"
+import { useProjectList } from "@/components/ProjectSwitcherList"
 import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
@@ -48,7 +49,7 @@ export function CommandPaletteHost({
   ...paletteProps
 }: CommandPaletteHostProps) {
   const pty = usePty()
-  const [projects, setProjects] = useState<CommandPaletteProject[]>([])
+  const projects: CommandPaletteProject[] = useProjectList(open)
   const [recentSessions, setRecentSessions] = useState<CommandPaletteSession[]>([])
   const [loadingNavigation, setLoadingNavigation] = useState(false)
   const handledTerminalRequestRef = useRef(0)
@@ -60,17 +61,12 @@ export function CommandPaletteHost({
     const accessTicket = sessionAccessTicket()
     setLoadingNavigation(true)
 
-    Promise.allSettled([
-      fetchArray<CommandPaletteProject>("/api/projects", controller.signal),
-      fetchArray<CommandPaletteSession>(
-        activeSessionsUrl({ limit: "12", perProject: "3" }, filter),
-        controller.signal,
-      ),
-    ]).then(([projectResult, sessionResult]) => {
+    fetchArray<CommandPaletteSession>(
+      activeSessionsUrl({ limit: "12", perProject: "3" }, filter),
+      controller.signal,
+    ).catch((): CommandPaletteSession[] => []).then((sessions) => {
       if (controller.signal.aborted) return
-      const sessions = sessionResult.status === "fulfilled" ? sessionResult.value : []
       learnListedAccess(sessions, accessTicket)
-      setProjects(projectResult.status === "fulfilled" ? projectResult.value : [])
       setRecentSessions(sessions)
       setLoadingNavigation(false)
     })

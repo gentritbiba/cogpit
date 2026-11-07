@@ -131,7 +131,7 @@ export function SessionListRow({ session, customName, onSelect }: SessionListRow
   return (
     // The pull-request chips are links, which a <button> may not contain, so the
     // row shell is a plain element and the button covers only its own content.
-    <div className="motion-list-item group flex w-full items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-within:bg-muted">
+    <div className="motion-list-item list-row-lazy group flex w-full items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-within:bg-muted">
       <button
         type="button"
         onClick={onSelect}

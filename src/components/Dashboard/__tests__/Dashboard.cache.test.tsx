@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import type { ComponentProps } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { authFetch } from "@/lib/auth"
 import {
@@ -16,6 +17,8 @@ import {
   publishListsStale,
 } from "@/lib/sessionAccess"
 import { installStubListFilter } from "@/__tests__/listFilter"
+import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
+import { __resetProjectsStoreForTest } from "@/lib/projectsStore"
 import type { ListedAccess } from "../../../../shared/contracts/sessionAccess"
 import { Dashboard } from "../index"
 
@@ -68,6 +71,23 @@ vi.mock("../SessionsView", () => ({
 
 const mockedAuthFetch = vi.mocked(authFetch)
 
+type DashboardProps = ComponentProps<typeof Dashboard>
+
+/** The Dashboard reads its sessions from the shared inventory, as it does in the app. */
+function renderDashboard(props: DashboardProps) {
+  const view = render(<SessionInventoryProvider><Dashboard {...props} /></SessionInventoryProvider>)
+  return {
+    ...view,
+    rerender: (next: DashboardProps) => view.rerender(
+      <SessionInventoryProvider><Dashboard {...next} /></SessionInventoryProvider>,
+    ),
+  }
+}
+
+function ok(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200 })
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((done) => {
@@ -81,9 +101,11 @@ describe("Dashboard list cache", () => {
     localStorage.clear()
     clearSessionListCache()
     mockedAuthFetch.mockReset()
+    __resetProjectsStoreForTest()
   })
 
   afterEach(() => {
+    cleanup()
     __resetEditionUiForTest()
     __resetSessionAccessForTest()
   })
@@ -108,38 +130,35 @@ describe("Dashboard list cache", () => {
 
     const projectsRequest = deferred<Response>()
     const sessionsRequest = deferred<Response>()
-    mockedAuthFetch
-      .mockReturnValueOnce(projectsRequest.promise)
-      .mockReturnValueOnce(sessionsRequest.promise)
+    mockedAuthFetch.mockImplementation((input) => {
+      const url = String(input)
+      if (url === "/api/projects") return projectsRequest.promise
+      if (url === "/api/active-sessions") return sessionsRequest.promise
+      return Promise.resolve(ok([]))
+    })
 
-    render(<Dashboard onSelectSession={vi.fn()} />)
+    renderDashboard({ onSelectSession: vi.fn() })
 
     expect(screen.getByText("Cached project")).toBeInTheDocument()
     expect(screen.getByText("Cached session title")).toBeInTheDocument()
 
     await act(async () => {
-      projectsRequest.resolve({
-        ok: true,
-        json: async () => [{
-          dirName: "project-a",
-          path: "/workspace/project-a",
-          shortName: "Fresh project",
-          sessionCount: 1,
-          lastModified: "2026-07-20T10:01:00Z",
-        }],
-      } as Response)
-      sessionsRequest.resolve({
-        ok: true,
-        json: async () => [{
-          dirName: "project-a",
-          projectShortName: "project-a",
-          fileName: "fresh.jsonl",
-          sessionId: "fresh-session",
-          firstUserMessage: "Fresh session title",
-          lastModified: "2026-07-20T10:01:00Z",
-          size: 120,
-        }],
-      } as Response)
+      projectsRequest.resolve(ok([{
+        dirName: "project-a",
+        path: "/workspace/project-a",
+        shortName: "Fresh project",
+        sessionCount: 1,
+        lastModified: "2026-07-20T10:01:00Z",
+      }]))
+      sessionsRequest.resolve(ok([{
+        dirName: "project-a",
+        projectShortName: "project-a",
+        fileName: "fresh.jsonl",
+        sessionId: "fresh-session",
+        firstUserMessage: "Fresh session title",
+        lastModified: "2026-07-20T10:01:00Z",
+        size: 120,
+      }]))
       await Promise.all([projectsRequest.promise, sessionsRequest.promise])
     })
 
@@ -160,7 +179,7 @@ describe("Dashboard list cache", () => {
     }])
     mockedAuthFetch.mockReturnValue(new Promise(() => {}))
 
-    render(<Dashboard onSelectSession={vi.fn()} />)
+    renderDashboard({ onSelectSession: vi.fn() })
 
     expect(screen.getByText("Filtered cached title")).toBeInTheDocument()
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/active-sessions?filter=narrow", expect.anything())
@@ -171,11 +190,8 @@ describe("Dashboard list cache", () => {
     const projectBRequest = deferred<Response>()
     mockedAuthFetch.mockImplementation((input) => {
       const url = String(input)
-      if (url === "/api/projects") {
-        return Promise.resolve({ ok: true, json: async () => [] } as Response)
-      }
-      if (url === "/api/active-sessions") {
-        return Promise.resolve({ ok: true, json: async () => [] } as Response)
+      if (url === "/api/projects" || url === "/api/active-sessions" || url === "/api/running-processes") {
+        return Promise.resolve(ok([]))
       }
       if (url.includes("/api/sessions/project-a")) return projectARequest.promise
       if (url.includes("/api/sessions/project-b")) return projectBRequest.promise
@@ -183,21 +199,14 @@ describe("Dashboard list cache", () => {
     })
     const onSelectSession = vi.fn()
 
-    const { rerender } = render(
-      <Dashboard selectedProjectDirName="project-a" onSelectSession={onSelectSession} />,
-    )
-    rerender(
-      <Dashboard selectedProjectDirName="project-b" onSelectSession={onSelectSession} />,
-    )
+    const { rerender } = renderDashboard({ selectedProjectDirName: "project-a", onSelectSession })
+    rerender({ selectedProjectDirName: "project-b", onSelectSession })
 
     await act(async () => {
-      projectBRequest.resolve({
-        ok: true,
-        json: async () => ({
-          sessions: [{ fileName: "project-b.jsonl", sessionId: "session-b" }],
-          total: 1,
-        }),
-      } as Response)
+      projectBRequest.resolve(ok({
+        sessions: [{ fileName: "project-b.jsonl", sessionId: "session-b" }],
+        total: 1,
+      }))
       await projectBRequest.promise
     })
     expect(screen.getByTestId("session-view")).toHaveTextContent(
@@ -205,13 +214,10 @@ describe("Dashboard list cache", () => {
     )
 
     await act(async () => {
-      projectARequest.resolve({
-        ok: true,
-        json: async () => ({
-          sessions: [{ fileName: "project-a.jsonl", sessionId: "session-a" }],
-          total: 1,
-        }),
-      } as Response)
+      projectARequest.resolve(ok({
+        sessions: [{ fileName: "project-a.jsonl", sessionId: "session-a" }],
+        total: 1,
+      }))
       await projectARequest.promise
     })
 
@@ -223,12 +229,11 @@ describe("Dashboard list cache", () => {
   })
 
   it("keeps a project's session until the server has deleted it", async () => {
-    mockedAuthFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ sessions: [{ fileName: "kept.jsonl", sessionId: "kept" }], total: 1 }),
-    } as Response)
+    mockedAuthFetch.mockImplementation(async (input) => (String(input).startsWith("/api/sessions/")
+      ? ok({ sessions: [{ fileName: "kept.jsonl", sessionId: "kept" }], total: 1 })
+      : ok([])))
     const onDeleteSession = vi.fn<(dirName: string, fileName: string) => Promise<boolean>>().mockResolvedValue(false)
-    render(<Dashboard selectedProjectDirName="project-a" onSelectSession={vi.fn()} onDeleteSession={onDeleteSession} />)
+    renderDashboard({ selectedProjectDirName: "project-a", onSelectSession: vi.fn(), onDeleteSession })
     await act(async () => {})
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete first" })))
@@ -255,20 +260,17 @@ describe("Dashboard list cache", () => {
       }
     }
 
-    function ok(body: unknown): Response {
-      return { ok: true, json: async () => body } as Response
-    }
-
     it("learns the access of the sessions on home and on a project page", async () => {
       mockedAuthFetch.mockImplementation(async (input) => {
         const url = String(input)
         if (url === "/api/projects") return ok([])
         if (url.startsWith("/api/active-sessions")) return ok([{ ...activeRow("active"), access: shared }])
+        if (url === "/api/running-processes") return ok([])
         return ok({ sessions: [{ fileName: "paged.jsonl", sessionId: "paged", access: shared }], total: 1 })
       })
 
       await act(async () => {
-        render(<Dashboard selectedProjectDirName="project-a" onSelectSession={vi.fn()} />)
+        renderDashboard({ selectedProjectDirName: "project-a", onSelectSession: vi.fn() })
       })
 
       expect(knownSessionAccess("active")).toBe("view")
@@ -286,7 +288,7 @@ describe("Dashboard list cache", () => {
         requests.set(url, request)
         return request.promise
       })
-      render(<Dashboard onSelectSession={vi.fn()} />)
+      renderDashboard({ onSelectSession: vi.fn() })
 
       act(() => filter.setKey("narrow"))
       expect(screen.getByText("Cached narrow")).toBeInTheDocument()
@@ -308,12 +310,12 @@ describe("Dashboard list cache", () => {
       mockedAuthFetch.mockImplementation((input) => {
         const url = String(input)
         if (url === "/api/projects") return Promise.resolve(ok([]))
-        if (url.startsWith("/api/active-sessions")) return Promise.resolve(ok([]))
+        if (url.startsWith("/api/active-sessions") || url === "/api/running-processes") return Promise.resolve(ok([]))
         const page = deferred<Response>()
         pages.set(url, page)
         return page.promise
       })
-      render(<Dashboard selectedProjectDirName="project-a" onSelectSession={vi.fn()} />)
+      renderDashboard({ selectedProjectDirName: "project-a", onSelectSession: vi.fn() })
       expect(pages.has("/api/sessions/project-a?page=1&limit=20")).toBe(true)
 
       act(() => filter.setKey("narrow"))
@@ -332,11 +334,11 @@ describe("Dashboard list cache", () => {
       mockedAuthFetch.mockImplementation(async (input) => {
         const url = String(input)
         if (url === "/api/projects") return ok([])
-        if (url.startsWith("/api/active-sessions")) return ok([])
+        if (url.startsWith("/api/active-sessions") || url === "/api/running-processes") return ok([])
         return ok({ sessions: [], total: 0 })
       })
       await act(async () => {
-        render(<Dashboard selectedProjectDirName="project-a" onSelectSession={vi.fn()} />)
+        renderDashboard({ selectedProjectDirName: "project-a", onSelectSession: vi.fn() })
       })
       const before = mockedAuthFetch.mock.calls.map(([url]) => String(url))
 
