@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { __resetProjectsStoreForTest } from "@/lib/projectsStore"
 import { NewSessionHeadline, type HeadlineProjectSwitcher } from "../NewSessionHero"
 
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
@@ -44,7 +45,8 @@ function switcher(overrides: Partial<HeadlineProjectSwitcher> = {}): HeadlinePro
 }
 
 beforeEach(() => {
-  mocks.authFetch.mockResolvedValue({ ok: true, json: async () => projects })
+  __resetProjectsStoreForTest()
+  mocks.authFetch.mockImplementation(async () => Response.json(projects))
 })
 
 afterEach(cleanup)

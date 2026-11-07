@@ -12,6 +12,7 @@ vi.mock("@/lib/auth", () => ({
 
 import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
 import { authFetch } from "@/lib/auth"
+import { __resetProjectsStoreForTest } from "@/lib/projectsStore"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const dispatch = vi.fn<(action: SessionAction) => void>()
@@ -35,6 +36,7 @@ const baseOptions = {
 describe("useProjectSessionLaunch", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    __resetProjectsStoreForTest()
   })
 
   it("starts a Claude project immediately and can switch the pending project to Codex", async () => {

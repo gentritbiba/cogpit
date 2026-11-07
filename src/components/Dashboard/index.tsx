@@ -1,39 +1,18 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import { authFetch } from "@/lib/auth"
+import { useSessionInventory } from "@/contexts/SessionInventoryContext"
+import { useProjects } from "@/lib/projectsStore"
 import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
 import { matchesSessionFilter } from "./sessionPresentation"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { useEditionUi } from "@/edition/hooks"
-import { activeSessionsUrl, listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
+import { listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import { learnListedAccess, onListsStale, sessionAccessTicket } from "@/lib/sessionAccess"
-import type { ProjectInfo, SessionInfo } from "./types"
+import type { SessionInfo } from "./types"
 import type { DeleteSession } from "@/components/session-browser/types"
-import {
-  activeSessionsCacheKey,
-  readCachedList,
-  readCachedSessionPage,
-  sessionListCacheKeys,
-  writeCachedList,
-  writeCachedSessionPage,
-} from "@/lib/sessionListCache"
-
-interface ActiveSessionInfo {
-  dirName: string
-  projectShortName: string
-  fileName: string
-  sessionId: string
-  slug?: string
-  model?: string
-  firstUserMessage?: string
-  gitBranch?: string
-  cwd?: string
-  lastModified: string
-  turnCount?: number
-  size: number
-  isActive?: boolean
-}
+import { readCachedSessionPage, writeCachedSessionPage } from "@/lib/sessionListCache"
 
 interface DashboardProps {
   onSelectSession: (dirName: string, fileName: string) => void
@@ -56,16 +35,19 @@ export const Dashboard = memo(function Dashboard({
 }: DashboardProps) {
   const filter = useSessionListFilter()
   const FilterEmpty = useEditionUi().sessionListFilter?.Empty
-  const [initialCachedData] = useState(() => ({
-    projects: readCachedList<ProjectInfo>(sessionListCacheKeys.projects),
-    activeSessions: readCachedList<ActiveSessionInfo>(activeSessionsCacheKey(filter.key)),
-  }))
-  const [projects, setProjects] = useState<ProjectInfo[]>(initialCachedData.projects ?? [])
-  const [activeSessions, setActiveSessions] = useState<ActiveSessionInfo[]>(initialCachedData.activeSessions ?? [])
-  const [loading, setLoading] = useState(initialCachedData.projects === undefined)
+  const inventory = useSessionInventory()
+  const {
+    projects,
+    loaded: projectsLoaded,
+    error: projectsError,
+    refresh: refreshProjects,
+  } = useProjects()
+  const activeSessions = useMemo(
+    () => inventory.sessions.filter((session) => !session.archived),
+    [inventory.sessions],
+  )
+  const loading = !projectsLoaded && projects.length === 0
   const [refreshing, setRefreshing] = useState(false)
-  const [projectsError, setProjectsError] = useState<string | null>(null)
-  const [activeError, setActiveError] = useState<string | null>(null)
 
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
@@ -76,63 +58,11 @@ export const Dashboard = memo(function Dashboard({
 
   const sessionRequestGeneration = useRef(0)
   const sessionAbortController = useRef<AbortController | null>(null)
-  const activeAbortController = useRef<AbortController | null>(null)
-  const shownFilter = useRef(filter.key)
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      const res = await authFetch("/api/projects")
-      if (!res.ok) throw new Error("Failed to fetch dashboard data")
-      const data = await res.json()
-      const nextProjects = Array.isArray(data) ? data as ProjectInfo[] : []
-      setProjects(nextProjects)
-      writeCachedList(sessionListCacheKeys.projects, nextProjects)
-      setProjectsError(null)
-    } catch (err) {
-      setProjectsError(err instanceof Error ? err.message : "Failed to load data")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Filter switches can race; each request aborts the one before it.
-  const fetchActiveSessions = useCallback(async () => {
-    activeAbortController.current?.abort()
-    const controller = new AbortController()
-    activeAbortController.current = controller
-    const accessTicket = sessionAccessTicket()
-    try {
-      const res = await authFetch(activeSessionsUrl({}, filter), { signal: controller.signal })
-      if (!res.ok) throw new Error("Failed to fetch dashboard data")
-      const data = await res.json()
-      if (controller.signal.aborted) return
-      const nextActiveSessions = Array.isArray(data) ? data as ActiveSessionInfo[] : []
-      learnListedAccess(nextActiveSessions, accessTicket)
-      setActiveSessions(nextActiveSessions)
-      writeCachedList(activeSessionsCacheKey(filter.key), nextActiveSessions)
-      setActiveError(null)
-    } catch (err) {
-      if (controller.signal.aborted) return
-      setActiveError(err instanceof Error ? err.message : "Failed to load data")
-    }
-  }, [filter])
-
-  useEffect(() => {
-    void fetchProjects()
-  }, [fetchProjects])
-
-  // A new filter shows its own cached list while its request runs.
-  useEffect(() => {
-    if (shownFilter.current !== filter.key) {
-      shownFilter.current = filter.key
-      setActiveSessions(readCachedList<ActiveSessionInfo>(activeSessionsCacheKey(filter.key)) ?? [])
-    }
-    void fetchActiveSessions()
-  }, [filter, fetchActiveSessions])
 
   async function refreshDashboard() {
     setRefreshing(true)
-    await Promise.all([fetchProjects(), fetchActiveSessions()])
+    inventory.refresh()
+    await refreshProjects()
     setRefreshing(false)
   }
 
@@ -207,14 +137,12 @@ export const Dashboard = memo(function Dashboard({
   useEffect(() => () => {
     sessionRequestGeneration.current += 1
     sessionAbortController.current?.abort()
-    activeAbortController.current?.abort()
   }, [])
 
-  // Owners moved, so which sessions each list holds and whose they are may have too.
+  // Owners moved, so which sessions the project page holds and whose they are may have too.
   useEffect(() => onListsStale(() => {
-    void fetchActiveSessions()
     if (selectedProjectDirName) void fetchSessions(selectedProjectDirName)
-  }), [fetchActiveSessions, fetchSessions, selectedProjectDirName])
+  }), [fetchSessions, selectedProjectDirName])
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectDirName) return null
@@ -301,7 +229,7 @@ export const Dashboard = memo(function Dashboard({
       refreshing={refreshing}
       searchFilter={searchFilter}
       setSearchFilter={setSearchFilter}
-      fetchError={projectsError ?? activeError}
+      fetchError={projectsError ?? inventory.error}
       selectedProjectDirName={selectedProjectDirName ?? null}
       onSelectProject={onSelectProject}
       onRefresh={() => void refreshDashboard()}
