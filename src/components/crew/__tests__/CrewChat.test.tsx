@@ -11,7 +11,7 @@ const initial: CrewChatPage = {
   members: [{ sessionId: "lead", name: "Lead", handle: "lead", listening: true, canInteract: true }, { sessionId: "parser", name: "Parser", handle: "parser", listening: false, canInteract: true }],
   messages: [{ sequence: 1, id: "message-001", rootId: "lead", author: { kind: "agent", name: "Parser", sessionId: "parser" }, text: "Found the issue", mentions: ["lead"], createdAt: Date.now() }],
 }
-const response = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 403, json: async () => body })
+const response = (body: unknown, ok = true) => Response.json(body, { status: ok ? 200 : 403 })
 beforeEach(() => {
   mocks.fetch.mockReset().mockResolvedValue(response(initial))
   mocks.json.mockReset().mockImplementation(async (_url, body, options) => response(options?.method === "PATCH" ? { listening: body.listening } : { message: { ...initial.messages[0], sequence: 2, id: body.commandId, author: { kind: "user", name: "You" }, text: body.text, mentions: [] }, pending: [] }))
@@ -24,7 +24,7 @@ describe("CrewChat", () => {
     expect(await screen.findByText("Found the issue")).toBeInTheDocument()
     expect(screen.getByRole("article", { name: "Message from Parser" })).toHaveTextContent("ParserToLead")
     fireEvent.click(screen.getByText("1 listening · Members & mentions"))
-    expect(screen.getByRole("switch", { name: "Listen for Lead" })).toBeChecked()
+    expect(await screen.findByRole("switch", { name: "Listen for Lead" })).toBeChecked()
     expect(screen.getByRole("switch", { name: "Listen for Parser" })).not.toBeChecked()
     fireEvent.click(screen.getByRole("switch", { name: "Listen for Parser" }))
     await waitFor(() => expect(mocks.json).toHaveBeenCalledWith("/api/crew-chat/lead", { sessionId: "parser", listening: true }, { method: "PATCH" }))
@@ -34,7 +34,7 @@ describe("CrewChat", () => {
     render(<CrewChat rootId="lead" />)
     await screen.findByText("Found the issue")
     fireEvent.click(screen.getByText("1 listening · Members & mentions"))
-    fireEvent.click(screen.getByRole("button", { name: "Mention Parser" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Mention Parser" }))
     expect(screen.getByRole("textbox", { name: "Message the crew" })).toHaveValue("@parser ")
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "@parser Check this finding" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
@@ -83,6 +83,6 @@ describe("CrewChat", () => {
     expect(screen.getByRole("textbox")).toBeDisabled()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
     fireEvent.click(screen.getByText("1 listening · Members & mentions"))
-    expect(screen.getByRole("switch", { name: "Listen for Lead" })).toHaveAttribute("aria-disabled", "true")
+    expect(await screen.findByRole("switch", { name: "Listen for Lead" })).toHaveAttribute("aria-disabled", "true")
   })
 })
