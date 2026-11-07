@@ -128,13 +128,36 @@ describe("openSession", () => {
     expect(shown[0].source.watchOffset).toBe(200)
   })
 
-  it("joins a turn page's header and lines exactly as sent", async () => {
+  it("parses a turn page as its header lines then its page lines, exactly as sent", async () => {
     const { click } = setup()
     const opening = click("a.jsonl")
     await flush()
-    fetches[0].resolve(tail('{"h":1}', { tailLines: ['{"h":1}', '{"t":"a"}'] }))
+    // The header holds only what precedes the file's first turn; the page holds whole turns.
+    const headerLines = ['{"type":"summary","summary":"s"}']
+    const tailLines = ['{"type":"user","uuid":"u1"}', '{"type":"assistant","uuid":"a1"}', '{"type":"user","uuid":"u2"}']
+    fetches[0].resolve(tail("", { headerLines, tailLines }))
     await opening
-    expect(parse).toHaveBeenCalledWith('{"h":1}\n{"h":1}\n{"t":"a"}')
+    expect(parse).toHaveBeenCalledWith([...headerLines, ...tailLines].join("\n"))
+  })
+
+  it("never drops a page line that happens to equal a header line", async () => {
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail('{"h":1}'))
+    await opening
+    expect(parse).toHaveBeenCalledWith('{"h":1}\n{"h":1}')
+  })
+
+  it("records that nothing is left above the oldest turn page", async () => {
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail("t", { hasMore: false, byteOffset: 40 }))
+    await opening
+    const entry = sessionCache.get("-d", "a.jsonl")!
+    expect(entry.hasMore).toBe(false)
+    expect(entry.nextByteOffset).toBe(40)
   })
 
   it("drops header lines a small file repeats in an older server's line page", async () => {
