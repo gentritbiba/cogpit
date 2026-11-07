@@ -55,6 +55,21 @@ describe("catalog rows", () => {
     await vi.waitFor(() => expect(changes.map((change) => change.kind)).toEqual(["touch", "visible"]), { timeout: 3_000 })
   })
 
+  it("leaves a write that only moved the last activity time a touch, and a new turn visible", async () => {
+    mocks.getSessionMeta.mockResolvedValue({ aiTitle: "first", turnCount: 1, firstUserMessage: "", lastUserMessage: "", lastTimestamp: "2026-11-08T00:00:00Z" })
+    await catalogRow({ filePath: "/rows/e.jsonl", mtimeMs: 1, size: 10 })
+
+    mocks.getSessionMeta.mockResolvedValue({ aiTitle: "first", turnCount: 1, firstUserMessage: "", lastUserMessage: "", lastTimestamp: "2026-11-08T00:00:01Z" })
+    reportTouchedFiles([{ filePath: "/rows/e.jsonl", mtimeMs: 2, size: 20 }])
+    await vi.waitFor(() => expect(mocks.getSessionMeta).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(changes.map((change) => change.kind)).toEqual([])
+
+    mocks.getSessionMeta.mockResolvedValue({ aiTitle: "first", turnCount: 2, firstUserMessage: "", lastUserMessage: "", lastTimestamp: "2026-11-08T00:00:02Z" })
+    reportTouchedFiles([{ filePath: "/rows/e.jsonl", mtimeMs: 3, size: 30 }])
+    await vi.waitFor(() => expect(changes.map((change) => change.kind)).toEqual(["visible"]), { timeout: 3_000 })
+  })
+
   it("counts a write to a session no list has read as visible without reading it", async () => {
     reportTouchedFiles([{ filePath: "/rows/c.jsonl", mtimeMs: 1, size: 1 }])
     await vi.waitFor(() => expect(changes.map((change) => change.kind)).toEqual(["visible"]))

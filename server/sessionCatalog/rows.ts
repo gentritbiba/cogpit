@@ -32,9 +32,14 @@ export function peekCatalogRow(file: TouchedFile): CatalogRow | null {
   return isCurrent(known, file) ? known! : null
 }
 
+/**
+ * Fields whose change is worth announcing at once. `lastTimestamp` is left
+ * out: it moves with every record a working agent writes, so it rides along
+ * with the size and mtime as a touch.
+ */
 const ROW_FIELDS = [
   "slug", "name", "aiTitle", "customTitle", "model", "firstUserMessage", "lastUserMessage",
-  "gitBranch", "cwd", "timestamp", "lastTimestamp", "turnCount", "teamName", "agentName",
+  "gitBranch", "cwd", "timestamp", "turnCount", "teamName", "agentName",
 ] as const satisfies ReadonlyArray<keyof SessionMeta>
 
 function rowChanged(before: CatalogRow, after: CatalogRow): boolean {
