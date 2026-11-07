@@ -1,4 +1,5 @@
-import { memo, useState } from "react"
+import { memo } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { ChevronDown, ChevronRight, History } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -20,7 +21,7 @@ interface Props {
  * future versions emit markdown-formatted summaries.
  */
 export const RecapBanner = memo(function RecapBanner({ content }: Props) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useDisclosure(useDisclosureKey("recap"), true)
   const Chev = open ? ChevronDown : ChevronRight
 
   return (

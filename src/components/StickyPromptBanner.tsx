@@ -1,7 +1,8 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import type { ParsedSession, Turn, UserContent } from "../../shared/session/types"
 import { getUserMessageImages, getUserMessageText } from "../../shared/session/parser"
 import { composerPromptText } from "../../shared/session/composerContext"
@@ -33,12 +34,9 @@ interface ReaderMessage {
   text: string
 }
 
-const TURN_SELECTOR = "[data-turn-index]"
 const READER_SELECTOR = "[data-reader-prompt]"
 const POSITION_EPSILON = 1
 const PREVIEW_LENGTH = 180
-/** How long a jump past the rendered turns waits for the virtualizer to settle the message, in frames. */
-const SETTLE_FRAMES = 30
 
 function firstLine(text: string): string {
   const line = text.split("\n")[0]
@@ -88,32 +86,31 @@ function readerMessages(turn: Turn): ReaderMessage[] {
 /**
  * The reader's latest message that the viewport has scrolled past, or null
  * while it is still in view. Anything nobody typed, such as a crew chat post
- * or a session reporting back, is passed over.
+ * or a session reporting back, is passed over. `firstVisibleKey` is the turn
+ * at the top of the viewport, as the timeline reports it.
  */
-function scrolledPastMessage(container: HTMLElement, turns: Turn[]): MessageAddress | null {
+function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string[], firstVisibleKey: string | null): MessageAddress | null {
+  if (firstVisibleKey === null) return null
+  const turnIndex = keys.indexOf(firstVisibleKey)
+  if (turnIndex < 0) return null
   const rootTop = visibleTop(container) + POSITION_EPSILON
-  let activeTurn: HTMLElement | null = null
-  for (const turn of container.querySelectorAll<HTMLElement>(TURN_SELECTOR)) {
-    if (turn.getBoundingClientRect().top > rootTop) break
-    activeTurn = turn
-  }
-  if (!activeTurn) return null
+  const row = container.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(firstVisibleKey)}"]`)
 
-  const turnIndex = Number(activeTurn.dataset.turnIndex)
-  if (!Number.isInteger(turnIndex)) return null
-
-  const bubbles = activeTurn.querySelectorAll<HTMLElement>(READER_SELECTOR)
-  for (let index = bubbles.length - 1; index >= 0; index--) {
-    const rect = bubbles[index].getBoundingClientRect()
-    if (rect.top > rootTop) continue
-    return rect.bottom > rootTop ? null : { turnIndex, key: bubbles[index].dataset.readerPrompt! }
+  if (row && row.getBoundingClientRect().top <= rootTop) {
+    const bubbles = row.querySelectorAll<HTMLElement>(READER_SELECTOR)
+    for (let index = bubbles.length - 1; index >= 0; index--) {
+      const rect = bubbles[index].getBoundingClientRect()
+      if (rect.top > rootTop) continue
+      return rect.bottom > rootTop ? null : { turnIndex, key: bubbles[index].dataset.readerPrompt! }
+    }
+    // The reader opened this turn and their prompt is just below the top.
+    if (bubbles[0]?.dataset.readerPrompt === "prompt") return null
   }
-  // The reader opened this turn and their prompt is just below the top.
-  if (bubbles[0]?.dataset.readerPrompt === "prompt") return null
 
   // None in this turn starts above the viewport, so it is the last one sent
-  // earlier, which the virtualizer may not have rendered.
-  for (let index = Math.min(turnIndex, turns.length) - 1; index >= 0; index--) {
+  // earlier, which the timeline may not have rendered.
+  const before = row && row.getBoundingClientRect().top <= rootTop ? turnIndex : turnIndex - 1
+  for (let index = Math.min(before, turns.length) - 1; index >= 0; index--) {
     const last = readerMessages(turns[index]).at(-1)
     if (last) return { turnIndex: index, key: last.key }
   }
@@ -125,76 +122,44 @@ function visibleTop(container: HTMLElement): number {
   return container.getBoundingClientRect().top + (parseFloat(getComputedStyle(container).scrollPaddingTop) || 0)
 }
 
-function bubbleAt(container: HTMLElement, { turnIndex, key }: MessageAddress): HTMLElement | null {
-  return container.querySelector<HTMLElement>(`[data-turn-index="${turnIndex}"] [data-reader-prompt="${key}"]`)
-}
-
-function scrollTopOf(container: HTMLElement, element: HTMLElement): number {
-  return Math.max(0, container.scrollTop + element.getBoundingClientRect().top - visibleTop(container))
-}
-
-/** Lands on a message once the virtualizer has rendered it and stopped moving it. */
-function landWhenSettled(container: HTMLElement, address: MessageAddress, framesLeft = SETTLE_FRAMES, lastTop?: number): void {
-  requestAnimationFrame(() => {
-    const bubble = bubbleAt(container, address)
-    const top = bubble ? scrollTopOf(container, bubble) : undefined
-    if (top !== undefined && lastTop !== undefined && Math.abs(top - lastTop) < POSITION_EPSILON) {
-      container.scrollTo({ top })
-      return
-    }
-    if (framesLeft > 0) landWhenSettled(container, address, framesLeft - 1, top)
-  })
-}
-
 export const StickyPromptBanner = memo(function StickyPromptBanner({
   session,
   scrollContainerRef,
   timelineRef,
 }: StickyPromptBannerProps) {
   const [sticky, setSticky] = useState<MessageAddress & { sessionId: string } | null>(null)
-  const turnsRef = useRef(session.turns)
-  useLayoutEffect(() => {
-    turnsRef.current = session.turns
-  }, [session.turns])
+  const turns = session.turns
+  const keys = useMemo(() => turnKeysOf(turns), [turns])
+  const latest = useRef({ turns, keys, sessionId: session.sessionId })
+  latest.current = { turns, keys, sessionId: session.sessionId }
 
-  useEffect(() => {
+  const update = useCallback(() => {
     const container = scrollContainerRef.current
-    if (!container) return
+    const timeline = timelineRef.current
+    if (!container || !timeline) return
+    const { turns, keys, sessionId } = latest.current
+    const address = scrolledPastMessage(container, turns, keys, timeline.getViewport().firstVisibleKey)
+    setSticky((current) => {
+      if (address === null) return null
+      if (current?.sessionId === sessionId && current.turnIndex === address.turnIndex && current.key === address.key) return current
+      return { sessionId, ...address }
+    })
+  }, [scrollContainerRef, timelineRef])
 
-    let frame: number | null = null
-    const update = () => {
-      frame = null
-      const address = scrolledPastMessage(container, turnsRef.current)
-      setSticky((current) => {
-        if (address === null) return null
-        if (current?.sessionId === session.sessionId && current.turnIndex === address.turnIndex && current.key === address.key) {
-          return current
-        }
-        return { sessionId: session.sessionId, ...address }
-      })
+  // The timeline reports scrolls and range changes; new turns are checked as they land.
+  const subscription = useRef<{ handle: TimelineHandle; unsubscribe: () => void } | null>(null)
+  useEffect(() => {
+    const handle = timelineRef.current
+    if (subscription.current?.handle !== handle) {
+      subscription.current?.unsubscribe()
+      subscription.current = handle ? { handle, unsubscribe: handle.subscribe(update) } : null
     }
-    const scheduleUpdate = () => {
-      if (frame === null) frame = requestAnimationFrame(update)
-    }
-
-    setSticky(null)
-    container.addEventListener("scroll", scheduleUpdate, { passive: true })
-
-    const mutationObserver = new MutationObserver(scheduleUpdate)
-    mutationObserver.observe(container, { childList: true, subtree: true })
-
-    const resizeObserver = new ResizeObserver(scheduleUpdate)
-    resizeObserver.observe(container)
-    if (container.firstElementChild) resizeObserver.observe(container.firstElementChild)
-
-    scheduleUpdate()
-    return () => {
-      container.removeEventListener("scroll", scheduleUpdate)
-      mutationObserver.disconnect()
-      resizeObserver.disconnect()
-      if (frame !== null) cancelAnimationFrame(frame)
-    }
-  }, [scrollContainerRef, session.sessionId])
+    update()
+  }, [timelineRef, update, turns, session.sessionId])
+  useEffect(() => () => {
+    subscription.current?.unsubscribe()
+    subscription.current = null
+  }, [])
 
   const message = useMemo(() => {
     if (!sticky || sticky.sessionId !== session.sessionId) return null
@@ -206,14 +171,10 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
   if (!message) return null
 
   const scrollToMessage = () => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    const bubble = bubbleAt(container, message)
-    if (bubble) {
-      container.scrollTo({ top: scrollTopOf(container, bubble), behavior: "smooth" })
-      return
-    }
-    if (timelineRef.current?.scrollToTurn(message.turnIndex)) landWhenSettled(container, message)
+    const turnKey = keys[message.turnIndex]
+    if (turnKey === undefined) return
+    const selector = `[data-reader-prompt="${CSS.escape(message.key)}"]`
+    void timelineRef.current?.scrollToTurn(turnKey, { target: (row) => row.querySelector(selector) })
   }
 
   return (

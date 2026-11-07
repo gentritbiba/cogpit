@@ -1,4 +1,5 @@
-import { memo, useState } from "react"
+import { memo } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { ChevronRight, ChevronDown, Webhook, AlertCircle } from "lucide-react"
 import type { ParsedHookEvent } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
@@ -12,7 +13,7 @@ interface Props {
 const TERMINAL_EVENTS = new Set(["StopFailure", "PermissionDenied", "PostToolUseFailure"])
 
 export const HookEventChip = memo(function HookEventChip({ events }: Props) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(useDisclosureKey("hooks"), false)
   if (events.length === 0) return null
   const hasError = events.some(
     (e) => TERMINAL_EVENTS.has(e.eventName) || (e.exitCode !== undefined && e.exitCode !== 0)

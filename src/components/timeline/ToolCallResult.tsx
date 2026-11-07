@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { Check, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
@@ -176,7 +177,7 @@ export function ToolResultPanel({
   filePath?: string
   renderResult?: (visible: string) => React.ReactNode
 }): React.ReactElement {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey("result"), false)
   const [copied, copyResult] = useCopyWithFeedback()
   const resultId = useId()
   // An elided body is fetched only while expanded, and the fetch is dropped on collapse.

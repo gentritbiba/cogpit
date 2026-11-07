@@ -1,4 +1,5 @@
-import { useMemo, useState, memo } from "react"
+import { useMemo, memo } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { ChevronDown, ChevronRight, Folder, FileCode2 } from "lucide-react"
 import { diffLineCount } from "../../../shared/diff-utils"
 import { expandEditToolCalls } from "../../../shared/session/edit-calls"
@@ -222,7 +223,7 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
   const canAccessHostFiles = useCapability("hostFiles")
   const fileChanges = useMemo(() => computeTurnFileChanges(turn, cwd), [turn, cwd])
   const tree = useMemo(() => buildFileTree(fileChanges, cwd), [fileChanges, cwd])
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey("files"), false)
 
   const totals = useMemo(() => {
     let add = 0
@@ -292,7 +293,7 @@ const TreeRow = memo(function TreeRow({
   turnIndex: number
   canFocusFiles: boolean
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey(`files:${node.fullPath}`), true)
 
   const paddingLeft = depth * 16 + 8
 

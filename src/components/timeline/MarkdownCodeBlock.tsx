@@ -1,4 +1,5 @@
-import { lazy, Suspense, useContext, useState, type HTMLAttributes } from "react"
+import { lazy, Suspense, useContext, type HTMLAttributes } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import type { ExtraProps } from "react-markdown"
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
@@ -111,7 +112,8 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
     )
   }
 
-  const plain = <HighlightedCodeBlock code={code} lang={lang} {...rest} />
+  const offset = _node?.position?.start.offset
+  const plain = <HighlightedCodeBlock code={code} lang={lang} stateKey={offset === undefined ? undefined : `code:${offset}`} {...rest} />
   if (blockScope && lang && parsePluginBlockLanguage(lang)) return <RuntimePluginBlock language={lang} source={code} instanceKey={`${blockScope.messageKey}:${_node?.position?.start.offset ?? 0}`} fallback={plain} />
   if (blockScope && isCogpitView(lang)) {
     const start = _node?.position?.start.offset
@@ -139,14 +141,17 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 export function HighlightedCodeBlock({
   code,
   lang,
+  stateKey,
   ...rest
 }: {
   code: string
   lang: string | null
+  /** Where the block sits in its markdown, so its fold outlives the row. */
+  stateKey?: string
 } & Omit<HTMLAttributes<HTMLElement>, "lang">): React.ReactElement {
   const isDark = useIsDarkMode()
   const tokens = useHighlightedTokens(code, lang, isDark)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useDisclosure(useDisclosureKey(stateKey ?? null), false)
   const lines = code.split("\n")
   const lineCount = lines.length
   const isLong = lineCount > 30
@@ -154,7 +159,7 @@ export function HighlightedCodeBlock({
   const Chevron = collapsed ? ChevronRight : ChevronDown
 
   return (
-    <div className="my-3 overflow-hidden rounded-lg border border-border bg-muted">
+    <div data-scroll-anchor="" className="my-3 overflow-hidden rounded-lg border border-border bg-muted">
       <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
         <div className="flex items-center gap-2">
           {isLong && (

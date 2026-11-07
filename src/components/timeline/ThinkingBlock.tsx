@@ -9,7 +9,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks }: ThinkingBlo
   if (blocks.length === 0) return null
 
   return (
-    <div className="flex flex-col gap-2">
+    <div data-scroll-anchor="" className="flex flex-col gap-2">
       {blocks.map((block, i) => (
         <p
           key={i}

@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react"
+import { type ReactNode } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { ChevronDown, Gauge, Lightbulb } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -134,7 +135,7 @@ interface DetailItem {
 const DETAIL_LIMIT = 8
 
 function ContextDetails({ usage }: { usage: LocalCommandContextUsage }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useDisclosure(useDisclosureKey("breakdown"), false)
   const groups: { title: string; items: DetailItem[] }[] = [
     { title: "Memory files", items: (usage.memory_files ?? []).map((file) => ({ label: file.path, meta: file.type, tokens: file.tokens })) },
     { title: "MCP tools", items: (usage.mcp_tools ?? []).map((tool) => ({ label: tool.name, meta: tool.server_name, tokens: tool.tokens })) },

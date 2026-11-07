@@ -1,4 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { Loader2, Redo2 } from "lucide-react"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
@@ -11,12 +13,6 @@ import type { Turn } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-/** Lets what sits over the timeline reach turns the virtualizer has not rendered. */
-export interface TimelineHandle {
-  /** Scrolls the turn to the top of the viewport at once. False when the turn is not in the list. */
-  scrollToTurn(turnIndex: number): boolean
-}
 
 interface VirtualizedTimelineProps {
   filteredTurns: { turn: Turn; index: number }[]
@@ -50,6 +46,8 @@ function RedoSection() {
               <TurnSection
                 turn={turn}
                 index={sessionTurnCount + i}
+                turnKey={`ghost-${turn.id}`}
+                isLast={false}
               />
               {requestRedoUpTo && (
                 <Button
@@ -99,6 +97,77 @@ function isCompactionOnlyTurn(turn: Turn): boolean {
     && turn.contentBlocks.length === 0
 }
 
+// ── Interim TimelineHandle over virtua (the engine replaces this file) ───────
+
+function interimHandle(
+  scrollRef: React.RefObject<HTMLElement | null>,
+  virtualizer: React.RefObject<VirtualizerHandle | null>,
+  rows: { key: string }[],
+): TimelineHandle {
+  const top = (el: HTMLElement) => el.getBoundingClientRect().top + (parseFloat(getComputedStyle(el).scrollPaddingTop) || 0)
+  return {
+    scrollToTurn(turnKey, opts) {
+      const index = rows.findIndex((row) => row.key === turnKey)
+      const el = scrollRef.current
+      if (index < 0 || !el || !virtualizer.current) return Promise.resolve(false)
+      virtualizer.current.scrollToIndex(index, { align: "start" })
+      return new Promise((resolve) => {
+        let frames = 30
+        let last: number | undefined
+        const land = () => {
+          const row = el.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(turnKey)}"]`)
+          const target = (row && opts?.target?.(row)) ?? row
+          if (target instanceof HTMLElement) {
+            const rect = target.getBoundingClientRect()
+            const offset = opts?.align === "center" ? (el.clientHeight - rect.height) / 2 : 0
+            const want = Math.max(0, el.scrollTop + rect.top - top(el) - offset)
+            if (last !== undefined && Math.abs(want - last) < 1) {
+              el.scrollTo({ top: want })
+              resolve(true)
+              return
+            }
+            last = want
+          }
+          if (frames-- > 0) requestAnimationFrame(land)
+          else resolve(false)
+        }
+        requestAnimationFrame(land)
+      })
+    },
+    scrollToBottom() {
+      const el = scrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    },
+    subscribe(listener) {
+      const el = scrollRef.current
+      if (!el) return () => {}
+      let frame: number | null = null
+      const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => { frame = null; listener() }) }
+      el.addEventListener("scroll", schedule, { passive: true })
+      const observer = new ResizeObserver(schedule)
+      if (el.firstElementChild) observer.observe(el.firstElementChild)
+      return () => {
+        el.removeEventListener("scroll", schedule)
+        observer.disconnect()
+        if (frame !== null) cancelAnimationFrame(frame)
+      }
+    },
+    getViewport() {
+      const el = scrollRef.current
+      if (!el) return { firstVisibleKey: null, atBottom: true }
+      const viewTop = top(el)
+      let firstVisibleKey: string | null = null
+      for (const row of el.querySelectorAll<HTMLElement>("[data-turn-key]")) {
+        if (row.getBoundingClientRect().bottom > viewTop) {
+          firstVisibleKey = row.dataset.turnKey ?? null
+          break
+        }
+      }
+      return { firstVisibleKey, atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 4 }
+    },
+  }
+}
+
 // ── Virtualized timeline ─────────────────────────────────────────────────────
 
 export function VirtualizedTimeline({
@@ -111,21 +180,20 @@ export function VirtualizedTimeline({
   timelineRef,
 }: VirtualizedTimelineProps) {
   const { state: { activeTurnIndex } } = useAppContext()
-  const { undoRedo } = useSessionContext()
+  const { undoRedo, session } = useSessionContext()
+  const sessionTurns = session?.turns
+  const allKeys = useMemo(() => turnKeysOf(sessionTurns ?? []), [sessionTurns])
+  const lastIndex = (sessionTurns?.length ?? 0) - 1
   const handleRef = useRef<VirtualizerHandle>(null)
   const listWrapRef = useRef<HTMLDivElement>(null)
   const [startMargin, setStartMargin] = useState(0)
 
   // React keys must be stable across prepends, so key by turn id alone
   // (indices shift). Duplicate ids within one parse are disambiguated.
-  const keyedTurns = useMemo(() => {
-    const seen = new Map<string, number>()
-    return filteredTurns.map((entry) => {
-      const n = seen.get(entry.turn.id) ?? 0
-      seen.set(entry.turn.id, n + 1)
-      return { ...entry, key: n === 0 ? entry.turn.id : `${entry.turn.id}#${n}` }
-    })
-  }, [filteredTurns])
+  const keyedTurns = useMemo(
+    () => filteredTurns.map((entry) => ({ ...entry, key: allKeys[entry.index] ?? entry.turn.id })),
+    [filteredTurns, allKeys],
+  )
 
   // Prepend detection drives virtua's `shift` prop: during a prepend the
   // scroll position is maintained from the end, so older turns appear above
@@ -179,14 +247,7 @@ export function VirtualizedTimeline({
     for (let i = 0; i < keyedTurns.length; i++) map.set(keyedTurns[i].index, i)
     return map
   }, [keyedTurns])
-  useImperativeHandle(timelineRef, () => ({
-    scrollToTurn(turnIndex) {
-      const virtualIdx = turnIndexToVirtualIdx.get(turnIndex)
-      if (virtualIdx === undefined || !handleRef.current) return false
-      handleRef.current.scrollToIndex(virtualIdx, { align: "start" })
-      return true
-    },
-  }), [turnIndexToVirtualIdx])
+  useImperativeHandle(timelineRef, () => interimHandle(scrollContainerRef, handleRef, keyedTurns), [scrollContainerRef, keyedTurns])
   const lastScrolledTurnRef = useRef<number | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {
@@ -214,7 +275,7 @@ export function VirtualizedTimeline({
           {keyedTurns.map(({ turn, index, key }) => (
             <div key={key} data-turn-index={index}>
               {(turn.compactionSummary || turn.compactionMeta) && (
-                <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} />
+                <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} disclosureKey={`${key}:compaction`} />
               )}
               {/* A compaction opens a turn of its own; suppress the empty
                   turn chrome until the conversation resumes into it. */}
@@ -222,6 +283,8 @@ export function VirtualizedTimeline({
                 <TurnSection
                   turn={turn}
                   index={index}
+                  turnKey={key}
+                  isLast={index === lastIndex}
                   branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
                 />
               )}
