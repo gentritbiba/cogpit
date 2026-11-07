@@ -84,7 +84,7 @@ export const AssistantText = memo(function AssistantText({
   const meta = [model && !model.startsWith("<") && shortenModel(model), effort, timestamp && new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })].filter(Boolean)
 
   return (
-    <div className="group/text relative min-w-0">
+    <div data-scroll-anchor="" className="group/text relative min-w-0">
       <div ref={contentRef} className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
         <CogpitBlockScope.Provider value={blockScope}>
           <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>

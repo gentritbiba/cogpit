@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { memo } from "react"
+import { DisclosureScope, useDisclosure, useDisclosureKey } from "./disclosure"
 import { Bell, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -25,7 +26,7 @@ const EVENT_STYLE = { Icon: Bell, color: "text-muted-foreground" } as const
  * and its output a click away.
  */
 export function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey(`task:${notification.taskId}`), false)
   const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES]
     ?? { ...EVENT_STYLE, label: notification.status || "Event" }
   const { Icon: StatusIcon } = statusStyle
@@ -84,14 +85,16 @@ export function TaskNotificationCard({ notification }: { notification: TaskNotif
  * back mid-turn. The block carries the record verbatim, so the grammar is
  * parsed here rather than in the session core.
  */
-export function TaskNotificationBlock({ content }: { content: string }) {
+export const TaskNotificationBlock = memo(function TaskNotificationBlock({ content }: { content: string }) {
   const { notifications } = parseTaskNotifications(content)
   if (notifications.length === 0) return null
   return (
     <div className="flex flex-col">
       {notifications.map((n, i) => (
-        <TaskNotificationCard key={n.taskId || `notification-${i}`} notification={n} />
+        <DisclosureScope key={n.taskId || `notification-${i}`} id={String(i)}>
+          <TaskNotificationCard notification={n} />
+        </DisclosureScope>
       ))}
     </div>
   )
-}
+})

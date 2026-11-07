@@ -61,6 +61,9 @@ interface Navigation {
   align: "start" | "center"
   target?: (row: HTMLElement) => Element | null
   resolve: (landed: boolean) => void
+  /** Frames left to wait for `target` to appear, e.g. inside a group the navigation just opened. */
+  framesLeft: number
+  retry: number | null
 }
 
 const ROW_SELECTOR = "[data-row-key]"
@@ -69,6 +72,7 @@ const DEFAULT_ROW_HEIGHT = 240
 const IDLE_MS = 150
 /** A navigation anchor gives way to the default anchor after this long without layout movement. */
 const NAVIGATION_HOLD_MS = 1500
+const TARGET_RETRY_FRAMES = 10
 const EMPTY_PLAN: RenderPlan = { segments: [], gaps: [], bottomPad: 0 }
 const PLAN_TOLERANCE = 2
 const SIZE_PROPERTIES = new Set(["height", "maxHeight", "minHeight", "blockSize", "gridTemplateRows"])
@@ -335,8 +339,7 @@ export class TimelineScrollController implements TimelineHandle {
   }
 
   private detachList(): void {
-    this.navigation?.resolve(false)
-    this.navigation = null
+    this.endNavigation(false)
     this.anchor = null
     this.renderedTops = new Map()
     this.pins.clear()
@@ -393,8 +396,7 @@ export class TimelineScrollController implements TimelineHandle {
     this.sessionChangeKey = sessionChangeKey
     this.placement = this.topOnNextSession ? "top" : "bottom"
     this.topOnNextSession = false
-    this.navigation?.resolve(false)
-    this.navigation = null
+    this.endNavigation(false)
     this.anchor = null
     this.liveHeights.clear()
     this.renderedTops = new Map()
@@ -603,14 +605,15 @@ export class TimelineScrollController implements TimelineHandle {
   private landNavigation(): void {
     const navigation = this.navigation!
     if (!this.indexOf.has(navigation.key)) {
-      this.navigation = null
+      this.endNavigation(false)
       this.setPins("navigation", [])
-      navigation.resolve(false)
       return
     }
     const row = this.rowEls.get(navigation.key)
     if (!row) return
-    const target = navigation.target?.(row) ?? row
+    const found = navigation.target?.(row) ?? null
+    const waiting = navigation.target !== undefined && !found && navigation.framesLeft > 0
+    const target = found ?? row
     const scroller = this.scroller!
     const rect = target.getBoundingClientRect()
     const visible = scroller.clientHeight - this.viewTopOffset()
@@ -624,8 +627,25 @@ export class TimelineScrollController implements TimelineHandle {
       kind: "navigation",
     }
     this.navigationMovedAt = performance.now()
+    if (waiting) {
+      // The row is in place; every layout pass (a resize when the group
+      // opens) tries the target again, and a frame tick covers a quiet one.
+      navigation.framesLeft--
+      navigation.retry ??= requestAnimationFrame(() => {
+        navigation.retry = null
+        if (this.navigation === navigation && this.scroller) this.landNavigation()
+      })
+      return
+    }
+    this.endNavigation(true)
+  }
+
+  private endNavigation(landed: boolean): void {
+    const navigation = this.navigation
+    if (!navigation) return
+    if (navigation.retry !== null) cancelAnimationFrame(navigation.retry)
     this.navigation = null
-    navigation.resolve(true)
+    navigation.resolve(landed)
   }
 
   /** Re-records where the anchor is now, picking a fresh default anchor when there is none to keep. */
@@ -840,6 +860,7 @@ export class TimelineScrollController implements TimelineHandle {
 
   /** Scroll input ends the activation and navigation anchors. */
   private clearUserAnchors(): void {
+    this.endNavigation(false)
     if (this.anchor && this.anchor.kind !== "default") this.anchor = null
     this.setPins("activation", [])
     this.setPins("navigation", [])
@@ -937,11 +958,11 @@ export class TimelineScrollController implements TimelineHandle {
 
   scrollToTurn = (turnKey: string, opts: ScrollToTurnOptions = {}): Promise<boolean> => {
     if (!this.scroller || !this.input || !this.indexOf.has(turnKey)) return Promise.resolve(false)
-    this.navigation?.resolve(false)
+    this.endNavigation(false)
     return new Promise<boolean>((resolve) => {
       this.dispatch({ type: "navigate" })
       this.placement = null
-      this.navigation = { key: turnKey, align: opts.align ?? "start", target: opts.target, resolve }
+      this.navigation = { key: turnKey, align: opts.align ?? "start", target: opts.target, resolve, framesLeft: TARGET_RETRY_FRAMES, retry: null }
       this.setPins("navigation", [turnKey])
       if (this.rowEls.has(turnKey)) {
         this.landNavigation()
@@ -955,8 +976,6 @@ export class TimelineScrollController implements TimelineHandle {
 
   scrollToBottom = (): void => {
     this.clearUserAnchors()
-    this.navigation?.resolve(false)
-    this.navigation = null
     this.dispatch({ type: "resume" })
     if (this.scroller && this.input) this.pinToBottom()
   }

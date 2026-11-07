@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react"
+import { memo, useEffect, useMemo } from "react"
 import { RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
 import { AgentMessageCard } from "./AgentMessageCard"
@@ -25,14 +25,13 @@ import { collectActivity, segmentActivity, type ActivityItem } from "@/lib/timel
 import { isReaderPrompt, promptSource, type PromptSource } from "@/lib/userMessageContent"
 import { InverseColorScheme } from "@/components/InverseColorScheme"
 import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
-import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
-import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext, useSessionContextOptional } from "@/contexts/SessionContext"
+import { DisclosureScope, useDisclosureKey, useTimelineState } from "./disclosure"
+import { useTimelineLiveStatus, useTimelineRowFacts } from "./TimelineRowsProvider"
 import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
-import type { Turn, TurnContentBlock, UserContent } from "../../../shared/session/types"
+import type { ToolCall, Turn, TurnContentBlock, UserContent } from "../../../shared/session/types"
 import { hasEditToolCalls } from "../../../shared/session/edit-calls"
 import { cn } from "@/lib/utils"
 import { getTurnDuration } from "@/lib/format"
@@ -48,71 +47,61 @@ const READER_BUBBLE = "ml-auto w-fit max-w-[min(85%,44rem)] rounded-2xl rounded-
 interface TurnSectionProps {
   turn: Turn
   index: number
-  /** The row key the timeline addresses this turn by. */
-  turnKey?: string
-  /** This is the session's last turn, the only one an agent can still be working on. */
-  isLast?: boolean
+  /** Stable across prepends; disclosure state inside the row is keyed under it. */
+  turnKey: string
+  /** The last turn is the only one still being worked on. */
+  isLast: boolean
   branchCount?: number
 }
 
 
 // ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
-export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) {
+/**
+ * Reads only facts that change rarely, so a streamed record re-renders the
+ * rows whose turn changed and no others. Only the last row can be working.
+ */
+export const TurnSection = memo(function TurnSection({ turn, index, turnKey, isLast, branchCount = 0 }: TurnSectionProps) {
   const {
     state: { activeTurnIndex, activeToolCallId, expandAll, expandToolPayloads },
     isMobile,
   } = useAppContext()
-  const { session, isLive, isSubAgentView, undoRedo, actions, pendingInteraction } = useSessionContext()
+  const facts = useTimelineRowFacts()
+  const status = useTimelineLiveStatus()
 
-  const isSessionLive = isLive && session !== null
-  // Narrower than `isSessionLive`: only the last turn can still be worked on, so
-  // this is what gates in-progress tool state. An unanswered peer message is a
-  // property of the session instead — you can answer one from any turn.
-  const isAgentActive = isSessionLive && index === (session?.turns.length ?? 0) - 1
-
-  // For the last active turn, derive completion from raw messages (immediate on end_turn).
-  // For all other turns, they're done by definition.
-  let isTurnDone = !isAgentActive
-  if (isAgentActive && session) {
-    const { status } = deriveSessionStatus(
-      session.rawMessages as Array<{ type: string; [key: string]: unknown }>
-    )
-    isTurnDone = !WORKING_STATUSES.has(status)
-  }
-
-  const cwd = session?.cwd ?? ""
+  const isSessionLive = facts?.isLive ?? false
+  const isAgentActive = isLast && status.live
+  const isTurnDone = !isAgentActive || !status.working
+  const cwd = facts?.cwd ?? ""
   const skillMetadata = useSkillMetadata(cwd)
-
-  // An async question sits mid-turn with work after it, so only the session's
-  // pending interaction can say whether it is still waiting on an answer.
-  const openQuestionId = pendingInteraction?.type === "question"
-    ? pendingInteraction.toolUseId
-    : undefined
+  const isActive = activeTurnIndex === index
 
   return (
-    <TurnSectionInner
-      turn={turn}
-      openQuestionId={openQuestionId}
-      index={index}
-      branchCount={branchCount}
-      isActive={activeTurnIndex === index}
-      activeToolCallId={activeToolCallId}
-      expandAll={expandAll}
-      expandToolPayloads={expandToolPayloads}
-      isAgentActive={isAgentActive}
-      isSessionLive={isSessionLive}
-      isTurnDone={isTurnDone}
-      isMobile={isMobile}
-      cwd={cwd}
-      skillMetadata={skillMetadata}
-      onRestoreToHere={!undoRedo.enabled || isSubAgentView ? undefined : undoRedo.requestUndo}
-      onOpenBranches={actions.handleOpenBranches}
-      onEditCommand={actions.handleEditCommand}
-      onExpandCommand={actions.handleExpandCommand}
-    />
+    <DisclosureScope id={turnKey} root>
+      <TurnSectionInner
+        turn={turn}
+        turnKey={turnKey}
+        openQuestionId={facts?.openQuestionId}
+        index={index}
+        branchCount={branchCount}
+        isActive={isActive}
+        activeToolCallId={isActive ? activeToolCallId : null}
+        expandAll={expandAll}
+        expandToolPayloads={expandToolPayloads}
+        isAgentActive={isAgentActive}
+        isSessionLive={isSessionLive}
+        isTurnDone={isTurnDone}
+        isMobile={isMobile}
+        cwd={cwd}
+        skillMetadata={skillMetadata}
+        onRestoreToHere={facts?.restoreToHere}
+        onOpenBranches={facts?.openBranches}
+        onEditCommand={facts?.editCommand}
+        onExpandCommand={facts?.expandCommand}
+      />
+    </DisclosureScope>
   )
-}
+})
 
 // ── Prompt context menu ──────────────────────────────────────────────────────
 
@@ -127,24 +116,21 @@ function MaybePromptContextMenu({
   index: number
   children: React.ReactNode
 }) {
-  const { session, isSubAgentView, undoRedo, actions } = useSessionContext()
-  const { requestUndo, branchesAtTurn } = undoRedo
-  const { handleOpenBranches, handleBranchFromHere } = actions
-
+  const facts = useTimelineRowFacts()
   // Redo ghosts render past the last real turn — there is nothing to restore to.
-  const isGhostTurn = index >= (session?.turns.length ?? 0)
+  const isGhostTurn = index >= (facts?.turnCount ?? 0)
 
-  if (!undoRedo.enabled || isSubAgentView || isGhostTurn || !requestUndo || !handleOpenBranches) {
+  if (!facts?.restoreToHere || !facts.openBranches || !facts.branchesAtTurn || isGhostTurn) {
     return <>{children}</>
   }
 
   return (
     <TurnContextMenu
       turnIndex={index}
-      branches={branchesAtTurn(index)}
-      onRestoreToHere={requestUndo}
-      onOpenBranches={handleOpenBranches}
-      onBranchFromHere={handleBranchFromHere}
+      branches={facts.branchesAtTurn(index)}
+      onRestoreToHere={facts.restoreToHere}
+      onOpenBranches={facts.openBranches}
+      onBranchFromHere={facts.branchFromHere}
     >
       {children}
     </TurnContextMenu>
@@ -155,6 +141,7 @@ function MaybePromptContextMenu({
 
 interface TurnSectionInnerProps {
   turn: Turn
+  turnKey: string
   index: number
   branchCount: number
   isActive: boolean
@@ -198,8 +185,17 @@ function TurnWorkLabel({
   )
 }
 
+/** Whether any folded block holds the tool call navigation is landing on. */
+function foldHidesCall(blocks: TurnContentBlock[], folded: readonly number[], toolCallId: string): boolean {
+  return folded.some((index) => {
+    const block = blocks[index]
+    return (block.kind === "tool_calls" || block.kind === "plan_mode") && block.toolCalls.some((call) => call.id === toolCallId)
+  })
+}
+
 const TurnSectionInner = memo(function TurnSectionInner({
   turn,
+  turnKey,
   index,
   branchCount,
   isActive,
@@ -229,10 +225,20 @@ const TurnSectionInner = memo(function TurnSectionInner({
   )
   // Undefined follows the global setting. A click becomes a local override,
   // so the disclosure never ignores the user while "expand all" is active.
-  // A turn mounted mid-work is pinned open from the start: the reader is
-  // watching it, and the settle that follows must not fold it under them.
-  const [workExpanded, setWorkExpanded] = useState<boolean | undefined>(() => isTurnDone ? undefined : true)
+  // A turn first mounted mid-work is pinned open: the reader is watching it,
+  // and the settle that follows must not fold it under them. The store keeps
+  // that first decision when the row remounts.
+  const [workExpanded, setWorkExpanded] = useTimelineState<boolean | undefined>(
+    useDisclosureKey("work"),
+    () => isTurnDone ? undefined : true,
+  )
   const workVisible = workExpanded ?? (expandAll || !isTurnDone)
+
+  const revealCall = activeToolCallId !== null && !workVisible && foldPlan.foldable
+    && foldHidesCall(turn.contentBlocks, foldPlan.foldedIndices, activeToolCallId)
+  useEffect(() => {
+    if (revealCall) setWorkExpanded(true)
+  }, [revealCall, setWorkExpanded])
 
   const { leadingBlocks, trailingBlocks } = useMemo(() => {
     if (!foldPlan.foldable) {
@@ -250,10 +256,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [foldPlan, turn.contentBlocks, workVisible])
 
-  const liveOnCallRow = useMemo(
-    () => new Set(turn.toolCalls.filter(streamsSubagentOnRow).map((call) => call.id)),
-    [turn.toolCalls],
-  )
+  const liveOnCallRow = useLiveOnCallRow(turn.toolCalls)
 
   const contentBlockProps = {
     turnId: turn.id,
@@ -272,6 +275,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   return (
     <div
       data-turn-index={index}
+      data-turn-key={turnKey}
       className={cn(
         "group relative",
         isMobile ? "px-0 py-4" : "px-4 py-4",
@@ -308,17 +312,19 @@ const TurnSectionInner = memo(function TurnSectionInner({
                 {...contentBlockProps}
               />
             )}
-            <TurnWorkFold
-              label={
-                <TurnWorkLabel
-                  turn={turn}
-                  isTurnDone={isTurnDone}
-                  hiddenToolCalls={foldPlan.hiddenToolCalls}
-                />
-              }
-              expanded={workVisible}
-              onToggle={() => setWorkExpanded(!workVisible)}
-            />
+            <div data-scroll-anchor="">
+              <TurnWorkFold
+                label={
+                  <TurnWorkLabel
+                    turn={turn}
+                    isTurnDone={isTurnDone}
+                    hiddenToolCalls={foldPlan.hiddenToolCalls}
+                  />
+                }
+                expanded={workVisible}
+                onToggle={() => setWorkExpanded(!workVisible)}
+              />
+            </div>
             {trailingBlocks.length > 0 && (
               <ContentBlocks
                 blocks={trailingBlocks}
@@ -334,12 +340,20 @@ const TurnSectionInner = memo(function TurnSectionInner({
         )}
 
         {isTurnDone && hasFileChanges && (
-          <TurnChangedFiles turn={turn} turnIndex={index} cwd={cwd} />
+          <div data-scroll-anchor="">
+            <TurnChangedFiles turn={turn} turnIndex={index} cwd={cwd} />
+          </div>
         )}
       </div>
     </div>
   )
 })
+
+/** The calls that stream their sub-agent on their own row, keeping its identity while that set is unchanged. */
+function useLiveOnCallRow(toolCalls: ToolCall[]): ReadonlySet<string> {
+  const ids = toolCalls.filter(streamsSubagentOnRow).map((call) => call.id).join("\n")
+  return useMemo(() => new Set(ids ? ids.split("\n") : []), [ids])
+}
 
 // ── The prompt ───────────────────────────────────────────────────────────────
 
@@ -473,7 +487,7 @@ function TurnPrompt({
 }
 
 /** A prompt that arrived while the turn was running, which is the reader's only when they sent it. */
-function QueuedPrompt({ content, timestamp, messageKey }: { content: string; timestamp: string; messageKey: string }) {
+const QueuedPrompt = memo(function QueuedPrompt({ content, timestamp, messageKey }: { content: string; timestamp: string; messageKey: string }) {
   const source = useMemo(() => promptSource(content), [content])
   if (source.kind === "silent") return null
   if (!isReaderPrompt(source, 0)) return <GeneratedPrompt source={source} content={content} timestamp={timestamp} />
@@ -485,15 +499,14 @@ function QueuedPrompt({ content, timestamp, messageKey }: { content: string; tim
       </ReaderBubble>
     </div>
   )
-}
+})
 
 // ── Content blocks renderer ──────────────────────────────────────────────────
 
 /**
  * A key that follows a block rather than its position. Live updates re-derive
  * every block, and a late sub-agent flush can insert one mid-turn; a positional
- * key would remount everything after it and silently collapse groups the user
- * had opened.
+ * key would remount everything after it and drop the state of what follows.
  */
 function blockIdentity(block: TurnContentBlock): string | null {
   switch (block.kind) {
@@ -509,14 +522,15 @@ function blockIdentity(block: TurnContentBlock): string | null {
 
 /** Quoting a reply of this turn into the composer, where the open session has one. */
 function useQuoteInReply(turnId: string): ((text: string) => void) | undefined {
-  const context = useSessionContextOptional()
-  const source = context?.sessionSource
-  const sessionId = context?.session?.sessionId
-  const add = context?.actions.handleAddComposerContext
+  const facts = useTimelineRowFacts()
+  const source = facts?.sessionSource
+  const sessionId = facts?.sessionId
+  const add = facts?.addComposerContext
+  const allowed = Boolean(facts && !facts.isSubAgentView && facts.canSend)
   return useMemo(() => {
-    if (!add || !source || !sessionId || context.isSubAgentView || !context.permissions.send) return undefined
+    if (!add || !source || !sessionId || !allowed) return undefined
     return (text: string) => { add({ id: newContextId(), kind: "quote", text, source: { dirName: source.dirName, fileName: source.fileName, sessionId, turnId } }) }
-  }, [add, source, sessionId, turnId, context?.isSubAgentView, context?.permissions.send])
+  }, [add, source, sessionId, turnId, allowed])
 }
 
 interface ActivityProps {
@@ -527,11 +541,30 @@ interface ActivityProps {
   skillMetadata?: Map<string, SkillMeta>
 }
 
+/** Item lists are rebuilt on every render; what matters is whether the blocks inside them changed. */
+function sameActivityItems(a: readonly ActivityItem[], b: readonly ActivityItem[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  return a.every((item, index) => {
+    const other = b[index]
+    if (item.kind === "thinking") return other.kind === "thinking" && item.blocks === other.blocks && item.thoughtForMs === other.thoughtForMs
+    return other.kind === "tool_calls" && item.toolCalls === other.toolCalls
+  })
+}
+
+function sameProps<P extends { items: ActivityItem[] }>(previous: P, next: P): boolean {
+  for (const key of Object.keys(next) as (keyof P)[]) {
+    if (key === "items") continue
+    if (!Object.is(previous[key], next[key])) return false
+  }
+  return sameActivityItems(previous.items, next.items)
+}
+
 /**
  * A run of thinking and tool calls: grouped work, broken wherever a call
  * started crew sessions, which show as their own rows.
  */
-function ActivityRun({ items, ...props }: ActivityProps & { items: ActivityItem[] }) {
+const ActivityRun = memo(function ActivityRun({ items, ...props }: ActivityProps & { items: ActivityItem[] }) {
   // Work between two starts is named after the start before it, so a group
   // keeps its identity, and its open state, while calls stream into it.
   let previousSpawn: string | null = null
@@ -547,24 +580,69 @@ function ActivityRun({ items, ...props }: ActivityProps & { items: ActivityItem[
         />
       )
     }
+    const key = previousSpawn ? `after:${previousSpawn}` : "lead"
     // A run without thinking skips activityItems, so a lone call renders as its own row.
     return (
-      <CollapsibleToolCalls
-        key={previousSpawn ? `after:${previousSpawn}` : "lead"}
-        toolCalls={segment.toolCalls}
-        expandAll={props.expandAll}
-        expandToolPayloads={props.expandToolPayloads}
-        activeToolCallId={props.activeToolCallId}
-        isAgentActive={props.isAgentActive}
-        activityItems={segment.thinkingCount > 0 ? segment.items : undefined}
-        thinkingCount={segment.thinkingCount}
-        thoughtForMs={segment.thoughtForMs}
-        skillMetadata={props.skillMetadata}
-      />
+      <DisclosureScope key={key} id={key}>
+        <CollapsibleToolCalls
+          toolCalls={segment.toolCalls}
+          expandAll={props.expandAll}
+          expandToolPayloads={props.expandToolPayloads}
+          activeToolCallId={props.activeToolCallId}
+          isAgentActive={props.isAgentActive}
+          activityItems={segment.thinkingCount > 0 ? segment.items : undefined}
+          thinkingCount={segment.thinkingCount}
+          thoughtForMs={segment.thoughtForMs}
+          skillMetadata={props.skillMetadata}
+        />
+      </DisclosureScope>
     )
   })
   return <div className="flex min-w-0 flex-col">{rows}</div>
-}
+}, sameProps)
+
+/** A text block, with the activity that follows it until the next text. */
+const TextRun = memo(function TextRun({
+  block,
+  blockIndex,
+  isFinalText,
+  turnId,
+  model,
+  effort,
+  items,
+  ...activity
+}: ActivityProps & {
+  block: Extract<TurnContentBlock, { kind: "text" }>
+  blockIndex: number
+  isFinalText: boolean
+  turnId: string
+  model: string | null
+  effort?: string
+  items: ActivityItem[]
+}) {
+  const quote = useQuoteInReply(turnId)
+  // The trailing activity sits inside the text element rather than after it,
+  // so streaming another paragraph into this block never moves the group to
+  // a different element and remounts it.
+  return (
+    <div data-scroll-anchor="" className="flex min-w-0 flex-col gap-2.5">
+      {block.text.map((text, ti) => (
+        <DisclosureScope key={ti} id={String(ti)}>
+          <AssistantText
+            text={text}
+            model={model}
+            effort={effort}
+            timestamp={block.timestamp}
+            messageKey={`${turnId}:${blockIndex}:${ti}`}
+            onQuote={quote}
+            showMeta={isFinalText && ti === block.text.length - 1}
+          />
+        </DisclosureScope>
+      ))}
+      {items.length > 0 && <ActivityRun items={items} {...activity} />}
+    </div>
+  )
+}, sameProps)
 
 /** Where the turn's last words are, so only that reply carries the turn's model, time and actions. */
 function finalTextIndex(blocks: TurnContentBlock[]): number {
@@ -574,6 +652,10 @@ function finalTextIndex(blocks: TurnContentBlock[]): number {
   return -1
 }
 
+/**
+ * The blocks of a turn, each its own memoized element under its own
+ * disclosure scope: a record that changes one block re-renders that block.
+ */
 function ContentBlocks({
   blocks,
   turnId,
@@ -594,15 +676,17 @@ function ContentBlocks({
   isSessionLive: boolean
 }) {
   const elements: React.ReactNode[] = []
-  const quote = useQuoteInReply(turnId)
   const lastTextIndex = finalTextIndex(originalBlocks)
 
   const keyUses = new Map<string, number>()
-  const keyFor = (block: TurnContentBlock, index: number) => {
-    const base = blockIdentity(block) ?? `at-${index}`
+  const keyFor = (block: TurnContentBlock) => {
+    const base = blockIdentity(block) ?? `at-${originalBlocks.indexOf(block)}`
     const used = keyUses.get(base) ?? 0
     keyUses.set(base, used + 1)
     return used === 0 ? base : `${base}#${used}`
+  }
+  const push = (key: string, element: React.ReactNode) => {
+    elements.push(<DisclosureScope key={key} id={key}>{element}</DisclosureScope>)
   }
 
   let i = 0
@@ -611,7 +695,7 @@ function ContentBlocks({
 
     if (block.kind === "thinking" || block.kind === "tool_calls") {
       const { items, nextIndex } = collectActivity(blocks, i)
-      elements.push(<ActivityRun key={keyFor(block, i)} items={items} {...activity} />)
+      push(keyFor(block), <ActivityRun items={items} {...activity} />)
       i = nextIndex
       continue
     }
@@ -619,132 +703,100 @@ function ContentBlocks({
     if (block.kind === "text") {
       const { items, nextIndex } = collectActivity(blocks, i + 1)
       const blockIndex = originalBlocks.indexOf(block)
-      // The trailing activity sits inside the text element rather than after it,
-      // so streaming another paragraph into this block never moves the group to
-      // a different element and remounts it.
-      elements.push(
-        <div key={keyFor(block, i)} className="flex min-w-0 flex-col gap-2.5">
-          {block.text.map((text, ti) => (
-            <AssistantText
-              key={ti}
-              text={text}
-              model={model}
-              effort={effort}
-              timestamp={block.timestamp}
-              messageKey={`${turnId}:${blockIndex}:${ti}`}
-              onQuote={quote}
-              showMeta={blockIndex === lastTextIndex && ti === block.text.length - 1}
-            />
-          ))}
-          {items.length > 0 && <ActivityRun items={items} {...activity} />}
-        </div>
-      )
+      push(keyFor(block), (
+        <TextRun
+          block={block}
+          blockIndex={blockIndex}
+          isFinalText={blockIndex === lastTextIndex}
+          turnId={turnId}
+          model={model}
+          effort={effort}
+          items={items}
+          {...activity}
+        />
+      ))
       i = nextIndex
       continue
     }
 
-    if (block.kind === "queued_prompt") {
-      elements.push(
-        <QueuedPrompt
-          key={keyFor(block, i)}
-          content={block.content}
-          timestamp={block.timestamp ?? ""}
-          messageKey={String(originalBlocks.indexOf(block))}
-        />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "agent_message") {
-      elements.push(
-        <AgentMessageCard
-          key={keyFor(block, i)}
-          sender={block.sender}
-          body={block.body}
-          reply={block.reply}
-          timestamp={block.timestamp}
-          isLive={isSessionLive}
-        />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "sub_agent" || block.kind === "background_agent") {
-      elements.push(
-        <AgentPanel
-          key={keyFor(block, i)}
-          messages={block.messages}
-          expandAll={activity.expandAll}
-          label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
-          countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
-          liveOnCallRow={liveOnCallRow}
-        />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "hook_event") {
-      elements.push(
-        <HookEventChip key={keyFor(block, i)} events={block.events} />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "plan_mode") {
-      elements.push(
-        <PlanModeBlock
-          key={keyFor(block, i)}
-          plan={block.plan}
-          planFilePath={block.planFilePath}
-          status={block.status}
-          toolCalls={block.toolCalls}
-          expandAll={activity.expandAll}
-          expandToolPayloads={activity.expandToolPayloads}
-          isAgentActive={activity.isAgentActive}
-          skillMetadata={activity.skillMetadata}
-        />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "recap") {
-      elements.push(
-        <RecapBanner
-          key={keyFor(block, i)}
-          content={block.content}
-        />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "task_notification") {
-      elements.push(
-        <TaskNotificationBlock key={keyFor(block, i)} content={block.content} />
-      )
-      i++
-      continue
-    }
-
-    if (block.kind === "local_command") {
-      elements.push(
-        <LocalCommandBlock
-          key={keyFor(block, i)}
-          content={block.content}
-          contextUsage={block.contextUsage}
-          usageReport={block.usageReport}
-        />
-      )
-      i++
-      continue
-    }
-
     i++
+    const key = keyFor(block)
+    switch (block.kind) {
+      case "queued_prompt":
+        push(key, (
+          <div data-scroll-anchor="">
+            <QueuedPrompt
+              content={block.content}
+              timestamp={block.timestamp ?? ""}
+              messageKey={String(originalBlocks.indexOf(block))}
+            />
+          </div>
+        ))
+        break
+      case "agent_message":
+        push(key, (
+          <div data-scroll-anchor="">
+            <AgentMessageCard
+              sender={block.sender}
+              body={block.body}
+              reply={block.reply}
+              timestamp={block.timestamp}
+              isLive={isSessionLive}
+            />
+          </div>
+        ))
+        break
+      case "sub_agent":
+      case "background_agent":
+        push(key, (
+          <div data-scroll-anchor="">
+            <AgentPanel
+              messages={block.messages}
+              expandAll={activity.expandAll}
+              label={block.kind === "sub_agent" ? "Sub-agent activity" : "Background agent activity"}
+              countLabel={block.kind === "sub_agent" ? "subagents active" : "agents active"}
+              liveOnCallRow={liveOnCallRow}
+            />
+          </div>
+        ))
+        break
+      case "hook_event":
+        push(key, <div data-scroll-anchor=""><HookEventChip events={block.events} /></div>)
+        break
+      case "plan_mode":
+        push(key, (
+          <div data-scroll-anchor="">
+            <PlanModeBlock
+              plan={block.plan}
+              planFilePath={block.planFilePath}
+              status={block.status}
+              toolCalls={block.toolCalls}
+              expandAll={activity.expandAll}
+              expandToolPayloads={activity.expandToolPayloads}
+              isAgentActive={activity.isAgentActive}
+              skillMetadata={activity.skillMetadata}
+            />
+          </div>
+        ))
+        break
+      case "recap":
+        push(key, <div data-scroll-anchor=""><RecapBanner content={block.content} /></div>)
+        break
+      case "task_notification":
+        push(key, <div data-scroll-anchor=""><TaskNotificationBlock content={block.content} /></div>)
+        break
+      case "local_command":
+        push(key, (
+          <div data-scroll-anchor="">
+            <LocalCommandBlock
+              content={block.content}
+              contextUsage={block.contextUsage}
+              usageReport={block.usageReport}
+            />
+          </div>
+        ))
+        break
+    }
   }
 
   return <>{elements}</>

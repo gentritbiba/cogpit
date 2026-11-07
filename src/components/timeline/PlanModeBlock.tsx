@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect } from "react"
+import { useDisclosure, useDisclosureKey, useTimelineState } from "./disclosure"
 import { ChevronRight, ChevronDown, NotebookPen, CheckCircle, Clock, XCircle } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import type { ToolCall } from "../../../shared/session/types"
@@ -30,7 +31,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({
   isAgentActive,
   skillMetadata,
 }: Props) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useDisclosure(useDisclosureKey("plan"), true)
   const hasPendingQuestion = toolCalls.some(
     (tc) => tc.name === "AskUserQuestion" && tc.result === null,
   )
@@ -38,13 +39,13 @@ export const PlanModeBlock = memo(function PlanModeBlock({
   // forces the list open. Latched: once opened it stays open, so the list does
   // not collapse out from under the user the moment they answer. An explicit
   // toggle always wins.
-  const [callsOverride, setCallsOverride] = useState<boolean | null>(null)
-  const autoOpened = useRef(hasPendingQuestion)
+  const [callsOverride, setCallsOverride] = useTimelineState<boolean | null>(useDisclosureKey("calls"), null)
+  const [autoOpened, setAutoOpened] = useDisclosure(useDisclosureKey("calls:auto"), hasPendingQuestion)
   useEffect(() => {
-    if (hasPendingQuestion) autoOpened.current = true
-  }, [hasPendingQuestion])
+    if (hasPendingQuestion) setAutoOpened(true)
+  }, [hasPendingQuestion, setAutoOpened])
   const planOpen = expandAll || open
-  const callsOpen = expandAll || (callsOverride ?? (hasPendingQuestion || autoOpened.current))
+  const callsOpen = expandAll || (callsOverride ?? (hasPendingQuestion || autoOpened))
 
   const Icon = status === "approved" ? CheckCircle : status === "rejected" ? XCircle : Clock
   const Chev = planOpen ? ChevronDown : ChevronRight

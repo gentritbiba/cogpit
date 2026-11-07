@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId, memo } from "react"
+import { useEffect, useRef, useMemo, useId, memo } from "react"
 import { Brain, ChevronRight, ListTree, Loader2 } from "lucide-react"
 import { ToolCallCard } from "./ToolCallCard"
 import { ThinkingBlock } from "./ThinkingBlock"
@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
+import { useDisclosureKey, useScopeTurnKey, useTimelineState } from "./disclosure"
+import { useTimelineNavigation } from "./TimelineRowsProvider"
 import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
@@ -24,8 +26,8 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   thoughtForMs?: number
   skillMetadata?: Map<string, SkillMeta>
 }) {
-  const [openOverride, setOpenOverride] = useState<boolean | null>(null)
-  const targetRef = useRef<HTMLDivElement | null>(null)
+  // Null follows the calls: open while one runs, closed once they settle.
+  const [openOverride, setOpenOverride] = useTimelineState<boolean | null>(useDisclosureKey("group"), null)
   const panelId = useId()
   const statusId = useId()
   const summary = useMemo(() => summarizeToolActivity(toolCalls, isAgentActive), [toolCalls, isAgentActive])
@@ -36,32 +38,34 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const entries = useMemo(() => toolActivityEntries(toolCalls, activityItems), [toolCalls, activityItems])
   const tail = useMemo(() => visibleToolActivity(entries, tailOnly, isAgentActive), [entries, tailOnly, isAgentActive])
 
-  const lastScrolledToolCallRef = useRef<string | null>(null)
-  const scrollRafRef = useRef<number | null>(null)
+  // Navigation to a call opens its group first, then lands once the call is rendered.
+  const turnKey = useScopeTurnKey()
+  const timeline = useTimelineNavigation()
+  const revealedRef = useRef<string | null>(null)
+  const pendingRevealRef = useRef<string | null>(null)
+  const holdsActiveCall = activeToolCallId !== null && toolCalls.some((call) => call.id === activeToolCallId)
   useEffect(() => {
-    if (!activeToolCallId) {
-      lastScrolledToolCallRef.current = null
+    if (!holdsActiveCall || !activeToolCallId) {
+      revealedRef.current = null
       return
     }
-    if (activeToolCallId === lastScrolledToolCallRef.current) return
-    if (!toolCalls.some((call) => call.id === activeToolCallId)) return
-    lastScrolledToolCallRef.current = activeToolCallId
+    if (revealedRef.current === activeToolCallId) return
+    revealedRef.current = activeToolCallId
+    pendingRevealRef.current = activeToolCallId
     setOpenOverride(true)
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = requestAnimationFrame(() => {
-        scrollRafRef.current = null
-        targetRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-      })
-    })
-  }, [activeToolCallId, toolCalls])
-  useEffect(() => () => {
-    if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
-  }, [])
+  }, [holdsActiveCall, activeToolCallId, setOpenOverride])
+  useEffect(() => {
+    const callId = pendingRevealRef.current
+    if (!callId || !isOpen || !turnKey || !timeline) return
+    pendingRevealRef.current = null
+    const selector = `[data-tool-call-id="${CSS.escape(callId)}"]`
+    void timeline.scrollToTurn(turnKey, { align: "center", target: (row) => row.querySelector(selector) })
+  }, [activeToolCallId, isOpen, turnKey, timeline])
 
   function renderCall(call: ToolCall) {
     const isActive = activeToolCallId === call.id
     return (
-      <div key={call.id} ref={isActive ? targetRef : undefined} className={cn("min-w-0", isActive && "rounded-md ring-2 ring-ring")}>
+      <div key={call.id} className={cn("min-w-0", isActive && "rounded-md ring-2 ring-ring")}>
         <ToolCallCard toolCall={call} expandToolPayloads={expandToolPayloads} isAgentActive={isAgentActive && call.result === null} skillMetadata={skillMetadata} />
       </div>
     )
@@ -76,7 +80,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const Icon = toolCalls.length > 0 ? ListTree : Brain
 
   return (
-    <div className="min-w-0" data-tool-activity="">
+    <div className="min-w-0" data-tool-activity="" data-scroll-anchor="">
       <button
         type="button"
         className="group/tool flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] leading-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -107,7 +111,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
             {tail.hidden > 0 && <Button type="button" variant="ghost" size="xs" className="mb-0.5 text-muted-foreground" onClick={() => setOpenOverride(true)}>Show {tail.hidden} earlier {tail.hidden === 1 ? "step" : "steps"}</Button>}
             {tail.visible.map((entry) => entry.kind === "tool_call"
               ? renderCall(entry.toolCall)
-              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
+              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} data-scroll-anchor="" className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
           </div>
         </CollapsibleContent>
       </Collapsible>

@@ -49,6 +49,8 @@ function RedoSection() {
               <TurnSection
                 turn={turn}
                 index={sessionTurnCount + i}
+                turnKey={`ghost-${turn.id}`}
+                isLast={false}
               />
               {requestRedoUpTo && (
                 <Button

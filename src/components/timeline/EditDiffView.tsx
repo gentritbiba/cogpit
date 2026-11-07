@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react"
+import { useDisclosureKey, useTimelineState } from "./disclosure"
 import { ChevronsUpDown, Maximize2, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -11,7 +12,7 @@ import {
 import { getLangFromPath, type ThemedToken } from "@/lib/shiki"
 import { useHighlightedTokens } from "@/hooks/useHighlightedTokens"
 import { renderWork } from "@/lib/rendering/service"
-import type { DiffLine } from "@/lib/rendering/diff"
+import { computeDiff, type DiffLine } from "@/lib/rendering/diff"
 
 type TokenizedLines = ThemedToken[][]
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
@@ -181,12 +182,22 @@ const PROGRESSIVE_THRESHOLD = 120
 const INITIAL_BATCH = 60
 const BATCH_SIZE = 120
 
+/** One diff row: `text-xs` at `leading-relaxed`. */
+const LINE_HEIGHT_REM = 0.75 * 1.625
+/** `max-h-64`, the compact view's cap. */
+const COMPACT_MAX_REM = 16
+/** Edits this small are diffed on the spot, so the view mounts at its final height. */
+const SYNC_DIFF_CHARS = 4_000
+
+const NO_SEPARATORS: readonly number[] = []
+
 function DiffLines({
   lines,
   oldTokens,
   newTokens,
   compact,
   startLine = 1,
+  separatorsKey = null,
 }: {
   lines: DiffLine[]
   oldTokens: TokenizedLines | null
@@ -194,8 +205,10 @@ function DiffLines({
   compact?: boolean
   /** 1-based starting line offset for real file line numbers. */
   startLine?: number
+  /** Where the expanded separators are kept, so they survive a remount. */
+  separatorsKey?: string | null
 }): React.ReactElement {
-  const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(new Set())
+  const [expandedSeparators, setExpandedSeparators] = useTimelineState<readonly number[]>(separatorsKey, NO_SEPARATORS)
   const collapsed = useMemo(() => collapseUnchangedLines(lines), [lines])
 
   // Progressive rendering: for large diffs, render in batches
@@ -219,10 +232,12 @@ function DiffLines({
   }, [renderedCount, collapsed.length])
 
   const handleExpand = useCallback((fromIdx: number) => {
-    setExpandedSeparators((prev) => new Set(prev).add(fromIdx))
-  }, [])
+    setExpandedSeparators((prev) => prev.includes(fromIdx) ? prev : [...prev, fromIdx])
+  }, [setExpandedSeparators])
 
   const itemsToRender = needsProgressive ? collapsed.slice(0, renderedCount) : collapsed
+  // Lines still to come hold their space, so batches fill a box instead of growing it.
+  const pendingLines = collapsed.length - itemsToRender.length
 
   return (
     <div
@@ -233,7 +248,7 @@ function DiffLines({
     >
       {itemsToRender.map((item, idx) => {
         if (item.kind === "separator") {
-          if (expandedSeparators.has(item.fromIdx)) {
+          if (expandedSeparators.includes(item.fromIdx)) {
             return lines.slice(item.fromIdx, item.toIdx + 1).map((line, j) => {
               const lineIdx = item.fromIdx + j
               return (
@@ -269,6 +284,7 @@ function DiffLines({
           />
         )
       })}
+      {pendingLines > 0 && <div aria-hidden style={{ height: `${pendingLines * LINE_HEIGHT_REM}rem` }} />}
     </div>
   )
 }
@@ -296,6 +312,20 @@ function DiffStats({ lines }: { lines: DiffLine[] }): React.ReactElement {
 
 // ── Main component ──────────────────────────────────────────────────────────
 
+/** The diff without waiting for the worker: computed before, or small enough to compute now. */
+function readyDiff(oldString: string, newString: string): { oldString: string; newString: string; lines: DiffLine[] } | null {
+  const lines = renderWork.peekDiff(oldString, newString)
+    ?? (oldString.length + newString.length <= SYNC_DIFF_CHARS ? computeDiff(oldString, newString) : undefined)
+  return lines ? { oldString, newString, lines } : null
+}
+
+/** The height the diff will take, held while the worker computes it; exact once the compact cap applies. */
+function preparingHeightRem(oldString: string, newString: string, compact: boolean): number {
+  const rows = Math.max(oldString.split("\n").length, newString.split("\n").length)
+  const height = rows * LINE_HEIGHT_REM
+  return compact ? Math.min(height, COMPACT_MAX_REM) : height
+}
+
 interface EditDiffViewProps {
   oldString: string
   newString: string
@@ -318,8 +348,16 @@ export function EditDiffView({
 }: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const isDark = useIsDarkMode()
-  const [diff, setDiff] = useState<{ oldString: string; newString: string; lines: DiffLine[] } | null>(null)
+  const [diff, setDiff] = useState<{ oldString: string; newString: string; lines: DiffLine[] } | null>(() => readyDiff(oldString, newString))
+  const separatorsKey = useDisclosureKey("diff:separators")
+  const ready = diff?.oldString === oldString && diff.newString === newString
   useEffect(() => {
+    if (ready) return
+    const known = readyDiff(oldString, newString)
+    if (known) {
+      setDiff(known)
+      return
+    }
     const controller = new AbortController()
     let retry: ReturnType<typeof setTimeout> | undefined
     const request = () => {
@@ -331,8 +369,8 @@ export function EditDiffView({
     }
     request()
     return () => { controller.abort(); clearTimeout(retry) }
-  }, [oldString, newString])
-  const lines = diff?.oldString === oldString && diff.newString === newString ? diff.lines : []
+  }, [oldString, newString, ready])
+  const lines = ready && diff ? diff.lines : []
   const lang = getLangFromPath(filePath)
   const oldTokens = useHighlightedTokens(oldString, lang, isDark)
   const newTokens = useHighlightedTokens(newString, lang, isDark)
@@ -341,7 +379,7 @@ export function EditDiffView({
 
   return (
     <>
-      <div className={cn(
+      <div data-scroll-anchor="" className={cn(
         "overflow-hidden rounded border border-border bg-muted",
         isCompact && "mt-1.5",
         hideHeader && "border-0 rounded-none"
@@ -369,14 +407,20 @@ export function EditDiffView({
             </div>
           </div>
         )}
-        {!diff || diff.oldString !== oldString || diff.newString !== newString ? <div role="status" className="p-2 text-xs text-muted-foreground">Preparing diff…</div> : null}
-        <DiffLines
-          lines={lines}
-          oldTokens={oldTokens}
-          newTokens={newTokens}
-          compact={isCompact}
-          startLine={startLine}
-        />
+        {ready ? (
+          <DiffLines
+            lines={lines}
+            oldTokens={oldTokens}
+            newTokens={newTokens}
+            compact={isCompact}
+            startLine={startLine}
+            separatorsKey={separatorsKey}
+          />
+        ) : (
+          <div role="status" className="p-2 text-xs text-muted-foreground" style={{ height: `${preparingHeightRem(oldString, newString, isCompact)}rem` }}>
+            Preparing diff…
+          </div>
+        )}
       </div>
 
       {isCompact && (

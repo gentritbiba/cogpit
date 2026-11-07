@@ -1,4 +1,5 @@
-import { memo, useMemo, useState, type CSSProperties } from "react"
+import { memo, useMemo, type CSSProperties } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import { ArrowDownLeft, ChevronDown, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -137,7 +138,7 @@ export const AgentMessageCard = memo(function AgentMessageCard({
   reply,
   isLive,
 }: Props) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey("message"), false)
   // turnBuilder already unwraps the envelope; this is the last thing between a
   // body that escaped it and the reader.
   const body = useMemo(() => stripEnvelopeFraming(rawBody), [rawBody])

@@ -1,4 +1,5 @@
-import { useId, useMemo, useState } from "react"
+import { useId, useMemo } from "react"
+import { DisclosureScope, useDisclosure, useDisclosureKey } from "./disclosure"
 import { Check, ChevronRight, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
@@ -32,7 +33,7 @@ function NestedCall({ name, input }: { name: string; input: Record<string, unkno
 export function CodexExecToolInput({ input }: { input: Record<string, unknown> }): React.ReactElement {
   const script = String(input.raw ?? "")
   const calls = useMemo(() => getCodexExecCalls(input), [input])
-  const [sourceOpen, setSourceOpen] = useState(false)
+  const [sourceOpen, setSourceOpen] = useDisclosure(useDisclosureKey("source"), false)
   const [copied, copyScript] = useCopyWithFeedback()
   const sourceId = useId()
   const showSource = calls.length === 0 || sourceOpen
@@ -41,7 +42,7 @@ export function CodexExecToolInput({ input }: { input: Record<string, unknown> }
     <section className="mt-2 min-w-0" aria-label="Tool script">
       {calls.length > 0 && (
         <div className="flex min-w-0 flex-col gap-3">
-          {calls.map((call, index) => <NestedCall key={index} {...call} />)}
+          {calls.map((call, index) => <DisclosureScope key={index} id={`exec:${index}`}><NestedCall {...call} /></DisclosureScope>)}
         </div>
       )}
       <div className="mb-1 mt-1 flex items-center justify-between gap-2">

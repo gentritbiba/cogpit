@@ -8,6 +8,7 @@ vi.mock("@/lib/shiki", () => ({ getLangFromPath: () => null, highlightCode: vi.f
 
 import { ToolResultPanel } from "../ToolCallResult"
 import { ElidedResultImage } from "../ElidedResultImage"
+import { DisclosureProvider, DisclosureScope } from "../disclosure"
 import { __resetToolResultBodiesForTest, BODY_CACHE_CHARS, cachedBodyChars, fetchBodyChunk, fetchFullBody } from "@/lib/toolResultBodies"
 import type { ElidedResult } from "../../../../shared/session/types"
 
@@ -64,6 +65,25 @@ describe("an elided tool result", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }))
     await waitFor(() => expect(screen.getByText("first-second")).toBeInTheDocument())
     expect(authFetch).toHaveBeenLastCalledWith(expect.stringContaining("&start=6"), expect.anything())
+  })
+
+  it("shows an expanded body on the first frame after its row remounts, with no loading step to resize from", async () => {
+    authFetch.mockResolvedValue(ok("FULL BODY"))
+    const ui = (shown: boolean) => (
+      <DisclosureProvider>
+        {shown && <DisclosureScope id="turn-1" root><ToolResultPanel result="preview" resultRef={stub()} /></DisclosureScope>}
+      </DisclosureProvider>
+    )
+    const { rerender } = render(ui(true))
+    fireEvent.click(screen.getByRole("button", { name: /Show full output/ }))
+    await waitFor(() => expect(screen.getByText("FULL BODY")).toBeInTheDocument())
+
+    rerender(ui(false))
+    rerender(ui(true))
+
+    expect(screen.getByText("FULL BODY")).toBeInTheDocument()
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(authFetch).toHaveBeenCalledTimes(1)
   })
 
   it("loads a kept-back image only when asked", async () => {

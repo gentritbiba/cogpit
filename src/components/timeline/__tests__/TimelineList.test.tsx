@@ -351,6 +351,25 @@ describe("TimelineList with the scroll engine", () => {
     expect(viewportTopOf(block("t20:b"))).toBeCloseTo(0)
   })
 
+  it("waits for a target that appears after the next layout, landing the row meanwhile", async () => {
+    const { controller } = mount({ turns: makeTurns(ids(0, 200)) })
+    let ready = false
+    let landed: Promise<boolean> = Promise.resolve(false)
+    let settled = false
+    act(() => {
+      landed = controller.scrollToTurn("t20", { target: (row) => ready ? row.querySelector('[data-block="t20:b"]') : null })
+      void landed.then(() => { settled = true })
+    })
+    await act(async () => {})
+    expect(viewportTopOf('[data-row-key="t20"]')).toBeCloseTo(0)
+    expect(settled).toBe(false)
+    ready = true
+    resize()
+    await act(async () => { await landed })
+    expect(await landed).toBe(true)
+    expect(viewportTopOf(block("t20:b"))).toBeCloseTo(0)
+  })
+
   it("does not land navigation on a turn that is not loaded", async () => {
     const { controller } = mount({ turns: makeTurns(ids(0, 20)) })
     await expect(controller.scrollToTurn("missing")).resolves.toBe(false)
