@@ -208,6 +208,31 @@ describe("GET /api/team-member-session/:team/:member", () => {
     expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-0ten.jsonl`)).body.currentMemberName).toBe("dev-10")
   })
 
+  it("matches a legacy spawn prompt that spans lines, over another member the prompt mentions", async () => {
+    await writeTeam("legacy", {
+      createdAt: CREATED_AT + 1,
+      leadSessionId: LEAD,
+      members: [
+        { name: "boss", agentType: "team-lead" },
+        { name: "frontend-builder", prompt: "Build the settings page" },
+        { name: "tester", prompt: "Test what\nfrontend-builder ships" },
+      ],
+    })
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-t1.jsonl`, [{ message: { content: "Test what\nfrontend-builder ships" } }])
+    expect((await memberSession("legacy", "tester")).body.fileName).toBe(`${LEAD}/subagents/agent-t1.jsonl`)
+    expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-t1.jsonl`)).body.currentMemberName).toBe("tester")
+  })
+
+  it("still names a shorter member whose name also appears on its own beside a longer one", async () => {
+    await writeTeam("legacy", {
+      createdAt: CREATED_AT + 1,
+      leadSessionId: LEAD,
+      members: [{ name: "boss", agentType: "team-lead" }, { name: "dev-1" }, { name: "dev-10" }],
+    })
+    await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-one.jsonl`, [{ message: { content: "You are dev-1. Hand off to dev-10 when done" } }])
+    expect((await sessionTeam(`leadSessionId=${LEAD}&subagentFile=agent-one.jsonl`)).body.currentMemberName).toBe("dev-1")
+  })
+
   it("answers 404 when no session belongs to the member", async () => {
     await writeTranscript(LEAD_DIR, `${LEAD}/subagents/agent-a1.jsonl`, [{ message: { content: "unrelated" } }])
     expect(await memberSession(TEAM, "worker")).toMatchObject({ status: 404, body: { error: "Member session not found" } })

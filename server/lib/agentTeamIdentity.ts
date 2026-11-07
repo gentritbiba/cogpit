@@ -25,6 +25,7 @@ export interface TeamMemberRef {
 const SUBAGENT_FILE_NAME = /^agent-[^/\\]+\.jsonl$/
 
 const SUBAGENT_HEAD_BYTES = 16384
+const SUBAGENT_READ_BATCH = 16
 const TAG_HEAD_BYTES = 32768
 const TAG_HEAD_LINES = 40
 const NO_TAGS: TeamTags = Object.freeze({ teamName: null, agentName: null })
@@ -44,34 +45,44 @@ function firstLineOf(text: string): string {
   return text.split("\n")[0] || ""
 }
 
-/**
- * How strongly a sub-agent's first line names a member: its spawn prompt beats
- * its name, and a longer name beats one it contains ("dev-10" over "dev-1").
- */
-function memberScore(firstLine: string, member: TeamMemberRef): number {
-  if (!member.name || member.agentType === "team-lead") return 0
+/** The opening of a member's spawn prompt as a transcript line carries it: raw, or escaped inside JSON. */
+function promptForms(member: TeamMemberRef): string[] {
   const snippet = (member.prompt || "").slice(0, 120)
-  if (snippet && (firstLine.includes(snippet) || firstLine.includes(snippet.replace(/"/g, '\\"')))) {
-    return 1_000_000 + snippet.length
-  }
-  if (firstLine.includes(member.name) || firstLine.includes(member.name.replace(/-/g, " "))) {
-    return member.name.length
-  }
-  return 0
+  return snippet ? [snippet, JSON.stringify(snippet).slice(1, -1)] : []
 }
 
-/** The member a sub-agent transcript's first line names best, or null. */
-function bestMember(firstLine: string, members: ReadonlyArray<TeamMemberRef>): string | null {
-  let best: string | null = null
-  let bestScore = 0
-  for (const member of members) {
-    const score = memberScore(firstLine, member)
-    if (score > bestScore) {
-      best = member.name ?? null
-      bestScore = score
-    }
+function nameForms(name: string): string[] {
+  return [name, name.replace(/-/g, " ")]
+}
+
+/** Whether `name` occurs in `line` other than as part of one of the `longer` names containing it. */
+function occursOnItsOwn(line: string, name: string, longer: readonly string[]): boolean {
+  for (let at = line.indexOf(name); at >= 0; at = line.indexOf(name, at + 1)) {
+    const insideLonger = longer.some((other) => {
+      for (let start = Math.max(0, at + name.length - other.length); start <= at; start++) {
+        if (line.startsWith(other, start)) return true
+      }
+      return false
+    })
+    if (!insideLonger) return true
   }
-  return best
+  return false
+}
+
+/**
+ * The member a sub-agent transcript's first line names, or null. A spawn
+ * prompt is the stronger match; otherwise the first member in config order
+ * whose name appears on its own, so "dev-10" in the line does not name "dev-1".
+ */
+function bestMember(firstLine: string, members: ReadonlyArray<TeamMemberRef>): string | null {
+  const eligible = members.filter((member): member is TeamMemberRef & { name: string } =>
+    Boolean(member.name) && member.agentType !== "team-lead")
+  const byPrompt = eligible.find((member) => promptForms(member).some((form) => firstLine.includes(form)))
+  if (byPrompt) return byPrompt.name
+  const allForms = eligible.flatMap((member) => nameForms(member.name))
+  const byName = eligible.find((member) => nameForms(member.name).some((form) =>
+    occursOnItsOwn(firstLine, form, allForms.filter((other) => other.length > form.length && other.includes(form)))))
+  return byName?.name ?? null
 }
 
 async function readSubagentFirstLine(filePath: string): Promise<string | null> {
@@ -116,10 +127,11 @@ export async function findSubagentOfMember(
   } catch {
     return null
   }
-  const firstLines = await Promise.all(names.map((name) => readSubagentFirstLine(join(subagentDir, name))))
-  for (let i = 0; i < names.length; i++) {
-    const firstLine = firstLines[i]
-    if (firstLine !== null && bestMember(firstLine, members) === memberName) return names[i]
+  for (let start = 0; start < names.length; start += SUBAGENT_READ_BATCH) {
+    const batch = names.slice(start, start + SUBAGENT_READ_BATCH)
+    const firstLines = await Promise.all(batch.map((name) => readSubagentFirstLine(join(subagentDir, name))))
+    const match = batch.findIndex((_, i) => firstLines[i] !== null && bestMember(firstLines[i]!, members) === memberName)
+    if (match >= 0) return batch[match]
   }
   return null
 }
