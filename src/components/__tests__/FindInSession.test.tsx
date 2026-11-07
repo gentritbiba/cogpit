@@ -324,4 +324,15 @@ describe("FindInSession", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(QUOTE_SEARCH_PAGES)
     expect(screen.getByText(`No match in ${QUOTE_SEARCH_PAGES} more pages`)).toBeInTheDocument()
   })
+
+  it("closes on Escape from any of its controls, not only the input", async () => {
+    const scroller = mountScroller("")
+    const { handle } = makeHandle()
+    const findRef = createRef<FindInSessionHandle>()
+    render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
+    act(() => findRef.current!.open())
+    await search("needle")
+    fireEvent.keyDown(screen.getByRole("button", { name: "Next match" }), { key: "Escape" })
+    expect(screen.queryByLabelText("Find in conversation")).toBeNull()
+  })
 })

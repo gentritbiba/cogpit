@@ -279,12 +279,16 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
       return () => clearTimeout(timer)
     }, [query])
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault()
-        e.stopPropagation()
-        handleClose()
-      } else if (e.key === "Enter") {
+    // On the whole panel, so Escape also closes it from its buttons.
+    const handlePanelKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      e.preventDefault()
+      e.stopPropagation()
+      handleClose()
+    }
+
+    const handleInputKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
         e.preventDefault()
         if (searched !== query) setSearched(query)
         else navigate(activeIndex + (e.shiftKey ? -1 : 1))
@@ -310,14 +314,14 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
             style={ring}
           />
         )}
-        <div className="motion-slide-down-in absolute right-4 top-12 z-30 flex flex-col gap-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-sm">
+        <div onKeyDown={handlePanelKeyDown} className="motion-slide-down-in absolute right-4 top-12 z-30 flex flex-col gap-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-sm">
           <div className="flex items-center gap-1">
             <InputGroup className="w-64">
               <InputGroupInput
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onKeyDown={handleInputKeyDown}
                 placeholder="Find in conversation"
                 aria-label="Find in conversation"
                 autoFocus
