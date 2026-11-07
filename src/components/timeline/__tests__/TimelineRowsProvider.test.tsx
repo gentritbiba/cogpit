@@ -1,4 +1,3 @@
-import { Profiler } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
@@ -15,7 +14,9 @@ const mocks = vi.hoisted(() => ({
   undoEnabled: false,
   openBranches: (() => {}) as (turnIndex: number) => void,
   statusRenders: new Map<string, number>(),
+  rowRenders: 0,
   skills: new Map(),
+  branches: [],
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -34,12 +35,19 @@ vi.mock("@/contexts/SessionContext", () => ({
     isSubAgentView: false,
     pendingInteraction: null,
     permissions: { send: true, answer: true },
-    undoRedo: { enabled: mocks.undoEnabled, branches: [], branchesAtTurn: () => [], requestUndo: () => {} },
+    // `branches` is state in useUndoRedo, so it keeps its identity; the object around it does not.
+    undoRedo: { enabled: mocks.undoEnabled, branches: mocks.branches, branchesAtTurn: () => [], requestUndo: () => {} },
     actions: { handleOpenBranches: mocks.openBranches, handleBranchFromHere: () => {} },
   }),
 }))
 
-vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => mocks.skills }))
+// Each row calls it once per render, so it counts row renders.
+vi.mock("@/hooks/useSkillMetadata", () => ({
+  useSkillMetadata: () => {
+    mocks.rowRenders++
+    return mocks.skills
+  },
+}))
 vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 vi.mock("@/lib/shiki", () => ({ highlightCode: vi.fn().mockResolvedValue([]), getLangFromPath: vi.fn().mockReturnValue(null) }))
@@ -78,7 +86,6 @@ function sessionOf(turns: Turn[]): ParsedSession {
   }
 }
 
-let rowCommits: string[] = []
 let facts: TimelineRowFacts | null = null
 
 function FactsProbe() {
@@ -91,9 +98,7 @@ function Timeline({ session }: { session: ParsedSession }) {
     <TimelineRowsProvider>
       <FactsProbe />
       {session.turns.map((turn, index) => (
-        <Profiler key={turn.id} id={turn.id} onRender={(id) => rowCommits.push(id)}>
-          <TurnSection turn={turn} index={index} turnKey={turn.id} isLast={index === session.turns.length - 1} />
-        </Profiler>
+        <TurnSection key={turn.id} turn={turn} index={index} turnKey={turn.id} isLast={index === session.turns.length - 1} />
       ))}
     </TimelineRowsProvider>
   )
@@ -109,7 +114,7 @@ beforeEach(() => {
   mocks.undoEnabled = false
   mocks.openBranches = () => {}
   mocks.statusRenders.clear()
-  rowCommits = []
+  mocks.rowRenders = 0
   facts = null
 })
 
@@ -118,13 +123,14 @@ describe("TimelineRowsProvider", () => {
     const settled = [turnOf("t0", [{ kind: "tool_calls", toolCalls: [call("c0")] }]), turnOf("t1", [{ kind: "tool_calls", toolCalls: [call("c1")] }])]
     const liveCalls: TurnContentBlock = { kind: "tool_calls", toolCalls: [call("c2")] }
     const { rerender } = show(sessionOf([...settled, turnOf("live", [liveCalls, { kind: "text", text: ["streaming"], timestamp: TIME }])]))!
-    rowCommits = []
+    expect(mocks.rowRenders).toBe(3)
 
     for (let record = 0; record < 3; record++) {
       show(sessionOf([...settled, turnOf("live", [liveCalls, { kind: "text", text: [`streaming ${record}`], timestamp: TIME }])]), rerender)
     }
 
-    expect(rowCommits.filter((id) => id !== "live")).toEqual([])
+    // One render per record, all of them the live row's.
+    expect(mocks.rowRenders).toBe(3 + 3)
     expect(Object.fromEntries(mocks.statusRenders)).toEqual({ c0: 1, c1: 1, c2: 1 })
   })
 
