@@ -19,7 +19,7 @@ beforeEach(() => {
   resetFacts()
   changes = []
   unsubscribe = subscribeCatalog((change) => changes.push(change))
-  mocks.getSessionMeta.mockReset().mockResolvedValue({ aiTitle: "first", turnCount: 1 })
+  mocks.getSessionMeta.mockReset().mockResolvedValue({ aiTitle: "first", turnCount: 1, firstUserMessage: "", lastUserMessage: "" })
   mocks.getSessionStatus.mockReset().mockResolvedValue({ status: "tool_use" })
   startRowRechecks()
 })

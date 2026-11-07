@@ -42,28 +42,58 @@ function meta(prompt: string): SessionMeta {
 }
 
 describe("saved session catalog", () => {
-  it("round-trips facts through an owner-only file, capping saved prompts but not the ones in memory", async () => {
+  it("round-trips facts through an owner-only file, one compact line per file", async () => {
     await startFactPersistence()
-    const long = "p".repeat(5000)
-    recordFact("/t/a.jsonl", "row", { meta: meta(long), status: { status: "idle" }, mtimeMs: 10, size: 20 })
+    recordFact("/t/a.jsonl", "row", { meta: meta("short"), status: { status: "idle" }, mtimeMs: 10, size: 20 })
     recordFact("/t/a.jsonl", "identity", {
       identity: { sessionId: "a", cwd: "/w", gitBranch: "", isSubagent: false, parentSessionId: null },
-      final: true, mtimeMs: 10, size: 20,
+      final: true, mtimeMs: 10, size: 20, sidecars: "1:2",
     })
-    expect(factsFor("/t/a.jsonl")?.row?.meta.firstUserMessage).toHaveLength(5000)
+    recordFact("/t/b.jsonl", "project", { path: "/w", final: true, mtimeMs: 1, size: 1 })
     await saveFacts()
     expect(statSync(savedPath()).mode & 0o777).toBe(0o600)
+    const lines = readFileSync(savedPath(), "utf-8").split("\n")
+    expect(lines).toHaveLength(3)
+    expect(lines.every((line) => !line.includes("\n  "))).toBe(true)
 
     resetFacts()
     await startFactPersistence()
-    const loaded = factsFor("/t/a.jsonl")
-    expect(loaded?.row?.meta.firstUserMessage).toHaveLength(2000)
-    expect(loaded?.row?.meta.lastUserMessage).toHaveLength(2000)
-    expect(loaded?.identity?.identity?.cwd).toBe("/w")
+    expect(factsFor("/t/a.jsonl")?.row?.meta.firstUserMessage).toBe("short")
+    expect(factsFor("/t/a.jsonl")?.identity).toMatchObject({ final: true, sidecars: "1:2" })
+    expect(factsFor("/t/b.jsonl")?.project?.path).toBe("/w")
+  })
+
+  it("caps a row's prompts in memory as on disk", async () => {
+    const kept = recordFact("/t/a.jsonl", "row", { meta: meta("p".repeat(5000)), status: { status: "idle" }, mtimeMs: 10, size: 20 })
+    expect(kept.meta.firstUserMessage).toHaveLength(2000)
+    expect(factsFor("/t/a.jsonl")?.row?.meta.lastUserMessage).toHaveLength(2000)
+  })
+
+  it("does not write when nothing changed since the last save", async () => {
+    await startFactPersistence()
+    recordFact("/t/a.jsonl", "project", { path: "/w", final: true, mtimeMs: 1, size: 1 })
+    await saveFacts()
+    rmSync(savedPath())
+    await saveFacts()
+    expect(() => statSync(savedPath())).toThrow()
+    recordFact("/t/a.jsonl", "project", { path: "/w2", final: true, mtimeMs: 2, size: 2 })
+    await saveFacts()
+    expect(statSync(savedPath()).size).toBeGreaterThan(0)
+  })
+
+  it("keeps the other files when one saved line is torn", async () => {
+    writeFileSync(savedPath(), [
+      JSON.stringify({ revision: 2 }),
+      JSON.stringify(["/t/a.jsonl", { project: { path: "/w", final: true, mtimeMs: 1, size: 1 } }]),
+      "[\"/t/b.jsonl\", {\"proj",
+    ].join("\n"))
+    await startFactPersistence()
+    expect(factsFor("/t/a.jsonl")?.project?.path).toBe("/w")
+    expect(factsFor("/t/b.jsonl")).toBeUndefined()
   })
 
   it("discards a file another reader revision wrote, and one that does not parse", async () => {
-    writeFileSync(savedPath(), JSON.stringify({ revision: 999, files: [["/t/a.jsonl", { project: { path: "/w", final: true, mtimeMs: 1, size: 1 } }]] }))
+    writeFileSync(savedPath(), `${JSON.stringify({ revision: 999 })}\n${JSON.stringify(["/t/a.jsonl", { project: { path: "/w", final: true, mtimeMs: 1, size: 1 } }])}`)
     await startFactPersistence()
     expect(factsFor("/t/a.jsonl")).toBeUndefined()
 

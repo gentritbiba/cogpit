@@ -15,7 +15,7 @@ import { beginServerStart } from "./lib/installState"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
-import { startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
+import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -52,7 +52,7 @@ export function sessionApiPlugin(): Plugin {
       if (suppression) console.warn(suppression)
       const pluginManager = await initializeAppPlugins(dataDir, { legacyHost, legacyClickUpPath: CLICKUP_CONFIG_FILE })
       server.httpServer?.on("close", () => {
-        void Promise.all([pluginManager.close(), disposeHubPluginRelay()])
+        void Promise.all([pluginManager.close(), disposeHubPluginRelay(), flushSessionCatalog()])
       })
 
       // Security middleware (before all routes)
