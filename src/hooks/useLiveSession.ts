@@ -130,11 +130,10 @@ export function useLiveSession(
     }
 
     // ── SSE burst coalescing ────────────────────────────────────────────
-    // Heavy bash output produces many SSE messages per second. If we send
-    // each one to the parser worker individually, every postMessage pays the
-    // cost of a structured-clone of the entire SessionView on BOTH ends —
-    // ~O(session size) per message. For a 5 MB session that burst can starve
-    // the renderer for seconds.
+    // Heavy bash output produces many SSE messages per second. Each worker
+    // round trip answers with the turns it changed, and the last turn usually
+    // changes every time, so sending messages one by one would copy and render
+    // that turn once per message.
     //
     // Instead, accumulate incoming text in `pendingText` while the worker is
     // busy and flush it as a single batch when the worker becomes idle.

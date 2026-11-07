@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react"
 import { useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
 import type { SessionSource } from "@/lib/sessionSource"
-import { makeTurn } from "@/__tests__/fixtures"
+import { makeToolCall, makeTurn } from "@/__tests__/fixtures"
 import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -558,6 +558,47 @@ describe("useSessionState", () => {
       expect(getSession(hook).turns[0].assistantText).toEqual([
         "first half", "second half", "more",
       ])
+    })
+
+    it("replaces only the window turns that changed, keeping every paged turn", () => {
+      const hook = renderState()
+      const head = makeTurn({ id: "live-1", userMessage: "first" })
+      const middle = makeTurn({ id: "live-2", userMessage: "second" })
+      const last = makeTurn({ id: "live-3", userMessage: "third" })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [head, middle, last] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "old-1", userMessage: "older" })] })
+      const before = getSession(hook).turns
+      expect(getState(hook).seamOpen).toBe(false)
+
+      const grown = { ...last, assistantText: ["more"] }
+      const added = makeTurn({ id: "live-4", userMessage: "fourth" })
+      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [head, middle, grown, added] }) })
+
+      const after = getSession(hook).turns
+      expect(after.map((t) => t.id)).toEqual(["old-1", "live-1", "live-2", "live-3", "live-4"])
+      expect(after.slice(0, 3)).toEqual(before.slice(0, 3))
+      after.slice(0, 3).forEach((turn, index) => expect(turn).toBe(before[index]))
+      expect(after[3]).toBe(grown)
+    })
+
+    it("merges the pages again while a paged message waits for a reply", () => {
+      const hook = renderState()
+      const head = makeTurn({ id: "live-1", userMessage: "go" })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [head] }), source: makeSource(), isMobile: false })
+      const asked = makeTurn({
+        id: "old-1",
+        userMessage: "start",
+        contentBlocks: [{ kind: "agent_message", sender: "peer", body: "question?", timestamp: "2026-01-01T00:00:00Z" }],
+      })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [asked] })
+      expect(getState(hook).seamOpen).toBe(true)
+
+      const reply = makeToolCall({ name: "SendMessage", input: { to: "peer", summary: "answered" } })
+      const answering = makeTurn({ id: "live-2", userMessage: "reply", toolCalls: [reply], contentBlocks: [{ kind: "tool_calls", toolCalls: [reply] }] })
+      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [head, answering] }) })
+
+      const paired = getSession(hook).turns[0]!.contentBlocks[0]
+      expect(paired).toMatchObject({ kind: "agent_message", reply: { summary: "answered" } })
     })
 
     it("drops paged-in history when a different session is loaded", () => {

@@ -23,7 +23,9 @@ beforeAll(async () => {
   await import("../session-parser.worker")
 })
 
-function ask(request: Omit<WorkerRequest, "id">): WorkerResponse {
+type Request = WorkerRequest extends infer R ? R extends unknown ? Omit<R, "id"> : never : never
+
+function ask(request: Request): WorkerResponse {
   const id = nextId++
   ;(self as unknown as { onmessage: (event: { data: WorkerRequest }) => void }).onmessage({ data: { ...request, id } as WorkerRequest })
   const answer = posted.find((message) => message.id === id)!

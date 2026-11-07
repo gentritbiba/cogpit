@@ -70,7 +70,7 @@ import type { Turn } from "../shared/session/types"
 import type { SessionView } from "../shared/session/sessionDigest"
 import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
 import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
-import { hasEditToolCalls } from "../shared/session/edit-calls"
+import { turnsChangeFiles, workflowCallCount } from "@/lib/turnFacts"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
@@ -290,26 +290,18 @@ export default function App() {
 
   // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
   // Bash writes that bypass-permissions sessions produce instead.
-  const hasFileChanges = useMemo(() => {
-    const session = state.session
-    if (!session) return false
-    return session.turns.some((turn) =>
-      hasEditToolCalls(turn.toolCalls, session.cwd)
-      || turn.subAgentActivity.some((msg) => hasEditToolCalls(msg.toolCalls, session.cwd))
-    )
-  }, [state.session])
+  const hasFileChanges = useMemo(
+    () => state.session ? turnsChangeFiles(state.session.turns, state.session.cwd) : false,
+    [state.session],
+  )
 
   // Cheaply detect workflow runs from already-parsed turns (Workflow tool calls).
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
-  const workflowToolCallCount = useMemo(() => {
-    if (!state.session || !agentCapabilities.workflows) return 0
-    let n = 0
-    for (const turn of state.session.turns)
-      for (const tc of turn.toolCalls)
-        if (tc.name === "Workflow") n++
-    return n
-  }, [state.session, agentCapabilities.workflows])
+  const workflowToolCallCount = useMemo(
+    () => state.session && agentCapabilities.workflows ? workflowCallCount(state.session.turns) : 0,
+    [state.session, agentCapabilities.workflows],
+  )
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
   // Workflows live under the top-level session dir; not shown on sub-agent views.
