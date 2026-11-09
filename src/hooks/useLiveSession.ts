@@ -27,7 +27,8 @@ export const RESYNC_COOLDOWN_MS = 10_000
 
 export function useLiveSession(
   source: SessionSource | null,
-  onUpdate: (session: SessionView) => void,
+  /** A streamed update of the load `loadId`. */
+  onUpdate: (session: SessionView, loadId: number) => void,
   workerParse: (text: string) => Promise<SessionView>,
   workerAppend: (existing: SessionView, newText: string) => Promise<SessionView>,
   /** Reload the session from disk: when the stream cannot resume, the worker lost the session, or a batch keeps failing. */
@@ -147,7 +148,7 @@ export function useLiveSession(
       pendingUpdate = false
       rafId = null
       if (sessionRef.current) {
-        onUpdateRef.current(sessionRef.current)
+        onUpdateRef.current(sessionRef.current, loadId)
       }
     }
 
@@ -223,15 +224,15 @@ export function useLiveSession(
       parsePromise
         .then((parsedResult) => {
           const result = scopeParsedSession(parsedResult, splitInstanceDirName(dirName).instanceId)
+          // Cached even after the stream closed: the worker already holds this
+          // version, and a switch back resumes from the entry.
+          sessionCache.update(dirName, fileName, loadId, {
+            parsed: result,
+            source: { watchOffset: flushedEnd },
+          })
           if (closed) return
           sessionRef.current = result
           landingRef.current = { digest: result.digest, lines: [...(landingRef.current?.lines ?? []), ...flushedLines] }
-          if (dirName && fileName) {
-            sessionCache.update(dirName, fileName, {
-              parsed: result,
-              source: { watchOffset: flushedEnd },
-            })
-          }
           scheduleUpdate()
         }, (err) => {
           console.error("[useLiveSession] worker parse failed:", err)
@@ -328,7 +329,9 @@ export function useLiveSession(
           clearOverlay()
           setIsCompacting(false)
         } else if (data.type === "reset") {
-          // The file shrank under us, or we fell too far behind: load it again.
+          // The stream cannot resume from here, so load the session again. The
+          // server ends the stream and repeats this on every reconnect until the
+          // reload lands; the controller folds those into the reload it runs.
           onResyncRef.current?.()
         } else if (data.type === "lines") {
           if (typeof data.end === "number") {

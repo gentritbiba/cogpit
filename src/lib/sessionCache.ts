@@ -114,10 +114,20 @@ class SessionCache {
     this.trim(key)
   }
 
-  update(dirName: string, fileName: string, partial: Partial<Omit<CacheEntry, "source">> & { source?: Partial<CacheEntry["source"]> }): void {
+  /**
+   * Updates the entry of the load `loadId`. An entry since replaced by
+   * another load of the transcript is left alone, so a write that started
+   * before a reload can never mix the old load into the new one.
+   */
+  update(
+    dirName: string,
+    fileName: string,
+    loadId: number,
+    partial: Partial<Omit<CacheEntry, "source">> & { source?: Partial<Omit<CacheEntry["source"], "loadId">> },
+  ): void {
     const key = sessionCacheKey(dirName, fileName)
     const entry = this.cache.get(key)
-    if (!entry) return
+    if (!entry || entry.source.loadId !== loadId) return
 
     const previous = entry.parsed
     if (partial.parsed !== undefined) entry.parsed = partial.parsed

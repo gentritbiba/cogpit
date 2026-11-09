@@ -238,7 +238,7 @@ describe("useParserWorker releases", () => {
     const session = await cached(hook, 1)
     const appended = hook.result.current.append(session, "more\n")
     latest().reply({ type: "delta", delta: { fromTurn: 1, turns: [], turnVersions: [], stats: session.stats, digest: session.digest, meta: {} }, kept: { handle: 1, version: 2 } })
-    sessionCache.update("-d", "1.jsonl", { parsed: await appended })
+    sessionCache.update("-d", "1.jsonl", 1, { parsed: await appended })
     expect(releases()).toEqual([])
   })
 

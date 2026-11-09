@@ -71,7 +71,8 @@ export type SessionAction =
   | { type: "SET_EXPAND_TOOL_PAYLOADS"; value: boolean }
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
-  | { type: "UPDATE_SESSION"; session: SessionView }
+  /** A streamed update of the load `loadId`; one from an earlier load of the session is dropped. */
+  | { type: "UPDATE_SESSION"; session: SessionView; loadId: number }
   | { type: "SET_OLDER_TURNS"; turns: Turn[] }
   | { type: "RELOAD_SESSION_CONTENT"; session: SessionView; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
@@ -259,6 +260,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       return { ...state, mobileTab: action.tab }
 
     case "UPDATE_SESSION":
+      if (state.sessionSource?.loadId !== action.loadId) return state
       return { ...state, ...updateSession(state, action.session) }
 
     case "SET_OLDER_TURNS": {

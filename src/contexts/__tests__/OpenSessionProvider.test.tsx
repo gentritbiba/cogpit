@@ -83,7 +83,7 @@ describe("OpenSessionProvider", () => {
     const before = { ...renders }
 
     const streamed = session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })])
-    act(() => store.dispatch({ type: "UPDATE_SESSION", session: streamed }))
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: streamed }))
 
     expect(screen.getByTestId("turns")).toHaveTextContent("2")
     expect(renders.transcript).toBe(before.transcript + 1)

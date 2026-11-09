@@ -490,7 +490,7 @@ describe("reloadCurrent", () => {
   it("replaces a cache hit and its paged history cleanly when the stream resets", async () => {
     const { sessions, dispatch, click, shown } = setup()
     cacheEntry("a.jsonl")
-    sessionCache.update("-d", "a.jsonl", { olderTurns: [{ id: "old" } as unknown as Turn] })
+    sessionCache.update("-d", "a.jsonl", 1, { olderTurns: [{ id: "old" } as unknown as Turn] })
     void click("a.jsonl")
     expect(shown).toHaveLength(1)
 
