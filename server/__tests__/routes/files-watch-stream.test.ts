@@ -541,6 +541,23 @@ describe("/api/watch stream v2", () => {
     closeConnection()
   })
 
+  it("resets a client that resumes inside a line, as after a diverged reset (review 2 #3)", async () => {
+    liveFile(`${a}\n${b}\n`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${bytes(`${a}\n`) + 3}&stream=2`)
+    expect(parseFrames(frames)).toEqual([{ type: "reset", reason: "diverged" }])
+    expect(res.end).toHaveBeenCalledOnce()
+    closeConnection()
+  })
+
+  it("resumes a client on a line boundary without a reset", async () => {
+    const file = liveFile(`${a}\n`)
+    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size}&stream=2`)
+    file.write(`${b}\n`)
+    await file.poke()
+    expect(parseFrames(frames).map(({ type }) => type)).toEqual(["init", "lines"])
+    closeConnection()
+  })
+
   it("resumes a client one byte past the end, whose line's newline is still owed", async () => {
     const file = liveFile(`${a}\n${b}`)
     const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size + 1}&stream=2`)

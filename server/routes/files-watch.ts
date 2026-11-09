@@ -447,6 +447,18 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (agentsPoller) clearInterval(agentsPoller)
     }
 
+    /** Whether the byte before `at` is a newline, as before every offset a v2 stream hands out. */
+    async function endsLine(at: number): Promise<boolean> {
+      const fh = await openTranscript(sessionFilePath)
+      try {
+        const byte = Buffer.alloc(1)
+        const { bytesRead } = await fh.read(byte, 0, 1, at - 1)
+        return bytesRead === 1 && byte[0] === 0x0a
+      } finally {
+        await fh.close()
+      }
+    }
+
     /** Tells a v2 client it has to reload, then ends the stream so it reconnects, and hears it again until it has. */
     function reset(reason: WatchResetReason) {
       if (closed) return
@@ -460,7 +472,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // and this connection. Without this, a line written in that race window
     // is skipped and the UI stays one response behind until the next write.
     statTranscript(sessionFilePath)
-      .then((s) => {
+      .then(async (s) => {
         if (closed) return
         if (!hasRequestedOffset) offset = s.size
         else if (v2 && offset === s.size + 1) {
@@ -469,7 +481,9 @@ export function registerFileWatchRoutes(use: UseFn) {
           newlineOwed = true
         } else if (v2 && offset > s.size) return reset("truncated")
         else if (v2 && s.size - offset > WATCH_GAP_RESET_BYTES) return reset("gap")
+        else if (v2 && offset > 0 && !await endsLine(offset)) return reset("diverged")
         else if (offset > s.size) offset = s.size
+        if (closed) return
         lineStart = newlineOwed ? offset + 1 : offset
         initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
