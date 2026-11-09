@@ -126,10 +126,16 @@ function startFlight(key: string, address: SessionAddress, parse: Parse, fresh: 
       flight.fetched = true
       const parsed = scopeParsedSession(await parse(tailText(data)), splitInstanceDirName(dirName).instanceId)
       // Never write one device's or identity's transcript under another's key.
-      if (sessionCacheKey(dirName, fileName) !== key) return null
+      if (sessionCacheKey(dirName, fileName) !== key) {
+        sessionCache.discard(parsed)
+        return null
+      }
       // A load that finished first, which a live stream may have advanced since, wins.
       const raced = fresh ? undefined : sessionCache.get(dirName, fileName)
-      if (raced) return { parsed: raced.parsed, source: raced.source }
+      if (raced) {
+        sessionCache.discard(parsed)
+        return { parsed: raced.parsed, source: raced.source }
+      }
       const source: SessionSource = {
         dirName,
         fileName,
@@ -185,6 +191,8 @@ export function createSessionController({
   let pending: PendingOpen | null = null
   /** The session the last committed open put on screen. */
   let shown: SessionAddress | null = null
+  /** This shell's screen in the cache, which holds the view it shows. */
+  const screen = {}
 
   const dropPending = () => {
     if (!pending) return
@@ -208,6 +216,7 @@ export function createSessionController({
     const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
       pending = null
       shown = address
+      sessionCache.show(screen, loaded.parsed)
       commit(loaded)
       return "opened"
     }
@@ -276,6 +285,7 @@ export function createSessionController({
       dropPending()
       token += 1
       shown = null
+      sessionCache.show(screen, null)
     },
   }
 }

@@ -103,6 +103,15 @@ describe("session parser worker", () => {
     expect(ask({ type: "append", base: { handle: 999, version: 1 }, newText: "" }).type).toBe("missing")
   })
 
+  it("keeps every session until the renderer releases it (review #2)", () => {
+    const sessions = Array.from({ length: 8 }, (_, index) => open(toJsonl([userMsg(`session ${index}`)])))
+    expect(() => sessions[0]!.append(toJsonl([userMsg("still here")]))).not.toThrow()
+
+    const { kept } = sessions[0]!
+    ;(self as unknown as { onmessage: (event: { data: WorkerRequest }) => void }).onmessage({ data: { type: "release", handle: kept.handle } })
+    expect(ask({ type: "append", base: kept, newText: toJsonl([userMsg("gone")]) }).type).toBe("missing")
+  })
+
   it("keeps no session for a page of older turns", () => {
     const answer = ask({ type: "parse", text: toJsonl(first), keep: false })
     expect(answer).toMatchObject({ type: "parsed", kept: null })

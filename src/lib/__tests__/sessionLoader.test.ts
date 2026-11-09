@@ -86,10 +86,15 @@ function cacheEntry(fileName: string, overrides: Partial<SessionView> = {}) {
   return parsed
 }
 
+/** Views the cache or a screen let go of, so the worker can drop their sessions. */
+let released: SessionView[] = []
+sessionCache.onRelease((view) => { released.push(view) })
+
 beforeEach(() => {
   vi.clearAllMocks()
   fetches = []
   sessionCache.clear()
+  released = []
   mockDeviceScope.mockReturnValue("local")
   mockIdentity.mockReturnValue(null)
   deferFetches()
@@ -299,6 +304,7 @@ describe("stale results (R1)", () => {
     expect(shown).toHaveLength(0)
     mockDeviceScope.mockReturnValue("local")
     expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
+    expect(released.map(({ sessionId }) => sessionId)).toEqual(['{"h":1}\na'])
   })
 
   it("drops a result when the signed-in identity changed while it loaded", async () => {
@@ -378,6 +384,44 @@ describe("shared loads (R2)", () => {
     expect(shown[0].parsed).toBe(live)
     await flush()
     expect(sessionCache.get("-d", "a.jsonl")?.parsed).toBe(live)
+    expect(released.map(({ sessionId }) => sessionId)).toEqual(['{"h":1}\na'])
+  })
+})
+
+describe("the view on screen (review #2)", () => {
+  it("stays held while hover prefetches push it out of the cache, until the user leaves", async () => {
+    const { sessions, click, shown } = setup()
+    const a = click("a.jsonl")
+    await flush()
+    fetchFor("a.jsonl").resolve(tail("a"))
+    await a
+    const onScreen = shown[0].parsed
+
+    for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
+      sessions.prefetchSession({ dirName: "-d", fileName: `${name}.jsonl` })
+      await flush()
+      fetchFor(`${name}.jsonl`).resolve(tail(name))
+      await flush()
+    }
+
+    expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
+    expect(released).toContain(onScreen)
+    expect([...sessionCache.heldViews()]).toContain(onScreen)
+
+    released = []
+    sessions.leave()
+    expect(released).toEqual([onScreen])
+    expect([...sessionCache.heldViews()]).not.toContain(onScreen)
+  })
+
+  it("lets the previous view go when another open lands", () => {
+    const { click } = setup()
+    const a = cacheEntry("a.jsonl")
+    cacheEntry("b.jsonl")
+    void click("a.jsonl")
+    void click("b.jsonl")
+    sessionCache.evict("-d", "a.jsonl")
+    expect([...sessionCache.heldViews()]).not.toContain(a)
   })
 })
 

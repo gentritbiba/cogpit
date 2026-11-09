@@ -34,8 +34,49 @@ export function sessionCacheKey(dirName: string, fileName: string): string {
   return `${activeScope()}:${dirName}/${fileName}`
 }
 
+type ReleaseListener = (view: SessionView) => void
+
 class SessionCache {
   private cache = new Map<string, CacheEntry>()
+  /** The view each session shell has on screen, which outlives its entry. */
+  private screens = new Map<object, SessionView>()
+  private releaseListeners = new Set<ReleaseListener>()
+
+  /** Calls `listener` with every view the cache or a screen lets go of. */
+  onRelease(listener: ReleaseListener): () => void {
+    this.releaseListeners.add(listener)
+    return () => { this.releaseListeners.delete(listener) }
+  }
+
+  /** Every view still held: each entry's, and each screen's. */
+  *heldViews(): Generator<SessionView> {
+    for (const entry of this.cache.values()) yield entry.parsed
+    yield* this.screens.values()
+  }
+
+  /** `screen` now shows `view`, or nothing; the view it showed before is let go of. */
+  show(screen: object, view: SessionView | null): void {
+    const previous = this.screens.get(screen)
+    if (view) this.screens.set(screen, view)
+    else this.screens.delete(screen)
+    if (previous && previous !== view) this.release(previous)
+  }
+
+  /** A view that was loaded but is not kept. */
+  discard(view: SessionView): void {
+    this.release(view)
+  }
+
+  private release(view: SessionView): void {
+    for (const listener of this.releaseListeners) listener(view)
+  }
+
+  private drop(key: string): void {
+    const entry = this.cache.get(key)
+    if (!entry) return
+    this.cache.delete(key)
+    this.release(entry.parsed)
+  }
 
   get(dirName: string, fileName: string): CacheEntry | undefined {
     const key = sessionCacheKey(dirName, fileName)
@@ -49,7 +90,8 @@ class SessionCache {
   set(parsed: SessionView, source: SessionSource, nextByteOffset: number, hasMore: boolean): void {
     const key = sessionCacheKey(source.dirName, source.fileName)
 
-    if (!this.cache.has(key) && this.cache.size >= MAX_ENTRIES) {
+    const replaced = this.cache.get(key)
+    if (!replaced && this.cache.size >= MAX_ENTRIES) {
       this.evictLRU()
     }
 
@@ -61,6 +103,7 @@ class SessionCache {
       hasMore,
       lastAccessed: Date.now(),
     })
+    if (replaced) this.release(replaced.parsed)
   }
 
   update(dirName: string, fileName: string, partial: Partial<Omit<CacheEntry, "source">> & { source?: Partial<CacheEntry["source"]> }): void {
@@ -68,6 +111,7 @@ class SessionCache {
     const entry = this.cache.get(key)
     if (!entry) return
 
+    const previous = entry.parsed
     if (partial.parsed !== undefined) entry.parsed = partial.parsed
     if (partial.olderTurns !== undefined) entry.olderTurns = partial.olderTurns
     if (partial.nextByteOffset !== undefined) entry.nextByteOffset = partial.nextByteOffset
@@ -76,11 +120,12 @@ class SessionCache {
     if (partial.source) {
       entry.source = { ...entry.source, ...partial.source }
     }
+    if (entry.parsed !== previous) this.release(previous)
   }
 
   evict(dirName?: string, fileName?: string): void {
     if (dirName !== undefined && fileName !== undefined) {
-      this.cache.delete(sessionCacheKey(dirName, fileName))
+      this.drop(sessionCacheKey(dirName, fileName))
     } else {
       this.evictLRU()
     }
@@ -90,12 +135,12 @@ class SessionCache {
   evictSession(sessionId: string): void {
     const prefix = `${activeScope()}:`
     for (const [key, { source }] of this.cache) {
-      if (key.startsWith(prefix) && rootSessionIdOf(source.dirName, source.fileName) === sessionId) this.cache.delete(key)
+      if (key.startsWith(prefix) && rootSessionIdOf(source.dirName, source.fileName) === sessionId) this.drop(key)
     }
   }
 
   clear(): void {
-    this.cache.clear()
+    for (const key of [...this.cache.keys()]) this.drop(key)
   }
 
   private evictLRU(): void {
@@ -110,7 +155,7 @@ class SessionCache {
     }
 
     if (oldestKey !== undefined) {
-      this.cache.delete(oldestKey)
+      this.drop(oldestKey)
     }
   }
 }
