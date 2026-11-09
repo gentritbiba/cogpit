@@ -31,8 +31,12 @@ export function useLiveSession(
   onUpdate: (session: SessionView, loadId: number) => void,
   workerParse: (text: string) => Promise<SessionView>,
   workerAppend: (existing: SessionView, newText: string) => Promise<SessionView>,
-  /** Reload the session from disk: when the stream cannot resume, the worker lost the session, or a batch keeps failing. */
-  onResync: (() => void) | undefined,
+  /**
+   * Reload the session from disk: when the stream cannot resume, the worker
+   * lost the session, or a batch keeps failing. A reload already waiting to
+   * retry keeps its wait.
+   */
+  onResync: ((options: { keepBackoff: boolean }) => void) | undefined,
   /** The session `source` loaded, read when the stream starts. */
   loadedSession: () => SessionView | null,
 ) {
@@ -245,7 +249,7 @@ export function useLiveSession(
           const now = Date.now()
           if (onResyncRef.current && now - lastResyncAtRef.current >= RESYNC_COOLDOWN_MS) {
             lastResyncAtRef.current = now
-            onResyncRef.current()
+            onResyncRef.current({ keepBackoff: true })
           }
         })
         .catch((err) => {
@@ -332,7 +336,7 @@ export function useLiveSession(
           // The stream cannot resume from here, so load the session again. The
           // server ends the stream and repeats this on every reconnect until the
           // reload lands; the controller folds those into the reload it runs.
-          onResyncRef.current?.()
+          onResyncRef.current?.({ keepBackoff: true })
         } else if (data.type === "lines") {
           if (typeof data.end === "number") {
             if (data.end <= appliedEnd) return

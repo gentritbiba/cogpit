@@ -601,14 +601,30 @@ describe("reloadCurrent", () => {
 
     it("folds a reset that arrives while it waits into the retry", async () => {
       const { sessions, reloading } = await failingReload()
-      void sessions.reloadCurrent()
-      void sessions.reloadCurrent()
+      void sessions.reloadCurrent({ keepBackoff: true })
+      void sessions.reloadCurrent({ keepBackoff: true })
       await tick()
       expect(fetches).toHaveLength(1)
       await tick(RELOAD_RETRY_DELAYS_MS[0]!)
       expect(fetches).toHaveLength(2)
       fetches[1].resolve(tail("a3"))
       await reloading
+    })
+
+    it("retries at once when asked again directly, but not for a reset (review 2 #4)", async () => {
+      const { sessions, dispatch, reloading } = await failingReload()
+      void sessions.reloadCurrent({ keepBackoff: true })
+      await tick()
+      expect(fetches).toHaveLength(1)
+
+      // An undo asks for the reload while the retry waits.
+      const confirmed = sessions.reloadCurrent()
+      expect(confirmed).toBe(reloading)
+      await tick()
+      expect(fetches).toHaveLength(2)
+      fetches[1].resolve(tail("after undo"))
+      await confirmed
+      expect(dispatch).toHaveBeenCalledOnce()
     })
 
     it("gives up after the last wait, and a later reset starts over", async () => {
