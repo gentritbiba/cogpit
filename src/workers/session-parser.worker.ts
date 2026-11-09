@@ -2,6 +2,7 @@ import { appendSessionInPlace, parseSession } from "../../shared/session/parser"
 import { liftElidedTurn } from "../../shared/session/resultProjection"
 import { computeSessionDigest, toSessionView, type SessionDigest, type SessionView } from "../../shared/session/sessionDigest"
 import type { ParsedSession, SessionStats, Turn } from "../../shared/session/types"
+import { jsonEqual } from "../lib/jsonEqual"
 
 /**
  * The worker keeps the sessions it parsed, raw records included, and the
@@ -57,23 +58,6 @@ let nextHandle = 0
 let lastStamp = 0
 const stamp = () => ++lastStamp
 
-function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false
-    for (let index = 0; index < a.length; index++) if (!sameValue(a[index], b[index])) return false
-    return true
-  }
-  if (Array.isArray(b)) return false
-  const left = a as Record<string, unknown>
-  const right = b as Record<string, unknown>
-  const keys = Object.keys(left)
-  if (keys.length !== Object.keys(right).length) return false
-  for (const key of keys) if (!(key in right) || !sameValue(left[key], right[key])) return false
-  return true
-}
-
 function metaOf(session: ParsedSession): SessionMeta {
   const { turns: _turns, stats: _stats, rawMessages: _records, ...meta } = session
   return meta
@@ -114,7 +98,7 @@ function append(base: KeptVersion, newText: string): (WorkerResponse & { type: "
       continue
     }
     liftElidedTurn(turn)
-    if (previous && previous.id === turn.id && sameValue(previous, turn)) {
+    if (previous && previous.id === turn.id && jsonEqual(previous, turn)) {
       turns[index] = previous
       turnVersions.push(held.turnVersions[index]!)
       continue
