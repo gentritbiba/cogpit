@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { BrowserPanel } from "@/components/BrowserPanel"
-import { SessionProvider, type SessionChatContextValue, type SessionContextValue } from "@/contexts/SessionContext"
+import { InSession } from "@/__tests__/InSession"
 import type { UseBrowserSessions } from "@/hooks/useBrowserSessions"
 import type { BrowserFrame, BrowserSocketStatus, UseBrowserSocket } from "@/hooks/useBrowserSocket"
 import type { WorkspacePanelContext } from "@/plugin-api"
@@ -196,9 +196,9 @@ function contextOf(session: SessionView | null = null): WorkspacePanelContext {
 /** The panel with `session` open, as the workspace shows it. */
 function panel(session: SessionView | null = null) {
   return (
-    <SessionProvider value={{ session } as SessionContextValue} chatValue={{} as SessionChatContextValue}>
+    <InSession session={session}>
       <BrowserPanel context={contextOf(session)} active closePanel={closePanel} />
-    </SessionProvider>
+    </InSession>
   )
 }
 

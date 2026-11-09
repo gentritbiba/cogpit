@@ -1,4 +1,4 @@
-import { useCallback, useState, type Dispatch } from "react"
+import { useCallback, useEffect, useState, type Dispatch } from "react"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionAction } from "@/hooks/useSessionState"
 import { createSessionController, type SessionController } from "@/lib/sessionLoader"
@@ -16,6 +16,9 @@ export function useSessionController(
   parse: (text: string) => Promise<SessionView>,
 ): { sessions: SessionController; dispatch: Dispatch<SessionAction> } {
   const [sessions] = useState(() => createSessionController({ parse, dispatch: dispatchState }))
+  // A shell that goes away (a closed share, a device switch) leaves its session,
+  // so the cache no longer keeps its screen and nothing lands after it.
+  useEffect(() => () => sessions.leave(), [sessions])
 
   const dispatch = useCallback((action: SessionAction) => {
     if (LEAVES.has(action.type)) sessions.leave()

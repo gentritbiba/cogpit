@@ -1,4 +1,4 @@
-import { memo, startTransition } from "react"
+import { memo } from "react"
 import type { ReactNode } from "react"
 import {
   Check,
@@ -219,10 +219,8 @@ function SessionBreadcrumb({
   const canReveal = hostFiles && !isRemote
 
   function handleViewProjectSessions(): void {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile: false })
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
-    })
+    dispatch({ type: "GO_HOME", isMobile: false })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
   }
 
   return (

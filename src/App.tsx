@@ -1,5 +1,5 @@
 import { ConversationComposer } from "@/components/ConversationComposer"
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense, type ReactNode } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, lazy, Suspense, type ReactNode } from "react"
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -101,6 +101,15 @@ import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
 const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
 
+// Facts App reads from the open session, at module scope so each runs only when the session changes.
+const selectSessionId = (open: SessionView | null) => open?.sessionId ?? null
+const selectCwd = (open: SessionView | null) => open?.cwd
+const selectModel = (open: SessionView | null) => open?.model
+const selectHasSession = (open: SessionView | null) => open !== null
+const selectChangesFiles = (open: SessionView | null) => open ? turnsChangeFiles(open.turns, open.cwd) : false
+const selectInteraction = (open: SessionView | null) => open ? detectPendingInteraction(open) : null
+const selectModelFallback = (open: SessionView | null) => open?.digest.modelFallback ?? null
+
 /** A fresh load brings back everything the server refused while its gate kept the caller out. */
 function reloadApp(): void {
   window.location.reload()
@@ -123,10 +132,10 @@ export default function App() {
   // facts it needs from it, so a streamed batch does not re-render the shell.
   const [state, dispatchState, sessionStore] = useSessionState()
   const getSession = useCallback(() => sessionStore.getState().session, [sessionStore])
-  const sessionId = useSessionSelector(sessionStore, (open) => open?.sessionId ?? null)
-  const sessionCwd = useSessionSelector(sessionStore, (open) => open?.cwd)
-  const sessionModel = useSessionSelector(sessionStore, (open) => open?.model)
-  const hasSession = useSessionSelector(sessionStore, (open) => open !== null)
+  const sessionId = useSessionSelector(sessionStore, selectSessionId)
+  const sessionCwd = useSessionSelector(sessionStore, selectCwd)
+  const sessionModel = useSessionSelector(sessionStore, selectModel)
+  const hasSession = useSessionSelector(sessionStore, selectHasSession)
   const { procBySession } = useSessionInventory()
   const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
   const { sessions, dispatch } = useSessionController(dispatchState, workerParse)
@@ -157,7 +166,10 @@ export default function App() {
   // the cache reports no more chunks.
   const { loadMore: loadMoreTurns } = chunkedSession
   const searchHydrationActive = Boolean(state.searchQuery) && chunkedSession.hasMore
-  const loadedTurnCount = useSessionSelector(sessionStore, (open) => searchHydrationActive ? open?.turns.length ?? 0 : 0)
+  const loadedTurnCount = useSessionSelector(
+    sessionStore,
+    useCallback((open: SessionView | null) => searchHydrationActive ? open?.turns.length ?? 0 : 0, [searchHydrationActive]),
+  )
   useEffect(() => {
     if (!searchHydrationActive) return
     void loadMoreTurns()
@@ -183,9 +195,7 @@ export default function App() {
     [toggleWorkspacePanel],
   )
   const handleSelectProject = useCallback((dirName: string | null) => {
-    startTransition(() => {
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
@@ -208,9 +218,7 @@ export default function App() {
   const handleEditCommand = useCallback((commandName: string) => {
     if (!configAdminEnabled) return
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
-    startTransition(() => {
-      dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
-    })
+    dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
   }, [configAdminEnabled, dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
@@ -293,17 +301,15 @@ export default function App() {
 
   // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
   // Bash writes that bypass-permissions sessions produce instead.
-  const hasFileChanges = useSessionSelector(
-    sessionStore,
-    (open) => open ? turnsChangeFiles(open.turns, open.cwd) : false,
-  )
+  const hasFileChanges = useSessionSelector(sessionStore, selectChangesFiles)
 
   // Cheaply detect workflow runs from already-parsed turns (Workflow tool calls).
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
+  const tracksWorkflows = agentCapabilities.workflows
   const workflowToolCallCount = useSessionSelector(
     sessionStore,
-    (open) => open && agentCapabilities.workflows ? workflowCallCount(open.turns) : 0,
+    useCallback((open: SessionView | null) => open && tracksWorkflows ? workflowCallCount(open.turns) : 0, [tracksWorkflows]),
   )
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
@@ -343,11 +349,7 @@ export default function App() {
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
   }, [hostFilesEnabled, openWorkspacePanel, isMobile])
 
-  const transcriptInteraction = useSessionSelector(
-    sessionStore,
-    (open) => open ? detectPendingInteraction(open) : null,
-    samePendingInteraction,
-  )
+  const transcriptInteraction = useSessionSelector(sessionStore, selectInteraction, samePendingInteraction)
 
   // The stream starts from the session the open controller already parsed, so
   // the worker does not parse it twice. After a reconnect or a failed parse,
@@ -405,7 +407,7 @@ export default function App() {
   } = useComposerSettings({
     agentKind: currentAgentKind,
     sessionModel,
-    modelFallback: useSessionSelector(sessionStore, (open) => open?.digest.modelFallback ?? null, sameModelFallback),
+    modelFallback: useSessionSelector(sessionStore, selectModelFallback, sameModelFallback),
     sessionSource: state.sessionSource,
     pendingDirName: state.pendingDirName,
     isLive,
@@ -580,8 +582,6 @@ export default function App() {
   const scrollToBottomInstant = useCallback(() => chatScroll.current?.scrollToBottomInstant(), [])
   const resetTurnCount = useCallback((count: number) => chatScroll.current?.resetTurnCount(count), [])
   const requestScrollToTop = useCallback(() => chatScroll.current?.requestScrollToTop(), [])
-  const resetFinalizedSessionTurnCount = resetTurnCount
-  const scrollFinalizedSessionToBottom = scrollToBottomInstant
 
   const handleTodosExpandedChange = useCallback((expanded: boolean) => {
     setTodosExpanded(expanded)
@@ -600,8 +600,8 @@ export default function App() {
   useLayoutEffect(() => {
     const handleSessionFinalized = (_parsed: SessionView) => {
       // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
-      resetFinalizedSessionTurnCount(0)
-      scrollFinalizedSessionToBottom()
+      resetTurnCount(0)
+      scrollToBottomInstant()
     }
     sessionFinalizedRef.current = handleSessionFinalized
     return () => {
@@ -609,7 +609,7 @@ export default function App() {
         sessionFinalizedRef.current = null
       }
     }
-  }, [resetFinalizedSessionTurnCount, scrollFinalizedSessionToBottom, sessionFinalizedRef])
+  }, [resetTurnCount, scrollToBottomInstant, sessionFinalizedRef])
 
   // Pre-session-switch cleanup: abort in-flight send-message and session creation
   // requests to free HTTP connections before fetching the new session data.
@@ -632,10 +632,8 @@ export default function App() {
   })
 
   const handleOpenPaletteProject = useCallback((dirName: string) => {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile })
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "GO_HOME", isMobile })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch, isMobile])
 
   // Sync URL <-> state
@@ -794,9 +792,10 @@ export default function App() {
     ? undoRedo.branchesAtTurn(renderedBranchModalTurn)
     : []
   // Followed live only while the modal is up.
+  const branchModalShown = renderedBranchModalTurn !== null
   const branchModalTurns = useSessionSelector(
     sessionStore,
-    (open) => renderedBranchModalTurn !== null ? open?.turns ?? null : null,
+    useCallback((open: SessionView | null) => branchModalShown ? open?.turns ?? null : null, [branchModalShown]),
   )
 
   // Replaces the composer when the session can be read but not driven.
@@ -839,8 +838,6 @@ export default function App() {
     isMobile,
   }), [state, dispatch, config, themeCtx, isMobile])
 
-  // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
-  // so timeline components don't re-render when chat status or scroll indicators change.
   const handleAddComposerContext = useCallback((item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null => {
     const input = chatInputRef.current
     if (!input) return "Open a session or start a new one to add context"
@@ -862,6 +859,8 @@ export default function App() {
     loadMore: chunkedSession.loadMore,
   })
 
+  // Everything the session context carries but the session itself, which the
+  // provider reads from the store. Chat and scroll live in their own context.
   const sessionControls = useMemo<SessionControls>(() => ({
     sessionSource: state.sessionSource,
     isLive,
@@ -905,8 +904,7 @@ export default function App() {
     canHandoff, handleProviderHandoff, handleAddComposerContext, handleOpenQuoteSource,
   ])
 
-  // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
-  // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
+  // The chat's status and actions; the provider pairs them with its scroll state.
   const chatState = useMemo<ChatState>(() => ({
     status: agentChat.status,
     error: agentChat.error,
@@ -930,7 +928,6 @@ export default function App() {
       controls={sessionControls}
       chat={chatState}
       isLive={isLive}
-      sessionChangeKey={state.sessionChangeKey}
       scrollHandle={chatScroll}
       onSessionShown={sessionShown}
     >

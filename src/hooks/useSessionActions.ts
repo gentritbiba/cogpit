@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, startTransition, type Dispatch } from "react"
+import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
@@ -38,14 +38,7 @@ export function useSessionActions({
   const showSession = useCallback(
     ({ parsed, source }: LoadedSession) => {
       setLoadError(null)
-      // Wrap the heavy re-render (new session timeline, virtualizer re-measure,
-      // undo graph rebuild) in a transition so React can keep interaction input
-      // responsive — the user's click has just landed, and the view flipping a
-      // frame later feels instantaneous compared to a synchronous commit that
-      // blocks for 100+ ms on large sessions.
-      startTransition(() => {
-        dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
-      })
+      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
       resetTurnCount(parsed.turns.length)
       cacheTurnCount(parsed.sessionId, parsed.turns.length)
       scrollToBottomInstant()
@@ -87,13 +80,11 @@ export function useSessionActions({
           {
             reason: "team",
             commit: ({ parsed, source }) => {
-              startTransition(() => {
-                dispatch({
-                  type: "SWITCH_TEAM_MEMBER",
-                  session: parsed,
-                  source,
-                  memberName: member.name,
-                })
+              dispatch({
+                type: "SWITCH_TEAM_MEMBER",
+                session: parsed,
+                source,
+                memberName: member.name,
               })
               resetTurnCount(parsed.turns.length)
               scrollToBottomInstant()
@@ -112,15 +103,11 @@ export function useSessionActions({
   const clearLoadError = useCallback(() => setLoadError(null), [])
 
   const handleGoHome = useCallback(() => {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile })
-    })
+    dispatch({ type: "GO_HOME", isMobile })
   }, [dispatch, isMobile])
 
   const handleCloseSession = useCallback(() => {
-    startTransition(() => {
-      dispatch({ type: "CLOSE_SESSION", isMobile })
-    })
+    dispatch({ type: "CLOSE_SESSION", isMobile })
   }, [dispatch, isMobile])
 
   const handleJumpToTurn = useCallback(

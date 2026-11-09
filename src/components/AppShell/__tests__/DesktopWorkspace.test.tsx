@@ -10,6 +10,7 @@ import type { useSessionContext } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const contextMocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -147,8 +148,8 @@ function setContexts({
     config: { openConfigDialog: vi.fn() },
   } as unknown as ReturnType<typeof useAppContext>)
 
+  showSession(session)
   contextMocks.useSessionContext.mockReturnValue({
-    session,
     sessionSource: session ? {
       dirName: "-workspace-current",
       fileName: "session-1.jsonl",

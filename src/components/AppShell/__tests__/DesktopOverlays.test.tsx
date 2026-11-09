@@ -11,6 +11,7 @@ import type { useSessionContext } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -97,8 +98,8 @@ function setContexts(
     theme: { theme: "dark" },
   } as unknown as ReturnType<typeof useAppContext>)
 
+  showSession(session)
   mocks.useSessionContext.mockReturnValue({
-    session,
     sessionSource: session ? { dirName: "-workspace-cogpit", fileName: "s.jsonl" } : null,
   } as unknown as ReturnType<typeof useSessionContext>)
 }

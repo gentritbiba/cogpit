@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
 import { createStore, shallowEqual, useStoreSelector, type Store } from "@/lib/store"
 import type { AgentKind } from "@/lib/agents"
@@ -335,27 +335,38 @@ function selectShell({ session: _session, windowTurns: _window, olderTurns: _old
   return shell
 }
 
-/**
- * The session state of one shell. The open session's content stays in
- * `store`: components select what they show from it, so a streamed batch
- * re-renders only those, never everything below the caller.
- */
 /** A store holding `session`, open with nothing paged in; empty by default. */
 export function createSessionStore(session: SessionView | null = null): SessionStore {
   return createStore(sessionReducer, { ...initialState, ...openSession(session) })
 }
 
+/**
+ * The session state of one shell. The open session's content stays in
+ * `store`: components select what they show from it, so a streamed batch
+ * re-renders only those, never everything below the caller.
+ */
 export function useSessionState(): readonly [SessionShellState, SessionStore["dispatch"], SessionStore] {
   const [store] = useState(() => createSessionStore())
   const state = useStoreSelector(store, selectShell, shallowEqual)
   return [state, store.dispatch, store]
 }
 
-/** A value derived from the open session; re-renders only when it changes by `isEqual`. */
+/**
+ * A value derived from the open session; re-renders only when it changes by
+ * `isEqual`. A stable `select` (module scope or memoized) runs only when the
+ * session changes, not on every render or shell update.
+ */
 export function useSessionSelector<T>(
   store: SessionStore,
   select: (session: SessionView | null) => T,
   isEqual?: (a: T, b: T) => boolean,
 ): T {
-  return useStoreSelector(store, (state: SessionState) => select(state.session), isEqual)
+  const selectState = useMemo(() => {
+    let last: { session: SessionView | null; value: T } | null = null
+    return (state: SessionState) => {
+      if (last?.session !== state.session) last = { session: state.session, value: select(state.session) }
+      return last.value
+    }
+  }, [select])
+  return useStoreSelector(store, selectState, isEqual)
 }

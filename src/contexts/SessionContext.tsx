@@ -1,7 +1,8 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useContext, useDeferredValue, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
 import { useChatScroll } from "@/hooks/useChatScroll"
-import { createSessionStore, useSessionSelector, type SessionStore } from "@/hooks/useSessionState"
+import { createSessionStore, useSessionSelector, type SessionState, type SessionStore } from "@/hooks/useSessionState"
+import { shallowEqual, useStoreSelector } from "@/lib/store"
 import { withStartPrompt } from "@/lib/startPrompts"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -46,11 +47,13 @@ export interface ScrollState {
   resetTurnCount: (count: number) => void
 }
 
-// ── Session Context (stable — session data, undo/redo, actions) ─────────────
+// ── Session Context (the open session, undo/redo, actions) ─────────────────
 
 export interface SessionContextValue {
   /** The parsed session data (null when no session is loaded) */
   session: SessionView | null
+  /** Changes with every load of a session; it always belongs to `session`. */
+  sessionChangeKey: number
   /** Source metadata for the loaded session */
   sessionSource: SessionSource | null
   /** Whether the session is actively streaming */
@@ -103,7 +106,7 @@ export interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | null>(null)
 
 /** Everything in the session context but the session's content, which changes on every live batch. */
-export type SessionControls = Omit<SessionContextValue, "session">
+export type SessionControls = Omit<SessionContextValue, "session" | "sessionChangeKey">
 
 const SessionControlsContext = createContext<SessionControls | null>(null)
 const SessionStoreContext = createContext<SessionStore | null>(null)
@@ -120,34 +123,11 @@ const SessionChatContext = createContext<SessionChatContextValue | null>(null)
 
 // ── Providers ────────────────────────────────────────────────────────────────
 
-interface SessionProviderProps {
-  value: SessionContextValue
-  chatValue: SessionChatContextValue
-  children: ReactNode
-}
-
-/** Provides a session that is already loaded and does not stream. */
-export function SessionProvider({ value, chatValue, children }: SessionProviderProps): ReactNode {
-  const store = useMemo(() => createSessionStore(value.session), [value.session])
-  return (
-    <SessionStoreContext.Provider value={store}>
-      <SessionControlsContext.Provider value={value}>
-        <SessionContext.Provider value={value}>
-          <SessionChatContext.Provider value={chatValue}>
-            {children}
-          </SessionChatContext.Provider>
-        </SessionContext.Provider>
-      </SessionControlsContext.Provider>
-    </SessionStoreContext.Provider>
-  )
-}
-
 interface OpenSessionProviderProps {
   store: SessionStore
   controls: SessionControls
   chat: ChatState
   isLive: boolean
-  sessionChangeKey: number
   /** The transcript's scroll controls, for the shell's own handlers. */
   scrollHandle?: Ref<ScrollState>
   /** Runs in the commit that first shows each session object. */
@@ -155,15 +135,23 @@ interface OpenSessionProviderProps {
   children: ReactNode
 }
 
+function selectOpen({ session, sessionChangeKey }: SessionState) {
+  return { session, sessionChangeKey }
+}
+
 /**
  * Provides the session open in `store`. Only this provider and the components
  * that read the session's content re-render on a live batch; whatever renders
  * it, and what reads only the controls or a selected fact, does not.
+ *
+ * A store update always renders at once, so the content follows a deferred
+ * copy: a live batch or a switch renders the transcript at low priority,
+ * where input or the next batch interrupts it.
  */
 export function OpenSessionProvider({
-  store, controls, chat, isLive, sessionChangeKey, scrollHandle, onSessionShown, children,
+  store, controls, chat, isLive, scrollHandle, onSessionShown, children,
 }: OpenSessionProviderProps): ReactNode {
-  const session = useSessionSelector(store, (open) => open)
+  const { session, sessionChangeKey } = useDeferredValue(useStoreSelector(store, selectOpen, shallowEqual))
   const shown = useMemo(() => session && withStartPrompt(session), [session])
   useLayoutEffect(() => { onSessionShown?.(session) }, [session, onSessionShown])
   const scroll = useChatScroll({
@@ -174,7 +162,7 @@ export function OpenSessionProvider({
     sessionChangeKey,
   })
   useImperativeHandle(scrollHandle, () => scroll, [scroll])
-  const value = useMemo(() => ({ ...controls, session: shown }), [controls, shown])
+  const value = useMemo(() => ({ ...controls, session: shown, sessionChangeKey }), [controls, shown, sessionChangeKey])
   const chatValue = useMemo(() => ({ chat, scroll }), [chat, scroll])
   return (
     <SessionStoreContext.Provider value={store}>
@@ -199,7 +187,7 @@ export function useSessionContextOptional(): SessionContextValue | null {
 export function useSessionContext(): SessionContextValue {
   const ctx = useContext(SessionContext)
   if (!ctx) {
-    throw new Error("useSessionContext must be used within a SessionProvider")
+    throw new Error("useSessionContext must be used within an OpenSessionProvider")
   }
   return ctx
 }
@@ -208,7 +196,7 @@ export function useSessionContext(): SessionContextValue {
 export function useSessionControls(): SessionControls {
   const ctx = useContext(SessionControlsContext)
   if (!ctx) {
-    throw new Error("useSessionControls must be used within a SessionProvider")
+    throw new Error("useSessionControls must be used within an OpenSessionProvider")
   }
   return ctx
 }
@@ -237,7 +225,7 @@ export function useSessionChatContextOptional(): SessionChatContextValue | null 
 export function useSessionChatContext(): SessionChatContextValue {
   const ctx = useContext(SessionChatContext)
   if (!ctx) {
-    throw new Error("useSessionChatContext must be used within a SessionProvider")
+    throw new Error("useSessionChatContext must be used within an OpenSessionProvider")
   }
   return ctx
 }

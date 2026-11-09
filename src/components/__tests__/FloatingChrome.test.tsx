@@ -12,6 +12,7 @@ import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import type { Turn } from "../../../shared/session/types"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -19,7 +20,6 @@ const mocks = vi.hoisted(() => ({
     defaultAgentKind: "claude" as const,
     networkAccessDisabled: false,
   },
-  session: null as SessionView | null,
   sessionSource: null as {
     dirName: string
     fileName: string
@@ -48,7 +48,6 @@ vi.mock("@/contexts/AppContext", () => ({
 }))
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
-    session: mocks.session,
     sessionSource: mocks.sessionSource,
     isLive: mocks.isLive,
     permissions: permissionsForAccess(mocks.level),
@@ -192,7 +191,7 @@ async function openSessionDetails(
 describe("FloatingChrome", () => {
   beforeEach(() => {
     mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    mocks.session = makeSession()
+    showSession(makeSession())
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
@@ -327,7 +326,7 @@ describe("FloatingChrome", () => {
     const user = userEvent.setup()
     const thinkingTurn = prTurn("thinking", "echo ok", "ok")
     thinkingTurn.thinking = [{ type: "thinking", thinking: "Working", signature: "sig" }]
-    mocks.session = makeSession({
+    showSession(makeSession({
       model: "claude-opus-4-5",
       gitBranch: "feat/clean-header",
       turns: [thinkingTurn],
@@ -344,7 +343,7 @@ describe("FloatingChrome", () => {
           },
         },
       }]),
-    })
+    }))
     mocks.isLive = true
 
     renderChrome({ workflowCount: 2 })
@@ -368,7 +367,7 @@ describe("FloatingChrome", () => {
 
   it("does not interpret Copilot provider records as Claude context usage", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       agentKind: "copilot",
       digest: computeSessionDigest([{
         type: "assistant",
@@ -382,7 +381,7 @@ describe("FloatingChrome", () => {
           },
         },
       }]),
-    })
+    }))
     mocks.sessionSource = {
       dirName: "copilot__L3RtcC9wcm9qZWN0",
       fileName: "test-session-id/events.jsonl",
@@ -493,7 +492,7 @@ describe("FloatingChrome", () => {
     expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
     unmount()
 
-    mocks.session = null
+    showSession(null)
     renderChrome()
     expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
   })
@@ -606,7 +605,7 @@ describe("FloatingChrome", () => {
 
 describe("FloatingChrome archive", () => {
   beforeEach(() => {
-    mocks.session = makeSession()
+    showSession(makeSession())
     mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
     mocks.isLive = false
     mocks.level = "own"
@@ -697,7 +696,7 @@ describe("FloatingChrome pull requests", () => {
 
   beforeEach(() => {
     mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    mocks.session = makeSession()
+    showSession(makeSession())
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
@@ -716,9 +715,9 @@ describe("FloatingChrome pull requests", () => {
 
   it("renders pull requests extracted from loaded turns", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", 'gh pr create --title "Team Edition"', "https://github.com/o/r/pull/13")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -732,10 +731,10 @@ describe("FloatingChrome pull requests", () => {
 
   it("collapses older pull requests into a +N chip", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [1, 2, 3, 4, 5].map((number) =>
         prTurn(String(number), "gh pr create --fill", `https://github.com/o/r/pull/${number}`)),
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -772,9 +771,9 @@ describe("FloatingChrome pull requests", () => {
       number: 13,
       url: "https://github.com/o/r/pull/13",
     }])
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/13")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -785,9 +784,9 @@ describe("FloatingChrome pull requests", () => {
   it("combines a scanned older pull request with a freshly created one", async () => {
     const user = userEvent.setup()
     withScannedSession("test-session-id", [scanned])
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/778")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)

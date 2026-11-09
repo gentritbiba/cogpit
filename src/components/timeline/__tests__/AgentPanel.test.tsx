@@ -1,11 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  SessionProvider,
-  type SessionChatContextValue,
-  type SessionContextValue,
-} from "@/contexts/SessionContext"
-import type { ParsedSession, SubAgentMessage } from "../../../../shared/session/types"
+import { InSession } from "@/__tests__/InSession"
+import type { SessionControls } from "@/contexts/SessionContext"
+import type { SubAgentMessage } from "../../../../shared/session/types"
+import type { SessionView } from "../../../../shared/session/sessionDigest"
 import { AgentPanel } from "../AgentPanel"
 
 const authFetch = vi.hoisted(() => vi.fn())
@@ -36,23 +34,24 @@ function summaryOnlyAgent(): SubAgentMessage {
   }
 }
 
+const SESSION = { sessionId: "sess-1", turns: [] } as unknown as SessionView
+
 function renderPanel(messages: SubAgentMessage[] = [summaryOnlyAgent()]) {
-  const value = {
-    session: { sessionId: "sess-1", rawMessages: [], turns: [] } as unknown as ParsedSession,
+  const controls = {
     sessionSource: { dirName: "-Users-me-proj", fileName: "sess-1.jsonl" },
     isLive: false,
     actions: { handleLoadSession: vi.fn() },
-  } as unknown as SessionContextValue
+  } as unknown as SessionControls
 
   return render(
-    <SessionProvider value={value} chatValue={{} as SessionChatContextValue}>
+    <InSession session={SESSION} controls={controls}>
       <AgentPanel
         messages={messages}
         expandAll
         label="Sub-agents"
         countLabel="agents"
       />
-    </SessionProvider>,
+    </InSession>,
   )
 }
 

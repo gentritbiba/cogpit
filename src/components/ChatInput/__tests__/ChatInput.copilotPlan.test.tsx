@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   submitPlanResponse: vi.fn(),
@@ -11,7 +12,6 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
-    session: { sessionId: "copilot-session" },
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
     pendingInteraction: {
@@ -71,6 +71,7 @@ vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
 import { ChatInput } from "../index"
 
 beforeEach(() => {
+  showSession({ sessionId: "copilot-session" })
   vi.clearAllMocks()
 })
 
