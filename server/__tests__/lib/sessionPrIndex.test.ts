@@ -155,12 +155,15 @@ describe("getCompleteSessionPullRequestData", () => {
       result("t2", "https://github.com/o/r/pull/2"),
     )
     expect(size()).toBeGreaterThan(1024 * 1024)
+    // Counts turns of the event loop; a 0 ms timer can miss a fast scan on a loaded machine.
     let ticks = 0
-    const ticker = setInterval(() => { ticks += 1 }, 0)
+    let ticking = true
+    const tick = () => { if (!ticking) return; ticks += 1; setImmediate(tick) }
+    setImmediate(tick)
     try {
       expect((await getSessionPullRequests(file, size())).map((pr) => pr.number)).toEqual([1, 2])
     } finally {
-      clearInterval(ticker)
+      ticking = false
     }
     expect(ticks).toBeGreaterThan(0)
   })
