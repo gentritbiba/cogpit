@@ -63,13 +63,17 @@ describe("useFileChangesData", () => {
       timestamp: "2026-11-09T10:00:00.000Z",
       message: { role: "assistant", content: [{ type: "tool_use", id: `edit-${file}`, name: "Edit", input: { file_path: file, old_string: "a", new_string: "b" } }] },
     })
-    const progress = (agentId: string, second: number): SubAgentMessage => ({
+    const progress = (agentId: string, second: number, status?: SubAgentMessage["status"]): SubAgentMessage => ({
       agentId, agentName: "worker", subagentType: null, type: "assistant", content: "", toolCalls: [], thinking: [], text: [],
       timestamp: `2026-11-09T10:00:${String(second).padStart(2, "0")}.000Z`, tokenUsage: null, model: null, isBackground: true,
+      ...(status ? { status } : {}),
     })
-    const withProgress = (base: SessionView, seconds: number[]): SessionView => {
+    const withProgress = (base: SessionView, seconds: number[], lastStatus?: SubAgentMessage["status"]): SessionView => {
       const turns = [...base.turns]
-      turns[0] = { ...turns[0], subAgentActivity: seconds.map((second) => progress("bg1", second)) }
+      turns[0] = {
+        ...turns[0],
+        subAgentActivity: seconds.map((second, index) => progress("bg1", second, index === seconds.length - 1 ? lastStatus : undefined)),
+      }
       return { ...base, turns }
     }
     const agentReads = () => api.fetch.mock.calls.filter(([url]) => String(url).includes("/subagents/agent-bg1.jsonl"))
@@ -97,27 +101,25 @@ describe("useFileChangesData", () => {
       expect(agentReads()).toHaveLength(1)
     })
 
-    it("reads the transcript again only after the agent wrote more, once however often it moved meanwhile", async () => {
+    it("reads the transcript again when the agent's status changes, not as it writes", async () => {
       api.fetch.mockResolvedValueOnce(new Response(agentEdit("/project/c.ts")))
       const { result, rerender } = renderHook(({ value }) => useFileChangesData(value), { initialProps: { value: withProgress(session, [1, 2]) } })
       await act(async () => {})
       expect(agentReads()).toHaveLength(1)
 
-      let finish!: (response: Response) => void
-      api.fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve }))
-      api.fetch.mockResolvedValue(new Response(agentEdit("/project/e.ts")))
       rerender({ value: withProgress(session, [1, 2, 3]) })
       rerender({ value: withProgress(session, [1, 2, 3, 4]) })
-      rerender({ value: withProgress(session, [1, 2, 3, 4, 5]) })
-      expect(agentReads()).toHaveLength(2)
+      await act(async () => {})
+      expect(agentReads()).toHaveLength(1)
 
-      await act(async () => { finish(new Response(agentEdit("/project/d.ts"))) })
+      api.fetch.mockResolvedValueOnce(new Response(agentEdit("/project/d.ts")))
+      rerender({ value: withProgress(session, [1, 2, 3, 4, 5], "completed") })
       await act(async () => {})
-      expect(agentReads()).toHaveLength(3)
-      expect(result.current.fileChanges.map((change) => change.toolCall.input.file_path)).toEqual(["/project/e.ts"])
-      rerender({ value: withProgress(session, [1, 2, 3, 4, 5]) })
+      expect(agentReads()).toHaveLength(2)
+      expect(result.current.fileChanges.map((change) => change.toolCall.input.file_path)).toEqual(["/project/d.ts"])
+      rerender({ value: withProgress(session, [1, 2, 3, 4, 5], "completed") })
       await act(async () => {})
-      expect(agentReads()).toHaveLength(3)
+      expect(agentReads()).toHaveLength(2)
     })
   })
 })

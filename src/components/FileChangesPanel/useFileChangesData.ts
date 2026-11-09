@@ -16,7 +16,7 @@ interface FileChange {
   agentId?: string
 }
 
-// Background agents' tool calls by agent, with the revision of its transcript they were read at.
+// Background agents' tool calls by agent, with the agent status they were read at.
 const bgAgentCache = new Map<string, { revision: string; toolCalls: ToolCall[] }>()
 const bgAgentLoads = new Map<string, Promise<void>>()
 const bgAgentWanted = new Map<string, string>()
@@ -64,8 +64,9 @@ export function useFileChangesData(session: SessionView) {
   }, [turnCount, lastTurnToolCallCount])
 
   // Claude background agents and completed Codex child rollouts keep their file
-  // operations in their own JSONL. Each progress message an agent leaves here
-  // is a line it wrote there, so the newest one is the revision of that file.
+  // operations in their own JSONL. It is read once per agent status, not per
+  // progress message: rereading a long agent's transcript as it writes is a
+  // whole-file download and parse each time.
   const bgAgentsToLoad = useMemo(() => {
     const revisions = new Map<string, string>()
     for (const turn of session.turns) {
@@ -73,7 +74,7 @@ export function useFileChangesData(session: SessionView) {
         const codexAgentFinished = isCodexSession &&
           (msg.status === "completed" || msg.status === "failed" || msg.status === "interrupted")
         if ((msg.isBackground || codexAgentFinished) && msg.toolCalls.length === 0) {
-          revisions.set(msg.agentId, `${msg.timestamp}:${msg.status ?? ""}`)
+          revisions.set(msg.agentId, msg.status ?? "")
         }
       }
     }
