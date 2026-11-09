@@ -16,8 +16,33 @@ interface FileChange {
   agentId?: string
 }
 
-// Module-level cache for background agent file changes
-const bgAgentCache = new Map<string, ToolCall[]>()
+// Background agents' tool calls by agent, with the revision of its transcript they were read at.
+const bgAgentCache = new Map<string, { revision: string; toolCalls: ToolCall[] }>()
+const bgAgentLoads = new Map<string, Promise<void>>()
+const bgAgentWanted = new Map<string, string>()
+
+/**
+ * Reads an agent's transcript at most once at a time. A revision that moves on
+ * while a read is in flight is read once more after it, however often it moved.
+ */
+function loadBgAgent(key: string, revision: string, read: () => Promise<ToolCall[] | null>): Promise<void> {
+  bgAgentWanted.set(key, revision)
+  const running = bgAgentLoads.get(key)
+  if (running) return running
+  const load = (async () => {
+    try {
+      for (let wanted = revision; bgAgentCache.get(key)?.revision !== wanted; wanted = bgAgentWanted.get(key)!) {
+        const toolCalls = await read()
+        if (!toolCalls) return
+        bgAgentCache.set(key, { revision: wanted, toolCalls })
+      }
+    } finally {
+      bgAgentLoads.delete(key)
+    }
+  })()
+  bgAgentLoads.set(key, load)
+  return load
+}
 
 export function useFileChangesData(session: SessionView) {
   const canAccessHostFiles = useCapability("hostFiles")
@@ -38,77 +63,55 @@ export function useFileChangesData(session: SessionView) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cheap proxy deps to avoid full array comparison
   }, [turnCount, lastTurnToolCallCount])
 
-  // Identify Claude background agents and completed Codex child rollouts whose
-  // file operations live only in their own JSONL.
+  // Claude background agents and completed Codex child rollouts keep their file
+  // operations in their own JSONL. Each progress message an agent leaves here
+  // is a line it wrote there, so the newest one is the revision of that file.
   const bgAgentsToLoad = useMemo(() => {
-    const agents: Array<{ agentId: string; turnIndex: number }> = []
-    for (let turnIndex = 0; turnIndex < session.turns.length; turnIndex++) {
-      for (const msg of session.turns[turnIndex].subAgentActivity) {
+    const revisions = new Map<string, string>()
+    for (const turn of session.turns) {
+      for (const msg of turn.subAgentActivity) {
         const codexAgentFinished = isCodexSession &&
           (msg.status === "completed" || msg.status === "failed" || msg.status === "interrupted")
         if ((msg.isBackground || codexAgentFinished) && msg.toolCalls.length === 0) {
-          agents.push({ agentId: msg.agentId, turnIndex })
+          revisions.set(msg.agentId, `${msg.timestamp}:${msg.status ?? ""}`)
         }
       }
     }
-    return agents
+    return [...revisions].map(([agentId, revision]) => ({ agentId, revision }))
   }, [session.turns, totalToolCallCount, isCodexSession]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch background agent JSONL files to extract their tool calls
   const [bgToolCalls, setBgToolCalls] = useState<Map<string, ToolCall[]>>(new Map())
-  const fetchedBgRef = useRef(new Set<string>())
 
   useEffect(() => {
     if (!dirName || !session.sessionId || bgAgentsToLoad.length === 0) return
-
-    const toFetch: Array<{ agentId: string; cacheKey: string }> = []
-    for (const { agentId } of bgAgentsToLoad) {
-      const cacheKey = deviceScopedKey(`${dirName}/${session.sessionId}/${agentId}`)
-      if (fetchedBgRef.current.has(cacheKey)) continue
-      if (bgAgentCache.has(cacheKey)) {
-        setBgToolCalls((prev) => {
-          const next = new Map(prev)
-          next.set(agentId, bgAgentCache.get(cacheKey)!)
-          return next
-        })
-        fetchedBgRef.current.add(cacheKey)
-        continue
-      }
-      toFetch.push({ agentId, cacheKey })
-    }
-
-    if (toFetch.length === 0) return
-
     let cancelled = false
-
-    async function fetchAll() {
-      const results = new Map<string, ToolCall[]>()
-      await Promise.all(
-        toFetch.map(async ({ agentId, cacheKey }) => {
-          try {
-            const url = `/api/sessions/${encodeURIComponent(dirName!)}/${encodeURIComponent(session.sessionId)}` +
-              `/subagents/agent-${encodeURIComponent(agentId)}.jsonl`
-            const res = await authFetch(url)
-            if (!res.ok) return
-            const text = await res.text()
-            const parsed = parseSubagentJsonl(text, agentId)
-            const tcs = parsed.flatMap((msg) => expandEditToolCalls(msg.toolCalls, session.cwd))
-            bgAgentCache.set(cacheKey, tcs)
-            fetchedBgRef.current.add(cacheKey)
-            results.set(agentId, tcs)
-          } catch { /* skip */ }
-        })
-      )
-      if (!cancelled && results.size > 0) {
-        setBgToolCalls((prev) => {
-          const next = new Map(prev)
-          for (const [id, tcs] of results) next.set(id, tcs)
-          return next
-        })
-      }
+    const keyOf = (agentId: string) => deviceScopedKey(`${dirName}/${session.sessionId}/${agentId}`)
+    const show = () => {
+      if (cancelled) return
+      setBgToolCalls((current) => {
+        const next = new Map<string, ToolCall[]>()
+        for (const { agentId } of bgAgentsToLoad) {
+          const toolCalls = bgAgentCache.get(keyOf(agentId))?.toolCalls
+          if (toolCalls) next.set(agentId, toolCalls)
+        }
+        return next.size === current.size && [...next].every(([agentId, toolCalls]) => current.get(agentId) === toolCalls) ? current : next
+      })
     }
-
-    fetchAll()
+    show()
+    for (const { agentId, revision } of bgAgentsToLoad) {
+      const key = keyOf(agentId)
+      if (bgAgentCache.get(key)?.revision === revision) continue
+      void loadBgAgent(key, revision, async () => {
+        try {
+          const url = `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(session.sessionId)}` +
+            `/subagents/agent-${encodeURIComponent(agentId)}.jsonl`
+          const res = await authFetch(url)
+          if (!res.ok) { void res.body?.cancel(); return null }
+          const parsed = parseSubagentJsonl(await res.text(), agentId)
+          return parsed.flatMap((msg) => expandEditToolCalls(msg.toolCalls, session.cwd))
+        } catch { return null }
+      }).then(show)
+    }
     return () => { cancelled = true }
   }, [dirName, session.sessionId, session.cwd, bgAgentsToLoad])
 
