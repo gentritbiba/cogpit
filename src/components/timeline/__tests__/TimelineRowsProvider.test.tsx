@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   openBranches: (() => {}) as (turnIndex: number) => void,
   statusRenders: new Map<string, number>(),
   rowRenders: 0,
+  statusDerivations: 0,
   skills: new Map(),
   branches: [],
 }))
@@ -48,7 +49,12 @@ vi.mock("@/hooks/useSkillMetadata", () => ({
     return mocks.skills
   },
 }))
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
+vi.mock("../../../../shared/session/sessionStatus", () => ({
+  deriveSessionStatus: () => {
+    mocks.statusDerivations++
+    return { status: "thinking" }
+  },
+}))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 vi.mock("@/lib/shiki", () => ({ highlightCode: vi.fn().mockResolvedValue([]), getLangFromPath: vi.fn().mockReturnValue(null) }))
 
@@ -115,6 +121,7 @@ beforeEach(() => {
   mocks.openBranches = () => {}
   mocks.statusRenders.clear()
   mocks.rowRenders = 0
+  mocks.statusDerivations = 0
   facts = null
 })
 
@@ -132,6 +139,19 @@ describe("TimelineRowsProvider", () => {
     // One render per record, all of them the live row's.
     expect(mocks.rowRenders).toBe(3 + 3)
     expect(Object.fromEntries(mocks.statusRenders)).toEqual({ c0: 1, c1: 1, c2: 1 })
+  })
+
+  // Review finding 9: the status was derived from every raw message on every provider render.
+  it("derives the session's status once per change of its messages, not on every render", () => {
+    const session = sessionOf([turnOf("t0", [])])
+    const { rerender } = show(session)!
+    mocks.undoEnabled = true
+    show(session, rerender)
+    mocks.undoEnabled = false
+    show(session, rerender)
+    expect(mocks.statusDerivations).toBe(1)
+    show({ ...session, rawMessages: [] }, rerender)
+    expect(mocks.statusDerivations).toBe(2)
   })
 
   it("changes the facts when a capability flips, so rows show or hide what it allows", () => {

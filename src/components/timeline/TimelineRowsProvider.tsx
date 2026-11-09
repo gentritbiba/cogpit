@@ -75,8 +75,10 @@ export function TimelineRowsProvider({ sessionKey, children }: {
   const cwd = session?.cwd ?? ""
   const turnCount = session?.turns.length ?? 0
   const live = isLive && session !== null
-  const working = live && WORKING_STATUSES.has(
-    deriveSessionStatus(session.rawMessages as Array<{ type: string; [key: string]: unknown }>).status,
+  const rawMessages = live ? session.rawMessages : null
+  const working = useMemo(
+    () => rawMessages !== null && WORKING_STATUSES.has(deriveSessionStatus(rawMessages as Array<{ type: string; [key: string]: unknown }>).status),
+    [rawMessages],
   )
   const openQuestionId = pendingInteraction?.type === "question" ? pendingInteraction.toolUseId : undefined
   const undoEnabled = undoRedo.enabled && !isSubAgentView
