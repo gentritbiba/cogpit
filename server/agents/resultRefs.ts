@@ -96,14 +96,6 @@ export function projectLine(format: Pick<AgentFormat, "projectResults">, line: s
   return format.projectResults(record, visit) ? JSON.stringify(record) : line
 }
 
-/** Lines with their native byte offsets, projected; a line without a known offset travels unchanged. */
-export function projectLines(format: Pick<AgentFormat, "projectResults">, lines: readonly string[], address: TranscriptAddress, offsetOf: (line: string, index: number) => number | undefined): string[] {
-  return lines.map((line, index) => {
-    const offset = offsetOf(line, index)
-    return offset === undefined ? line : projectLine(format, line, address, offset)
-  })
-}
-
 /** Most of one native line the server reads back for a body. */
 export const MAX_RESULT_LINE_BYTES = 128 * 1024 * 1024
 

@@ -64,7 +64,7 @@ interface TurnSectionProps {
  */
 export const TurnSection = memo(function TurnSection({ turn, index, turnKey, isLast, branchCount = 0 }: TurnSectionProps) {
   const {
-    state: { activeToolCallId, expandAll, expandToolPayloads },
+    state: { expandAll, expandToolPayloads },
     isMobile,
   } = useAppContext()
   const facts = useTimelineRowFacts()
@@ -86,7 +86,7 @@ export const TurnSection = memo(function TurnSection({ turn, index, turnKey, isL
         index={index}
         branchCount={branchCount}
         isActive={isActive}
-        activeToolCallId={isActive ? activeToolCallId : null}
+        activeToolCallId={isActive ? facts?.activeToolCallId ?? null : null}
         expandAll={expandAll}
         expandToolPayloads={expandToolPayloads}
         isAgentActive={isAgentActive}

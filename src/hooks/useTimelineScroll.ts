@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { TimelineScrollController, type HistoryBytes } from "@/lib/timelineScroll/controller"
 import { usePendingPrompts } from "@/hooks/usePendingPrompts"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface UseTimelineScrollOpts {
-  session: ParsedSession | null
+  session: SessionView | null
   pendingMessages: string[]
   consumePending: (count?: number) => void
   /** Transcript bytes behind and ahead of the paging cursor; sizes the history reserve. */

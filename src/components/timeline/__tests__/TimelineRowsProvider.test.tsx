@@ -3,26 +3,26 @@ import { render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
 import { TimelineRowsProvider, useTimelineRowFacts, type TimelineRowFacts } from "../TimelineRowsProvider"
 import { emptyTurn } from "@/__tests__/fixtures"
-import type { ParsedSession, ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../../shared/session/sessionDigest"
+import type { ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
 
 // The real rows, tool groups and tool cards render here. A session update is
 // simulated the way App delivers one: a new session object and a new context
 // value with fresh `actions` and `undoRedo` objects, while unchanged turns and
 // blocks keep their identity.
 const mocks = vi.hoisted(() => ({
-  session: null as unknown as ParsedSession,
+  session: null as unknown as SessionView,
   undoEnabled: false,
   openBranches: (() => {}) as (turnIndex: number) => void,
   statusRenders: new Map<string, number>(),
   rowRenders: 0,
-  statusDerivations: 0,
   skills: new Map(),
   branches: [],
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -32,6 +32,8 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: () => ({
     session: mocks.session,
     sessionSource: null,
+    activeTurnIndex: null,
+    activeToolCallId: null,
     isLive: true,
     isSubAgentView: false,
     pendingInteraction: null,
@@ -47,12 +49,6 @@ vi.mock("@/hooks/useSkillMetadata", () => ({
   useSkillMetadata: () => {
     mocks.rowRenders++
     return mocks.skills
-  },
-}))
-vi.mock("../../../../shared/session/sessionStatus", () => ({
-  deriveSessionStatus: () => {
-    mocks.statusDerivations++
-    return { status: "thinking" }
   },
 }))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
@@ -83,12 +79,12 @@ function turnOf(id: string, contentBlocks: TurnContentBlock[]): Turn {
   })
 }
 
-function sessionOf(turns: Turn[]): ParsedSession {
+function sessionOf(turns: Turn[]): SessionView {
   return {
     sessionId: "session-1", version: "1", gitBranch: "", cwd: "/repo", slug: "", name: "", model: "",
     turns,
     stats: { totalInputTokens: 0, totalOutputTokens: 0, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, toolCallCounts: {}, errorCount: 0, totalDurationMs: 0, turnCount: turns.length },
-    rawMessages: [],
+    digest: { ...EMPTY_SESSION_DIGEST, status: { status: "thinking" } },
   }
 }
 
@@ -99,7 +95,7 @@ function FactsProbe() {
   return null
 }
 
-function Timeline({ session }: { session: ParsedSession }) {
+function Timeline({ session }: { session: SessionView }) {
   return (
     <TimelineRowsProvider>
       <FactsProbe />
@@ -110,7 +106,7 @@ function Timeline({ session }: { session: ParsedSession }) {
   )
 }
 
-function show(session: ParsedSession, rerender?: (ui: React.ReactElement) => void) {
+function show(session: SessionView, rerender?: (ui: React.ReactElement) => void) {
   mocks.session = session
   if (rerender) rerender(<Timeline session={session} />)
   else return render(<Timeline session={session} />)
@@ -121,7 +117,6 @@ beforeEach(() => {
   mocks.openBranches = () => {}
   mocks.statusRenders.clear()
   mocks.rowRenders = 0
-  mocks.statusDerivations = 0
   facts = null
 })
 
@@ -139,19 +134,6 @@ describe("TimelineRowsProvider", () => {
     // One render per record, all of them the live row's.
     expect(mocks.rowRenders).toBe(3 + 3)
     expect(Object.fromEntries(mocks.statusRenders)).toEqual({ c0: 1, c1: 1, c2: 1 })
-  })
-
-  // Review finding 9: the status was derived from every raw message on every provider render.
-  it("derives the session's status once per change of its messages, not on every render", () => {
-    const session = sessionOf([turnOf("t0", [])])
-    const { rerender } = show(session)!
-    mocks.undoEnabled = true
-    show(session, rerender)
-    mocks.undoEnabled = false
-    show(session, rerender)
-    expect(mocks.statusDerivations).toBe(1)
-    show({ ...session, rawMessages: [] }, rerender)
-    expect(mocks.statusDerivations).toBe(2)
   })
 
   it("changes the facts when a capability flips, so rows show or hide what it allows", () => {

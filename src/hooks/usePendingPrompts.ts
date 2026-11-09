@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface UsePendingPromptsOpts {
-  session: ParsedSession | null
+  session: SessionView | null
   pendingMessages: string[]
   consumePending: (count?: number) => void
 }

@@ -7,12 +7,13 @@ import type { Turn } from "../../../../shared/session/types"
 
 // ── Contexts and rows ────────────────────────────────────────────────────────
 
-const appState = { activeTurnIndex: null as number | null, activeToolCallId: null as string | null, expandAll: false }
+const appState = { expandAll: false }
+const selection = { activeTurnIndex: null as number | null, activeToolCallId: null as string | null }
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ state: appState }),
 }))
 vi.mock("@/contexts/SessionContext", () => ({
-  useSessionContext: () => ({ undoRedo: { enabled: false, branchesAtTurn: undefined }, isSubAgentView: false, session: null }),
+  useSessionContext: () => ({ ...selection, undoRedo: { enabled: false, branchesAtTurn: undefined }, isSubAgentView: false, session: null }),
 }))
 vi.mock("@/components/UndoRedoBar", () => ({ UndoRedoBar: () => null }))
 // Each turn renders two anchored blocks whose heights the test controls, and marks itself when it is the selected turn.
@@ -79,8 +80,8 @@ beforeEach(() => {
   blockSize = BLOCK
   rawScrollTop = 0
   writes.length = 0
-  appState.activeTurnIndex = null
-  appState.activeToolCallId = null
+  selection.activeTurnIndex = null
+  selection.activeToolCallId = null
   appState.expandAll = false
   patch("scrollTop", {
     get(this: Element) { return isScroller(this) ? scrollTop() : 0 },
@@ -436,14 +437,14 @@ describe("TimelineList with the scroll engine", () => {
 
   it("jumps to the turn selected in the panels", () => {
     const { rerender } = mount({ turns: makeTurns(ids(0, 200)) })
-    appState.activeTurnIndex = 40
+    selection.activeTurnIndex = 40
     rerender({ turns: makeTurns(ids(0, 200)) })
     expect(viewportTopOf('[data-row-key="t40"]')).toBeCloseTo(0)
   })
 
   it("does not jump again when a prepend shifts the selected turn's index", () => {
     const { rerender, controller } = mount({ turns: makeTurns(ids(100, 200)) })
-    appState.activeTurnIndex = 40
+    selection.activeTurnIndex = 40
     rerender({ turns: makeTurns(ids(100, 200)) })
     expect(viewportTopOf('[data-row-key="t140"]')).toBeCloseTo(0)
     const jump = vi.spyOn(controller, "scrollToTurn")
@@ -451,11 +452,11 @@ describe("TimelineList with the scroll engine", () => {
     // The selection keeps its index while older turns arrive: it now names another turn.
     rerender({ turns: makeTurns(ids(80, 200)) })
     // Or it moves with its turn.
-    appState.activeTurnIndex = 60
+    selection.activeTurnIndex = 60
     rerender({ turns: makeTurns(ids(80, 200)) })
     expect(jump).not.toHaveBeenCalled()
     // A new selection still jumps.
-    appState.activeTurnIndex = 10
+    selection.activeTurnIndex = 10
     rerender({ turns: makeTurns(ids(80, 200)) })
     expect(jump).toHaveBeenCalledWith("t90", { align: "start" })
   })
@@ -463,13 +464,13 @@ describe("TimelineList with the scroll engine", () => {
   // LOAD QA F7 (crew 2275): the selected turn's ring stayed on the index after older turns were prepended.
   it("marks the turn the selection jumped to, not whatever turn later takes its index", () => {
     const { rerender } = mount({ turns: makeTurns(ids(100, 200)), sessionKey: "active-turn" })
-    appState.activeTurnIndex = 40
+    selection.activeTurnIndex = 40
     rerender({ turns: makeTurns(ids(100, 200)), sessionKey: "active-turn" })
     const marked = () => [...scroller!.querySelectorAll<HTMLElement>("[data-active-turn]")].map((el) => el.dataset.activeTurn)
     expect(marked()).toEqual(["t140"])
     rerender({ turns: makeTurns(ids(80, 200)), sessionKey: "active-turn" })
     expect(marked()).toEqual(["t140"])
-    appState.activeTurnIndex = null
+    selection.activeTurnIndex = null
     rerender({ turns: makeTurns(ids(80, 200)), sessionKey: "active-turn" })
     expect(marked()).toEqual([])
   })
@@ -477,8 +478,8 @@ describe("TimelineList with the scroll engine", () => {
   it("jumps to a tool call by key: asks its turn to reveal it, then centres its card", () => {
     const { rerender, controller } = mount({ turns: makeTurns(ids(0, 200)) })
     const jump = vi.spyOn(controller, "scrollToTurn")
-    appState.activeTurnIndex = 40
-    appState.activeToolCallId = "call-7"
+    selection.activeTurnIndex = 40
+    selection.activeToolCallId = "call-7"
     rerender({ turns: makeTurns(ids(0, 200)) })
     expect(jump).toHaveBeenCalledTimes(1)
     const [key, opts] = jump.mock.calls[0]
@@ -488,7 +489,7 @@ describe("TimelineList with the scroll engine", () => {
     row.innerHTML = '<div data-tool-call-id="call-6"></div><div data-tool-call-id="call-7"></div>'
     expect(opts!.target!(row)).toBe(row.lastElementChild)
     // Another call in the same turn is a new selection.
-    appState.activeToolCallId = "call-6"
+    selection.activeToolCallId = "call-6"
     rerender({ turns: makeTurns(ids(0, 200)) })
     expect(jump).toHaveBeenCalledTimes(2)
   })

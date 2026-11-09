@@ -40,7 +40,7 @@ const PINNED = [
   "useDevices",
   "useProjectList",
   "useProjectNames",
-  "useSessionContext",
+  "useSessionControls",
 ]
 
 describe("the edition SDK", () => {

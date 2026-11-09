@@ -1,7 +1,7 @@
 import { memo, useMemo, useRef, useState, useEffect } from "react"
 import { Bot, Brain, CheckCircle2, ChevronDown, CircleDashed, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { deriveSessionStatus, getStatusLabel, getTerminalReasonLabel } from "../../../shared/session/sessionStatus"
+import { getStatusLabel, getTerminalReasonLabel } from "../../../shared/session/sessionStatus"
 import { formatDuration, getTurnDuration } from "@/lib/format"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useAgentProgress } from "@/contexts/StreamingOverlayContext"
@@ -263,9 +263,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     // In-progress compaction announced by the runtime over the watch stream
     if (isCompacting) return { status: "compacting" as const }
 
-    return deriveSessionStatus(
-      session.rawMessages as Array<{ type: string; [key: string]: unknown }>
-    )
+    return session.digest.status
   }, [session, sseState, isCompacting])
 
   // Advance the stale-completion state only after React commits the status that

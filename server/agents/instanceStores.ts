@@ -19,6 +19,8 @@ export function createInstanceStore(instance: ProviderInstance): AgentStore {
   return {
     ...store, instanceId: instance.id, descriptor: { ...descriptorFor(instance.agent), sessionFile: { ...store.descriptor.sessionFile, sessionId: (file) => { const id = store.descriptor.sessionFile.sessionId(file); return id ? qualify(id) : null } } },
     async listSessionFiles() { return (await store.listSessionFiles()).map((file) => ({ ...file, dirName: file.dirName ? dir(file.dirName) : null })) },
+    async listedSessionFiles() { return (await store.listedSessionFiles()).map((file) => ({ ...file, dirName: file.dirName ? dir(file.dirName) : null })) },
+    knownSessionFile: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.knownSessionFile(parts.nativeId) : null },
     resolveSessionFile: (name, file) => store.resolveSessionFile(splitInstanceDirName(name).nativeDirName, file),
     findSessionFile: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.findSessionFile(parts.nativeId) : Promise.resolve(null) },
     async transcriptRoot(path) { const root = await store.transcriptRoot(path); return root ? { ...root, rootSessionId: qualify(root.rootSessionId) } : null },
@@ -37,7 +39,7 @@ export function instanceStores(): AgentStore[] {
   const instances = process.env.COGPIT_AGENT_WORKER === "1" ? [] : orchestrationStore().instances()
   const keyOf = (instance: ProviderInstance) => JSON.stringify([instance.id, instance.homeDir, instance.agent])
   const keys = new Set(instances.map(keyOf))
-  for (const key of cache.keys()) if (!keys.has(key)) cache.delete(key)
+  for (const [key, store] of cache) if (!keys.has(key)) { store.dispose(); cache.delete(key) }
   return instances.map((instance) => {
     const key = keyOf(instance)
     let store = cache.get(key)

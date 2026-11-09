@@ -78,7 +78,7 @@ export const localHost: SessionHost = {
 
   async queue(sessionId, action, req) {
     const ctx = await queueContext(sessionId, req)
-    return action ? applyQueueAction(ctx, sessionId, action, req) : ctx.dispatcher.store.commands(ctx.conversation.id, ctx.scope)
+    return action ? applyQueueAction(ctx, sessionId, action, req) : ctx.dispatcher.store.openCommands(ctx.conversation.id, ctx.scope)
   },
 
   async stop(sessionId) {

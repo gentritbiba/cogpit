@@ -32,6 +32,12 @@ export async function sessionBoard(sessionId: string): Promise<SessionBoard | nu
   return boards.get(sessionId) ?? null
 }
 
+/** Every board, the most recently updated first. */
+export async function allSessionBoards(): Promise<SessionBoard[]> {
+  await file.load()
+  return [...boards.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 /** Replace a session's board with `content`. */
 export async function setSessionBoard(sessionId: string, content: BoardContent, now = Date.now()): Promise<SessionBoard> {
   await file.load()

@@ -28,12 +28,17 @@ import {
   activeSessionsCacheKey,
   readCachedList,
   sessionListCacheKeys,
-  writeCachedList,
+  writeCachedLists,
 } from "@/lib/sessionListCache"
 import { activeSessionsUrl, useSessionListFilter } from "@/lib/sessionListFilter"
 import { learnListedAccess, onListsStale, sessionAccessTicket } from "@/lib/sessionAccess"
+import { subscribeSessionListEvents } from "@/lib/sessionListEvents"
+import { shareList } from "@/lib/structuralShare"
+import { SESSION_LIST_EPOCH_HEADER, SESSION_LIST_VERSION_HEADER } from "../../shared/contracts/sessionList"
 
 const LIVE_POLL_INTERVAL = 20_000
+const FALLBACK_POLL_INTERVAL = 60_000
+const FOCUS_MIN_INTERVAL = 5_000
 
 /** Map processes to sessions by sessionId (keep highest-mem per session). */
 export function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> {
@@ -74,6 +79,7 @@ export interface SessionInventory {
   procBySession: Map<string, RunningProcess>
   /** Sessions that transitioned to "completed" during this browser session. */
   newlyCompleted: Set<string>
+  /** The list for the current filter is being read for the first time; background refreshes leave it false. */
   loading: boolean
   error: string | null
   refresh: () => void
@@ -100,14 +106,36 @@ export interface SessionInventory {
 
 const SessionInventoryContext = createContext<SessionInventory | null>(null)
 
+const sessionKeyOf = (session: ActiveSessionInfo) => `${session.dirName}/${session.fileName}`
+const processKeyOf = (process: RunningProcess) => String(process.pid)
+
+function listVersion(response: Response): number | null {
+  const version = Number(response.headers.get(SESSION_LIST_VERSION_HEADER))
+  return response.headers.has(SESSION_LIST_VERSION_HEADER) && Number.isFinite(version) ? version : null
+}
+
+/**
+ * What a list fetch also does: `full` reads the running processes beside the
+ * list; `list` reads them only when the list changed; `rows` only adds rows
+ * (archived ones), which no process drives.
+ */
+type FetchMode = "full" | "list" | "rows"
+
 export function SessionInventoryProvider({ children }: { children: ReactNode }) {
   const [mountedDeviceScope] = useState(getActiveDeviceScope)
   const filter = useSessionListFilter()
   // The server refuses the list while its gate shows; it is read again once the gate lifts.
   const gated = useAppGate() !== null
-  const sessionsCacheKey = activeSessionsCacheKey(filter.key)
+  const [showArchivedSetting, setShowArchivedSetting] = useLocalStorage<boolean>(
+    deviceScopedKey("live-sessions-show-archived"),
+    false,
+  )
+  const showArchived = showArchivedSetting === true
+  const [searchActive, setSearchActive] = useState(false)
+  const wantArchived = showArchived || searchActive
+  const [initialCacheKey] = useState(() => activeSessionsCacheKey(filter.key, showArchived))
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>(
-    () => readCachedList<ActiveSessionInfo>(sessionsCacheKey) ?? [],
+    () => readCachedList<ActiveSessionInfo>(initialCacheKey) ?? [],
   )
   const [processes, setProcesses] = useState<RunningProcess[]>(
     () => readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
@@ -115,19 +143,14 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
-  const [showArchivedSetting, setShowArchivedSetting] = useLocalStorage<boolean>(
-    deviceScopedKey("live-sessions-show-archived"),
-    false,
-  )
-  const showArchived = showArchivedSetting === true
-  const [searchActive, setSearchActive] = useState(false)
-  const includeArchived = showArchived || searchActive
   const [archivedCount, setArchivedCount] = useState(0)
+  const [pushUnsupported, setPushUnsupported] = useState(false)
   // Seeded from the cached list so a session archived before a reload still
   // reads as archived. Read by setArchived for the same reason as sessionsRef.
   const archivedIdsRef = useRef<ReadonlySet<string>>(learnArchivedIds(new Set(), sessions))
   const [archivedIds, setArchivedIds] = useState<ReadonlySet<string>>(archivedIdsRef.current)
   const replaceArchivedIds = useCallback((next: ReadonlySet<string>) => {
+    if (next === archivedIdsRef.current) return
     archivedIdsRef.current = next
     setArchivedIds(next)
   }, [])
@@ -140,9 +163,30 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   // Read by setArchived so back-to-back updates (an optimistic change and its
   // rollback) each see the other's result instead of a stale render.
   const sessionsRef = useRef(sessions)
-  const listedCacheKeyRef = useRef(sessionsCacheKey)
+  // The cache entry the rows in hand belong to, whether they include archived
+  // sessions, and the validator of the response they came from.
+  const rowsKeyRef = useRef(initialCacheKey)
+  const rowsIncludeArchivedRef = useRef(showArchived)
+  const validatorRef = useRef<{ url: string; etag: string } | null>(null)
+  const loadedKeyRef = useRef<string | null>(null)
+  const writtenRef = useRef({ key: initialCacheKey, sessions, processes })
+  const filterRef = useRef(filter)
+  const wantArchivedRef = useRef(wantArchived)
+  // List versions: the newest the server announced, the one the rows show,
+  // and the server run they count in.
+  const announcedVersionRef = useRef(0)
+  const heldVersionRef = useRef(0)
+  const epochRef = useRef<string | null>(null)
+  const staleRef = useRef(false)
+  const lastListFetchRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const processAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(false)
+
+  useEffect(() => {
+    filterRef.current = filter
+    wantArchivedRef.current = wantArchived
+  }, [filter, wantArchived])
 
   useEffect(() => {
     mountedRef.current = true
@@ -150,11 +194,45 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       mountedRef.current = false
       abortRef.current?.abort()
       abortRef.current = null
+      processAbortRef.current?.abort()
+      processAbortRef.current = null
     }
   }, [])
 
-  const fetchInventory = useCallback(async () => {
-    if (gated || !mountedRef.current || getActiveDeviceScope() !== mountedDeviceScope) return
+  const replaceSessions = useCallback((next: ActiveSessionInfo[], key: string) => {
+    rowsKeyRef.current = key
+    if (next === sessionsRef.current) return
+    sessionsRef.current = next
+    setSessions(next)
+  }, [])
+
+  const canFetch = useCallback(() => (
+    !gated && mountedRef.current && getActiveDeviceScope() === mountedDeviceScope
+  ), [gated, mountedDeviceScope])
+
+  const loadProcesses = useCallback(async () => {
+    if (!canFetch()) return
+    processAbortRef.current?.abort()
+    const ac = new AbortController()
+    processAbortRef.current = ac
+    try {
+      // Unfiltered: the open session may be outside the list, and whether
+      // another process drives it is read from here.
+      const response = await authFetch("/api/running-processes", { signal: ac.signal })
+      if (!response.ok) return
+      const data: unknown = await response.json()
+      if (ac.signal.aborted || !mountedRef.current) return
+      const next = Array.isArray(data) ? data as RunningProcess[] : []
+      setProcesses((previous) => shareList(previous, next, processKeyOf))
+    } catch {
+      // The list still shows; the next refresh asks again.
+    } finally {
+      if (processAbortRef.current === ac) processAbortRef.current = null
+    }
+  }, [canFetch])
+
+  const fetchInventory = useCallback(async (mode: FetchMode) => {
+    if (!canFetch()) return
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
@@ -165,63 +243,93 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       && getActiveDeviceScope() === mountedDeviceScope
     )
 
-    setLoading(true)
+    const includeArchived = wantArchivedRef.current
+    const url = activeSessionsUrl(includeArchived ? { archived: "include" } : {}, filterRef.current)
+    const cacheKey = activeSessionsCacheKey(filterRef.current.key, includeArchived)
+    const validator = validatorRef.current
+    const headers = validator?.url === url && rowsKeyRef.current === cacheKey
+      ? { "If-None-Match": validator.etag }
+      : undefined
+    const versionAtStart = announcedVersionRef.current
+    if (loadedKeyRef.current !== cacheKey) setLoading(true)
+    lastListFetchRef.current = Date.now()
+    staleRef.current = false
     const accessTicket = sessionAccessTicket()
     try {
-      const [sessRes, procRes] = await Promise.all([
-        authFetch(
-          activeSessionsUrl(includeArchived ? { archived: "include" } : {}, filter),
-          { signal: ac.signal },
-        ),
-        // Unfiltered: the open session may be outside the list, and whether
-        // another process drives it is read from here.
-        authFetch("/api/running-processes", { signal: ac.signal }),
-      ])
+      const request = authFetch(url, { signal: ac.signal, ...(headers && { headers }) })
+      if (mode === "full") void loadProcesses()
+      const response = await request
       if (!isCurrentRequest()) return
-      if (!sessRes.ok || !procRes.ok) {
-        throw new Error("Failed to fetch live data")
+      let changed = false
+      if (response.status !== 304) {
+        if (!response.ok) throw new Error("Failed to fetch live data")
+        const data: unknown = await response.json()
+        if (!isCurrentRequest()) return
+        const fetched = Array.isArray(data) ? data as ActiveSessionInfo[] : []
+        learnListedAccess(fetched, accessTicket)
+        if (awaitingBaselineRef.current) {
+          awaitingBaselineRef.current = false
+          prevStatusRef.current = null
+        }
+        const shared = shareList(sessionsRef.current, fetched, sessionKeyOf)
+        changed = shared !== sessionsRef.current
+        replaceSessions(shared, cacheKey)
+        rowsIncludeArchivedRef.current = includeArchived
+        replaceArchivedIds(learnArchivedIds(archivedIdsRef.current, shared))
+        setArchivedCount(Number(response.headers.get("X-Cogpit-Archived-Count")) || 0)
+        const etag = response.headers.get("ETag")
+        validatorRef.current = etag ? { url, etag } : null
       }
-      const [sessData, procData] = await Promise.all([sessRes.json(), procRes.json()])
-      if (!isCurrentRequest()) return
-      const nextSessions = Array.isArray(sessData) ? sessData as ActiveSessionInfo[] : []
-      const nextProcesses = Array.isArray(procData) ? procData as RunningProcess[] : []
-      learnListedAccess(nextSessions, accessTicket)
-      if (awaitingBaselineRef.current) {
-        awaitingBaselineRef.current = false
-        prevStatusRef.current = null
+      loadedKeyRef.current = cacheKey
+      const epoch = response.headers.get(SESSION_LIST_EPOCH_HEADER)
+      if (epoch && epoch !== epochRef.current) {
+        if (epochRef.current !== null) announcedVersionRef.current = heldVersionRef.current = 0
+        epochRef.current = epoch
       }
-      sessionsRef.current = nextSessions
-      setSessions(nextSessions)
-      setProcesses(nextProcesses)
-      replaceArchivedIds(learnArchivedIds(archivedIdsRef.current, nextSessions))
-      setArchivedCount(Number(sessRes.headers.get("X-Cogpit-Archived-Count")) || 0)
-      writeCachedList(sessionsCacheKey, nextSessions)
-      writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
+      heldVersionRef.current = Math.max(heldVersionRef.current, listVersion(response) ?? versionAtStart)
       setError(null)
+      if (mode === "list" && changed) void loadProcesses()
+      abortRef.current = null
+      // Something changed while this request ran: read the list once more, now or once it shows.
+      if (announcedVersionRef.current > heldVersionRef.current) {
+        if (document.visibilityState === "visible") void fetchInventory("list")
+        else staleRef.current = true
+      }
     } catch (err) {
       if (!isCurrentRequest()) return
       setError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
-      if (isCurrentRequest()) setLoading(false)
       if (abortRef.current === ac) abortRef.current = null
+      if (abortRef.current === null && mountedRef.current) setLoading(false)
     }
-  }, [gated, mountedDeviceScope, includeArchived, filter, sessionsCacheKey, replaceArchivedIds])
+  }, [canFetch, mountedDeviceScope, loadProcesses, replaceSessions, replaceArchivedIds])
 
-  const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
+  const fetchRef = useRef(fetchInventory)
+  useEffect(() => {
+    fetchRef.current = fetchInventory
+  }, [fetchInventory])
+  const refresh = useCallback(() => { void fetchInventory("full") }, [fetchInventory])
 
   // A new filter shows its own cached list while the refresh for it runs.
   useEffect(() => {
-    if (listedCacheKeyRef.current === sessionsCacheKey) return
-    listedCacheKeyRef.current = sessionsCacheKey
+    const key = activeSessionsCacheKey(filter.key, wantArchivedRef.current)
+    if (rowsKeyRef.current === key) return
     awaitingBaselineRef.current = true
-    const cached = readCachedList<ActiveSessionInfo>(sessionsCacheKey) ?? []
-    sessionsRef.current = cached
-    setSessions(cached)
-  }, [sessionsCacheKey])
+    const cached = readCachedList<ActiveSessionInfo>(key) ?? []
+    rowsIncludeArchivedRef.current = wantArchivedRef.current
+    writtenRef.current = { ...writtenRef.current, key, sessions: cached }
+    replaceSessions(cached, key)
+  }, [filter.key, replaceSessions])
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+  }, [refresh, filter])
+
+  // A search or the archive toggle needs archived rows; ending either keeps the
+  // rows in hand (lists hide archived ones) until the next refresh.
+  useEffect(() => {
+    if (wantArchived && !rowsIncludeArchivedRef.current) void fetchRef.current("rows")
+  }, [wantArchived])
 
   // Which sessions the lists hold moved; list them again.
   useEffect(() => onListsStale(() => {
@@ -229,28 +337,85 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     refresh()
   }), [refresh])
 
+  // The server announces each list change; a hidden window reads it once it shows again.
+  useEffect(() => {
+    if (gated) return
+    setPushUnsupported(false)
+    return subscribeSessionListEvents({
+      onVersion: ({ version, epoch }) => {
+        // The server restarted: its versions count from 0 again.
+        const restarted = epoch === undefined
+          ? version < announcedVersionRef.current
+          : epochRef.current !== null && epoch !== epochRef.current
+        if (epoch !== undefined) epochRef.current = epoch
+        if (restarted) announcedVersionRef.current = heldVersionRef.current = 0
+        announcedVersionRef.current = Math.max(announcedVersionRef.current, version)
+        if (!restarted && version <= heldVersionRef.current) return
+        if (abortRef.current && !restarted) staleRef.current = true
+        else if (document.visibilityState === "visible") void fetchRef.current("list")
+        else staleRef.current = true
+      },
+      onUnsupported: () => setPushUnsupported(true),
+      onSupported: () => setPushUnsupported(false),
+    })
+  }, [gated])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && staleRef.current) void fetchRef.current("list")
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [])
+
   const procBySession = useMemo(() => buildProcMap(processes), [processes])
 
-  // Scanning every project and spawning `ps` on a timer once consumed a full
-  // CPU core in bursts, so the inventory refreshes on focus and, while
-  // something is live, on a gentle visible-only timer — never unconditionally.
+  // Spawning `ps` on a timer once consumed a full CPU core in bursts, so the
+  // processes refresh on a gentle visible-only timer only while something is live.
   const hasLiveWork = useMemo(
     () => hasUnfinishedWork(sessions, procBySession),
     [sessions, procBySession],
   )
 
   useEffect(() => {
-    window.addEventListener("focus", refresh)
-    return () => window.removeEventListener("focus", refresh)
+    const onFocus = () => {
+      if (Date.now() - lastListFetchRef.current >= FOCUS_MIN_INTERVAL) refresh()
+    }
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
   }, [refresh])
 
+  // Without the stream (an older server) the list is read on a visible-only
+  // timer: every 20 s while something is live, every 60 s otherwise. With the
+  // stream, the live timer only follows the processes.
   useEffect(() => {
-    if (!hasLiveWork) return
+    if (!hasLiveWork && !pushUnsupported) return
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") refresh()
-    }, LIVE_POLL_INTERVAL)
+      if (document.visibilityState !== "visible") {
+        if (pushUnsupported) staleRef.current = true
+        return
+      }
+      if (!pushUnsupported) void loadProcesses()
+      else void fetchRef.current(hasLiveWork ? "full" : "list")
+    }, hasLiveWork ? LIVE_POLL_INTERVAL : FALLBACK_POLL_INTERVAL)
     return () => clearInterval(interval)
-  }, [hasLiveWork, refresh])
+  }, [hasLiveWork, pushUnsupported, loadProcesses])
+
+  // The cache follows the lists once they changed, in one write after paint.
+  // Archived rows a search brought in are not kept: a cold start reads them
+  // only while the archive toggle is on.
+  useEffect(() => {
+    if (getActiveDeviceScope() !== mountedDeviceScope) return
+    const written = writtenRef.current
+    const key = rowsKeyRef.current
+    const keepsRows = !rowsIncludeArchivedRef.current || showArchived
+    const writes: Array<readonly [string, unknown[]]> = []
+    if (keepsRows && (written.sessions !== sessions || written.key !== key)) writes.push([key, sessions])
+    if (written.processes !== processes) writes.push([sessionListCacheKeys.runningProcesses, processes])
+    if (writes.length === 0) return
+    writtenRef.current = keepsRows ? { key, sessions, processes } : { ...written, processes }
+    writeCachedLists(writes)
+  }, [sessions, processes, mountedDeviceScope, showArchived])
 
   // Highlight a session seen working that just finished, until the user looks
   // at it. One the list brings in already finished was never seen working.
@@ -296,16 +461,8 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     })
   }, [])
 
-  const replaceSessions = useCallback((next: ActiveSessionInfo[]) => {
-    sessionsRef.current = next
-    setSessions(next)
-    if (getActiveDeviceScope() === mountedDeviceScope) {
-      writeCachedList(sessionsCacheKey, next)
-    }
-  }, [mountedDeviceScope, sessionsCacheKey])
-
   const removeSession = useCallback((sessionId: string) => {
-    replaceSessions(sessionsRef.current.filter((s) => s.sessionId !== sessionId))
+    replaceSessions(sessionsRef.current.filter((s) => s.sessionId !== sessionId), rowsKeyRef.current)
   }, [replaceSessions])
 
   const setArchived = useCallback((sessionIds: readonly string[], archived: boolean) => {
@@ -323,7 +480,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (archived) return { ...s, archived: true, archivedReason: "manual" as const }
       const { archived: _archived, archivedReason: _archivedReason, ...rest } = s
       return rest
-    }))
+    }), rowsKeyRef.current)
     const delta = archived ? changedIds.size : -changedIds.size
     setArchivedCount((count) => Math.max(0, count + delta))
   }, [replaceArchivedIds, replaceSessions])

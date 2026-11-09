@@ -84,8 +84,10 @@ export const ChatArea = memo(function ChatArea({
     onMobileSearchClose?.()
   }, [dispatch, onMobileSearchClose])
 
-  // session is guaranteed non-null when ChatArea renders
-  const currentSession = session!
+  // The shell mounts this once a session is open; the deferred copy shown here
+  // can still be empty in that first commit.
+  if (!session) return null
+  const currentSession = session
   const rateLimitBanner = sessionSource
     ? { block: rateLimit, dirName: sessionSource.dirName, fileName: sessionSource.fileName }
     : null

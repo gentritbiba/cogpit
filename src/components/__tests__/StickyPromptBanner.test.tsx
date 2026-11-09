@@ -7,9 +7,10 @@ import { makeTurn } from "@/__tests__/fixtures"
 import { DisclosureProvider, revealKey, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
 import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
 import { renderComposerMessage } from "../../../shared/session/composerContext"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
-function makeSession(sessionId: string, turns: Array<string | null | Partial<Turn>>): ParsedSession {
+function makeSession(sessionId: string, turns: Array<string | null | Partial<Turn>>): SessionView {
   return {
     sessionId,
     version: "1",
@@ -32,7 +33,7 @@ function makeSession(sessionId: string, turns: Array<string | null | Partial<Tur
       totalDurationMs: 0,
       turnCount: turns.length,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
@@ -56,7 +57,7 @@ function Harness({
   mountedBlocks,
   onScrollToTurn,
 }: {
-  session: ParsedSession
+  session: SessionView
   bubbles: Array<string[] | null>
   /** The content blocks a windowed turn has mounted, as its items' `data-blocks` ranges. */
   mountedBlocks?: string[]

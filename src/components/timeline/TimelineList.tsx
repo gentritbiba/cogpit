@@ -142,9 +142,9 @@ export function TimelineList({
   isLoadingOlder,
   onLoadMore,
 }: TimelineListProps) {
-  const { state: { activeTurnIndex, activeToolCallId, expandAll } } = useAppContext()
+  const { state: { expandAll } } = useAppContext()
   const store = useTimelineStore()
-  const { undoRedo } = useSessionContext()
+  const { undoRedo, activeTurnIndex, activeToolCallId } = useSessionContext()
   const plan = useSyncExternalStore(controller.subscribePlan, controller.getPlan)
   const [, forceRender] = useReducer((count: number) => count + 1, 0)
 

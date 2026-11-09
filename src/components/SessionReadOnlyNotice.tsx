@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import { Bot, Eye, ShieldEllipsis, ShieldX } from "lucide-react"
 import { PermissionRequestBar } from "@/components/ChatInput/PermissionRequestBar"
 import { PlanApprovalBar } from "@/components/ChatInput/PlanApprovalBar"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useEditionUi } from "@/edition/hooks"
 import type { SessionAccess } from "@/hooks/useSessionAccess"
 import type { AgentKind } from "@/lib/agents"
@@ -42,8 +42,8 @@ export function SessionReadOnlyNotice({ reason }: { reason: ReadOnlyReason }) {
 /** The edition may say more about a session the user can only view. */
 function ViewOnlyNote() {
   const { ReadOnlyNote } = useEditionUi()
-  const { session } = useSessionContext()
-  return ReadOnlyNote && session ? <ReadOnlyNote sessionId={session.sessionId} /> : "View only"
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  return ReadOnlyNote && sessionId !== null ? <ReadOnlyNote sessionId={sessionId} /> : "View only"
 }
 
 /** A reader still sees what the session is waiting on, without the controls to answer it. */
@@ -57,7 +57,7 @@ function ReaderBanner({ icon, children }: { icon: LucideIcon; children: React.Re
 }
 
 function PendingPrompts() {
-  const { pendingInteraction, permissionRequests } = useSessionContext()
+  const { pendingInteraction, permissionRequests } = useSessionControls()
   const plan = pendingInteraction?.type === "plan" ? pendingInteraction : null
   if (!plan && permissionRequests.length === 0) return null
   return (

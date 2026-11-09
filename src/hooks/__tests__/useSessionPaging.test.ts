@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
 import { emptyTurn } from "@/__tests__/fixtures"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
@@ -11,6 +11,7 @@ vi.mock("@/lib/sessionCache", () => ({
 import { useSessionPaging } from "../useSessionPaging"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
@@ -30,7 +31,7 @@ function beforeResponse(overrides: Record<string, unknown> = {}) {
 }
 
 const olderTurns = [{ id: "old-1", userMessage: "old", contentBlocks: [], toolCalls: [] }] as unknown as Turn[]
-const parsed = { turns: olderTurns } as unknown as ParsedSession
+const parsed = { turns: olderTurns } as unknown as SessionView
 
 function cachedEntry(overrides: Record<string, unknown> = {}) {
   return {
@@ -38,7 +39,7 @@ function cachedEntry(overrides: Record<string, unknown> = {}) {
     hasMore: true,
     nextByteOffset: 500,
     olderTurns: [],
-    source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "" },
+    source: { dirName: "-dir", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
     lastAccessed: 0,
     ...overrides,
   } as ReturnType<typeof sessionCache.get>
@@ -89,7 +90,7 @@ describe("useSessionPaging", () => {
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
     expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
     expect(added).toBe(1)
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns,
@@ -117,7 +118,7 @@ describe("useSessionPaging", () => {
 
     async function pageTwice(firstPage: Record<string, unknown>, secondPage: Record<string, unknown>) {
       const { result, onOlderTurns, workerParse } = setup()
-      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as ParsedSession)
+      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as SessionView)
       mockAuthFetch.mockResolvedValueOnce(beforeResponse(firstPage))
       mockGet.mockReturnValue(cachedEntry({ olderTurns: [] }))
       await act(async () => { await result.current.loadMore() })
@@ -146,7 +147,7 @@ describe("useSessionPaging", () => {
 
     it("stitches the first page onto a tail that may have cut a turn", async () => {
       const { result, onOlderTurns, workerParse } = setup()
-      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as ParsedSession)
+      workerParse.mockResolvedValue({ turns: [olderWhole] } as unknown as SessionView)
       mockAuthFetch.mockResolvedValueOnce(beforeResponse({ unit: "turns" }))
       mockGet.mockReturnValue(cachedEntry({ olderTurns: [compactionTurn] }))
       await act(async () => { await result.current.loadMore() })
@@ -154,17 +155,34 @@ describe("useSessionPaging", () => {
     })
   })
 
-  it("does not parse line-page records that overlap the header", async () => {
-    mockAuthFetch.mockResolvedValue(beforeResponse({
-      lines: ['{"h":1}', '{"l":1}', '{"l":2}'],
-    }))
-    const { result, workerParse } = setup()
+  describe("line pages from an older server", () => {
+    const prompt = JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "first prompt" } })
 
-    await act(async () => {
-      await result.current.loadMore()
+    it("puts only the lines before the first turn in front of a page below a gap", async () => {
+      mockAuthFetch.mockResolvedValue(beforeResponse({ headerLines: ['{"h":1}', prompt], hasMore: true }))
+      const { result, workerParse } = setup()
+
+      await act(async () => {
+        await result.current.loadMore()
+      })
+
+      expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
     })
 
-    expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
+    it("joins the whole header to a page that reaches the head, without the lines it repeats", async () => {
+      mockAuthFetch.mockResolvedValue(beforeResponse({
+        headerLines: ['{"h":1}', prompt],
+        lines: ['{"h":1}', prompt, '{"l":1}'],
+        hasMore: false,
+      }))
+      const { result, workerParse } = setup()
+
+      await act(async () => {
+        await result.current.loadMore()
+      })
+
+      expect(workerParse).toHaveBeenCalledWith(['{"h":1}', prompt, '{"l":1}'].join("\n"))
+    })
   })
 
   it("flips hasMore off when the server reports the end", async () => {
@@ -187,7 +205,7 @@ describe("useSessionPaging", () => {
     })
 
     expect(onOlderTurns).not.toHaveBeenCalled()
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: false,
       nextByteOffset: 100,
     })
@@ -323,7 +341,7 @@ describe("useSessionPaging", () => {
     expect(onOlderTurns).not.toHaveBeenCalled()
     // The stale page is still banked on the old session's entry, cursor and
     // turns together, so reopening it picks up where this left off.
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns,
@@ -379,7 +397,7 @@ describe("useSessionPaging", () => {
 
     // The new (older) page lands in front of what was already loaded.
     expect(onOlderTurns).toHaveBeenLastCalledWith([...olderTurns, ...previous])
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns: [...olderTurns, ...previous],

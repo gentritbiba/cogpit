@@ -482,11 +482,34 @@ describe("POST /api/branch-session", () => {
     expect(writtenLines).toHaveLength(6)
   })
 
-  it("falls back to turnIndex when turnUuid matches no line", async () => {
+  it("cuts after the turn a page-merged id names, by a record inside the turn", async () => {
     mockedIsWithinDir.mockReturnValue(true)
-    const sourceContent = buildJsonl(3)
-    mockedReadFile.mockResolvedValue(sourceContent as never)
+    mockedReadFile.mockResolvedValue(buildJsonl(3) as never)
     mockedWriteFile.mockResolvedValue(undefined as never)
+
+    // A client that paged turn 1 in from its middle holds it as `a1`, the
+    // record its page opened on, and counts it 0 among its loaded turns.
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "my-project",
+        fileName: "original-session-id.jsonl",
+        turnIndex: 0,
+        turnUuid: "a1",
+      })
+    )
+
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(res.statusCode).toBe(200)
+    const writtenLines = (mockedWriteFile.mock.calls[0][1] as string).trim().split("\n")
+    expect(writtenLines.map((line) => JSON.parse(line).uuid)).toEqual(["u0", "a0", "u1", "a1"])
+    expect(JSON.parse(writtenLines[0]).branchedFrom.turnIndex).toBe(1)
+  })
+
+  it("refuses, rather than cut by the loaded index, when no turn has the id", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReadFile.mockResolvedValue(buildJsonl(3) as never)
 
     const { res } = callHandler(
       "/api/branch-session",
@@ -499,15 +522,10 @@ describe("POST /api/branch-session", () => {
       })
     )
 
-    await vi.waitFor(() => {
-      expect(res.body).toBeTruthy()
-      expect(res.statusCode).toBe(200)
-    })
-
-    // unmatched uuid → index cut applies: keep only turn 0
-    const writtenContent = mockedWriteFile.mock.calls[0][1] as string
-    const writtenLines = writtenContent.trim().split("\n")
-    expect(writtenLines).toHaveLength(2)
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(res.statusCode).toBe(409)
+    expect(JSON.parse(res.body).error).toBe("Unable to locate the selected turn in the current session file")
+    expect(mockedWriteFile).not.toHaveBeenCalled()
   })
 
   it("branches Codex sessions with rollout naming and metadata", async () => {
@@ -652,6 +670,41 @@ describe("POST /api/branch-session", () => {
       "11111111-1111-4111-8111-111111111111",
       { toEventId: "user-event-3" },
     )
+  })
+
+  it("forks Copilot after a turn named by an event inside it, and refuses an id no turn has", async () => {
+    mockedResolveSessionFilePath.mockResolvedValue(
+      "/tmp/copilot/session-state/11111111-1111-4111-8111-111111111111/events.jsonl" as never,
+    )
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({ type: "user.message", id: "user-event-1", data: { turnId: "turn-1", content: "First" } }),
+      JSON.stringify({ type: "assistant.message", id: "assistant-event-1", data: { content: "Done" } }),
+      JSON.stringify({ type: "user.message", id: "user-event-2", data: { turnId: "turn-2", content: "Second" } }),
+    ].join("\n") as never)
+    const branch = (turnUuid: string) => callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: COPILOT_DIR_NAME,
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+        turnIndex: 1,
+        turnUuid,
+      }),
+    ).res
+
+    const named = branch("assistant-event-1")
+    await vi.waitFor(() => expect(named.body).toBeTruthy())
+    expect(named.statusCode).toBe(200)
+    expect(mockedForkCopilotSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      { toEventId: "user-event-2" },
+    )
+
+    mockedForkCopilotSession.mockClear()
+    const unknown = branch("not-a-turn")
+    await vi.waitFor(() => expect(unknown.body).toBeTruthy())
+    expect(unknown.statusCode).toBe(409)
+    expect(mockedForkCopilotSession).not.toHaveBeenCalled()
   })
 
   it("forks only the session the access check allowed, whatever the path spells", async () => {

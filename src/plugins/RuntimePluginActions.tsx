@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Volume2 } from "lucide-react"
 import { evaluateCompatibility } from "@cogpit/plugin-contracts"
-import { useSessionChatContextOptional, useSessionContextOptional } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionChatContextOptional, useSessionControlsOptional } from "@/contexts/SessionContext"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -11,11 +11,11 @@ import { useRuntimeContributions } from "./RuntimePluginContributions"
 /** Enabled, compatible plugins that may add controls to the open session's composer, or null when none may. */
 export function useComposerPlugins() {
   const runtime = useRuntimeContributions()
-  const session = useSessionContextOptional()
+  const controls = useSessionControlsOptional()
   const chat = useSessionChatContextOptional()
-  const sessionId = session?.session?.sessionId
+  const sessionId = useOpenSession((open) => open?.sessionId)
   const status = runtime?.status
-  if (!runtime?.activation || !status?.store.available || status.safeMode || !chat || !sessionId || session?.permissions.send === false) return null
+  if (!runtime?.activation || !status?.store.available || status.safeMode || !chat || !sessionId || controls?.permissions.send === false) return null
   const plugins = status.store.plugins.filter(plugin => plugin.enabled
     && (plugin.scope.type === "all" || !!runtime.project && plugin.scope.projectIds.includes(runtime.project.id))
     && evaluateCompatibility(plugin.manifest, clientRuntimeDescriptor(), status.runtime, { allowPrerelease: plugin.manifest.publisher.startsWith("dev-") }).compatible)

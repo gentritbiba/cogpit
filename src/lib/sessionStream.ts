@@ -9,7 +9,16 @@ export interface ConnectionState {
   lastEventAt: number | null
 }
 export interface SessionStream { source: EventSource; close: () => void; state: () => ConnectionState }
-interface SessionStreamOptions { onLost?: () => void; onState?: (state: ConnectionState) => void }
+interface SessionStreamOptions {
+  onLost?: () => void
+  onState?: (state: ConnectionState) => void
+  /**
+   * The URL each connection opens, read again on every reconnect, so a stream
+   * resumes where its reader is instead of replaying from where it started.
+   * The stream is shared by its plain `url`.
+   */
+  connectUrl?: () => string
+}
 
 const owners = new Map<string, StreamOwner>()
 
@@ -52,18 +61,32 @@ class StreamOwner {
   private generation = 0
   private retryingGeneration: number | null = null
   private stopped = false
+  private suspended = false
   private stopFrames: (() => void)[] = []
   private readonly foreground = () => {
     if (document.visibilityState === "hidden" || this.stopped || this.health.transport === "denied") return
     if (!this.source || this.health.transport !== "open" || (this.health.lastEventAt !== null && Date.now() - this.health.lastEventAt > 45000)) this.connect()
   }
   private readonly identityChanged = () => this.stop()
+  // A page frozen in the back/forward cache would otherwise hold its connection, one of the
+  // browser's six per host, until evicted.
+  private readonly suspend = () => {
+    if (this.stopped || this.health.transport === "denied") return
+    this.release()
+    this.suspended = true
+    this.setHealth({ ...this.health, transport: "connecting", freshness: "stale" })
+  }
+  private readonly resume = (event: PageTransitionEvent) => {
+    if (event.persisted && this.suspended) this.connect()
+  }
 
-  constructor(readonly key: string, readonly url: string) {
+  constructor(readonly key: string, readonly url: string, private readonly connectUrl?: () => string) {
     window.addEventListener("online", this.foreground)
     document.addEventListener("visibilitychange", this.foreground)
     window.addEventListener("cogpit-identity-changed", this.identityChanged)
     window.addEventListener("cogpit-device-scope-changed", this.identityChanged)
+    window.addEventListener("pagehide", this.suspend)
+    window.addEventListener("pageshow", this.resume)
     this.connect()
   }
   add(options: SessionStreamOptions): Subscriber {
@@ -99,17 +122,22 @@ class StreamOwner {
     })
   }
   private setHealth(state: ConnectionState): void { this.health = state; for (const subscriber of this.subscribers) subscriber.options.onState?.(state) }
-  private connect(): void {
-    if (this.stopped) return
+  private release(): void {
     clearTimeout(this.timer)
     this.asking?.abort()
     for (const stop of this.stopFrames) stop()
+    this.stopFrames = []
     this.source?.close()
     this.generation++
     this.retryingGeneration = null
     this.linked.clear()
+  }
+  private connect(): void {
+    if (this.stopped) return
+    this.release()
+    this.suspended = false
     this.setHealth({ ...this.health, transport: "connecting" })
-    this.source = new EventSource(this.url)
+    this.source = new EventSource(this.connectUrl ? authUrl(this.connectUrl()) : this.url)
     this.stopFrames = [announceAccessFrames(this.source), announceConfigFrames(this.source)]
     for (const type of this.types) this.link(type)
   }
@@ -134,13 +162,14 @@ class StreamOwner {
     this.timer = setTimeout(() => this.connect(), delay)
   }
   stop(): void {
-    this.stopped = true; this.generation++
-    clearTimeout(this.timer); this.asking?.abort(); this.source?.close()
-    for (const stop of this.stopFrames) stop()
+    this.stopped = true
+    this.release()
     window.removeEventListener("online", this.foreground)
     document.removeEventListener("visibilitychange", this.foreground)
     window.removeEventListener("cogpit-identity-changed", this.identityChanged)
     window.removeEventListener("cogpit-device-scope-changed", this.identityChanged)
+    window.removeEventListener("pagehide", this.suspend)
+    window.removeEventListener("pageshow", this.resume)
     this.setHealth({ ...this.health, transport: "closed", freshness: "stale" })
     if (owners.get(this.key) === this) owners.delete(this.key)
   }
@@ -150,7 +179,7 @@ export function openSessionStream(url: string, options: SessionStreamOptions = {
   const resolved = authUrl(url)
   const key = JSON.stringify([getActiveDeviceScope(), getActiveIdentity(), resolved])
   let owner = owners.get(key)
-  if (!owner) { owner = new StreamOwner(key, resolved); owners.set(key, owner) }
+  if (!owner) { owner = new StreamOwner(key, resolved, options.connectUrl); owners.set(key, owner) }
   const source = owner.add(options)
   return { source: source as unknown as EventSource, close: () => source.close(), state: () => owner.health }
 }

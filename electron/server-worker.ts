@@ -12,6 +12,7 @@ import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "../server/sessionHosts/delegatedRequests"
 import { startSlack } from "../server/slack"
+import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "../server/sessionCatalog"
 import { LOCAL_READER, markNotificationsRead } from "../server/lib/notificationHistory"
 import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
@@ -37,6 +38,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
     const listenPort = (isDev || networkEnabled) ? 19384 : 0
 
+    startSessionCatalogAfterFirstResponse(httpServer)
     await new Promise<void>((resolve) => {
       httpServer.listen(listenPort, listenHost, () => resolve())
     })
@@ -55,6 +57,8 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     setServerPort(port)
     writePortFile(port)
     process.on("exit", removePortFile)
+    // The app ends the worker with SIGTERM on quit; keep what the session catalog learned.
+    process.once("SIGTERM", () => { void flushSessionCatalog().finally(() => process.exit(0)) })
 
     console.log(`[server-worker] Cogpit server listening on http://${listenHost}:${port}`)
     startSessionActivityMonitor()

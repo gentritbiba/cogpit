@@ -25,7 +25,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.fetch, jsonFetch: mocks.fetch, a
 vi.mock("@/lib/shiki", () => ({ highlightCode: vi.fn().mockResolvedValue([]), getLangFromPath: () => null }))
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -33,8 +33,10 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionChatContext: () => ({ chat: { sendMessage: vi.fn() } }),
   useSessionContext: () => ({
-    session: { sessionId: "session-1", cwd: "/repo", turns: [], rawMessages: [] },
+    session: { sessionId: "session-1", cwd: "/repo", turns: [], digest: { status: { status: mocks.status } } },
     sessionSource: null,
+    activeTurnIndex: null,
+    activeToolCallId: null,
     isLive: true,
     isSubAgentView: false,
     pendingInteraction: mocks.pendingQuestion ? { type: "question", toolUseId: mocks.pendingQuestion } : null,
@@ -44,7 +46,6 @@ vi.mock("@/contexts/SessionContext", () => ({
   }),
 }))
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => mocks.skills }))
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: mocks.status }) }))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 
 const TIME = "2026-11-07T10:00:00.000Z"

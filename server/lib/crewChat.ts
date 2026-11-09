@@ -1,9 +1,10 @@
 import type { IncomingMessage } from "node:http"
-import { CREW_CHAT_MAX_LENGTH, crewChatHandles, crewChatMentions, formatCrewChatDelivery, type CrewChatAuthor, type CrewChatMember, type CrewChatPage } from "../../shared/contracts/crewChat"
+import { CREW_CHAT_MAX_LENGTH, crewChatHandles, crewChatMentions, formatCrewChatDelivery, type CrewChatAuthor, type CrewChatDelivery, type CrewChatMember, type CrewChatMessage, type CrewChatPage } from "../../shared/contracts/crewChat"
 import { accessAtLeast } from "../../shared/contracts/sessionAccess"
 import { accessLevelOf, editionModule, getRequestPrincipal } from "../edition"
 import { beforeOrchestrationClose, orchestrationStore } from "../orchestration/storage"
 import { fingerprint, OrchestrationError } from "../orchestration/store"
+import { DeviceRequestError } from "../hub/deviceRequest"
 import { hostForSession } from "../sessionHosts"
 import { crewRootOf } from "./crew"
 import { crewSessionIds } from "./sessionCrew"
@@ -90,6 +91,8 @@ export async function postCrewChat(sessionId: string, input: { text: string; com
 }
 
 const delivering = new Map<string, Promise<void>>()
+/** Deliveries a member took whose settle threw; a later pass settles them instead of sending again. */
+const sentUnsettled = new Set<string>()
 const watched = new Map<string, { rootId: string; req?: IncomingMessage }>()
 let timer: ReturnType<typeof setInterval> | undefined
 let generation = 0
@@ -100,18 +103,19 @@ export function closeCrewChatMonitor(): void {
   timer = undefined
   watched.clear()
   delivering.clear()
+  sentUnsettled.clear()
 }
 
 function watchCrewChat(rootId: string, req?: IncomingMessage): void {
   const scope = commandScope(req)
-  if (!orchestrationStore().chatDeliveries(rootId, scope).length) return
+  if (!orchestrationStore().hasPendingChatDeliveries(rootId, scope)) return
   watched.set(JSON.stringify([rootId, scope]), { rootId, req })
   if (timer) return
   beforeOrchestrationClose(closeCrewChatMonitor)
   timer = setInterval(() => {
     for (const [key, watch] of watched) {
       const currentRequest = watch.req ? refreshExecutionRequest(watch.req) : undefined
-      if (currentRequest === null || !orchestrationStore().chatDeliveries(watch.rootId, commandScope(currentRequest)).length) { watched.delete(key); continue }
+      if (currentRequest === null || !orchestrationStore().hasPendingChatDeliveries(watch.rootId, commandScope(currentRequest))) { watched.delete(key); continue }
       void deliverCrewChat(watch.rootId, currentRequest).catch(() => {})
     }
     if (!watched.size) { clearInterval(timer); timer = undefined }
@@ -131,50 +135,129 @@ export function deliverCrewChat(rootId: string, req?: IncomingMessage): Promise<
   return work
 }
 
+/** Attempts before a delivery gives up on a member that fails it; with the backoff below that is about 10 minutes. */
+export const CREW_CHAT_DELIVERY_ATTEMPTS = 8
+const RETRY_BASE_MS = 5_000
+const RETRY_CAP_MS = 5 * 60_000
+/** A busy member is reachable and usually free again soon, so it is asked again on a short fixed delay. */
+export const CREW_CHAT_BUSY_RETRY_MS = 10_000
+/** How long a mention waits on a member that answers busy every time before it gives up. */
+export const CREW_CHAT_BUSY_GIVE_UP_MS = 60 * 60_000
+/** Busy answers a notice gets before it is skipped. */
+export const CREW_CHAT_NOTICE_BUSY_ANSWERS = 3
+
+/** How long to wait after the `attempt`th failure (1-based). */
+export function crewChatRetryDelay(attempt: number): number {
+  return Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** (attempt - 1))
+}
+
+type DeliveryFailure = { kind: "unreachable" | "busy" | "failed"; reason: string }
+
+class CrewMemberUnreachable extends Error {}
+
+function deliveryFailure(error: unknown): DeliveryFailure {
+  const reason = error instanceof Error && error.message ? error.message : "Chat delivery failed"
+  if (error instanceof CrewMemberUnreachable) return { kind: "unreachable", reason }
+  // session-send's answer when the session cannot take a message right now; other 409s are permanent.
+  if (error instanceof DeviceRequestError && error.status === 409 && error.code === "CONFLICT") return { kind: "busy", reason }
+  return { kind: "failed", reason }
+}
+
+function deferral(delivery: CrewChatDelivery, { kind, reason }: DeliveryFailure, now: number) {
+  if (kind === "busy") {
+    const busySince = delivery.busySince || now
+    const patience = delivery.kind === "mention" ? CREW_CHAT_BUSY_GIVE_UP_MS : (CREW_CHAT_NOTICE_BUSY_ANSWERS - 1) * CREW_CHAT_BUSY_RETRY_MS
+    return { delivery, error: reason, attempts: delivery.attempts, busySince, nextAttemptAt: now + CREW_CHAT_BUSY_RETRY_MS, giveUp: now - busySince >= patience }
+  }
+  const attempts = delivery.attempts + 1
+  return { delivery, error: reason, attempts, busySince: 0, nextAttemptAt: now + crewChatRetryDelay(attempts), giveUp: attempts >= CREW_CHAT_DELIVERY_ATTEMPTS }
+}
+
+/**
+ * One pass over the deliveries that are due. A member that fails once in a pass is not asked again in
+ * that pass, so many messages to an offline device cost one request. A notice to a member out of reach is
+ * skipped, and one to a busy member after a few short retries. A mention to a busy member is retried
+ * shortly without counting an attempt, for up to an hour; any other failure counts one, backs off, and
+ * the last allowed one settles the delivery as `failed`.
+ */
 async function flushCrewChat(rootId: string, scope: string, req?: IncomingMessage): Promise<void> {
   const activeGeneration = generation
   const store = orchestrationStore()
   const attempted = new Set<string>()
+  const blocked = new Map<string, DeliveryFailure>()
   for (;;) {
-    const pending = store.chatDeliveries(rootId, scope).filter((delivery) => !attempted.has(JSON.stringify([delivery.sequence, delivery.sessionId])))
-    if (!pending.length) return
-    for (const delivery of pending) {
-      attempted.add(JSON.stringify([delivery.sequence, delivery.sessionId]))
-      const message = store.chatMessage(delivery.sequence)
-      if (!message) continue
-      try {
-        if (!await may(req, rootId, "interact") || !await may(req, delivery.sessionId, "interact")) continue
-        const host = await hostForSession(delivery.sessionId)
-        const state = await host.state(delivery.sessionId)
-        if (generation !== activeGeneration) return
-        if (["unreachable", "not_found"].includes(state.outcome)) throw new Error(state.error || "Crew member is unavailable")
-        const mentioned = delivery.kind === "mention"
-        if (!mentioned && (!store.chatListener(rootId, delivery.sessionId).listening || !state.running || state.activeNotifications === false)) {
-          store.updateChatDelivery(delivery, "skipped")
-          continue
+    const due = store.dueChatDeliveries(rootId, scope, Date.now()).filter((delivery) => !attempted.has(JSON.stringify([delivery.sequence, delivery.sessionId])))
+    if (!due.length) return
+    const deferrals: ReturnType<typeof deferral>[] = []
+    try {
+      for (const delivery of due) {
+        const key = JSON.stringify([delivery.sequence, delivery.sessionId])
+        attempted.add(key)
+        if (sentUnsettled.has(key)) { store.settleChatDelivery(delivery, "accepted"); sentUnsettled.delete(key); continue }
+        const message = store.chatMessage(delivery.sequence)
+        if (!message) { store.settleChatDelivery(delivery, "skipped", "The message no longer exists"); continue }
+        let failure = blocked.get(delivery.sessionId)
+        if (!failure) {
+          let sent = false
+          try {
+            sent = await sendCrewChatDelivery(store, rootId, delivery, message, req, () => generation !== activeGeneration)
+          } catch (error) {
+            failure = deliveryFailure(error)
+            blocked.set(delivery.sessionId, failure)
+          }
+          if (generation !== activeGeneration) return
+          if (sent) {
+            sentUnsettled.add(key)
+            store.settleChatDelivery(delivery, "accepted")
+            sentUnsettled.delete(key)
+          }
         }
-        const deviceFlag = host.remote ? ` --device ${shellQuoted(getDeviceName())}` : ""
-        const fetchCommand = `cogpit-session chat fetch ${shellQuoted(rootId)}${deviceFlag} --after ${Math.max(0, message.sequence - 1)}`
-        const replyCommand = `cogpit-session chat post "YOUR_MESSAGE" --crew ${shellQuoted(rootId)}${deviceFlag}`
-        if (!await may(req, rootId, "interact") || !await may(req, delivery.sessionId, "interact")) continue
-        if (generation !== activeGeneration) return
-        // A device's durable queue would hold it out of reach of this host's lead check, so a device
-        // delivers it now or answers busy, and this host keeps it pending until then.
-        const result = await host.send(delivery.sessionId, formatCrewChatDelivery(message, mentioned, fetchCommand, replyCommand), {
-          ...(host.remote ? {} : { commandId: `crew-chat-${fingerprint([rootId, delivery.sequence, delivery.sessionId]).slice(0, 40)}` }),
-          intent: state.activeNotifications === false ? "queue" : "steer",
-          notification: true,
-          ...(!mentioned ? { onlyWhileRunning: true } : {}),
-          ...(host.remote ? {} : { leadSessionId: rootId }),
-          req,
-        })
-        if (generation !== activeGeneration) return
-        if (result.delivery === "busy") throw new Error("Crew member could not accept this message")
-        store.updateChatDelivery(delivery, "accepted")
-      } catch (error) {
-        if (generation !== activeGeneration) return
-        store.updateChatDelivery(delivery, "pending", error instanceof Error ? error.message : "Chat delivery failed")
+        if (!failure) continue
+        const next = deferral(delivery, failure, Date.now())
+        if (delivery.kind !== "mention" && (failure.kind === "unreachable" || (failure.kind === "busy" && next.giveUp))) store.settleChatDelivery(delivery, "skipped", failure.reason)
+        else deferrals.push(next)
       }
+    } finally {
+      if (generation === activeGeneration) store.deferChatDeliveries(deferrals)
     }
   }
+}
+
+async function crewMemberState(sessionId: string) {
+  try {
+    const host = await hostForSession(sessionId)
+    return { host, state: await host.state(sessionId) }
+  } catch (error) {
+    throw new CrewMemberUnreachable(deliveryFailure(error).reason)
+  }
+}
+
+/** Sends one message, answering whether the member took it, or throws why it could not. */
+async function sendCrewChatDelivery(store: ReturnType<typeof orchestrationStore>, rootId: string, delivery: CrewChatDelivery, message: CrewChatMessage, req: IncomingMessage | undefined, closed: () => boolean): Promise<boolean> {
+  const allowed = async () => await may(req, rootId, "interact") && await may(req, delivery.sessionId, "interact")
+  if (!await allowed()) throw new Error("Not allowed to message this crew member")
+  const { host, state } = await crewMemberState(delivery.sessionId)
+  if (closed()) return false
+  if (["unreachable", "not_found"].includes(state.outcome)) throw new CrewMemberUnreachable(state.error || "Crew member is unavailable")
+  const mentioned = delivery.kind === "mention"
+  if (!mentioned && (!store.chatListener(rootId, delivery.sessionId).listening || !state.running || state.activeNotifications === false)) {
+    store.settleChatDelivery(delivery, "skipped")
+    return false
+  }
+  const deviceFlag = host.remote ? ` --device ${shellQuoted(getDeviceName())}` : ""
+  const fetchCommand = `cogpit-session chat fetch ${shellQuoted(rootId)}${deviceFlag} --after ${Math.max(0, message.sequence - 1)}`
+  const replyCommand = `cogpit-session chat post "YOUR_MESSAGE" --crew ${shellQuoted(rootId)}${deviceFlag}`
+  if (!await allowed()) throw new Error("Not allowed to message this crew member")
+  if (closed()) return false
+  // A device's durable queue would hold it out of reach of this host's lead check, so a device
+  // delivers it now or answers busy, and this host keeps it pending until then.
+  await host.send(delivery.sessionId, formatCrewChatDelivery(message, mentioned, fetchCommand, replyCommand), {
+    ...(host.remote ? {} : { commandId: `crew-chat-${fingerprint([rootId, delivery.sequence, delivery.sessionId]).slice(0, 40)}` }),
+    intent: state.activeNotifications === false ? "queue" : "steer",
+    notification: true,
+    ...(!mentioned ? { onlyWhileRunning: true } : {}),
+    ...(host.remote ? {} : { leadSessionId: rootId }),
+    req,
+  })
+  return !closed()
 }

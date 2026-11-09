@@ -1,8 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
-import { deriveSessionStatus } from "../../../shared/session/sessionStatus"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import type { Branch } from "../../../shared/session/types"
 import type { ComposerAttachment, ComposerContextItem, QuoteSource } from "../../../shared/session/composerContext"
 import { DisclosureProvider } from "./disclosure"
@@ -19,6 +18,8 @@ export interface TimelineRowFacts {
   isLive: boolean
   isSubAgentView: boolean
   turnCount: number
+  /** The tool call selected in the stats and sidebar panels; only the selected turn's row reads it. */
+  activeToolCallId: string | null
   canSend: boolean
   canAnswer: boolean
   /** Tool call id of the question the session is waiting on, if any. */
@@ -70,16 +71,12 @@ export function TimelineRowsProvider({ sessionKey, children }: {
   sessionKey?: string
   children: ReactNode
 }) {
-  const { session, sessionSource, isLive, isSubAgentView, permissions, pendingInteraction, undoRedo, actions } = useSessionContext()
+  const { session, sessionSource, activeToolCallId, isLive, isSubAgentView, permissions, pendingInteraction, undoRedo, actions } = useSessionContext()
   const sessionId = session?.sessionId ?? null
   const cwd = session?.cwd ?? ""
   const turnCount = session?.turns.length ?? 0
   const live = isLive && session !== null
-  const rawMessages = live ? session.rawMessages : null
-  const working = useMemo(
-    () => rawMessages !== null && WORKING_STATUSES.has(deriveSessionStatus(rawMessages as Array<{ type: string; [key: string]: unknown }>).status),
-    [rawMessages],
-  )
+  const working = live && WORKING_STATUSES.has(session.digest.status.status)
   const openQuestionId = pendingInteraction?.type === "question" ? pendingInteraction.toolUseId : undefined
   const undoEnabled = undoRedo.enabled && !isSubAgentView
 
@@ -99,6 +96,7 @@ export function TimelineRowsProvider({ sessionKey, children }: {
     isLive: live,
     isSubAgentView,
     turnCount,
+    activeToolCallId,
     canSend: permissions.send,
     canAnswer: permissions.answer,
     openQuestionId,
@@ -112,7 +110,7 @@ export function TimelineRowsProvider({ sessionKey, children }: {
     addComposerContext,
     openQuoteSource,
   }), [
-    sessionId, sessionSource, cwd, live, isSubAgentView, turnCount, permissions.send, permissions.answer,
+    sessionId, sessionSource, cwd, live, isSubAgentView, turnCount, activeToolCallId, permissions.send, permissions.answer,
     openQuestionId, undoRedo.branches, branchesAtTurn, restoreToHere, openBranches, branchFromHere,
     editCommand, expandCommand, addComposerContext, openQuoteSource,
   ])

@@ -31,8 +31,8 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   isLoadingOlder = false,
   onLoadMore,
 }: ConversationTimelineProps) {
-  const { state: { searchQuery, sessionChangeKey } } = useAppContext()
-  const { session } = useSessionContext()
+  const { state: { searchQuery } } = useAppContext()
+  const { session, sessionChangeKey } = useSessionContext()
 
   const turns = session?.turns
   const allTurns = useMemo(() => {

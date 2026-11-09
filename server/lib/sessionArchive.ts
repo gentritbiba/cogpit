@@ -45,6 +45,19 @@ export function subscribeSessionArchive(listener: (sessionIds: readonly string[]
   return () => { archiveListeners.delete(listener) }
 }
 
+const changeListeners = new Set<() => void>()
+
+/** Called after every write that archived, restored or forgot a session. */
+export function subscribeArchiveChanges(listener: () => void): () => void {
+  changeListeners.add(listener)
+  return () => { changeListeners.delete(listener) }
+}
+
+async function persistChange(): Promise<void> {
+  await file.persist()
+  for (const listener of changeListeners) listener()
+}
+
 const file = new SessionConfigFile(SESSION_ARCHIVE_FILE, {
   reset() {
     archived = new Map()
@@ -99,7 +112,7 @@ export async function setSessionsArchived(
       if (wasArchived || !wasKept) changed.push(sessionId)
     }
   }
-  if (changed.length > 0) await file.persist()
+  if (changed.length > 0) await persistChange()
   if (archive) for (const listener of archiveListeners) listener(sessionIds)
   return changed
 }
@@ -112,7 +125,7 @@ export async function forgetSessions(sessionIds: readonly string[]): Promise<voi
     if (archived.delete(sessionId)) changed = true
     if (kept.delete(sessionId)) changed = true
   }
-  if (changed) await file.persist()
+  if (changed) await persistChange()
 }
 
 /**

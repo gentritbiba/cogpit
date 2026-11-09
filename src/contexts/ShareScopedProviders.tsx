@@ -1,27 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AppProvider, type AppContextValue } from "@/contexts/AppContext"
-import {
-  SessionProvider,
-  type SessionChatContextValue,
-  type SessionContextValue,
-} from "@/contexts/SessionContext"
+import { OpenSessionProvider, type SessionControls } from "@/contexts/SessionContext"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useSessionPaging } from "@/hooks/useSessionPaging"
-import { useSessionState } from "@/hooks/useSessionState"
-import { useTimelineScroll } from "@/hooks/useTimelineScroll"
+import { useSessionSelector, useSessionState } from "@/hooks/useSessionState"
+import { useSessionController } from "@/hooks/useSessionController"
 import { useShareChat } from "@/hooks/useShareChat"
 import { useSharePermissions } from "@/hooks/useSharePermissions"
 import { useTheme } from "@/hooks/useTheme"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { setMe } from "@/lib/capabilities"
 import { detectPendingInteraction } from "../../shared/session/parser"
-import { loadSessionTailFresh } from "@/lib/sessionLoader"
 import { agentKindForDirName } from "@/lib/agents"
 import { stopShare, type SharedSessionInfo } from "@/lib/shareApi"
 import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import { samePendingInteraction } from "@/lib/sessionFacts"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { NO_CAPABILITIES, type MeResponse } from "../../shared/contracts/identity"
 
 /**
@@ -65,8 +62,9 @@ interface ShareScopedProvidersProps {
 export function ShareScopedProviders({ info, children }: ShareScopedProvidersProps) {
   const isMobile = useIsMobile()
   const theme = useTheme()
-  const [state, dispatch] = useSessionState()
-  const { parse: workerParse, append: workerAppend } = useParserWorker()
+  const [state, dispatchState, sessionStore] = useSessionState()
+  const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
+  const { sessions, dispatch } = useSessionController(dispatchState, workerParse)
   const [loadState, setLoadState] = useState<ShareLoadState>("loading")
 
   // Host affordances read this module cell directly (useCapability), not the
@@ -81,40 +79,39 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
 
   const loadSession = useCallback(async () => {
     try {
-      const { parsed, source } = await loadSessionTailFresh(
-        info.dirName,
-        info.fileName,
-        workerParse,
-        "shared session",
-      )
-      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
-      setLoadState("ready")
+      await sessions.openSession({ dirName: info.dirName, fileName: info.fileName }, {
+        reason: "share",
+        commit: ({ parsed, source }) => {
+          dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
+          setLoadState("ready")
+        },
+      })
     } catch {
       setLoadState("failed")
     }
-  }, [dispatch, info.dirName, info.fileName, isMobile, workerParse])
+  }, [dispatch, info.dirName, info.fileName, isMobile, sessions])
 
-  // Once, for the life of the shell. A guest has exactly one session, so the
-  // only thing that could re-trigger this is an incidental dependency change
-  // (a viewport crossing the mobile breakpoint), which must not refetch.
-  const loadedRef = useRef(false)
+  // Once per mount: a guest has exactly one session, so an incidental change
+  // (a viewport crossing the mobile breakpoint) must not refetch. An unmount
+  // leaves the session, so a remount (StrictMode's in development) loads again.
+  const loadSessionRef = useRef(loadSession)
+  loadSessionRef.current = loadSession
   useEffect(() => {
-    if (loadedRef.current) return
-    loadedRef.current = true
-    void loadSession()
-  }, [loadSession])
+    void loadSessionRef.current()
+  }, [])
 
-  const handleLiveUpdate = useCallback((session: ParsedSession) => {
-    dispatch({ type: "UPDATE_SESSION", session })
+  const handleLiveUpdate = useCallback((session: SessionView, loadId: number) => {
+    dispatch({ type: "UPDATE_SESSION", session, loadId })
   }, [dispatch])
 
-  const { isLive, sseState, isCompacting, turnError } = useLiveSession(
+  const getSession = useCallback(() => sessionStore.getState().session, [sessionStore])
+  const { isLive, sseState, isCompacting, sessionShown, turnError } = useLiveSession(
     state.sessionSource,
     handleLiveUpdate,
     workerParse,
     workerAppend,
-    undefined,
-    state.session,
+    sessions.reloadCurrent,
+    getSession,
   )
 
   const handleOlderTurns = useCallback((turns: Turn[]) => {
@@ -125,25 +122,19 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
-    workerParse,
+    workerParse: parsePage,
     onOlderTurns: handleOlderTurns,
-  })
-
-  const scroll = useTimelineScroll({
-    session: state.session,
-    pendingMessages: chat.pendingMessages,
-    consumePending: chat.consumePending,
-    historyBytes: paging.historyBytes,
   })
 
   // Disabled, not stubbed: rewinding a transcript writes to the host filesystem
   // and is not on the guest's allowlist. Passing `false` keeps the real hook's
   // shape without it ever reaching `/api/undo-state`.
-  const undoRedo = useUndoRedo(state.session, state.sessionSource, loadSession, false)
+  const undoRedo = useUndoRedo(sessionStore, state.sessionSource, loadSession, false)
 
-  const pendingInteraction = useMemo(
-    () => (state.session ? detectPendingInteraction(state.session) : null),
-    [state.session],
+  const pendingInteraction = useSessionSelector(
+    sessionStore,
+    (open) => open ? detectPendingInteraction(open) : null,
+    samePendingInteraction,
   )
 
   const handleToggleExpandAll = useCallback(() => {
@@ -177,8 +168,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     isMobile,
   }), [state, dispatch, theme, isMobile, info.dirName, noop])
 
-  const sessionValue = useMemo<SessionContextValue>(() => ({
-    session: state.session,
+  const sessionControls = useMemo<SessionControls>(() => ({
     sessionSource: state.sessionSource,
     isLive,
     sseState,
@@ -210,13 +200,11 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
       handleLoadSession: noop,
     },
   }), [
-    state.session, state.sessionSource, isLive, sseState, isCompacting, turnError,
+    state.sessionSource, isLive, sseState, isCompacting, turnError,
     undoRedo, pendingInteraction, permissions.requests, permissions.responding,
     permissions.respond, permissions.respondAll, handleStopSession,
     handleToggleExpandAll, noop,
   ])
-
-  const chatValue = useMemo<SessionChatContextValue>(() => ({ chat, scroll }), [chat, scroll])
 
   const view = useMemo<ShareViewState>(() => ({
     loadState,
@@ -227,9 +215,15 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
 
   return (
     <AppProvider value={appValue}>
-      <SessionProvider value={sessionValue} chatValue={chatValue}>
+      <OpenSessionProvider
+        store={sessionStore}
+        controls={sessionControls}
+        chat={chat}
+        historyBytes={paging.historyBytes}
+        onSessionShown={sessionShown}
+      >
         {children(view)}
-      </SessionProvider>
+      </OpenSessionProvider>
     </AppProvider>
   )
 }

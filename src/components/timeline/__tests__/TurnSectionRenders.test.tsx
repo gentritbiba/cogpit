@@ -3,12 +3,13 @@ import { render } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
 import { TimelineRowsProvider } from "../TimelineRowsProvider"
 import { emptyTurn } from "@/__tests__/fixtures"
-import type { ParsedSession, ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../../shared/session/sessionDigest"
+import type { ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
 
 // Counts renders of the leaf components a block turns into. Rows here keep
 // object identity for blocks that did not change, as the live pipeline does.
 const mocks = vi.hoisted(() => ({
-  session: null as unknown as ParsedSession,
+  session: null as unknown as SessionView,
   renders: new Map<string, number>(),
   skills: new Map(),
 }))
@@ -17,7 +18,7 @@ const count = (key: string) => mocks.renders.set(key, (mocks.renders.get(key) ??
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -27,6 +28,8 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: () => ({
     session: mocks.session,
     sessionSource: null,
+    activeTurnIndex: null,
+    activeToolCallId: null,
     isLive: true,
     isSubAgentView: false,
     pendingInteraction: null,
@@ -38,7 +41,6 @@ vi.mock("@/contexts/SessionContext", () => ({
 }))
 
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => mocks.skills }))
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 
 vi.mock("../AssistantText", async () => {
@@ -81,17 +83,17 @@ function turnOf(id: string, contentBlocks: TurnContentBlock[]): Turn {
   })
 }
 
-function sessionOf(turns: Turn[]): ParsedSession {
+function sessionOf(turns: Turn[]): SessionView {
   return {
     sessionId: "session-1", version: "1", gitBranch: "", cwd: "/repo", slug: "", name: "", model: "",
     turns,
     stats: { totalInputTokens: 0, totalOutputTokens: 0, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, toolCallCounts: {}, errorCount: 0, totalDurationMs: 0, turnCount: turns.length },
-    rawMessages: [],
+    digest: { ...EMPTY_SESSION_DIGEST, status: { status: "thinking" } },
   }
 }
 
 /** Renders the rows the way the timeline list does: one memoized row per turn. */
-function Timeline({ session }: { session: ParsedSession }) {
+function Timeline({ session }: { session: SessionView }) {
   return (
     <TimelineRowsProvider>
       {session.turns.map((turn, index) => (
@@ -101,7 +103,7 @@ function Timeline({ session }: { session: ParsedSession }) {
   )
 }
 
-function show(session: ParsedSession, rerender?: (ui: React.ReactElement) => void) {
+function show(session: SessionView, rerender?: (ui: React.ReactElement) => void) {
   mocks.session = session
   if (rerender) rerender(<Timeline session={session} />)
   else return render(<Timeline session={session} />)

@@ -30,6 +30,8 @@ describe("authenticated HTTP stream classification", () => {
     expect(isAuthenticatedHttpStreamRequest(request("/api/watch/project/session.jsonl"))).toBe(true)
     expect(isAuthenticatedHttpStreamRequest(request("/api/task-output?path=x"))).toBe(true)
     expect(isAuthenticatedHttpStreamRequest(request("/hub/dev_1/api/workflow-watch/a/b"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/api/session-list/events"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/hub/dev_1/api/session-list/events?x=1"))).toBe(true)
     expect(isAuthenticatedHttpStreamRequest(request("/api/projects"))).toBe(false)
     expect(isAuthenticatedHttpStreamRequest(request("/api/watch/a/b", "POST"))).toBe(false)
   })

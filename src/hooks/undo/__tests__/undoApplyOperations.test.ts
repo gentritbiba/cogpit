@@ -3,7 +3,7 @@ import { applyRedo, type UndoTransaction } from "@/hooks/undo/undoApplyOperation
 import { archiveTurn } from "@/lib/undo-engine"
 import { makeTurn } from "@/__tests__/fixtures"
 import type { Branch, UndoState } from "../../../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 
 const source = { dirName: "-Users-me-project", fileName: "s.jsonl" } as SessionSource
 

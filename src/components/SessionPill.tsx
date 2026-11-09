@@ -1,4 +1,4 @@
-import { memo, startTransition } from "react"
+import { memo } from "react"
 import type { ReactNode } from "react"
 import {
   Check,
@@ -26,24 +26,24 @@ import { PullRequestChips } from "@/components/PullRequestChips"
 import { ContextBadge, FLOATING_PILL, LiveIndicator } from "@/components/header-shared"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { useAppContext } from "@/contexts/AppContext"
-import type { SessionSource } from "@/hooks/useLiveSession"
+import type { SessionSource } from "@/lib/sessionSource"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import {
   formatTokenCount,
-  getContextUsage,
   parseSubAgentPath,
   projectName,
   shortenModel,
 } from "@/lib/format"
-import type { ParsedSession, RawMessage } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
+import type { ContextUsage } from "../../shared/session/contextWindow"
 import { capabilitiesForDirName } from "@/lib/agents"
 import { cn } from "@/lib/utils"
 import type { SessionPullRequest } from "../../shared/session/prLinks"
 
 interface SessionPillProps {
-  session: ParsedSession
+  session: SessionView
   sessionSource: SessionSource | null
   isLive: boolean
   pullRequests: SessionPullRequest[]
@@ -78,9 +78,7 @@ export const SessionPill = memo(function SessionPill({
   const thinkingEnabled = session.turns.some((turn) => turn.thinking.length > 0)
   // Context usage is read out of the transcript, so only agents whose records
   // carry token accounting can answer it.
-  const rawMessages = (
-    capabilitiesForDirName(sessionSource?.dirName).contextWindow ? session.rawMessages : []
-  ) as readonly RawMessage[]
+  const contextUsage = capabilitiesForDirName(sessionSource?.dirName).contextWindow ? session.digest.contextUsage : null
 
   return (
     <Tooltip>
@@ -109,7 +107,7 @@ export const SessionPill = memo(function SessionPill({
           </button>
         )}
         {isLive && <LiveIndicator aria-label="Session is live" />}
-        <ContextBadge rawMessages={rawMessages} />
+        <ContextBadge usage={contextUsage} />
       </TooltipTrigger>
       <TooltipContent role="tooltip" side="bottom" align="start" sideOffset={6} className="p-3">
         <SessionDetails
@@ -117,7 +115,7 @@ export const SessionPill = memo(function SessionPill({
           thinkingEnabled={thinkingEnabled}
           subAgentLabel={subAgentLabel}
           pullRequests={pullRequests}
-          rawMessages={rawMessages}
+          contextUsage={contextUsage}
         />
       </TooltipContent>
     </Tooltip>
@@ -125,11 +123,11 @@ export const SessionPill = memo(function SessionPill({
 })
 
 interface SessionDetailsProps {
-  session: ParsedSession
+  session: SessionView
   thinkingEnabled: boolean
   subAgentLabel: string | null
   pullRequests: SessionPullRequest[]
-  rawMessages: readonly RawMessage[]
+  contextUsage: ContextUsage | null
 }
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
@@ -146,9 +144,8 @@ function SessionDetails({
   thinkingEnabled,
   subAgentLabel,
   pullRequests,
-  rawMessages,
+  contextUsage: ctx,
 }: SessionDetailsProps) {
-  const ctx = getContextUsage(rawMessages)
   const duplicatedFrom = session.branchedFrom
 
   return (
@@ -187,7 +184,7 @@ function SessionDetails({
 }
 
 interface SessionBreadcrumbProps {
-  session: ParsedSession
+  session: SessionView
   sessionSource: SessionSource
   copied: boolean
   creatingSession: boolean
@@ -222,10 +219,8 @@ function SessionBreadcrumb({
   const canReveal = hostFiles && !isRemote
 
   function handleViewProjectSessions(): void {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile: false })
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
-    })
+    dispatch({ type: "GO_HOME", isMobile: false })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
   }
 
   return (

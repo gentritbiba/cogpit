@@ -4,10 +4,11 @@ import { Users } from "lucide-react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MobileAppShell } from "../MobileAppShell"
 import type { MobileAppShellProps } from "../mobileTypes"
-import type { MobileTab } from "@/components/MobileNav"
+import type { MobileTab } from "@/hooks/useSessionState"
 import type { AccountControlProps, EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({ tab: "chat" as MobileTab, mainView: "sessions" as MainView }))
 vi.mock("@/contexts/AppContext", () => ({
@@ -16,7 +17,7 @@ vi.mock("@/contexts/AppContext", () => ({
     config: { defaultAgentKind: "claude" },
   }),
 }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContext: () => ({ session: {}, isSubAgentView: false }) }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContext: () => ({ isSubAgentView: false }) }))
 vi.mock("@/components/ChatArea", () => ({
   ChatArea: function ChatArea() {
     const [expanded, setExpanded] = useState(false)
@@ -102,6 +103,7 @@ function props(): MobileAppShellProps {
 }
 
 beforeEach(() => {
+  showSession({})
   mocks.tab = "chat"
   mocks.mainView = "sessions"
 })

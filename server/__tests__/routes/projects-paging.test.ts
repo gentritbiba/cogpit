@@ -7,6 +7,8 @@ import { join } from "node:path"
 const state = vi.hoisted(() => ({ filePath: "" }))
 
 vi.mock("../../lib/sessionArchive", () => ({
+  AUTO_ARCHIVE_AFTER_MS: 14 * 24 * 60 * 60_000,
+  subscribeArchiveChanges: () => () => {},
   archiveReason: () => null,
   readArchive: async () => ({ archived: new Map(), kept: new Set() }),
   setSessionsArchived: vi.fn().mockResolvedValue([]),

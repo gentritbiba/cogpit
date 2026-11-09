@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { usePendingPrompts } from "../usePendingPrompts"
 import { emptyTurn } from "@/__tests__/fixtures"
-import type { ParsedSession } from "../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
-function makeSession(turnCount: number): ParsedSession {
+function makeSession(turnCount: number): SessionView {
   return {
     sessionId: "s1",
     version: "1",
@@ -24,13 +24,13 @@ function makeSession(turnCount: number): ParsedSession {
       totalDurationMs: 0,
       turnCount,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
 describe("usePendingPrompts", () => {
   const consumePending = vi.fn()
-  const defaults = { session: null as ParsedSession | null, pendingMessages: [] as string[], consumePending }
+  const defaults = { session: null as SessionView | null, pendingMessages: [] as string[], consumePending }
 
   beforeEach(() => vi.clearAllMocks())
 

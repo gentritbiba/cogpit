@@ -170,8 +170,13 @@ owned zone, that file is the bug, not the plan.
 5. **`server/agents/<agent>Store.ts`** — implement `AgentStore` over the CLI's
    sessions root, using the shared containment primitive in `./containment`,
    with the head-read identity and full metadata readers as a sibling
-   `<agent>Metadata.ts`. An agent that records the project only inside the
-   transcript gets its project listings from `./transcriptProjects`.
+   `<agent>Metadata.ts`. Listings come from a session catalog
+   (`server/sessionCatalog/storeCatalog.ts`) the store creates from a
+   `StoreCatalogSource`: its `listDir` describes one directory of the tree, and
+   the catalog watches those directories, re-reading only what changed;
+   `listSessionFiles` stays a fresh walk over the same `listDir`. An agent that
+   records the project only inside the transcript gets its project files from
+   `./transcriptProjects`.
    `agentsWroteSince` is polled while a session is watched, so it answers false
    when the CLI's agent transcripts cannot be found cheaply.
    Register it in `server/agents/index.ts`.
@@ -180,7 +185,9 @@ owned zone, that file is the bug, not the plan.
    same directory, and the live model catalog in `<agent>Models.ts`.
    `activity().agentsRunning` comes from the process itself, never from
    transcript timing: `sessionAgentsRunning` in `./agentsRunning` already falls
-   back to the store for sessions no runtime holds.
+   back to the store for sessions no runtime holds. `listActive()` is read every
+   2 s while a client follows the session list (`server/sessionList/`), so it
+   stays an in-memory answer.
    Register it in `server/agents/runtimes.ts`.
 7. **Per-record tables in `server/agents/`** — add a row to `tailRecords.ts`
    (status from the tail), `summaryFolds.ts` (Mission Control cards),

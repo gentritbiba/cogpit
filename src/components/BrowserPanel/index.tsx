@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
 import { useBrowserSessions, type BrowserActionResult } from "@/hooks/useBrowserSessions"
 import { useBrowserSocket } from "@/hooks/useBrowserSocket"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
+import { useOpenSession } from "@/contexts/SessionContext"
 import { deviceScopedKey } from "@/lib/device"
+import { shallowEqual } from "@/lib/store"
 import { copyToClipboard } from "@/lib/utils"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { BrowserSessionInfo } from "../../../shared/browser/types"
-import { latestBrowserActivity } from "../../../shared/session/browserActivity"
+import { latestBrowserActivity, type BrowserAgentActivity } from "../../../shared/session/browserActivity"
 import { AgentCaption } from "./AgentCaption"
 import { BrowserListFailed, BrowserNoneYet, BrowserNotInstalled, BrowserStopped } from "./BrowserEmptyState"
 import { BrowserNavBar } from "./BrowserNavBar"
@@ -39,6 +41,10 @@ const MANUAL_HOLD_MS = 10_000
 /** No frame for this long means the page is standing still, not that it broke. */
 const STILL_AFTER_MS = 3_000
 const NO_SESSIONS: BrowserSessionInfo[] = []
+
+function sameActivity(a: BrowserAgentActivity | null, b: BrowserAgentActivity | null): boolean {
+  return a === b || (a !== null && b !== null && shallowEqual(a, b))
+}
 
 export function BrowserPanel({ context, active, closePanel, onAnnotate }: WorkspacePanelProps & {
   /** Adds an annotation to the message composer; returns why it could not, or null. Absent where there is no composer. */
@@ -74,9 +80,8 @@ export function BrowserPanel({ context, active, closePanel, onAnnotate }: Worksp
   // Only a browser the server listed: anything else it would refuse.
   const socket = useBrowserSocket(active && listed ? selected : null, receiveClipboard)
 
-  const currentSessionId = context.session?.sessionId ?? null
-  // Walking the transcript per frame would cost more than painting one.
-  const activity = useMemo(() => latestBrowserActivity(context.session), [context.session])
+  const currentSessionId = context.sessionId
+  const activity = useOpenSession(latestBrowserActivity, sameActivity)
   const driven = drivenBrowser(activity?.session ?? null, sessions, currentSessionId)
   const drivenExists = sessions.some((session) => session.name === driven && !session.archived)
 

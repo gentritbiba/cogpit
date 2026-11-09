@@ -95,6 +95,13 @@ export function storeForDirName(dirName: string | null | undefined): AgentStore 
   return registry.storeForDirName(dirName)
 }
 
+/**
+ * Order in which storage is searched for a bare session id. Not `AGENT_KINDS`:
+ * it preserves the historical resolution order, and the ids are near-unique
+ * across agents anyway, so the order mostly decides which store pays first.
+ */
+export const SESSION_LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot", "acp"]
+
 /** Every store, in agent-detection order. */
 export function allStores(): readonly AgentStore[] {
   return [...registry.allStores(), ...instanceStores()]

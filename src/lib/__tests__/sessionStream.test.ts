@@ -154,6 +154,44 @@ describe("openSessionStream", () => {
     expect(closedFirst).not.toHaveBeenCalled()
   })
 
+  it("lets go of its connection when the page is frozen and resumes from the reader's offset when it is restored", () => {
+    let offset = 100
+    const states: string[] = []
+    const stream = openSessionStream(URL_PATH, { connectUrl: () => `${URL_PATH}?offset=${offset}`, onState: (state) => states.push(state.transport) })
+    const frozen = FakeEventSource.last
+    offset = 250
+
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }))
+    expect(frozen.closed).toBe(true)
+    expect(FakeEventSource.last).toBe(frozen)
+    expect(states.at(-1)).toBe("connecting")
+
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }))
+    expect(FakeEventSource.last).toBe(frozen)
+
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }))
+    expect(FakeEventSource.last).not.toBe(frozen)
+    expect(FakeEventSource.last.url).toBe(`/hub/dev${URL_PATH}?offset=250`)
+    const restored = FakeEventSource.last
+
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }))
+    expect(FakeEventSource.last).toBe(restored)
+    stream.close()
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }))
+    expect(FakeEventSource.last).toBe(restored)
+  })
+
+  it("keeps streaming while the tab is hidden", () => {
+    openSessionStream(URL_PATH)
+    const source = FakeEventSource.last
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+    document.dispatchEvent(new Event("visibilitychange"))
+    visibility.mockRestore()
+
+    expect(source.closed).toBe(false)
+    expect(FakeEventSource.last).toBe(source)
+  })
+
   it("asks nothing of a personal server, and stops asking once closed", () => {
     openSessionStream(URL_PATH)
     FakeEventSource.last.giveUp()

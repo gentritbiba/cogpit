@@ -53,17 +53,38 @@ export function createEmptySessionStats(turnCount: number): SessionStats {
   }
 }
 
+/** One turn's share of the session's stats, kept per turn object so a re-count only walks turns it has not seen. */
+const turnShares = new WeakMap<Turn, SessionStats>()
+
+function turnShare(turn: Turn): SessionStats {
+  let share = turnShares.get(turn)
+  if (share) return share
+  share = createEmptySessionStats(0)
+  if (turn.tokenUsage) addUsageToStats(share, turn.tokenUsage)
+  if (turn.durationMs) share.totalDurationMs += turn.durationMs
+  share.errorCount += countToolCalls(turn.toolCalls, share.toolCallCounts)
+  for (const sa of turn.subAgentActivity) {
+    share.errorCount += countToolCalls(sa.toolCalls, share.toolCallCounts)
+    if (sa.tokenUsage) addUsageToStats(share, sa.tokenUsage)
+  }
+  turnShares.set(turn, share)
+  return share
+}
+
+/** Stats over `turns`. A turn must not change after it is counted; parsers build a new turn instead. */
 export function computeStats(turns: Turn[]): SessionStats {
   const stats = createEmptySessionStats(turns.length)
 
   for (const turn of turns) {
-    if (turn.tokenUsage) addUsageToStats(stats, turn.tokenUsage)
-    if (turn.durationMs) stats.totalDurationMs += turn.durationMs
-    stats.errorCount += countToolCalls(turn.toolCalls, stats.toolCallCounts)
-
-    for (const sa of turn.subAgentActivity) {
-      stats.errorCount += countToolCalls(sa.toolCalls, stats.toolCallCounts)
-      if (sa.tokenUsage) addUsageToStats(stats, sa.tokenUsage)
+    const share = turnShare(turn)
+    stats.totalInputTokens += share.totalInputTokens
+    stats.totalOutputTokens += share.totalOutputTokens
+    stats.totalCacheCreationTokens += share.totalCacheCreationTokens
+    stats.totalCacheReadTokens += share.totalCacheReadTokens
+    stats.totalDurationMs += share.totalDurationMs
+    stats.errorCount += share.errorCount
+    for (const name in share.toolCallCounts) {
+      stats.toolCallCounts[name] = (stats.toolCallCounts[name] ?? 0) + share.toolCallCounts[name]!
     }
   }
 

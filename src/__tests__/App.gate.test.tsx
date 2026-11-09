@@ -11,7 +11,7 @@ import { clearSessionListCache } from "@/lib/sessionListCache"
 import { ALL_CAPABILITIES, GATE_HEADER, type MeResponse } from "../../shared/contracts/identity"
 
 vi.mock("@/hooks/useParserWorker", () => ({
-  useParserWorker: () => ({ parse: async () => null, append: async () => null }),
+  useParserWorker: () => ({ parse: async () => null, parsePage: async () => null, append: async () => null }),
 }))
 
 vi.mock("@/components/AppShell/DesktopAppShell", () => ({

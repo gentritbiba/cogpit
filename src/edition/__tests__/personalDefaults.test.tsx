@@ -17,7 +17,7 @@ vi.mock("@cogpit/edition-ui", () => {
 })
 
 vi.mock("@/hooks/useParserWorker", () => ({
-  useParserWorker: () => ({ parse: async () => null, append: async () => null }),
+  useParserWorker: () => ({ parse: async () => null, parsePage: async () => null, append: async () => null }),
 }))
 
 /** Stands in for the shell and reports the slots it would render from. */

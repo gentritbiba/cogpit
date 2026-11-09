@@ -18,6 +18,10 @@ import { createSessionToken, revokeAllSessions } from "../../security"
 import { __resetEditionForTest } from "../../edition"
 import { installFakeEdition } from "../edition/fakeEdition"
 import { setRequestPrincipal } from "../../requestPrincipal"
+import { catalogVersion, markCatalogChanged } from "../../sessionCatalog"
+import { handleSessionListEvents } from "../../sessionList/events"
+import { LIST_EPOCH, sendListResponse } from "../../sessionList/revalidate"
+import { SESSION_LIST_EVENTS_PATH } from "../../../shared/contracts/sessionList"
 import type { SessionPrincipal } from "../../sessionConstants"
 
 // TLS devices must route through node:https. A real https upstream would need
@@ -601,6 +605,43 @@ describe("createHubProxyHandler — streaming", () => {
     const closed = reader.read().then(({ done }) => done, () => true)
     invalidateDeviceConnections(device.id)
     await expect(closed).resolves.toBe(true)
+  })
+
+  it("streams the session list version from a device as it changes", async () => {
+    const target = track(await makeTarget((req, res) => {
+      req.url = "/"
+      handleSessionListEvents(req, res, () => {})
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const response = await fetch(base(hub.port, device.id, SESSION_LIST_EVENTS_PATH))
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    const connected = decoder.decode((await reader.read()).value)
+    expect(connected).toContain(`event: version\ndata: {"version":${catalogVersion()},"epoch":"${LIST_EPOCH}"}`)
+
+    markCatalogChanged("visible")
+    const changed = decoder.decode((await reader.read()).value)
+    expect(changed).toContain(`data: {"version":${catalogVersion()},"epoch":"${LIST_EPOCH}"}`)
+    await reader.cancel()
+  })
+
+  it("passes a list's 304 and its validators through", async () => {
+    const list = { headers: { "X-Cogpit-Archived-Count": "2" }, body: "[]", version: 7 }
+    const target = track(await makeTarget((req, res) => sendListResponse(req, res, list)))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const first = await fetch(base(hub.port, device.id, "/api/active-sessions"))
+    const etag = first.headers.get("etag")
+    expect(first.status).toBe(200)
+    expect(etag).toMatch(/^W\//)
+    const again = await fetch(base(hub.port, device.id, "/api/active-sessions"), { headers: { "If-None-Match": etag! } })
+    expect(again.status).toBe(304)
+    expect(again.headers.get("x-cogpit-list-version")).toBe("7")
+    expect(again.headers.get("x-cogpit-archived-count")).toBe("2")
   })
 
   it("passes non-401 error statuses (503) through verbatim", async () => {

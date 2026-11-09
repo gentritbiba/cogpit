@@ -5,6 +5,9 @@ import { storeForDirName, storeForPath } from "../../agents"
 import { authorizeSession, visibilityFor } from "../../edition"
 import { authorizeTranscript, visibleChildTranscripts } from "../../edition/transcript"
 import { findJsonlPath } from "../../sessionPaths"
+import { handleSessionListEvents } from "../../sessionList/events"
+import { sendListResponse, sharedListBuild } from "../../sessionList/revalidate"
+import { SESSION_LIST_EVENTS_PATH } from "../../../shared/contracts/sessionList"
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { listProjects } from "./projectList"
 import { handleSessionPage } from "./sessionPage"
@@ -54,12 +57,19 @@ export function registerProjectRoutes(use: UseFn) {
     if (req.method !== "GET") return next()
     if (req.url && req.url !== "/" && req.url !== "") return next()
 
+    const check = visibilityFor(req)
     try {
-      sendJson(res, 200, await listProjects(visibilityFor(req)))
+      const response = await sharedListBuild(req, res, { route: "projects", query: "", seesEverything: check.everything }, async () => (
+        { headers: {}, body: JSON.stringify(await listProjects(check)) }
+      ))
+      if (response) sendListResponse(req, res, response)
     } catch (err) {
       sendJson(res, 500, { error: String(err) })
     }
   })
+
+  // GET /api/session-list/events - the list version, pushed as it changes
+  use(SESSION_LIST_EVENTS_PATH, handleSessionListEvents)
 
   // GET /api/sessions/:dirName - list sessions / serve file content
   use("/api/sessions/", async (req, res, next) => {

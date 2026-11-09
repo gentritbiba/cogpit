@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
+import { joinLinePage } from "@/lib/sessionLoader"
 import { prependTurns } from "@/lib/timelinePaging"
 import type { HistoryBytes } from "@/lib/timelineScroll/controller"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import { agentKindForDirName, formatFor } from "../../shared/session/agents"
+import { linesBeforeFirstTurn } from "../../shared/session/pageCuts"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface BeforeResponse {
   headerLines: string[]
@@ -22,7 +26,7 @@ interface UseSessionPagingOpts {
   fileName: string | null
   /** Bumped by the reducer on every session (re)load; resyncs paging state from the cache. */
   sessionChangeKey: number
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
   /** Receives every turn loaded above the live window, oldest first. */
   onOlderTurns: (olderTurns: Turn[]) => void
 }
@@ -128,7 +132,7 @@ export function useSessionPaging({
       const hasMorePages = data.lines.length > 0 && data.hasMore
       if (identityRef.current === key) setHasMore(hasMorePages)
       if (data.lines.length === 0) {
-        sessionCache.update(dirName, fileName, {
+        sessionCache.update(dirName, fileName, cached.source.loadId, {
           hasMore: hasMorePages,
           nextByteOffset: data.byteOffset,
         })
@@ -136,11 +140,18 @@ export function useSessionPaging({
         return 0
       }
 
-      // A line page can repeat header records at its start; a turn page never does.
+      // A turn page's header holds only the lines before its first turn; an
+      // older server's line page sends the file's first lines (see `joinLinePage`).
       const byTurns = data.unit === "turns"
-      const headerLineSet = new Set(data.headerLines)
-      const pageLines = byTurns ? data.lines : data.lines.filter((line) => !headerLineSet.has(line))
-      const olderParsed = await workerParse([...data.headerLines, ...pageLines].join("\n"))
+      const pageLines = byTurns
+        ? [...data.headerLines, ...data.lines]
+        : joinLinePage(
+          data.headerLines,
+          linesBeforeFirstTurn(formatFor(agentKindForDirName(dirName)), data.headerLines),
+          data.lines,
+          data.hasMore,
+        )
+      const olderParsed = await workerParse(pageLines.join("\n"))
 
       // The byte cursor and the pages it consumed advance together: a cursor
       // that moves without them strands that history behind it forever.
@@ -148,7 +159,7 @@ export function useSessionPaging({
         stitch: !cursorOnTurnRef.current,
       })
       if (identityRef.current === key) cursorOnTurnRef.current = byTurns && !data.cutTurn
-      sessionCache.update(dirName, fileName, {
+      sessionCache.update(dirName, fileName, cached.source.loadId, {
         hasMore: hasMorePages,
         nextByteOffset: data.byteOffset,
         olderTurns: history,

@@ -1,9 +1,10 @@
 import { authFetch, authUrl } from "./auth"
 import { getActiveDeviceScope, getActiveIdentity } from "./device"
-import type { CommandReceipt, Conversation, EventPage } from "../../shared/contracts/orchestration"
+import type { CommandReceipt, Conversation } from "../../shared/contracts/orchestration"
 
-export interface ConversationState { conversation: Conversation | null; commands: CommandReceipt[]; cursor: number; freshness: "waiting" | "current" | "stale"; error?: string; currentAddress?: { dirName: string; fileName: string }; pendingTransition?: { id: string; sessionId?: string } | null }
-export const EMPTY_CONVERSATION: ConversationState = { conversation: null, commands: [], cursor: 0, freshness: "waiting" }
+/** `commands` holds the conversation's commands that are not completed or cancelled, plus any `watch`ed ones. */
+export interface ConversationState { conversation: Conversation | null; commands: CommandReceipt[]; freshness: "waiting" | "current" | "stale"; error?: string; currentAddress?: { dirName: string; fileName: string }; pendingTransition?: { id: string; sessionId?: string } | null }
+export const EMPTY_CONVERSATION: ConversationState = { conversation: null, commands: [], freshness: "waiting" }
 const states = new Map<string, ConversationStateOwner>()
 
 class ConversationStateOwner {
@@ -13,6 +14,8 @@ class ConversationStateOwner {
   private pending?: AbortController
   private attempts = 0
   private stopped = false
+  private etag?: string
+  private readonly watchedIds = new Set<string>()
   private readonly identityChanged = () => { this.stopped = true; clearTimeout(this.timer); this.pending?.abort(); this.apply({ ...EMPTY_CONVERSATION, freshness: "stale", error: "Account or device changed" }); states.delete(this.key) }
   private readonly refresh = () => { if (document.visibilityState !== "hidden") void this.fetch() }
   constructor(readonly key: string, readonly url: string) {}
@@ -42,11 +45,18 @@ class ConversationStateOwner {
   snapshot = (): ConversationState => this.state
   get watched(): boolean { return this.listeners.size > 0 }
   admit(receipt: CommandReceipt): void {
-    if (!this.state.commands.some((command) => command.id === receipt.id)) this.apply({ ...this.state, commands: [...this.state.commands, receipt] })
+    if (this.state.commands.some((command) => command.id === receipt.id)) return
+    this.etag = undefined
+    this.apply({ ...this.state, commands: [...this.state.commands, receipt] })
+  }
+  /** Keeps `commandId` in `commands` after it completes or is cancelled, until the returned function is called. */
+  watch(commandId: string): () => void {
+    this.watchedIds.add(commandId)
+    return () => { this.watchedIds.delete(commandId) }
   }
   private apply(state: ConversationState): void {
-    if (JSON.stringify(this.state) === JSON.stringify(state)) return
-    this.state = state
+    if (sameJson(this.state, state)) return
+    this.state = sameJson(this.state.commands, state.commands) ? { ...state, commands: this.state.commands } : state
     for (const listener of this.listeners) listener()
   }
   private async fetch(): Promise<void> {
@@ -55,17 +65,26 @@ class ConversationStateOwner {
     const controller = new AbortController(); this.pending = controller
     let denied = false
     try {
-      const response = await authFetch(`${this.url}&after=${this.state.cursor}`, { signal: controller.signal })
+      const etag = this.etag
+      const url = [this.url, ...[...this.watchedIds].map((id) => `commandId=${encodeURIComponent(id)}`)].join("&")
+      const response = await authFetch(url, { signal: controller.signal, headers: etag ? { "If-None-Match": etag } : undefined })
+      if (response.status === 304) {
+        if (etag && etag === this.etag) this.apply({ ...this.state, freshness: "current", error: undefined })
+        this.attempts = 0
+        return
+      }
       if (!response.ok) { denied = [401, 403, 404].includes(response.status); throw new Error(`Queue unavailable (${response.status})`) }
-      const data = await response.json() as { conversation: Conversation; commands: CommandReceipt[]; replay: EventPage; currentAddress?: ConversationState["currentAddress"]; pendingTransition?: ConversationState["pendingTransition"] }
+      const data = await response.json() as { conversation: Conversation; commands: CommandReceipt[]; currentAddress?: ConversationState["currentAddress"]; pendingTransition?: ConversationState["pendingTransition"] }
       if (controller.signal.aborted) return
-      if (!data.conversation || !Array.isArray(data.commands) || !data.replay || !Number.isSafeInteger(data.replay.cursor)) throw new Error("Invalid queue snapshot")
-      // Cursor and the applied snapshot move together; failed decoding cannot
-      // advance replay beyond the state consumers actually saw.
-      this.apply({ conversation: data.conversation, commands: data.commands, cursor: data.replay.cursor, freshness: "current", currentAddress: data.currentAddress, pendingTransition: data.pendingTransition })
+      if (!data.conversation || !Array.isArray(data.commands)) throw new Error("Invalid queue snapshot")
+      this.apply({ conversation: data.conversation, commands: data.commands, freshness: "current", currentAddress: data.currentAddress, pendingTransition: data.pendingTransition })
+      this.etag = response.headers.get("ETag") ?? undefined
       this.attempts = 0
     } catch (error) {
-      if (!controller.signal.aborted) this.apply({ ...(denied ? EMPTY_CONVERSATION : this.state), freshness: "stale", error: error instanceof Error ? error.message : "Queue unavailable" })
+      if (!controller.signal.aborted) {
+        if (denied) this.etag = undefined
+        this.apply({ ...(denied ? EMPTY_CONVERSATION : this.state), freshness: "stale", error: error instanceof Error ? error.message : "Queue unavailable" })
+      }
       this.attempts++
     } finally {
       this.pending = undefined
@@ -78,6 +97,15 @@ class ConversationStateOwner {
     if (!response.ok) { const result = await response.json() as { error?: string }; throw new Error(result.error ?? "Queue update failed") }
     await this.fetch()
   }
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false
+  const left = a as Record<string, unknown>, right = b as Record<string, unknown>
+  for (const key in left) if (!sameJson(left[key], right[key])) return false
+  for (const key in right) if (!(key in left) && right[key] !== undefined) return false
+  return true
 }
 
 function ownerAddress(sessionId: string): { key: string; url: string } {
