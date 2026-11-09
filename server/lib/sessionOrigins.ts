@@ -36,6 +36,12 @@ interface PersistedOrigins {
 }
 
 let origins = new Map<string, SessionOrigin>()
+let revision = 0
+
+/** Changes whenever the origins in memory do, so readers can reuse what they built from them; not persisted. */
+export function sessionOriginsRevision(): number {
+  return revision
+}
 
 const optionalString = (value: unknown) => (typeof value === "string" && value ? value : undefined)
 
@@ -54,8 +60,10 @@ function handoffFrom(value: unknown): Handoff | undefined {
 const file = new SessionConfigFile(SESSION_ORIGINS_FILE, {
   reset() {
     origins = new Map()
+    revision++
   },
   apply(parsed) {
+    revision++
     const sessions = (parsed as Partial<PersistedOrigins> | null)?.sessions
     if (typeof sessions !== "object" || sessions === null) return
     for (const [sessionId, entry] of Object.entries(sessions)) {
@@ -102,6 +110,7 @@ export async function recordSessionOrigin(
   }
   if (JSON.stringify(existing) === JSON.stringify(next)) return
   origins.set(sessionId, next)
+  revision++
   await file.persist()
 }
 
@@ -142,6 +151,7 @@ export async function clearSessionHandoff(sessionId: string): Promise<void> {
   const { handoff: _handoff, ...rest } = origin
   void _handoff
   origins.set(sessionId, rest)
+  revision++
   await file.persist()
 }
 
@@ -159,7 +169,9 @@ export async function forgetSessionOrigins(sessionIds: readonly string[]): Promi
   for (const sessionId of sessionIds) {
     if (origins.delete(sessionId)) changed = true
   }
-  if (changed) await file.persist()
+  if (!changed) return
+  revision++
+  await file.persist()
 }
 
 export function __resetSessionOriginsForTest(): void {

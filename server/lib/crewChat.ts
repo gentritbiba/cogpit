@@ -8,7 +8,7 @@ import { DeviceRequestError } from "../hub/deviceRequest"
 import { hostForSession } from "../sessionHosts"
 import { crewRootOf } from "./crew"
 import { crewSessionIds } from "./sessionCrew"
-import { sessionParents } from "./sessionOrigins"
+import { sessionOriginsRevision, sessionParents } from "./sessionOrigins"
 import { commandScope, refreshExecutionRequest } from "./durableSend"
 import { getDeviceName } from "../routes/hello"
 
@@ -18,23 +18,72 @@ async function may(req: IncomingMessage | undefined, sessionId: string, level: "
   return Boolean(actual && accessAtLeast(actual, level))
 }
 
-export async function crewChatContext(sessionId: string, req?: IncomingMessage) {
+interface CrewChatAccess {
+  rootId: string
+  named: Omit<CrewChatMember, "listening">[]
+  canPost: boolean
+}
+
+export interface CrewChatContext {
+  rootId: string
+  members: CrewChatMember[]
+  membersVersion: string
+  canPost: boolean
+}
+
+async function readAccess(sessionId: string, req?: IncomingMessage): Promise<CrewChatAccess> {
   const parents = await sessionParents()
   const rootId = crewRootOf(sessionId, parents)
   if (!await may(req, sessionId, "view") || !await may(req, rootId, "view")) throw new OrchestrationError(403, "Crew chat requires access to its lead session")
   const rootHost = await hostForSession(rootId)
   if (!await rootHost.has(rootId)) throw new OrchestrationError(404, "Crew lead session not found")
   const ids = await crewSessionIds(rootId, { parents, canView: (id) => may(req, id, "view") })
-  const store = orchestrationStore()
   const named = ids.map((id) => ({ sessionId: id, name: id === rootId ? "Lead" : parents.get(id)?.name ?? id }))
   const handles = crewChatHandles(named, rootId)
-  const members: CrewChatMember[] = await Promise.all(named.map(async (member) => ({ ...member, handle: handles.get(member.sessionId)!, listening: store.chatListener(rootId, member.sessionId).listening, canInteract: await may(req, member.sessionId, "interact") })))
-  return { rootId, members, canPost: await may(req, rootId, "interact") }
+  return {
+    rootId,
+    named: await Promise.all(named.map(async (member) => ({ ...member, handle: handles.get(member.sessionId)!, canInteract: await may(req, member.sessionId, "interact") }))),
+    canPost: await may(req, rootId, "interact"),
+  }
 }
 
-export async function readCrewChat(sessionId: string, options: { after?: number; before?: number; limit?: number; readerSessionId?: string; fetchId?: string } = {}, req?: IncomingMessage): Promise<CrewChatPage> {
-  const context = await crewChatContext(sessionId, req)
-  watchCrewChat(context.rootId, req)
+function withListeners(access: CrewChatAccess): CrewChatContext {
+  const listeners = orchestrationStore().chatListeners(access.rootId)
+  const members = access.named.map(({ sessionId, name, handle, canInteract }) => ({ sessionId, name, handle, listening: listeners.get(sessionId) ?? true, canInteract }))
+  return { rootId: access.rootId, members, membersVersion: fingerprint(members).slice(0, 16), canPost: access.canPost }
+}
+
+/** The crew a session chats in, as the caller may see it, read fresh: what posts and listening changes act on. */
+export async function crewChatContext(sessionId: string, req?: IncomingMessage): Promise<CrewChatContext> {
+  return withListeners(await readAccess(sessionId, req))
+}
+
+/** How long a read reuses what the caller may see in a crew whose lineage did not change. */
+const ACCESS_REUSE_MS = 5_000
+const readAccessCache = new Map<string, { revision: number; at: number; access: Promise<CrewChatAccess> }>()
+
+/**
+ * The crew for a chat read. Polls reuse the crew's members and the caller's
+ * access to them until the lineage changes or a few seconds pass; listening
+ * flags are read every time.
+ */
+export async function crewChatReadContext(sessionId: string, req?: IncomingMessage): Promise<CrewChatContext> {
+  const key = JSON.stringify([commandScope(req), sessionId])
+  const revision = sessionOriginsRevision()
+  const now = Date.now()
+  let entry = readAccessCache.get(key)
+  if (!entry || entry.revision !== revision || now - entry.at >= ACCESS_REUSE_MS) {
+    for (const [known, value] of readAccessCache) if (now - value.at >= ACCESS_REUSE_MS) readAccessCache.delete(known)
+    entry = { revision, at: now, access: readAccess(sessionId, req) }
+    readAccessCache.set(key, entry)
+    const settled = entry
+    settled.access.catch(() => { if (readAccessCache.get(key) === settled) readAccessCache.delete(key) })
+  }
+  return withListeners(await entry.access)
+}
+
+export async function readCrewChat(sessionId: string, options: { after?: number; before?: number; limit?: number; readerSessionId?: string; fetchId?: string } = {}, req?: IncomingMessage, known?: CrewChatContext): Promise<CrewChatPage> {
+  const context = known ?? await crewChatContext(sessionId, req)
   const store = orchestrationStore()
   const reader = options.readerSessionId
   if (reader && !context.members.some((member) => member.sessionId === reader && member.canInteract)) throw new OrchestrationError(403, "Only a crew member can fetch its unread messages")
@@ -43,6 +92,10 @@ export async function readCrewChat(sessionId: string, options: { after?: number;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new OrchestrationError(400, "limit must be between 1 and 100")
   for (const cursor of [after, options.before]) if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0)) throw new OrchestrationError(400, "Chat cursors must be non-negative integers")
   if (after !== undefined && options.before !== undefined) throw new OrchestrationError(400, "Use either after or before")
+  if (store.hasPendingChatDeliveries(context.rootId, commandScope(req))) {
+    watchCrewChat(context.rootId, req)
+    void deliverCrewChat(context.rootId, req).catch(() => {})
+  }
   const cached = reader && options.fetchId && options.after === undefined ? store.operation(commandScope(req), options.fetchId) : null
   const fetchFingerprint = fingerprint({ rootId: context.rootId, reader, limit })
   if (cached && cached.fingerprint !== fetchFingerprint) throw new OrchestrationError(409, "Fetch ID was reused for another chat read")
@@ -52,12 +105,11 @@ export async function readCrewChat(sessionId: string, options: { after?: number;
   const messages = after !== undefined ? page.slice(0, limit) : page.slice(-limit)
   const nextCursor = messages.at(-1)?.sequence ?? after ?? 0
   if (reader && options.after === undefined) store.finishChatFetch(commandScope(req), options.fetchId, fetchFingerprint, context.rootId, reader, { messages, nextCursor, hasMore })
-  void deliverCrewChat(context.rootId, req).catch(() => {})
   return { ...context, messages, nextCursor, hasMore }
 }
 
-export async function setCrewChatListening(sessionId: string, targetId: string, listening: boolean, req?: IncomingMessage) {
-  const context = await crewChatContext(sessionId, req)
+export async function setCrewChatListening(sessionId: string, targetId: string, listening: boolean, req?: IncomingMessage, known?: CrewChatContext) {
+  const context = known ?? await crewChatContext(sessionId, req)
   if (!context.members.some((member) => member.sessionId === targetId && member.canInteract)) throw new OrchestrationError(403, "You cannot change this member's listening setting")
   orchestrationStore().setChatListening(context.rootId, targetId, listening)
   return { rootId: context.rootId, sessionId: targetId, listening }
@@ -66,8 +118,8 @@ export async function setCrewChatListening(sessionId: string, targetId: string, 
 /** How long a post waits for its deliveries before answering with the ones still pending. */
 const POST_DELIVERY_WAIT_MS = 2_000
 
-export async function postCrewChat(sessionId: string, input: { text: string; commandId: string; senderSessionId?: string; mentions?: string[] }, req?: IncomingMessage) {
-  const context = await crewChatContext(sessionId, req)
+export async function postCrewChat(sessionId: string, input: { text: string; commandId: string; senderSessionId?: string; mentions?: string[] }, req?: IncomingMessage, known?: CrewChatContext) {
+  const context = known ?? await crewChatContext(sessionId, req)
   if (!context.canPost) throw new OrchestrationError(403, "Posting to crew chat requires interaction access to the lead session")
   const text = input.text.trim()
   if (!text || text.length > CREW_CHAT_MAX_LENGTH) throw new OrchestrationError(400, `Chat messages must contain 1–${CREW_CHAT_MAX_LENGTH} characters`)
@@ -106,7 +158,12 @@ export function closeCrewChatMonitor(): void {
   sentUnsettled.clear()
 }
 
-function watchCrewChat(rootId: string, req?: IncomingMessage): void {
+/**
+ * Keeps delivering a crew's pending messages in the background, in the
+ * reader's scope; nothing when none is pending. One indexed read, so any
+ * poll of the crew can call it.
+ */
+export function watchCrewChat(rootId: string, req?: IncomingMessage): void {
   const scope = commandScope(req)
   if (!orchestrationStore().hasPendingChatDeliveries(rootId, scope)) return
   watched.set(JSON.stringify([rootId, scope]), { rootId, req })
@@ -121,6 +178,20 @@ function watchCrewChat(rootId: string, req?: IncomingMessage): void {
     if (!watched.size) { clearInterval(timer); timer = undefined }
   }, 1_000)
   timer.unref()
+}
+
+/**
+ * Re-arms delivery for every crew with messages still on their way after a
+ * restart, which otherwise waits for the crew's next read or post. Only the
+ * personal edition can act without a signed-in request.
+ */
+export function resumeLocalCrewChat(): void {
+  if (editionModule().auth) return
+  try {
+    for (const rootId of orchestrationStore().chatRootsWithPendingDeliveries(commandScope())) watchCrewChat(rootId)
+  } catch (error) {
+    console.error("[crew chat] could not resume pending deliveries", error)
+  }
 }
 
 function shellQuoted(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'` }

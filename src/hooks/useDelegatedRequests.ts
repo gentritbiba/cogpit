@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { authFetch, jsonFetch } from "@/lib/auth"
+import { jsonEqual } from "@/lib/jsonEqual"
 import { useVisiblePolling } from "@/hooks/useVisiblePolling"
 import type { DelegatedRequest } from "../../shared/contracts/delegatedRequests"
 import type { PendingInputResponse } from "../../shared/contracts/pendingInput"
@@ -22,7 +23,7 @@ export function useDelegatedRequests(parentSessionId: string | null) {
       if (!isActive() || !res.ok) return
       const data = await res.json() as { requests: DelegatedRequest[] }
       if (!isActive()) return
-      setRequests((current) => (JSON.stringify(current) === JSON.stringify(data.requests) ? current : data.requests))
+      setRequests((current) => (jsonEqual(current, data.requests) ? current : data.requests))
     } catch {
       // The next poll retries.
     }

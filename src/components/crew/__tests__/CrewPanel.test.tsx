@@ -53,7 +53,7 @@ function renderPanel() {
 beforeEach(() => {
   mocks.crew = crew
   mocks.navigate.mockReset()
-  mocks.fetch.mockReset().mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.startsWith("/api/crew-chat/") ? { rootId: mocks.crew.rootId, messages: [], members: [], canPost: true, hasMore: false, nextCursor: 0 } : mocks.crew }))
+  mocks.fetch.mockReset().mockImplementation(async (url: string) => Response.json(url.startsWith("/api/crew-chat/") ? { rootId: mocks.crew.rootId, messages: [], members: [], canPost: true, hasMore: false, nextCursor: 0 } : mocks.crew))
   mocks.json.mockReset().mockResolvedValue({ ok: true, status: 200 })
 })
 afterEach(cleanup)
@@ -69,7 +69,7 @@ describe("CrewPanel", () => {
   it("rolls the crew up under its root as counts", async () => {
     renderPanel()
     expect(await screen.findByRole("button", { name: "Wave 3 coordinator" })).toBeInTheDocument()
-    expect(mocks.fetch).toHaveBeenCalledWith("/api/session-crew/lane")
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toContain("/api/session-crew/lane?brief=1")
 
     const summary = screen.getByRole("region", { name: "Crew summary" })
     expect(summary).toHaveTextContent("3 sessions")

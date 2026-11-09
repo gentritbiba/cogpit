@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest"
-import type { DelegatedTask } from "../../../shared/contracts/orchestration"
+import type { DelegatedTaskState } from "../../../shared/contracts/orchestration"
 import { readSessionCrew, type CrewSources } from "../../lib/sessionCrew"
 import type { CrewLink } from "../../lib/sessionOrigins"
 import type { SessionState } from "../../lib/sessionWait"
@@ -12,9 +12,9 @@ const state = (sessionId: string, overrides: Partial<SessionState> = {}): Sessio
   sessionId, outcome: "completed", live: false, running: false, waiting: [], ...overrides,
 })
 
-function task(childSessionId: string, overrides: Partial<DelegatedTask> = {}): DelegatedTask {
+function task(childSessionId: string, overrides: Partial<DelegatedTaskState> = {}): DelegatedTaskState {
   return {
-    id: `task-${childSessionId}`, parentSessionId: "coordinator", childSessionId, sourceId: childSessionId,
+    id: `task-${childSessionId}`, parentSessionId: "coordinator", childSessionId,
     state: "completed", createdAt: 1, updatedAt: 2, ...overrides,
   }
 }
@@ -34,8 +34,8 @@ function sources(overrides: Partial<CrewSources> = {}): CrewSources {
         ? { outcome: "needs_input", waiting: [{ kind: "permission", requestId: "r1", toolName: "Bash", summary: "gh api", availableDecisions: ["allow", "deny"] }] }
         : {}),
       address: { dirName: `-${sessionId}`, fileName: `${sessionId}.jsonl` },
+      listed: sessionId === "lane-b" ? null : { customTitle: `${sessionId} title`, model: "opus", turnCount: 3 },
     }),
-    listed: async (sessionId) => (sessionId === "lane-b" ? null : { customTitle: `${sessionId} title`, model: "opus", turnCount: 3 }),
     tasks: () => [task("lane-a", { acknowledgedAt: 5 }), task("lane-b", { state: "running" })],
     ...overrides,
   }
@@ -83,7 +83,7 @@ describe("readSessionCrew", () => {
   it("answers for a member as an unreachable session when its machine fails", async () => {
     const describe = vi.fn(async (sessionId: string) => {
       if (sessionId === "lane-b") throw new Error("device offline")
-      return sources().describe(sessionId)
+      return sources().describe(sessionId, undefined)
     })
     const crew = await readSessionCrew("coordinator", sources({ describe }))
     expect(crew?.members.find((member) => member.sessionId === "lane-b")).toMatchObject({
@@ -100,7 +100,7 @@ describe("readSessionCrew", () => {
 
   it("leaves out members neither on disk nor held, keeping the root and the session asked about", async () => {
     const gone = new Set(["coordinator", "lane-a", "reviewer"])
-    const describe = async (sessionId: string) => (gone.has(sessionId) ? null : sources().describe(sessionId))
+    const describe = async (sessionId: string) => (gone.has(sessionId) ? null : sources().describe(sessionId, undefined))
     const crew = await readSessionCrew("reviewer", sources({ describe }))
     expect(crew?.members.map((member) => [member.sessionId, member.outcome])).toEqual([
       ["coordinator", "not_found"],

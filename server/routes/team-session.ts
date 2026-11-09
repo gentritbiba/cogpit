@@ -1,14 +1,10 @@
-import {
-  dirs,
-  isWithinDir,
-  readdir,
-  open,
-  join,
-  stat,
-} from "../helpers"
+import { basename, dirname } from "node:path"
+import { soleDescriptorWhere } from "../../shared/session/agent-descriptors"
+import { storeFor } from "../agents"
 import { lineageFromMeta, teamLeadIn } from "../agents/lineage"
 import { authorizeSession, observeAgentTeam, visibilityFor, type VisibilityCheck } from "../edition"
-import { matchSubagentToMember, readSessionTeamTags } from "../lib/agentTeamIdentity"
+import { dirs, isWithinDir, join, readdir } from "../helpers"
+import { findSubagentOfMember, matchSubagentToMember, readSessionTeamTags } from "../lib/agentTeamIdentity"
 import { sendJson, type UseFn } from "../http"
 import {
   authorizeTeam,
@@ -19,54 +15,48 @@ import {
   type TeamConfig,
 } from "./agentTeamAccess"
 
-/** List project dir names under PROJECTS_DIR (excluding the memory dir). */
-async function listProjectDirNames(): Promise<string[]> {
-  const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-  return entries
-    .filter((e) => e.isDirectory() && e.name !== "memory")
-    .map((e) => e.name)
+const TEAM_AGENT = soleDescriptorWhere((descriptor) => descriptor.capabilities.agentTeams, "agent teams")
+const teamStore = () => storeFor(TEAM_AGENT.kind)
+
+/** Tag heads read at once while looking for a member; most are memoized after the first lookup. */
+const TAG_READ_BATCH = 16
+
+/** How the UI addresses a transcript under the team agent's projects dir. */
+function addressOf(filePath: string): { dirName: string; fileName: string } {
+  return { dirName: basename(dirname(filePath)), fileName: basename(filePath) }
 }
 
 /**
  * Resolve team membership for a session that is itself a teammate's own
- * top-level session (new agent-team format). Locates `<sessionId>.jsonl`,
- * reads its teamName/agentName tags, and loads the matching team config.
+ * top-level session (new agent-team format): read its teamName/agentName
+ * tags and load the matching team config.
  */
 async function detectTeamFromSessionFile(
   sessionId: string,
   dirNameHint: string | null
 ): Promise<{ teamName: string; config: TeamConfig; currentMemberName: string | null } | null> {
-  const fileName = `${sessionId}.jsonl`
-
-  let candidateDirs: string[]
-  try {
-    candidateDirs = dirNameHint
-      ? [dirNameHint]
-      : await listProjectDirNames()
-  } catch {
-    return null
+  let filePath: string | null
+  if (dirNameHint) {
+    filePath = join(dirs.PROJECTS_DIR, dirNameHint, TEAM_AGENT.sessionFile.name(sessionId))
+    if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) return null
+  } else {
+    filePath = await teamStore().findSessionFile(sessionId)
+    if (!filePath) return null
   }
-
-  for (const dirName of candidateDirs) {
-    const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-    if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) continue
-    const tags = await readSessionTeamTags(filePath)
-    if (!tags.teamName) continue
-
-    const config = await readTeamConfig(tags.teamName)
-    return config && { teamName: tags.teamName, config, currentMemberName: tags.agentName }
-  }
-
-  return null
+  const tags = await readSessionTeamTags(filePath)
+  if (!tags.teamName) return null
+  const config = await readTeamConfig(tags.teamName)
+  return config && { teamName: tags.teamName, config, currentMemberName: tags.agentName }
 }
 
 /**
- * Find a team member's own top-level session (new agent-team format) by
- * scanning project dirs for `<uuid>.jsonl` files tagged with the given
- * teamName/agentName. Dirs containing the lead session are checked first,
- * and only files modified after the team was created are considered —
- * teammate sessions are always newer than their team. A team's name is
- * reused once it is deleted, so only a session the caller may see is taken.
+ * Find a team member's own top-level session (new agent-team format): a
+ * transcript tagged with the given teamName/agentName. Candidates come from
+ * the session listing, newest first with the lead's project dir ahead of the
+ * rest, and only files modified after the team was created count, since a
+ * teammate's session is always newer than its team. A team's name is reused
+ * once it is deleted, so only a session the caller may see is taken.
+ * Also answers where the lead's transcript is, which the same listing holds.
  */
 async function findMemberTopLevelSession(
   teamName: string,
@@ -74,53 +64,33 @@ async function findMemberTopLevelSession(
   leadSessionId: string,
   teamCreatedAt: number,
   visible: VisibilityCheck,
-): Promise<{ dirName: string; fileName: string } | null> {
-  let projectDirNames: string[]
-  try {
-    projectDirNames = await listProjectDirNames()
-  } catch {
-    return null
+): Promise<{ member: { dirName: string; fileName: string } | null; leadPath: string | null }> {
+  const sessions = await teamStore().listTopLevelSessions().catch(() => [])
+  const leadFileName = TEAM_AGENT.sessionFile.name(leadSessionId)
+  const leadPath = sessions.find((session) => session.fileName === leadFileName)?.filePath ?? null
+  const leadDir = leadPath && dirname(leadPath)
+  const inLeadDir = []
+  const elsewhere = []
+  for (const session of [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs)) {
+    if (session.mtimeMs < teamCreatedAt || session.filePath === leadPath) continue
+    if (dirname(session.filePath) === leadDir) inLeadDir.push(session)
+    else elsewhere.push(session)
   }
+  const candidates = [...inLeadDir, ...elsewhere]
 
-  const leadFile = `${leadSessionId}.jsonl`
-  const dirFiles: Array<{ dirName: string; files: string[]; hasLead: boolean }> = []
-  for (const dirName of projectDirNames) {
-    try {
-      const names = (await readdir(join(dirs.PROJECTS_DIR, dirName))).filter(
-        (f) => f.endsWith(".jsonl")
-      )
-      const files: Array<{ name: string; mtimeMs: number }> = []
-      for (const name of names) {
-        if (name === leadFile) continue
-        try {
-          const s = await stat(join(dirs.PROJECTS_DIR, dirName, name))
-          if (s.mtimeMs >= teamCreatedAt) files.push({ name, mtimeMs: s.mtimeMs })
-        } catch {
-          continue
-        }
-      }
-      // Newest first — the member's session is typically the most recent
-      files.sort((a, b) => b.mtimeMs - a.mtimeMs)
-      dirFiles.push({ dirName, files: files.map((f) => f.name), hasLead: names.includes(leadFile) })
-    } catch {
-      continue
-    }
-  }
-  // Members almost always share the lead's project dir — check it first
-  dirFiles.sort((a, b) => Number(b.hasLead) - Number(a.hasLead))
-
-  for (const { dirName, files } of dirFiles) {
-    for (const f of files) {
-      const filePath = join(dirs.PROJECTS_DIR, dirName, f)
-      const tags = await readSessionTeamTags(filePath)
-      if (tags.teamName !== teamName || tags.agentName !== memberName) continue
-      const sessionId = f.slice(0, -".jsonl".length)
+  for (let start = 0; start < candidates.length; start += TAG_READ_BATCH) {
+    const batch = candidates.slice(start, start + TAG_READ_BATCH)
+    const tags = await Promise.all(batch.map((session) => readSessionTeamTags(session.filePath, session)))
+    for (let i = 0; i < batch.length; i++) {
+      if (tags[i].teamName !== teamName || tags[i].agentName !== memberName) continue
+      const { filePath, fileName } = batch[i]
+      const sessionId = batch[i].sessionId ?? TEAM_AGENT.sessionFile.sessionId(fileName)
+      if (!sessionId) continue
       const lineage = lineageFromMeta({ sessionId, parentSessionId: null }, filePath)
-      if ((await visible(sessionId, lineage)) !== "hidden") return { dirName, fileName: f }
+      if ((await visible(sessionId, lineage)) !== "hidden") return { member: addressOf(filePath), leadPath }
     }
   }
-
-  return null
+  return { member: null, leadPath }
 }
 
 export function registerTeamSessionRoutes(use: UseFn) {
@@ -229,29 +199,19 @@ export function registerTeamSessionRoutes(use: UseFn) {
     const leadSessionId = team.lead.sessionId
 
     try {
-      const member = config.members?.find((m) => m.name === memberName)
+      const members = config.members ?? []
+      const member = members.find((m) => m.name === memberName)
 
       if (member?.agentType === "team-lead") {
-        const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-        for (const entry of entries) {
-          if (!entry.isDirectory() || entry.name === "memory") continue
-          const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-          try {
-            const files = await readdir(projectDir)
-            const targetFile = `${leadSessionId}.jsonl`
-            if (files.includes(targetFile)) {
-              sendJson(res, 200, { dirName: entry.name, fileName: targetFile })
-              return
-            }
-          } catch { continue }
-        }
-        sendJson(res, 404, { error: "Lead session not found" })
+        const leadPath = await teamStore().findSessionFile(leadSessionId)
+        if (leadPath) sendJson(res, 200, addressOf(leadPath))
+        else sendJson(res, 404, { error: "Lead session not found" })
         return
       }
 
       // New format first (Claude Code 2.1.19x+): members run as their own
       // top-level sessions tagged with teamName/agentName — exact match.
-      const topLevel = await findMemberTopLevelSession(
+      const { member: topLevel, leadPath } = await findMemberTopLevelSession(
         teamName,
         memberName,
         leadSessionId,
@@ -263,62 +223,20 @@ export function registerTeamSessionRoutes(use: UseFn) {
         return
       }
 
-      // Legacy format: members stored as subagent files under the lead
-      // session, matched fuzzily by name/prompt snippet.
-      const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name === "memory") continue
-        const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-        const subagentDir = join(projectDir, leadSessionId, "subagents")
-
-        let subagentFiles: string[]
-        try {
-          subagentFiles = (await readdir(subagentDir)).filter((f) =>
-            f.endsWith(".jsonl")
-          )
-        } catch {
-          continue
-        }
-
-        const memberPrompt = member?.prompt || ""
-        const promptSnippet = memberPrompt.slice(0, 120)
-        const searchTerms = [
+      // Legacy format: members stored as sub-agent files under the lead
+      // session, matched by the spawn prompt or name on their first line.
+      if (leadPath) {
+        const subagentFile = await findSubagentOfMember(
+          join(dirname(leadPath), leadSessionId, "subagents"),
           memberName,
-          memberName.replace(/-/g, " "),
-          ...(promptSnippet
-            ? [
-                promptSnippet,
-                promptSnippet.replace(/"/g, '\\"'),
-              ]
-            : []),
-        ]
-
-        for (const sf of subagentFiles) {
-          try {
-            const filePath = join(subagentDir, sf)
-            const fh = await open(filePath, "r")
-            try {
-              const buf = Buffer.alloc(16384)
-              const { bytesRead } = await fh.read(buf, 0, 16384, 0)
-              const raw = buf.subarray(0, bytesRead).toString("utf-8")
-              const firstLine = raw.split("\n")[0] || ""
-
-              const matches = searchTerms.some((term) =>
-                firstLine.includes(term)
-              )
-              if (matches) {
-                sendJson(res, 200, {
-                  dirName: entry.name,
-                  fileName: `${leadSessionId}/subagents/${sf}`,
-                })
-                return
-              }
-            } finally {
-              await fh.close()
-            }
-          } catch {
-            continue
-          }
+          member ? members : [...members, { name: memberName }],
+        )
+        if (subagentFile) {
+          sendJson(res, 200, {
+            dirName: addressOf(leadPath).dirName,
+            fileName: `${leadSessionId}/subagents/${subagentFile}`,
+          })
+          return
         }
       }
 

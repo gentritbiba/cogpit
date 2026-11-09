@@ -31,10 +31,12 @@ vi.mock("../../atomicJsonFile", async (importOriginal) => {
 
 import {
   __resetSessionOriginsForTest,
+  clearSessionHandoff,
   forgetSessionOrigins,
   recordSessionOrigin,
   sessionChildren,
   sessionOrigin,
+  sessionOriginsRevision,
   sessionParents,
 } from "../../lib/sessionOrigins"
 
@@ -182,5 +184,31 @@ describe("sessionOrigins", () => {
     await writeFile(filePath(), "{not json")
     __resetSessionOriginsForTest()
     expect(await sessionChildren("p")).toEqual([])
+  })
+
+  it("moves its revision on every change to the origins in memory, and only then", async () => {
+    await mkdir(mockDirs.SESSION_CONFIG_DIR, { recursive: true })
+    await writeFile(filePath(), JSON.stringify({ version: 1, sessions: { a: { parentSessionId: "p", createdAt: 1 } } }))
+    const before = sessionOriginsRevision()
+    await sessionParents()
+    const loaded = sessionOriginsRevision()
+    expect(loaded).toBeGreaterThan(before)
+
+    await recordSessionOrigin("a", { parentSessionId: "p" })
+    await forgetSessionOrigins(["missing"])
+    await clearSessionHandoff("a")
+    expect(sessionOriginsRevision()).toBe(loaded)
+
+    await recordSessionOrigin("b", { parentSessionId: "p" })
+    const recorded = sessionOriginsRevision()
+    expect(recorded).toBeGreaterThan(loaded)
+    await recordSessionOrigin("b", { parentSessionId: "p", handoff: { repoRoot: "/r", base: "abc", workspaceId: "w", branch: "cogpit/x" } })
+    const handedOff = sessionOriginsRevision()
+    expect(handedOff).toBeGreaterThan(recorded)
+    await clearSessionHandoff("b")
+    const cleared = sessionOriginsRevision()
+    expect(cleared).toBeGreaterThan(handedOff)
+    await forgetSessionOrigins(["b"])
+    expect(sessionOriginsRevision()).toBeGreaterThan(cleared)
   })
 })

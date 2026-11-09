@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { memo, useCallback, useMemo, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, MailCheck, Network, Square, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,7 @@ import type { CrewMember, SessionCrew } from "../../../shared/contracts/crew"
 import { shortenModel } from "../../../shared/session/model-names"
 import {
   CREW_DOT,
-  crewMemberName,
+  crewMemberNames,
   crewRequests,
   crewTally,
   crewTree,
@@ -28,6 +28,7 @@ import {
   startedLabel,
   type CrewTreeRow,
 } from "./crewView"
+import { useRowWindow } from "./useRowWindow"
 
 type Filter = "all" | "working" | "needs-you" | "done"
 
@@ -51,19 +52,20 @@ export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
   const [tab, setTab] = useState("overview")
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const mapControls = useCrewMapControls(crew?.rootId ?? "")
-  const byId = useMemo(() => new Map((crew?.members ?? []).map((member) => [member.sessionId, member])), [crew])
   const kinds = useMemo(() => new Map((crew?.members ?? []).flatMap((member) => member.address ? [[member.sessionId, agentKindForDirName(member.address.dirName)] as const] : [])), [crew])
-  const nameOf = (member: CrewMember) => crewMemberName(member, byId, names)
-  const open = (member: CrewMember) => {
+  const memberNames = useMemo(() => (crew ? crewMemberNames(crew, names) : new Map<string, string>()), [crew, names])
+  const nameOf = useCallback((member: CrewMember) => memberNames.get(member.sessionId) ?? member.sessionId, [memberNames])
+  const openSession = context.openSession
+  const open = useCallback((member: CrewMember) => {
     if (member.address && member.device) revealSessionPath(sessionPath(member.address.dirName, member.address.fileName, member.device.id))
-    else if (member.address && context.openSession) context.openSession(member.address.dirName, member.address.fileName)
+    else if (member.address && openSession) openSession(member.address.dirName, member.address.fileName)
     else void revealSessionById(member.sessionId)
-  }
-  const toggle = (sessionId: string) => setCollapsed((previous) => {
+  }, [openSession])
+  const toggle = useCallback((sessionId: string) => setCollapsed((previous) => {
     const next = new Set(previous)
     if (!next.delete(sessionId)) next.add(sessionId)
     return next
-  })
+  }), [])
   return (
     <aside aria-label="Crew" className="flex size-full min-h-0 flex-col bg-canvas">
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
@@ -251,16 +253,10 @@ function CrewSessions({
   onToggle: (sessionId: string) => void
 }) {
   const [filter, setFilter] = useState<Filter>("working")
-  let hiddenBelow: number | null = null
-  const rows = crewTree(crew).filter(({ member, depth }) => {
-    if (filter !== "all") {
-      const state = memberCellState(member)
-      return filter === "done" ? state !== "working" && state !== "needs-you" : state === filter
-    }
-    if (hiddenBelow !== null && depth > hiddenBelow) return false
-    hiddenBelow = collapsed.has(member.sessionId) ? depth : null
-    return true
-  })
+  const tree = useMemo(() => crewTree(crew), [crew])
+  const rows = useMemo(() => visibleRows(tree, filter, collapsed), [tree, filter, collapsed])
+  const list = useRef<HTMLUListElement>(null)
+  const range = useRowWindow(list, rows.length)
   return (
     <section aria-label="Sessions" className="px-1.5 py-2.5">
       <div className="mb-1.5 flex items-center gap-2 px-1.5">
@@ -292,8 +288,8 @@ function CrewSessions({
           )}
         </div>
       ) : (
-        <ul className="flex flex-col">
-          {rows.map((row) => (
+        <ul ref={list} className="flex flex-col" style={{ paddingTop: range.before, paddingBottom: range.after }}>
+          {rows.slice(range.start, range.end).map((row) => (
             <CrewRow
               key={row.member.sessionId}
               row={row}
@@ -304,7 +300,7 @@ function CrewSessions({
               onMarkRead={onMarkRead}
               onStop={onStop}
               collapsed={filter === "all" ? collapsed.has(row.member.sessionId) : undefined}
-              onToggle={() => onToggle(row.member.sessionId)}
+              onToggle={onToggle}
             />
           ))}
         </ul>
@@ -313,7 +309,23 @@ function CrewSessions({
   )
 }
 
-function CrewRow({
+/** The rows a filter shows; under All, without the members of folded branches. */
+function visibleRows(tree: readonly CrewTreeRow[], filter: Filter, collapsed: ReadonlySet<string>): CrewTreeRow[] {
+  if (filter !== "all") {
+    return tree.filter(({ member }) => {
+      const state = memberCellState(member)
+      return filter === "done" ? state !== "working" && state !== "needs-you" : state === filter
+    })
+  }
+  let hiddenBelow: number | null = null
+  return tree.filter(({ member, depth }) => {
+    if (hiddenBelow !== null && depth > hiddenBelow) return false
+    hiddenBelow = collapsed.has(member.sessionId) ? depth : null
+    return true
+  })
+}
+
+const CrewRow = memo(function CrewRow({
   row: { member, depth, children },
   here,
   busy,
@@ -332,7 +344,7 @@ function CrewRow({
   onMarkRead: (parentId: string, taskId: string) => Promise<void>
   onStop: (member: CrewMember) => Promise<void>
   collapsed?: boolean
-  onToggle: () => void
+  onToggle: (sessionId: string) => void
 }) {
   const state = memberCellState(member)
   const activity = memberActivity(member)
@@ -353,7 +365,7 @@ function CrewRow({
             size="icon-xs"
             aria-label={`${collapsed ? "Expand" : "Collapse"} ${name}'s child sessions`}
             aria-expanded={!collapsed}
-            onClick={onToggle}
+            onClick={() => onToggle(member.sessionId)}
           >
             <ChevronRight data-icon="inline-start" className={cn("transition-transform", !collapsed && "rotate-90")} />
           </Button>
@@ -421,4 +433,4 @@ function CrewRow({
       )}
     </li>
   )
-}
+})

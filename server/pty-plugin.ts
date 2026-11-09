@@ -12,6 +12,7 @@ import { installSessionCli } from "./sessionCli/install"
 import { getDataRoot } from "./config"
 import { beginServerStart } from "./lib/installState"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
+import { resumeLocalCrewChat } from "./lib/crewChat"
 import { isSessionActive } from "./agents/runtimes"
 
 export function ptyPlugin(): Plugin {
@@ -28,6 +29,7 @@ export function ptyPlugin(): Plugin {
       const browserSupport = initBrowserSupport(isSessionActive)
       installSessionCli()
       resumeLocalDelegations()
+      resumeLocalCrewChat()
       const authorization = new PtyAuthorizationController()
 
       server.httpServer!.on(

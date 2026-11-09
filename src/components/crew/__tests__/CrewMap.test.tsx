@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CrewMember, SessionCrew } from "../../../../shared/contracts/crew"
-import { CrewMap, useCrewMapControls } from "../CrewMap"
+import { CrewMap, MAP_WINDOW_MIN, useCrewMapControls } from "../CrewMap"
 import { CARD_HEIGHT, ROW_GAP } from "../crewMapLayout"
 
 function member(sessionId: string, parentId: string | null, startedAt: number, overrides: Partial<CrewMember> = {}): CrewMember {
@@ -200,6 +200,74 @@ describe("CrewMap", () => {
       // Thirty rows above it are gone, so the same card is thirty rows higher up.
       expect(region.scrollTop).toBe(4000 - 30 * (CARD_HEIGHT + ROW_GAP))
     } finally {
+      width.mockRestore()
+      height.mockRestore()
+    }
+  })
+
+  it("draws only the cards near the view of a large crew, and more as it scrolls", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(360)
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400)
+    try {
+      const lanes: SessionCrew = {
+        sessionId: "lead",
+        rootId: "lead",
+        members: [member("lead", null, 0), ...Array.from({ length: 300 }, (_, index) => member(`lane-${index}`, "lead", index + 1))],
+      }
+      const { rerender } = renderMap(lanes)
+      const region = panelMap()
+      expect(cards().length).toBeLessThan(MAP_WINDOW_MIN)
+      expect(cards()).toContain("lead")
+      expect(cards()).not.toContain("lane-250")
+
+      let stored = 0
+      Object.defineProperty(region, "scrollTop", { configurable: true, get: () => stored, set: (value: number) => { stored = value } })
+      region.scrollTo = vi.fn()
+      rerender(lanes, "lane-250")
+      const target = (region.scrollTo as ReturnType<typeof vi.fn>).mock.calls[0]![0] as { top: number }
+      expect(target.top).toBeGreaterThan(0)
+
+      stored = target.top
+      fireEvent.scroll(region)
+      expect(cards()).toContain("lane-250")
+      expect(cards()).not.toContain("lead")
+    } finally {
+      width.mockRestore()
+      height.mockRestore()
+    }
+  })
+
+  it("draws fewer cards again after zooming back in, and fills a taller view", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(360)
+    let viewHeight = 1_000
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => viewHeight)
+    const resized: Array<() => void> = []
+    const Observer = globalThis.ResizeObserver
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: () => void) {}
+      observe() { resized.push(this.callback) }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver
+    try {
+      renderMap({
+        sessionId: "lead",
+        rootId: "lead",
+        members: [member("lead", null, 0), ...Array.from({ length: 300 }, (_, index) => member(`lane-${index}`, "lead", index + 1))],
+      })
+      const opened = cards().length
+      for (let step = 0; step < 8; step++) fireEvent.click(screen.getByRole("button", { name: "Zoom out" }))
+      const zoomedOut = cards().length
+      expect(zoomedOut).toBeGreaterThan(opened)
+      fireEvent.click(screen.getByRole("button", { name: "Actual size" }))
+      expect(cards().length).toBeLessThan(zoomedOut)
+
+      const before = cards().length
+      viewHeight = 10_000
+      act(() => { for (const callback of resized) callback() })
+      expect(cards().length).toBeGreaterThan(before)
+    } finally {
+      globalThis.ResizeObserver = Observer
       width.mockRestore()
       height.mockRestore()
     }

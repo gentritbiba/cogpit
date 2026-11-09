@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   findJsonlPath: vi.fn(),
@@ -47,7 +50,19 @@ beforeEach(() => {
   mocks.agentsRunning.mockReset().mockResolvedValue(false)
 })
 
-const written = (agoMs: number) => ({ filePath: "/t/a.jsonl", lastActivityMs: Date.now() - agoMs })
+let transcripts: string
+beforeAll(() => { transcripts = mkdtempSync(join(tmpdir(), "cogpit-session-wait-")) })
+afterAll(() => rmSync(transcripts, { recursive: true, force: true }))
+
+/** Session "a", whose transcript was last written `agoMs` ago. */
+function written(agoMs: number): string {
+  const filePath = join(transcripts, "a.jsonl")
+  writeFileSync(filePath, "")
+  const at = (Date.now() - agoMs) / 1000
+  utimesSync(filePath, at, at)
+  mocks.findJsonlPath.mockResolvedValueOnce(filePath)
+  return "a"
+}
 
 afterEach(() => {
   clearTurnError("a")
@@ -81,13 +96,12 @@ describe("readSessionState", () => {
 
   it("reads an unmanaged session's progress from the tail while its transcript is being written", async () => {
     mocks.getSessionStatus.mockResolvedValue({ status: "thinking" })
-    expect((await readSessionState("a", written(5_000))).outcome).toBe("running")
-    expect(mocks.findJsonlPath).not.toHaveBeenCalled()
+    expect((await readSessionState(written(5_000))).outcome).toBe("running")
   })
 
   it("reads a mid-flight tail nothing holds and nothing writes as finished", async () => {
     mocks.getSessionStatus.mockResolvedValue({ status: "tool_use", toolName: "Bash" })
-    expect((await readSessionState("a", written(2 * 24 * 60 * 60_000))).outcome).toBe("completed")
+    expect((await readSessionState(written(2 * 24 * 60 * 60_000))).outcome).toBe("completed")
     // A transcript it cannot stat has not been written lately either.
     expect((await readSessionState("a")).outcome).toBe("completed")
   })
@@ -95,12 +109,12 @@ describe("readSessionState", () => {
   it("keeps a session waiting on its agents running while it is held or its agents still write", async () => {
     mocks.getSessionStatus.mockResolvedValue({ status: "awaiting_agents" })
     mocks.activity.set("a", { live: true, running: false })
-    expect((await readSessionState("a", written(60 * 60_000))).outcome).toBe("running")
+    expect((await readSessionState(written(60 * 60_000))).outcome).toBe("running")
 
     mocks.activity.clear()
-    expect((await readSessionState("a", written(60 * 60_000))).outcome).toBe("completed")
+    expect((await readSessionState(written(60 * 60_000))).outcome).toBe("completed")
     mocks.agentsRunning.mockResolvedValue(true)
-    expect((await readSessionState("a", written(60 * 60_000))).outcome).toBe("running")
+    expect((await readSessionState(written(60 * 60_000))).outcome).toBe("running")
     expect(mocks.agentsRunning).toHaveBeenCalledWith("-work", "a")
   })
 
@@ -128,7 +142,7 @@ describe("readSessionState", () => {
   it("reports a turn the agent failed as an error, in plain words first", async () => {
     const failure = { reason: "not_signed_in", message: "Invalid API key · Fix external API key", httpStatus: 401 }
     mocks.getSessionStatus.mockResolvedValue({ status: "completed", terminalReason: "authentication_failed", failure })
-    expect(await readSessionState("a", written(60_000))).toMatchObject({
+    expect(await readSessionState(written(60_000))).toMatchObject({
       outcome: "error",
       error: "Claude Code isn't signed in. Invalid API key · Fix external API key",
       failure,

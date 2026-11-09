@@ -19,17 +19,13 @@ const mocks = vi.hoisted(() => {
     waitAcrossHosts: vi.fn(),
     markAnswered: vi.fn(),
     sessionChildren: vi.fn(),
-    sessionParents: vi.fn(),
-    sessionOrigin: vi.fn(),
-    allTopLevelSessions: vi.fn(),
-    readSessionState: vi.fn(),
-    readActiveSessionRow: vi.fn(),
-    runtimeForSession: vi.fn(),
     runSessionCli: vi.fn(),
+    readCrewSnapshot: vi.fn(),
   }
 })
 
-vi.mock("../../sessionHosts", () => ({
+vi.mock("../../sessionHosts", async (importOriginal) => ({
+  statesAcrossHosts: (await importOriginal<typeof import("../../sessionHosts")>()).statesAcrossHosts,
   SESSION_SCOPE_HEADER: "x-cogpit-session-scope",
   hostForSession: mocks.hostForSession,
   hostForOrigin: (origin: { deviceId?: string } | null) => (origin?.deviceId ? mocks.remote : null),
@@ -38,34 +34,10 @@ vi.mock("../../sessionHosts", () => ({
     Promise.all(ids.map(async (sessionId) => ({ host: await mocks.hostForSession(sessionId, options), sessionId }))),
   waitAcrossHosts: mocks.waitAcrossHosts,
 }))
-vi.mock("../../lib/sessionOrigins", () => ({
-  sessionChildren: mocks.sessionChildren,
-  sessionOrigin: mocks.sessionOrigin,
-  sessionParents: mocks.sessionParents,
-}))
-vi.mock("../../agents", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../agents")>(),
-  allTopLevelSessions: mocks.allTopLevelSessions,
-}))
-vi.mock("../../agents/runtimes", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../agents/runtimes")>(),
-  runtimeForSession: mocks.runtimeForSession,
-}))
-vi.mock("../../lib/sessionWait", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../lib/sessionWait")>(),
-  readSessionState: mocks.readSessionState,
-}))
-vi.mock("../../lib/sessionArchive", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../lib/sessionArchive")>(),
-  readArchive: async () => ({ archived: new Map(), kept: new Set() }),
-}))
-vi.mock("../../routes/projects/activeSessionRow", () => ({ readActiveSessionRow: mocks.readActiveSessionRow }))
+vi.mock("../../lib/sessionOrigins", () => ({ sessionChildren: mocks.sessionChildren }))
+vi.mock("../../lib/crewSnapshot", () => ({ readCrewSnapshot: mocks.readCrewSnapshot }))
 vi.mock("../../lib/sessionBoards", () => ({
   sessionBoard: async (id: string) => (id === "lead" ? { sessionId: "lead", title: "Wave 3", sections: [], updatedAt: 1 } : null),
-}))
-vi.mock("../../orchestration/storage", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../orchestration/storage")>(),
-  orchestrationStore: () => ({ tasks: () => [{ id: "t1", parentSessionId: "p1", childSessionId: "c1", sourceId: "s", state: "completed", createdAt: 1, updatedAt: 2 }] }),
 }))
 vi.mock("../../sessionCli/commands", () => ({ runSessionCli: mocks.runSessionCli }))
 vi.mock("../../sessionHosts/delegatedRequests", () => ({
@@ -89,16 +61,12 @@ async function call(path: string, method: string, url: string, body?: unknown, h
   sendBody()
   await done
   await vi.waitFor(() => expect(res.end.mock.calls.length + next.mock.calls.length).toBeGreaterThan(0))
-  return { status: res._getStatus(), body: JSON.parse(res._getData() || "null"), next }
+  return { status: res._getStatus(), body: JSON.parse(res._getData() || "null"), headers: res._getHeaders(), next }
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.hostForSession.mockImplementation(async (id: string) => (id.startsWith("r") ? mocks.remote : mocks.host))
-  mocks.allTopLevelSessions.mockResolvedValue([])
-  mocks.sessionOrigin.mockResolvedValue(null)
-  mocks.readActiveSessionRow.mockResolvedValue(null)
-  mocks.runtimeForSession.mockReturnValue(null)
 })
 
 describe("/api/session-wait", () => {
@@ -200,55 +168,51 @@ describe("/api/session-children", () => {
       ],
     })
   })
+
+  it("still lists the children here when their device is offline, asking it once (2026-11-07 23:02, e59cd71c)", async () => {
+    mocks.sessionChildren.mockResolvedValue(["c1", "r2", "r3"])
+    mocks.host.state.mockResolvedValue({ sessionId: "c1", outcome: "completed", waiting: [] })
+    mocks.remote.state.mockRejectedValue(new DeviceRequestError("dev_1", 530, "Device answered HTTP 530"))
+    const { status, body } = await call("/api/session-children/", "GET", "/p1")
+    expect(status).toBe(200)
+    expect(body.children).toEqual([
+      { sessionId: "c1", outcome: "completed", waiting: [] },
+      { sessionId: "r2", outcome: "unreachable", live: false, running: false, waiting: [], error: "Device answered HTTP 530", device: { id: "dev_1", name: "agentbox" } },
+      { sessionId: "r3", outcome: "unreachable", live: false, running: false, waiting: [], error: "Device answered HTTP 530", device: { id: "dev_1", name: "agentbox" } },
+    ])
+    expect(mocks.remote.state).toHaveBeenCalledOnce()
+  })
+
+  it("answers only for this machine when a hub asks with the local scope", async () => {
+    mocks.sessionChildren.mockResolvedValue(["c1", "r2"])
+    mocks.hostForSession.mockImplementation(async (id: string, options?: { localOnly?: boolean }) => (options?.localOnly || !id.startsWith("r") ? mocks.host : mocks.remote))
+    mocks.host.state.mockImplementation(async (id: string) => ({ sessionId: id, outcome: id === "c1" ? "completed" : "not_found", waiting: [] }))
+    const { status, body } = await call("/api/session-children/", "GET", "/p1", undefined, { "x-cogpit-session-scope": "local" })
+    expect(status).toBe(200)
+    expect(body.children).toEqual([{ sessionId: "c1", outcome: "completed", waiting: [] }, { sessionId: "r2", outcome: "not_found", waiting: [] }])
+    expect(mocks.remote.state).not.toHaveBeenCalled()
+  })
 })
 
 describe("/api/session-crew", () => {
-  const DAY = 24 * 60 * 60_000
-  const listed = (sessionId: string, mtimeMs = Date.now()) => ({
-    sessionId, dirName: "-work", fileName: `${sessionId}.jsonl`, filePath: `/work/${sessionId}.jsonl`, mtimeMs, size: 1,
+  const crew = { sessionId: "c1", rootId: "p1", members: [{ sessionId: "p1", parentId: null, startedAt: null, device: null, address: null, outcome: "completed", waiting: [] }] }
+
+  it("answers the crew with an ETag, and a 304 while it is unchanged", async () => {
+    mocks.readCrewSnapshot.mockResolvedValue(crew)
+    const first = await call("/api/session-crew/", "GET", "/c1")
+    expect(first).toMatchObject({ status: 200, body: crew })
+    expect(mocks.readCrewSnapshot).toHaveBeenCalledWith(expect.anything(), "c1", { localOnly: false, brief: false })
+    const etag = first.headers.ETag!
+    expect(etag).toMatch(/^W\//)
+    expect(await call("/api/session-crew/", "GET", "/c1", undefined, { "if-none-match": etag })).toMatchObject({ status: 304, body: null })
+    mocks.readCrewSnapshot.mockResolvedValue({ ...crew, members: [{ ...crew.members[0], outcome: "running" }] })
+    expect((await call("/api/session-crew/", "GET", "/c1", undefined, { "if-none-match": etag })).status).toBe(200)
   })
 
-  beforeEach(() => {
-    mocks.sessionParents.mockResolvedValue(new Map([
-      ["c1", { parentSessionId: "p1", createdAt: 10, name: "lane" }],
-      ["r2", { parentSessionId: "c1", createdAt: 20 }],
-      ["moved", { parentSessionId: "p1", createdAt: 30 }],
-      ["old", { parentSessionId: "p1", createdAt: 40 }],
-      ["starting", { parentSessionId: "p1", createdAt: 50 }],
-    ]))
-    mocks.sessionOrigin.mockImplementation(async (id: string) => (id === "r2" ? { deviceId: "dev_1", createdAt: 20 } : null))
-    mocks.allTopLevelSessions.mockResolvedValue([listed("p1"), listed("c1"), listed("old", Date.now() - 30 * DAY)])
-    mocks.runtimeForSession.mockImplementation((id: string) => (id === "starting" ? {} : null))
-    mocks.readSessionState.mockImplementation(async (id: string) => ({ sessionId: id, outcome: "completed", live: false, running: false, waiting: [] }))
-    mocks.readActiveSessionRow.mockImplementation(async (candidate: { sessionId: string }) => ({
-      customTitle: `${candidate.sessionId} title`, lastActivityAt: "2026-10-20T10:00:00Z",
-    }))
-    mocks.host.address.mockResolvedValue(null)
-    mocks.remote.state.mockResolvedValue({ sessionId: "r2", outcome: "needs_input", live: true, running: true, waiting: [{ kind: "question", requestId: "q1", questions: [] }] })
-    Object.assign(mocks.remote, { address: vi.fn(async () => null) })
-  })
-
-  it("reports the crew from any member, root first, with state, machine and result", async () => {
-    const { status, body } = await call("/api/session-crew/", "GET", "/r2")
-    expect(status).toBe(200)
-    expect(body).toMatchObject({
-      sessionId: "r2",
-      rootId: "p1",
-      members: [
-        { sessionId: "p1", parentId: null, outcome: "completed", device: null, customTitle: "p1 title" },
-        { sessionId: "c1", parentId: "p1", name: "lane", address: { dirName: "-work", fileName: "c1.jsonl" }, result: { taskId: "t1", state: "completed", acknowledged: false } },
-        { sessionId: "r2", parentId: "c1", outcome: "needs_input", device: { id: "dev_1", name: "agentbox" }, address: null },
-        { sessionId: "starting", parentId: "p1", device: null },
-      ],
-    })
-  })
-
-  it("lists members as the session list does, reading each from the listing without searching devices", async () => {
-    const { body } = await call("/api/session-crew/", "GET", "/p1")
-    // "moved" has no transcript and nothing holds it; "old" is archived.
-    expect(body.members.map((member: { sessionId: string }) => member.sessionId)).toEqual(["p1", "c1", "r2", "starting"])
-    expect(mocks.readSessionState).toHaveBeenCalledWith("c1", { filePath: "/work/c1.jsonl", lastActivityMs: Date.parse("2026-10-20T10:00:00Z") })
-    expect(mocks.hostForSession).not.toHaveBeenCalled()
+  it("passes brief=1 and a device's local scope through, and 404s an unknown session", async () => {
+    mocks.readCrewSnapshot.mockResolvedValue(null)
+    expect((await call("/api/session-crew/", "GET", "/c1?brief=1", undefined, { "x-cogpit-session-scope": "local" })).status).toBe(404)
+    expect(mocks.readCrewSnapshot).toHaveBeenCalledWith(expect.anything(), "c1", { localOnly: true, brief: true })
   })
 })
 

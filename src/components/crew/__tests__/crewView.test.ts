@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { CrewMember, SessionCrew } from "../../../../shared/contracts/crew"
 import {
-  crewMemberName,
+  crewMemberNames,
   crewRequests,
   crewTally,
   crewTree,
@@ -79,12 +79,12 @@ describe("crewView", () => {
   })
 
   it("names members the way the session list does", () => {
-    const byId = new Map(crew.members.map((value) => [value.sessionId, value]))
-    expect(crewMemberName(byId.get("coordinator")!, byId, {})).toBe("Wave 3 coordinator")
-    expect(crewMemberName(byId.get("rooftop")!, byId, {})).toBe("w3-rooftop")
-    expect(crewMemberName(byId.get("storefront")!, byId, {})).toBe("storefront")
-    expect(crewMemberName(byId.get("reviewer")!, byId, {})).toBe("Review packet r2")
-    expect(crewMemberName(byId.get("rooftop")!, byId, { rooftop: "mine" })).toBe("mine")
+    const names = crewMemberNames(crew, {})
+    expect(names.get("coordinator")).toBe("Wave 3 coordinator")
+    expect(names.get("rooftop")).toBe("w3-rooftop")
+    expect(names.get("storefront")).toBe("storefront")
+    expect(names.get("reviewer")).toBe("Review packet r2")
+    expect(crewMemberNames(crew, { rooftop: "mine" }).get("rooftop")).toBe("mine")
   })
 
   it("describes what a member is doing in a line", () => {
