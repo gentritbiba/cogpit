@@ -5,6 +5,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BuiltInPanelServicesProvider } from "@/components/workspace-panels/BuiltInPanelServices"
 import { MobileWorkspacePanels } from "@/components/workspace-panels/MobileWorkspacePanels"
+import { StatusPanelProvider } from "@/components/board/StatusPanelContext"
 import { ViewPanelProvider } from "@/components/views/ViewPanelContext"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { WorkspacePanelContext } from "@/plugin-api"
@@ -113,6 +114,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
         shown={active && panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.views}
         onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.views)}
       >
+      <StatusPanelProvider openSessionId={session?.sessionId ?? null} onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.status)}>
       <MobileWorkspacePanels
         panels={workspacePanels}
         context={context}
@@ -133,6 +135,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
           </Suspense>
         ) : null}
       />
+      </StatusPanelProvider>
       </ViewPanelProvider>
       {pluginsOpen && canConfigure && <Suspense fallback={null}>
         <PluginsDialog client={runtimePlugins.client} state={runtimePlugins} currentPath={project.currentCwd ?? null} initialPluginId={pluginSettingsId}

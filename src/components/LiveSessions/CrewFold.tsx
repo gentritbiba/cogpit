@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { ChevronRight } from "lucide-react"
+import { MemberStatusButton } from "@/components/board/StatusLink"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { workingChip } from "./attentionGroups"
@@ -89,7 +90,7 @@ export function CrewFold({
               : ""
             const reportsLabel = via || (reports > 0 ? ` · ${reports} ${reports === 1 ? "session" : "sessions"}` : "")
             return (
-              <li key={value.sessionId}>
+              <li key={value.sessionId} className="flex items-center gap-0.5">
                 <button
                   type="button"
                   data-crew-member={value.sessionId}
@@ -97,7 +98,7 @@ export function CrewFold({
                   aria-label={`${name}${reportsLabel}, ${activity}`}
                   onClick={() => onSelectSession(value.dirName, value.fileName)}
                   className={cn(
-                    "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                     isActive && "bg-accent",
                   )}
                 >
@@ -110,6 +111,7 @@ export function CrewFold({
                     {activity}
                   </span>
                 </button>
+                <MemberStatusButton sessionId={value.sessionId} name={name} />
               </li>
             )
           })}
