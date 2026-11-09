@@ -2,7 +2,6 @@ import { useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { getSessionRecencyMs } from "../../../shared/session-ordering"
 import { workingChip } from "./attentionGroups"
 import { directReports, memberName, type CrewCounts, type MemberNeed, type MemberStatus } from "./crew"
 import { STATUS_DOT } from "./statusDot"
@@ -55,10 +54,7 @@ export function CrewFold({
   // someone so it never hides behind the session that started it.
   const isDirect = (value: ActiveSessionInfo) => !value.crew || value.crew.parentId === host.sessionId || !byId.has(value.crew.parentId)
   const listed = members.filter((value) => isDirect(value) || statusOf(value).state === "needs-you")
-  const ordered = [...listed].sort((a, b) => (
-    STATE_ORDER[statusOf(a).state] - STATE_ORDER[statusOf(b).state]
-    || (statusOf(a).state === "done" ? getSessionRecencyMs(b) - getSessionRecencyMs(a) : 0)
-  ))
+  const ordered = [...listed].sort((a, b) => STATE_ORDER[statusOf(a).state] - STATE_ORDER[statusOf(b).state])
   const done = ordered.filter((value) => statusOf(value).state === "done")
   const hiddenDone = showAllDone ? [] : done.slice(DONE_VISIBLE)
   const shown = ordered.filter((value) => !hiddenDone.includes(value))
