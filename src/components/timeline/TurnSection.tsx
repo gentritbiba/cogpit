@@ -267,7 +267,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       ...contentItems(leadingBlocks, keyFor, contentBlockProps),
       {
         key: "work-fold",
-        node: (
+        render: () => (
           <div data-scroll-anchor="">
             <TurnWorkFold
               label={
@@ -682,8 +682,8 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
 }: ContentItemsProps): WindowItem[] {
   const items: WindowItem[] = []
   const indexOf = (block: TurnContentBlock) => blockIndex.get(block) ?? -1
-  const push = (key: string, first: TurnContentBlock, last: TurnContentBlock, element: React.ReactNode) => {
-    items.push({ key, blocks: [indexOf(first), indexOf(last)], node: <DisclosureScope id={key}>{element}</DisclosureScope> })
+  const push = (key: string, first: TurnContentBlock, last: TurnContentBlock, element: () => React.ReactNode) => {
+    items.push({ key, blocks: [indexOf(first), indexOf(last)], render: () => <DisclosureScope id={key}>{element()}</DisclosureScope> })
   }
 
   let i = 0
@@ -692,7 +692,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
 
     if (block.kind === "thinking" || block.kind === "tool_calls") {
       const { items: activityItems, nextIndex } = collectActivity(blocks, i, indexOf)
-      push(keyFor(block), block, blocks[nextIndex - 1], <ActivityRun items={activityItems} {...activity} />)
+      push(keyFor(block), block, blocks[nextIndex - 1], () => <ActivityRun items={activityItems} {...activity} />)
       i = nextIndex
       continue
     }
@@ -700,7 +700,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
     if (block.kind === "text") {
       const { items: activityItems, nextIndex } = collectActivity(blocks, i + 1, indexOf)
       const index = indexOf(block)
-      push(keyFor(block), block, blocks[nextIndex - 1], (
+      push(keyFor(block), block, blocks[nextIndex - 1], () => (
         <TextRun
           block={block}
           blockIndex={index}
@@ -720,7 +720,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
     const key = keyFor(block)
     switch (block.kind) {
       case "queued_prompt":
-        push(key, block, block, (
+        push(key, block, block, () => (
           <div data-scroll-anchor="">
             <QueuedPrompt
               content={block.content}
@@ -731,7 +731,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
         ))
         break
       case "agent_message":
-        push(key, block, block, (
+        push(key, block, block, () => (
           <div data-scroll-anchor="">
             <AgentMessageCard
               sender={block.sender}
@@ -745,7 +745,7 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
         break
       case "sub_agent":
       case "background_agent":
-        push(key, block, block, (
+        push(key, block, block, () => (
           <div data-scroll-anchor="">
             <AgentPanel
               messages={block.messages}
@@ -758,10 +758,10 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
         ))
         break
       case "hook_event":
-        push(key, block, block, <div data-scroll-anchor=""><HookEventChip events={block.events} /></div>)
+        push(key, block, block, () => <div data-scroll-anchor=""><HookEventChip events={block.events} /></div>)
         break
       case "plan_mode":
-        push(key, block, block, (
+        push(key, block, block, () => (
           <div data-scroll-anchor="">
             <PlanModeBlock
               plan={block.plan}
@@ -777,13 +777,13 @@ function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
         ))
         break
       case "recap":
-        push(key, block, block, <div data-scroll-anchor=""><RecapBanner content={block.content} /></div>)
+        push(key, block, block, () => <div data-scroll-anchor=""><RecapBanner content={block.content} /></div>)
         break
       case "task_notification":
-        push(key, block, block, <div data-scroll-anchor=""><TaskNotificationBlock content={block.content} /></div>)
+        push(key, block, block, () => <div data-scroll-anchor=""><TaskNotificationBlock content={block.content} /></div>)
         break
       case "local_command":
-        push(key, block, block, (
+        push(key, block, block, () => (
           <div data-scroll-anchor="">
             <LocalCommandBlock
               content={block.content}

@@ -7,7 +7,8 @@ export const BlockWindowHostContext = createContext<BlockWindowHost | null>(null
 
 export interface WindowItem {
   key: string
-  node: ReactNode
+  /** Called only for the items that mount. */
+  render: () => ReactNode
   /** The turn's content blocks this item renders, first and last index; find scopes its matches with them. */
   blocks?: readonly [number, number]
 }
@@ -93,7 +94,7 @@ function Item({ item, itemRef }: { item: WindowItem; itemRef?: (el: HTMLElement 
       data-blocks={item.blocks ? `${item.blocks[0]}-${item.blocks[1]}` : undefined}
       className="min-w-0"
     >
-      {item.node}
+      {item.render()}
     </div>
   )
 }

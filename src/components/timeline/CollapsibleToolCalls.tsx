@@ -55,11 +55,11 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     return ordinals
   }, [entries])
   const items: WindowItem[] = tail.visible.map((entry) => entry.kind === "tool_call"
-    ? { key: entry.toolCall.id, node: renderCall(entry.toolCall) }
+    ? { key: entry.toolCall.id, render: () => renderCall(entry.toolCall) }
     : {
       key: `thinking-${thinkingOrdinal.get(entry)}`,
       blocks: entry.block === undefined ? undefined : [entry.block, entry.block],
-      node: <div data-scroll-anchor="" className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>,
+      render: () => <div data-scroll-anchor="" className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>,
     })
   const pinned = revealTarget === null || typeof revealTarget === "number"
     ? NO_PINS
