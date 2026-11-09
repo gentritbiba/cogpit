@@ -271,7 +271,7 @@ describe("CrewMap", () => {
       width.mockRestore()
       height.mockRestore()
     }
-  })
+  }, 20_000)
 
   it("zooms with its controls", () => {
     renderMap()

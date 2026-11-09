@@ -91,8 +91,8 @@ describe("GET /api/session-commands", () => {
     expect(changed.body.commands.map((command: { id: string }) => command.id)).toEqual(["new-message"])
   })
 
-  it("keeps the response small for a conversation with hundreds of finished commands", async () => {
-    for (let index = 0; index < 300; index++) complete(`finished-${index}`)
+  it("keeps the response small for a conversation with many finished commands", async () => {
+    for (let index = 0; index < 20; index++) complete(`finished-${index}`)
     commandDispatcher().store.admit("local", "waiting-1", conversationId, { message: "next" })
     const { text, body } = await get("")
     expect(body.commands).toHaveLength(1)

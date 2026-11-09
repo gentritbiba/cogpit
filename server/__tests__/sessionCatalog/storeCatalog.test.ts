@@ -59,6 +59,16 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 100))
 }
 
+/** Until no read has happened for a while: macOS reports the setup's own writes to a new watcher late, which rescans once. */
+async function quiet(calls: object): Promise<void> {
+  for (let seen = JSON.stringify(calls), stable = 0; stable < 3; ) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const now = JSON.stringify(calls)
+    stable = now === seen ? stable + 1 : 0
+    seen = now
+  }
+}
+
 function claudeStore(): { store: AgentStore; root: string } {
   const root = join(home, "projects")
   mkdirSync(join(root, "-work-app"), { recursive: true })
@@ -177,7 +187,7 @@ describe("session catalog reads", () => {
       await catalog.topLevelSessions()
       await settle()
       await vi.waitFor(() => expect(calls.listDir).toBeGreaterThanOrEqual(4))
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await quiet(calls)
       const before = { ...calls }
       for (let i = 0; i < 5; i += 1) await catalog.topLevelSessions()
       await catalog.projects()
