@@ -20,7 +20,7 @@ vi.mock("../TurnSection", () => ({
   TurnSection: ({ turnKey }: { turnKey: string }) => (
     <>
       <div data-scroll-anchor="" data-block={`${turnKey}:a`} />
-      <div data-scroll-anchor="" data-block={`${turnKey}:b`} />
+      <div data-scroll-anchor="" data-block={`${turnKey}:b`}><button type="button">toggle</button></div>
     </>
   ),
 }))
@@ -230,10 +230,34 @@ describe("TimelineList with the scroll engine", () => {
   it("releases following when the scrollbar is grabbed", () => {
     mount({ turns: makeTurns(ids(0, 50)) })
     const top = scrollTop()
-    act(() => { scroller!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })) })
+    act(() => { scroller!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", clientX: 805 })) })
     blockHeights.set("t49:b", 400)
     resize()
     expect(scrollTop()).toBe(top)
+  })
+
+  // Review finding 1: every press released following, and at the bottom nothing brought it back.
+  it("keeps following through a tap, a text-selection press and a press on the scroller's padding", () => {
+    mount({ turns: makeTurns(ids(0, 50)) })
+    act(() => {
+      scroller!.querySelector(block("t49:a"))!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "touch" }))
+      scroller!.querySelector(block("t48:b"))!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }))
+      scroller!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "touch", clientX: 400 }))
+      scroller!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse", clientX: 400 }))
+    })
+    blockHeights.set("t49:b", 400)
+    resize()
+    expect(scrollTop()).toBe(maxScroll())
+  })
+
+  it("resumes following at idle when a release left the reader at the bottom with nothing held", () => {
+    vi.useFakeTimers()
+    mount({ turns: makeTurns(ids(0, 50)) })
+    act(() => { scroller!.dispatchEvent(new WheelEvent("wheel", { deltaY: -40 })) })
+    act(() => { vi.advanceTimersByTime(200) })
+    blockHeights.set("t49:b", 400)
+    resize()
+    expect(scrollTop()).toBe(maxScroll())
   })
 
   it("does not resume following when a collapse clamps the reader to the bottom", () => {
@@ -309,8 +333,8 @@ describe("TimelineList with the scroll engine", () => {
 
   it("keeps an activated control under the pointer in the last turn", () => {
     const { controller } = mount({ turns: makeTurns(ids(0, 30)) })
-    const target = scroller!.querySelector(block("t29:b"))!
-    act(() => { target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 })) })
+    const target = scroller!.querySelector(`${block("t29:b")} button`)!
+    act(() => { target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" })) })
     const before = target.getBoundingClientRect().top
     blockHeights.set("t29:a", 10)
     resize()

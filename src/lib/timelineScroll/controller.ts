@@ -115,6 +115,13 @@ function isActivatable(target: EventTarget | null): target is Element {
   return target instanceof Element && target.closest("button, a[href], summary, [role=button], [aria-expanded]") !== null
 }
 
+/** A mouse press on the scroller's own scrollbar gutter; a press on its padding or a touch is not one. */
+function onScrollbar(el: HTMLElement, event: PointerEvent): boolean {
+  if (event.pointerType !== "mouse") return false
+  const x = event.clientX - el.getBoundingClientRect().left - el.clientLeft
+  return x < 0 || x >= el.clientWidth
+}
+
 export class TimelineScrollController implements TimelineHandle, BlockWindowHost {
   readonly scrollerRef: { current: HTMLDivElement | null } = { current: null }
 
@@ -269,10 +276,11 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     }
     const onPointerDown = (event: PointerEvent) => {
       if (event.target === el) {
+        if (!onScrollbar(el, event)) return
         this.scrollbarHeld = true
         this.clearUserAnchors()
         this.dispatch({ type: "scrollbar" })
-      } else if (event.button === 0 && event.target instanceof Element) {
+      } else if (event.button === 0 && isActivatable(event.target)) {
         this.activate(event.target)
       }
     }
@@ -885,7 +893,11 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   /** Puts the slack back to its estimate where nobody can see it move. */
   private onIdle(): void {
     const scroller = this.scroller
-    this.dispatch({ type: "idle" })
+    this.dispatch({
+      type: "idle",
+      distanceToBottom: scroller ? this.distanceToBottom() : Infinity,
+      anchored: this.anchor !== null && this.anchor.kind !== "default",
+    })
     if (!scroller || !this.input || this.placement !== null) return
     const next = normalizeTop({ topPad: this.topPad, target: this.topPadTarget(), scrollTop: scroller.scrollTop })
     if (Math.abs(next.topPad - this.topPad) >= 1) {

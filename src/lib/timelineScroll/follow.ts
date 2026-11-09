@@ -11,7 +11,7 @@ export type FollowEvent =
   /** Finger movement since the last touch event; positive is downward, which scrolls up. */
   | { type: "touchmove"; dy: number }
   | { type: "key"; key: string; shiftKey: boolean }
-  /** A pointer pressed on the scroller itself, which is its scrollbar. */
+  /** A mouse press on the scroller's scrollbar gutter. */
   | { type: "scrollbar" }
   /** A click or key activation inside the timeline. */
   | { type: "activate" }
@@ -27,7 +27,12 @@ export type FollowEvent =
     }
   /** The jump-to-bottom button, End, or sending a message. */
   | { type: "resume" }
-  | { type: "idle" }
+  | {
+      type: "idle"
+      distanceToBottom: number
+      /** An activated control or a navigation target is being held in place. */
+      anchored: boolean
+    }
 
 /** How close to the bottom a reader's own scroll must land to resume following. */
 export const RESUME_DISTANCE = 4
@@ -64,6 +69,6 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowSta
     case "resume":
       return next(state, true, state.userInput)
     case "idle":
-      return next(state, state.following, false)
+      return next(state, state.following || (!event.anchored && event.distanceToBottom <= RESUME_DISTANCE), false)
   }
 }

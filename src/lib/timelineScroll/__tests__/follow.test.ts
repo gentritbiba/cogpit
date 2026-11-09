@@ -60,10 +60,17 @@ describe("followReducer", () => {
   })
 
   it("forgets user input at idle", () => {
-    expect(followReducer({ following: false, userInput: true }, { type: "idle" }).userInput).toBe(false)
+    expect(followReducer({ following: false, userInput: true }, { type: "idle", distanceToBottom: 500, anchored: false }).userInput).toBe(false)
+  })
+
+  // Review finding 1: a release with no scroll (a wheel or a swipe at the bottom) must not stick.
+  it("resumes at idle when the reader rests at the bottom and nothing is held there", () => {
+    expect(followReducer(anchored, { type: "idle", distanceToBottom: 2, anchored: false }).following).toBe(true)
+    expect(followReducer(anchored, { type: "idle", distanceToBottom: 2, anchored: true }).following).toBe(false)
+    expect(followReducer(anchored, { type: "idle", distanceToBottom: 40, anchored: false }).following).toBe(false)
   })
 
   it("returns the same state when nothing changes", () => {
-    expect(followReducer(anchored, { type: "idle" })).toBe(anchored)
+    expect(followReducer(anchored, { type: "idle", distanceToBottom: 500, anchored: false })).toBe(anchored)
   })
 })
