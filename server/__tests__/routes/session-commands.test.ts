@@ -69,6 +69,14 @@ describe("GET /api/session-commands", () => {
     expect(legacy.body.replay.cursor).toBeGreaterThan(0)
   })
 
+  it("lists finished commands too for an older client, which waits to see its receipt finish (review #3)", async () => {
+    complete("finished")
+    commandDispatcher().store.admit("local", "waiting-1", conversationId, { message: "next" })
+    const legacy = await get("&after=0")
+    expect(legacy.body.commands.map((command: { id: string; state: string }) => [command.id, command.state])).toEqual([["finished", "completed"], ["waiting-1", "queued"]])
+    expect((await get("")).body.commands.map((command: { id: string }) => command.id)).toEqual(["waiting-1"])
+  })
+
   it("tags the body and answers 304 while it is unchanged", async () => {
     const first = await get("")
     expect(first.etag).toMatch(/^W\/"[\w-]+"$/)
