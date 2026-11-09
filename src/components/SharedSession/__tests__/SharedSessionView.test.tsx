@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SharedSessionView } from "@/components/SharedSession/SharedSessionView"
@@ -170,6 +171,11 @@ describe("SharedSessionView", () => {
     expect(load?.url).toBe(
       "/api/sessions/-Users-me-proj/sess-1.jsonl?tail=10&unit=turns&projection=results-v1",
     )
+  })
+
+  it("loads under StrictMode, whose simulated unmount leaves the first load (review 3 #4)", async () => {
+    render(<StrictMode><SharedSessionView info={INFO} /></StrictMode>)
+    expect(await screen.findByText("hi from the agent")).toBeInTheDocument()
   })
 
   it("shows the shared session's title and marks the view as a guest view", async () => {
