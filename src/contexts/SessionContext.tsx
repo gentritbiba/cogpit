@@ -1,5 +1,5 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
 import { useChatScroll } from "@/hooks/useChatScroll"
 import { createSessionStore, useSessionSelector, useShownSession, type SessionStore } from "@/hooks/useSessionState"
 import { withStartPrompt } from "@/lib/startPrompts"
@@ -155,21 +155,11 @@ function storeTurnIndex(shown: SessionView | null, open: SessionView | null, ind
   return at < 0 ? null : at
 }
 
-/** `controls` with the actions that take a turn index counting the turns on screen. */
-function onScreenTurns(controls: SessionControls, toStore: (index: number) => number | null): SessionControls {
-  const resolved = (act: (turnIndex: number) => void) => (index: number) => {
+/** `act`, taking an index into the session on screen instead. */
+function onScreenTurn(act: (turnIndex: number) => void, toStore: (index: number) => number | null) {
+  return (index: number) => {
     const at = toStore(index)
     if (at !== null) act(at)
-  }
-  const { undoRedo, actions } = controls
-  return {
-    ...controls,
-    undoRedo: { ...undoRedo, requestUndo: resolved(undoRedo.requestUndo) },
-    actions: {
-      ...actions,
-      handleOpenBranches: actions.handleOpenBranches && resolved(actions.handleOpenBranches),
-      handleBranchFromHere: actions.handleBranchFromHere && resolved(actions.handleBranchFromHere),
-    },
   }
 }
 
@@ -190,10 +180,23 @@ export function OpenSessionProvider({
     onSessionShown?.(session)
   }, [session, onSessionShown])
   // A row acts after the commit that showed it, which the store may be ahead of.
-  const screenControls = useMemo(
-    () => onScreenTurns(controls, (index) => storeTurnIndex(onScreenRef.current, store.getState().session, index)),
-    [controls, store],
+  // Each action keeps its identity while the one it wraps does, as rows are memoized on it.
+  const toStore = useCallback((index: number) => storeTurnIndex(onScreenRef.current, store.getState().session, index), [store])
+  const { undoRedo, actions } = controls
+  const requestUndo = useMemo(() => onScreenTurn(undoRedo.requestUndo, toStore), [undoRedo.requestUndo, toStore])
+  const handleOpenBranches = useMemo(
+    () => actions.handleOpenBranches && onScreenTurn(actions.handleOpenBranches, toStore),
+    [actions.handleOpenBranches, toStore],
   )
+  const handleBranchFromHere = useMemo(
+    () => actions.handleBranchFromHere && onScreenTurn(actions.handleBranchFromHere, toStore),
+    [actions.handleBranchFromHere, toStore],
+  )
+  const screenControls = useMemo(() => ({
+    ...controls,
+    undoRedo: { ...undoRedo, requestUndo },
+    actions: { ...actions, handleOpenBranches, handleBranchFromHere },
+  }), [controls, undoRedo, actions, requestUndo, handleOpenBranches, handleBranchFromHere])
   const scroll = useChatScroll({
     session,
     isLive,

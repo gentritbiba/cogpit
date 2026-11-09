@@ -267,6 +267,30 @@ describe("OpenSessionProvider", () => {
       expect(requestUndo).toHaveBeenCalledWith(1)
     })
 
+    it("keeps each action's identity across a live batch and a fresh controls object, as rows are memoized on it", () => {
+      const store = createSessionStore()
+      const requestUndo = vi.fn()
+      const handleOpenBranches = vi.fn()
+      const make = () => ({ ...controls, undoRedo: { enabled: true, requestUndo }, actions: { handleOpenBranches } }) as unknown as SessionControls
+      let row!: Pick<SessionControls, "undoRedo" | "actions">
+      function Row() {
+        row = useSessionContext()
+        return null
+      }
+      const tree = (actionControls: SessionControls) => (
+        <OpenSessionProvider store={store} controls={actionControls} chat={chat} isLive>
+          <Row />
+        </OpenSessionProvider>
+      )
+      const { rerender } = render(tree(make()))
+      load(store, session([makeTurn({ id: "t1" })]))
+      const before = row
+      act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })]) }))
+      rerender(tree(make()))
+      expect(row.undoRedo.requestUndo).toBe(before.undoRedo.requestUndo)
+      expect(row.actions.handleOpenBranches).toBe(before.actions.handleOpenBranches)
+    })
+
     it("does nothing when another session opened before the screen caught up", () => {
       const { store, row, requestUndo, handleOpenBranches, handleBranchFromHere } = setup()
       load(store, session([makeTurn({ id: "a1" }), makeTurn({ id: "a2" })], "a"))
