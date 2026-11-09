@@ -3,7 +3,7 @@ import { followReducer, RESUME_DISTANCE, type FollowEvent, type FollowState } fr
 import type { BlockWindow, BlockWindowHost, WindowViewport } from "./blockWindow"
 import { blockHeights, timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
 import { reserveHeight, shouldLoadOlder } from "./history"
-import { layoutTops, mergeSegments, planRange, rowsOverlapping, sumHeights, type Extent } from "./layout"
+import { layoutTops, mergeSegments, planRange, rowsOverlapping, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
 import { absorb, normalizeTop, slackForTarget, trimBottomSlack } from "./slack"
 import type { ScrollToTurnOptions, TimelineHandle, TimelineViewport } from "./types"
 
@@ -78,13 +78,6 @@ const TARGET_RETRY_FRAMES = 10
 const EMPTY_PLAN: RenderPlan = { segments: [], gaps: [], bottomPad: 0 }
 const PLAN_TOLERANCE = 2
 
-function sameKeys(a: readonly string[], b: readonly string[]): boolean {
-  if (a === b) return true
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-  return true
-}
-
 /** How deep below a row the default anchor may sit. */
 const MAX_ANCHOR_DEPTH = 12
 
@@ -147,7 +140,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private renderedTops = new Map<number, number>()
 
   private plan: RenderPlan = EMPTY_PLAN
-  private range: { first: string; last: string } | null = null
+  private range: KeyRange | null = null
   private planVersion = 0
   private appliedPlanVersion = 0
   private plannedFirstTop: number | null = null
@@ -702,11 +695,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
 
   /** The committed range without its pinned islands. */
   private currentRange(): Extent | null {
-    const range = this.range
-    if (!range) return null
-    const start = this.indexOf.get(range.first)
-    const last = this.indexOf.get(range.last)
-    return start === undefined || last === undefined || last < start ? null : { start, end: last + 1 }
+    return toExtent(this.indexOf, this.range)
   }
 
   /** Row tops in content coordinates, from the rendered rows or, before any render, from where the first would go. */
@@ -763,7 +752,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
         if (index !== undefined) pinned.push(index)
       }
     }
-    this.range = range.end > range.start ? { first: this.keys[range.start], last: this.keys[range.end - 1] } : null
+    this.range = toKeyRange(this.keys, range)
     const segments = mergeSegments(range, pinned, n)
     const gaps = segments.map((segment, i) => i === 0 ? 0 : sumHeights(this.heights, segments[i - 1].end, segment.start))
     const last = segments[segments.length - 1]

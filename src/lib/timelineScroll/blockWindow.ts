@@ -1,5 +1,5 @@
 import { isAnimatingSize } from "./animation"
-import { layoutTops, mergeSegments, planRange, sumHeights, type Extent } from "./layout"
+import { layoutTops, mergeSegments, planRange, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
 
 /**
  * Virtualization inside one row. A turn with hundreds of blocks, or a tool
@@ -82,13 +82,6 @@ export function planWindowRange({ heights, gap, known, current, viewTop, viewpor
   return planRange({ tops, heights: pitch, current, viewTop: top, viewport, follow: false })
 }
 
-function sameList(a: readonly string[], b: readonly string[]): boolean {
-  if (a === b) return true
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-  return true
-}
-
 function samePlan(a: WindowPlan, b: WindowPlan): boolean {
   return a.runs.length === b.runs.length
     && a.runs.every((run, i) => run.start === b.runs[i].start && run.end === b.runs[i].end)
@@ -104,7 +97,7 @@ export class BlockWindow {
   private heights = new Float64Array(0)
   private readonly measured = new Map<string, number>()
   private pinnedKeys: readonly string[] = []
-  private range: { first: string; last: string } | null = null
+  private range: KeyRange | null = null
   private plan: WindowPlan = EMPTY_PLAN
   private renderedPlan: WindowPlan | null = null
   private container: HTMLElement | null = null
@@ -122,8 +115,8 @@ export class BlockWindow {
    * at the last item keeps following the items appended after it.
    */
   setItems(keys: readonly string[], pinned: readonly string[]): void {
-    const keysChanged = !sameList(keys, this.keys)
-    if (!keysChanged && sameList(pinned, this.pinnedKeys)) return
+    const keysChanged = !sameKeys(keys, this.keys)
+    if (!keysChanged && sameKeys(pinned, this.pinnedKeys)) return
     const previous = this.keys
     this.pinnedKeys = pinned
     if (keysChanged) {
@@ -135,7 +128,7 @@ export class BlockWindow {
       if (range && range.last === previous[previous.length - 1] && keys.length > 0) range.last = keys[keys.length - 1]
       if (range && (!this.indexOf.has(range.first) || !this.indexOf.has(range.last))) this.range = null
     }
-    if (!this.range) this.range = this.toKeys(this.initialRange())
+    if (!this.range) this.range = toKeyRange(this.keys, this.initialRange())
     this.plan = this.buildPlan()
   }
 
@@ -204,7 +197,7 @@ export class BlockWindow {
       viewTop: viewport.top - containerTop,
       viewport: viewport.height,
     })
-    const next = this.toKeys(range)
+    const next = toKeyRange(this.keys, range)
     if (next?.first === this.range?.first && next?.last === this.range?.last) return
     this.range = next
     this.publish(this.buildPlan())
@@ -232,15 +225,7 @@ export class BlockWindow {
   }
 
   private currentRange(): Extent | null {
-    const range = this.range
-    if (!range) return null
-    const start = this.indexOf.get(range.first)
-    const last = this.indexOf.get(range.last)
-    return start === undefined || last === undefined || last < start ? null : { start, end: last + 1 }
-  }
-
-  private toKeys(range: Extent): { first: string; last: string } | null {
-    return range.end > range.start ? { first: this.keys[range.start], last: this.keys[range.end - 1] } : null
+    return toExtent(this.indexOf, this.range)
   }
 
   /** Before the window is laid out: start where the host says the viewport will be. */

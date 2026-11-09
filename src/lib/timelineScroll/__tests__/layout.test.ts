@@ -5,6 +5,9 @@ import {
   planRange,
   mergeSegments,
   sumHeights,
+  sameKeys,
+  toExtent,
+  toKeyRange,
 } from "../layout"
 
 const h = (...xs: number[]) => Float64Array.from(xs)
@@ -90,5 +93,21 @@ describe("sumHeights", () => {
   it("sums a half-open slice", () => {
     expect(sumHeights(h(1, 2, 3, 4), 1, 3)).toBe(5)
     expect(sumHeights(h(1, 2), 2, 2)).toBe(0)
+  })
+})
+
+describe("key ranges", () => {
+  it("follow their items when others are inserted around them, and lapse when an end is gone", () => {
+    const range = toKeyRange(["a", "b", "c", "d"], { start: 1, end: 3 })
+    expect(range).toEqual({ first: "b", last: "c" })
+    expect(toExtent(new Map([["x", 0], ["a", 1], ["b", 2], ["c", 3]]), range)).toEqual({ start: 2, end: 4 })
+    expect(toExtent(new Map([["a", 0], ["c", 1]]), range)).toBeNull()
+    expect(toKeyRange(["a"], { start: 0, end: 0 })).toBeNull()
+  })
+
+  it("compares key lists by content", () => {
+    expect(sameKeys(["a", "b"], ["a", "b"])).toBe(true)
+    expect(sameKeys(["a", "b"], ["a"])).toBe(false)
+    expect(sameKeys(["a", "b"], ["b", "a"])).toBe(false)
   })
 })

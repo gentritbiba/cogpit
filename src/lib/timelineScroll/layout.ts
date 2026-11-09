@@ -9,6 +9,31 @@ export interface Extent {
   end: number
 }
 
+/** A range addressed by the keys of its first and last item, so inserting items elsewhere does not move it. */
+export interface KeyRange {
+  first: string
+  last: string
+}
+
+export function sameKeys(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+export function toKeyRange(keys: readonly string[], range: Extent): KeyRange | null {
+  return range.end > range.start ? { first: keys[range.start], last: keys[range.end - 1] } : null
+}
+
+/** Where a key range sits now; null once either end is gone. */
+export function toExtent(indexOf: ReadonlyMap<string, number>, range: KeyRange | null): Extent | null {
+  if (!range) return null
+  const start = indexOf.get(range.first)
+  const last = indexOf.get(range.last)
+  return start === undefined || last === undefined || last < start ? null : { start, end: last + 1 }
+}
+
 export function sumHeights(heights: ArrayLike<number>, start: number, end: number): number {
   let total = 0
   for (let i = start; i < end; i++) total += heights[i]
