@@ -22,6 +22,7 @@ import {
   stat,
   writeFile,
   watch,
+  join as helperJoin,
 } from "../../helpers"
 
 const mockedReaddir = asReaddirMock(vi.mocked(readdir))
@@ -362,7 +363,7 @@ describe("team routes", () => {
       const onChange: Array<() => void> = []
       let tasksDirExists = false
       mockedWatch.mockImplementation(((dir: string, _options: unknown, listener: () => void) => {
-        if (dir === join("/tmp/test-tasks", "late-tasks") && !tasksDirExists) throw new Error("ENOENT")
+        if (dir === helperJoin("/tmp/test-tasks", "late-tasks") && !tasksDirExists) throw new Error("ENOENT")
         onChange.push(listener)
         return { on: vi.fn(), close: vi.fn() } as unknown as FSWatcher
       }) as unknown as typeof watch)
@@ -371,7 +372,7 @@ describe("team routes", () => {
       expect(mockedWatch).toHaveBeenCalledTimes(2)
       tasksDirExists = true
       onChange[0]()
-      expect(mockedWatch).toHaveBeenLastCalledWith(join("/tmp/test-tasks", "late-tasks"), { recursive: true }, expect.any(Function))
+      expect(mockedWatch).toHaveBeenLastCalledWith(helperJoin("/tmp/test-tasks", "late-tasks"), { recursive: true }, expect.any(Function))
       onChange[0]()
       expect(mockedWatch).toHaveBeenCalledTimes(3)
       stream.close()
@@ -398,13 +399,13 @@ describe("team routes", () => {
         }) as unknown as typeof watch)
 
         const first = await openStream("t")
-        expect(opened.map((o) => o.dir)).toEqual([join(root, "teams", "t"), join(root, "tasks", "t")])
+        expect(opened.map((o) => o.dir)).toEqual([helperJoin(join(root, "teams"), "t"), helperJoin(join(root, "tasks"), "t")])
 
         opened[1].fail()
         await rename(join(root, "teams", "t"), join(root, "teams", "t-old"))
         await mkdir(join(root, "teams", "t"))
         const second = await openStream("t")
-        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([join(root, "tasks", "t"), join(root, "teams", "t")])
+        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([helperJoin(join(root, "tasks"), "t"), helperJoin(join(root, "teams"), "t")])
 
         const third = await openStream("t")
         expect(opened).toHaveLength(4)
