@@ -22,7 +22,7 @@ export type SseConnectionState = "connecting" | "connected" | "disconnected"
 /** Shared empty map so an unchanged "no progress" state never re-renders consumers. */
 const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
 
-/** A parse that keeps failing, or a session the worker lost, would otherwise reload on every batch. */
+/** A parse that keeps failing, a session the worker lost, or a reset repeated on every reconnect would otherwise reload each time. */
 export const RESYNC_COOLDOWN_MS = 10_000
 
 export function useLiveSession(
@@ -210,6 +210,13 @@ export function useLiveSession(
       setAgentProgress(EMPTY_AGENT_PROGRESS)
     }
 
+    const resync = () => {
+      const now = Date.now()
+      if (!onResyncRef.current || now - lastResyncAtRef.current < RESYNC_COOLDOWN_MS) return
+      lastResyncAtRef.current = now
+      onResyncRef.current({ keepBackoff: true })
+    }
+
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
       const toFlush = pendingText
@@ -246,11 +253,7 @@ export function useLiveSession(
           failed = true
           pendingText = toFlush + pendingText
           pendingLines = [...flushedLines, ...pendingLines]
-          const now = Date.now()
-          if (onResyncRef.current && now - lastResyncAtRef.current >= RESYNC_COOLDOWN_MS) {
-            lastResyncAtRef.current = now
-            onResyncRef.current({ keepBackoff: true })
-          }
+          resync()
         })
         .catch((err) => {
           console.error("[useLiveSession] live update failed:", err)
@@ -335,8 +338,8 @@ export function useLiveSession(
         } else if (data.type === "reset") {
           // The stream cannot resume from here, so load the session again. The
           // server ends the stream and repeats this on every reconnect until the
-          // reload lands; the controller folds those into the reload it runs.
-          onResyncRef.current?.({ keepBackoff: true })
+          // reload lands.
+          resync()
         } else if (data.type === "lines") {
           if (typeof data.end === "number") {
             if (data.end <= appliedEnd) return

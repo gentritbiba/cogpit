@@ -760,6 +760,22 @@ describe("useLiveSession", () => {
       act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
       expect(onResync).toHaveBeenCalledTimes(1)
     })
+
+    it("asks for a reload once per cooldown however often the reset repeats (review 2 #9)", () => {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
+
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "diverged" }) })
+      expect(onResync).toHaveBeenCalledOnce()
+      expect(onResync).toHaveBeenCalledWith({ keepBackoff: true })
+
+      vi.advanceTimersByTime(RESYNC_COOLDOWN_MS)
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      expect(onResync).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("closes EventSource on unmount", () => {
