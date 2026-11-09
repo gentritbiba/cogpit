@@ -2,7 +2,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
-import type { ParsedSession, Turn, UserContent } from "../../shared/session/types"
+import type { Turn, UserContent } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import { getUserMessageImages, getUserMessageText } from "../../shared/session/parser"
 import { composerPromptText } from "../../shared/session/composerContext"
 import {
@@ -17,7 +18,7 @@ import {
 } from "@/lib/userMessageContent"
 
 interface StickyPromptBannerProps {
-  session: ParsedSession
+  session: SessionView
   scrollContainerRef: React.RefObject<HTMLElement | null>
   timelineRef: React.RefObject<TimelineHandle | null>
 }

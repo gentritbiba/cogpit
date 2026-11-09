@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
+import { useLayoutEffect } from "react"
 import { Users } from "lucide-react"
 
 import { usePanelState } from "../usePanelState"
@@ -7,7 +8,7 @@ import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { ALL_CAPABILITIES } from "../../../shared/contracts/identity"
-import type { SessionState } from "../useSessionState"
+import { useSessionState, type SessionState } from "../useSessionState"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 const state = { mainView: "sessions" } as SessionState
@@ -164,6 +165,22 @@ describe("usePanelState", () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: "CLOSE_CONFIG" })
     expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
+  })
+
+  it("shows the session view and the requested panel in one commit when leaving a main view", () => {
+    const commits: Array<[string, string | null]> = []
+    const { result } = renderHook(() => {
+      const [shell, dispatch] = useSessionState()
+      const panels = usePanelState(shell as SessionState, dispatch)
+      useLayoutEffect(() => { commits.push([shell.mainView, panels.activeWorkspacePanel]) })
+      return { dispatch, panels }
+    })
+    act(() => result.current.dispatch({ type: "OPEN_CONFIG" }))
+    commits.length = 0
+
+    act(() => result.current.panels.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.worktrees))
+
+    expect(commits).toEqual([["sessions", BUILT_IN_WORKSPACE_PANEL_IDS.worktrees]])
   })
 
   it.each([

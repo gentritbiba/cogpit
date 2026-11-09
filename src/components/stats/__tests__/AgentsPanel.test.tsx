@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { ParsedSession } from "../../../../shared/session/types"
 import { AgentsPanel } from "../AgentsPanel"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../../shared/session/sessionDigest"
 
-function makeSession(): ParsedSession {
+function makeSession(): SessionView {
   return {
     sessionId: "main-session",
     version: "2.1.198",
@@ -56,7 +56,7 @@ function makeSession(): ParsedSession {
       totalDurationMs: 0,
       turnCount: 1,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     agentKind: "claude",
   }
 }

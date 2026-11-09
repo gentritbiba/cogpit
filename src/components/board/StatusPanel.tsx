@@ -32,7 +32,7 @@ export function StatusPanel({ context, closePanel }: WorkspacePanelProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   useClockTick()
 
-  const focusId = statusPanel?.target ?? context.session?.sessionId ?? null
+  const focusId = statusPanel?.target ?? context.sessionId ?? null
   const focus = focusId ? boards.get(focusId) ?? null : null
   const crewRoot = focus?.rootId ?? context.crew?.rootId ?? focusId
   const all = [...boards.values()]

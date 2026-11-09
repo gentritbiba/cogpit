@@ -3,7 +3,8 @@ import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { prependTurns } from "@/lib/timelinePaging"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
-import type { ParsedSession, Turn } from "../../shared/session/types"
+import type { Turn } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface BeforeResponse {
   headerLines: string[]
@@ -17,7 +18,7 @@ interface UseSessionPagingOpts {
   fileName: string | null
   /** Bumped by the reducer on every session (re)load; resyncs paging state from the cache. */
   sessionChangeKey: number
-  workerParse: (text: string) => Promise<ParsedSession>
+  workerParse: (text: string) => Promise<SessionView>
   /** Receives every turn loaded above the live window, oldest first. */
   onOlderTurns: (olderTurns: Turn[]) => void
 }
@@ -83,7 +84,7 @@ export function useSessionPaging({
       const hasMorePages = data.lines.length > 0 && data.hasMore
       if (identityRef.current === key) setHasMore(hasMorePages)
       if (data.lines.length === 0) {
-        sessionCache.update(dirName, fileName, {
+        sessionCache.update(dirName, fileName, cached.source.loadId, {
           hasMore: hasMorePages,
           nextByteOffset: data.byteOffset,
         })
@@ -97,7 +98,7 @@ export function useSessionPaging({
       // The byte cursor and the pages it consumed advance together: a cursor
       // that moves without them strands that history behind it forever.
       const history = prependTurns(cached.olderTurns, olderParsed.turns, cached.source.agentKind)
-      sessionCache.update(dirName, fileName, {
+      sessionCache.update(dirName, fileName, cached.source.loadId, {
         hasMore: hasMorePages,
         nextByteOffset: data.byteOffset,
         olderTurns: history,

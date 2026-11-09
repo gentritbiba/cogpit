@@ -13,9 +13,17 @@
  */
 import { classifyAgentFailure } from "./agentFailures"
 import { awaitingAgentsStatus, type AgentLaunch } from "./backgroundAgents"
-import { isAssistantMessage } from "./messageTypeGuards"
+import {
+  isAssistantMessage,
+  isAttachmentMessage,
+  isCompactBoundary,
+  isQueueOperationMessage,
+  isSummaryMessage,
+  isSystemMessage,
+} from "./messageTypeGuards"
+import { cutsBeforeBoundaries } from "./pageCuts"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
-import { buildTurns, buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
+import { buildTurnsWithStarts, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
 import { isPlainObject, visitField, visitJoinedText, type ResultVisitor } from "./resultProjection"
 import type {
   AgentFailure,
@@ -120,10 +128,14 @@ export function extractClaudeMetadataFromLines(lines: readonly string[]): Claude
   return extractSessionMetadata(parseRecords(lines))
 }
 
+/** Where each turn of a session starts in its records, kept with the records an append extends. */
+const turnStartsByRecords = new WeakMap<readonly unknown[], number[]>()
+
 export function parseClaudeSession(jsonlText: string, options?: ParseSessionOptions): ParsedSession {
   const rawMessages = parseLines(jsonlText)
   const metadata = extractSessionMetadata(rawMessages)
-  const turns = buildTurns(rawMessages)
+  const { turns, turnStartIndices } = buildTurnsWithStarts(rawMessages)
+  turnStartsByRecords.set(rawMessages, turnStartIndices)
   const stats = options?.skipStats ? createEmptySessionStats(turns.length) : computeStats(turns)
 
   return {
@@ -139,10 +151,15 @@ export function parseClaudeSession(jsonlText: string, options?: ParseSessionOpti
  * Incrementally append new JSONL lines to an existing parsed session.
  * Avoids re-parsing all turns from scratch — only re-processes the last
  * (potentially incomplete) turn and any new messages.
+ *
+ * `existing` is left as it was, unless `inPlace`: then its records are
+ * extended in place and shared with the result, which saves copying them for
+ * a caller that keeps only the result.
  */
 export function appendClaudeSession(
   existing: ParsedSession,
   newJsonlText: string,
+  inPlace = false,
 ): ParsedSession {
   const newMessages = parseLines(newJsonlText)
   if (newMessages.length === 0) return existing
@@ -150,14 +167,15 @@ export function appendClaudeSession(
   // Only this format's records reach here, so they use Claude's discriminated
   // message union and are safe to pass to the Claude turn builder.
   const existingRawMessages = existing.rawMessages as RawMessage[]
-  const allRawMessages = [...existingRawMessages, ...newMessages]
+  const allRawMessages = inPlace ? existingRawMessages : [...existingRawMessages]
+  const existingCount = existingRawMessages.length
 
   // Only the last turn can still change, so keep every turn before it and
   // rebuild from where it started. Both the cut point and the keep-count come
   // from `turnStarts` so they cannot disagree — even for a window that begins
   // mid-turn (bottom-first loading) and therefore has no turn-starting user
   // record to walk back to.
-  const turnStarts = findTurnStartIndices(existingRawMessages)
+  const turnStarts = turnStartsByRecords.get(existingRawMessages) ?? findTurnStartIndices(existingRawMessages)
   // Turns paged in above the loaded window have no raw messages behind them.
   const historyTurnCount = Math.max(0, existing.turns.length - turnStarts.length)
   let rebuildFromTurn = Math.max(0, turnStarts.length - 1)
@@ -186,9 +204,15 @@ export function appendClaudeSession(
 
   // With no turns in the window at all, there is nothing to rebuild — parse
   // the new messages on their own and keep everything already known.
-  const rebuildFrom = turnStarts[rebuildFromTurn] ?? existingRawMessages.length
+  const rebuildFrom = turnStarts[rebuildFromTurn] ?? existingCount
   const keptTurns = existing.turns.slice(0, historyTurnCount + rebuildFromTurn)
-  const tailTurns = buildTurns(allRawMessages.slice(rebuildFrom))
+  for (const message of newMessages) allRawMessages.push(message)
+  const tail = buildTurnsWithStarts(allRawMessages.slice(rebuildFrom))
+  const tailTurns = tail.turns
+  turnStartsByRecords.set(allRawMessages, [
+    ...turnStarts.slice(0, rebuildFromTurn),
+    ...tail.turnStartIndices.map((index) => index + rebuildFrom),
+  ])
 
   // Only the rebuilt tail passed through pairing, and it cannot see the kept
   // turns above it — so a peer message two or more turns back would lose the
@@ -525,6 +549,25 @@ export function claudeTurnBoundaries(
   // `<task-notification>` wake-ups as new turns, while `buildTurns` folds them
   // into the turn in flight, so every boundary after one was off by a turn.
   return buildTurnsWithStarts(records as unknown as RawMessage[]).turnStartIndices
+}
+
+/**
+ * Records the turn builder holds for the turn after them: a compaction or a
+ * recap it attaches to that turn, and the queue records and attachments
+ * written ahead of the prompt that opens it.
+ */
+function travelsWithNextClaudeTurn(record: Record<string, unknown>): boolean {
+  const message = record as unknown as RawMessage
+  return isSummaryMessage(message)
+    || isCompactBoundary(message)
+    || (isSystemMessage(message) && message.subtype === "away_summary")
+    || isQueueOperationMessage(message)
+    || isAttachmentMessage(message)
+}
+
+/** Where a page may start: each turn boundary, moved back over what the turn builder holds for that turn. */
+export function claudePageCuts(records: readonly Record<string, unknown>[]): number[] {
+  return cutsBeforeBoundaries(claudeTurnBoundaries(records), records, travelsWithNextClaudeTurn)
 }
 
 // ── Result projection ───────────────────────────────────────────────────────

@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MobileNav } from "../MobileNav"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
-  session: null as object | null,
   isLive: false,
   hapticLight: vi.fn(),
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
-  useSessionContext: () => ({ session: mocks.session, isLive: mocks.isLive }),
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
+  useSessionContext: () => ({ isLive: mocks.isLive }),
 }))
 
 vi.mock("@/lib/haptics", () => ({
@@ -17,7 +17,7 @@ vi.mock("@/lib/haptics", () => ({
 }))
 
 beforeEach(() => {
-  mocks.session = {}
+  showSession({})
   mocks.isLive = false
 })
 
@@ -64,7 +64,7 @@ describe("MobileNav", () => {
   })
 
   it("keeps workspace tools reachable without a session", () => {
-    mocks.session = null
+    showSession(null)
 
     render(
       <MobileNav

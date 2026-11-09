@@ -8,13 +8,13 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
     isLive: true,
     sessionSource: {
       dirName: "project",
       fileName: "session.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: mocks.agentKind,
     },
     actions: { handleStopSession: mocks.stopSession },

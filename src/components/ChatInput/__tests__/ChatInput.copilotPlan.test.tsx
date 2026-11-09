@@ -1,17 +1,17 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   submitPlanResponse: vi.fn(),
   sendMessage: vi.fn(),
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   // No plugin runtime is mounted here, so composer plugins never read these.
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
-    session: { sessionId: "copilot-session" },
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
     pendingInteraction: {
@@ -71,6 +71,7 @@ vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
 import { ChatInput } from "../index"
 
 beforeEach(() => {
+  showSession({ sessionId: "copilot-session" })
   vi.clearAllMocks()
 })
 

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PreviewAppShell } from "../PreviewAppShell"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mockUseSessionContext = vi.fn()
 
@@ -11,7 +12,7 @@ vi.mock("@/contexts/AppContext", () => ({
   }),
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => mockUseSessionContext(),
 }))
 
@@ -31,7 +32,8 @@ const commonProps = {
 
 describe("PreviewAppShell", () => {
   beforeEach(() => {
-    mockUseSessionContext.mockReturnValue({ session: null })
+    mockUseSessionContext.mockReturnValue({})
+    showSession(null)
   })
 
   it("shows the local session lookup state", () => {
@@ -49,7 +51,7 @@ describe("PreviewAppShell", () => {
   })
 
   it("renders only the conversation and composer after loading", () => {
-    mockUseSessionContext.mockReturnValue({ session: { sessionId: "session-123" } })
+    showSession({ sessionId: "session-123" })
 
     render(<PreviewAppShell {...commonProps} />)
 

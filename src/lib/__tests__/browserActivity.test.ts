@@ -204,6 +204,23 @@ describe("latestBrowserActivity", () => {
     })
   })
 
+  it("reads only the turns a live batch replaced (review 3 #9)", () => {
+    let reads = 0
+    const counted = (calls: ToolCall[]) => {
+      const kept = turn([])
+      Object.defineProperty(kept, "toolCalls", { get: () => { reads++; return calls } })
+      return kept
+    }
+    const older = [counted([toolCall({ input: { command: "ls" } })]), counted([toolCall({ input: { command: "pwd" } })])]
+    expect(latestBrowserActivity(session([...older, turn([])]))).toBeNull()
+    const first = reads
+
+    const streamed = turn([toolCall({ id: "tool-2", input: { command: "agent-browser snapshot" } })])
+    expect(latestBrowserActivity(session([...older, streamed]))?.toolCallId).toBe("tool-2")
+    expect(latestBrowserActivity(session([...older, turn([])]))).toBeNull()
+    expect(reads).toBe(first)
+  })
+
   it("never reads a subagent's browser calls", () => {
     const withSubAgent = turn([], {
       subAgentActivity: [{

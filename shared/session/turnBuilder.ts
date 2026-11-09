@@ -363,19 +363,6 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
 
 // ── Build Turns State Machine ────────────────────────────────────────────────
 
-/** Drops the pairing a previous run left on this turn, without touching the original. */
-function clearAgentMessageReplies(turn: Turn): Turn {
-  if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
-  return {
-    ...turn,
-    contentBlocks: turn.contentBlocks.map((block) => {
-      if (block.kind !== "agent_message") return block
-      const { reply: _paired, ...unpaired } = block
-      return unpaired
-    }),
-  }
-}
-
 /**
  * Attach each peer message to the `SendMessage` that answered it.
  *
@@ -393,16 +380,19 @@ function clearAgentMessageReplies(turn: Turn): Turn {
  * answer depends only on the list handed in. Callers that assemble a transcript
  * from several `buildTurns` calls — the page stitcher and the incremental
  * append — re-run it over the joined list and get what a single parse of that
- * list would have produced. Turns holding no peer message come back by
- * reference, so a re-run costs nothing for the rest of the transcript.
+ * list would have produced. A turn whose pairings did not change comes back
+ * by reference, and the turns handed in are never modified.
  */
 export function pairAgentMessageReplies(turns: readonly Turn[]): Turn[] {
-  const repaired = turns.map(clearAgentMessageReplies)
-  const unanswered = new Map<string, Array<Extract<TurnContentBlock, { kind: "agent_message" }>>>()
+  type AgentMessageBlock = Extract<TurnContentBlock, { kind: "agent_message" }>
+  const unanswered = new Map<string, AgentMessageBlock[]>()
+  const replies = new Map<AgentMessageBlock, NonNullable<AgentMessageBlock["reply"]>>()
+  let peerMessages = false
 
-  for (const turn of repaired) {
+  for (const turn of turns) {
     for (const block of turn.contentBlocks) {
       if (block.kind === "agent_message") {
+        peerMessages = true
         const waiting = unanswered.get(block.sender)
         if (waiting) waiting.push(block)
         else unanswered.set(block.sender, [block])
@@ -417,15 +407,27 @@ export function pairAgentMessageReplies(turns: readonly Turn[]): Turn[] {
         const target = unanswered.get(to)?.shift()
         if (!target) continue
         const summary = call.input.summary
-        target.reply = {
+        replies.set(target, {
           summary: typeof summary === "string" ? summary : "",
           timestamp: call.timestamp || block.timestamp || "",
-        }
+        })
       }
     }
   }
 
-  return repaired
+  if (!peerMessages) return turns as Turn[]
+  return turns.map((turn) => {
+    let changed = false
+    const contentBlocks = turn.contentBlocks.map((block) => {
+      if (block.kind !== "agent_message") return block
+      const reply = replies.get(block)
+      if (reply?.summary === block.reply?.summary && reply?.timestamp === block.reply?.timestamp) return block
+      changed = true
+      const { reply: _previous, ...unpaired } = block
+      return reply ? { ...unpaired, reply } : unpaired
+    })
+    return changed ? { ...turn, contentBlocks } : turn
+  })
 }
 
 /**

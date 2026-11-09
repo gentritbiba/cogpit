@@ -1,6 +1,5 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { ParsedSession } from "../../../shared/session/types"
 
 const mocks = vi.hoisted(() => ({ removeSession: vi.fn(), toastError: vi.fn() }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({
@@ -20,6 +19,7 @@ import {
 import { SESSION_ACCESS_CHANGED_EVENT, SESSION_ACCESS_LOST_EVENT, trackDeletion } from "@/lib/sessionAccessEvents"
 import { sessionCache } from "@/lib/sessionCache"
 import { activeSessionsCacheKey, clearSessionListCache, readCachedList, writeCachedList } from "@/lib/sessionListCache"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
 const OPEN = "00000000-0000-4000-8000-000000000001"
 const OTHER = "00000000-0000-4000-8000-000000000002"
@@ -65,7 +65,7 @@ describe("useSessionAccessLoss", () => {
 
   it("forgets a lost session everywhere, says so once, and leaves it when it is open", async () => {
     renderListener(OPEN)
-    sessionCache.set("-work", `${OPEN}.jsonl`, { turns: [] } as unknown as ParsedSession, "", 0, false)
+    sessionCache.set({ turns: [] } as unknown as SessionView, { dirName: "-work", fileName: `${OPEN}.jsonl`, watchOffset: 0, loadId: 1 }, 0, false)
     writeCachedList(activeSessionsCacheKey("shared"), [{ sessionId: OPEN }, { sessionId: OTHER }])
     learnListedAccess([{ sessionId: OPEN, access: { level: "view", mine: false } }], sessionAccessTicket())
 
@@ -136,7 +136,7 @@ describe("useSessionAccessLoss", () => {
 
   it("closes a session the caller deleted and forgets it everywhere, without a word of lost access", async () => {
     renderListener(DELETED)
-    sessionCache.set("-work", `${DELETED}.jsonl`, { turns: [] } as unknown as ParsedSession, "", 0, false)
+    sessionCache.set({ turns: [] } as unknown as SessionView, { dirName: "-work", fileName: `${DELETED}.jsonl`, watchOffset: 0, loadId: 1 }, 0, false)
     writeCachedList(activeSessionsCacheKey("mine"), [{ sessionId: DELETED }, { sessionId: OTHER }])
 
     await act(() => trackDeletion(DELETED, Promise.resolve(true)))

@@ -87,7 +87,7 @@ const logsResponse: VercelBuildLogsResponse = {
 const openExternal = vi.fn().mockResolvedValue(null)
 
 const context: WorkspacePanelContext = {
-  session: null,
+  sessionId: null,
   sessionChangeKey: 0,
   projectPath: "/repo",
   hasFileChanges: false,

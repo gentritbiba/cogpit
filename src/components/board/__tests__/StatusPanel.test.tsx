@@ -21,7 +21,7 @@ const board = (sessionId: string, rootId: string, overrides: Partial<ListedBoard
 })
 
 const context = (sessionId: string | null, rootId?: string): WorkspacePanelContext => ({
-  session: sessionId ? { sessionId } as WorkspacePanelContext["session"] : null,
+  sessionId,
   sessionChangeKey: 0,
   projectPath: null,
   hasFileChanges: false,

@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useSessionState } from "@/hooks/useSessionState"
+import { useSessionSelector, useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
-import type { ParsedSession } from "../../../shared/session/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
-import { makeTurn } from "@/__tests__/fixtures"
+import type { SessionSource } from "@/lib/sessionSource"
+import { makeToolCall, makeTurn } from "@/__tests__/fixtures"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "test-session",
     version: "1.0",
@@ -28,7 +28,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     ...overrides,
   }
 }
@@ -37,7 +37,7 @@ function makeSource(overrides: Partial<SessionSource> = {}): SessionSource {
   return {
     dirName: "test-dir",
     fileName: "test.jsonl",
-    rawText: "",
+    watchOffset: 0, loadId: 1,
     ...overrides,
   }
 }
@@ -47,10 +47,10 @@ function renderState() {
 }
 
 function getState(hook: ReturnType<typeof renderState>): SessionState {
-  return hook.result.current[0]
+  return hook.result.current[2].getState()
 }
 
-function getSession(hook: ReturnType<typeof renderState>): ParsedSession {
+function getSession(hook: ReturnType<typeof renderState>): SessionView {
   const session = getState(hook).session
   if (!session) throw new Error("expected a session to be loaded")
   return session
@@ -63,6 +63,44 @@ function dispatch(hook: ReturnType<typeof renderState>, ...actions: Parameters<t
 // ── Initial State ───────────────────────────────────────────────────────
 
 describe("useSessionState", () => {
+  describe("the shell state and the store", () => {
+    it("does not re-render its caller for a streamed batch, only for what the shell shows", () => {
+      let renders = 0
+      const hook = renderHook(() => { renders++; return useSessionState() })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
+      const shell = hook.result.current[0]
+      const rendered = renders
+
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1" })] }) })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
+      expect(renders).toBe(rendered)
+      expect(hook.result.current[0]).toBe(shell)
+      expect(getSession(hook).turns.map((turn) => turn.id)).toEqual(["t0", "t1"])
+      expect("session" in shell).toBe(false)
+
+      dispatch(hook, { type: "SET_SEARCH_QUERY", value: "needle" })
+      expect(renders).toBe(rendered + 1)
+      expect(hook.result.current[0].searchQuery).toBe("needle")
+    })
+
+    it("re-renders a selector's caller only when its value changes", () => {
+      const hook = renderState()
+      const store = hook.result.current[2]
+      let renders = 0
+      const selected = renderHook(() => { renders++; return useSessionSelector(store, (open) => open?.turns.length ?? 0) })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      expect(selected.result.current).toBe(1)
+      const rendered = renders
+
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1", assistantText: ["more"] })] }) })
+      expect(renders).toBe(rendered)
+
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1" }), makeTurn({ id: "t2" })] }) })
+      expect(selected.result.current).toBe(2)
+      expect(renders).toBe(rendered + 1)
+    })
+  })
+
   describe("initial state", () => {
     it("starts with null session", () => {
       const hook = renderState()
@@ -491,10 +529,24 @@ describe("useSessionState", () => {
       dispatch(hook, { type: "JUMP_TO_TURN", index: 3 })
 
       const session2 = makeSession({ sessionId: "s2" })
-      dispatch(hook, { type: "UPDATE_SESSION", session: session2 })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: session2 })
       expect(getState(hook).session).toBe(session2)
       // activeTurnIndex should NOT be reset
       expect(getState(hook).activeTurnIndex).toBe(3)
+    })
+
+    it("drops an update from an earlier load of the session (review #5)", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ sessionId: "s1" }), source: makeSource(), isMobile: false })
+      const reloaded = makeSession({ sessionId: "after-undo" })
+      dispatch(hook, { type: "RELOAD_SESSION_CONTENT", session: reloaded, source: makeSource({ loadId: 2 }) })
+
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ sessionId: "before-undo" }) })
+      expect(getState(hook).session).toBe(reloaded)
+
+      const streamed = makeSession({ sessionId: "after-undo", turns: [makeTurn({ id: "t1" })] })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 2, session: streamed })
+      expect(getState(hook).session).toBe(streamed)
     })
 
     // The live pipeline only ever knows the window the session opened with, so
@@ -521,6 +573,7 @@ describe("useSessionState", () => {
       const rebuiltWindowTurn = { ...windowTurn, assistantText: ["updated"] }
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ turns: [rebuiltWindowTurn] }),
       })
 
@@ -550,6 +603,7 @@ describe("useSessionState", () => {
 
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ turns: [{ ...cutHead, assistantText: ["second half", "more"] }] }),
       })
 
@@ -558,6 +612,47 @@ describe("useSessionState", () => {
       expect(getSession(hook).turns[0].assistantText).toEqual([
         "first half", "second half", "more",
       ])
+    })
+
+    it("replaces only the window turns that changed, keeping every paged turn", () => {
+      const hook = renderState()
+      const head = makeTurn({ id: "live-1", userMessage: "first" })
+      const middle = makeTurn({ id: "live-2", userMessage: "second" })
+      const last = makeTurn({ id: "live-3", userMessage: "third" })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [head, middle, last] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "old-1", userMessage: "older" })] })
+      const before = getSession(hook).turns
+      expect(getState(hook).seamOpen).toBe(false)
+
+      const grown = { ...last, assistantText: ["more"] }
+      const added = makeTurn({ id: "live-4", userMessage: "fourth" })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [head, middle, grown, added] }) })
+
+      const after = getSession(hook).turns
+      expect(after.map((t) => t.id)).toEqual(["old-1", "live-1", "live-2", "live-3", "live-4"])
+      expect(after.slice(0, 3)).toEqual(before.slice(0, 3))
+      after.slice(0, 3).forEach((turn, index) => expect(turn).toBe(before[index]))
+      expect(after[3]).toBe(grown)
+    })
+
+    it("merges the pages again while a paged message waits for a reply", () => {
+      const hook = renderState()
+      const head = makeTurn({ id: "live-1", userMessage: "go" })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [head] }), source: makeSource(), isMobile: false })
+      const asked = makeTurn({
+        id: "old-1",
+        userMessage: "start",
+        contentBlocks: [{ kind: "agent_message", sender: "peer", body: "question?", timestamp: "2026-01-01T00:00:00Z" }],
+      })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [asked] })
+      expect(getState(hook).seamOpen).toBe(true)
+
+      const reply = makeToolCall({ name: "SendMessage", input: { to: "peer", summary: "answered" } })
+      const answering = makeTurn({ id: "live-2", userMessage: "reply", toolCalls: [reply], contentBlocks: [{ kind: "tool_calls", toolCalls: [reply] }] })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [head, answering] }) })
+
+      const paired = getSession(hook).turns[0]!.contentBlocks[0]
+      expect(paired).toMatchObject({ kind: "agent_message", reply: { summary: "answered" } })
     })
 
     it("drops paged-in history when a different session is loaded", () => {
@@ -579,10 +674,41 @@ describe("useSessionState", () => {
       })
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ sessionId: "other", turns: [nextWindowTurn] }),
       })
 
       expect(getSession(hook).turns.map((t) => t.id)).toEqual(["other-1"])
+    })
+  })
+
+  // ── SET_OLDER_TURNS ───────────────────────────────────────────────
+
+  describe("SET_OLDER_TURNS", () => {
+    it("keeps the active turn on the same turn as pages go in front of it", () => {
+      const hook = renderState()
+      const window = [makeTurn({ id: "t1", userMessage: "one" }), makeTurn({ id: "t2", userMessage: "two" })]
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: window }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 1, toolCallId: "call-2" })
+
+      const page = [makeTurn({ id: "t-1", userMessage: "minus one" }), makeTurn({ id: "t0", userMessage: "zero" })]
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: page })
+      expect(getState(hook).activeTurnIndex).toBe(3)
+      expect(getSession(hook).turns[3]!.id).toBe("t2")
+      expect(getState(hook).activeToolCallId).toBe("call-2")
+
+      // The next page repeats the window's first turn, which the merge keeps once.
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-2", userMessage: "minus two" }), ...page, window[0]!] })
+      const active = getState(hook).activeTurnIndex!
+      expect(getSession(hook).turns.map(({ id }) => id)).toEqual(["t-2", "t-1", "t0", "t1", "t2"])
+      expect(getSession(hook).turns[active]!.id).toBe("t2")
+    })
+
+    it("leaves no active turn as it was", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
+      expect(getState(hook).activeTurnIndex).toBeNull()
     })
   })
 
@@ -598,6 +724,17 @@ describe("useSessionState", () => {
       expect(getState(hook).session).toBe(session)
       expect(getState(hook).sessionSource).toBe(source)
       expect(getState(hook).sessionChangeKey).toBe(before + 1)
+    })
+
+    it("clears the active turn, whose index counted the history the reload drops (review 3 #5)", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-1" }), makeTurn({ id: "t0" })] })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 2, toolCallId: "call-1" })
+
+      dispatch(hook, { type: "RELOAD_SESSION_CONTENT", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource({ loadId: 2 }) })
+      expect(getState(hook).activeTurnIndex).toBeNull()
+      expect(getState(hook).activeToolCallId).toBeNull()
     })
   })
 

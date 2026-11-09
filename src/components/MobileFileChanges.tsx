@@ -7,12 +7,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 
 interface MobileFileChangesProps {
   open: boolean
   onClose: () => void
-  session: ParsedSession
+  session: SessionView
   sessionChangeKey: number
 }
 

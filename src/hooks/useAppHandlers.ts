@@ -1,17 +1,16 @@
 /**
- * App-level action handlers — session reload, duplication, deletion, branching,
+ * App-level action handlers — session duplication, deletion, branching,
  * model tracking, and settings application.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { ParsedSession } from "../../shared/session/types"
-import type { SessionSource } from "./useLiveSession"
-import type { SessionAction } from "./useSessionState"
+import type { SessionSource } from "@/lib/sessionSource"
+import type { SessionAction, SessionStore } from "./useSessionState"
 import { toast } from "sonner"
 import { authFetch, jsonFetch } from "@/lib/auth"
 import { readError } from "@/lib/httpJson"
 import type { DeleteSession } from "@/components/session-browser/types"
-import { loadSessionTailCached, loadSessionTailFresh } from "@/lib/sessionLoader"
+import type { SessionController } from "@/lib/sessionLoader"
 import { rememberCreatedSession } from "@/lib/sessionAccess"
 import { trackDeletion } from "@/lib/sessionAccessEvents"
 import { parseSubAgentPath } from "@/lib/format"
@@ -21,9 +20,11 @@ import type { SessionSettingField } from "../../shared/contracts/sessionSettings
 
 interface AppHandlersDeps {
   state: {
-    session: ParsedSession | null
+    sessionId: string | null
     sessionSource: SessionSource | null
   }
+  /** Holds the open session's turns, read when a handler runs. */
+  sessionStore: SessionStore
   dispatch: React.Dispatch<SessionAction>
   isMobile: boolean
   handleJumpToTurn: (index: number, toolCallId?: string) => void
@@ -42,8 +43,7 @@ interface AppHandlersDeps {
   mcpConfig: string | null
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
-  /** Off-main-thread session parser from App's `useParserWorker`. */
-  workerParse: (text: string) => Promise<ParsedSession>
+  sessions: SessionController
   /** Whether the user may stop the session and change its settings. */
   canInteract: boolean
 }
@@ -75,9 +75,6 @@ interface AppliedSettings {
 }
 
 interface AppHandlersResult {
-  // Session reload
-  reloadSession: () => Promise<void>
-
   // Branch modal
   branchModalTurn: number | null
   setBranchModalTurn: React.Dispatch<React.SetStateAction<number | null>>
@@ -106,7 +103,7 @@ interface AppHandlersResult {
 
 export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
-    state, dispatch, isMobile, handleJumpToTurn,
+    state, sessionStore, dispatch, isMobile, handleJumpToTurn,
     markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
     settingsChange, onSettingsChangeSent,
     selectedModel,
@@ -115,25 +112,9 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     ultracode,
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
-    workerParse,
+    sessions,
     canInteract,
   } = deps
-
-  // ── Session reload ─────────────────────────────────────────────────────────
-  const reloadSession = useCallback(async () => {
-    if (!state.sessionSource) return
-    const { dirName, fileName } = state.sessionSource
-    try {
-      // Fresh (cache-invalidating) tail load: reload exists because the file
-      // changed on disk (rewind, compaction), so cached turns would be stale.
-      const { parsed, source } = await loadSessionTailFresh(
-        dirName, fileName, workerParse, "session",
-      )
-      dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
-    } catch {
-      // keep the current session on failure — matches the old silent return
-    }
-  }, [state.sessionSource, dispatch, workerParse])
 
   // ── Branch modal ───────────────────────────────────────────────────────────
   const [branchModalTurn, setBranchModalTurn] = useState<number | null>(null)
@@ -145,22 +126,24 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   // path instead of reading the whole file back.
   const openCopy = useCallback(async (request: Record<string, unknown>) => {
     try {
-      const res = await authFetch("/api/branch-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
+      await sessions.openSession(async () => {
+        const res = await authFetch("/api/branch-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        })
+        if (!res.ok) throw new Error(await readError(res, "Could not copy session"))
+        const data = await res.json()
+        rememberCreatedSession(data.sessionId)
+        return { dirName: data.dirName, fileName: data.fileName }
+      }, {
+        reason: "copy",
+        commit: ({ parsed, source }) => dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile }),
       })
-      if (!res.ok) return
-      const data = await res.json()
-      rememberCreatedSession(data.sessionId)
-      const { parsed, source } = await loadSessionTailCached(
-        data.dirName, data.fileName, workerParse, "session",
-      )
-      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
-    } catch {
-      // silently fail
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not copy session")
     }
-  }, [dispatch, isMobile, workerParse])
+  }, [dispatch, isMobile, sessions])
 
   const handleDuplicateSessionByPath = useCallback(
     (dirName: string, fileName: string) => openCopy({ dirName, fileName }),
@@ -186,14 +169,11 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const handleBranchFromHere = useCallback(async (turnIndex: number) => {
     if (!state.sessionSource) return
     const { dirName, fileName } = state.sessionSource
-    // turnIndex counts LOADED turns, which on a tail-loaded session differ from
-    // file-order turns. Send the turn's boundary-message uuid so the server can
-    // cut at the exact turn regardless of how much of the session is loaded.
-    // Synthetic ids (queued turns, uuid-less messages) won't match any line —
-    // the server falls back to turnIndex for those.
-    const turnUuid = state.session?.turns[turnIndex]?.id
+    // turnIndex counts the loaded turns only, so the server finds the turn by
+    // its id, and refuses rather than guess when no turn in the file has it.
+    const turnUuid = sessionStore.getState().session?.turns[turnIndex]?.id
     await openCopy({ dirName, fileName, turnIndex, turnUuid })
-  }, [state.sessionSource, state.session, openCopy])
+  }, [state.sessionSource, sessionStore, openCopy])
 
   // ── Mobile jump to turn ────────────────────────────────────────────────────
   const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
@@ -221,7 +201,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const onSettingsChangeSentRef = useRef(onSettingsChangeSent)
   onSettingsChangeSentRef.current = onSettingsChangeSent
 
-  const currentSessionId = state.session?.sessionId ?? null
+  const currentSessionId = state.sessionId
   const prevSessionIdRef = useRef<string | null>(null)
   // Records what each session's process was started with. Never written back
   // into the composer: useSessionConfigSync owns that state, and replaying a
@@ -325,7 +305,6 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   }, [scrollRequestScrollToTop, handleDashboardSelect])
 
   return {
-    reloadSession,
     branchModalTurn,
     setBranchModalTurn,
     handleOpenBranches,

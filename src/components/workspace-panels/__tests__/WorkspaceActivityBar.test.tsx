@@ -21,7 +21,7 @@ vi.mock("@/components/ui/resizable", () => ({
 }))
 
 const context: WorkspacePanelContext = {
-  session: null,
+  sessionId: null,
   sessionChangeKey: 0,
   projectPath: "/repo",
   hasFileChanges: false,

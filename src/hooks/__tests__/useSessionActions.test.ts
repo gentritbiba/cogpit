@@ -8,16 +8,21 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 // Mock sessionCache module
-vi.mock("@/lib/sessionCache", () => ({
-  sessionCache: {
-    get: vi.fn(() => undefined),
-    set: vi.fn(),
-    update: vi.fn(),
-    updateRawText: vi.fn(),
-    evict: vi.fn(),
-    clear: vi.fn(),
-  },
-}))
+vi.mock("@/lib/sessionCache", async () => {
+  const device = await import("@/lib/device")
+  return {
+    sessionCache: {
+      get: vi.fn(() => undefined),
+      set: vi.fn(),
+      update: vi.fn(),
+      evict: vi.fn(),
+      clear: vi.fn(),
+      show: vi.fn(),
+      discard: vi.fn(),
+    },
+    sessionCacheKey: (dirName: string, fileName: string) => `${device.getActiveDeviceScope()}:${dirName}/${fileName}`,
+  }
+})
 
 // Mock device scope so we can drive device/revision changes mid-flight.
 vi.mock("@/lib/device", () => ({
@@ -27,18 +32,21 @@ vi.mock("@/lib/device", () => ({
 }))
 
 import { useSessionActions } from "@/hooks/useSessionActions"
+import { createSessionController } from "@/lib/sessionLoader"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope } from "@/lib/device"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
+import type { SessionAction } from "@/hooks/useSessionState"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockSessionCache = vi.mocked(sessionCache)
 const mockGetActiveDeviceScope = vi.mocked(getActiveDeviceScope)
 
-function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
+function makeSession(overrides?: Partial<SessionView>): SessionView {
   return {
     sessionId: "test-session",
     version: "1",
@@ -58,22 +66,25 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     ...overrides,
   }
 }
 
-function makeDefaultOpts(session?: ParsedSession): Parameters<typeof useSessionActions>[0] {
-  const parsedSession = session ?? makeParsedSession()
+function makeDefaultOpts(session?: SessionView) {
+  const parsedSession = session ?? makeSession()
   const workerParse = vi.fn(() => Promise.resolve(parsedSession))
-  return {
-    dispatch: vi.fn(),
+  const dispatch = vi.fn<(action: SessionAction) => void>()
+  const opts: Parameters<typeof useSessionActions>[0] & { dispatch: typeof dispatch; workerParse: typeof workerParse } = {
+    dispatch,
     isMobile: false,
     teamContext: null,
     scrollToBottomInstant: vi.fn(),
     resetTurnCount: vi.fn(),
+    sessions: createSessionController({ parse: workerParse, dispatch }),
     workerParse,
   }
+  return opts
 }
 
 function makeTeamContext(teamName: string): SessionTeamContext {
@@ -120,25 +131,21 @@ beforeEach(() => {
 })
 
 describe("useSessionActions", () => {
-  describe("handleLoadSession", () => {
-    it("dispatches LOAD_SESSION and resets turn count", () => {
-      const opts = makeDefaultOpts()
+  describe("showing a loaded session", () => {
+    it("dispatches LOAD_SESSION and resets turn count", async () => {
+      const session = makeSession({ turns: [{ id: "t1" } as unknown as Turn, { id: "t2" } as unknown as Turn] })
+      const opts = makeDefaultOpts(session)
+      mockAuthFetch.mockResolvedValue(new Response(makeTailResponse({ end: 190 }), { status: 200 }))
       const { result } = renderHook(() => useSessionActions(opts))
 
-      const session = makeParsedSession({ turns: [{ id: "t1" } as unknown as Turn, { id: "t2" } as unknown as Turn] })
-
-      act(() => {
-        result.current.handleLoadSession(session, {
-          dirName: "dir",
-          fileName: "file.jsonl",
-          rawText: "raw",
-        })
+      await act(async () => {
+        await result.current.handleDashboardSelect("dir", "file.jsonl")
       })
 
       expect(opts.dispatch).toHaveBeenCalledWith({
         type: "LOAD_SESSION",
         session,
-        source: { dirName: "dir", fileName: "file.jsonl", rawText: "raw" },
+        source: expect.objectContaining({ dirName: "dir", fileName: "file.jsonl", watchOffset: 190 }),
         isMobile: false,
       })
       expect(opts.resetTurnCount).toHaveBeenCalledWith(2)
@@ -155,8 +162,8 @@ describe("useSessionActions", () => {
   })
 
   describe("handleDashboardSelect", () => {
-    it("fetches session via tail endpoint, parses it, and calls handleLoadSession", async () => {
-      const session = makeParsedSession()
+    it("fetches session via tail endpoint, parses it, and shows it", async () => {
+      const session = makeSession()
       const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
         new Response(makeTailResponse(), { status: 200 })
@@ -169,8 +176,8 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/my-dir/session.jsonl?tail=30&projection=results-v1",
-        { background: false },
+        "/api/sessions/my-dir/session.jsonl?tail=10&unit=turns&projection=results-v1",
+        { background: false, signal: expect.any(AbortSignal) },
       )
       expect(opts.workerParse).toHaveBeenCalled()
       expect(opts.dispatch).toHaveBeenCalledWith(
@@ -179,9 +186,9 @@ describe("useSessionActions", () => {
     })
 
     it("uses cache hit for instant switch without fetching", async () => {
-      const session = makeParsedSession()
+      const session = makeSession()
       const opts = makeDefaultOpts(session)
-      const cachedSource = { dirName: "my-dir", fileName: "session.jsonl", rawText: "cached" }
+      const cachedSource = { dirName: "my-dir", fileName: "session.jsonl", watchOffset: 6, loadId: 1 }
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
         source: cachedSource,
@@ -217,8 +224,8 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30&projection=results-v1`,
-        { background: false },
+        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=10&unit=turns&projection=results-v1`,
+        { background: false, signal: expect.any(AbortSignal) },
       )
     })
 
@@ -265,7 +272,7 @@ describe("useSessionActions", () => {
     })
 
     it("stores parsed session in cache after successful fetch", async () => {
-      const session = makeParsedSession()
+      const session = makeSession()
       const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
         new Response(makeTailResponse({ byteOffset: 150, hasMore: false }), { status: 200 })
@@ -278,28 +285,24 @@ describe("useSessionActions", () => {
       })
 
       expect(mockSessionCache.set).toHaveBeenCalledWith(
-        "my-dir",
-        "session.jsonl",
         session,
-        expect.any(String),
+        expect.objectContaining({ dirName: "my-dir", fileName: "session.jsonl", watchOffset: 200 }),
         150,
         false,
-        expect.anything(),
-        200,
       )
     })
 
-    it("skips the cache write when the active device changes mid-flight but still loads the session", async () => {
-      const session = makeParsedSession()
+    it("neither caches nor shows a session whose device changed mid-flight", async () => {
+      const session = makeSession()
       const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
         new Response(makeTailResponse(), { status: 200 })
       )
 
-      // loadSessionTailCached snapshots the device before the fetch, then
-      // re-reads it before the cache set. Simulate a switch between the two.
+      // The load keys itself to the device before the fetch, then re-reads
+      // the key before the cache set. Simulate a switch between the two.
       mockGetActiveDeviceScope
-        .mockReturnValueOnce("device-a") // snapshot before authFetch
+        .mockReturnValueOnce("device-a") // key before authFetch
         .mockReturnValueOnce("device-b") // guard before sessionCache.set
 
       const { result } = renderHook(() => useSessionActions(opts))
@@ -308,12 +311,9 @@ describe("useSessionActions", () => {
         await result.current.handleDashboardSelect("my-dir", "session.jsonl")
       })
 
-      // No cross-device cache poisoning…
+      // No cross-device cache poisoning, and the remounted app is not handed the old device's session.
       expect(mockSessionCache.set).not.toHaveBeenCalled()
-      // …but the fetched session still renders.
-      expect(opts.dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "LOAD_SESSION" })
-      )
+      expect(opts.dispatch).not.toHaveBeenCalled()
     })
   })
 
@@ -358,12 +358,13 @@ describe("useSessionActions", () => {
         name: "Bob",
       })
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/team-member-session/${encodeURIComponent("my-team")}/${encodeURIComponent("Bob")}`
+        `/api/team-member-session/${encodeURIComponent("my-team")}/${encodeURIComponent("Bob")}`,
+        { signal: expect.any(AbortSignal) },
       )
       // Second call goes to the tail endpoint — not the full-file endpoint.
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/member-dir/session.jsonl?tail=30&projection=results-v1",
-        { background: false },
+        "/api/sessions/member-dir/session.jsonl?tail=10&unit=turns&projection=results-v1",
+        { background: false, signal: expect.any(AbortSignal) },
       )
       expect(opts.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -420,12 +421,11 @@ describe("useSessionActions", () => {
         await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
-      // Error label from loadSessionTailCached — mentions the member session being loaded.
-      expect(result.current.loadError).toBe("Failed to load session for Alice (500)")
+      expect(result.current.loadError).toBe("Failed to load session (500)")
     })
 
     it("second team-member switch to same session is a cache hit (no network)", async () => {
-      const session = makeParsedSession()
+      const session = makeSession()
       const opts = makeDefaultOpts(session)
       opts.teamContext = makeTeamContext("team")
 
@@ -447,7 +447,7 @@ describe("useSessionActions", () => {
       // After the first switch, simulate a cache hit on the same session.
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
-        source: { dirName: "d", fileName: "f.jsonl", rawText: "cached" },
+        source: { dirName: "d", fileName: "f.jsonl", watchOffset: 6, loadId: 1 },
         olderTurns: [],
         nextByteOffset: 100,
         hasMore: false,
@@ -466,7 +466,8 @@ describe("useSessionActions", () => {
       // Exactly one fetch (the member lookup) — no tail fetch for the cached session.
       expect(mockAuthFetch).toHaveBeenCalledTimes(1)
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/team-member-session/${encodeURIComponent("team")}/${encodeURIComponent("Alice")}`
+        `/api/team-member-session/${encodeURIComponent("team")}/${encodeURIComponent("Alice")}`,
+        { signal: expect.any(AbortSignal) },
       )
     })
 
@@ -646,19 +647,19 @@ describe("useSessionActions", () => {
     })
   })
 
-  describe("handleLoadSession edge cases", () => {
-    it("passes isMobile from opts", () => {
+  describe("showing a loaded session on mobile", () => {
+    it("passes isMobile from opts", async () => {
       const opts = makeDefaultOpts()
       opts.isMobile = true
+      mockAuthFetch.mockResolvedValue(new Response(makeTailResponse(), { status: 200 }))
       const { result } = renderHook(() => useSessionActions(opts))
-      const session = makeParsedSession()
 
-      act(() => {
-        result.current.handleLoadSession(session, { dirName: "d", fileName: "f.jsonl", rawText: "" })
+      await act(async () => {
+        await result.current.handleDashboardSelect("d", "f.jsonl")
       })
 
       expect(opts.dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ isMobile: true })
+        expect.objectContaining({ type: "LOAD_SESSION", isMobile: true })
       )
     })
   })
@@ -689,6 +690,66 @@ describe("useSessionActions", () => {
       })
 
       expect(result.current.loadError).toBeNull()
+    })
+  })
+
+  describe("stale opens (R1)", () => {
+    function deferred() {
+      let resolve!: (res: Response) => void
+      const promise = new Promise<Response>((r) => { resolve = r })
+      return { promise, resolve }
+    }
+
+    it("never shows a slow session over one the user clicked after it", async () => {
+      const opts = makeDefaultOpts()
+      const slow = deferred()
+      const fast = deferred()
+      mockAuthFetch.mockReturnValueOnce(slow.promise).mockReturnValueOnce(fast.promise)
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      let first!: Promise<void>
+      let second!: Promise<void>
+      act(() => {
+        first = result.current.handleDashboardSelect("d", "slow.jsonl")
+        second = result.current.handleDashboardSelect("d", "fast.jsonl")
+      })
+      await act(async () => {
+        fast.resolve(new Response(makeTailResponse(), { status: 200 }))
+        await second
+        slow.resolve(new Response("gone", { status: 500 }))
+        await first
+      })
+
+      const loads = opts.dispatch.mock.calls.map(([a]) => a).filter((a) => a.type === "LOAD_SESSION")
+      expect(loads.map((a) => a.source.fileName)).toEqual(["fast.jsonl"])
+      // The slow open lost, so its failure is nobody's error.
+      expect(result.current.loadError).toBeNull()
+    })
+
+    it("keeps the loading indicator of the team switch that superseded another", async () => {
+      const opts = makeDefaultOpts()
+      opts.teamContext = makeTeamContext("team")
+      const bobLookup = deferred()
+      const aliceLookup = deferred()
+      mockAuthFetch.mockReturnValueOnce(bobLookup.promise).mockReturnValueOnce(aliceLookup.promise)
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      let bob!: Promise<void>
+      act(() => {
+        bob = result.current.handleTeamMemberSwitch(makeTeamMember("Bob"))
+        void result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
+      })
+      await act(async () => {
+        bobLookup.resolve(new Response(JSON.stringify({ dirName: "d", fileName: "bob.jsonl" }), { status: 200 }))
+        await bob
+      })
+
+      const loading = opts.dispatch.mock.calls.map(([a]) => a).filter((a) => a.type === "SET_LOADING_MEMBER")
+      expect(loading).toEqual([
+        { type: "SET_LOADING_MEMBER", name: "Bob" },
+        { type: "SET_LOADING_MEMBER", name: "Alice" },
+      ])
+      expect(opts.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "SWITCH_TEAM_MEMBER" }))
     })
   })
 })

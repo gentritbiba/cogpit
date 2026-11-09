@@ -10,7 +10,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession } from "@/contexts/SessionContext"
 
 interface PreviewAppShellProps {
   sessionId: string
@@ -33,11 +33,11 @@ export function PreviewAppShell({
   onLoadMoreTurns,
 }: PreviewAppShellProps) {
   const { isMobile } = useAppContext()
-  const { session } = useSessionContext()
+  const hasSession = useOpenSession((open) => open !== null)
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-foreground">
-      {session ? (
+      {hasSession ? (
         <main className="relative flex min-h-0 flex-1 flex-col">
           <ChatArea
             searchInputRef={searchInputRef}

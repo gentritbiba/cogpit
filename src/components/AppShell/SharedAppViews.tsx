@@ -5,7 +5,7 @@ import { Dashboard } from "@/components/Dashboard"
 import { SessionBrowser } from "@/components/session-browser"
 import { Spinner } from "@/components/ui/Spinner"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionControls } from "@/contexts/SessionContext"
 import type { HomeModelControls, HomeStart } from "@/components/home/HomeComposer"
 import type { EditionMainView } from "@/edition/contract"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
@@ -64,7 +64,7 @@ export function PrimarySessionBrowser({
   mobile = false,
   header,
 }: PrimarySessionBrowserProps) {
-  const { sessionSource } = useSessionContext()
+  const { sessionSource } = useSessionControls()
   const { config } = useAppContext()
   const activeSessionKey = sessionSource
     ? `${sessionSource.dirName}/${sessionSource.fileName}`

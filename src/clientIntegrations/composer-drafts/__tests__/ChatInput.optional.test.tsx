@@ -4,13 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
-  source: null as { dirName: string; fileName: string; rawText: string } | null,
-  session: { sessionId: "session-1" } as { sessionId: string } | null,
+  source: null as { dirName: string; fileName: string; watchOffset: number; loadId: number } | null,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
-    session: mocks.session,
     sessionSource: mocks.source,
     isLive: false,
     actions: { handleEditConfig: vi.fn(), handleOpenQuoteSource: vi.fn(async () => true) },
@@ -41,6 +39,7 @@ import { activeComposer } from "@/plugins/composerBridge"
 import { resetUnsentRecoveriesForTest } from "@/components/ChatInput/unsentRecovery"
 import { setActiveIdentity } from "@/lib/device"
 import { renderComposerMessage, type ComposerContextItem } from "../../../../shared/session/composerContext"
+import { showSession, shownSession } from "@/__tests__/sessionContextMock"
 
 const excerpt: ComposerContextItem = { id: "ctx-excerpt01", kind: "file", path: "src/app.ts", startLine: 4, endLine: 6, text: "const x = 1", comment: "Why?" }
 const capture: ComposerContextItem = { id: "ctx-capture01", kind: "browser", note: "Overlap", url: "https://example.test", title: "Home", viewport: { width: 800, height: 600 }, region: { x: 0, y: 0, width: 100, height: 50 }, capturedAt: "2026-10-29T12:00:00.000Z", browser: "default", image: 1 }
@@ -66,7 +65,7 @@ function mount(props: Parameters<typeof ChatInput>[0] = {}) {
 beforeEach(() => {
   localStorage.clear(); resetDraftStoresForTest(); resetUnsentRecoveriesForTest(); setActiveIdentity(null); mocks.source = null
   mocks.sendMessage.mockReset().mockResolvedValue(true)
-  mocks.session = { sessionId: crypto.randomUUID() }
+  showSession({ sessionId: crypto.randomUUID() })
 })
 afterEach(() => { activation?.abort(); integration?.dispose(); vi.restoreAllMocks() })
 
@@ -111,7 +110,7 @@ describe("optional Saved drafts composer integration", () => {
     let refuse!: (sent: boolean) => void
     mocks.sendMessage.mockReturnValueOnce(new Promise<boolean>((resolve) => { refuse = resolve }))
     const view = mount({ projectCwd: "/repo" })
-    const firstSession = mocks.session
+    const firstSession = shownSession()!
     act(() => { view.ref.current!.addContext(capture, [{ id: "capture-a", mediaType: "image/png", data: "eA==" }]) })
     type("first capture")
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send message" })) })
@@ -119,11 +118,11 @@ describe("optional Saved drafts composer integration", () => {
     if (newer === "context") act(() => { view.ref.current!.addContext(excerpt) })
     if (newer === "capture") act(() => { view.ref.current!.addContext({ ...capture, id: "ctx-capture02" }, [{ id: "capture-b", mediaType: "image/png", data: "eQ==" }]) })
     const current = view.ref.current!.getDraft()
-    if (newer === "switch") { mocks.session = { sessionId: "elsewhere" }; view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" allowImages={false} />) }
+    if (newer === "switch") { showSession({ sessionId: "elsewhere" }); view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" allowImages={false} />) }
     await act(async () => { refuse(false) })
     if (newer === "switch") {
       expect(view.ref.current!.getDraft().text).toBe("")
-      mocks.session = firstSession; view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" />)
+      showSession(firstSession); view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" />)
     }
     expect(view.ref.current!.getDraft()).toEqual(current)
     const entry = (await list()).items.find((entry) => entry.kind === "refused")!
@@ -176,7 +175,7 @@ describe("optional Saved drafts composer integration", () => {
   })
 
   it.each(["before", "after"])("hands the exact accepted first prompt to the created session with callback %s settlement", async (ordering) => {
-    mocks.session = null
+    showSession(null)
     let created!: (identity: { sessionId: string; cwd: string; dirName: string }) => void
     let accepted!: (sent: boolean) => void
     mocks.sendMessage.mockImplementationOnce((_text, _images, callback) => { created = callback; return new Promise<boolean>((resolve) => { accepted = resolve }) })
@@ -186,7 +185,7 @@ describe("optional Saved drafts composer integration", () => {
     type("new pending typing")
     const identity = { sessionId: "created-a", cwd: "/actual-worktree", dirName: "actual-project" }
     if (ordering === "before") act(() => { created(identity) })
-    mocks.session = { sessionId: "created-a" }; mocks.source = { dirName: "actual-project", fileName: "created-a.jsonl", rawText: "" }
+    showSession({ sessionId: "created-a" }); mocks.source = { dirName: "actual-project", fileName: "created-a.jsonl", watchOffset: 0, loadId: 1 }
     view.rerender(<ChatInput ref={view.ref} projectCwd="/actual-worktree" />)
     type("new target typing")
     await act(async () => { accepted(true) })
@@ -194,7 +193,7 @@ describe("optional Saved drafts composer integration", () => {
     expect(message()).toHaveValue("new target typing")
     await save(); fireEvent.keyDown(message(), { key: "ArrowUp" })
     expect(message()).toHaveValue("exact first prompt")
-    mocks.session = null; mocks.source = null
+    showSession(null); mocks.source = null
     view.rerender(<ChatInput ref={view.ref} projectCwd="/pending" composerIdentity="pending-project" />)
     expect(message()).toHaveValue("new pending typing")
   })
@@ -249,7 +248,7 @@ describe("optional Saved drafts composer integration", () => {
   })
 
   it("requires a current host-side raw backup before resetting damaged storage", async () => {
-    const identity = JSON.stringify(["", mocks.session!.sessionId])
+    const identity = JSON.stringify(["", shownSession()!.sessionId])
     const key = composerScope("/repo", identity)
     localStorage.setItem(key, "{broken legacy bytes")
     mount({ projectCwd: "/repo" }); type("new typing")
@@ -295,7 +294,7 @@ it("bounds metadata pages below the frame limit even with Unicode and large imag
 })
 
 it("retains an interrupted-upload warning on mount until explicit dismissal", async () => {
-  const key = composerScope("/repo", JSON.stringify(["", mocks.session!.sessionId]))
+  const key = composerScope("/repo", JSON.stringify(["", shownSession()!.sessionId]))
   draftStore(key).markUpload(true)
   resetDraftStoresForTest()
   mount({ projectCwd: "/repo" })

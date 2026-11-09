@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   cutLineAfterTurnIndex,
-  cutLineAfterTurnId,
   cutLineForTurnCount,
+  findTurnById,
   formatFor,
   turnBoundaryLines,
 } from "../../../shared/session/agents"
@@ -82,11 +82,20 @@ describe("Claude turn boundaries", () => {
     expect(turnBoundaryLines(claude, lines)).toEqual([1])
   })
 
-  it("cuts after the turn with a given id, however much of the file is loaded", () => {
-    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "u1")).toBe(4)
+  it("finds the turn with a given id, however much of the file is loaded", () => {
+    expect(findTurnById(claude, CLAUDE_LINES, "u1")).toEqual({ index: 0, nextLine: 4 })
     // The last turn leaves nothing to remove.
-    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "u2")).toBe("keep-all")
-    expect(cutLineAfterTurnId(claude, CLAUDE_LINES, "not-here")).toBeNull()
+    expect(findTurnById(claude, CLAUDE_LINES, "u2")).toEqual({ index: 1, nextLine: null })
+    expect(findTurnById(claude, CLAUDE_LINES, "not-here")).toBeNull()
+  })
+
+  it("finds a turn by the id a page opening inside it gave it", () => {
+    // A page cut at the mixed record names its first turn after that record;
+    // merged with the page above, the turn keeps that id.
+    const page = claude.parse(CLAUDE_LINES.slice(2).join("\n"), { skipStats: true })
+    expect(page.turns[0].id).toBe("mixed-1")
+    expect(findTurnById(claude, CLAUDE_LINES, "mixed-1")).toEqual({ index: 0, nextLine: 4 })
+    expect(findTurnById(claude, CLAUDE_LINES, "a3")).toEqual({ index: 1, nextLine: null })
   })
 
   it("ignores a malformed line instead of shifting every index after it", () => {
@@ -118,8 +127,19 @@ describe("Codex turn boundaries", () => {
       { timestamp: `2026-01-01T00:0${n}:01Z`, type: "event_msg", payload: { type: "user_message", message: `ask ${n}` } },
     ]))
     const ids = codex.parse(labelled.join("\n")).turns.map((turn) => turn.id)
-    expect(cutLineAfterTurnId(codex, labelled, ids[1])).toBe(4)
-    expect(cutLineAfterTurnId(codex, labelled, ids[2])).toBe("keep-all")
+    expect(findTurnById(codex, labelled, ids[1])).toEqual({ index: 1, nextLine: 4 })
+    expect(findTurnById(codex, labelled, ids[2])).toEqual({ index: 2, nextLine: null })
+  })
+
+  it("finds a Codex turn by the id a page opening inside it gave it", () => {
+    const lines = jsonl([1, 2].flatMap((n) => [
+      { timestamp: `2026-01-01T00:0${n}:00Z`, type: "turn_context", payload: { cwd: "/tmp", turn_id: `t-${n}` } },
+      { timestamp: `2026-01-01T00:0${n}:01Z`, type: "event_msg", payload: { type: "user_message", message: `ask ${n}` } },
+      { timestamp: `2026-01-01T00:0${n}:02Z`, type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `answer ${n}` }] } },
+    ]))
+    const fragment = codex.parse(lines.slice(2, 3).join("\n"), { skipStats: true }).turns[0].id
+    expect(fragment).not.toBe(codex.parse(lines.join("\n")).turns[0].id)
+    expect(findTurnById(codex, lines, fragment)).toEqual({ index: 0, nextLine: 3 })
   })
 
   it("does not open a second turn for an event carrying no message text", () => {

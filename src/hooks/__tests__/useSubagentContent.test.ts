@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest"
-import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
+import { describe, it, expect, vi } from "vitest"
+import { renderHook, waitFor } from "@testing-library/react"
+import type { SubAgentMessage } from "../../../shared/session/types"
+
+const api = vi.hoisted(() => ({ fetch: vi.fn() }))
+vi.mock("@/lib/auth", () => ({ authFetch: api.fetch }))
+vi.mock("@/contexts/SessionContext", () => ({
+  useSessionContext: () => ({ session: { sessionId: "parent-1" }, sessionSource: { dirName: "proj-a" }, isLive: false }),
+}))
+vi.mock("@/lib/device", () => ({ deviceScopedKey: (key: string) => key }))
+
+import { parseSubagentJsonl, useSubagentContent } from "@/hooks/useSubagentContent"
 
 function buildSubagentJsonl(messages: Array<Record<string, unknown>>): string {
   return messages.map((m) => JSON.stringify(m)).join("\n")
@@ -252,5 +262,39 @@ describe("parseSubagentJsonl", () => {
         new_string: "const value = 2",
       },
     })
+  })
+})
+
+describe("useSubagentContent", () => {
+  it("loads a finished agent's return from its transcript tail and keeps the launch stats on the first loaded message", async () => {
+    const assistant = (text: string, model: string) => JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-03-01T19:00:01Z",
+      message: { role: "assistant", model, content: [{ type: "text", text }] },
+    })
+    api.fetch.mockImplementation(async () => new Response(JSON.stringify({
+      headerLines: [JSON.stringify({ type: "user", message: { role: "user", content: "Review this" } })],
+      tailLines: [assistant("Checked the diff", "claude-opus-4-6"), assistant("APPROVE", "claude-opus-4-6")],
+      byteOffset: 900,
+      totalSize: 2000,
+      hasMore: true,
+    })))
+    const launch: SubAgentMessage = {
+      agentId: "a1", agentName: "reviewer", subagentType: "code-reviewer", type: "assistant", content: null,
+      toolCalls: [], thinking: [], text: [], timestamp: "2026-03-01T19:00:00Z", tokenUsage: null, model: null,
+      isBackground: true, prompt: "Review this", status: "async_launched", durationMs: 4200, toolUseCount: 7,
+    }
+
+    const messages = [launch]
+    const { result } = renderHook(() => useSubagentContent(messages, true))
+
+    await waitFor(() => expect(result.current.enrichedMessages).toHaveLength(2))
+    expect(api.fetch).toHaveBeenCalledExactlyOnceWith("/api/sessions/proj-a/parent-1/subagents/agent-a1.jsonl?tail=1&projection=results-v1")
+    expect(result.current.enrichedMessages[0]).toMatchObject({
+      text: ["Checked the diff"], model: "claude-opus-4-6",
+      durationMs: 4200, toolUseCount: 7, status: "async_launched", prompt: "Review this", agentName: "reviewer", subagentType: "code-reviewer",
+    })
+    expect(result.current.enrichedMessages[1]).toMatchObject({ text: ["APPROVE"] })
+    expect(result.current.isLoading).toBe(false)
   })
 })
