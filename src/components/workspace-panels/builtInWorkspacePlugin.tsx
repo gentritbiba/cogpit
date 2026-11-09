@@ -11,6 +11,7 @@ import {
 import { BUILT_IN_PLUGIN_ID } from "@/plugins/builtInPanelIds"
 import { useOpenSession } from "@/contexts/SessionContext"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { useBuiltInPanelServices } from "./BuiltInPanelServices"
 
 /** How long the rail keeps marking the icon after the agent's last browser call. */
@@ -95,6 +96,10 @@ function BrowserWorkspacePanel(props: WorkspacePanelProps) {
   )
 }
 
+function browserActivityAt(open: SessionView | null): number {
+  return Date.parse(latestBrowserActivity(open)?.timestamp ?? "")
+}
+
 /**
  * A dot on the rail while the agent is driving a browser, so the panel is
  * worth opening. One timeout, armed for the moment the last call goes stale —
@@ -102,7 +107,7 @@ function BrowserWorkspacePanel(props: WorkspacePanelProps) {
  */
 function BrowserActivityIndicator() {
   const [, expire] = useState(0)
-  const at = useOpenSession((open) => Date.parse(latestBrowserActivity(open)?.timestamp ?? ""))
+  const at = useOpenSession(browserActivityAt)
 
   useEffect(() => {
     const remaining = at + BROWSING_MS - Date.now()

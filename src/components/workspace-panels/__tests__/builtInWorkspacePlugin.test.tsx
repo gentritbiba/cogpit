@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
-import { SessionProvider, type SessionChatContextValue, type SessionContextValue } from "@/contexts/SessionContext"
+import { InSession } from "@/__tests__/InSession"
 import { builtInWorkspacePlugin } from "../builtInWorkspacePlugin"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import { collectWorkspacePanels, type WorkspacePanelContext } from "@/plugin-api"
@@ -22,12 +22,20 @@ function contextOf(overrides: Partial<WorkspacePanelContext> = {}): WorkspacePan
   }
 }
 
+const walks = vi.hoisted(() => ({ count: 0 }))
+vi.mock("../../../../shared/session/browserActivity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../shared/session/browserActivity")>()
+  return {
+    ...actual,
+    latestBrowserActivity: (...args: Parameters<typeof actual.latestBrowserActivity>) => {
+      walks.count++
+      return actual.latestBrowserActivity(...args)
+    },
+  }
+})
+
 function inSession(session: SessionView, node: ReactNode) {
-  return (
-    <SessionProvider value={{ session } as SessionContextValue} chatValue={{} as SessionChatContextValue}>
-      {node}
-    </SessionProvider>
-  )
+  return <InSession session={session}>{node}</InSession>
 }
 
 function sessionDrivingAt(timestamp: string): SessionView {
@@ -140,5 +148,19 @@ describe("builtInWorkspacePlugin", () => {
       <Indicator context={contextOf({ sessionId: "cogpit-1" })} active={false} />,
     ))
     expect(screen.getByRole("status", dot)).toBeInTheDocument()
+  })
+
+  it("walks the transcript for browser activity only when the session changes", () => {
+    const Indicator = browserPanel().indicator
+    if (!Indicator) throw new Error("the Browser panel has no indicator")
+    const session = sessionDrivingAt(new Date().toISOString())
+    const view = render(inSession(session, <Indicator context={contextOf({ sessionId: "cogpit-1" })} active={false} />))
+    const walked = walks.count
+
+    // The rail re-renders the indicator with a fresh context object.
+    view.rerender(inSession(session, <Indicator context={contextOf({ sessionId: "cogpit-1" })} active />))
+    view.rerender(inSession(session, <Indicator context={contextOf({ sessionId: "cogpit-1" })} active={false} />))
+
+    expect(walks.count).toBe(walked)
   })
 })
