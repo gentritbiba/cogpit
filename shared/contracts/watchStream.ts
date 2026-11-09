@@ -27,7 +27,7 @@ export type WatchResetReason = "truncated" | "gap"
 /**
  * The stream cannot continue from where the client is: the file shrank below
  * it (`truncated`), or it is too far behind to catch up line by line (`gap`).
- * Nothing more is sent on this connection; the client reloads the session.
+ * The server ends the connection after it; the client reloads the session.
  */
 export interface WatchResetEvent {
   type: "reset"

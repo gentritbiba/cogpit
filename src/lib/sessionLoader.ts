@@ -68,12 +68,17 @@ export interface SessionController {
   prefetchSession(address: SessionAddress): void
   /**
    * Re-read the session on screen from disk, dropping the history paged in
-   * above it. A no-op with nothing on screen or while another open is landing.
+   * above it. A failed read is retried after `RELOAD_RETRY_DELAYS_MS` while
+   * the session stays on screen. A no-op with nothing on screen or while
+   * another open is landing; a call during a reload joins it.
    */
   reloadCurrent(): Promise<void>
   /** The user left the session on screen; nothing pending may land after this. */
   leave(): void
 }
+
+/** The waits before each retry of a failed reload; after the last one it gives up. */
+export const RELOAD_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
 
 /** Turns a tail page asks for; the server stops earlier at its byte budget. */
 export const TAIL_TURNS = 10
@@ -193,6 +198,7 @@ export function createSessionController({
   let shown: SessionAddress | null = null
   /** This shell's screen in the cache, which holds the view it shows. */
   const screen = {}
+  let reloading: Promise<void> | null = null
 
   const dropPending = () => {
     if (!pending) return
@@ -258,6 +264,23 @@ export function createSessionController({
     return land(address, loaded)
   }
 
+  async function reload(address: SessionAddress): Promise<void> {
+    for (const delay of [...RELOAD_RETRY_DELAYS_MS, null]) {
+      try {
+        await open(address, "reload", ({ parsed, source }) => {
+          dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
+        })
+        return
+      } catch {
+        // The session already on screen stays there.
+      }
+      if (delay === null) return
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      // Another open took over the screen, or the user left it.
+      if (pending || shown !== address) return
+    }
+  }
+
   return {
     openSession: (target, { reason, commit, recover }) => open(target, reason, commit, recover),
 
@@ -270,15 +293,11 @@ export function createSessionController({
       })
     },
 
-    async reloadCurrent() {
-      if (pending || !shown) return
-      try {
-        await open(shown, "reload", ({ parsed, source }) => {
-          dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
-        })
-      } catch {
-        // The session already on screen stays there.
-      }
+    reloadCurrent() {
+      if (reloading) return reloading
+      if (pending || !shown) return Promise.resolve()
+      reloading = reload(shown).finally(() => { reloading = null })
+      return reloading
     },
 
     leave() {

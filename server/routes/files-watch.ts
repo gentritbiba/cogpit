@@ -446,11 +446,12 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (agentsPoller) clearInterval(agentsPoller)
     }
 
-    /** Tells a v2 client it has to reload, then stops sending until it reconnects with a new offset. */
+    /** Tells a v2 client it has to reload, then ends the stream so it reconnects, and hears it again until it has. */
     function reset(reason: WatchResetReason) {
       if (closed) return
       res.write(`data: ${JSON.stringify({ type: "reset", reason } satisfies WatchResetEvent)}\n\n`)
       cleanup()
+      res.end()
     }
 
     // Establish the baseline after the client snapshot. When the client sends

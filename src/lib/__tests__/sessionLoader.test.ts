@@ -8,7 +8,7 @@ vi.mock("@/lib/device", () => ({
   getActiveIdentity: vi.fn(() => null),
 }))
 
-import { createSessionController, type LoadedSession, type SessionAddress } from "@/lib/sessionLoader"
+import { createSessionController, RELOAD_RETRY_DELAYS_MS, type LoadedSession, type SessionAddress } from "@/lib/sessionLoader"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
@@ -507,19 +507,85 @@ describe("reloadCurrent", () => {
     expect(fetches.map((f) => f.url)).toEqual([expect.stringContaining("/b.jsonl?")])
   })
 
-  it("keeps the session on screen when the reload fails, and can reload it later", async () => {
-    const { sessions, dispatch } = await openA()
-    const failing = sessions.reloadCurrent()
-    await flush()
-    fetches[0].resolve({}, 500)
-    await failing
-    expect(dispatch).not.toHaveBeenCalled()
+  describe("after a failed read (review #4)", () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+    const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms)
 
-    const retry = sessions.reloadCurrent()
-    await flush()
-    fetches[1].resolve(tail("a3"))
-    await retry
-    expect(dispatch).toHaveBeenCalledOnce()
+    async function failingReload() {
+      const ctx = setup()
+      const a = ctx.click("a.jsonl")
+      await tick()
+      fetchFor("a.jsonl").resolve(tail("a"))
+      await a
+      fetches = []
+      const reloading = ctx.sessions.reloadCurrent()
+      await tick()
+      fetches[0].resolve({}, 502)
+      await tick()
+      return { ...ctx, reloading }
+    }
+
+    it("keeps the session on screen and retries after a wait", async () => {
+      const { dispatch, reloading } = await failingReload()
+      expect(dispatch).not.toHaveBeenCalled()
+      await tick(RELOAD_RETRY_DELAYS_MS[0]! - 1)
+      expect(fetches).toHaveLength(1)
+      await tick(1)
+      expect(fetches).toHaveLength(2)
+      fetches[1].resolve(tail("a3"))
+      await reloading
+      expect(dispatch).toHaveBeenCalledOnce()
+    })
+
+    it("folds a reset that arrives while it waits into the retry", async () => {
+      const { sessions, reloading } = await failingReload()
+      void sessions.reloadCurrent()
+      void sessions.reloadCurrent()
+      await tick()
+      expect(fetches).toHaveLength(1)
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      expect(fetches).toHaveLength(2)
+      fetches[1].resolve(tail("a3"))
+      await reloading
+    })
+
+    it("gives up after the last wait, and a later reset starts over", async () => {
+      const { sessions, dispatch, reloading } = await failingReload()
+      for (const delay of RELOAD_RETRY_DELAYS_MS) {
+        await tick(delay)
+        fetches.at(-1)!.resolve({}, 502)
+        await tick()
+      }
+      await reloading
+      expect(fetches).toHaveLength(RELOAD_RETRY_DELAYS_MS.length + 1)
+      expect(dispatch).not.toHaveBeenCalled()
+
+      const again = sessions.reloadCurrent()
+      await tick()
+      fetches.at(-1)!.resolve(tail("a4"))
+      await again
+      expect(dispatch).toHaveBeenCalledOnce()
+    })
+
+    it("stops once the user opens another session", async () => {
+      const { click, reloading } = await failingReload()
+      const b = click("b.jsonl")
+      await tick()
+      fetchFor("b.jsonl").resolve(tail("b"))
+      await b
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      await reloading
+      expect(fetches.filter((f) => f.url.includes("/a.jsonl?"))).toHaveLength(1)
+    })
+
+    it("stops once the user leaves", async () => {
+      const { sessions, reloading } = await failingReload()
+      sessions.leave()
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      await reloading
+      expect(fetches).toHaveLength(1)
+    })
   })
 
   it("does not join a load that started before the transcript changed, and later opens join the reload", async () => {
