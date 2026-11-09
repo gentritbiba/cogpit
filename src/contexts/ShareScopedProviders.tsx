@@ -221,7 +221,6 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
         controls={sessionControls}
         chat={chat}
         isLive={isLive}
-        sessionChangeKey={state.sessionChangeKey}
         onSessionShown={sessionShown}
       >
         {children(view)}

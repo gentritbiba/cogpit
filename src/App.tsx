@@ -1,5 +1,5 @@
 import { ConversationComposer } from "@/components/ConversationComposer"
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense, type ReactNode } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, lazy, Suspense, type ReactNode } from "react"
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -183,9 +183,7 @@ export default function App() {
     [toggleWorkspacePanel],
   )
   const handleSelectProject = useCallback((dirName: string | null) => {
-    startTransition(() => {
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
@@ -208,9 +206,7 @@ export default function App() {
   const handleEditCommand = useCallback((commandName: string) => {
     if (!configAdminEnabled) return
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
-    startTransition(() => {
-      dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
-    })
+    dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
   }, [configAdminEnabled, dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
@@ -632,10 +628,8 @@ export default function App() {
   })
 
   const handleOpenPaletteProject = useCallback((dirName: string) => {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile })
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "GO_HOME", isMobile })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch, isMobile])
 
   // Sync URL <-> state
@@ -930,7 +924,6 @@ export default function App() {
       controls={sessionControls}
       chat={chatState}
       isLive={isLive}
-      sessionChangeKey={state.sessionChangeKey}
       scrollHandle={chatScroll}
       onSessionShown={sessionShown}
     >

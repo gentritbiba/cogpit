@@ -1,4 +1,4 @@
-import { createRef } from "react"
+import { createRef, useLayoutEffect } from "react"
 import { act, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -15,9 +15,9 @@ import { makeTurn } from "@/__tests__/fixtures"
 import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import type { Turn } from "../../../shared/session/types"
 
-function session(turns: Turn[]): SessionView {
+function session(turns: Turn[], sessionId = "s1"): SessionView {
   return {
-    sessionId: "s1",
+    sessionId,
     version: "1",
     gitBranch: "main",
     cwd: "/repo",
@@ -74,7 +74,7 @@ describe("OpenSessionProvider", () => {
     const shown = vi.fn()
     Object.assign(renders, { shell: 0, controls: 0, fact: 0, transcript: 0 })
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive sessionChangeKey={0} scrollHandle={scrollHandle} onSessionShown={shown}>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive scrollHandle={scrollHandle} onSessionShown={shown}>
         <Shell />
         <Transcript />
       </OpenSessionProvider>,
@@ -93,5 +93,52 @@ describe("OpenSessionProvider", () => {
     // The overlay handoff runs in the commit that shows the batch.
     expect(shown).toHaveBeenLastCalledWith(streamed)
     expect(scrollHandle.current?.resetTurnCount).toBeTypeOf("function")
+  })
+
+  it("shows a batch after the urgent commit, so a click or the next batch can interrupt that render", () => {
+    const store = createSessionStore()
+    const shown = vi.fn()
+    const seen: Array<[number | undefined, string | null]> = []
+    // A fact reader commits with the store; its layout effect sees what the transcript shows then.
+    function Probe() {
+      const count = useOpenSession((open) => open?.turns.length)
+      useLayoutEffect(() => { seen.push([count, screen.getByTestId("turns").textContent]) }, [count])
+      return null
+    }
+    render(
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive onSessionShown={shown}>
+        <Transcript />
+        <Probe />
+      </OpenSessionProvider>,
+    )
+    act(() => store.dispatch({ type: "LOAD_SESSION", session: session([makeTurn({ id: "t1" })]), source: { dirName: "d", fileName: "s1.jsonl", watchOffset: 0, loadId: 1 }, isMobile: false }))
+    seen.length = 0
+
+    const streamed = session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })])
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: streamed }))
+
+    expect(seen).toEqual([[2, "1"]])
+    expect(screen.getByTestId("turns")).toHaveTextContent("2")
+    expect(shown).toHaveBeenLastCalledWith(streamed)
+  })
+
+  it("hands a switched-to session and its change key to the transcript together", () => {
+    const store = createSessionStore()
+    const pairs: Array<[string | undefined, number]> = []
+    function Keyed() {
+      const { session: open, sessionChangeKey } = useSessionContext()
+      pairs.push([open?.sessionId, sessionChangeKey])
+      return null
+    }
+    render(
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+        <Keyed />
+      </OpenSessionProvider>,
+    )
+    for (const id of ["s1", "s2"]) {
+      act(() => store.dispatch({ type: "LOAD_SESSION", session: session([makeTurn({ id: "t1" })], id), source: { dirName: "d", fileName: `${id}.jsonl`, watchOffset: 0, loadId: 1 }, isMobile: false }))
+    }
+
+    expect(pairs).toEqual([[undefined, 0], ["s1", 1], ["s2", 2]])
   })
 })

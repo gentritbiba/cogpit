@@ -102,41 +102,40 @@ export function usePanelState(
   const handleToggleSidebar = useCallback(() => {
     startTransition(() => setShowSidebar(!showSidebar))
   }, [setShowSidebar, showSidebar])
+  // The main view lives in the session store, which never renders in a
+  // transition, so leaving it sets the panel urgently too: both show in one commit.
   const toggleWorkspacePanel = useCallback((panelId: string) => {
-    startTransition(() => {
-      const returningToSessions = mainView !== "sessions"
-      if (returningToSessions) dispatch(CLOSE_MAIN_VIEW[mainView])
-      setStoredWorkspacePanel((current) => (
-        returningToSessions || canonicalPluginPanelId(current) !== canonicalPluginPanelId(panelId) ? panelId : null
-      ))
-    })
+    if (mainView !== "sessions") {
+      dispatch(CLOSE_MAIN_VIEW[mainView])
+      setStoredWorkspacePanel(panelId)
+      return
+    }
+    startTransition(() => setStoredWorkspacePanel((current) => (
+      canonicalPluginPanelId(current) !== canonicalPluginPanelId(panelId) ? panelId : null
+    )))
   }, [dispatch, setStoredWorkspacePanel, mainView])
   const openWorkspacePanel = useCallback((panelId: string) => {
-    startTransition(() => {
-      if (mainView !== "sessions") dispatch(CLOSE_MAIN_VIEW[mainView])
+    if (mainView !== "sessions") {
+      dispatch(CLOSE_MAIN_VIEW[mainView])
       setStoredWorkspacePanel(panelId)
-    })
+      return
+    }
+    startTransition(() => setStoredWorkspacePanel(panelId))
   }, [dispatch, setStoredWorkspacePanel, mainView])
   const closeWorkspacePanel = useCallback(() => {
     startTransition(() => setStoredWorkspacePanel(null))
   }, [setStoredWorkspacePanel])
   const handleToggleConfig = useCallback(() => {
-    const closing = mainView === "config"
-    startTransition(() => {
-      dispatch({ type: closing ? "CLOSE_CONFIG" : "OPEN_CONFIG" })
-    })
+    dispatch({ type: mainView === "config" ? "CLOSE_CONFIG" : "OPEN_CONFIG" })
   }, [mainView, dispatch])
   const handleToggleMission = useCallback(() => {
-    const closing = mainView === "mission"
-    startTransition(() => {
-      dispatch({ type: closing ? "CLOSE_MISSION" : "OPEN_MISSION" })
-    })
+    dispatch({ type: mainView === "mission" ? "CLOSE_MISSION" : "OPEN_MISSION" })
   }, [mainView, dispatch])
   const openMainView = useCallback((id: string) => {
-    startTransition(() => dispatch({ type: "OPEN_EXTENSION_VIEW", id }))
+    dispatch({ type: "OPEN_EXTENSION_VIEW", id })
   }, [dispatch])
   const closeMainView = useCallback(() => {
-    startTransition(() => dispatch({ type: "CLOSE_EXTENSION_VIEW" }))
+    dispatch({ type: "CLOSE_EXTENSION_VIEW" })
   }, [dispatch])
   // Each main view is asked once, as soon as the caller may open it, whether
   // the app should start in it, until one does.
@@ -157,9 +156,7 @@ export function usePanelState(
     }
   }, [mainViews, openMainView])
   const handleEditConfig = useCallback((filePath: string) => {
-    startTransition(() => {
-      dispatch({ type: "OPEN_CONFIG", filePath })
-    })
+    dispatch({ type: "OPEN_CONFIG", filePath })
   }, [dispatch])
   const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
