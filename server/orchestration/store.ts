@@ -252,14 +252,14 @@ export class OrchestrationStore {
     return this.transaction(() => Number(this.db.prepare("UPDATE crew_chat_deliveries SET state=?,error=? WHERE sequence=? AND session_id=? AND state='pending'").run(state, error ?? null, delivery.sequence, delivery.sessionId).changes) > 0)
   }
   /**
-   * Records failed attempts in one write each: a later attempt time, or `failed` once `giveUp` is set.
-   * A row another pass already moved on (settled, or counted this attempt) is left alone.
+   * Records failed attempts in one write each: the attempt count, a later attempt time, or `failed` once
+   * `giveUp` is set. A row another pass already moved on (settled, or counted this attempt) is left alone.
    */
-  deferChatDeliveries(failures: readonly { delivery: CrewChatDelivery; error: string; nextAttemptAt: number; giveUp: boolean }[]): void {
-    if (!failures.length) return
+  deferChatDeliveries(deferrals: readonly { delivery: CrewChatDelivery; error: string; attempts: number; nextAttemptAt: number; giveUp: boolean }[]): void {
+    if (!deferrals.length) return
     this.transaction(() => {
-      const update = this.db.prepare("UPDATE crew_chat_deliveries SET attempts=attempts+1,error=?,next_attempt_at=?,state=? WHERE sequence=? AND session_id=? AND state='pending' AND attempts=?")
-      for (const { delivery, error, nextAttemptAt, giveUp } of failures) update.run(error, nextAttemptAt, giveUp ? "failed" : "pending", delivery.sequence, delivery.sessionId, delivery.attempts)
+      const update = this.db.prepare("UPDATE crew_chat_deliveries SET attempts=?,error=?,next_attempt_at=?,state=? WHERE sequence=? AND session_id=? AND state='pending' AND attempts=?")
+      for (const { delivery, error, attempts, nextAttemptAt, giveUp } of deferrals) update.run(attempts, error, nextAttemptAt, giveUp ? "failed" : "pending", delivery.sequence, delivery.sessionId, delivery.attempts)
     })
   }
 
