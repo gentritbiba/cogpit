@@ -104,6 +104,7 @@ const TimelineRow = memo(function TimelineRow({ turn, index, rowKey, isLast, bra
       role="article"
       aria-posinset={index + 1}
       aria-setsize={setSize}
+      tabIndex={0}
     >
       {(turn.compactionSummary || turn.compactionMeta) && (
         <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} disclosureKey={`${rowKey}:compaction`} />

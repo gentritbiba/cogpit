@@ -540,4 +540,17 @@ describe("TimelineList with the scroll engine", () => {
     expect(rows[0].getAttribute("aria-posinset")).toBe("1")
     expect(rows[0].getAttribute("aria-setsize")).toBe("3")
   })
+
+  // Review finding 11: feed articles could not take focus, so the feed keyboard pattern was unavailable.
+  it("lets an article take focus, keeping it mounted where it is while the reader scrolls away", () => {
+    mount({ turns: makeTurns(ids(0, 200)) })
+    const row = scroller!.querySelector<HTMLElement>('[data-row-key="t195"]')!
+    const writesBefore = writes.length
+    act(() => row.focus())
+    expect(document.activeElement).toBe(row)
+    expect(writes.length).toBe(writesBefore)
+    userScrollTo(1000)
+    expect(renderedKeys()).toContain("t195")
+    expect(document.activeElement).toBe(row)
+  })
 })
