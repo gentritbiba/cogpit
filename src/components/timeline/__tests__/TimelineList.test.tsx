@@ -201,7 +201,17 @@ describe("TimelineList with the scroll engine", () => {
     const keys = renderedKeys()
     expect(keys).toContain("t199")
     expect(keys.length).toBeLessThan(30)
-    expect(controller.getIndicators()).toEqual({ canScrollDown: false, placed: true })
+    expect(controller.getIndicators()).toEqual({ canScrollDown: false })
+  })
+
+  // Review finding 10: a placement flag in the snapshot re-rendered App on every session open.
+  it("does not notify the chrome when a session opens at the bottom", () => {
+    const controller = new TimelineScrollController()
+    const notified = vi.fn()
+    controller.subscribeIndicators(notified)
+    const { rerender } = mount({ turns: makeTurns(ids(0, 200)), sessionKey: "open-a" }, controller)
+    rerender({ turns: makeTurns(ids(300, 400)), sessionChangeKey: 2, sessionKey: "open-b" })
+    expect(notified).not.toHaveBeenCalled()
   })
 
   it("opens a sub-agent view at its first row", () => {
@@ -210,7 +220,6 @@ describe("TimelineList with the scroll engine", () => {
     mount({ turns: makeTurns(ids(0, 200)) }, controller)
     expect(renderedKeys()).toContain("t0")
     expect(viewportTopOf('[data-row-key="t0"]')).toBeCloseTo(0)
-    expect(controller.getIndicators().placed).toBe(true)
   })
 
   it("pins streaming growth to the bottom inside the resize callback", () => {
@@ -517,9 +526,9 @@ describe("TimelineList with the scroll engine", () => {
 
   // Review finding 4: a ref closure stayed for every row key ever rendered, across sessions.
   it("drops the row refs of another session's rows when a session starts", () => {
-    const { rerender, controller } = mount({ turns: makeTurns(ids(0, 30)) })
+    const { rerender, controller } = mount({ turns: makeTurns(ids(0, 30)), sessionKey: "refs-a" })
     const left = controller.rowRef("t29")
-    rerender({ turns: makeTurns(ids(100, 120)), sessionChangeKey: 2 })
+    rerender({ turns: makeTurns(ids(100, 120)), sessionChangeKey: 2, sessionKey: "refs-b" })
     expect(controller.rowRef("t29")).not.toBe(left)
   })
 

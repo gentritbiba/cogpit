@@ -26,8 +26,6 @@ export interface RenderPlan {
 
 export interface TimelineIndicators {
   canScrollDown: boolean
-  /** The open placement for the current session has landed. */
-  placed: boolean
 }
 
 export interface TimelineRowsInput {
@@ -172,7 +170,9 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private scrollbarHeld = false
   private touchY = 0
 
-  private indicators: TimelineIndicators = { canScrollDown: false, placed: false }
+  private indicators: TimelineIndicators = { canScrollDown: false }
+  /** The open placement for the current session has landed. */
+  private placed = false
   private readonly indicatorListeners = new Set<() => void>()
   private readonly viewportListeners = new Set<() => void>()
   private notifyFrame: number | null = null
@@ -403,7 +403,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     this.follow = { following: this.placement === "bottom", userInput: false }
     this.writeTopPad(0)
     this.writeBottomSlack(0)
-    this.setIndicators({ canScrollDown: false, placed: false })
+    this.placed = false
+    this.setIndicators({ canScrollDown: false })
   }
 
   private rebuildHeights(): void {
@@ -574,7 +575,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
 
   private markPlaced(): void {
     this.placement = null
-    this.setIndicators({ ...this.indicators, placed: true })
+    this.placed = true
   }
 
   /** Cancels any movement of the anchor; false when there is no anchor to keep. */
@@ -950,7 +951,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     if (shouldLoadOlder({
       hasMore: input.hasMore,
       loading: input.isLoadingOlder,
-      placed: this.indicators.placed,
+      placed: this.placed,
       viewport: scroller.clientHeight,
       viewTop: scroller.scrollTop,
       firstRowTop,
@@ -960,11 +961,11 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private updateIndicators(): void {
     if (!this.scroller) return
     const canScrollDown = !this.follow.following && this.distanceToBottom() > 10
-    if (canScrollDown !== this.indicators.canScrollDown) this.setIndicators({ ...this.indicators, canScrollDown })
+    if (canScrollDown !== this.indicators.canScrollDown) this.setIndicators({ canScrollDown })
   }
 
   private setIndicators(next: TimelineIndicators): void {
-    if (next.canScrollDown === this.indicators.canScrollDown && next.placed === this.indicators.placed) return
+    if (next.canScrollDown === this.indicators.canScrollDown) return
     this.indicators = next
     for (const listener of this.indicatorListeners) listener()
   }
