@@ -1,5 +1,8 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { useChatScroll } from "@/hooks/useChatScroll"
+import { createSessionStore, useSessionSelector, type SessionStore } from "@/hooks/useSessionState"
+import { withStartPrompt } from "@/lib/startPrompts"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SseConnectionState } from "@/hooks/useLiveSession"
@@ -99,6 +102,13 @@ export interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null)
 
+/** Everything in the session context but the session's content, which changes on every live batch. */
+export type SessionControls = Omit<SessionContextValue, "session">
+
+const SessionControlsContext = createContext<SessionControls | null>(null)
+const SessionStoreContext = createContext<SessionStore | null>(null)
+const NO_SESSION = createSessionStore()
+
 // ── Session Chat Context (volatile — chat status, scroll indicators) ────────
 
 export interface SessionChatContextValue {
@@ -116,13 +126,66 @@ interface SessionProviderProps {
   children: ReactNode
 }
 
+/** Provides a session that is already loaded and does not stream. */
 export function SessionProvider({ value, chatValue, children }: SessionProviderProps): ReactNode {
+  const store = useMemo(() => createSessionStore(value.session), [value.session])
   return (
-    <SessionContext.Provider value={value}>
-      <SessionChatContext.Provider value={chatValue}>
-        {children}
-      </SessionChatContext.Provider>
-    </SessionContext.Provider>
+    <SessionStoreContext.Provider value={store}>
+      <SessionControlsContext.Provider value={value}>
+        <SessionContext.Provider value={value}>
+          <SessionChatContext.Provider value={chatValue}>
+            {children}
+          </SessionChatContext.Provider>
+        </SessionContext.Provider>
+      </SessionControlsContext.Provider>
+    </SessionStoreContext.Provider>
+  )
+}
+
+interface OpenSessionProviderProps {
+  store: SessionStore
+  controls: SessionControls
+  chat: ChatState
+  isLive: boolean
+  sessionChangeKey: number
+  /** The transcript's scroll controls, for the shell's own handlers. */
+  scrollHandle?: Ref<ScrollState>
+  /** Runs in the commit that first shows each session object. */
+  onSessionShown?: (session: SessionView | null) => void
+  children: ReactNode
+}
+
+/**
+ * Provides the session open in `store`. Only this provider and the components
+ * that read the session's content re-render on a live batch; whatever renders
+ * it, and what reads only the controls or a selected fact, does not.
+ */
+export function OpenSessionProvider({
+  store, controls, chat, isLive, sessionChangeKey, scrollHandle, onSessionShown, children,
+}: OpenSessionProviderProps): ReactNode {
+  const session = useSessionSelector(store, (open) => open)
+  const shown = useMemo(() => session && withStartPrompt(session), [session])
+  useLayoutEffect(() => { onSessionShown?.(session) }, [session, onSessionShown])
+  const scroll = useChatScroll({
+    session,
+    isLive,
+    pendingMessages: chat.pendingMessages,
+    consumePending: chat.consumePending,
+    sessionChangeKey,
+  })
+  useImperativeHandle(scrollHandle, () => scroll, [scroll])
+  const value = useMemo(() => ({ ...controls, session: shown }), [controls, shown])
+  const chatValue = useMemo(() => ({ chat, scroll }), [chat, scroll])
+  return (
+    <SessionStoreContext.Provider value={store}>
+      <SessionControlsContext.Provider value={controls}>
+        <SessionContext.Provider value={value}>
+          <SessionChatContext.Provider value={chatValue}>
+            {children}
+          </SessionChatContext.Provider>
+        </SessionContext.Provider>
+      </SessionControlsContext.Provider>
+    </SessionStoreContext.Provider>
   )
 }
 
@@ -139,6 +202,31 @@ export function useSessionContext(): SessionContextValue {
     throw new Error("useSessionContext must be used within a SessionProvider")
   }
   return ctx
+}
+
+/** The session context without the session, so a live batch does not re-render the caller. */
+export function useSessionControls(): SessionControls {
+  const ctx = useContext(SessionControlsContext)
+  if (!ctx) {
+    throw new Error("useSessionControls must be used within a SessionProvider")
+  }
+  return ctx
+}
+
+/** The controls, or null outside a session provider (shared views, previews). */
+export function useSessionControlsOptional(): SessionControls | null {
+  return useContext(SessionControlsContext)
+}
+
+/**
+ * A value derived from the open session (null when none is open, or outside a
+ * provider). The caller re-renders only when it changes by `isEqual`.
+ */
+export function useOpenSession<T>(
+  select: (session: SessionView | null) => T,
+  isEqual?: (a: T, b: T) => boolean,
+): T {
+  return useSessionSelector(useContext(SessionStoreContext) ?? NO_SESSION, select, isEqual)
 }
 
 /** The chat, or null outside a session provider (shared views, previews). */

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import type { UndoState, Branch, Turn } from "../../shared/session/types"
-import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
+import { useSessionSelector, type SessionStore } from "@/hooks/useSessionState"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { capabilitiesForDirName } from "@/lib/agents"
@@ -23,6 +23,12 @@ import {
 
 export type { UndoConfirmState } from "./undo/undoHelpers"
 const EMPTY_BRANCHES: Branch[] = []
+
+function sameTurnIds(a: readonly Turn[] | null, b: readonly Turn[] | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((turn, index) => turn.id === b[index].id)
+}
 
 export interface UseUndoRedoResult {
   enabled: boolean
@@ -50,7 +56,7 @@ export interface UseUndoRedoResult {
 }
 
 export function useUndoRedo(
-  session: SessionView | null,
+  store: SessionStore,
   sessionSource: SessionSource | null,
   onReloadSession: () => Promise<void>,
   enabled = true,
@@ -61,23 +67,24 @@ export function useUndoRedo(
   const [applyError, setApplyError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const rewindPreviewRequestRef = useRef(0)
-  // Read when a turn asks to restore, so the callback every row holds stays the
-  // same object while the session streams.
-  const latestSessionRef = useRef(session)
-  latestSessionRef.current = session
+  // Only what undo shows is subscribed to; the actions read the session when
+  // they run, so a streamed batch neither re-renders the caller nor replaces
+  // the callbacks every row holds.
+  const sessionId = useSessionSelector(store, (open) => open?.sessionId ?? null)
+  const turnCount = useSessionSelector(store, (open) => open?.turns.length ?? 0)
 
   // Load undo state when session changes
   useEffect(() => {
     rewindPreviewRequestRef.current += 1
-    if (!enabled || !session) {
+    if (!enabled || sessionId === null) {
       setUndoState(null)
       setConfirmState(null)
       setApplyError(null)
       sessionIdRef.current = null
       return
     }
-    if (session.sessionId === sessionIdRef.current) return
-    sessionIdRef.current = session.sessionId
+    if (sessionId === sessionIdRef.current) return
+    sessionIdRef.current = sessionId
 
     // No persisted undo history to fetch when the CLI keeps none of its own.
     if (!capabilitiesForDirName(sessionSource?.dirName).redo) {
@@ -86,7 +93,7 @@ export function useUndoRedo(
     }
 
     // Capture the id so we can check for staleness when the fetch resolves
-    const fetchedSessionId = session.sessionId
+    const fetchedSessionId = sessionId
     const controller = new AbortController()
 
     authFetch(`/api/undo-state/${encodeURIComponent(fetchedSessionId)}`, {
@@ -107,8 +114,8 @@ export function useUndoRedo(
       })
 
     return () => controller.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when sessionId changes, not on every session object update
-  }, [enabled, session?.sessionId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when sessionId changes
+  }, [enabled, sessionId])
 
   const commitUndoTransaction = useCallback(async (transaction: UndoTransaction) => {
     try {
@@ -140,7 +147,13 @@ export function useUndoRedo(
   }, [])
 
   const storedBranches = undoState?.branches ?? EMPTY_BRANCHES
-  const loadedTurns = session?.turns
+  // Branch points resolve against turn ids, so only a change in which turns are
+  // loaded (a new turn, a page above) resolves them again.
+  const loadedTurns = useSessionSelector(
+    store,
+    (open) => storedBranches.length > 0 ? open?.turns ?? null : null,
+    sameTurnIds,
+  )
   // Indexed against the turns loaded right now; see resolveBranchPoints.
   const branches = useMemo(
     () => loadedTurns ? resolveBranchPoints(storedBranches, loadedTurns) : storedBranches,
@@ -150,18 +163,18 @@ export function useUndoRedo(
   // canRedo: true if most recent branch's branchPoint + 1 === current session length
   // (no new turns added since the undo)
   const { canRedo, redoTurnCount, redoBranch } = useMemo((): { canRedo: boolean; redoTurnCount: number; redoBranch: Branch | null } => {
-    if (!session || branches.length === 0) {
+    if (sessionId === null || branches.length === 0) {
       return { canRedo: false, redoTurnCount: 0, redoBranch: null }
     }
     // Check most recent branch first (most likely candidate)
     for (let i = branches.length - 1; i >= 0; i--) {
       const b = branches[i]
-      if (b.branchPointTurnIndex + 1 === session.turns.length) {
+      if (b.branchPointTurnIndex + 1 === turnCount) {
         return { canRedo: true, redoTurnCount: b.turns.length, redoBranch: b }
       }
     }
     return { canRedo: false, redoTurnCount: 0, redoBranch: null }
-  }, [session, branches])
+  }, [sessionId, turnCount, branches])
 
   // Parse the redo branch's JSONL lines into full Turn objects for ghost rendering
   const redoGhostTurns = useMemo<Turn[]>(() => {
@@ -180,7 +193,7 @@ export function useUndoRedo(
 
   // Request undo: "Restore to here" on turn N keeps turns 0..(N-1)
   const requestUndo = useCallback((targetTurnIndex: number) => {
-    const session = latestSessionRef.current
+    const session = store.getState().session
     if (!enabled || !session) return
     const effectiveTarget = targetTurnIndex - 1
     if (effectiveTarget >= session.turns.length - 1 || effectiveTarget < -1) return
@@ -235,11 +248,11 @@ export function useUndoRedo(
       summary: buildSummary(ops, session.turns.length - 1 - effectiveTarget),
       targetTurnIndex: effectiveTarget,
     })
-  }, [enabled, sessionSource?.dirName])
+  }, [enabled, store, sessionSource?.dirName])
 
   // Request redo: restore the entire most recent branch
   const requestRedoAll = useCallback(() => {
-    if (!enabled || !canRedo || !redoBranch || !session) return
+    if (!enabled || !canRedo || !redoBranch) return
 
     const ops = buildRedoFromArchived(redoBranch.turns)
     setConfirmState({
@@ -248,11 +261,11 @@ export function useUndoRedo(
       targetTurnIndex: redoBranch.branchPointTurnIndex + redoBranch.turns.length,
       branchId: redoBranch.id,
     })
-  }, [enabled, canRedo, redoBranch, session])
+  }, [enabled, canRedo, redoBranch])
 
   // Request partial redo: restore ghost turns up to and including ghostTurnIndex
   const requestRedoUpTo = useCallback((ghostTurnIndex: number) => {
-    if (!enabled || !canRedo || !redoBranch || !session) return
+    if (!enabled || !canRedo || !redoBranch) return
 
     const turnCount = ghostTurnIndex + 1
     const ops = buildRedoFromArchived(redoBranch.turns, ghostTurnIndex)
@@ -263,10 +276,11 @@ export function useUndoRedo(
       branchId: redoBranch.id,
       redoUpToArchiveIndex: ghostTurnIndex,
     })
-  }, [enabled, canRedo, redoBranch, session])
+  }, [enabled, canRedo, redoBranch])
 
   // Request branch switch (from branch modal)
   const requestBranchSwitch = useCallback((branchId: string, archiveTurnIndex?: number) => {
+    const session = store.getState().session
     if (!enabled || !session) return
     const branch = branches.find((b) => b.id === branchId)
     if (!branch) return
@@ -285,10 +299,11 @@ export function useUndoRedo(
       branchId,
       branchTurnIndex: targetArchiveIdx,
     })
-  }, [enabled, session, branches])
+  }, [enabled, store, branches])
 
   // Confirm and apply the pending operation
   const confirmApply = useCallback(async (restoreFiles = false) => {
+    const session = store.getState().session
     if (!enabled || !confirmState || !session || !sessionSource) {
       setConfirmState(null)
       return
@@ -361,7 +376,7 @@ export function useUndoRedo(
     } finally {
       setIsApplying(false)
     }
-  }, [enabled, confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
+  }, [enabled, confirmState, store, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
 
   const confirmCancel = useCallback(() => {
     rewindPreviewRequestRef.current += 1

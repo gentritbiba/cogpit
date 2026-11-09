@@ -64,7 +64,7 @@ function RuntimePluginPanelSession({ client, plugin, project, active, title, epo
   const openSession = useRef(context.openSession)
   const [review, setReview] = useState<{ leaseId: string; request: ReviewStartRequest } | null>(null)
   const activation = useRef<RuntimePanelActivation | null>(null)
-  const sessionKey = JSON.stringify([context.session?.sessionId, context.sessionChangeKey])
+  const sessionKey = JSON.stringify([context.sessionId, context.sessionChangeKey])
   const [loaded, setLoaded] = useState<{ payload: ArrayBuffer; leaseId: string; runtime: RuntimePanelActivation } | null>(null)
   const [error, setError] = useState<string | null>(null)
   useLayoutEffect(() => { currentActive.current = active; activation.current?.setActive(active) }, [active])

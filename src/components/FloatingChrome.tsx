@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react"
+import { memo, useMemo, useState, type ComponentProps } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
   Activity,
@@ -43,7 +43,7 @@ import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { UsageCostDialog } from "@/components/UsageCostDialog"
 import { FLOATING_PILL } from "@/components/header-shared"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useEditionUi } from "@/edition/hooks"
 import { useCapability } from "@/hooks/useCapability"
@@ -55,7 +55,22 @@ import { parseSubAgentPath } from "@/lib/format"
 import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
 import { cn, copyToClipboard } from "@/lib/utils"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../shared/helpLinks"
-import { extractPullRequests, mergePullRequests } from "../../shared/session/prLinks"
+import { extractPullRequests, mergePullRequests, type SessionPullRequest } from "../../shared/session/prLinks"
+
+type OpenSessionPillProps = Omit<ComponentProps<typeof SessionPill>, "session" | "pullRequests"> & {
+  scannedPullRequests: SessionPullRequest[] | undefined
+}
+
+/** The pill shows the session as it streams; the chrome around it does not re-render with it. */
+function OpenSessionPill({ scannedPullRequests, ...pill }: OpenSessionPillProps) {
+  const session = useOpenSession((open) => open)
+  const turns = session?.turns
+  const pullRequests = useMemo(
+    () => mergePullRequests(extractPullRequests(turns ?? []), scannedPullRequests),
+    [turns, scannedPullRequests],
+  )
+  return session && <SessionPill session={session} pullRequests={pullRequests} {...pill} />
+}
 
 interface FloatingChromeProps {
   /** Whether the sidebar is toggled on — decides if the expand pill is offered. */
@@ -111,7 +126,9 @@ export const FloatingChrome = memo(function FloatingChrome({
   onOpenMainView,
 }: FloatingChromeProps) {
   const { config: { networkUrl, defaultAgentKind } } = useAppContext()
-  const { session, sessionSource, isLive, permissions, actions } = useSessionContext()
+  const { sessionSource, isLive, permissions, actions } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const sessionCwd = useOpenSession((open) => open?.cwd)
   const inventory = useSessionInventoryOptional()
   const { AccountControl, SessionHeaderActions } = useEditionUi()
   const canViewUsage = useCapability("viewUsage")
@@ -120,24 +137,19 @@ export const FloatingChrome = memo(function FloatingChrome({
   const [monitorOpen, setMonitorOpen] = useState(false)
   const [cmdCopied, copyCmd] = useCopyWithFeedback()
 
-  const sessionTurns = session?.turns
   const scanned = inventory?.sessions.find(
-    (candidate) => candidate.sessionId === session?.sessionId,
+    (candidate) => candidate.sessionId === sessionId,
   )?.pullRequests
-  const pullRequests = useMemo(
-    () => mergePullRequests(extractPullRequests(sessionTurns ?? []), scanned),
-    [sessionTurns, scanned],
-  )
-  const archiveToggle = useSessionArchiveToggle(session?.sessionId ?? "", isLive, permissions.archive)
+  const archiveToggle = useSessionArchiveToggle(sessionId ?? "", isLive, permissions.archive)
   const activeAgentKind = sessionSource
     ? sessionSource.agentKind ?? agentKindForDirName(sessionSource.dirName)
     : defaultAgentKind
   const isSubAgent = sessionSource ? parseSubAgentPath(sessionSource.fileName) !== null : false
 
   function handleCopyResumeCmd(): void {
-    if (!session) return
+    if (sessionId === null) return
     const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
-    copyCmd(getResumeCommand(agentKind, session.sessionId, session.cwd))
+    copyCmd(getResumeCommand(agentKind, sessionId, sessionCwd))
   }
 
   function handleCopyNetworkUrl(): void {
@@ -175,7 +187,7 @@ export const FloatingChrome = memo(function FloatingChrome({
             />
           )}
 
-          {session && isSubAgent && onBackToMain && (
+          {sessionId !== null && isSubAgent && onBackToMain && (
             <Button
               type="button"
               variant="ghost"
@@ -188,12 +200,11 @@ export const FloatingChrome = memo(function FloatingChrome({
             </Button>
           )}
 
-          {session && (
-            <SessionPill
-              session={session}
+          {sessionId !== null && (
+            <OpenSessionPill
               sessionSource={sessionSource}
               isLive={isLive}
-              pullRequests={pullRequests}
+              scannedPullRequests={scanned}
               copied={cmdCopied}
               creatingSession={creatingSession}
               onCopyResume={handleCopyResumeCmd}
@@ -203,9 +214,9 @@ export const FloatingChrome = memo(function FloatingChrome({
             />
           )}
 
-          {session && !isSubAgent && <CrewParentPill sessionId={session.sessionId} />}
+          {sessionId !== null && !isSubAgent && <CrewParentPill sessionId={sessionId} />}
 
-          {session && onShowWorkflows && (workflowCount ?? 0) > 0 && (
+          {sessionId !== null && onShowWorkflows && (workflowCount ?? 0) > 0 && (
             <Button
               variant="ghost"
               size="xs"
@@ -235,17 +246,17 @@ export const FloatingChrome = memo(function FloatingChrome({
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             <DeviceSwitcher />
           </div>
-          {session && capabilitiesFor(activeAgentKind).sharing && can("share") && (
+          {sessionId !== null && capabilitiesFor(activeAgentKind).sharing && can("share") && (
             <div className={cn(FLOATING_PILL, PILL_ROW)}>
-              <ShareButton sessionId={session.sessionId} />
+              <ShareButton sessionId={sessionId} />
             </div>
           )}
-          {session && !isSubAgent && SessionHeaderActions && (
+          {sessionId !== null && !isSubAgent && SessionHeaderActions && (
             <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
-              <SessionHeaderActions sessionId={session.sessionId} />
+              <SessionHeaderActions sessionId={sessionId} />
             </div>
           )}
-          {session && !isSubAgent && archiveToggle && (
+          {sessionId !== null && !isSubAgent && archiveToggle && (
             <PillIconButton
               icon={archiveToggle.icon}
               label={archiveToggle.label}
@@ -262,7 +273,7 @@ export const FloatingChrome = memo(function FloatingChrome({
                 <MoreHorizontal data-icon="inline-start" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" sideOffset={6} className="w-64">
-                {session && !isSubAgent && permissions.send && actions.handleProviderHandoff && (
+                {sessionId !== null && !isSubAgent && permissions.send && actions.handleProviderHandoff && (
                   <>
                     <DropdownMenuGroup>
                       <DropdownMenuItem onClick={actions.handleProviderHandoff}>

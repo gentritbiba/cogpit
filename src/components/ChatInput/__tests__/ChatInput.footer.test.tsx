@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   session: null as { sessionId: string } | null,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   // No plugin runtime is mounted here, so composer plugins never read these.
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,

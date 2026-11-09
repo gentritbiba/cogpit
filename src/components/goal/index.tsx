@@ -1,7 +1,8 @@
 import { Flag } from "lucide-react"
 import type { ReactNode } from "react"
 import { capabilitiesFor, type AgentKind } from "@/lib/agents"
-import type { SessionView } from "../../../shared/session/sessionDigest"
+import type { TranscriptGoalState } from "../../../shared/session/sessionDigest"
+import { useOpenSession } from "@/contexts/SessionContext"
 import { Button } from "@/components/ui/button"
 import { ThreadGoalProvider } from "./ThreadGoalProvider"
 import { TranscriptGoalProvider } from "./TranscriptGoalProvider"
@@ -9,7 +10,7 @@ import { useGoalControls } from "./context"
 
 interface GoalProviderProps {
   agentKind: AgentKind
-  session: SessionView
+  sessionId: string
   /** Resolves false when the session refused the command. */
   onSendCommand: (command: string) => Promise<boolean>
   children: ReactNode
@@ -18,18 +19,23 @@ interface GoalProviderProps {
 /** Owns the session's long-running goal so the composer can place its two
  *  pieces independently: a full-width row above the input, and a compact
  *  trigger that lives inline with the other composer settings. */
-export function GoalProvider({ agentKind, session, onSendCommand, children }: GoalProviderProps) {
+function sameGoal(a: TranscriptGoalState | null, b: TranscriptGoalState | null): boolean {
+  return a === b || (a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b))
+}
+
+export function GoalProvider({ agentKind, sessionId, onSendCommand, children }: GoalProviderProps) {
   const goals = capabilitiesFor(agentKind).goals
+  const transcriptGoal = useOpenSession((open) => open?.digest.goal ?? null, sameGoal)
   if (goals === "thread-api") {
     return (
-      <ThreadGoalProvider agentKind={agentKind} threadId={session.sessionId}>
+      <ThreadGoalProvider agentKind={agentKind} threadId={sessionId}>
         {children}
       </ThreadGoalProvider>
     )
   }
   if (goals === "transcript") {
     return (
-      <TranscriptGoalProvider agentKind={agentKind} session={session} onSendCommand={onSendCommand}>
+      <TranscriptGoalProvider agentKind={agentKind} goal={transcriptGoal} onSendCommand={onSendCommand}>
         {children}
       </TranscriptGoalProvider>
     )

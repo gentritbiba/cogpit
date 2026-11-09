@@ -1,10 +1,12 @@
-import { useReducer } from "react"
+import { useState } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
+import { createStore, shallowEqual, useStoreSelector, type Store } from "@/lib/store"
 import type { AgentKind } from "@/lib/agents"
 import type { Turn } from "../../shared/session/types"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
-import type { MobileTab } from "@/components/MobileNav"
+
+export type MobileTab = "chat" | "sessions" | "workspace"
 
 /** "extension" is a main view an edition registers, named by `extensionViewId`. */
 export type MainView = "sessions" | "config" | "mission" | "extension"
@@ -46,6 +48,16 @@ export interface SessionState {
   mobileTab: MobileTab
   dashboardProject: string | null
 }
+
+/** What the paged, streamed session content is kept in. */
+type SessionContentKey = "session" | "windowTurns" | "olderTurns" | "seamOpen"
+
+/**
+ * Everything but the open session's content: which session is open and how
+ * the app around it is set up. It stays the same object while the session
+ * streams, so what reads only this does not re-render on a live batch.
+ */
+export type SessionShellState = Omit<SessionState, SessionContentKey>
 
 export type SessionAction =
   | { type: "LOAD_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
@@ -314,6 +326,33 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
   }
 }
 
-export function useSessionState() {
-  return useReducer(sessionReducer, initialState)
+export type SessionStore = Store<SessionState, SessionAction>
+
+function selectShell({ session: _session, windowTurns: _window, olderTurns: _older, seamOpen: _seam, ...shell }: SessionState): SessionShellState {
+  return shell
+}
+
+/**
+ * The session state of one shell. The open session's content stays in
+ * `store`: components select what they show from it, so a streamed batch
+ * re-renders only those, never everything below the caller.
+ */
+/** A store holding `session`, open with nothing paged in; empty by default. */
+export function createSessionStore(session: SessionView | null = null): SessionStore {
+  return createStore(sessionReducer, { ...initialState, ...openSession(session) })
+}
+
+export function useSessionState(): readonly [SessionShellState, SessionStore["dispatch"], SessionStore] {
+  const [store] = useState(() => createSessionStore())
+  const state = useStoreSelector(store, selectShell, shallowEqual)
+  return [state, store.dispatch, store]
+}
+
+/** A value derived from the open session; re-renders only when it changes by `isEqual`. */
+export function useSessionSelector<T>(
+  store: SessionStore,
+  select: (session: SessionView | null) => T,
+  isEqual?: (a: T, b: T) => boolean,
+): T {
+  return useStoreSelector(store, (state: SessionState) => select(state.session), isEqual)
 }

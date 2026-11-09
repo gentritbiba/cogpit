@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Check, Flag, Pencil, Trash2, X } from "lucide-react"
-import type { SessionView, TranscriptGoalState } from "../../../shared/session/sessionDigest"
+import type { TranscriptGoalState } from "../../../shared/session/sessionDigest"
 import type { AgentKind } from "@/lib/agents"
 import { agentShortName } from "@/lib/agents/presentation"
 import { formatTokenCount } from "@/lib/format"
@@ -29,7 +29,8 @@ function statusVariant(status: TranscriptGoalState["status"]): "secondary" | "de
 
 interface TranscriptGoalProviderProps {
   agentKind: AgentKind
-  session: SessionView
+  /** The goal the transcript last recorded, or null when none is set. */
+  goal: TranscriptGoalState | null
   /** Resolves false when the session refused the command. */
   onSendCommand: (command: string) => Promise<boolean>
   children: ReactNode
@@ -39,9 +40,8 @@ interface TranscriptGoalProviderProps {
  * Goal controls for an agent whose goal state is read back from its own
  * transcript and set with a `/goal` slash command.
  */
-export function TranscriptGoalProvider({ agentKind, session, onSendCommand, children }: TranscriptGoalProviderProps) {
+export function TranscriptGoalProvider({ agentKind, goal: parsedGoal, onSendCommand, children }: TranscriptGoalProviderProps) {
   const agentName = agentShortName(agentKind)
-  const parsedGoal = session.digest.goal
   const [optimisticGoal, setOptimisticGoal] = useState<TranscriptGoalState | null | undefined>()
   const [editing, setEditing] = useState(false)
   const [condition, setCondition] = useState("")

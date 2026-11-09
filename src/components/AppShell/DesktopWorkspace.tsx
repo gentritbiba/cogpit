@@ -14,7 +14,7 @@ import { DesktopWorkspacePanels } from "@/components/workspace-panels/DesktopWor
 import { ViewPanelProvider } from "@/components/views/ViewPanelContext"
 import { availableWorkspacePanels } from "@/components/workspace-panels/WorkspaceActivityBar"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { useMainView } from "@/edition/hooks"
 import { can } from "@/lib/capabilities"
@@ -59,8 +59,8 @@ function DesktopSessionContent({
   sessionView,
   floatingChrome,
 }: Pick<DesktopAppShellProps, "sessionView"> & { floatingChrome: ReactNode }) {
-  const { session } = useSessionContext()
-  if (!session) return null
+  const hasSession = useOpenSession((open) => open !== null)
+  if (!hasSession) return null
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -100,7 +100,8 @@ function DesktopMainView({
   floatingChrome,
 }: DesktopViewProps & { view: DesktopMainView; extensionView: EditionMainView | null; floatingChrome: ReactNode }) {
   const { state, config } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
+  const { sessionSource } = useSessionControls()
+  const sessionCwd = useOpenSession((open) => open?.cwd)
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
 
@@ -110,7 +111,7 @@ function DesktopMainView({
         <div className="motion-session-enter flex min-h-0 flex-1 pt-10">
           <ConfigBrowser
             projectPath={resolveDesktopProjectPath({
-              sessionCwd: session?.cwd,
+              sessionCwd,
               pendingPath,
               sessionDirPath: sessionSource?.dirName ? dirNameToPath(sessionSource.dirName) : null,
               dashboardProjectPath: state.dashboardProject ? dirNameToPath(state.dashboardProject) : null,
@@ -241,8 +242,9 @@ export function DesktopWorkspace({
   chrome,
 }: DesktopAppShellProps) {
   const { state, config } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
-  const openCrew = useOpenSessionCrew(session?.sessionId ?? null)
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const openCrew = useOpenSessionCrew(sessionId)
   const [pluginsOpen, setPluginsOpen] = useState(() => new URLSearchParams(window.location.search).get("pluginSafeMode") === "1")
   const [pluginSettingsId, setPluginSettingsId] = useState<string>()
   const openPluginSettings = useCallback((pluginId: string) => { setPluginSettingsId(pluginId); setPluginsOpen(true) }, [])
@@ -276,7 +278,7 @@ export function DesktopWorkspace({
 
   const view = resolveDesktopMainView({
     mainView: state.mainView,
-    hasSession: Boolean(session),
+    hasSession: sessionId !== null,
     pendingDirName: state.pendingDirName,
     extensionViewAvailable: extensionView !== null,
   })
@@ -302,7 +304,7 @@ export function DesktopWorkspace({
   const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config" && !isHome
 
   const panelContext: WorkspacePanelContext = {
-    session,
+    sessionId,
     sessionAddress: sessionSource ? { dirName: sessionSource.dirName, fileName: sessionSource.fileName } : null,
     sessionChangeKey: state.sessionChangeKey,
     projectPath: project.currentCwd ?? null,

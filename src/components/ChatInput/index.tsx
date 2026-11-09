@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore, useLayoutEffect, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionChatContext, useSessionControls } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
@@ -138,9 +138,11 @@ function getActionRowClass(stacked: boolean, isMultiline: boolean): string {
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(props, ref) {
-  const { session, sessionSource } = useSessionContext()
-  const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", session?.sessionId ?? "pending"])
-  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? session?.cwd ?? "", identity])
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const sessionCwd = useOpenSession((open) => open?.cwd)
+  const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", sessionId ?? "pending"])
+  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? sessionCwd ?? "", identity])
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 
@@ -150,8 +152,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const initial = useRef(snapshot.draft).current
   const mounted = useRef(true)
   const canAccessHostFiles = useCapability("hostFiles")
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
   const {
-    session,
     sessionSource,
     isLive,
     actions: { handleEditConfig: onEditConfig },
@@ -164,7 +166,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     slashSuggestionsLoading,
     turnError,
     promptSuggestion,
-  } = useSessionContext()
+  } = useSessionControls()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
 
@@ -194,7 +196,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const signInDirName = sessionSource?.dirName ?? composerIdentity
   const signInTarget = useMemo(() => signInTargetFor(agentKind ?? DEFAULT_AGENT_KIND, signInDirName), [agentKind, signInDirName])
   const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind ?? DEFAULT_AGENT_KIND)
-  const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
+  const openQuoteSource = useSessionControls().actions.handleOpenQuoteSource
 
   const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
   const applyDraft = useCallback((value: ComposerDraft) => {
@@ -315,13 +317,13 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
 
   const submitUserQuestion = useCallback(async (answer: string) => {
     const interaction = pendingInteraction
-    if (!session?.sessionId || interaction?.type !== "question") return
+    if (!sessionId || interaction?.type !== "question") return
 
     const question = interaction.questions[0]
     if (!question || !answer.trim()) return
 
     const result = await submitUserQuestionAnswers(
-      session.sessionId,
+      sessionId,
       interaction.toolUseId,
       { [question.question]: answer },
     )
@@ -330,7 +332,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     // errored, session restarted, …). Never swallow the user's text — deliver
     // it as a regular message instead so the input can't appear frozen.
     return result.ok || await onSend(answer)
-  }, [pendingInteraction, session?.sessionId, onSend])
+  }, [pendingInteraction, sessionId, onSend])
 
   const submitPlanResponse = useCallback(async (
     approved: boolean,
@@ -342,7 +344,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       interaction?.type === "plan"
       && interaction.provider === "copilot"
       && interaction.requestId
-      && session?.sessionId
+      && sessionId
     ) {
       const requestId = interaction.requestId
       if (planRespondingRequestRef.current) return false
@@ -350,7 +352,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       setPlanResponding(true)
       setPlanResponseError(null)
       try {
-        const submitted = await submitCopilotPlanResponse(session.sessionId, requestId, {
+        const submitted = await submitCopilotPlanResponse(sessionId, requestId, {
           approved,
           ...(selectedAction ? { selectedAction } : {}),
           ...(feedback ? { feedback } : {}),
@@ -368,7 +370,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     }
     onSend(approved ? "yes" : feedback || "no")
     return true
-  }, [pendingInteraction, session?.sessionId, onSend])
+  }, [pendingInteraction, sessionId, onSend])
 
   const focusComposerAtEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -446,13 +448,13 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       const delivery = pendingInteraction?.type === "question"
         ? submitUserQuestion(trimmed).then(Boolean)
         : textResponse ? submitPlanResponse(false, undefined, trimmed)
-          : session?.sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
+          : sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
             : onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload, (session) => emitComposerEvent(composer, { type: "created", sendId: entryId, session }))
       void delivery.then(settle, () => settle(false))
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind, signInTarget])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind, signInTarget])
   const handleSubmit = useCallback(() => submitText(text), [submitText, text])
 
   // Spoken text continues the draft; sending it sends the whole draft.

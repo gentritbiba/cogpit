@@ -18,7 +18,8 @@ interface Pending {
 }
 
 interface Inputs {
-  session: SessionView | null
+  /** The open session, read when a jump looks for its turn. */
+  getSession: () => SessionView | null
   sessionSource: SessionSource | null
   loadSession: (dirName: string, fileName: string) => void
   jumpToTurn: (index: number) => void
@@ -61,7 +62,8 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
 
   const evaluate = useCallback(() => {
     const pending = pendingRef.current
-    const { session, sessionSource, hasMore, loadMore, jumpToTurn } = latest.current
+    const { getSession, sessionSource, hasMore, loadMore, jumpToTurn } = latest.current
+    const session = getSession()
     if (!pending || pending.loading || !session || !shows(sessionSource, pending.source)) return
     const index = quoteTurnIndex(session, pending.source, pending.text)
     if (index >= 0) {

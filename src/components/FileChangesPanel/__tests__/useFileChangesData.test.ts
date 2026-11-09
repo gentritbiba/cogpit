@@ -6,7 +6,7 @@ import { makeEditToolCall, simpleSession } from "@/__tests__/fixtures"
 
 const api = vi.hoisted(() => ({ fetch: vi.fn(), source: { dirName: "project", watchOffset: 7, loadId: 1 } }))
 vi.mock("@/lib/auth", () => ({ authFetch: api.fetch }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContext: () => ({ sessionSource: api.source }) }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContext: () => ({ sessionSource: api.source }) }))
 vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
 vi.mock("@/lib/device", () => ({ deviceScopedKey: (key: string) => key }))
 import { useFileChangesData } from "../useFileChangesData"

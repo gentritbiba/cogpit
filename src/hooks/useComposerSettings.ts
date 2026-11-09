@@ -2,13 +2,16 @@ import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelCapabilities } from "@/hooks/useModelCapabilities"
 import type { SessionSource } from "@/lib/sessionSource"
-import type { SessionView } from "../../shared/session/sessionDigest"
+import type { ModelFallbackNotice } from "../../shared/session/sessionDigest"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind, descriptorFor } from "@/lib/agents"
 import { isUltracodeCapableModel } from "@/lib/utils"
 
 interface UseComposerSettingsOptions {
   agentKind: AgentKind | undefined
-  session: SessionView | null
+  /** The model the open session last ran, if one is open. */
+  sessionModel: string | undefined
+  /** The open session's latest model fallback. */
+  modelFallback: ModelFallbackNotice | null
   sessionSource: SessionSource | null
   pendingDirName: string | null
   isLive: boolean
@@ -20,7 +23,8 @@ interface UseComposerSettingsOptions {
  */
 export function useComposerSettings({
   agentKind,
-  session,
+  sessionModel,
+  modelFallback: fallback,
   sessionSource,
   pendingDirName,
   isLive,
@@ -42,7 +46,7 @@ export function useComposerSettings({
   } = useModelCapabilities(effectiveAgentKind, selectedModel, splitInstanceDirName(sessionSource?.dirName ?? pendingDirName).instanceId)
   const ultracodeAvailable = isUltracodeCapableModel(
     effectiveAgentKind,
-    selectedModel || session?.model,
+    selectedModel || sessionModel,
   )
   const ultracodeActive = ultracodeEnabled && ultracodeAvailable
   const effectiveEffort = normalizeEffort(selectedEffort)
@@ -100,7 +104,6 @@ export function useComposerSettings({
     return () => clearTimeout(timer)
   }, [modelFallbackNotice])
 
-  const fallback = session?.digest.modelFallback ?? null
   useEffect(() => {
     if (!isLive || !fallback) return
     if (!capabilitiesFor(effectiveAgentKind).modelFallbackNotices) return

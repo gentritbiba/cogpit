@@ -75,7 +75,8 @@ function renderSettings(initial: {
   return renderHook(
     (props: typeof initial) => useComposerSettings({
       agentKind: props.agentKind,
-      session: props.session ?? null,
+      sessionModel: props.session?.model,
+      modelFallback: props.session?.digest.modelFallback ?? null,
       sessionSource: props.source ?? null,
       pendingDirName: props.pendingDirName ?? null,
       isLive: props.isLive ?? false,

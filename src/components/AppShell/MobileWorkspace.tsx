@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useState } from "react"
 import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
 import { LayoutGrid, Puzzle, SlidersHorizontal } from "lucide-react"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { BuiltInPanelServicesProvider } from "@/components/workspace-panels/BuiltInPanelServices"
 import { MobileWorkspacePanels } from "@/components/workspace-panels/MobileWorkspacePanels"
 import { ViewPanelProvider } from "@/components/views/ViewPanelContext"
@@ -23,8 +23,9 @@ const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((modu
 
 export function MobileWorkspace({ navigation, sessionView, project, active }: MobileAppShellProps & { active: boolean }) {
   const { state } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
-  const openCrew = useOpenSessionCrew(session?.sessionId ?? null)
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const openCrew = useOpenSessionCrew(sessionId)
   const canAccessHostFiles = useCapability("hostFiles")
   const canUseBrowser = useCapability("browser")
   const canConfigure = useCapability("configWrite")
@@ -65,7 +66,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
   }
 
   const context: WorkspacePanelContext = {
-    session,
+    sessionId,
     sessionAddress: sessionSource ? { dirName: sessionSource.dirName, fileName: sessionSource.fileName } : null,
     sessionChangeKey: state.sessionChangeKey,
     projectPath: project.currentCwd ?? null,

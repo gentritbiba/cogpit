@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
-import type { SessionState, SessionAction } from "./useSessionState"
+import type { SessionShellState, SessionAction } from "./useSessionState"
 import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
 import { devicePathPrefix, getActiveDeviceId, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
@@ -8,7 +8,7 @@ import { fileNameFromUrlId } from "@/lib/agents"
 import { sessionPath } from "@/lib/revealSession"
 
 interface UseUrlSyncOpts {
-  state: SessionState
+  state: SessionShellState
   dispatch: Dispatch<SessionAction>
   isMobile: boolean
   resetTurnCount: (count: number) => void
@@ -56,7 +56,7 @@ function fileNameFromSessionId(dirName: string, sessionId: string): string {
   return fileNameFromUrlId(dirName, sessionId)
 }
 
-function stateToPath(state: SessionState): string {
+function stateToPath(state: SessionShellState): string {
   const prefix = devicePathPrefix()
   if (state.sessionSource) return sessionPath(state.sessionSource.dirName, state.sessionSource.fileName)
   if (state.pendingDirName) {

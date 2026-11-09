@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useSessionState } from "@/hooks/useSessionState"
+import { useSessionSelector, useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
 import type { SessionSource } from "@/lib/sessionSource"
 import { makeToolCall, makeTurn } from "@/__tests__/fixtures"
@@ -47,7 +47,7 @@ function renderState() {
 }
 
 function getState(hook: ReturnType<typeof renderState>): SessionState {
-  return hook.result.current[0]
+  return hook.result.current[2].getState()
 }
 
 function getSession(hook: ReturnType<typeof renderState>): SessionView {
@@ -63,6 +63,44 @@ function dispatch(hook: ReturnType<typeof renderState>, ...actions: Parameters<t
 // ── Initial State ───────────────────────────────────────────────────────
 
 describe("useSessionState", () => {
+  describe("the shell state and the store", () => {
+    it("does not re-render its caller for a streamed batch, only for what the shell shows", () => {
+      let renders = 0
+      const hook = renderHook(() => { renders++; return useSessionState() })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
+      const shell = hook.result.current[0]
+      const rendered = renders
+
+      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }) })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
+      expect(renders).toBe(rendered)
+      expect(hook.result.current[0]).toBe(shell)
+      expect(getSession(hook).turns.map((turn) => turn.id)).toEqual(["t0", "t1"])
+      expect("session" in shell).toBe(false)
+
+      dispatch(hook, { type: "SET_SEARCH_QUERY", value: "needle" })
+      expect(renders).toBe(rendered + 1)
+      expect(hook.result.current[0].searchQuery).toBe("needle")
+    })
+
+    it("re-renders a selector's caller only when its value changes", () => {
+      const hook = renderState()
+      const store = hook.result.current[2]
+      let renders = 0
+      const selected = renderHook(() => { renders++; return useSessionSelector(store, (open) => open?.turns.length ?? 0) })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      expect(selected.result.current).toBe(1)
+      const rendered = renders
+
+      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1", assistantText: ["more"] })] }) })
+      expect(renders).toBe(rendered)
+
+      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" }), makeTurn({ id: "t2" })] }) })
+      expect(selected.result.current).toBe(2)
+      expect(renders).toBe(rendered + 1)
+    })
+  })
+
   describe("initial state", () => {
     it("starts with null session", () => {
       const hook = renderState()

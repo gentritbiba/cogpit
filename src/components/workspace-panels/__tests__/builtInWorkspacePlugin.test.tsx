@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import type { ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
+import { SessionProvider, type SessionChatContextValue, type SessionContextValue } from "@/contexts/SessionContext"
 import { builtInWorkspacePlugin } from "../builtInWorkspacePlugin"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import { collectWorkspacePanels, type WorkspacePanelContext } from "@/plugin-api"
@@ -10,7 +12,7 @@ const panels = collectWorkspacePanels([builtInWorkspacePlugin])
 
 function contextOf(overrides: Partial<WorkspacePanelContext> = {}): WorkspacePanelContext {
   return {
-    session: null,
+    sessionId: null,
     sessionChangeKey: 0,
     projectPath: "/repo",
     hasFileChanges: false,
@@ -18,6 +20,14 @@ function contextOf(overrides: Partial<WorkspacePanelContext> = {}): WorkspacePan
     canUseBrowser: true,
     ...overrides,
   }
+}
+
+function inSession(session: SessionView, node: ReactNode) {
+  return (
+    <SessionProvider value={{ session } as SessionContextValue} chatValue={{} as SessionChatContextValue}>
+      {node}
+    </SessionProvider>
+  )
 }
 
 function sessionDrivingAt(timestamp: string): SessionView {
@@ -118,21 +128,17 @@ describe("builtInWorkspacePlugin", () => {
     expect(screen.queryByRole("status", dot)).not.toBeInTheDocument()
     idle.unmount()
 
-    const stale = render(
-      <Indicator
-        context={contextOf({ session: sessionDrivingAt(new Date(Date.now() - 60_000).toISOString()) })}
-        active={false}
-      />,
-    )
+    const stale = render(inSession(
+      sessionDrivingAt(new Date(Date.now() - 60_000).toISOString()),
+      <Indicator context={contextOf({ sessionId: "cogpit-1" })} active={false} />,
+    ))
     expect(screen.queryByRole("status", dot)).not.toBeInTheDocument()
     stale.unmount()
 
-    render(
-      <Indicator
-        context={contextOf({ session: sessionDrivingAt(new Date().toISOString()) })}
-        active={false}
-      />,
-    )
+    render(inSession(
+      sessionDrivingAt(new Date().toISOString()),
+      <Indicator context={contextOf({ sessionId: "cogpit-1" })} active={false} />,
+    ))
     expect(screen.getByRole("status", dot)).toBeInTheDocument()
   })
 })
