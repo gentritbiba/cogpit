@@ -49,8 +49,13 @@ export interface CrewChatDelivery {
   sessionId: string
   scope: string
   kind: "mention" | "notification"
-  state: "pending" | "accepted" | "skipped"
+  /** `failed` is terminal: the member stayed out of reach for every attempt; `error` keeps the last reason. */
+  state: "pending" | "accepted" | "skipped" | "failed"
   error?: string
+  /** Failed attempts so far. */
+  attempts: number
+  /** Epoch ms before which the delivery is not tried again. */
+  nextAttemptAt: number
 }
 
 export function crewChatHandles(members: readonly { sessionId: string; name: string }[], rootId: string): Map<string, string> {
