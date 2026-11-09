@@ -5,6 +5,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { browserHome } from "../browser/paths"
+import { serverPort } from "../lib/portFile"
 import { noteBrowserProfiles } from "../browser/owners"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
 import { instanceDirName, instanceSessionId, splitInstanceSessionId, splitInstanceDirName } from "../../shared/session/instances"
@@ -22,11 +23,13 @@ export function providerInstanceEnvironment(instance: ProviderInstance, dataRoot
   const descriptor = descriptorFor(instance.agent)
   const userRoot = join(instance.homeDir, "user")
   for (const directory of [userRoot, join(userRoot, ".config"), join(userRoot, ".cache"), join(userRoot, ".local/share"), join(userRoot, "tmp")]) mkdirSync(directory, { recursive: true, mode: 0o700 })
-  const env: NodeJS.ProcessEnv = Object.fromEntries(["PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ", "COGPIT_PORT"].flatMap((key) => process.env[key] ? [[key, process.env[key]!]] : []))
+  const env: NodeJS.ProcessEnv = Object.fromEntries(["PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"].flatMap((key) => process.env[key] ? [[key, process.env[key]!]] : []))
   Object.assign(env, { HOME: userRoot, USERPROFILE: userRoot, XDG_CONFIG_HOME: join(userRoot, ".config"), XDG_CACHE_HOME: join(userRoot, ".cache"), XDG_DATA_HOME: join(userRoot, ".local/share"), TMPDIR: join(userRoot, "tmp"), TEMP: join(userRoot, "tmp"), TMP: join(userRoot, "tmp"), COGPIT_AGENT_WORKER: "1", COGPIT_AGENT_INSTANCE_ID: instance.id, COGPIT_WORKER_AGENT: instance.agent, COGPIT_WORKER_DATA_ROOT: join(instance.homeDir, "cogpit"), COGPIT_WORKER_CONFIG_PATH: join(instance.homeDir, "config.json"), COGPIT_ORCHESTRATION_ROOT: dataRoot, ELECTRON_RUN_AS_NODE: "1" })
   if (descriptor.cli.homeEnvVar) env[descriptor.cli.homeEnvVar] = instance.homeDir
   if (descriptor.cli.bundledBySdk) env.CLAUDE_CONFIG_DIR = instance.homeDir
   env.COGPIT_BROWSER_HOME = browserHome()
+  const port = serverPort()
+  if (port !== null) env.COGPIT_PORT = String(port)
   if (instance.executable) env.COGPIT_PROVIDER_EXECUTABLE = instance.executable
   if (instance.args) env.COGPIT_PROVIDER_ARGS = JSON.stringify(instance.args)
   return env
