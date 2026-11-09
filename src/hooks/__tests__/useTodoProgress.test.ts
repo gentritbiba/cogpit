@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
-import type { ParsedSession, Turn, ToolCall } from "../../../shared/session/types"
+import { createSessionStore } from "@/hooks/useSessionState"
+import type { Turn, ToolCall } from "../../../shared/session/types"
 import { emptyTurn } from "@/__tests__/fixtures"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
 
 function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
   return {
@@ -19,7 +21,7 @@ function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
 const makeTurn = (toolCalls: ToolCall[] = []) =>
   emptyTurn({ toolCalls, userMessage: "test", timestamp: "" })
 
-function makeSession(turns: Turn[]): ParsedSession {
+function makeSession(turns: Turn[]): SessionView {
   return {
     sessionId: "test-session",
     version: "1",
@@ -39,20 +41,50 @@ function makeSession(turns: Turn[]): ParsedSession {
       totalDurationMs: 0,
       turnCount: turns.length,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
+/** A store with `session` loaded, as the live stream updates it. */
+function loadedStore(session: SessionView | null) {
+  const store = createSessionStore()
+  if (session) store.dispatch({ type: "LOAD_SESSION", session, source: { dirName: "d", fileName: "s.jsonl", watchOffset: 0, loadId: 1 }, isMobile: false })
+  return store
+}
+
+function renderProgress(session: SessionView | null) {
+  const store = loadedStore(session)
+  return { store, ...renderHook(() => useTodoProgress(store)) }
+}
+
 describe("useTodoProgress", () => {
+  it("re-renders only when the progress changes, not on every streamed batch", () => {
+    const todos = [{ content: "Step 1", status: "in_progress" as const, activeForm: "Doing step 1" }]
+    const first = makeSession([makeTurn([makeToolCall({ name: "TodoWrite", input: { todos } })])])
+    let renders = 0
+    const store = loadedStore(first)
+    const { result } = renderHook(() => { renders++; return useTodoProgress(store) })
+    const shown = result.current
+
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "Read" })])]) }))
+    expect(renders).toBe(1)
+    expect(result.current).toBe(shown)
+
+    const done = [{ ...todos[0], status: "completed" as const }]
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "TodoWrite", input: { todos: done } })])]) }))
+    expect(renders).toBe(2)
+    expect(result.current!.completed).toBe(1)
+  })
+
   describe("null/empty cases", () => {
     it("returns null when session is null", () => {
-      const { result } = renderHook(() => useTodoProgress(null))
+      const { result } = renderProgress(null)
       expect(result.current).toBeNull()
     })
 
     it("returns null when session has no turns", () => {
       const session = makeSession([])
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current).toBeNull()
     })
 
@@ -61,7 +93,7 @@ describe("useTodoProgress", () => {
         makeTurn([makeToolCall({ name: "Read" })]),
         makeTurn([makeToolCall({ name: "Write" })]),
       ])
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current).toBeNull()
     })
 
@@ -74,7 +106,7 @@ describe("useTodoProgress", () => {
           }),
         ]),
       ])
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current).toBeNull()
     })
 
@@ -87,7 +119,7 @@ describe("useTodoProgress", () => {
           }),
         ]),
       ])
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current).toBeNull()
     })
   })
@@ -111,7 +143,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       expect(result.current).toMatchObject({ completed: 1, total: 2 })
       expect(result.current?.todos).toEqual([
@@ -135,7 +167,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       expect(result.current).not.toBeNull()
       expect(result.current!.todos).toEqual(todos)
@@ -168,7 +200,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       expect(result.current!.todos).toEqual(lateTodos)
       expect(result.current!.total).toBe(3)
@@ -191,7 +223,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       expect(result.current).not.toBeNull()
       expect(result.current!.todos).toEqual(todos)
@@ -212,7 +244,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current!.completed).toBe(3)
       expect(result.current!.total).toBe(3)
     })
@@ -229,7 +261,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current!.completed).toBe(0)
     })
   })
@@ -248,7 +280,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current!.inProgress).toEqual(todos[1])
     })
 
@@ -264,7 +296,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current!.inProgress).toBeNull()
     })
 
@@ -280,7 +312,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
       expect(result.current!.inProgress).toEqual(todos[0])
     })
   })
@@ -296,7 +328,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result, rerender } = renderHook(() => useTodoProgress(session))
+      const { result, rerender } = renderProgress(session)
       const first = result.current
 
       rerender()
@@ -319,15 +351,12 @@ describe("useTodoProgress", () => {
         makeTurn([makeToolCall({ name: "TodoWrite", input: { todos: todos2 } })]),
       ])
 
-      const { result, rerender } = renderHook(
-        ({ session }) => useTodoProgress(session),
-        { initialProps: { session: session1 } }
-      )
+      const { result, store } = renderProgress(session1)
 
       expect(result.current!.total).toBe(1)
       expect(result.current!.completed).toBe(0)
 
-      rerender({ session: session2 })
+      act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: session2 }))
 
       expect(result.current!.total).toBe(2)
       expect(result.current!.completed).toBe(1)
@@ -371,7 +400,7 @@ describe("useTodoProgress", () => {
         ]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       // Should use the TodoWrite from turn 3 (last one that has TodoWrite)
       expect(result.current!.total).toBe(3)
@@ -394,7 +423,7 @@ describe("useTodoProgress", () => {
         makeTurn([makeToolCall({ name: "Bash" })]),
       ])
 
-      const { result } = renderHook(() => useTodoProgress(session))
+      const { result } = renderProgress(session)
 
       expect(result.current!.total).toBe(1)
       expect(result.current!.completed).toBe(1)

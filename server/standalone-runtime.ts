@@ -14,6 +14,7 @@ import {
   setConfigPath,
 } from "./config"
 import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
+import { detachFromParentCogpit } from "./lib/parentCogpit"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "./sessionHosts/delegatedRequests"
 import { startSlack, stopSlack } from "./slack"
@@ -82,6 +83,7 @@ export async function startStandaloneServer({
   publishPort = false,
   legacyClickUpPath,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
+  detachFromParentCogpit()
   // First, before this start writes anything of its own.
   await beginServerStart(dataDir)
   const legacyPluginHost = await captureLegacyPluginHost(dataDir)

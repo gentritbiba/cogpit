@@ -1,5 +1,5 @@
 import { ConversationComposer } from "@/components/ConversationComposer"
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, lazy, Suspense, type ReactNode } from "react"
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,7 +18,7 @@ import { GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
 import { DelegatedRequests } from "@/components/DelegatedRequests"
 import { cn } from "@/lib/utils"
 import { ProcessPanel } from "@/components/ProcessPanel"
-import { BackgroundServers } from "@/components/stats/BackgroundServers"
+import { OpenSessionBackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
 import { QueuedTurns } from "@/components/QueuedTurns"
@@ -31,9 +31,9 @@ import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { useSessionWorkflows } from "@/hooks/useSessionWorkflows"
 import { usePtyChat } from "@/hooks/usePtyChat"
 import { useIsMobile } from "@/hooks/useIsMobile"
-import { useSessionState } from "@/hooks/useSessionState"
-import { useChatScroll } from "@/hooks/useChatScroll"
+import { useSessionSelector, useSessionState } from "@/hooks/useSessionState"
 import { useSessionActions } from "@/hooks/useSessionActions"
+import { useSessionController } from "@/hooks/useSessionController"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useTheme } from "@/hooks/useTheme"
@@ -60,16 +60,17 @@ import { useSessionConfigSync } from "@/hooks/useSessionConfigSync"
 import type { SessionConfig } from "@/lib/sessionConfig"
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
 import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
-import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
 import { detectPendingInteraction } from "../shared/session/parser"
 import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import type { ParsedSession, Turn } from "../shared/session/types"
+import type { Turn } from "../shared/session/types"
+import type { SessionView } from "../shared/session/sessionDigest"
+import { sameModelFallback, samePendingInteraction } from "@/lib/sessionFacts"
 import { newContextId, type ComposerAttachment, type ComposerContextItem } from "../shared/session/composerContext"
 import { useQuoteNavigation } from "@/hooks/useQuoteNavigation"
-import { hasEditToolCalls } from "../shared/session/edit-calls"
+import { turnsChangeFiles, workflowCallCount } from "@/lib/turnFacts"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
@@ -86,7 +87,7 @@ import { EditionUiFailedScreen } from "@/edition/EditionUiFailedScreen"
 import { useEditionUi } from "@/edition/hooks"
 import { useEditionUiReadiness } from "@/edition/load"
 import { AppProvider } from "@/contexts/AppContext"
-import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { OpenSessionProvider, type ChatState, type ScrollState, type SessionControls } from "@/contexts/SessionContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
@@ -95,11 +96,19 @@ import { permissionsForAccess } from "@/lib/sessionAccessPermissions"
 import { useSessionAccess } from "@/hooks/useSessionAccess"
 import { accessReadOnlyReason, SessionReadOnlyNotice, type ReadOnlyReason } from "@/components/SessionReadOnlyNotice"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
-import { withStartPrompt } from "@/lib/startPrompts"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
 const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
+
+// Facts App reads from the open session, at module scope so each runs only when the session changes.
+const selectSessionId = (open: SessionView | null) => open?.sessionId ?? null
+const selectCwd = (open: SessionView | null) => open?.cwd
+const selectModel = (open: SessionView | null) => open?.model
+const selectHasSession = (open: SessionView | null) => open !== null
+const selectChangesFiles = (open: SessionView | null) => open ? turnsChangeFiles(open.turns, open.cwd) : false
+const selectInteraction = (open: SessionView | null) => open ? detectPendingInteraction(open) : null
+const selectModelFallback = (open: SessionView | null) => open?.digest.modelFallback ?? null
 
 /** A fresh load brings back everything the server refused while its gate kept the caller out. */
 function reloadApp(): void {
@@ -119,9 +128,17 @@ export default function App() {
   const terminalEnabled = identityReady && me.capabilities.terminal
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
-  const [state, dispatch] = useSessionState()
+  // The open session's content lives in `sessionStore`. App reads only the
+  // facts it needs from it, so a streamed batch does not re-render the shell.
+  const [state, dispatchState, sessionStore] = useSessionState()
+  const getSession = useCallback(() => sessionStore.getState().session, [sessionStore])
+  const sessionId = useSessionSelector(sessionStore, selectSessionId)
+  const sessionCwd = useSessionSelector(sessionStore, selectCwd)
+  const sessionModel = useSessionSelector(sessionStore, selectModel)
+  const hasSession = useSessionSelector(sessionStore, selectHasSession)
   const { procBySession } = useSessionInventory()
-  const { parse: workerParse, append: workerAppend } = useParserWorker()
+  const { parse: workerParse, parsePage, append: workerAppend } = useParserWorker()
+  const { sessions, dispatch } = useSessionController(dispatchState, workerParse)
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
     dispatch({ type: "SET_OLDER_TURNS", turns: olderTurns })
@@ -130,17 +147,15 @@ export default function App() {
   // Stable prefetch callback bound to the current worker. Used by sidebar rows
   // to warm the LRU cache on hover-intent so a subsequent click is synchronous.
   const prefetchSession = useCallback(
-    (dirName: string, fileName: string) => {
-      void prefetchSessionFn(dirName, fileName, workerParse)
-    },
-    [workerParse],
+    (dirName: string, fileName: string) => sessions.prefetchSession({ dirName, fileName }),
+    [sessions],
   )
 
   const chunkedSession = useSessionPaging({
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
-    workerParse,
+    workerParse: parsePage,
     onOlderTurns: handleOlderTurns,
   })
 
@@ -151,7 +166,10 @@ export default function App() {
   // the cache reports no more chunks.
   const { loadMore: loadMoreTurns } = chunkedSession
   const searchHydrationActive = Boolean(state.searchQuery) && chunkedSession.hasMore
-  const loadedTurnCount = state.session?.turns.length ?? 0
+  const loadedTurnCount = useSessionSelector(
+    sessionStore,
+    useCallback((open: SessionView | null) => searchHydrationActive ? open?.turns.length ?? 0 : 0, [searchHydrationActive]),
+  )
   useEffect(() => {
     if (!searchHydrationActive) return
     void loadMoreTurns()
@@ -177,9 +195,7 @@ export default function App() {
     [toggleWorkspacePanel],
   )
   const handleSelectProject = useCallback((dirName: string | null) => {
-    startTransition(() => {
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
@@ -187,26 +203,22 @@ export default function App() {
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const currentAgentKind = state.sessionSource?.agentKind
     ?? agentKindForDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
-  const currentProcess = state.session?.sessionId
-    ? procBySession.get(state.session.sessionId)
-    : undefined
+  const currentProcess = sessionId ? procBySession.get(sessionId) : undefined
   const agentCapabilities = capabilitiesFor(currentAgentKind)
   const isReadOnlySession = isExternallyDrivenSession(currentAgentKind, currentProcess)
-  const sessionAccess = useSessionAccess(state.session?.sessionId ?? null)
+  const sessionAccess = useSessionAccess(sessionId)
   const sessionPermissions = permissionsForAccess(sessionAccess.level)
   const supportsWorktrees = agentCapabilities.worktrees
   const mcpEnabled = agentCapabilities.mcp && configAdminEnabled && sessionPermissions.mcp
   const slashSuggestions = useSlashSuggestions(
-    configAdminEnabled ? state.session?.cwd ?? pendingPath ?? undefined : undefined,
+    configAdminEnabled ? sessionCwd ?? pendingPath ?? undefined : undefined,
     configAdminEnabled && agentCapabilities.slashCommands,
   )
 
   const handleEditCommand = useCallback((commandName: string) => {
     if (!configAdminEnabled) return
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
-    startTransition(() => {
-      dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
-    })
+    dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
   }, [configAdminEnabled, dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
@@ -257,8 +269,8 @@ export default function App() {
     handleToggleProjectFiles,
     closeRightWorkspace,
   } = useProjectWorkspace({
-    sessionId: state.session?.sessionId,
-    sessionCwd: state.session?.cwd,
+    sessionId: sessionId ?? undefined,
+    sessionCwd,
     pendingPath,
     sessionDirName: state.sessionSource?.dirName,
     pendingDirName: state.pendingDirName,
@@ -270,7 +282,7 @@ export default function App() {
   })
 
   // TODO progress from session's TodoWrite tool calls
-  const todoProgress = useTodoProgress(state.session ?? null)
+  const todoProgress = useTodoProgress(sessionStore)
   const [todosExpanded, setTodosExpanded] = useState(false)
 
   // Derive the current project dirName from session, pending session, or dashboard selection
@@ -289,26 +301,16 @@ export default function App() {
 
   // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
   // Bash writes that bypass-permissions sessions produce instead.
-  const hasFileChanges = useMemo(() => {
-    const session = state.session
-    if (!session) return false
-    return session.turns.some((turn) =>
-      hasEditToolCalls(turn.toolCalls, session.cwd)
-      || turn.subAgentActivity.some((msg) => hasEditToolCalls(msg.toolCalls, session.cwd))
-    )
-  }, [state.session])
+  const hasFileChanges = useSessionSelector(sessionStore, selectChangesFiles)
 
   // Cheaply detect workflow runs from already-parsed turns (Workflow tool calls).
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
-  const workflowToolCallCount = useMemo(() => {
-    if (!state.session || !agentCapabilities.workflows) return 0
-    let n = 0
-    for (const turn of state.session.turns)
-      for (const tc of turn.toolCalls)
-        if (tc.name === "Workflow") n++
-    return n
-  }, [state.session, agentCapabilities.workflows])
+  const tracksWorkflows = agentCapabilities.workflows
+  const workflowToolCallCount = useSessionSelector(
+    sessionStore,
+    useCallback((open: SessionView | null) => open && tracksWorkflows ? workflowCallCount(open.turns) : 0, [tracksWorkflows]),
+  )
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
   // Workflows live under the top-level session dir; not shown on sub-agent views.
@@ -347,35 +349,27 @@ export default function App() {
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
   }, [hostFilesEnabled, openWorkspacePanel, isMobile])
 
-  const transcriptInteraction = useMemo(
-    () => state.session ? detectPendingInteraction(state.session) : null,
-    [state.session],
-  )
+  const transcriptInteraction = useSessionSelector(sessionStore, selectInteraction, samePendingInteraction)
 
-  // Live session streaming — wrapped in startTransition so React can
-  // interrupt these low-priority renders to process user interactions (clicks).
-  // After a reconnect or a failed parse, reload the session to catch missed messages.
-  // state.session is passed as `initialSession` so the hook can skip the
-  // duplicate worker parse on every source change (the session was already
-  // parsed by useSessionActions / useNewSession before dispatch).
-  const resyncHandlerRef = useRef<(() => void) | null>(null)
+  // The stream starts from the session the open controller already parsed, so
+  // the worker does not parse it twice. After a reconnect or a failed parse,
+  // the session reloads to catch missed messages.
+  const handleLiveUpdate = useCallback((session: SessionView, loadId: number) => {
+    dispatch({ type: "UPDATE_SESSION", session, loadId })
+  }, [dispatch])
   const {
-    isLive, sseState, isCompacting, streamingOverlayStore, turnError, agentProgress, promptSuggestion, rateLimit,
+    isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit,
   } = useLiveSession(
     state.sessionSource,
-    (updated) => {
-      startTransition(() => {
-        dispatch({ type: "UPDATE_SESSION", session: updated })
-      })
-    },
+    handleLiveUpdate,
     workerParse,
     workerAppend,
-    () => resyncHandlerRef.current?.(),
-    state.session,
+    sessions.reloadCurrent,
+    getSession,
   )
 
   // Background agents (shared between notifications + StatsPanel)
-  const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
+  const backgroundAgents = useBackgroundAgents(sessionCwd ?? null)
 
   // Permissions management
   const perms = usePermissions(currentAgentKind, config.freshInstall)
@@ -383,7 +377,7 @@ export default function App() {
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
   const permReqs = usePermissionRequests(
-    isReadOnlySession ? null : state.session?.sessionId ?? null,
+    isReadOnlySession ? null : sessionId,
   )
   const pendingInteraction = isReadOnlySession
     ? null
@@ -412,7 +406,8 @@ export default function App() {
     handleModelRejected,
   } = useComposerSettings({
     agentKind: currentAgentKind,
-    session: state.session,
+    sessionModel,
+    modelFallback: useSessionSelector(sessionStore, selectModelFallback, sameModelFallback),
     sessionSource: state.sessionSource,
     pendingDirName: state.pendingDirName,
     isLive,
@@ -423,12 +418,12 @@ export default function App() {
   // have changed elsewhere, and persist the user's changes back so other
   // devices/browsers see the same state.
   const sessionConfigKey = getSessionConfigKey(
-    state.session?.sessionId,
+    sessionId ?? undefined,
     state.sessionSource?.fileName,
   )
   const sessionConfig = useSessionConfigSync({
     sessionKey: sessionConfigKey,
-    sessionId: state.session?.sessionId ?? null,
+    sessionId,
     access: sessionAccess.level,
     values: {
       model: selectedModel,
@@ -491,6 +486,7 @@ export default function App() {
   } = useProjectSessionLaunch({
     permissionsConfig: perms.config,
     dispatch,
+    sessions,
     isMobile,
     defaultAgentKind: config.defaultAgentKind,
     pendingDirName: state.pendingDirName,
@@ -507,8 +503,8 @@ export default function App() {
   // Active agent chat
   const agentChat = usePtyChat({
     sessionSource: state.sessionSource,
-    parsedSessionId: state.session?.sessionId ?? null,
-    cwd: state.session?.cwd,
+    parsedSessionId: sessionId,
+    cwd: sessionCwd,
     permissions: pickedPermissions,
     onPermissionsApplied: perms.markApplied,
     settingsChange: sessionConfig.picked,
@@ -576,42 +572,36 @@ export default function App() {
     if (!isMobile) return
     dispatch({
       type: "GUARD_MOBILE_TAB",
-      hasSession: !!state.session || !!state.pendingDirName,
+      hasSession: hasSession || !!state.pendingDirName,
     })
-  }, [state.session, state.pendingDirName, state.mobileTab, isMobile, dispatch])
+  }, [hasSession, state.pendingDirName, state.mobileTab, isMobile, dispatch])
 
-  // Scroll management
-  const scroll = useChatScroll({
-    session: state.session,
-    isLive,
-    pendingMessages: agentChat.pendingMessages,
-    consumePending: agentChat.consumePending,
-    sessionChangeKey: state.sessionChangeKey,
-  })
-
-  const chatScrollRef = scroll.chatScrollRef
-  const resetFinalizedSessionTurnCount = scroll.resetTurnCount
-  const scrollFinalizedSessionToBottom = scroll.scrollToBottomInstant
+  // The transcript's scroll lives with the session provider, which renders on
+  // every live batch; the shell drives it through this handle.
+  const chatScroll = useRef<ScrollState>(null)
+  const scrollToBottomInstant = useCallback(() => chatScroll.current?.scrollToBottomInstant(), [])
+  const resetTurnCount = useCallback((count: number) => chatScroll.current?.resetTurnCount(count), [])
+  const requestScrollToTop = useCallback(() => chatScroll.current?.requestScrollToTop(), [])
 
   const handleTodosExpandedChange = useCallback((expanded: boolean) => {
     setTodosExpanded(expanded)
     // Scroll chat to compensate for padding change (pb-48 vs pb-32 = 64px)
     requestAnimationFrame(() => {
-      const el = chatScrollRef.current
+      const el = chatScroll.current?.chatScrollRef.current
       if (el) {
         el.scrollTo({ top: el.scrollTop + (expanded ? 64 : -64), behavior: "smooth" })
       }
     })
-  }, [chatScrollRef])
+  }, [])
 
   // Wire up the session-finalized bridge now that scroll is available. A layout
   // effect keeps render pure and installs the latest callback before user input
   // or passive effects can finalize a newly-created session.
   useLayoutEffect(() => {
-    const handleSessionFinalized = (_parsed: ParsedSession) => {
+    const handleSessionFinalized = (_parsed: SessionView) => {
       // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
-      resetFinalizedSessionTurnCount(0)
-      scrollFinalizedSessionToBottom()
+      resetTurnCount(0)
+      scrollToBottomInstant()
     }
     sessionFinalizedRef.current = handleSessionFinalized
     return () => {
@@ -619,7 +609,7 @@ export default function App() {
         sessionFinalizedRef.current = null
       }
     }
-  }, [resetFinalizedSessionTurnCount, scrollFinalizedSessionToBottom, sessionFinalizedRef])
+  }, [resetTurnCount, scrollToBottomInstant, sessionFinalizedRef])
 
   // Pre-session-switch cleanup: abort in-flight send-message and session creation
   // requests to free HTTP connections before fetching the new session data.
@@ -635,17 +625,15 @@ export default function App() {
     isMobile,
     mobileTab: state.mobileTab,
     teamContext,
-    scrollToBottomInstant: scroll.scrollToBottomInstant,
-    resetTurnCount: scroll.resetTurnCount,
-    workerParse,
+    scrollToBottomInstant,
+    resetTurnCount,
+    sessions,
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
   const handleOpenPaletteProject = useCallback((dirName: string) => {
-    startTransition(() => {
-      dispatch({ type: "GO_HOME", isMobile })
-      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-    })
+    dispatch({ type: "GO_HOME", isMobile })
+    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
   }, [dispatch, isMobile])
 
   // Sync URL <-> state
@@ -653,9 +641,9 @@ export default function App() {
     state,
     dispatch,
     isMobile,
-    resetTurnCount: scroll.resetTurnCount,
-    scrollToBottomInstant: scroll.scrollToBottomInstant,
-    workerParse,
+    resetTurnCount,
+    scrollToBottomInstant,
+    sessions,
   })
 
   // MRU session history for Ctrl+Tab switching
@@ -663,8 +651,7 @@ export default function App() {
 
   useSessionAccessLoss({
     openSessionId: (state.sessionSource && rootSessionIdOf(state.sessionSource.dirName, state.sessionSource.fileName))
-      ?? state.session?.sessionId
-      ?? null,
+      ?? sessionId,
     leave: actions.handleCloseSession,
     forgetVisits: sessionHistory.forget,
   })
@@ -679,7 +666,8 @@ export default function App() {
 
   // App-level handlers (extracted from App.tsx)
   const handlers = useAppHandlers({
-    state: { session: state.session, sessionSource: state.sessionSource },
+    state: { sessionId, sessionSource: state.sessionSource },
+    sessionStore,
     dispatch,
     isMobile,
     handleJumpToTurn: actions.handleJumpToTurn,
@@ -693,9 +681,9 @@ export default function App() {
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
     mcpConfig: mcpEnabled ? mcpData.mcpConfigJson : null,
-    scrollRequestScrollToTop: scroll.requestScrollToTop,
+    scrollRequestScrollToTop: requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
-    workerParse,
+    sessions,
     canInteract: sessionPermissions.canInteract,
   })
 
@@ -710,29 +698,16 @@ export default function App() {
   useEffect(() => {
     const justLoaded = mcpData.loaded && !mcpPrevLoadedRef.current
     mcpPrevLoadedRef.current = mcpData.loaded
-    const sessionId = state.session?.sessionId
     if (justLoaded && sessionId && mcpHasRestrictions && hasSettingsChanges) {
       handleApplySettings()
     }
-  }, [mcpData.loaded, mcpHasRestrictions, hasSettingsChanges, handleApplySettings, state.session?.sessionId])
-
-  // Wire the resync bridge after reloadSession is available. Layout timing
-  // guarantees useLiveSession's passive EventSource effect observes the latest
-  // committed handler, without leaking a discarded render through the ref.
-  useLayoutEffect(() => {
-    resyncHandlerRef.current = handlers.reloadSession
-    return () => {
-      if (resyncHandlerRef.current === handlers.reloadSession) {
-        resyncHandlerRef.current = null
-      }
-    }
-  }, [handlers.reloadSession])
+  }, [mcpData.loaded, mcpHasRestrictions, hasSettingsChanges, handleApplySettings, sessionId])
 
   // Undo/redo system
   const undoRedo = useUndoRedo(
-    state.session,
+    sessionStore,
     state.sessionSource,
-    handlers.reloadSession,
+    sessions.reloadCurrent,
     hostFilesEnabled && sessionPermissions.undo,
   )
 
@@ -816,6 +791,12 @@ export default function App() {
   const branchModalBranches = renderedBranchModalTurn !== null
     ? undoRedo.branchesAtTurn(renderedBranchModalTurn)
     : []
+  // Followed live only while the modal is up.
+  const branchModalShown = renderedBranchModalTurn !== null
+  const branchModalTurns = useSessionSelector(
+    sessionStore,
+    useCallback((open: SessionView | null) => branchModalShown ? open?.turns ?? null : null, [branchModalShown]),
+  )
 
   // Replaces the composer when the session can be read but not driven.
   let readOnlyReason: ReadOnlyReason | null = null
@@ -823,7 +804,7 @@ export default function App() {
   else if (isReadOnlySession) readOnlyReason = { kind: "external", agentKind: currentAgentKind }
   else readOnlyReason = accessReadOnlyReason(sessionAccess)
   const activeReadOnlyNode = readOnlyReason && <SessionReadOnlyNotice reason={readOnlyReason} />
-  const currentSessionId = state.session?.sessionId ?? null
+  const currentSessionId = sessionId
   const canHandoff = currentSessionId !== null && readOnlyReason === null
     && state.mainView === "sessions" && (!isMobile || state.mobileTab === "chat")
   const [providerHandoffSessionId, setProviderHandoffSessionId] = useState<string | null>(null)
@@ -842,38 +823,21 @@ export default function App() {
   else if (createError) clearActiveError = clearCreateError
 
   const showSseWarning = Boolean(
-    state.session
+    hasSession
     && state.sessionSource
     && sseState === "disconnected",
   )
 
   // ─── Build context values ──────────────────────────────────────────────────
 
-  // Fine-grained deps: re-create context only when fields that AppContext
-  // consumers actually use change.  state.session / state.sessionSource are
-  // deliberately excluded — consumers get session data from SessionContext.
-  // This prevents the entire component tree from re-rendering on every SSE
-  // update during streaming (~60 Hz), which previously starved the main
-  // thread and made buttons unclickable.
   const appContextValue = useMemo(() => ({
     state,
     dispatch,
     config,
     theme: themeCtx,
     isMobile,
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [
-    state.activeTurnIndex, state.activeToolCallId,
-    state.searchQuery, state.expandAll, state.expandToolPayloads,
-    state.mainView, state.extensionViewId, state.mobileTab,
-    state.dashboardProject, state.pendingDirName, state.pendingCwd,
-    state.currentMemberName, state.loadingMember,
-    state.configFilePath, state.sessionChangeKey,
-    dispatch, config, themeCtx, isMobile,
-  ])
+  }), [state, dispatch, config, themeCtx, isMobile])
 
-  // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
-  // so timeline components don't re-render when chat status or scroll indicators change.
   const handleAddComposerContext = useCallback((item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null => {
     const input = chatInputRef.current
     if (!input) return "Open a session or start a new one to add context"
@@ -884,7 +848,7 @@ export default function App() {
   }, [isMobile, dispatch])
 
   const handleOpenQuoteSource = useQuoteNavigation({
-    session: state.session,
+    getSession,
     sessionSource: state.sessionSource,
     loadSession: handlers.handleLoadSessionScrollAware,
     jumpToTurn: useCallback((index: number) => {
@@ -895,9 +859,9 @@ export default function App() {
     loadMore: chunkedSession.loadMore,
   })
 
-  const displayedSession = useMemo(() => state.session && withStartPrompt(state.session), [state.session])
-  const sessionContextValue = useMemo<SessionContextValue>(() => ({
-    session: displayedSession,
+  // Everything the session context carries but the session itself, which the
+  // provider reads from the store. Chat and scroll live in their own context.
+  const sessionControls = useMemo<SessionControls>(() => ({
     sessionSource: state.sessionSource,
     isLive,
     sseState,
@@ -929,7 +893,7 @@ export default function App() {
       handleOpenQuoteSource,
     },
   }), [
-    displayedSession, state.sessionSource,
+    state.sessionSource,
     isLive, sseState, isCompacting, turnError, promptSuggestion, rateLimit,
     undoRedo, pendingInteraction, isSubAgentView, sessionPermissions,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
@@ -940,27 +904,38 @@ export default function App() {
     canHandoff, handleProviderHandoff, handleAddComposerContext, handleOpenQuoteSource,
   ])
 
-  // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
-  // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
-  const sessionChatValue = useMemo<SessionChatContextValue>(() => ({
-    chat: {
-      status: agentChat.status,
-      error: agentChat.error,
-      pendingMessages: agentChat.pendingMessages,
-      isConnected: agentChat.isConnected,
-      sendMessage: agentChat.sendMessage,
-      interrupt: agentChat.interrupt,
-      stopAgent: agentChat.stopAgent,
-      consumePending: agentChat.consumePending,
-    },
-    scroll,
+  // The chat's status and actions; the provider pairs them with its scroll state.
+  const chatState = useMemo<ChatState>(() => ({
+    status: agentChat.status,
+    error: agentChat.error,
+    pendingMessages: agentChat.pendingMessages,
+    isConnected: agentChat.isConnected,
+    sendMessage: agentChat.sendMessage,
+    interrupt: agentChat.interrupt,
+    stopAgent: agentChat.stopAgent,
+    consumePending: agentChat.consumePending,
   }), [
     agentChat.status, agentChat.error, agentChat.pendingMessages, agentChat.isConnected,
     agentChat.sendMessage, agentChat.interrupt, agentChat.stopAgent, agentChat.consumePending,
-    scroll,
   ])
 
-  const isNewSession = !!state.pendingDirName && !state.session
+  // A deep link opens its session while the gates below still wait, so every
+  // screen App returns sits in this provider: the transcript's scroll host then
+  // sees that session open, as it does any later one.
+  const withOpenSession = (node: ReactNode) => (
+    <OpenSessionProvider
+      store={sessionStore}
+      controls={sessionControls}
+      chat={chatState}
+      isLive={isLive}
+      scrollHandle={chatScroll}
+      onSessionShown={sessionShown}
+    >
+      {node}
+    </OpenSessionProvider>
+  )
+
+  const isNewSession = !!state.pendingDirName && !hasSession
 
   // Opening a new session should land the caret in the composer right away.
   // Stays above the early-return gates below so hook order never changes.
@@ -971,13 +946,13 @@ export default function App() {
   }, [isNewSession, isMobile, state.pendingDirName])
 
   // The server's own edition UI did not download, and its screens need it.
-  if (editionLoad.failed) return <EditionUiFailedScreen onRetry={editionLoad.retry} />
+  if (editionLoad.failed) return withOpenSession(<EditionUiFailedScreen onRetry={editionLoad.retry} />)
 
   // ─── AUTH GATE (remote clients + local browsers on account sign-in) ─────────
   // A server of another edition also waits for its UI, so its sign-in and
   // setup screens are the edition's own.
   if (!networkAuth.authChecked || !editionLoad.serverReady) {
-    return (
+    return withOpenSession(
       <div
         className="dark flex h-dvh items-center justify-center bg-canvas"
         role="status"
@@ -993,21 +968,21 @@ export default function App() {
     // yet, so its first-time setup comes first. Password sign-in never asks.
     const EditionSetupScreen = editionUi.SetupScreen
     if (networkAuth.setupRequired && EditionSetupScreen) {
-      return (
+      return withOpenSession(
         <EditionSetupScreen
           onAuthenticated={networkAuth.handleAuthenticated}
           onSetupClosed={networkAuth.refreshServerState}
         />
       )
     }
-    return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} setupRequired={networkAuth.setupRequired} />
+    return withOpenSession(<LoginScreen onAuthenticated={networkAuth.handleAuthenticated} setupRequired={networkAuth.setupRequired} />)
   }
 
   // Do not mount privileged providers or child fetch effects under the
   // optimistic personal defaults while the signed-in account's capabilities
   // load, or while a device of another edition loads that edition's UI.
   if (!identityReady || !editionLoad.ready) {
-    return (
+    return withOpenSession(
       <div
         className="dark flex h-dvh items-center justify-center bg-canvas"
         role="status"
@@ -1024,7 +999,7 @@ export default function App() {
   // are cleared and the gate screen's own toasts show alone.
   if (me.gate) {
     const GateScreen = editionUi.GateScreen ?? DefaultGateScreen
-    return (
+    return withOpenSession(
       <>
         <GateScreen gate={me.gate} onRestored={reloadApp} onLogout={networkAuth.logout} />
         <AppStatusToasts
@@ -1040,7 +1015,7 @@ export default function App() {
 
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
-    return (
+    return withOpenSession(
       <div className="dark flex h-dvh items-center justify-center bg-canvas" role="status" aria-label="Loading">
         <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
@@ -1048,7 +1023,7 @@ export default function App() {
   }
 
   if (config.configError) {
-    return (
+    return withOpenSession(
       <div className="dark flex h-dvh items-center justify-center bg-canvas text-foreground">
         <Empty>
           <EmptyHeader>
@@ -1070,8 +1045,8 @@ export default function App() {
   }
 
   if (!config.claudeDir) {
-    if (configAdminEnabled) return <SetupScreen onConfigured={config.retryConfig} />
-    return (
+    if (configAdminEnabled) return withOpenSession(<SetupScreen onConfigured={config.retryConfig} />)
+    return withOpenSession(
       <div className="dark flex h-dvh items-center justify-center bg-canvas text-sm text-muted-foreground">
         Cogpit is waiting for an administrator to finish server setup.
       </div>
@@ -1100,8 +1075,8 @@ export default function App() {
     />
   ) : null
 
-  const branchModalCurrentTurns = renderedBranchModalTurn !== null && state.session
-    ? state.session.turns.slice(renderedBranchModalTurn)
+  const branchModalCurrentTurns = renderedBranchModalTurn !== null && branchModalTurns
+    ? branchModalTurns.slice(renderedBranchModalTurn)
     : []
 
   const branchModal = hostFilesEnabled && renderedBranchModalTurn !== null && branchModalBranches.length > 0 && (
@@ -1167,7 +1142,7 @@ export default function App() {
     </Suspense>
   )
 
-  const goalSession = agentCapabilities.goals ? state.session : null
+  const goalSessionId = agentCapabilities.goals ? sessionId : null
 
   const buildChatInputSettings = (includeGoal: boolean) => (
     <ChatInputSettings
@@ -1188,7 +1163,7 @@ export default function App() {
       ultracodeEnabled={ultracodeActive}
       onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
       onApplySettings={handlers.handleApplySettings}
-      activeModelId={state.session?.model}
+      activeModelId={sessionModel}
       mcpServers={mcpEnabled ? mcpData.servers : undefined}
       selectedMcpServers={mcpEnabled ? mcpData.selectedServers : undefined}
       onToggleMcpServer={mcpEnabled ? mcpData.toggleServer : undefined}
@@ -1198,8 +1173,8 @@ export default function App() {
       onMcpAuth={mcpEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
-      mobileExtra={includeGoal && goalSession ? <GoalTrigger /> : undefined}
-      trailingExtra={includeGoal && goalSession ? <GoalTrigger /> : undefined}
+      mobileExtra={includeGoal && goalSessionId ? <GoalTrigger /> : undefined}
+      trailingExtra={includeGoal && goalSessionId ? <GoalTrigger /> : undefined}
     />
   )
   const chatInputSettingsNode = buildChatInputSettings(true)
@@ -1207,7 +1182,7 @@ export default function App() {
 
   const composer = (
     <div className={cn("shrink-0", isMobile && "bg-background")}>
-      <DelegatedRequests sessionId={isReadOnlySession ? null : state.session?.sessionId ?? null} />
+      <DelegatedRequests sessionId={isReadOnlySession ? null : sessionId} />
       <GoalSection />
       <ChatInput
         ref={chatInputRef}
@@ -1222,7 +1197,7 @@ export default function App() {
 
   const composerWithQueue = (
     <ConversationComposer
-      sessionId={state.session?.sessionId ?? null}
+      sessionId={sessionId}
       readOnly={isReadOnlySession || !sessionPermissions.send}
       onOpen={actions.handleDashboardSelect}
       handoffOpen={canHandoff && providerHandoffSessionId === currentSessionId}
@@ -1233,10 +1208,10 @@ export default function App() {
       {composer}
     </ConversationComposer>
   )
-  const chatInputNode = goalSession ? (
+  const chatInputNode = goalSessionId ? (
     <GoalProvider
       agentKind={currentAgentKind}
-      session={goalSession}
+      sessionId={goalSessionId}
       onSendCommand={agentChat.sendMessage}
     >
       {composerWithQueue}
@@ -1264,13 +1239,9 @@ export default function App() {
   const statsPanelVisible = isMobile
     ? state.mobileTab === "workspace" && panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
     : panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
-  const backgroundServers = state.session && !statsPanelVisible && (
+  const backgroundServers = hasSession && !statsPanelVisible && (
     <div className="hidden">
-      <BackgroundServers
-        cwd={state.session.cwd}
-        turns={state.session.turns}
-        onServersChanged={processPanel.handleServersChanged}
-      />
+      <OpenSessionBackgroundServers onServersChanged={processPanel.handleServersChanged} />
     </div>
   )
 
@@ -1278,10 +1249,9 @@ export default function App() {
   // Reuse the exact live-session contexts and composer while removing every
   // navigation/dashboard surface from the rendered product.
   if (previewSessionId) {
-    return (
+    return withOpenSession(
       <AppProvider value={appContextValue}>
       <PtyProvider>
-      <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider store={streamingOverlayStore} agentProgress={agentProgress}>
         <PreviewAppShell
           sessionId={previewSessionId}
@@ -1293,7 +1263,6 @@ export default function App() {
           onLoadMoreTurns={chunkedSession.loadMore}
         />
       </StreamingOverlayProvider>
-      </SessionProvider>
       </PtyProvider>
       {toasterNode}
       </AppProvider>
@@ -1302,10 +1271,9 @@ export default function App() {
 
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
-    return (
+    return withOpenSession(
       <AppProvider value={appContextValue}>
       <PtyProvider enabled={terminalEnabled}>
-      <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider store={streamingOverlayStore} agentProgress={agentProgress}>
         <MobileAppShell
           navigation={{
@@ -1362,7 +1330,6 @@ export default function App() {
           }}
         />
       </StreamingOverlayProvider>
-      </SessionProvider>
       </PtyProvider>
       {toasterNode}
       </AppProvider>
@@ -1370,10 +1337,9 @@ export default function App() {
   }
 
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
-  return (
+  return withOpenSession(
     <AppProvider value={appContextValue}>
     <PtyProvider enabled={terminalEnabled}>
-    <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider store={streamingOverlayStore} agentProgress={agentProgress}>
         <DesktopAppShell
           navigation={{
@@ -1447,7 +1413,6 @@ export default function App() {
           }}
         />
       </StreamingOverlayProvider>
-      </SessionProvider>
     </PtyProvider>
     {toasterNode}
     </AppProvider>

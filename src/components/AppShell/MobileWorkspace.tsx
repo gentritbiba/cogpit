@@ -2,9 +2,10 @@ import { lazy, Suspense, useCallback, useState } from "react"
 import { useOpenSessionCrew } from "@/hooks/useOpenSessionCrew"
 import { LayoutGrid, Puzzle, SlidersHorizontal } from "lucide-react"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { BuiltInPanelServicesProvider } from "@/components/workspace-panels/BuiltInPanelServices"
 import { MobileWorkspacePanels } from "@/components/workspace-panels/MobileWorkspacePanels"
+import { StatusPanelProvider } from "@/components/board/StatusPanelContext"
 import { ViewPanelProvider } from "@/components/views/ViewPanelContext"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { WorkspacePanelContext } from "@/plugin-api"
@@ -23,8 +24,9 @@ const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((modu
 
 export function MobileWorkspace({ navigation, sessionView, project, active }: MobileAppShellProps & { active: boolean }) {
   const { state } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
-  const openCrew = useOpenSessionCrew(session?.sessionId ?? null)
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const openCrew = useOpenSessionCrew(sessionId)
   const canAccessHostFiles = useCapability("hostFiles")
   const canUseBrowser = useCapability("browser")
   const canConfigure = useCapability("configWrite")
@@ -65,7 +67,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
   }
 
   const context: WorkspacePanelContext = {
-    session,
+    sessionId,
     sessionAddress: sessionSource ? { dirName: sessionSource.dirName, fileName: sessionSource.fileName } : null,
     sessionChangeKey: state.sessionChangeKey,
     projectPath: project.currentCwd ?? null,
@@ -113,6 +115,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
         shown={active && panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.views}
         onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.views)}
       >
+      <StatusPanelProvider openSessionId={sessionId} onReveal={() => panels.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.status)}>
       <MobileWorkspacePanels
         panels={workspacePanels}
         context={context}
@@ -133,6 +136,7 @@ export function MobileWorkspace({ navigation, sessionView, project, active }: Mo
           </Suspense>
         ) : null}
       />
+      </StatusPanelProvider>
       </ViewPanelProvider>
       {pluginsOpen && canConfigure && <Suspense fallback={null}>
         <PluginsDialog client={runtimePlugins.client} state={runtimePlugins} currentPath={project.currentCwd ?? null} initialPluginId={pluginSettingsId}

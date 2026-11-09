@@ -2,9 +2,10 @@ import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch } from "react"
 import { useNewSession } from "@/hooks/useNewSession"
 import { loadProjects } from "@/lib/projectsStore"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionView } from "../../shared/session/sessionDigest"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
+import type { SessionController } from "@/lib/sessionLoader"
 import {
   DISCOVERED_DIRNAME_KIND,
   agentKindForDirName,
@@ -16,6 +17,7 @@ import {
 interface UseProjectSessionLaunchOptions {
   permissionsConfig: PermissionsConfig
   dispatch: Dispatch<SessionAction>
+  sessions: SessionController
   isMobile: boolean
   defaultAgentKind: AgentKind
   pendingDirName: string | null
@@ -40,6 +42,7 @@ interface UseProjectSessionLaunchOptions {
 export function useProjectSessionLaunch({
   permissionsConfig,
   dispatch,
+  sessions,
   isMobile,
   defaultAgentKind,
   pendingDirName,
@@ -52,13 +55,14 @@ export function useProjectSessionLaunch({
   mcpConfig,
   onModelRejected,
 }: UseProjectSessionLaunchOptions) {
-  const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
+  const sessionFinalizedRef = useRef<((parsed: SessionView) => void) | null>(null)
   const liveSessionsRefreshRef = useRef<(() => void) | null>(null)
   const [pendingFirstMessage, setPendingFirstMessage] = useState<string | null>(null)
 
   const newSession = useNewSession({
     permissionsConfig,
     dispatch,
+    sessions,
     isMobile,
     onSessionFinalized: (parsed) => {
       sessionFinalizedRef.current?.(parsed)

@@ -3,7 +3,8 @@ import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { AgentCard, type AgentStatus } from "@/components/stats/AgentCard"
-import type { ParsedSession, ToolCall } from "../../../shared/session/types"
+import type { ToolCall } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { parseSubAgentPath } from "@/lib/format"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import { authFetch } from "@/lib/auth"
@@ -42,7 +43,7 @@ function isAgentToolCall(toolCall: ToolCall): boolean {
   return toolCall.name === "Task" || toolCall.name === "Agent"
 }
 
-function extractInlineAgents(session: ParsedSession, streamingOverlay: StreamingOverlay): InlineAgent[] {
+function extractInlineAgents(session: SessionView, streamingOverlay: StreamingOverlay): InlineAgent[] {
   const seen = new Map<string, InlineAgent>()
   for (const turn of session.turns) {
     for (const block of turn.contentBlocks) {
@@ -102,7 +103,7 @@ function extractInlineAgents(session: ParsedSession, streamingOverlay: Streaming
 // ── Props ───────────────────────────────────────────────────────────────────
 
 interface AgentsPanelProps {
-  session: ParsedSession
+  session: SessionView
   sessionSource?: { dirName: string; fileName: string } | null
   bgAgents: BgAgent[]
   /** Whether the user may stop the session's background agents. */

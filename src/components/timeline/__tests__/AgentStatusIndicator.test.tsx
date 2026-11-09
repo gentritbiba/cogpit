@@ -1,35 +1,33 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  SessionProvider,
-  type SessionChatContextValue,
-  type SessionContextValue,
-} from "@/contexts/SessionContext"
+import { InSession } from "@/__tests__/InSession"
+import type { SessionControls } from "@/contexts/SessionContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { EMPTY_OVERLAY } from "@/lib/streamingOverlay"
-import type { ParsedSession } from "../../../../shared/session/types"
 import { AgentStatusIndicator, LiveElapsed } from "../AgentStatusIndicator"
 import { registerSignInRunner } from "@/lib/agents/signIn"
+import { computeSessionDigest, type SessionDigest, type SessionView } from "../../../../shared/session/sessionDigest"
+import type { RawRecord } from "../../../../shared/session/types"
 
 interface MockSession {
-  rawMessages: Array<Record<string, unknown>>
+  digest: SessionDigest
   turns: []
   sessionId?: string
 }
 
 function completedSession(): MockSession {
   return {
-    rawMessages: [
+    digest: computeSessionDigest([
       { type: "user" },
       { type: "assistant", message: { stop_reason: "end_turn" } },
-    ],
+    ]),
     turns: [],
   }
 }
 
 function awaitingAgentsSession(): MockSession {
   return {
-    rawMessages: [
+    digest: computeSessionDigest([
       { type: "user", message: { role: "user", content: "go" } },
       {
         type: "user",
@@ -37,7 +35,7 @@ function awaitingAgentsSession(): MockSession {
         toolUseResult: { status: "async_launched", agentId: "ag1", description: "Explore the parser" },
       },
       { type: "assistant", message: { stop_reason: "end_turn" } },
-    ],
+    ]),
     turns: [],
   }
 }
@@ -53,28 +51,26 @@ function agentLaunch(toolUseId: string, agentId: string, description: string) {
 
 function agentBatchSession(): MockSession {
   return {
-    rawMessages: [
+    digest: computeSessionDigest([
       { type: "user", message: { role: "user", content: "go" } },
       agentLaunch("tu1", "ag1", "Read the parser"),
       agentLaunch("tu2", "ag2", "Read the renderer"),
       { type: "assistant", message: { stop_reason: "end_turn" } },
       { type: "user", message: { role: "user", content: "<task-notification>\n<task-id>ag1</task-id>\n</task-notification>" } },
       { type: "assistant", message: { stop_reason: "end_turn" } },
-    ],
+    ]),
     turns: [],
   }
 }
 
 function thinkingSession(): MockSession {
   return {
-    rawMessages: [
+    digest: computeSessionDigest([
       { type: "assistant", message: { stop_reason: null } },
-    ],
+    ]),
     turns: [],
   }
 }
-
-const unusedChatContext = {} as SessionChatContextValue
 
 function indicatorWithContext({
   session = completedSession(),
@@ -87,25 +83,24 @@ function indicatorWithContext({
   session?: MockSession
   isLive?: boolean
   isCompacting?: boolean
-  pendingInteraction?: SessionContextValue["pendingInteraction"]
+  pendingInteraction?: SessionControls["pendingInteraction"]
   agentProgress?: Record<string, string>
   dirName?: string
 } = {}) {
-  const value = {
-    session: session as unknown as ParsedSession,
-    sessionSource: dirName ? { dirName, fileName: "s.jsonl", rawText: "" } : null,
+  const controls = {
+    sessionSource: dirName ? { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 } : null,
     isLive,
     sseState: "connected",
     isCompacting,
     pendingInteraction,
-  } as SessionContextValue
+  } as SessionControls
 
   return (
-    <SessionProvider value={value} chatValue={unusedChatContext}>
+    <InSession session={session as unknown as SessionView} controls={controls}>
       <StreamingOverlayProvider value={EMPTY_OVERLAY} agentProgress={agentProgress}>
         <AgentStatusIndicator />
       </StreamingOverlayProvider>
-    </SessionProvider>
+    </InSession>
   )
 }
 
@@ -273,8 +268,8 @@ describe("AgentStatusIndicator lifecycle", () => {
 })
 
 describe("AgentStatusIndicator failed turns", () => {
-  const failedWith = (failureRecord: Record<string, unknown>): MockSession => ({
-    rawMessages: [{ type: "user", message: { role: "user", content: "hi" } }, failureRecord],
+  const failedWith = (failureRecord: RawRecord): MockSession => ({
+    digest: computeSessionDigest([{ type: "user", message: { role: "user", content: "hi" } }, failureRecord]),
     turns: [],
   })
   const apiError = (error: string, status: number, text: string) => ({

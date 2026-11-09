@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MobileSessionInfoBar } from "../SessionInfoBar.mobile"
-import type { ParsedSession } from "../../../shared/session/types"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 
 vi.mock("../DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
 vi.mock("@/hooks/useSessionArchive", () => ({ useSessionArchiveToggle: () => null }))
 
 function header(isLive: boolean) {
-  return <MobileSessionInfoBar session={{ sessionId: "s1", cwd: "/work/cogpit", turns: [] } as unknown as ParsedSession} sessionSource={null} isSubAgentView={false} isLive={isLive} canArchive={false} claudeRawMessages={[]} creatingSession={false} onNewSession={vi.fn()} />
+  return <MobileSessionInfoBar session={{ sessionId: "s1", cwd: "/work/cogpit", turns: [] } as unknown as SessionView} sessionSource={null} isSubAgentView={false} isLive={isLive} canArchive={false} contextUsage={null} creatingSession={false} onNewSession={vi.fn()} />
 }
 
 describe("MobileSessionInfoBar", () => {

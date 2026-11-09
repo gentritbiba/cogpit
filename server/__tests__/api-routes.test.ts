@@ -43,6 +43,7 @@ const CANONICAL_ROUTE_IDS = [
   "session-status",
   "session-orchestration",
   "crew-chat",
+  "session-boards",
   "shares",
   "share-guest",
   "editor",

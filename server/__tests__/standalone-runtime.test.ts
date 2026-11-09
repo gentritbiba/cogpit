@@ -56,6 +56,24 @@ describe("startStandaloneServer", () => {
     expect(existsSync(join(freshData, "plugin-host-classification"))).toBe(true)
   })
 
+  it("started inside an agent, keeps off the parent's orchestration store", async () => {
+    const { staticDir, dataDir } = await fixture()
+    const parentRoot = join(dirname(dataDir), "parent-cogpit")
+    const saved = { session: process.env.COGPIT_SESSION_ID, root: process.env.COGPIT_ORCHESTRATION_ROOT }
+    process.env.COGPIT_SESSION_ID = "parent-session"
+    process.env.COGPIT_ORCHESTRATION_ROOT = parentRoot
+    try {
+      runningServers.push(await startStandaloneServer({ staticDir, dataDir, host: "127.0.0.1", port: 0, env: {} }))
+      expect(process.env.COGPIT_SESSION_ID).toBeUndefined()
+      expect(process.env.COGPIT_ORCHESTRATION_ROOT).toBeUndefined()
+      expect(existsSync(join(parentRoot, "orchestration"))).toBe(false)
+    } finally {
+      if (saved.session === undefined) delete process.env.COGPIT_SESSION_ID
+      else process.env.COGPIT_SESSION_ID = saved.session
+      process.env.COGPIT_ORCHESTRATION_ROOT = saved.root
+    }
+  })
+
   it("refuses a passwordless non-loopback bind before listening", async () => {
     const { staticDir, dataDir } = await fixture()
     await expect(startStandaloneServer({

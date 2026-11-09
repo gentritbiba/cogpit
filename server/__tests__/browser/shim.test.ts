@@ -263,6 +263,15 @@ describe.skipIf(process.platform === "win32")("starting a browser's daemon", () 
     }
   })
 
+  it("stamps a session's run dir with the port of the Cogpit that runs it, and never run/shared", () => {
+    runShim(["--session", "tmp-1", "snapshot"], { COGPIT_SESSION_ID: "s1", COGPIT_PORT: "5200" })
+    runShim(["--session", "tmp-2", "snapshot"], { COGPIT_SESSION_ID: "s2" })
+    runShim(["--session", "tmp-3", "snapshot"], { COGPIT_PORT: "5200" })
+    expect(readFileSync(join(home, "run", "s1", ".server"), "utf8")).toBe("5200\n")
+    expect(existsSync(join(home, "run", "s2", ".server"))).toBe(false)
+    expect(existsSync(join(home, "run", "shared", ".server"))).toBe(false)
+  })
+
   it("dates every call to a throwaway, and none to a named browser, for the idle sweep", () => {
     runShim(["--session", "tmp-1", "snapshot"], { COGPIT_SESSION_ID: "s1" })
     runShim(["--session", "work", "snapshot"])

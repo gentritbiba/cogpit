@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest"
 import {
+  DEFAULT_PAGE_BYTE_BUDGET,
   DEFAULT_TAIL_BYTE_BUDGET,
-  parseTailByteBudget,
-  trimTailToByteBudget,
+  oldestKeptLine,
+  parseByteBudget,
 } from "../../routes/projects/tailBudget"
 
 function lineOfBytes(byteLength: number, fill = "a"): string {
@@ -11,102 +12,87 @@ function lineOfBytes(byteLength: number, fill = "a"): string {
   return fill.repeat(byteLength)
 }
 
-describe("trimTailToByteBudget", () => {
-  it("returns lines untouched when they fit the budget", () => {
+describe("oldestKeptLine", () => {
+  it("keeps every line when they fit the budget", () => {
     const lines = [lineOfBytes(100), lineOfBytes(100)]
-    const result = trimTailToByteBudget(lines, 500, 1024)
-    expect(result.lines).toEqual(lines)
-    expect(result.byteOffset).toBe(500)
+    expect(oldestKeptLine(lines, 1024)).toBe(0)
   })
 
-  it("drops oldest lines first and advances byteOffset by exact dropped bytes", () => {
+  it("drops oldest lines first", () => {
     const lines = [lineOfBytes(300), lineOfBytes(200), lineOfBytes(100)]
     // budget fits the newest two (200+1 + 100+1 = 302), not the oldest
-    const result = trimTailToByteBudget(lines, 1000, 400)
-    expect(result.lines).toEqual([lines[1], lines[2]])
-    // dropped the 300-byte line + its newline
-    expect(result.byteOffset).toBe(1000 + 301)
+    expect(oldestKeptLine(lines, 400)).toBe(1)
   })
 
-  it("accounts for multibyte UTF-8 content when computing offsets", () => {
+  it("counts multibyte UTF-8 content in bytes", () => {
     // "é" is 2 bytes in UTF-8, so 100 chars = 200 bytes (+1 newline = 201)
-    const multibyte = "é".repeat(100)
-    const lines = [multibyte, lineOfBytes(50), lineOfBytes(50)]
-    const result = trimTailToByteBudget(lines, 0, 110)
-    expect(result.lines).toEqual([lines[1], lines[2]])
-    expect(result.byteOffset).toBe(201)
+    const lines = ["é".repeat(100), lineOfBytes(50), lineOfBytes(50)]
+    expect(oldestKeptLine(lines, 110)).toBe(1)
+    expect(oldestKeptLine(lines, 303)).toBe(0)
   })
 
   it("always keeps the newest line even when it alone exceeds the budget", () => {
-    const giant = lineOfBytes(900_000)
-    const lines = [lineOfBytes(100), giant]
-    const result = trimTailToByteBudget(lines, 0, 1024)
-    expect(result.lines).toEqual([giant])
-    expect(result.byteOffset).toBe(101)
+    const lines = [lineOfBytes(100), lineOfBytes(900_000)]
+    expect(oldestKeptLine(lines, 1024)).toBe(1)
   })
 
-  it("handles an empty line list", () => {
-    const result = trimTailToByteBudget([], 42, 1024)
-    expect(result.lines).toEqual([])
-    expect(result.byteOffset).toBe(42)
+  it("keeps nothing of an empty line list", () => {
+    expect(oldestKeptLine([], 1024)).toBe(0)
   })
 
   it("keeps at least minLines lines even when over the byte budget", () => {
     const lines = Array.from({ length: 50 }, () => lineOfBytes(1024))
-    const result = trimTailToByteBudget(lines, 0, 2048, 30)
-    expect(result.lines).toEqual(lines.slice(20))
-    expect(result.byteOffset).toBe(20 * 1025)
+    expect(oldestKeptLine(lines, 2048, 30)).toBe(20)
   })
 
   it("lets the budget keep more lines than the floor", () => {
     const lines = Array.from({ length: 50 }, () => lineOfBytes(1024))
     // 40KB fits 39 lines of 1025 bytes — more than the 30-line floor
-    const result = trimTailToByteBudget(lines, 0, 40 * 1024, 30)
-    expect(result.lines).toEqual(lines.slice(11))
-    expect(result.byteOffset).toBe(11 * 1025)
+    expect(oldestKeptLine(lines, 40 * 1024, 30)).toBe(11)
   })
 
-  it("drops noise lines without letting them spend the budget or the floor", () => {
+  it("skips noise lines without letting them spend the budget or the floor", () => {
     const isNoise = (line: string) => line.startsWith("n")
     const lines = [lineOfBytes(100), lineOfBytes(500, "n"), lineOfBytes(100), lineOfBytes(500, "n"), lineOfBytes(100)]
-    const result = trimTailToByteBudget(lines, 0, 250, 2, isNoise)
-    expect(result.lines).toEqual([lines[2], lines[4]])
-    // the oldest line and the noise after it are behind the boundary
-    expect(result.byteOffset).toBe(101 + 501)
+    expect(oldestKeptLine(lines, 250, 2, isNoise)).toBe(2)
   })
 
-  it("skips a page that is all noise to its end", () => {
+  it("keeps nothing of a page that is all noise", () => {
     const lines = [lineOfBytes(10, "n"), lineOfBytes(20, "n")]
-    const result = trimTailToByteBudget(lines, 5, 1024, 30, (line) => line.startsWith("n"))
-    expect(result).toEqual({ lines: [], byteOffset: 5 + 11 + 21 })
+    expect(oldestKeptLine(lines, 1024, 30, (line) => line.startsWith("n"))).toBe(2)
   })
 
   it("keeps everything when the floor exceeds the line count", () => {
     const lines = [lineOfBytes(100), lineOfBytes(900_000)]
-    const result = trimTailToByteBudget(lines, 7, 1024, 30)
-    expect(result.lines).toEqual(lines)
-    expect(result.byteOffset).toBe(7)
+    expect(oldestKeptLine(lines, 1024, 30)).toBe(0)
+  })
+
+  it("measures lines as sizeOf counts them, such as projected", () => {
+    const lines = [lineOfBytes(900_000), lineOfBytes(900_000), lineOfBytes(900_000)]
+    expect(oldestKeptLine(lines, 1024, 1, undefined, () => 300)).toBe(0)
+    expect(oldestKeptLine(lines, 1024, 1, undefined, (_, index) => (index === 0 ? 900 : 300))).toBe(1)
   })
 })
 
-describe("parseTailByteBudget", () => {
-  it("falls back to the default without a param", () => {
-    expect(parseTailByteBudget(null)).toBe(DEFAULT_TAIL_BYTE_BUDGET)
+describe("parseByteBudget", () => {
+  it("falls back to the given default without a param", () => {
+    expect(parseByteBudget(null, DEFAULT_TAIL_BYTE_BUDGET)).toBe(DEFAULT_TAIL_BYTE_BUDGET)
+    expect(parseByteBudget(null, DEFAULT_PAGE_BYTE_BUDGET)).toBe(DEFAULT_PAGE_BYTE_BUDGET)
   })
 
   it("falls back to the default on garbage input", () => {
-    expect(parseTailByteBudget("abc")).toBe(DEFAULT_TAIL_BYTE_BUDGET)
+    expect(parseByteBudget("abc", DEFAULT_TAIL_BYTE_BUDGET)).toBe(DEFAULT_TAIL_BYTE_BUDGET)
   })
 
   it("clamps tiny values up to the minimum", () => {
-    expect(parseTailByteBudget("1")).toBe(16 * 1024)
+    expect(parseByteBudget("1", DEFAULT_TAIL_BYTE_BUDGET)).toBe(16 * 1024)
   })
 
   it("clamps huge values down to the maximum", () => {
-    expect(parseTailByteBudget("999999999")).toBe(16 * 1024 * 1024)
+    expect(parseByteBudget("999999999", DEFAULT_TAIL_BYTE_BUDGET)).toBe(16 * 1024 * 1024)
   })
 
   it("passes through sane values", () => {
-    expect(parseTailByteBudget(String(512 * 1024))).toBe(512 * 1024)
+    expect(parseByteBudget(String(512 * 1024), DEFAULT_TAIL_BYTE_BUDGET)).toBe(512 * 1024)
   })
 })

@@ -75,6 +75,9 @@ export interface DelegatedTask {
   notified?: string[]
 }
 
+/** Unread tasks are neither acknowledged nor cancelled. */
+export const isUnreadTask = (task: Pick<DelegatedTask, "state" | "acknowledgedAt">) => !task.acknowledgedAt && task.state !== "cancelled"
+
 export interface ProviderInstance {
   setupCommand?: string
   retired?: boolean

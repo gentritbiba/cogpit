@@ -10,7 +10,7 @@ vi.mock("@/lib/auth", () => ({ authFetch: mocks.fetch }))
 vi.mock("@/lib/conversationState", () => {
   const state: ConversationState = {
     conversation: { id: "conversation", revision: 1, createdAt: 1, updatedAt: 1, binding: { hostId: "local", agent: "acp", instanceId: "account", sessionId: "source", cwd: "/workspace", filePath: "/workspace/source.jsonl", nativeSessionId: "native" } },
-    commands: [], cursor: 0, freshness: "current",
+    commands: [], freshness: "current",
   }
   mocks.state = state
   const owner = { subscribe: () => () => {}, snapshot: () => mocks.state! }

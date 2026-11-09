@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { computeSessionDigest, EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
@@ -10,7 +11,8 @@ import { permissionsForAccess, type SessionAccessState } from "@/lib/sessionAcce
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { DOCUMENTATION_URL, REPORT_ISSUE_URL } from "../../../shared/helpLinks"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
-import type { ParsedSession, Turn } from "../../../shared/session/types"
+import type { Turn } from "../../../shared/session/types"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -18,11 +20,11 @@ const mocks = vi.hoisted(() => ({
     defaultAgentKind: "claude" as const,
     networkAccessDisabled: false,
   },
-  session: null as ParsedSession | null,
   sessionSource: null as {
     dirName: string
     fileName: string
-    rawText: string
+    watchOffset: number
+    loadId: number
     agentKind?: AgentKind
   } | null,
   isLive: false,
@@ -44,9 +46,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ config: mocks.config, dispatch: mocks.dispatch }),
 }))
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
-    session: mocks.session,
     sessionSource: mocks.sessionSource,
     isLive: mocks.isLive,
     permissions: permissionsForAccess(mocks.level),
@@ -129,7 +130,7 @@ function prTurn(id: string, command: string, result: string): Turn {
   }
 }
 
-function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
+function makeSession(overrides: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: "test-session-id",
     version: "1.0",
@@ -149,7 +150,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       totalDurationMs: 0,
       turnCount: 0,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
     agentKind: "claude",
     ...overrides,
   }
@@ -190,11 +191,11 @@ async function openSessionDetails(
 describe("FloatingChrome", () => {
   beforeEach(() => {
     mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    mocks.session = makeSession()
+    showSession(makeSession())
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     mocks.isLive = false
@@ -325,12 +326,12 @@ describe("FloatingChrome", () => {
     const user = userEvent.setup()
     const thinkingTurn = prTurn("thinking", "echo ok", "ok")
     thinkingTurn.thinking = [{ type: "thinking", thinking: "Working", signature: "sig" }]
-    mocks.session = makeSession({
+    showSession(makeSession({
       model: "claude-opus-4-5",
       gitBranch: "feat/clean-header",
       turns: [thinkingTurn],
       branchedFrom: { sessionId: "parent-session", turnIndex: 2 },
-      rawMessages: [{
+      digest: computeSessionDigest([{
         type: "assistant",
         message: {
           model: "claude-opus-4-5",
@@ -341,8 +342,8 @@ describe("FloatingChrome", () => {
             cache_read_input_tokens: 5_000,
           },
         },
-      }],
-    })
+      }]),
+    }))
     mocks.isLive = true
 
     renderChrome({ workflowCount: 2 })
@@ -366,9 +367,9 @@ describe("FloatingChrome", () => {
 
   it("does not interpret Copilot provider records as Claude context usage", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       agentKind: "copilot",
-      rawMessages: [{
+      digest: computeSessionDigest([{
         type: "assistant",
         message: {
           model: "claude-sonnet-4.6",
@@ -379,12 +380,12 @@ describe("FloatingChrome", () => {
             cache_read_input_tokens: 5_000,
           },
         },
-      }],
-    })
+      }]),
+    }))
     mocks.sessionSource = {
       dirName: "copilot__L3RtcC9wcm9qZWN0",
       fileName: "test-session-id/events.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "copilot",
     }
 
@@ -400,7 +401,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "parent/subagents/agent-a1b2c3d4e5.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
 
@@ -491,7 +492,7 @@ describe("FloatingChrome", () => {
     expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
     unmount()
 
-    mocks.session = null
+    showSession(null)
     renderChrome()
     expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
   })
@@ -503,7 +504,7 @@ describe("FloatingChrome", () => {
     ["codex__L3RtcC9wcm9qZWN0", true],
     ["copilot__L3RtcC9wcm9qZWN0", false],
   ])("offers the share control in %s only when the agent can be shared", (dirName, shareable) => {
-    mocks.sessionSource = { dirName, fileName: "s.jsonl", rawText: "" }
+    mocks.sessionSource = { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 }
 
     renderChrome()
 
@@ -540,7 +541,7 @@ describe("FloatingChrome", () => {
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id/subagents/agent-abc.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     renderChrome()
@@ -604,8 +605,8 @@ describe("FloatingChrome", () => {
 
 describe("FloatingChrome archive", () => {
   beforeEach(() => {
-    mocks.session = makeSession()
-    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", rawText: "", agentKind: "claude" }
+    showSession(makeSession())
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "test-session-id.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
     mocks.isLive = false
     mocks.level = "own"
     mocks.inventorySessions = []
@@ -675,7 +676,7 @@ describe("FloatingChrome archive", () => {
   })
 
   it("withholds archiving from a sub-agent view", () => {
-    mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", rawText: "", agentKind: "claude" }
+    mocks.sessionSource = { dirName: "-tmp-project", fileName: "parent-id/subagents/agent-abc.jsonl", watchOffset: 0, loadId: 1, agentKind: "claude" }
     renderChrome()
 
     expect(screen.queryByRole("button", { name: /rchive/ })).not.toBeInTheDocument()
@@ -695,11 +696,11 @@ describe("FloatingChrome pull requests", () => {
 
   beforeEach(() => {
     mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
-    mocks.session = makeSession()
+    showSession(makeSession())
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "test-session-id.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
       agentKind: "claude",
     }
     mocks.isLive = false
@@ -714,9 +715,9 @@ describe("FloatingChrome pull requests", () => {
 
   it("renders pull requests extracted from loaded turns", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", 'gh pr create --title "Team Edition"', "https://github.com/o/r/pull/13")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -730,10 +731,10 @@ describe("FloatingChrome pull requests", () => {
 
   it("collapses older pull requests into a +N chip", async () => {
     const user = userEvent.setup()
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [1, 2, 3, 4, 5].map((number) =>
         prTurn(String(number), "gh pr create --fill", `https://github.com/o/r/pull/${number}`)),
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -770,9 +771,9 @@ describe("FloatingChrome pull requests", () => {
       number: 13,
       url: "https://github.com/o/r/pull/13",
     }])
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/13")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)
@@ -783,9 +784,9 @@ describe("FloatingChrome pull requests", () => {
   it("combines a scanned older pull request with a freshly created one", async () => {
     const user = userEvent.setup()
     withScannedSession("test-session-id", [scanned])
-    mocks.session = makeSession({
+    showSession(makeSession({
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/778")],
-    })
+    }))
 
     renderChrome()
     await openSessionDetails(user)

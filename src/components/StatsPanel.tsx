@@ -20,7 +20,7 @@ import { TurnNavigator } from "@/components/stats/TurnNavigator"
 import { ToolCallIndex } from "@/components/stats/ToolCallIndex"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionContext, useSessionControls } from "@/contexts/SessionContext"
 import { useCapability } from "@/hooks/useCapability"
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ interface SearchHeaderProps {
 
 function SearchHeader({ searchInputRef }: SearchHeaderProps): React.JSX.Element {
   const { state: { searchQuery, expandAll }, dispatch } = useAppContext()
-  const { actions: { handleToggleExpandAll } } = useSessionContext()
+  const { actions: { handleToggleExpandAll } } = useSessionControls()
   return (
     <div className="sticky top-0 border-b bg-popover px-3 py-3">
       <div className="mb-2 flex items-center justify-between">

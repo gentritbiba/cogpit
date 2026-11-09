@@ -14,11 +14,10 @@ import { textAssistant, toJsonl, userMsg } from "./fixtures"
 
 vi.mock("@/hooks/useParserWorker", async () => {
   const { parseSession } = await import("../../shared/session/parser")
+  const { toSessionView } = await import("../../shared/session/sessionDigest")
+  const parse = async (text: string) => toSessionView(parseSession(text))
   return {
-    useParserWorker: () => ({
-      parse: async (text: string) => parseSession(text),
-      append: async () => null,
-    }),
+    useParserWorker: () => ({ parse, parsePage: parse, append: async () => null }),
   }
 })
 

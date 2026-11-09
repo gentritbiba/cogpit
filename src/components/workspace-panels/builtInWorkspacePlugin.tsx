@@ -1,15 +1,19 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
-import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
+import { lazy, Suspense, useEffect, useState } from "react"
+import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, ListChecks, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
+import { needsYouCount } from "@/components/board/boardView"
 import { Spinner } from "@/components/ui/Spinner"
+import { useSessionBoards } from "@/hooks/useSessionBoards"
 import {
   definePlugin,
   type WorkspacePanelIndicatorProps,
   type WorkspacePanelProps,
 } from "@/plugin-api"
 import { BUILT_IN_PLUGIN_ID } from "@/plugins/builtInPanelIds"
+import { useOpenSession } from "@/contexts/SessionContext"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { useBuiltInPanelServices } from "./BuiltInPanelServices"
 
 /** How long the rail keeps marking the icon after the agent's last browser call. */
@@ -23,6 +27,9 @@ const WorktreePanel = lazy(() =>
 )
 const CrewPanel = lazy(() =>
   import("@/components/crew/CrewPanel").then((module) => ({ default: module.CrewPanel })),
+)
+const StatusPanel = lazy(() =>
+  import("@/components/board/StatusPanel").then((module) => ({ default: module.StatusPanel })),
 )
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
@@ -61,10 +68,11 @@ function ProjectFilesWorkspacePanel({ context, closePanel }: WorkspacePanelProps
 }
 
 function FileChangesWorkspacePanel({ context }: WorkspacePanelProps) {
-  if (!context.session) return null
+  const session = useOpenSession((open) => open)
+  if (!session) return null
   return (
     <FileChangesPanel
-      session={context.session}
+      session={session}
       sessionChangeKey={context.sessionChangeKey}
     />
   )
@@ -93,18 +101,18 @@ function BrowserWorkspacePanel(props: WorkspacePanelProps) {
   )
 }
 
+function browserActivityAt(open: SessionView | null): number {
+  return Date.parse(latestBrowserActivity(open)?.timestamp ?? "")
+}
+
 /**
  * A dot on the rail while the agent is driving a browser, so the panel is
  * worth opening. One timeout, armed for the moment the last call goes stale —
  * a new call re-arms it, and a session that never browses schedules nothing.
  */
-function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
+function BrowserActivityIndicator() {
   const [, expire] = useState(0)
-  // The rail re-renders on anything; the transcript is only walked when it moves.
-  const at = useMemo(
-    () => Date.parse(latestBrowserActivity(context.session)?.timestamp ?? ""),
-    [context.session],
-  )
+  const at = useOpenSession(browserActivityAt)
 
   useEffect(() => {
     const remaining = at + BROWSING_MS - Date.now()
@@ -119,6 +127,25 @@ function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
       role="status"
       aria-label="The agent is using the browser"
       className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-500"
+    />
+  )
+}
+
+function StatusWorkspacePanel(props: WorkspacePanelProps) {
+  return <Suspense fallback={<PanelFallback />}><StatusPanel {...props} /></Suspense>
+}
+
+/** A dot on the rail while a status in the open session's crew says something waits on the user. */
+function StatusIndicator({ context }: WorkspacePanelIndicatorProps) {
+  const boards = useSessionBoards()
+  const rootId = context.crew?.rootId ?? context.sessionId
+  const waiting = [...boards.values()].some((board) => board.rootId === rootId && needsYouCount(board) > 0)
+  if (!waiting) return null
+  return (
+    <span
+      role="status"
+      aria-label="A status says something waits on you"
+      className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-warning"
     />
   )
 }
@@ -199,6 +226,17 @@ export const builtInWorkspacePlugin = definePlugin({
       when: (context) => Boolean(context.crew),
     },
     {
+      id: "status",
+      title: "Status",
+      icon: ListChecks,
+      component: StatusWorkspacePanel,
+      indicator: StatusIndicator,
+      order: 2,
+      defaultSize: "30%",
+      minSize: "320px",
+      maxSize: "60%",
+    },
+    {
       id: "worktrees",
       title: "Worktrees",
       icon: GitBranch,
@@ -252,7 +290,7 @@ export const builtInWorkspacePlugin = definePlugin({
       order: 20,
       defaultSize: "36%",
       minSize: "320px",
-      when: (context) => context.canAccessHostFiles && context.hasFileChanges && context.session !== null,
+      when: (context) => context.canAccessHostFiles && context.hasFileChanges && context.sessionId !== null,
     },
     {
       id: "automations",
@@ -272,7 +310,7 @@ export const builtInWorkspacePlugin = definePlugin({
       order: 30,
       defaultSize: "36%",
       minSize: "320px",
-      when: (context) => context.session !== null,
+      when: (context) => context.sessionId !== null,
     },
   ],
 })

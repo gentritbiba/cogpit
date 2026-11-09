@@ -6,7 +6,7 @@ import { emptyTurn } from "@/__tests__/fixtures"
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -14,7 +14,9 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionContext: () => ({
-    session: { turns: [], rawMessages: [], cwd: "/tmp" },
+    activeTurnIndex: null,
+    activeToolCallId: null,
+    session: { turns: [], digest: { status: { status: "thinking" } }, cwd: "/tmp" },
     isLive: true,
     isSubAgentView: false,
     undoRedo: { enabled: false },
@@ -24,7 +26,6 @@ vi.mock("@/contexts/SessionContext", () => ({
 
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => new Map() }))
 
-vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 

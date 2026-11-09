@@ -46,7 +46,7 @@ function renderPanel() {
   const closePanel = vi.fn()
   render(
     <ViewPanelProvider shown onReveal={vi.fn()}>
-      <ViewPanel context={{ session: null, sessionChangeKey: 0, projectPath: null, hasFileChanges: false, canAccessHostFiles: true, canUseBrowser: true }} active closePanel={closePanel} />
+      <ViewPanel context={{ sessionId: null, sessionChangeKey: 0, projectPath: null, hasFileChanges: false, canAccessHostFiles: true, canUseBrowser: true }} active closePanel={closePanel} />
     </ViewPanelProvider>,
   )
   return closePanel

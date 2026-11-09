@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useNewSession } from "../useNewSession"
 import type { PermissionsConfig } from "@/lib/permissions"
-import type { ParsedSession } from "../../../shared/session/types"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import { ALL_CAPABILITIES, NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import type { ListedAccess } from "../../../shared/contracts/sessionAccess"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
@@ -12,24 +12,18 @@ vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
 }))
 
-// Mock parseSession
-vi.mock("../../../shared/session/parser", () => ({
-  parseSession: vi.fn(),
-}))
-
 vi.mock("@/hooks/useSessionNames", () => ({
   rename: vi.fn(),
 }))
 
 import { authFetch } from "@/lib/auth"
-import { parseSession } from "../../../shared/session/parser"
+import type { LoadedSession, SessionAddress, SessionController } from "@/lib/sessionLoader"
 import { __resetSessionAccessForTest, knownSessionAccess } from "@/lib/sessionAccess"
 import { rename as renameSession } from "@/hooks/useSessionNames"
 
 const mockedAuthFetch = vi.mocked(authFetch)
-const mockedParseSession = vi.mocked(parseSession)
 
-const mockParsedSession: ParsedSession = {
+const mockSession: SessionView = {
   sessionId: "new-session-1",
   version: "1",
   gitBranch: "main",
@@ -48,7 +42,17 @@ const mockParsedSession: ParsedSession = {
     totalDurationMs: 0,
     turnCount: 0,
   },
-  rawMessages: [],
+  digest: EMPTY_SESSION_DIGEST,
+}
+
+/** The tail load an open ends in; the controller's own behaviour has its own suite. */
+const load = vi.fn<(address: SessionAddress) => Promise<LoadedSession>>()
+
+const sessions: SessionController = {
+  openSession: vi.fn(),
+  prefetchSession: vi.fn(),
+  reloadCurrent: vi.fn(),
+  leave: vi.fn(),
 }
 
 describe("useNewSession", () => {
@@ -59,6 +63,7 @@ describe("useNewSession", () => {
   const defaultOpts = {
     permissionsConfig,
     dispatch,
+    sessions,
     isMobile: false,
     onSessionFinalized,
     model: "claude-opus-4-6",
@@ -67,7 +72,22 @@ describe("useNewSession", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
-    mockedParseSession.mockReturnValue(mockParsedSession)
+    load.mockImplementation(async (address) => ({
+      parsed: mockSession,
+      source: { ...address, watchOffset: 64, loadId: 7 },
+    }))
+    vi.mocked(sessions.openSession).mockImplementation(async (target, { commit, recover }) => {
+      const address = typeof target === "function" ? await target(new AbortController().signal) : target
+      let loaded: LoadedSession
+      try {
+        loaded = await load(address)
+      } catch (error) {
+        if (!recover) throw error
+        loaded = recover(error, address)
+      }
+      commit(loaded)
+      return "opened"
+    })
   })
 
   it("returns initial state", () => {
@@ -138,11 +158,6 @@ describe("useNewSession", () => {
           sessionId: "session-123",
         }),
       } as Response)
-      // Mock the content fetch response
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{"type":"user","message":{"role":"user","content":"hello"}}'),
-      } as Response)
 
     let sessionId: string | null = null
     await act(async () => {
@@ -155,24 +170,23 @@ describe("useNewSession", () => {
     expect(body.cwd).toBe("/tmp/my-project")
     expect(body.contextWindowTokens).toBe(1000000)
     expect(result.current.creatingSession).toBe(false)
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "FINALIZE_SESSION",
-        session: expect.objectContaining({ sessionId: "session-123", turns: [] }),
-      })
+    // Finalized from a tail load through the controller, never by fetching and parsing the whole file here.
+    expect(sessions.openSession).toHaveBeenCalledWith(
+      { dirName: "-tmp-my-project", fileName: "session.jsonl" },
+      expect.objectContaining({ reason: "finalize" }),
     )
+    expect(mockedAuthFetch).toHaveBeenCalledTimes(1)
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "FINALIZE_SESSION",
+      session: mockSession,
+      source: { dirName: "-tmp-my-project", fileName: "session.jsonl", watchOffset: 64, loadId: 7 },
+      isMobile: false,
+    })
     expect(onSessionFinalized).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "session-123", turns: [] }),
+      mockSession,
       expect.objectContaining({ dirName: "-tmp-my-project", fileName: "session.jsonl" })
     )
-    await vi.waitFor(() => {
-      expect(dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "RELOAD_SESSION_CONTENT",
-          session: mockParsedSession,
-        })
-      )
-    })
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "RELOAD_SESSION_CONTENT" }))
   })
 
   it("owns a session it just created in team edition before showing it", async () => {
@@ -197,7 +211,6 @@ describe("useNewSession", () => {
         ok: true,
         json: () => Promise.resolve({ dirName: "-tmp-my-project", fileName: "session.jsonl", sessionId: "session-123" }),
       } as Response)
-      .mockResolvedValue({ ok: false, text: () => Promise.resolve("") } as Response)
 
     await act(async () => {
       await result.current.createAndSend("hello")
@@ -261,10 +274,6 @@ describe("useNewSession", () => {
           sessionId: "session-123",
         }),
       } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{"type":"user","message":{"role":"user","content":"hello"}}'),
-      } as Response)
 
     await act(async () => {
       await result.current.createAndSend("hello")
@@ -299,63 +308,78 @@ describe("useNewSession", () => {
     expect(result.current.createError).toBe("Unknown error")
   })
 
-  it("createAndSend finalizes with minimal session when content fetch never returns content", async () => {
-    vi.useFakeTimers()
-    try {
-      const { result } = renderHook(() => useNewSession(defaultOpts))
+  it("finalizes with an empty session the stream fills from the start when the transcript cannot be read yet", async () => {
+    load.mockRejectedValueOnce(new Error("Failed to load session (404)"))
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+    act(() => {
+      result.current.handleNewSession("dir1")
+    })
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+    } as Response)
 
-      act(() => {
-        result.current.handleNewSession("dir1")
+    await act(async () => {
+      await result.current.createAndSend("hello")
+    })
+
+    expect(result.current.createError).toBeNull()
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        session: expect.objectContaining({ sessionId: "sid", turns: [] }),
+        source: expect.objectContaining({ dirName: "dir1", fileName: "s.jsonl", watchOffset: 0 }),
       })
+    )
+    expect(onSessionFinalized).toHaveBeenCalled()
+  })
 
-      let callCount = 0
-      mockedAuthFetch.mockImplementation(async () => {
-        callCount++
-        if (callCount === 1) {
-          // First call: create-and-send succeeds
-          return {
-            ok: true,
-            json: () => Promise.resolve({
-              dirName: "dir1",
-              fileName: "s.jsonl",
-              sessionId: "sid",
-            }),
-          } as Response
-        }
-        // All subsequent calls (polling for JSONL content): return empty text
-        return {
-          ok: true,
-          text: () => Promise.resolve(""),
-        } as unknown as Response
+  it("keeps the session's identity when its transcript is still empty, resuming where the tail ended", async () => {
+    load.mockImplementationOnce(async (address) => ({
+      parsed: { ...mockSession, sessionId: "" },
+      source: { ...address, watchOffset: 12, loadId: 8 },
+    }))
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+    act(() => {
+      result.current.handleNewSession("dir1")
+    })
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+    } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("hello")
+    })
+
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        session: expect.objectContaining({ sessionId: "sid" }),
+        source: expect.objectContaining({ watchOffset: 12 }),
       })
+    )
+  })
 
-      let done = false
-      await act(async () => {
-        const promise = result.current.createAndSend("hello").then(() => {
-          done = true
-        })
+  it("does not finalize a session the user has already left", async () => {
+    vi.mocked(sessions.openSession).mockResolvedValueOnce("superseded")
+    const onCreated = vi.fn()
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+    act(() => {
+      result.current.handleNewSession("dir1")
+    })
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+    } as Response)
 
-        // Fast-forward through all polling delays until the promise resolves
-        while (!done) {
-          await vi.advanceTimersByTimeAsync(200)
-        }
+    await act(async () => {
+      await result.current.createAndSend("hello", undefined, onCreated)
+    })
 
-        await promise
-      })
-
-      // Should finalize with a minimal session instead of erroring,
-      // so the user transitions to ChatArea and SSE picks up real content
-      expect(result.current.createError).toBeNull()
-      expect(dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "FINALIZE_SESSION",
-          session: expect.objectContaining({ sessionId: "sid", turns: [] }),
-        })
-      )
-      expect(onSessionFinalized).toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "FINALIZE_SESSION" }))
+    expect(onCreated).not.toHaveBeenCalled()
+    expect(onSessionFinalized).not.toHaveBeenCalled()
   })
 
   it("createAndSend handles network errors", async () => {
@@ -436,10 +460,6 @@ describe("useNewSession", () => {
         ok: true,
         json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
       } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve("{}"),
-      } as Response)
 
     const images = [{ data: "base64data", mediaType: "image/png" }]
 
@@ -480,10 +500,6 @@ describe("useNewSession", () => {
         ok: true,
         json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
       } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve("{}"),
-      } as Response)
 
     await act(async () => {
       await result.current.createAndSend("Fix the auth token refresh logic")
@@ -505,10 +521,6 @@ describe("useNewSession", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve("{}"),
       } as Response)
 
     await act(async () => {
@@ -544,10 +556,6 @@ describe("useNewSession", () => {
             },
           ],
         }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve("{}"),
       } as Response)
 
     let sessionId: string | null = null
@@ -606,7 +614,6 @@ describe("useNewSession", () => {
           ],
         }),
       } as Response)
-      .mockResolvedValue({ ok: false, text: () => Promise.resolve("") } as Response)
 
     await act(async () => {
       await result.current.createAndSend("hello codex")
@@ -651,7 +658,6 @@ describe("useNewSession", () => {
             })),
           }),
         } as Response)
-        .mockResolvedValue({ ok: true, text: () => Promise.resolve("{}") } as Response)
 
       let sessionId: string | null = null
       await act(async () => {

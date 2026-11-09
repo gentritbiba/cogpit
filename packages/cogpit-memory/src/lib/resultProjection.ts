@@ -14,7 +14,7 @@
  * when the server serves its body.
  */
 
-import type { ElidedResult, ParsedSession, ToolCall } from "./types"
+import type { ElidedResult, ParsedSession, ToolCall, Turn } from "./types"
 
 /** Opens an elided body. Never produced by a CLI; U+2063 is an invisible separator. */
 export const ELIDED_MARK = "\u2063cogpit-elided-v1:"
@@ -105,7 +105,8 @@ export function visitJoinedText(
   return parts.flatMap((part, index) => index === first ? [withText(part, replacement)] : texts[index] === undefined ? [part] : [])
 }
 
-function liftCalls(calls: readonly ToolCall[]): void {
+/** Moves the stub of each call's elided result onto it as `resultRef`, leaving the preview as `result`. */
+export function liftElidedCalls(calls: readonly ToolCall[]): void {
   for (const call of calls) {
     const elided = readElided(call.result)
     if (!elided) continue
@@ -120,13 +121,16 @@ function liftCalls(calls: readonly ToolCall[]): void {
  * and idempotent: a lifted call carries no marker.
  */
 export function liftElidedResults(session: ParsedSession): ParsedSession {
-  for (const turn of session.turns) {
-    liftCalls(turn.toolCalls)
-    for (const message of turn.subAgentActivity) liftCalls(message.toolCalls)
-    for (const block of turn.contentBlocks) {
-      if (block.kind === "tool_calls" || block.kind === "plan_mode") liftCalls(block.toolCalls)
-      else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftCalls(message.toolCalls)
-    }
-  }
+  for (const turn of session.turns) liftElidedTurn(turn)
   return session
+}
+
+/** `liftElidedResults` for one turn. */
+export function liftElidedTurn(turn: Turn): void {
+  liftElidedCalls(turn.toolCalls)
+  for (const message of turn.subAgentActivity) liftElidedCalls(message.toolCalls)
+  for (const block of turn.contentBlocks) {
+    if (block.kind === "tool_calls" || block.kind === "plan_mode") liftElidedCalls(block.toolCalls)
+    else if (block.kind === "sub_agent" || block.kind === "background_agent") for (const message of block.messages) liftElidedCalls(message.toolCalls)
+  }
 }

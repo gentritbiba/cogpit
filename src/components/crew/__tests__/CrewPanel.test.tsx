@@ -45,7 +45,7 @@ async function allSessions() {
 
 function renderPanel() {
   const openSession = vi.fn()
-  const context = { session: { sessionId: "lane" }, openSession } as unknown as WorkspacePanelContext
+  const context = { sessionId: "lane", openSession } as unknown as WorkspacePanelContext
   render(<CrewPanel context={context} active closePanel={vi.fn()} />)
   return { openSession }
 }

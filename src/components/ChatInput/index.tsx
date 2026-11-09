@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore, useLayoutEffect, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
-import { X } from "lucide-react"
+import { Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionChatContext, useSessionControls } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "../../../shared/contracts/projectTools"
@@ -19,7 +19,6 @@ import { registerComposer, emitComposerEvent, dispatchComposerKey, type Composer
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
-import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
 import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
 import { signInTargetFor, startAgentSignIn } from "@/lib/agents/signIn"
@@ -138,9 +137,11 @@ function getActionRowClass(stacked: boolean, isMultiline: boolean): string {
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(props, ref) {
-  const { session, sessionSource } = useSessionContext()
-  const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", session?.sessionId ?? "pending"])
-  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? session?.cwd ?? "", identity])
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const sessionCwd = useOpenSession((open) => open?.cwd)
+  const identity = JSON.stringify([sessionSource?.dirName ?? props.composerIdentity ?? props.agentKind ?? "", sessionId ?? "pending"])
+  const scope = JSON.stringify([deviceScopedKey("composer-v1"), props.projectCwd ?? sessionCwd ?? "", identity])
   return <ScopedChatInput key={scope} {...props} scope={scope} ref={ref} />
 }))
 
@@ -150,8 +151,8 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const initial = useRef(snapshot.draft).current
   const mounted = useRef(true)
   const canAccessHostFiles = useCapability("hostFiles")
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
   const {
-    session,
     sessionSource,
     isLive,
     actions: { handleEditConfig: onEditConfig },
@@ -164,7 +165,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     slashSuggestionsLoading,
     turnError,
     promptSuggestion,
-  } = useSessionContext()
+  } = useSessionControls()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
 
@@ -194,7 +195,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
   const signInDirName = sessionSource?.dirName ?? composerIdentity
   const signInTarget = useMemo(() => signInTargetFor(agentKind ?? DEFAULT_AGENT_KIND, signInDirName), [agentKind, signInDirName])
   const agentInstalled = isAgentInstalled(useAgentAvailability(), agentKind ?? DEFAULT_AGENT_KIND)
-  const openQuoteSource = useSessionContext().actions.handleOpenQuoteSource
+  const openQuoteSource = useSessionControls().actions.handleOpenQuoteSource
 
   const draftNow = useCallback((): ComposerDraft => ({ v: 1, text: textRef.current, context: contextRef.current, attachments: imagesRef.current }), [])
   const applyDraft = useCallback((value: ComposerDraft) => {
@@ -315,13 +316,13 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
 
   const submitUserQuestion = useCallback(async (answer: string) => {
     const interaction = pendingInteraction
-    if (!session?.sessionId || interaction?.type !== "question") return
+    if (!sessionId || interaction?.type !== "question") return
 
     const question = interaction.questions[0]
     if (!question || !answer.trim()) return
 
     const result = await submitUserQuestionAnswers(
-      session.sessionId,
+      sessionId,
       interaction.toolUseId,
       { [question.question]: answer },
     )
@@ -330,7 +331,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     // errored, session restarted, …). Never swallow the user's text — deliver
     // it as a regular message instead so the input can't appear frozen.
     return result.ok || await onSend(answer)
-  }, [pendingInteraction, session?.sessionId, onSend])
+  }, [pendingInteraction, sessionId, onSend])
 
   const submitPlanResponse = useCallback(async (
     approved: boolean,
@@ -342,7 +343,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       interaction?.type === "plan"
       && interaction.provider === "copilot"
       && interaction.requestId
-      && session?.sessionId
+      && sessionId
     ) {
       const requestId = interaction.requestId
       if (planRespondingRequestRef.current) return false
@@ -350,7 +351,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       setPlanResponding(true)
       setPlanResponseError(null)
       try {
-        const submitted = await submitCopilotPlanResponse(session.sessionId, requestId, {
+        const submitted = await submitCopilotPlanResponse(sessionId, requestId, {
           approved,
           ...(selectedAction ? { selectedAction } : {}),
           ...(feedback ? { feedback } : {}),
@@ -368,7 +369,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     }
     onSend(approved ? "yes" : feedback || "no")
     return true
-  }, [pendingInteraction, session?.sessionId, onSend])
+  }, [pendingInteraction, sessionId, onSend])
 
   const focusComposerAtEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -389,6 +390,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     setText(suggestion)
     focusComposerAtEnd()
   }, [focusComposerAtEnd])
+  const isPlanApproval = pendingInteraction?.type === "plan"
+  const isUserQuestion = pendingInteraction?.type === "question"
+  const hasPermissions = permissionRequests.length > 0
+  // The CLI's predicted next prompt waits in the empty composer as its
+  // placeholder, taking no room of its own; Tab or the sparkle button takes it.
+  const offeredSuggestion = !text && !hasPermissions && !isPlanApproval && !isUserQuestion ? promptSuggestion : null
 
   const handleFileSelect = useCallback((path: string) => {
     if (!fileMention) return
@@ -446,13 +453,13 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       const delivery = pendingInteraction?.type === "question"
         ? submitUserQuestion(trimmed).then(Boolean)
         : textResponse ? submitPlanResponse(false, undefined, trimmed)
-          : session?.sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
+          : sessionId ? onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload)
             : onSend(renderComposerMessage({ text: trimmed, context: sentContext }), imagePayload, (session) => emitComposerEvent(composer, { type: "created", sendId: entryId, session }))
       void delivery.then(settle, () => settle(false))
     } catch { settle(false) }
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, session?.sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind, signInTarget])
+  }, [images, context, allowImages, onSend, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse, sessionId, uploading, recovery, draftNow, applyDraft, composer, agentKind, signInTarget])
   const handleSubmit = useCallback(() => submitText(text), [submitText, text])
 
   // Spoken text continues the draft; sending it sends the whole draft.
@@ -514,11 +521,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = filteredSlashList[slashSelectedIndex]; if (selected) handleSlashSelect(selected); return }
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
+    if (offeredSuggestion && e.key === "Tab" && !e.shiftKey) { e.preventDefault(); applySuggestion(offeredSuggestion); return }
     if (dictationStatus !== "idle" && e.key === "Escape") { e.preventDefault(); dictation?.cancel(); return }
     if (recording && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); dictation?.finish(true); return }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dictating) void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer, dictationStatus, dictating, recording, dictation])
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer, dictationStatus, dictating, recording, dictation, offeredSuggestion, applySuggestion])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
@@ -540,9 +548,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     },
   }), [updateMultiline, addContext, draftNow, applyDraft])
 
-  const isPlanApproval = pendingInteraction?.type === "plan"
-  const isUserQuestion = pendingInteraction?.type === "question"
-  const hasPermissions = permissionRequests.length > 0
   // With session controls inside the card the message always gets its own
   // row, so the inline single-line grid only applies to the mobile composer.
   const stacked = Boolean(footer)
@@ -559,7 +564,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     <div
       className={cn(
         "relative pb-0",
-        compact ? "px-2 pt-2" : "px-3 pt-2",
+        compact ? "px-2 pt-1" : "px-3 pt-1",
         isDragOver && "ring-2 ring-info/40 ring-inset",
       )}
       onDragOver={handleDragOver}
@@ -597,10 +602,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
               onReject={() => { void submitPlanResponse(false) }}
             />
           )}
-
-        {/* Sits above the composer it fills. Renders nothing when the CLI sent
-            no suggestion, which is most turns. */}
-        <PromptSuggestionBar suggestion={promptSuggestion} onAccept={applySuggestion} />
 
         {snapshot.messages.filter((message) => !message.pending).map((message) => <div key={message.id} role="status" className="mb-2 rounded border p-2 text-xs">
           <p>Unsent message: {message.draft.text.slice(0, 100) || "Context / attachments"}. Kept in this tab.</p>
@@ -664,7 +665,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
                 // On mobile, scroll textarea into view after virtual keyboard opens
                 setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
               }}
-              placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
+              placeholder={offeredSuggestion ? `${offeredSuggestion}  (Tab)` : getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
               aria-label="Message"
               role="combobox"
               aria-autocomplete="list"
@@ -684,6 +685,19 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
               {footer}
               {dictation && dictationStatus !== "idle" ? <DictationBar dictation={dictation} /> : <>
                 <RuntimePluginActions />
+                {offeredSuggestion && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => applySuggestion(offeredSuggestion)}
+                    className="text-muted-foreground"
+                    title="Use the suggestion (Tab)"
+                    aria-label={`Use the suggestion: ${offeredSuggestion}`}
+                  >
+                    <Sparkles data-icon="icon" />
+                  </Button>
+                )}
                 {dictation && <DictationButton dictation={dictation} onStart={() => textareaRef.current?.focus()} />}
               </>}
               <ActionButtons hasContent={recording || hasContent && !dictating} onSubmit={recording ? () => dictation?.finish(true) : handleSubmit}

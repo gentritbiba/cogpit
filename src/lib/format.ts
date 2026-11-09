@@ -1,5 +1,4 @@
-import type { RawMessage, Turn } from "../../shared/session/types"
-import { computeContextUsage, type ContextUsage } from "../../shared/session/contextWindow"
+import type { Turn } from "../../shared/session/types"
 import { descriptorForDirName } from "@/lib/agents"
 
 export { shortenModel } from "../../shared/session/model-names"
@@ -154,24 +153,3 @@ export function parseSubAgentPath(fileName: string): {
 // ── Context Window ────────────────────────────────────────────────────────
 
 export { getContextLimit } from "../../shared/session/contextWindow"
-
-/**
- * Get the current context usage from the last API response in the session.
- *
- * Each API call reports the FULL context window as input tokens.
- * A single turn can have multiple API calls (thinking → tool_use → more thinking),
- * and mergeTokenUsage sums them — which is correct for billing but wrong for
- * context size. We need the LAST raw API response's usage, not the merged turn total.
- */
-export function getContextUsage(
-  rawMessages: readonly RawMessage[]
-): ContextUsage | null {
-  // Walk backwards through raw messages to find the last assistant message with usage
-  for (let i = rawMessages.length - 1; i >= 0; i--) {
-    const msg = rawMessages[i]
-    if (msg.type === "assistant") {
-      return computeContextUsage(msg.message.usage, msg.message.model ?? "", "claude")
-    }
-  }
-  return null
-}

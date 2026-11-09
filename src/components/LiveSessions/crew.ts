@@ -36,7 +36,7 @@ export interface MemberStatus {
 export interface CrewFolding {
   /** Rows placed on their own, in the order given. */
   topLevel: ActiveSessionInfo[]
-  /** The members riding with each row that carries a crew, in the order they were started. */
+  /** The members riding with each row that carries a crew, the most recently active first. */
   crewOf: ReadonlyMap<string, ActiveSessionInfo[]>
 }
 
@@ -79,7 +79,9 @@ export function foldCrewRows(rows: readonly ActiveSessionInfo[]): CrewFolding {
   }
 
   for (const members of crewOf.values()) {
-    members.sort((a, b) => (a.crew?.startedAt ?? 0) - (b.crew?.startedAt ?? 0))
+    members.sort((a, b) => (
+      getSessionRecencyMs(b) - getSessionRecencyMs(a) || (b.crew?.startedAt ?? 0) - (a.crew?.startedAt ?? 0)
+    ))
   }
   return { topLevel, crewOf }
 }

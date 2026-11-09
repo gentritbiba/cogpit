@@ -21,6 +21,7 @@ const onModelRejected = vi.fn<(model: string) => void>()
 const baseOptions = {
   permissionsConfig: defaultPermissions(false),
   dispatch,
+  sessions: { openSession: vi.fn(), prefetchSession: vi.fn(), reloadCurrent: vi.fn(), leave: vi.fn() },
   isMobile: false,
   defaultAgentKind: "claude" as AgentKind,
   pendingDirName: null as string | null,

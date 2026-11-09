@@ -41,7 +41,7 @@ function renderComposer() {
       onHydrate: () => {},
     })
     return usePtyChat({
-      sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+      sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       parsedSessionId: "sess",
       model: values.model,
       effort: values.effort,

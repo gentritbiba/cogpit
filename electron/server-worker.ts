@@ -6,6 +6,7 @@
 import { CLICKUP_CONFIG_FILE } from "../server/lib/clickupConfig"
 import { createServerComposition } from "../server/app-server"
 import { getConfig } from "../server/config"
+import { detachFromParentCogpit } from "../server/lib/parentCogpit"
 import { removePortFile, setServerPort, writePortFile } from "../server/lib/portFile"
 import { setDesktopAttention } from "../server/lib/desktopAttention"
 import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
@@ -25,6 +26,7 @@ let starting = false
 
 async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<void> {
   try {
+    detachFromParentCogpit()
     const { httpServer } = await createServerComposition(staticDir, userDataDir, {
       mode: "electron",
       legacyClickUpPath: CLICKUP_CONFIG_FILE,

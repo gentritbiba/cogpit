@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { BrowserPanel } from "@/components/BrowserPanel"
+import { InSession } from "@/__tests__/InSession"
 import type { UseBrowserSessions } from "@/hooks/useBrowserSessions"
 import type { BrowserFrame, BrowserSocketStatus, UseBrowserSocket } from "@/hooks/useBrowserSocket"
 import type { WorkspacePanelContext } from "@/plugin-api"
 import type { BrowserClientMessage, BrowserTab } from "../../../../shared/browser/protocol"
 import type { BrowserSessionInfo, BrowserSkillTarget } from "../../../../shared/browser/types"
 import { AGENT_KINDS } from "../../../../shared/session/agent-descriptors"
-import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
+import type { ToolCall, Turn } from "../../../../shared/session/types"
+import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../../shared/session/sessionDigest"
 
 vi.mock("@/hooks/useBrowserSessions", () => ({
   useBrowserSessions: (enabled: boolean) => sessionsDouble(enabled),
@@ -135,7 +137,7 @@ function browserOf(overrides: Partial<BrowserSessionInfo> = {}): BrowserSessionI
 const WORK = browserOf({ name: "work", isDefault: false })
 const SHOP = browserOf({ name: "shop", isDefault: false })
 
-function sessionDriving(command: string, done = true): ParsedSession {
+function sessionDriving(command: string, done = true): SessionView {
   const call: ToolCall = {
     id: "tool-1",
     name: "Bash",
@@ -176,13 +178,13 @@ function sessionDriving(command: string, done = true): ParsedSession {
       totalDurationMs: 0,
       turnCount: 1,
     },
-    rawMessages: [],
+    digest: EMPTY_SESSION_DIGEST,
   }
 }
 
-function contextOf(session: ParsedSession | null = null): WorkspacePanelContext {
+function contextOf(session: SessionView | null = null): WorkspacePanelContext {
   return {
-    session,
+    sessionId: session?.sessionId ?? null,
     sessionChangeKey: 0,
     projectPath: "/repo",
     hasFileChanges: false,
@@ -191,13 +193,18 @@ function contextOf(session: ParsedSession | null = null): WorkspacePanelContext 
   }
 }
 
-function panel(context = contextOf()) {
-  return <BrowserPanel context={context} active closePanel={closePanel} />
+/** The panel with `session` open, as the workspace shows it. */
+function panel(session: SessionView | null = null) {
+  return (
+    <InSession session={session}>
+      <BrowserPanel context={contextOf(session)} active closePanel={closePanel} />
+    </InSession>
+  )
 }
 
-function setup(context = contextOf()) {
+function setup(session: SessionView | null = null) {
   const user = userEvent.setup()
-  return { user, ...render(panel(context)) }
+  return { user, ...render(panel(session)) }
 }
 
 function selectedName(): string {
@@ -311,7 +318,7 @@ describe("BrowserPanel", () => {
 
   it("follows the agent to another browser that exists", async () => {
     browsers = [browserOf(), WORK]
-    setup(contextOf(sessionDriving("agent-browser --session work open https://example.com")))
+    setup(sessionDriving("agent-browser --session work open https://example.com"))
 
     await waitFor(() => expect(selectedName()).toContain("work"))
     expect(socketSessions).toContain("work")
@@ -319,7 +326,7 @@ describe("BrowserPanel", () => {
 
   it("leaves an unknown browser alone", async () => {
     browsers = [browserOf()]
-    setup(contextOf(sessionDriving("agent-browser --session ghost open https://example.com")))
+    setup(sessionDriving("agent-browser --session ghost open https://example.com"))
 
     await waitFor(() => expect(selectedName()).toContain("default"))
     expect(socketSessions).not.toContain("ghost")
@@ -333,7 +340,7 @@ describe("BrowserPanel", () => {
     await user.click(await screen.findByRole("button", { name: "Switch to shop" }))
     await waitFor(() => expect(selectedName()).toContain("shop"))
 
-    rerender(panel(contextOf(sessionDriving("agent-browser --session work open https://example.com"))))
+    rerender(panel(sessionDriving("agent-browser --session work open https://example.com")))
 
     await waitFor(() => expect(selectedName()).toContain("shop"))
     expect(socketSessions).not.toContain("work")
@@ -342,14 +349,14 @@ describe("BrowserPanel", () => {
   it("captions the page only while the agent drives the browser on screen", async () => {
     browsers = [browserOf(), WORK]
     const { user, rerender } = setup(
-      contextOf(sessionDriving("agent-browser open https://example.com", false)),
+      sessionDriving("agent-browser open https://example.com", false),
     )
 
     expect(screen.getByText("agent-browser open https://example.com")).toBeInTheDocument()
     expect(screen.getByText("running")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Follow agent" }))
-    rerender(panel(contextOf(sessionDriving("agent-browser --session work snapshot"))))
+    rerender(panel(sessionDriving("agent-browser --session work snapshot")))
 
     expect(selectedName()).toContain("default")
     expect(screen.queryByText("agent-browser --session work snapshot")).not.toBeInTheDocument()
@@ -447,7 +454,7 @@ describe("BrowserPanel archiving", () => {
 
   it("does not follow stale transcript activity into an archived browser", async () => {
     browsers = [browserOf(), browserOf({ name: "work", isDefault: false, running: false, archived: true })]
-    setup(contextOf(sessionDriving("agent-browser --session work open https://example.com")))
+    setup(sessionDriving("agent-browser --session work open https://example.com"))
     expect(selectedName()).toContain("default")
   })
 })
@@ -505,7 +512,7 @@ describe("BrowserPanel for a caller with an account of their own", () => {
   it("offers no way to open a stopped browser they may only watch", () => {
     socketState = "stopped"
     browsers = [MINE, { ...ALICES, running: false }]
-    setup(contextOf(sessionDriving("agent-browser open https://example.com")))
+    setup(sessionDriving("agent-browser open https://example.com"))
 
     expect(screen.getByText(/isn.t running/)).toBeInTheDocument()
     expect(screen.queryByLabelText("Page to open")).not.toBeInTheDocument()
@@ -513,7 +520,7 @@ describe("BrowserPanel for a caller with an account of their own", () => {
 
   it("follows an agent that named no browser into the session owner's own", async () => {
     browsers = [MINE, { ...ALICES, control: "drive" }]
-    setup(contextOf(sessionDriving("agent-browser open https://example.com")))
+    setup(sessionDriving("agent-browser open https://example.com"))
 
     await waitFor(() => expect(selectedName()).toContain("Alice's browser"))
     expect(socketSessions).toContain("user-u_alice")

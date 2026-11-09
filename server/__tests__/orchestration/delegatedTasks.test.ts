@@ -148,6 +148,38 @@ describe("durable delegated results", () => {
     origins.sessionOrigin.mockResolvedValue(null)
   })
 
+  it("lets go of a parent once none of its tasks needs work, until it is armed again", async () => {
+    const store = orchestrationStore()
+    store.putTask("owner", { sourceId: "detach-first", parentSessionId: "idle-parent", childSessionId: "idle-child" })
+    const send = vi.fn(async (_id: string, _message: string) => ({ receipt: acceptedReceipt }))
+    const host = { state: async () => ({ outcome: "completed" }), result: async () => ({ reply: "Done" }), send, stop: async () => true }
+    const authorize = vi.fn(async () => true)
+    attachTaskAuthority("owner", "idle-parent", { authorize, host: async () => host })
+    await refreshUntil(() => send.mock.calls.length === 1)
+    await refreshDelegatedTasks()
+    authorize.mockClear()
+    await refreshDelegatedTasks()
+    expect(authorize).not.toHaveBeenCalled()
+
+    store.putTask("owner", { sourceId: "detach-second", parentSessionId: "idle-parent", childSessionId: "idle-child-2" })
+    attachTaskAuthority("owner", "idle-parent", { authorize, host: async () => host })
+    await until(() => send.mock.calls.length === 2)
+    expect(send.mock.calls[1]![1]).toContain("Child session: idle-child-2")
+  })
+
+  it("remembers what the parent was told about a child across its tasks", async () => {
+    const store = orchestrationStore()
+    const earlier = store.putTask("owner", { sourceId: "told-earlier", parentSessionId: "told-parent", childSessionId: "told-child" })
+    store.updateTask("owner", earlier.id, { state: "completed", acknowledgedAt: 1, notified: ["q-told"] })
+    store.putTask("owner", { sourceId: "told-later", parentSessionId: "told-parent", childSessionId: "told-child", commandId: "later" })
+    const question = { kind: "question" as const, requestId: "q-told", questions: [{ question: "Again?", multiSelect: false, options: ["Yes"] }] }
+    const state = vi.fn(async () => ({ outcome: "needs_input", waiting: [question] }))
+    const send = vi.fn(async (_id: string, _message: string) => ({ receipt: acceptedReceipt }))
+    attachTaskAuthority("owner", "told-parent", { authorize: async () => true, host: async () => ({ state, result: async () => null, send, stop: async () => true }) })
+    await refreshUntil(() => state.mock.calls.length > 1)
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it("tells the parent when its follow-up is held, and drops a cancelled one silently", async () => {
     const store = orchestrationStore()
     store.putTask("owner", { sourceId: "held-follow-up", parentSessionId: "held-parent", childSessionId: "held-child", commandId: "held-message" })

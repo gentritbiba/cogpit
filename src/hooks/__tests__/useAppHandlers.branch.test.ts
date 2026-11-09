@@ -1,17 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 
-const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), loadSessionTailCached: vi.fn(), toastError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), toastError: vi.fn() }))
 vi.mock("@/contexts/SessionInventoryContext", () => ({ useSessionInventory: () => ({ removeSession: vi.fn() }) }))
 vi.mock("@/lib/auth", () => ({
   authFetch: mocks.authFetch,
   jsonFetch: (url: string, body: unknown) => mocks.authFetch(url, { method: "POST", body: JSON.stringify(body) }),
 }))
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }))
-vi.mock("@/lib/sessionLoader", () => ({
-  loadSessionTailCached: mocks.loadSessionTailCached,
-  loadSessionTailFresh: vi.fn(),
-}))
 
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { ACCESS_LOST_MESSAGE, useSessionAccessLoss } from "@/hooks/useSessionAccessLoss"
@@ -24,21 +20,35 @@ import {
   sessionAccessTicket,
 } from "@/lib/sessionAccess"
 import type { PermissionsConfig } from "@/lib/permissions"
-import type { SessionAction } from "@/hooks/useSessionState"
-import type { ParsedSession } from "../../../shared/session/types"
+import { createSessionStore, type SessionAction } from "@/hooks/useSessionState"
+import type { SessionController } from "@/lib/sessionLoader"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
 import { SESSION_ACCESS_HEADER, SESSION_ID_HEADER } from "../../../shared/contracts/sessionAccess"
 
 const ALICE = { id: "u_alice", username: "alice", displayName: "Alice" }
 const COPY = "22222222-2222-4222-8222-222222222222"
 
+/** Opens whatever the copy request resolves; the controller's own behaviour has its own suite. */
+const sessions: SessionController = {
+  openSession: async (target, { commit }) => {
+    const address = typeof target === "function" ? await target(new AbortController().signal) : target
+    commit({ parsed: { sessionId: COPY } as unknown as SessionView, source: { ...address, watchOffset: 0, loadId: 2 } })
+    return "opened"
+  },
+  prefetchSession: vi.fn(),
+  reloadCurrent: vi.fn(),
+  leave: vi.fn(),
+}
+
 function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<typeof useAppHandlers>[0] {
-  const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as ParsedSession
+  const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as SessionView
   return {
     state: {
-      session: parsed,
-      sessionSource: { dirName: "-work-app", fileName: "original.jsonl", rawText: "" },
+      sessionId: parsed.sessionId,
+      sessionSource: { dirName: "-work-app", fileName: "original.jsonl", watchOffset: 0, loadId: 1 },
     },
+    sessionStore: createSessionStore(parsed),
     dispatch,
     isMobile: false,
     handleJumpToTurn: vi.fn(),
@@ -54,7 +64,7 @@ function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<type
     mcpConfig: null,
     scrollRequestScrollToTop: vi.fn(),
     handleDashboardSelect: vi.fn(),
-    workerParse: vi.fn(),
+    sessions,
     canInteract: false,
   }
 }
@@ -77,7 +87,6 @@ describe("useAppHandlers copies", () => {
       fileName: `${COPY}.jsonl`,
       sessionId: COPY,
     })))
-    mocks.loadSessionTailCached.mockResolvedValue({ parsed: { sessionId: COPY }, source: { dirName: "-work-app" } })
   })
 
   afterEach(() => {
@@ -98,6 +107,22 @@ describe("useAppHandlers copies", () => {
     await act(() => copy(result.current))
 
     expect(accessWhenOpened).toHaveBeenCalledWith("own")
+  })
+
+  it("names the turn by its id and says why the server would not branch there", async () => {
+    mocks.toastError.mockReset()
+    const refusal = "Unable to locate the selected turn in the current session file"
+    mocks.authFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: refusal }), { status: 409 }))
+    const dispatch = vi.fn()
+    const { result } = renderHandlers(dispatch)
+
+    await act(() => result.current.handleBranchFromHere(0))
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/branch-session", expect.objectContaining({
+      body: JSON.stringify({ dirName: "-work-app", fileName: "original.jsonl", turnIndex: 0, turnUuid: "turn-1" }),
+    }))
+    expect(mocks.toastError).toHaveBeenCalledWith(refusal)
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "LOAD_SESSION" }))
   })
 })
 

@@ -9,8 +9,8 @@ import {
 } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { getContextUsage, formatTokenCount } from "@/lib/format"
-import type { RawMessage } from "../../shared/session/types"
+import { formatTokenCount } from "@/lib/format"
+import type { ContextUsage } from "../../shared/session/contextWindow"
 
 /**
  * The one surface for everything that floats over the chat pane now that
@@ -92,7 +92,7 @@ export const HeaderIconButton = memo(function HeaderIconButton({
 // ── ContextBadge ─────────────────────────────────────────────────────────────
 
 interface ContextBadgeProps {
-  rawMessages: readonly RawMessage[]
+  usage: ContextUsage | null
   showRemaining?: boolean
   showTooltip?: boolean
   warnOnly?: boolean
@@ -118,12 +118,11 @@ export const CONTEXT_STYLES: Record<ContextPressure, string> = {
  * Renders nothing if context usage data is unavailable.
  */
 export const ContextBadge = memo(function ContextBadge({
-  rawMessages,
+  usage: ctx,
   showRemaining = false,
   showTooltip = false,
   warnOnly = false,
 }: ContextBadgeProps) {
-  const ctx = getContextUsage(rawMessages)
   if (!ctx) return null
 
   const pctLeft = Math.max(0, 100 - ctx.percent)

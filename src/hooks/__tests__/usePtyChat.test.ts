@@ -51,7 +51,7 @@ describe("usePtyChat", () => {
   it("does not send or interrupt a read-only session", async () => {
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "copilot__L3Byb2plY3Q", fileName: "sess/events.jsonl", rawText: "" },
+        sessionSource: { dirName: "copilot__L3Byb2plY3Q", fileName: "sess/events.jsonl", watchOffset: 0, loadId: 1 },
         parsedSessionId: "sess",
         readOnly: true,
       })
@@ -72,7 +72,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
         ultracode: true,
         contextWindowTokens: 200000,
       })
@@ -99,7 +99,7 @@ describe("usePtyChat", () => {
     vi.mocked(admitReceipt).mockReturnValueOnce(true).mockReturnValueOnce(false)
 
     const { result } = renderHook(() =>
-      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" } })
+      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 } })
     )
 
     await act(async () => {
@@ -119,7 +119,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -139,7 +139,7 @@ describe("usePtyChat", () => {
     )
     mockedAuthFetch.mockResolvedValueOnce(refused).mockResolvedValueOnce(reply({ error: "Server error" }, 500))
     const { result } = renderHook(() =>
-      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" } }),
+      usePtyChat({ sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 } }),
     )
 
     let sent: boolean[] = []
@@ -161,7 +161,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "codex__proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "codex__proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
         model: "gpt-5.4-mini",
         onModelRejected,
       })
@@ -188,7 +188,7 @@ describe("usePtyChat", () => {
         sessionSource: {
           dirName: "copilot__L3Byb2plY3Q",
           fileName: "123e4567-e89b-42d3-a456-426614174000/events.jsonl",
-          rawText: "",
+          watchOffset: 0, loadId: 1,
         },
         model: "",
       })
@@ -210,7 +210,7 @@ describe("usePtyChat", () => {
         sessionSource: {
           dirName: "codex__proj",
           fileName: "2026/07/21/rollout-2026-07-21T22-59-57-e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3.jsonl",
-          rawText: "",
+          watchOffset: 0, loadId: 1,
         },
       })
     )
@@ -228,7 +228,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -247,7 +247,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -302,7 +302,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -331,7 +331,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -385,7 +385,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -407,7 +407,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "old-id.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "old-id.jsonl", watchOffset: 0, loadId: 1 },
         parsedSessionId: "real-uuid-123",
       })
     )
@@ -427,7 +427,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -444,7 +444,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -456,8 +456,8 @@ describe("usePtyChat", () => {
   })
 
   it("resets state when session changes (sessionId switches)", async () => {
-    const source1 = { dirName: "proj", fileName: "sess1.jsonl", rawText: "" }
-    const source2 = { dirName: "proj", fileName: "sess2.jsonl", rawText: "" }
+    const source1 = { dirName: "proj", fileName: "sess1.jsonl", watchOffset: 0, loadId: 1 }
+    const source2 = { dirName: "proj", fileName: "sess2.jsonl", watchOffset: 0, loadId: 1 }
 
     // First session has an error
     mockedAuthFetch.mockResolvedValueOnce(reply({ error: "Server error" }, 500))
@@ -506,7 +506,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
         onPermissionsApplied,
       })
     )
@@ -520,7 +520,7 @@ describe("usePtyChat", () => {
 
   it("sends a permission mode only when one is given, leaving the session's own otherwise", async () => {
     mockedAuthFetch.mockResolvedValue(reply({ success: true }))
-    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 }
     const picked = { mode: "plan" as const, allowedTools: [], disallowedTools: [] }
 
     const { result, rerender } = renderHook(
@@ -542,7 +542,7 @@ describe("usePtyChat", () => {
 
   it("names the settings the user picked in settingsChange, and none when nothing was picked", async () => {
     mockedAuthFetch.mockResolvedValue(reply({ success: true }))
-    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 }
 
     const { result, rerender } = renderHook(
       ({ settingsChange }) => usePtyChat({ sessionSource, model: "sonnet", effort: "high", settingsChange }),
@@ -563,7 +563,7 @@ describe("usePtyChat", () => {
 
   it("carries fast mode and ultracode turned off only when the user picked them", async () => {
     mockedAuthFetch.mockResolvedValue(reply({ success: true }))
-    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", rawText: "" }
+    const sessionSource = { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 }
 
     const { result, rerender } = renderHook(
       ({ settingsChange }) => usePtyChat({ sessionSource, fastMode: false, ultracode: false, settingsChange }),
@@ -588,7 +588,7 @@ describe("usePtyChat", () => {
     const onSettingsChangeSent = vi.fn()
 
     const { result } = renderHook(() => usePtyChat({
-      sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+      sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       model: "sonnet",
       settingsChange: ["model"],
       onSettingsChangeSent,
@@ -609,7 +609,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
@@ -642,7 +642,7 @@ describe("usePtyChat", () => {
 
     const { result } = renderHook(() =>
       usePtyChat({
-        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", watchOffset: 0, loadId: 1 },
       })
     )
 
