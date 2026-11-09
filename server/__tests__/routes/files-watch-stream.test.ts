@@ -526,6 +526,21 @@ describe("/api/watch stream v2", () => {
     closeConnection()
   })
 
+  it("resets when a line sent before its newline turns out to go on (review #8)", async () => {
+    const file = liveFile(`${a}\n`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size}&stream=2`)
+    file.write(b)
+    await file.poke()
+    await file.poke()
+    expect(lineEvents(frames)).toHaveLength(1)
+    file.write(`${c}\n`)
+    await file.poke()
+    expect(parseFrames(frames).at(-1)).toEqual({ type: "reset", reason: "diverged" })
+    expect(lineEvents(frames)).toHaveLength(1)
+    expect(res.end).toHaveBeenCalledOnce()
+    closeConnection()
+  })
+
   it("resumes a client one byte past the end, whose line's newline is still owed", async () => {
     const file = liveFile(`${a}\n${b}`)
     const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size + 1}&stream=2`)

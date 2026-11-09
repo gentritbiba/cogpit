@@ -22,11 +22,12 @@ export interface WatchLinesEvent {
   end: number
 }
 
-export type WatchResetReason = "truncated" | "gap"
+export type WatchResetReason = "truncated" | "gap" | "diverged"
 
 /**
  * The stream cannot continue from where the client is: the file shrank below
- * it (`truncated`), or it is too far behind to catch up line by line (`gap`).
+ * it (`truncated`), it is too far behind to catch up line by line (`gap`), or
+ * a line sent before its newline was written went on after all (`diverged`).
  * The server ends the connection after it; the client reloads the session.
  */
 export interface WatchResetEvent {

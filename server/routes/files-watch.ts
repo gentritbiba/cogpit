@@ -326,7 +326,8 @@ export function registerFileWatchRoutes(use: UseFn) {
               if (newlineOwed && raw) {
                 newlineOwed = false
                 if (raw.startsWith("\n")) raw = raw.slice(1)
-                // The line sent early was not complete after all; what follows is a line of its own.
+                // The line sent early was not complete after all, and a v2 client already resumes past its newline.
+                else if (v2) return reset("diverged")
                 else lineStart -= 1
               }
               const start = lineStart
