@@ -283,6 +283,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         ...state,
         ...openSession(action.session),
         sessionSource: action.source,
+        activeTurnIndex: null,
+        activeToolCallId: null,
         sessionChangeKey: state.sessionChangeKey + 1,
       }
 

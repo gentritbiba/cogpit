@@ -682,7 +682,7 @@ describe("useSessionState", () => {
     })
   })
 
-  // ── RELOAD_SESSION_CONTENT ────────────────────────────────────────
+  // ── SET_OLDER_TURNS ───────────────────────────────────────────────
 
   describe("SET_OLDER_TURNS", () => {
     it("keeps the active turn on the same turn as pages go in front of it", () => {
@@ -712,6 +712,8 @@ describe("useSessionState", () => {
     })
   })
 
+  // ── RELOAD_SESSION_CONTENT ────────────────────────────────────────
+
   describe("RELOAD_SESSION_CONTENT", () => {
     it("sets session and source and increments changeKey", () => {
       const hook = renderState()
@@ -722,6 +724,17 @@ describe("useSessionState", () => {
       expect(getState(hook).session).toBe(session)
       expect(getState(hook).sessionSource).toBe(source)
       expect(getState(hook).sessionChangeKey).toBe(before + 1)
+    })
+
+    it("clears the active turn, whose index counted the history the reload drops (review 3 #5)", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-1" }), makeTurn({ id: "t0" })] })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 2, toolCallId: "call-1" })
+
+      dispatch(hook, { type: "RELOAD_SESSION_CONTENT", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource({ loadId: 2 }) })
+      expect(getState(hook).activeTurnIndex).toBeNull()
+      expect(getState(hook).activeToolCallId).toBeNull()
     })
   })
 
