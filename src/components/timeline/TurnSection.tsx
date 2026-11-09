@@ -55,10 +55,10 @@ interface TurnSectionProps {
 
 export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) {
   const {
-    state: { activeTurnIndex, activeToolCallId, expandAll, expandToolPayloads },
+    state: { expandAll, expandToolPayloads },
     isMobile,
   } = useAppContext()
-  const { session, isLive, isSubAgentView, undoRedo, actions, pendingInteraction } = useSessionContext()
+  const { session, activeTurnIndex, activeToolCallId, isLive, isSubAgentView, undoRedo, actions, pendingInteraction } = useSessionContext()
 
   const isSessionLive = isLive && session !== null
   // Narrower than `isSessionLive`: only the last turn can still be worked on, so

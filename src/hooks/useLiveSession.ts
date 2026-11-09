@@ -73,9 +73,10 @@ export function useLiveSession(
   workerAppendRef.current = workerAppend
   const loadedSessionRef = useRef(loadedSession)
   loadedSessionRef.current = loadedSession
-  const lastResyncAtRef = useRef(0)
-  // Streamed lines whose overlay messages go once the update holding them is on screen.
-  const landingRef = useRef<{ digest: SessionDigest; lines: string[] } | null>(null)
+  /** The last resync, and the transcript it was for: the cooldown holds for that transcript only. */
+  const lastResyncRef = useRef<{ transcript: string; at: number } | null>(null)
+  // Parsed batches, oldest first, whose overlay messages go once an update holding them is on screen.
+  const landingRef = useRef<Array<{ digest: SessionDigest; lines: string[] }>>([])
 
   // Dropping an overlay message when its line arrives would blank its text for
   // as long as the worker and the render take; dropping it with the commit that
@@ -83,9 +84,10 @@ export function useLiveSession(
   // layout effect of whatever renders the session.
   const sessionShown = useCallback((shown: SessionView | null) => {
     const landing = landingRef.current
-    if (!landing || shown?.digest !== landing.digest) return
-    landingRef.current = null
-    const next = reconcileWithLines(overlayRef.current, landing.lines)
+    const upTo = landing.findIndex(({ digest }) => digest === shown?.digest)
+    if (upTo < 0) return
+    landingRef.current = landing.slice(upTo + 1)
+    const next = reconcileWithLines(overlayRef.current, landing.slice(0, upTo + 1).flatMap(({ lines }) => lines))
     if (next === overlayRef.current) return
     overlayRef.current = next
     streamingOverlayStore.publish(next)
@@ -210,10 +212,12 @@ export function useLiveSession(
       setAgentProgress(EMPTY_AGENT_PROGRESS)
     }
 
+    const transcript = `${dirName}/${fileName}`
     const resync = () => {
       const now = Date.now()
-      if (!onResyncRef.current || now - lastResyncAtRef.current < RESYNC_COOLDOWN_MS) return
-      lastResyncAtRef.current = now
+      const last = lastResyncRef.current
+      if (!onResyncRef.current || (last?.transcript === transcript && now - last.at < RESYNC_COOLDOWN_MS)) return
+      lastResyncRef.current = { transcript, at: now }
       onResyncRef.current({ keepBackoff: true })
     }
 
@@ -243,7 +247,7 @@ export function useLiveSession(
           })
           if (closed) return
           sessionRef.current = result
-          landingRef.current = { digest: result.digest, lines: [...(landingRef.current?.lines ?? []), ...flushedLines] }
+          landingRef.current = [...landingRef.current, { digest: result.digest, lines: flushedLines }]
           scheduleUpdate()
         }, (err) => {
           console.error("[useLiveSession] worker parse failed:", err)
@@ -388,7 +392,7 @@ export function useLiveSession(
       if (overlayRafId !== null) cancelAnimationFrame(overlayRafId)
       if (staleSweep) clearInterval(staleSweep)
       overlayRef.current = EMPTY_OVERLAY
-      landingRef.current = null
+      landingRef.current = []
       streamingOverlayStore.publish(EMPTY_OVERLAY)
     }
   }, [dirName, fileName, loadId, watchOffset, streamingOverlayStore])

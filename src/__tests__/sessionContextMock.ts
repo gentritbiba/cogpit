@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react"
-import { createSessionStore, useSessionSelector } from "@/hooks/useSessionState"
+import { afterEach } from "vitest"
+import { createSessionStore, useSessionSelector, useShownSession } from "@/hooks/useSessionState"
 import type { SessionView } from "../../shared/session/sessionDigest"
 
 /** Mocks hand in partial context values; the session itself comes from `showSession`. */
@@ -11,10 +12,10 @@ interface SessionContextMock {
   [hook: string]: unknown
 }
 
-/** The open session behind the mocked hooks, in a real store the components subscribe to. */
-const store = createSessionStore()
+/** The open session behind the mocked hooks, in a real store the components subscribe to; each test starts with none. */
+let store = createSessionStore()
+afterEach(() => { store = createSessionStore() })
 const SOURCE = { dirName: "project", fileName: "session.jsonl", watchOffset: 0, loadId: 1 }
-const whole = (open: SessionView | null) => open
 
 /**
  * Opens `session` (a partial one is fine) in that store, or closes it. A
@@ -34,7 +35,8 @@ export function shownSession(): SessionView | null {
 /**
  * Completes a `@/contexts/SessionContext` module mock: the controls hooks
  * return the mock's context value, and the session in that value and in
- * `useOpenSession` comes from the store `showSession` drives.
+ * `useOpenSession` comes from the store `showSession` drives. The context
+ * hands it over as the real provider does, as the deferred copy on screen.
  */
 export function withSessionHooks<T extends SessionContextMock>(mock: T) {
   const controls = (hook: ContextHook | undefined) => () => {
@@ -43,9 +45,9 @@ export function withSessionHooks<T extends SessionContextMock>(mock: T) {
     return value
   }
   const withSession = (hook: ContextHook | undefined) => () => {
-    const session = useSessionSelector(store, whole)
+    const { session, sessionChangeKey, activeTurnIndex, activeToolCallId } = useShownSession(store)
     const value = controls(hook)()
-    return value && { ...value, session }
+    return value && { ...value, session, sessionChangeKey, activeTurnIndex, activeToolCallId }
   }
   const context = controls(mock.useSessionContext ?? mock.useSessionContextOptional)
   return {

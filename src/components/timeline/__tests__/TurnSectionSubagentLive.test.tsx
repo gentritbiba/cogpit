@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({ turns: [] as Turn[] }))
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -21,6 +21,8 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionContext: () => ({
+    activeTurnIndex: null,
+    activeToolCallId: null,
     session: { sessionId: "session-1", turns: mocks.turns, digest: { ...EMPTY_SESSION_DIGEST, status: { status: "thinking" } }, cwd: "/workspace" },
     sessionSource: null,
     isLive: true,

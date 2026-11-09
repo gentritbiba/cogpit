@@ -1,8 +1,7 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, useDeferredValue, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
 import { useChatScroll } from "@/hooks/useChatScroll"
-import { createSessionStore, useSessionSelector, type SessionState, type SessionStore } from "@/hooks/useSessionState"
-import { shallowEqual, useStoreSelector } from "@/lib/store"
+import { createSessionStore, useSessionSelector, useShownSession, type SessionStore } from "@/hooks/useSessionState"
 import { withStartPrompt } from "@/lib/startPrompts"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -54,7 +53,10 @@ export interface SessionContextValue {
   session: SessionView | null
   /** Changes with every load of a session; it always belongs to `session`. */
   sessionChangeKey: number
-  /** Source metadata for the loaded session */
+  /** The turn in focus, counted in `session.turns`. */
+  activeTurnIndex: number | null
+  activeToolCallId: string | null
+  /** Where the open session was loaded from; in the session context, where `session` was. */
   sessionSource: SessionSource | null
   /** Whether the session is actively streaming */
   isLive: boolean
@@ -90,6 +92,7 @@ export interface SessionContextValue {
     handleEditConfig?: (filePath: string) => void
     handleEditCommand?: (commandName: string) => void
     handleExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+    /** Turn indices from the provider's contexts count the turns on screen. */
     handleOpenBranches?: (turnIndex: number) => void
     handleBranchFromHere?: (turnIndex: number) => void
     handleToggleExpandAll: () => void
@@ -106,7 +109,7 @@ export interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | null>(null)
 
 /** Everything in the session context but the session's content, which changes on every live batch. */
-export type SessionControls = Omit<SessionContextValue, "session" | "sessionChangeKey">
+export type SessionControls = Omit<SessionContextValue, "session" | "sessionChangeKey" | "activeTurnIndex" | "activeToolCallId">
 
 const SessionControlsContext = createContext<SessionControls | null>(null)
 const SessionStoreContext = createContext<SessionStore | null>(null)
@@ -135,25 +138,65 @@ interface OpenSessionProviderProps {
   children: ReactNode
 }
 
-function selectOpen({ session, sessionChangeKey }: SessionState) {
-  return { session, sessionChangeKey }
+/**
+ * Where the turn at `index` of the session on screen sits in the store's
+ * session, which can be ahead of it: a batch or page not shown yet, or
+ * another session already open. Null when the store's session lacks it.
+ */
+function storeTurnIndex(shown: SessionView | null, open: SessionView | null, index: number): number | null {
+  if (!shown || !open || shown.sessionId !== open.sessionId) return null
+  const turn = shown.turns[index]
+  if (!turn) return null
+  // Batches add turns behind it and pages in front of it, so look there first.
+  for (const at of [index, index + open.turns.length - shown.turns.length]) {
+    if (open.turns[at]?.id === turn.id) return at
+  }
+  const at = open.turns.findIndex(({ id }) => id === turn.id)
+  return at < 0 ? null : at
+}
+
+/** `act`, taking an index into the session on screen instead. */
+function onScreenTurn(act: (turnIndex: number) => void, toStore: (index: number) => number | null) {
+  return (index: number) => {
+    const at = toStore(index)
+    if (at !== null) act(at)
+  }
 }
 
 /**
- * Provides the session open in `store`. Only this provider and the components
- * that read the session's content re-render on a live batch; whatever renders
- * it, and what reads only the controls or a selected fact, does not.
- *
- * A store update always renders at once, so the content follows a deferred
- * copy: a live batch or a switch renders the transcript at low priority,
- * where input or the next batch interrupts it.
+ * Provides the session open in `store`, as `useShownSession` shows it. Only
+ * this provider and the components that read the session's content re-render
+ * on a live batch; whatever renders it, and what reads only the controls or a
+ * selected fact, does not.
  */
 export function OpenSessionProvider({
   store, controls, chat, isLive, scrollHandle, onSessionShown, children,
 }: OpenSessionProviderProps): ReactNode {
-  const { session, sessionChangeKey } = useDeferredValue(useStoreSelector(store, selectOpen, shallowEqual))
+  const { session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId } = useShownSession(store)
   const shown = useMemo(() => session && withStartPrompt(session), [session])
-  useLayoutEffect(() => { onSessionShown?.(session) }, [session, onSessionShown])
+  const onScreenRef = useRef<SessionView | null>(null)
+  useLayoutEffect(() => {
+    onScreenRef.current = session
+    onSessionShown?.(session)
+  }, [session, onSessionShown])
+  // A row acts after the commit that showed it, which the store may be ahead of.
+  // Each action keeps its identity while the one it wraps does, as rows are memoized on it.
+  const toStore = useCallback((index: number) => storeTurnIndex(onScreenRef.current, store.getState().session, index), [store])
+  const { undoRedo, actions } = controls
+  const requestUndo = useMemo(() => onScreenTurn(undoRedo.requestUndo, toStore), [undoRedo.requestUndo, toStore])
+  const handleOpenBranches = useMemo(
+    () => actions.handleOpenBranches && onScreenTurn(actions.handleOpenBranches, toStore),
+    [actions.handleOpenBranches, toStore],
+  )
+  const handleBranchFromHere = useMemo(
+    () => actions.handleBranchFromHere && onScreenTurn(actions.handleBranchFromHere, toStore),
+    [actions.handleBranchFromHere, toStore],
+  )
+  const screenControls = useMemo(() => ({
+    ...controls,
+    undoRedo: { ...undoRedo, requestUndo },
+    actions: { ...actions, handleOpenBranches, handleBranchFromHere },
+  }), [controls, undoRedo, actions, requestUndo, handleOpenBranches, handleBranchFromHere])
   const scroll = useChatScroll({
     session,
     isLive,
@@ -162,11 +205,14 @@ export function OpenSessionProvider({
     sessionChangeKey,
   })
   useImperativeHandle(scrollHandle, () => scroll, [scroll])
-  const value = useMemo(() => ({ ...controls, session: shown, sessionChangeKey }), [controls, shown, sessionChangeKey])
+  const value = useMemo(
+    () => ({ ...screenControls, session: shown, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }),
+    [screenControls, shown, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId],
+  )
   const chatValue = useMemo(() => ({ chat, scroll }), [chat, scroll])
   return (
     <SessionStoreContext.Provider value={store}>
-      <SessionControlsContext.Provider value={controls}>
+      <SessionControlsContext.Provider value={screenControls}>
         <SessionContext.Provider value={value}>
           <SessionChatContext.Provider value={chatValue}>
             {children}

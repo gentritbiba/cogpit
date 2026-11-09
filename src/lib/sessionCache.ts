@@ -146,12 +146,8 @@ class SessionCache {
     this.trim(key)
   }
 
-  evict(dirName?: string, fileName?: string): void {
-    if (dirName !== undefined && fileName !== undefined) {
-      this.drop(sessionCacheKey(dirName, fileName))
-    } else {
-      this.evictLRU()
-    }
+  evict(dirName: string, fileName: string): void {
+    this.drop(sessionCacheKey(dirName, fileName))
   }
 
   /** Drop every transcript of a session on the active device: its own, and those filed under it. */
@@ -179,11 +175,6 @@ class SessionCache {
       bytes -= coveredBytes(this.cache.get(key)!)
       this.drop(key)
     }
-  }
-
-  private evictLRU(): void {
-    const key = this.leastRecentlyUsed(new Set())
-    if (key !== undefined) this.drop(key)
   }
 
   private leastRecentlyUsed(except: ReadonlySet<string>): string | undefined {

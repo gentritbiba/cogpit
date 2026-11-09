@@ -13,7 +13,7 @@ import { findBrowserInvocations } from "../browser/invocation"
 import { isThrowawayName } from "../browser/names"
 import { expandToolScript } from "./agents"
 import { getCommandText } from "./toolSummary"
-import type { ParsedSession, ToolCall } from "./types"
+import type { ParsedSession, ToolCall, Turn } from "./types"
 
 export interface BrowserAgentActivity {
   /** Managed browser the call drove: `--session <name>`, else the default one. */
@@ -57,6 +57,19 @@ function activityOf(call: ToolCall): BrowserAgentActivity | null {
   return null
 }
 
+/** A live batch keeps every turn it did not change, so each turn is read once. */
+const activityByTurn = new WeakMap<Turn, BrowserAgentActivity | null>()
+
+function turnActivity(turn: Turn): BrowserAgentActivity | null {
+  let activity = activityByTurn.get(turn)
+  if (activity !== undefined) return activity
+  activity = null
+  const calls = turn.toolCalls
+  for (let index = calls.length - 1; index >= 0 && !activity; index--) activity = activityOf(calls[index])
+  activityByTurn.set(turn, activity)
+  return activity
+}
+
 /**
  * The newest visible `agent-browser` call in the session, or null. A throwaway
  * call is skipped rather than ending the scan, so a subagent working in the
@@ -65,11 +78,8 @@ function activityOf(call: ToolCall): BrowserAgentActivity | null {
 export function latestBrowserActivity(session: Pick<ParsedSession, "turns"> | null): BrowserAgentActivity | null {
   const turns = session?.turns ?? []
   for (let turn = turns.length - 1; turn >= 0; turn--) {
-    const calls = turns[turn].toolCalls
-    for (let index = calls.length - 1; index >= 0; index--) {
-      const activity = activityOf(calls[index])
-      if (activity) return activity
-    }
+    const activity = turnActivity(turns[turn])
+    if (activity) return activity
   }
   return null
 }

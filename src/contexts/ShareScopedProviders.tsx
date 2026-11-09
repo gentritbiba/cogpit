@@ -91,15 +91,14 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     }
   }, [dispatch, info.dirName, info.fileName, isMobile, sessions])
 
-  // Once, for the life of the shell. A guest has exactly one session, so the
-  // only thing that could re-trigger this is an incidental dependency change
-  // (a viewport crossing the mobile breakpoint), which must not refetch.
-  const loadedRef = useRef(false)
+  // Once per mount: a guest has exactly one session, so an incidental change
+  // (a viewport crossing the mobile breakpoint) must not refetch. An unmount
+  // leaves the session, so a remount (StrictMode's in development) loads again.
+  const loadSessionRef = useRef(loadSession)
+  loadSessionRef.current = loadSession
   useEffect(() => {
-    if (loadedRef.current) return
-    loadedRef.current = true
-    void loadSession()
-  }, [loadSession])
+    void loadSessionRef.current()
+  }, [])
 
   const handleLiveUpdate = useCallback((session: SessionView, loadId: number) => {
     dispatch({ type: "UPDATE_SESSION", session, loadId })

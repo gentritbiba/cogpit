@@ -72,9 +72,10 @@ export interface SessionController {
    * Re-read the session on screen from disk, dropping the history paged in
    * above it. A failed read is retried after `RELOAD_RETRY_DELAYS_MS` while
    * the session stays on screen. A no-op with nothing on screen or while
-   * another open is landing. A call during a reload joins it, and cuts short
-   * a wait before its next retry unless it passes `keepBackoff`, as the live
-   * stream's repeated resets do.
+   * another open is landing. A call during a reload joins it. Unless it
+   * passes `keepBackoff`, as the live stream's repeated resets do, it also
+   * cuts short a wait before the next retry, or reads once more after a read
+   * already in flight.
    */
   reloadCurrent(options?: { keepBackoff?: boolean }): Promise<void>
   /** The user left the session on screen; nothing pending may land after this. */
@@ -226,6 +227,8 @@ export function createSessionController({
   let reloading: Promise<void> | null = null
   /** Ends the wait before the reload's next retry. */
   let retryNow: (() => void) | null = null
+  /** A direct reload came in while a read was in flight, which may have read the transcript before it changed. */
+  let readAgain = false
 
   const dropPending = () => {
     if (!pending) return
@@ -329,11 +332,19 @@ export function createSessionController({
 
     reloadCurrent(options) {
       if (reloading) {
-        if (!options?.keepBackoff) retryNow?.()
+        if (options?.keepBackoff) return reloading
+        if (retryNow) retryNow()
+        else readAgain = true
         return reloading
       }
       if (pending || !shown) return Promise.resolve()
-      reloading = reload(shown).finally(() => { reloading = null })
+      const address = shown
+      reloading = (async () => {
+        do {
+          readAgain = false
+          await reload(address)
+        } while (readAgain && !pending && shown === address)
+      })().finally(() => { reloading = null })
       return reloading
     },
 

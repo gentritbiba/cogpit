@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useDeferredValue, useMemo, useState } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
 import { createStore, shallowEqual, useStoreSelector, type Store } from "@/lib/store"
 import type { AgentKind } from "@/lib/agents"
@@ -33,6 +33,7 @@ export interface SessionState {
   pendingDirName: string | null
   /** Real filesystem path for the pending session (avoids lossy dirNameToPath) */
   pendingCwd: string | null
+  /** The turn in focus, counted in `session.turns`. */
   activeTurnIndex: number | null
   activeToolCallId: string | null
   searchQuery: string
@@ -49,8 +50,8 @@ export interface SessionState {
   dashboardProject: string | null
 }
 
-/** What the paged, streamed session content is kept in. */
-type SessionContentKey = "session" | "windowTurns" | "olderTurns" | "seamOpen"
+/** The paged, streamed session content, and the turn in focus, which is counted in it. */
+type SessionContentKey = "session" | "windowTurns" | "olderTurns" | "seamOpen" | "activeTurnIndex" | "activeToolCallId"
 
 /**
  * Everything but the open session's content: which session is open and how
@@ -58,6 +59,9 @@ type SessionContentKey = "session" | "windowTurns" | "olderTurns" | "seamOpen"
  * streams, so what reads only this does not re-render on a live batch.
  */
 export type SessionShellState = Omit<SessionState, SessionContentKey>
+
+/** The open session as the transcript shows it, with what counts its turns. */
+export type ShownSession = Pick<SessionState, "session" | "sessionChangeKey" | "sessionSource" | "activeTurnIndex" | "activeToolCallId">
 
 export type SessionAction =
   | { type: "LOAD_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
@@ -283,6 +287,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         ...state,
         ...openSession(action.session),
         sessionSource: action.source,
+        activeTurnIndex: null,
+        activeToolCallId: null,
         sessionChangeKey: state.sessionChangeKey + 1,
       }
 
@@ -331,8 +337,16 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
 export type SessionStore = Store<SessionState, SessionAction>
 
-function selectShell({ session: _session, windowTurns: _window, olderTurns: _older, seamOpen: _seam, ...shell }: SessionState): SessionShellState {
+function selectShell({
+  session: _session, windowTurns: _window, olderTurns: _older, seamOpen: _seam,
+  activeTurnIndex: _active, activeToolCallId: _activeCall,
+  ...shell
+}: SessionState): SessionShellState {
   return shell
+}
+
+function selectShown({ session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }: SessionState): ShownSession {
+  return { session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }
 }
 
 /** A store holding `session`, open with nothing paged in; empty by default. */
@@ -349,6 +363,20 @@ export function useSessionState(): readonly [SessionShellState, SessionStore["di
   const [store] = useState(() => createSessionStore())
   const state = useStoreSelector(store, selectShell, shallowEqual)
   return [state, store.dispatch, store]
+}
+
+/**
+ * The open session as the transcript shows it. A store update always renders
+ * at once, so this follows a deferred copy: a live batch or a switch renders
+ * at low priority, where input or the next batch interrupts it. What counts
+ * the turns comes in the same copy, so an index never meets another list. A
+ * session opened onto an empty screen shows at once, as there is nothing to
+ * keep on screen meanwhile.
+ */
+export function useShownSession(store: SessionStore): ShownSession {
+  const open = useStoreSelector(store, selectShown, shallowEqual)
+  const shown = useDeferredValue(open)
+  return shown.session === null ? open : shown
 }
 
 /**

@@ -682,14 +682,48 @@ describe("reloadCurrent", () => {
     void click
   })
 
-  it("collapses a second reload into the one in flight", async () => {
+  it("collapses a reset during a read into the read in flight", async () => {
     const { sessions } = await openA()
-    const first = sessions.reloadCurrent()
-    const second = sessions.reloadCurrent()
+    const first = sessions.reloadCurrent({ keepBackoff: true })
+    const second = sessions.reloadCurrent({ keepBackoff: true })
+    expect(second).toBe(first)
     await flush()
     expect(fetches).toHaveLength(1)
     fetches[0].resolve(tail("a2"))
-    await Promise.all([first, second])
+    await first
+    expect(fetches).toHaveLength(1)
+  })
+
+  it("reads once more after a read that started before a direct reload (review 3 #7)", async () => {
+    const { sessions, dispatch } = await openA()
+    const reset = sessions.reloadCurrent({ keepBackoff: true })
+    await flush()
+    expect(fetches).toHaveLength(1)
+
+    // An undo lands while the reset's read is in flight; that read may predate it.
+    const undo = sessions.reloadCurrent()
+    void sessions.reloadCurrent()
+    expect(undo).toBe(reset)
+    fetches[0].resolve(tail("before undo"))
+    await flush()
+    expect(fetches).toHaveLength(2)
+    fetches[1].resolve(tail("after undo"))
+    await undo
+    expect(fetches).toHaveLength(2)
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      session: expect.objectContaining({ sessionId: '{"h":1}\nafter undo' }),
+    }))
+  })
+
+  it("does not read again for a direct reload once the user left", async () => {
+    const { sessions } = await openA()
+    const reset = sessions.reloadCurrent({ keepBackoff: true })
+    await flush()
+    void sessions.reloadCurrent()
+    sessions.leave()
+    await reset
+    await flush()
+    expect(fetches).toHaveLength(1)
   })
 })
 
