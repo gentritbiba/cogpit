@@ -14,11 +14,11 @@ vi.mock("../../lib/sessionOrigins", () => ({
   },
 }))
 vi.mock("../../sessionHosts/localHost", () => ({
-  localHost: { id: "local", name: "this machine", remote: false, has: async () => false },
+  localHost: { id: "local", name: "this machine", remote: false, has: async () => false, state: async (sessionId: string) => ({ sessionId, outcome: "completed", live: false, running: false, waiting: [] }) },
 }))
 
 import { addDevice, initDeviceRegistry, removeDevice, listDevices } from "../../hub/registry"
-import { hostForSession, hostNamed, waitAcrossHosts } from "../../sessionHosts"
+import { hostForSession, hostNamed, statesAcrossHosts, waitAcrossHosts } from "../../sessionHosts"
 import { createRemoteHost } from "../../sessionHosts/remoteHost"
 
 interface Seen {
@@ -216,5 +216,33 @@ describe("session host resolution", () => {
       { host: createRemoteHost(slow.device.id), sessionId: "b" },
     ], { mode: "any", timeoutMs: 30_000 })
     expect(result).toEqual({ timedOut: false, sessions: [state("a", "completed"), state("b", "running")] })
+  })
+
+  it("reads states across machines, asking a device that fails only once (2026-11-07 23:02, e59cd71c)", async () => {
+    const dead = await fakeDevice((_req, res) => send(res, 530, { error: "Origin unreachable" }))
+    const alive = await fakeDevice((req, res) => send(res, 200, state(req.url.split("/").pop()!, "running")))
+    const { localHost } = await import("../../sessionHosts/localHost")
+    const deadHost = createRemoteHost(dead.device.id)
+    const states = await statesAcrossHosts([
+      { host: localHost, sessionId: "here" },
+      ...["d1", "d2", "d3"].map((sessionId) => ({ host: deadHost, sessionId })),
+      { host: createRemoteHost(alive.device.id), sessionId: "a1" },
+    ])
+    expect(states.map(({ sessionId, outcome }) => [sessionId, outcome])).toEqual([["here", "completed"], ["d1", "unreachable"], ["d2", "unreachable"], ["d3", "unreachable"], ["a1", "running"]])
+    expect(new Set(states.slice(1, 4).map((entry) => entry.error)).size).toBe(1)
+    expect(states[1]!.error).toBeTruthy()
+    expect(dead.seen.filter((entry) => entry.url.startsWith("/api/session-status/"))).toHaveLength(1)
+  })
+
+  it("answers each session in the order asked, however a device spells its id", async () => {
+    const device = await fakeDevice((req, res) => send(res, 200, state(req.url.split("/").pop()!.toUpperCase(), "running")))
+    const { localHost } = await import("../../sessionHosts/localHost")
+    const host = createRemoteHost(device.device.id)
+    const states = await statesAcrossHosts([
+      { host, sessionId: "abc" },
+      { host: localHost, sessionId: "here" },
+      { host, sessionId: "def" },
+    ])
+    expect(states.map(({ sessionId, outcome }) => [sessionId, outcome])).toEqual([["ABC", "running"], ["here", "completed"], ["DEF", "running"]])
   })
 })

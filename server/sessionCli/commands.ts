@@ -22,6 +22,7 @@ import {
   localHost,
   locateSessions,
   remoteHostsList,
+  statesAcrossHosts,
   waitAcrossHosts,
   type SessionHost,
 } from "../sessionHosts"
@@ -407,7 +408,7 @@ async function newCommand(inv: CliInvocation, rest: string[]): Promise<CliOutput
       if (task) {
         const report = JSON.parse(output.stdout) as { outcome?: string; timedOut?: boolean }
         if (!report.timedOut && (report.outcome === "completed" || report.outcome === "error")) {
-          const current = orchestrationStore().tasks(inv.scope).find((value) => value.id === task.id)
+          const current = orchestrationStore().task(inv.scope, task.id)
           if (current && current.state !== "cancelled") orchestrationStore().updateTask(inv.scope, task.id, { state: report.outcome, result: report, acknowledgedAt: Date.now() }, current.state)
         }
       }
@@ -680,16 +681,18 @@ async function childrenCommand(inv: CliInvocation, rest: string[]): Promise<CliO
   const visibleChildren = []
   for (const id of await sessionChildren(parentId)) { try { await requireSessionAccess(inv, id); visibleChildren.push(id) } catch { /* Omit sessions outside this caller’s view. */ } }
   const located = await locateSessions(visibleChildren)
-  const children = await Promise.all(located.map(async ({ host, sessionId }) => {
-    const state = await host.state(sessionId)
+  const states = await statesAcrossHosts(located)
+  const children = located.map(({ host, sessionId }, index) => {
+    const state = states[index]!
     return {
       sessionId,
       ...deviceField(host),
       outcome: state.outcome,
       ...(state.status ? { status: state.status } : {}),
       ...(state.waiting.length > 0 ? { waiting: state.waiting.length } : {}),
+      ...(state.outcome === "unreachable" && state.error ? { error: state.error } : {}),
     }
-  }))
+  })
   return json({ sessionId: parentId, children })
 }
 

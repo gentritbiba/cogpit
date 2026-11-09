@@ -47,7 +47,8 @@ vi.mock("../../edition", async (original) => ({
   accessLevelOf: mocks.accessLevelOf,
 }))
 
-vi.mock("../../sessionHosts", () => ({
+vi.mock("../../sessionHosts", async (original) => ({
+  statesAcrossHosts: (await original<typeof import("../../sessionHosts")>()).statesAcrossHosts,
   localHost: mocks.local,
   hostNamed: (name: string) => {
     if (name === "agentbox") return mocks.remote
@@ -206,6 +207,23 @@ describe("new", () => {
     mocks.waitAcrossHosts.mockResolvedValueOnce({ timedOut: true, sessions: [state("child-1", "running")] })
     expect((await run(["new", "work", "--wait", "--timeout", "0"], { invocationId: "timed-out" })).exitCode).toBe(EXIT.timedOut)
     expect(orchestrationStore().tasks("local", "parent-1").find((task) => task.sourceId === "timed-out")).toMatchObject({ state: "running", deliveryDisposition: "async" })
+  })
+  it("settles a blocking invocation's own task by id, leaving one cancelled during the wait cancelled", async () => {
+    const store = orchestrationStore()
+    const scopeReads = vi.spyOn(store, "tasks")
+    mocks.waitAcrossHosts.mockResolvedValueOnce({ timedOut: false, sessions: [state("child-1", "completed")] })
+    expect((await run(["new", "work", "--wait"], { invocationId: "settled-by-id" })).exitCode).toBe(EXIT.ok)
+    expect(scopeReads).not.toHaveBeenCalled()
+    scopeReads.mockRestore()
+
+    mocks.waitAcrossHosts.mockImplementationOnce(async () => {
+      const task = store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")!
+      store.updateTask("local", task.id, { state: "cancelled" })
+      return { timedOut: false, sessions: [state("child-1", "completed")] }
+    })
+    await run(["new", "work", "--wait"], { invocationId: "cancelled-meanwhile" })
+    expect(store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")).toMatchObject({ state: "cancelled" })
+    expect(store.tasks("local", "parent-1").find((value) => value.sourceId === "cancelled-meanwhile")).not.toHaveProperty("acknowledgedAt")
   })
   it("warns that a session started outside a Cogpit session has no parent to notify", async () => {
     expect(out(await run(["new", "work"], { callerSessionId: undefined })).warning).toContain("COGPIT_SESSION_ID is not set")
@@ -617,6 +635,21 @@ describe("children and stop", () => {
       { sessionId: "r2", device: "agentbox", stopped: false, running: true },
     ])
     expect(await run(["stop", "--children"], { callerSessionId: undefined })).toMatchObject({ exitCode: EXIT.error })
+  })
+
+  it("lists the children here when their device is offline, asking it once (2026-11-07 23:02, e59cd71c)", async () => {
+    mocks.sessionChildren.mockResolvedValue(["c1", "r2", "r3"])
+    mocks.local.state.mockImplementation(async (id: string) => state(id, "completed"))
+    mocks.remote.state.mockRejectedValue(Object.assign(new Error("Device answered HTTP 530"), { name: "DeviceRequestError", status: 530 }))
+    expect(out(await run(["children"]))).toEqual({
+      sessionId: "parent-1",
+      children: [
+        { sessionId: "c1", outcome: "completed" },
+        { sessionId: "r2", device: "agentbox", outcome: "unreachable", error: "Device answered HTTP 530" },
+        { sessionId: "r3", device: "agentbox", outcome: "unreachable", error: "Device answered HTTP 530" },
+      ],
+    })
+    expect(mocks.remote.state).toHaveBeenCalledOnce()
   })
 })
 

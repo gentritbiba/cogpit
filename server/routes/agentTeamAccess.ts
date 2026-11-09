@@ -11,7 +11,7 @@ import {
   type SessionIdRef,
   type VisibleSession,
 } from "../edition"
-import { dirs, join, readFile } from "../helpers"
+import { dirs, join, readFile, stat } from "../helpers"
 import { sendJson } from "../http"
 
 /**
@@ -49,15 +49,34 @@ export function sendInvalidTeamName(res: ServerResponse): void {
   sendJson(res, 400, { error: "Invalid team or member name" })
 }
 
-/** A team's config, or null when it is missing, unreadable or not an object. */
+const configMemo = new Map<string, { mtimeMs: number; size: number; config: TeamConfig | null }>()
+
+/**
+ * A team's config, or null when it is missing, unreadable or not an object.
+ * Parsed once per version of the file; callers must not mutate it.
+ */
 export async function readTeamConfig(teamName: string): Promise<TeamConfig | null> {
   if (!isTeamPathSegment(teamName)) return null
+  const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
+  let version: { mtimeMs: number; size: number }
   try {
-    const config: unknown = JSON.parse(await readFile(join(dirs.TEAMS_DIR, teamName, "config.json"), "utf-8"))
-    return isRecord(config) ? config as TeamConfig : null
+    version = await stat(configPath)
   } catch {
+    configMemo.delete(configPath)
     return null
   }
+  const cached = configMemo.get(configPath)
+  if (cached && cached.mtimeMs === version.mtimeMs && cached.size === version.size) return cached.config
+  let config: TeamConfig | null = null
+  try {
+    const parsed: unknown = JSON.parse(await readFile(configPath, "utf-8"))
+    config = isRecord(parsed) ? parsed as TeamConfig : null
+  } catch {
+    configMemo.delete(configPath)
+    return null
+  }
+  configMemo.set(configPath, { mtimeMs: version.mtimeMs, size: version.size, config })
+  return config
 }
 
 export interface AuthorizedTeam {

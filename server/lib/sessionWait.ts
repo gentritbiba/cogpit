@@ -5,7 +5,7 @@ import { nativeBinding } from "../agents/nativeBindings"
 import { storeForPath } from "../agents"
 import { sessionAgentsRunning } from "../agents/agentsRunning"
 import { runtimeFor, runtimeForSession } from "../agents/runtimes"
-import type { RuntimeActivity } from "../agents/runtimeTypes"
+import type { AgentRuntime, RuntimeActivity } from "../agents/runtimeTypes"
 import type { AgentStore } from "../agents/types"
 import { findJsonlPath } from "../sessionPaths"
 import { orchestrationStore } from "../orchestration/storage"
@@ -55,13 +55,6 @@ export function clearTurnError(sessionId: string): void {
   turnErrors.delete(sessionId)
 }
 
-/** A transcript the caller already found, so the read skips looking for it. */
-export interface KnownTranscript {
-  filePath: string
-  /** When the session last did something; the transcript's mtime when absent. */
-  lastActivityMs?: number
-}
-
 /**
  * Whether a mid-flight tail means the session is still working. A runtime
  * holding the session is trusted over the tail, which lags the turn boundary
@@ -89,37 +82,68 @@ async function tailStillWorking(
  * Whether a message waiting in the session's queue will start its next turn.
  * Until the dispatcher hands it over, the session still describes the turn
  * before, so a `wait` right after a `send` would return that turn's reply.
+ * A reader of many sessions passes the conversations that start next, read once.
  */
-async function messageStartsNext(sessionId: string, kind: AgentKind, filePath: string | null): Promise<boolean> {
+async function messageStartsNext(sessionId: string, kind: AgentKind, filePath: string | null, startingNext?: ReadonlySet<string>): Promise<boolean> {
+  if (startingNext?.size === 0) return false
   const store = orchestrationStore()
   const conversation = store.findConversation(await nativeBinding(sessionId, kind, filePath))
-  return conversation !== null && store.startsNext(conversation.id)
+  if (!conversation) return false
+  return startingNext ? startingNext.has(conversation.id) : store.startsNext(conversation.id)
 }
 
-export async function readSessionState(sessionId: string, known?: KnownTranscript): Promise<SessionState> {
+/**
+ * What a session's state changes by without a write to its transcript: the
+ * runtime holding it, the requests it is blocked on, a message about to
+ * start its next turn and a turn error nobody waited on. All in memory or one
+ * indexed lookup, so a reader of many sessions can tell which changed.
+ */
+export interface SessionSignals {
+  runtime: AgentRuntime
+  activity: RuntimeActivity
+  waiting: PendingInput[]
+  startsNext: boolean
+  turnError?: string
+}
+
+/** Null when nothing knows the session: no transcript and no runtime holding it. */
+export async function readSessionSignals(sessionId: string, filePath: string | null, startingNext?: ReadonlySet<string>): Promise<SessionSignals | null> {
   // The transcript decides whose session it is; a live session whose
   // transcript is not on disk yet falls back to the runtime holding it.
-  const filePath = known?.filePath ?? await findJsonlPath(sessionId)
   const store = storeForPath(filePath)
   const runtime = store ? runtimeFor(store.kind, store.instanceId) : runtimeForSession(sessionId)
-  if (!runtime) {
-    return { sessionId, outcome: "not_found", live: false, running: false, waiting: [] }
+  if (!runtime) return null
+  const turnError = turnErrors.get(sessionId)
+  return {
+    runtime,
+    activity: runtime.activity(sessionId),
+    waiting: listPendingInput(sessionId),
+    startsNext: await messageStartsNext(sessionId, runtime.kind, filePath, startingNext).catch(() => false),
+    ...(turnError !== undefined && { turnError }),
   }
+}
 
-  const activity = runtime.activity(sessionId)
-  const statusInfo = filePath ? await getSessionStatus(filePath) : undefined
-  const waiting = listPendingInput(sessionId)
-  const identity = filePath && store?.readIdentity ? await store.readIdentity(filePath).catch(() => null) : null
-  const workspace = identity?.cwd ? await workspaceDetailsForCwd(identity.cwd) : {}
+/** A transcript whose tail the caller already read, as the session list caches it. */
+export interface ReadTranscript {
+  filePath: string
+  statusInfo: SessionStatusInfo
+  lastActivityMs?: number
+}
+
+/** A session's state from its signals and tail, without its workspace details. */
+export async function sessionStateFrom(sessionId: string, signals: SessionSignals, transcript: ReadTranscript | null): Promise<SessionState> {
+  const { runtime, activity, waiting } = signals
+  const statusInfo = transcript?.statusInfo
   const failure = statusInfo?.failure
-  const error = turnErrors.get(sessionId)
+  const error = signals.turnError
     ?? (failure ? `${agentFailureTitle(runtime.kind, failure)} ${failure.message}` : statusInfo?.terminalReason)
+  const store = transcript && storeForPath(transcript.filePath)
 
   let outcome: SessionOutcome
   if (waiting.length > 0) outcome = "needs_input"
   else if (activity.running) outcome = "running"
-  else if (await messageStartsNext(sessionId, runtime.kind, filePath).catch(() => false)) outcome = "running"
-  else if (filePath && store && await tailStillWorking(sessionId, statusInfo?.status, activity, { store, filePath, lastActivityMs: known?.lastActivityMs })) outcome = "running"
+  else if (signals.startsNext) outcome = "running"
+  else if (transcript && store && await tailStillWorking(sessionId, statusInfo?.status, activity, { ...transcript, store })) outcome = "running"
   else if (error) outcome = "error"
   else outcome = "completed"
 
@@ -130,9 +154,20 @@ export async function readSessionState(sessionId: string, known?: KnownTranscrip
     activeNotifications: runtime.descriptor.capabilities.activeNotifications,
     ...statusInfo,
     waiting,
-    ...workspace,
     ...(error && outcome === "error" ? { error } : {}),
   }
+}
+
+export async function readSessionState(sessionId: string): Promise<SessionState> {
+  const filePath = await findJsonlPath(sessionId)
+  const signals = await readSessionSignals(sessionId, filePath)
+  if (!signals) return { sessionId, outcome: "not_found", live: false, running: false, waiting: [] }
+  const statusInfo = filePath ? await getSessionStatus(filePath) : undefined
+  const transcriptStore = storeForPath(filePath)
+  const identity = filePath && transcriptStore?.readIdentity ? await transcriptStore.readIdentity(filePath).catch(() => null) : null
+  const workspace = identity?.cwd ? await workspaceDetailsForCwd(identity.cwd) : {}
+  const state = await sessionStateFrom(sessionId, signals, filePath && statusInfo ? { filePath, statusInfo } : null)
+  return { ...state, ...workspace }
 }
 
 /** Under the two-minute default of agents' shell tools, so a bare `wait` is never killed. */

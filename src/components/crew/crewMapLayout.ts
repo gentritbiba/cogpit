@@ -210,11 +210,11 @@ export function layoutCrewMap(
 
   const hiddenUnder = (id: string): HiddenWork => {
     const work: HiddenWork = { count: 0, working: 0, needsYou: 0 }
-    const counted = new Set(placed)
+    const counted = new Set<string>()
     const stack = [...visibleChildren(id)]
     while (stack.length > 0) {
       const member = stack.pop()!
-      if (counted.has(member.sessionId)) continue
+      if (placed.has(member.sessionId) || counted.has(member.sessionId)) continue
       counted.add(member.sessionId)
       work.count++
       const state = memberCellState(member)

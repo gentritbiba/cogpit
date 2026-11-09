@@ -14,16 +14,18 @@ const mocks = vi.hoisted(() => ({
   ]),
   access: vi.fn<(req: IncomingMessage, id: string) => Promise<SessionAccessLevel | null>>(),
   state: vi.fn(), send: vi.fn(), host: vi.fn(),
+  revision: 1,
+  auth: null as unknown,
 }))
 vi.mock("../../orchestration/storage", () => ({ orchestrationStore: () => mocks.store, closeOrchestrationStore: vi.fn(), beforeOrchestrationClose: vi.fn() }))
-vi.mock("../../lib/sessionOrigins", () => ({ sessionParents: async () => mocks.parents }))
+vi.mock("../../lib/sessionOrigins", () => ({ sessionParents: async () => mocks.parents, sessionOriginsRevision: () => mocks.revision }))
 vi.mock("../../lib/durableSend", () => ({ commandScope: () => "local", refreshExecutionRequest: (req: IncomingMessage) => req }))
-vi.mock("../../edition", () => ({ accessLevelOf: mocks.access, editionModule: () => ({ auth: null }), getRequestPrincipal: () => null }))
+vi.mock("../../edition", () => ({ accessLevelOf: mocks.access, editionModule: () => ({ auth: mocks.auth }), getRequestPrincipal: () => null }))
 vi.mock("../../sessionHosts", () => ({ hostForSession: mocks.host }))
 vi.mock("../../routes/hello", () => ({ getDeviceName: () => "coordinator-box" }))
 
 import { DeviceRequestError } from "../../hub/deviceRequest"
-import { closeCrewChatMonitor, CREW_CHAT_BUSY_GIVE_UP_MS, CREW_CHAT_BUSY_RETRY_MS, CREW_CHAT_DELIVERY_ATTEMPTS, CREW_CHAT_NOTICE_BUSY_ANSWERS, crewChatRetryDelay, deliverCrewChat, postCrewChat, readCrewChat, setCrewChatListening } from "../../lib/crewChat"
+import { closeCrewChatMonitor, CREW_CHAT_BUSY_GIVE_UP_MS, CREW_CHAT_BUSY_RETRY_MS, CREW_CHAT_DELIVERY_ATTEMPTS, CREW_CHAT_NOTICE_BUSY_ANSWERS, crewChatReadContext, crewChatRetryDelay, deliverCrewChat, postCrewChat, readCrewChat, resumeLocalCrewChat, setCrewChatListening, watchCrewChat } from "../../lib/crewChat"
 const req = {} as IncomingMessage
 const deviceBusy = () => new DeviceRequestError("mb-pro", 409, "Session is already active", "CONFLICT")
 const post = (text: string, commandId = "chat-message-001", senderSessionId = "parser", mentions?: string[]) => postCrewChat("parser", { text, commandId, senderSessionId, mentions }, req)
@@ -31,6 +33,8 @@ const post = (text: string, commandId = "chat-message-001", senderSessionId = "p
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.store = new OrchestrationStore(":memory:")
+  mocks.revision++
+  mocks.auth = null
   mocks.access.mockResolvedValue("own")
   mocks.state.mockImplementation(async (id: string) => ({ outcome: id === "idle" ? "completed" : "running", running: id !== "idle", live: id !== "idle", activeNotifications: true }))
   mocks.send.mockResolvedValue({ delivery: "queued" })
@@ -199,6 +203,86 @@ describe("crew chat", () => {
     await setCrewChatListening("lead", "reviewer", false, req)
     await deliverCrewChat("lead", req)
     expect(mocks.send.mock.calls.some(([id]) => id === "reviewer")).toBe(false)
+  })
+
+  it("reuses the crew between reads until its lineage changes, and reads listening every time", async () => {
+    const first = await crewChatReadContext("parser", req)
+    const checks = mocks.access.mock.calls.length
+    expect(await crewChatReadContext("parser", req)).toEqual(first)
+    expect(mocks.access.mock.calls.length).toBe(checks)
+
+    await setCrewChatListening("lead", "idle", false, req)
+    const muted = await crewChatReadContext("parser", req)
+    expect(muted.members.find((member) => member.sessionId === "idle")?.listening).toBe(false)
+    expect(muted.membersVersion).not.toBe(first.membersVersion)
+
+    mocks.parents.set("late", { parentSessionId: "lead", createdAt: 5, name: "Late" })
+    try {
+      expect((await crewChatReadContext("parser", req)).members.map((member) => member.handle)).not.toContain("late")
+      mocks.revision++
+      expect((await crewChatReadContext("parser", req)).members.map((member) => member.handle)).toContain("late")
+    } finally { mocks.parents.delete("late") }
+  })
+
+  it("rechecks the caller's access to a crew's members after a few seconds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    expect((await crewChatReadContext("parser", req)).members.find((member) => member.sessionId === "idle")?.canInteract).toBe(true)
+    mocks.access.mockImplementation(async (_, id) => (id === "idle" ? "view" : "own"))
+    expect((await crewChatReadContext("parser", req)).members.find((member) => member.sessionId === "idle")?.canInteract).toBe(true)
+    vi.setSystemTime(Date.now() + 5_000)
+    expect((await crewChatReadContext("parser", req)).members.find((member) => member.sessionId === "idle")?.canInteract).toBe(false)
+  })
+
+  it("delivers from a read only while the crew has messages on their way", async () => {
+    await readCrewChat("lead", {}, req)
+    expect(mocks.state).not.toHaveBeenCalled()
+    mocks.send.mockRejectedValueOnce(new Error("offline"))
+    await post("@reviewer Retry me", "read-kick-001")
+    expect(mocks.store.chatDeliveries("lead", "local")).toHaveLength(1)
+    closeCrewChatMonitor()
+    mocks.state.mockClear()
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(Date.now() + crewChatRetryDelay(1))
+    await readCrewChat("lead", {}, req)
+    await vi.waitFor(() => expect(mocks.store.chatDeliveries("lead", "local")).toEqual([]))
+    expect(mocks.state).toHaveBeenCalled()
+  })
+
+  it("resumes deliveries left pending by a restart without a read or post", async () => {
+    vi.useFakeTimers()
+    mocks.send.mockRejectedValue(new Error("offline"))
+    await post("@reviewer Before the restart", "resume-chat-001")
+    closeCrewChatMonitor()
+    mocks.send.mockReset().mockResolvedValue({ delivery: "queued" })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mocks.send).not.toHaveBeenCalled()
+    resumeLocalCrewChat()
+    await vi.advanceTimersByTimeAsync(crewChatRetryDelay(1))
+    expect(mocks.send.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining(["reviewer", "lead"]))
+    expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+  })
+
+  it("lets any crew poll re-arm deliveries a restart left pending, where startup cannot (team edition)", async () => {
+    vi.useFakeTimers()
+    mocks.send.mockRejectedValue(new Error("offline"))
+    await post("@reviewer After the restart", "rearm-chat-001")
+    closeCrewChatMonitor()
+    mocks.auth = {}
+    mocks.send.mockReset().mockResolvedValue({ delivery: "queued" })
+    resumeLocalCrewChat()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mocks.send).not.toHaveBeenCalled()
+    watchCrewChat("lead", req)
+    await vi.advanceTimersByTimeAsync(crewChatRetryDelay(1))
+    expect(mocks.send.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining(["reviewer"]))
+    expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+  })
+
+  it("arms nothing for a crew with nothing on its way", async () => {
+    vi.useFakeTimers()
+    watchCrewChat("lead", req)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(mocks.host).not.toHaveBeenCalled()
   })
 
   describe("deliveries to a member that stays out of reach", () => {
@@ -406,7 +490,7 @@ describe("crew chat", () => {
       expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries").get()).toEqual({ state: "failed", error: 'Device "MB Pro" returned HTTP 502 while minting a token', attempts: CREW_CHAT_DELIVERY_ATTEMPTS })
     })
 
-    it("waits out each backoff step, even when crew reads ask for delivery sooner", async () => {
+    it("waits out each backoff step, even when chat reads and crew polls ask for delivery sooner", async () => {
       vi.useFakeTimers()
       offline()
       postFor(1)
@@ -417,6 +501,7 @@ describe("crew chat", () => {
         const delay = crewChatRetryDelay(attempt)
         await vi.advanceTimersByTimeAsync(delay - 1_500)
         await readCrewChat("lead", {}, req)
+        watchCrewChat("lead", req)
         await deliverCrewChat("lead", req)
         await vi.advanceTimersByTimeAsync(0)
         expect(mocks.state, `before retry ${attempt}`).toHaveBeenCalledTimes(attempt)

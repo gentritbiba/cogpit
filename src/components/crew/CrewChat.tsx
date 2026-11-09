@@ -17,8 +17,9 @@ const NO_KINDS: ReadonlyMap<string, AgentKind> = new Map()
 
 /** `kinds` names each member's agent, for its provider mark. */
 export function CrewChat({ rootId, kinds = NO_KINDS, active = true }: { rootId: string; kinds?: ReadonlyMap<string, AgentKind>; active?: boolean }) {
-  const chat = useCrewChat(rootId)
+  const chat = useCrewChat(rootId, active)
   const [draft, setDraft] = useState("")
+  const [membersOpen, setMembersOpen] = useState(false)
   const end = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
   const latest = chat.messages.at(-1)?.sequence
@@ -26,6 +27,7 @@ export function CrewChat({ rootId, kinds = NO_KINDS, active = true }: { rootId: 
   const handles = useMemo(() => crewChatHandleMap(members), [members])
   const tints = useMemo(() => crewChatTints(members, rootId), [members, rootId])
   const byId = useMemo(() => new Map(members.map((member) => [member.sessionId, member])), [members])
+  const listening = useMemo(() => members.filter((member) => member.listening).length, [members])
   const runs = useMemo(() => crewChatRuns(chat.messages, rootId), [chat.messages, rootId])
 
   useEffect(() => { if (active && follow.current) end.current?.scrollIntoView?.({ block: "end" }) }, [active, latest])
@@ -38,11 +40,11 @@ export function CrewChat({ rootId, kinds = NO_KINDS, active = true }: { rootId: 
 
   return (
     <section aria-label="Crew chat" className="flex h-full min-h-0 flex-col">
-      <details className="shrink-0 border-b px-3 py-2">
+      <details className="shrink-0 border-b px-3 py-2" onToggle={(event) => setMembersOpen(event.currentTarget.open)}>
         <summary className="cursor-pointer text-xs text-muted-foreground">
-          {chat.page ? `${members.filter((member) => member.listening).length} listening · Members & mentions` : "Loading chat…"}
+          {chat.page ? `${listening} listening · Members & mentions` : "Loading chat…"}
         </summary>
-        <FieldGroup className="max-h-48 gap-2 overflow-y-auto py-2">
+        {membersOpen && <FieldGroup className="max-h-48 gap-2 overflow-y-auto py-2">
           {members.map((member) => (
             <Field key={member.sessionId} orientation="horizontal" className="items-center gap-2">
               <CrewAvatar role={member.sessionId === rootId ? "lead" : "agent"} sessionId={member.sessionId} kinds={kinds} tints={tints} className="size-5" />
@@ -56,7 +58,7 @@ export function CrewChat({ rootId, kinds = NO_KINDS, active = true }: { rootId: 
               <Switch id={`listen-${member.sessionId}`} size="sm" checked={member.listening} disabled={!member.canInteract || chat.busyMembers.has(member.sessionId)} onCheckedChange={(value) => void chat.setListening(member.sessionId, value)} />
             </Field>
           ))}
-        </FieldGroup>
+        </FieldGroup>}
         <p className="pb-1 text-xs text-muted-foreground">Listening sends short notices while an agent works. @mentions send the full message, even when listening is off.</p>
       </details>
       <ScrollArea className="min-h-0 flex-1" onScrollCapture={(event) => {

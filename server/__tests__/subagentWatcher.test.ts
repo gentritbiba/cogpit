@@ -343,4 +343,86 @@ describe("watchSubagents", () => {
     expect(appendFile).toHaveBeenCalledTimes(2)
     watcher.close()
   })
+
+  it("reads only the transcript a file event names, and scans for anything else", async () => {
+    const bodies: Record<string, string> = {
+      "agent-a1.jsonl": `${userLine("one")}\n`,
+      "agent-a2.jsonl": `${userLine("two")}\n`,
+    }
+    mockFiles(bodies)
+    let changed!: (event: string, fileName: string | null) => void
+    watch.mockImplementation((_path, _options, callback) => {
+      changed = callback
+      return { close: vi.fn(), on: vi.fn() }
+    })
+    const watcher = watchSubagents("/tmp/session.jsonl", "session", tasks({ a1: { toolUseId: "tool-1" }, a2: { toolUseId: "tool-2" } }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(readdir).toHaveBeenCalledOnce()
+    expect(appendFile).toHaveBeenCalledTimes(2)
+
+    bodies["agent-a1.jsonl"] += `${userLine("one more")}\n`
+    mockFiles(bodies)
+    stat.mockClear()
+    changed("change", "agent-a1.jsonl")
+    await vi.advanceTimersByTimeAsync(0)
+    expect(readdir).toHaveBeenCalledOnce()
+    expect(stat.mock.calls.map(([path]) => basename(String(path)))).toEqual(["agent-a1.jsonl"])
+    expect(appendFile).toHaveBeenCalledTimes(3)
+    expect(JSON.parse(String(appendFile.mock.calls[2][1])).data.agentId).toBe("a1")
+
+    changed("rename", null)
+    await vi.advanceTimersByTimeAsync(0)
+    changed("change", "notes.txt")
+    await vi.advanceTimersByTimeAsync(0)
+    expect(readdir).toHaveBeenCalledTimes(3)
+    expect(appendFile).toHaveBeenCalledTimes(3)
+    watcher.close()
+  })
+
+  it("forwards each record once when file events arrive while a file is still being read", async () => {
+    const pendingStat = deferred<{ size: number }>()
+    const body = `${userLine("once")}\n`
+    mockFiles({ "agent-a1.jsonl": body })
+    let changed!: (event: string, fileName: string | null) => void
+    watch.mockImplementation((_path, _options, callback) => {
+      changed = callback
+      return { close: vi.fn(), on: vi.fn() }
+    })
+    stat.mockReturnValueOnce(pendingStat.promise)
+    const watcher = watchSubagents("/tmp/session.jsonl", "session", tasks({ a1: { toolUseId: "tool-1" } }))
+    await vi.advanceTimersByTimeAsync(0)
+    changed("change", "agent-a1.jsonl")
+    changed("change", "agent-a1.jsonl")
+    pendingStat.resolve({ size: Buffer.byteLength(body) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(appendFile).toHaveBeenCalledOnce()
+    watcher.close()
+  })
+
+  it("handles a file event that lands while a drain is finishing, without waiting for the backstop", async () => {
+    for (let ticks = 0; ticks <= 12; ticks++) {
+      appendFile.mockClear()
+      const body = Buffer.from(`${userLine("late event")}\n`)
+      stat.mockImplementation(async () => ({ size: body.length }))
+      open.mockImplementation(async () => ({
+        read: vi.fn(async (buffer: Buffer, _o: number, length: number, position: number) => ({ bytesRead: body.copy(buffer, 0, position, position + length) })),
+        close: vi.fn().mockResolvedValue(undefined),
+      }))
+      let changed!: (event: string, fileName: string | null) => void
+      watch.mockImplementation((_path, _options, callback) => {
+        changed = callback
+        return { close: vi.fn(), on: vi.fn() }
+      })
+      readdir.mockImplementationOnce(async () => {
+        let chain = Promise.resolve()
+        for (let i = 0; i < ticks; i++) chain = chain.then(() => {})
+        void chain.then(() => changed("change", "agent-a1.jsonl"))
+        return []
+      })
+      const watcher = watchSubagents("/tmp/session.jsonl", "session", tasks({ a1: { toolUseId: "tool-1" } }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(appendFile, `event ${ticks} microtasks after the scan`).toHaveBeenCalledOnce()
+      watcher.close()
+    }
+  })
 })

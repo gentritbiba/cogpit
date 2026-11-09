@@ -2,19 +2,33 @@ import { createHash, randomUUID } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { openDatabase, type SqliteDatabase } from "./database"
-import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
+import type { CommandIntent, CommandReceipt, CommandState, Conversation, ConversationEvent, DelegatedTask, DelegatedTaskState, EventPage, NativeBinding, ProviderInstance } from "../../shared/contracts/orchestration"
 import type { CrewChatAuthor, CrewChatDelivery, CrewChatMessage } from "../../shared/contracts/crewChat"
 import { isTerminalOccurrence, occurrenceCommandId, occurrenceCreationId, type ExecutionGrant, type GrantRef, type OccurrenceHold, type OccurrenceInput, type OccurrenceState, type TriggerOccurrence, type TriggerRecord, type UnattendedAction } from "../../shared/contracts/triggers"
 
 type Row = Record<string, unknown>
-/** Task fields the task reads filter on. */
+/** Task fields the indexes hold, so reads that need only these never parse a task's result. */
 const TASK_FIELD = {
   parent: "json_extract(data,'$.parentSessionId')",
   child: "json_extract(data,'$.childSessionId')",
   state: "json_extract(data,'$.state')",
   acknowledgedAt: "json_extract(data,'$.acknowledgedAt')",
+  createdAt: "json_extract(data,'$.createdAt')",
+  updatedAt: "json_extract(data,'$.updatedAt')",
 } as const
 const UNREAD_TASK = `${TASK_FIELD.acknowledgedAt} IS NULL AND ${TASK_FIELD.state}<>'cancelled'`
+const TASK_STATE_COLUMNS = `id,${TASK_FIELD.parent} parent,${TASK_FIELD.child} child,${TASK_FIELD.state} state,${TASK_FIELD.acknowledgedAt} acknowledged_at,${TASK_FIELD.createdAt} created_at,${TASK_FIELD.updatedAt} updated_at`
+function taskState(row: Row): DelegatedTaskState {
+  return {
+    id: String(row.id),
+    parentSessionId: String(row.parent),
+    childSessionId: String(row.child),
+    state: row.state as DelegatedTask["state"],
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    ...(row.acknowledged_at == null ? {} : { acknowledgedAt: Number(row.acknowledged_at) }),
+  }
+}
 export interface StoredCommand {
   receipt: CommandReceipt
   scope: string
@@ -76,6 +90,8 @@ export class OrchestrationStore {
   private readonly triggerListeners = new Set<TriggerListener>()
   private pendingEvents: ConversationEvent[] | null = null
   private pendingTriggerEvents: Parameters<TriggerListener>[0][] = []
+  private dataVersion: ReturnType<SqliteDatabase["prepare"]> | undefined
+  private knownInstances: { version: number; instances: ProviderInstance[] } | null = null
 
   constructor(readonly path: string, private readonly now: () => number = Date.now) {
     if (path !== ":memory:") {
@@ -99,7 +115,9 @@ export class OrchestrationStore {
           CREATE INDEX IF NOT EXISTS event_conversation ON events(conversation_id,sequence);
           CREATE TABLE IF NOT EXISTS dispatcher(id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, epoch INTEGER NOT NULL, expires_at INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, scope TEXT NOT NULL, source_id TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(scope,source_id));
-          CREATE INDEX IF NOT EXISTS task_parent ON tasks(scope,json_extract(data,'$.parentSessionId'));
+          DROP INDEX IF EXISTS task_parent;
+          CREATE INDEX IF NOT EXISTS task_by_parent ON tasks(scope,${TASK_FIELD.parent},${TASK_FIELD.child},${TASK_FIELD.state},${TASK_FIELD.acknowledgedAt},${TASK_FIELD.createdAt},${TASK_FIELD.updatedAt},id);
+          CREATE INDEX IF NOT EXISTS task_by_child ON tasks(scope,${TASK_FIELD.child},${TASK_FIELD.parent},${TASK_FIELD.state},${TASK_FIELD.acknowledgedAt},${TASK_FIELD.createdAt},${TASK_FIELD.updatedAt},id);
           CREATE INDEX IF NOT EXISTS task_unread ON tasks(scope,${TASK_FIELD.parent}) WHERE ${UNREAD_TASK};
           CREATE TABLE IF NOT EXISTS instances(id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS transitions(conversation_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL);
@@ -165,6 +183,14 @@ export class OrchestrationStore {
   chatListener(rootId: string, sessionId: string): { listening: boolean; cursor: number } {
     const row = this.db.prepare("SELECT listening,cursor FROM crew_chat_listeners WHERE root_id=? AND session_id=?").get(rootId, sessionId) as Row | undefined
     return { listening: row ? Boolean(row.listening) : true, cursor: Number(row?.cursor ?? 0) }
+  }
+  /** Who in a crew turned listening off or on; a member with no row listens. */
+  chatListeners(rootId: string): Map<string, boolean> {
+    return new Map((this.db.prepare("SELECT session_id,listening FROM crew_chat_listeners WHERE root_id=?").all(rootId) as Row[]).map((row) => [String(row.session_id), Boolean(row.listening)]))
+  }
+  /** Crews with a message still waiting to reach a member. */
+  chatRootsWithPendingDeliveries(scope: string): string[] {
+    return (this.db.prepare("SELECT DISTINCT m.root_id FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE d.scope=? AND d.state='pending'").all(scope) as Row[]).map((row) => String(row.root_id))
   }
   setChatListening(rootId: string, sessionId: string, listening: boolean): void {
     this.transaction(() => this.db.prepare("INSERT INTO crew_chat_listeners(root_id,session_id,listening) VALUES(?,?,?) ON CONFLICT(root_id,session_id) DO UPDATE SET listening=excluded.listening").run(rootId, sessionId, Number(listening)))
@@ -461,6 +487,10 @@ export class OrchestrationStore {
     if (this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('held','unknown') LIMIT 1").get(conversationId)) return false
     return Boolean(this.db.prepare("SELECT 1 FROM commands WHERE conversation_id=? AND state IN ('queued','dispatching') AND json_extract(payload,'$.onlyWhileRunning') IS NOT 1 LIMIT 1").get(conversationId))
   }
+  /** Every conversation `startsNext` holds for, in one read. */
+  conversationsStartingNext(): Set<string> {
+    return new Set((this.db.prepare("SELECT DISTINCT c.conversation_id id FROM commands c WHERE c.state IN ('queued','dispatching') AND json_extract(c.payload,'$.onlyWhileRunning') IS NOT 1 AND NOT EXISTS (SELECT 1 FROM commands h WHERE h.conversation_id=c.conversation_id AND h.state IN ('held','unknown'))").all() as Row[]).map((row) => String(row.id)))
+  }
   /** Cancels every message still waiting for a conversation, from any account, so a stop is final. */
   cancelWaiting(conversationId: string): number {
     return this.transaction(() => {
@@ -590,6 +620,13 @@ export class OrchestrationStore {
     const row = this.db.prepare("SELECT data FROM tasks WHERE scope=? AND id=?").get(scope, id) as Row | undefined
     return row ? decode<DelegatedTask>(row.data) : null
   }
+  /** Tasks without their results, for one parent or for the given children. */
+  taskStates(scope: string, by: { parentSessionId: string } | { childSessionIds: readonly string[] }): DelegatedTaskState[] {
+    const rows = ("parentSessionId" in by
+      ? this.db.prepare(`SELECT ${TASK_STATE_COLUMNS} FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=?`).all(scope, by.parentSessionId)
+      : this.db.prepare(`SELECT ${TASK_STATE_COLUMNS} FROM tasks WHERE scope=? AND ${TASK_FIELD.child} IN (SELECT value FROM json_each(?))`).all(scope, JSON.stringify(by.childSessionIds))) as Row[]
+    return rows.map(taskState)
+  }
   /** A parent's tasks it has not acknowledged and nobody cancelled, without their results. */
   unreadTasks(scope: string, parentSessionId: string): Omit<DelegatedTask, "result">[] {
     return (this.db.prepare(`SELECT json_remove(data,'$.result') data FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=? AND ${UNREAD_TASK}`).all(scope, parentSessionId) as Row[])
@@ -664,9 +701,15 @@ export class OrchestrationStore {
       this.db.prepare("DELETE FROM execution_grants WHERE revoked_at IS NOT NULL AND revoked_at<?").run(cutoff)
     })
   }
-  instances(): ProviderInstance[] { return (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
-  putInstance(instance: ProviderInstance): void { this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
-  deleteInstance(id: string): void { this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
+  /** Read on every session lookup, so kept until this connection writes one or another connection commits. */
+  instances(): ProviderInstance[] {
+    this.dataVersion ??= this.db.prepare("PRAGMA data_version")
+    const version = Number((this.dataVersion.get() as Row).data_version)
+    if (this.knownInstances?.version !== version) this.knownInstances = { version, instances: (this.db.prepare("SELECT data FROM instances").all() as Row[]).map((r) => decode<ProviderInstance>(r.data)) }
+    return this.knownInstances.instances
+  }
+  putInstance(instance: ProviderInstance): void { this.knownInstances = null; this.db.prepare("INSERT INTO instances VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(instance.id, JSON.stringify(instance)); this.protectFiles() }
+  deleteInstance(id: string): void { this.knownInstances = null; this.db.prepare("DELETE FROM instances WHERE id=?").run(id) }
   operation(scope: string, id: string): { fingerprint: string; input: Record<string, unknown>; result?: unknown } | null {
     const row = this.db.prepare("SELECT fingerprint,input,result FROM operations WHERE scope=? AND id=?").get(scope, id) as Row | undefined
     return row ? { fingerprint: String(row.fingerprint), input: decode(row.input), ...(row.result ? { result: decode(row.result) } : {}) } : null

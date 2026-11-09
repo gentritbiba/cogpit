@@ -3,22 +3,15 @@ import { registerSessionMcpRoutes } from "./session-mcp"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { isAbsolute } from "node:path"
 import type { PendingInputResponse } from "../agents/pendingInput"
-import { runtimeForSession, type UserQuestionAnswers } from "../agents/runtimes"
-import type { TopLevelSessionInfo } from "../agents/types"
-import { sessionChildren, sessionOrigin, sessionParents } from "../lib/sessionOrigins"
-import { readSessionCrew, type CrewSources } from "../lib/sessionCrew"
-import { crewRootOf } from "../lib/crew"
-import { archiveReason, readArchive } from "../lib/sessionArchive"
+import type { UserQuestionAnswers } from "../agents/runtimes"
+import { sessionChildren } from "../lib/sessionOrigins"
 import { sessionBoard } from "../lib/sessionBoards"
-import { commandScope } from "../lib/durableSend"
-import { orchestrationStore } from "../orchestration/storage"
-import { allTopLevelSessions } from "../agents"
-import { listedSessionId } from "../agents/listedSession"
-import { readActiveSessionRow } from "./projects/activeSessionRow"
-import { parseWaitSeconds, readSessionState } from "../lib/sessionWait"
+import { parseWaitSeconds } from "../lib/sessionWait"
+import { readCrewSnapshot } from "../lib/crewSnapshot"
+import { sendJsonWithEtag } from "../lib/jsonEtag"
 import { sendJson, singlePathParam, withJsonBody, type UseFn } from "../http"
 import { runSessionCli } from "../sessionCli/commands"
-import { hostForOrigin, hostForSession, localHost, locateSessions, SESSION_SCOPE_HEADER, waitAcrossHosts } from "../sessionHosts"
+import { hostForSession, locateSessions, SESSION_SCOPE_HEADER, statesAcrossHosts, waitAcrossHosts } from "../sessionHosts"
 import {
   listDelegatedRequests,
   markDelegatedRequestAnswered,
@@ -52,87 +45,6 @@ function abortOnClose(req: IncomingMessage, res: ServerResponse): AbortSignal {
 
 function scopeOf(req: IncomingMessage): { localOnly: boolean } {
   return { localOnly: req.headers[SESSION_SCOPE_HEADER] === "local" }
-}
-
-/**
- * Where `/api/session-crew` reads a crew from. Its members are the ones the
- * session list carries with the crew, read from one listing: sessions this
- * machine lists and has not archived, and those a runtime here holds before
- * their transcript is written. A member recorded on a hub device is asked
- * there; one recorded without a device runs here, so no other device is
- * searched for it.
- */
-async function crewSources(req: IncomingMessage, sessionId: string): Promise<CrewSources> {
-  const [parents, listing, archive] = await Promise.all([sessionParents(), allTopLevelSessions(), readArchive()])
-  const listedById = new Map(listing.map((session) => [listedSessionId(session), session]))
-  const rootId = crewRootOf(sessionId, parents)
-  const { localOnly } = scopeOf(req)
-  const now = Date.now()
-  const canView = async (id: string) => {
-    const level = await accessLevelOf(req, id)
-    return Boolean(level && accessAtLeast(level, "view"))
-  }
-  const rows = new Map<string, ReturnType<typeof readActiveSessionRow>>()
-  const rowOf = (candidate: TopLevelSessionInfo) => {
-    const id = listedSessionId(candidate)
-    let row = rows.get(id)
-    if (!row) {
-      row = readActiveSessionRow(candidate, {
-        search: "", pullRequestSearch: null, pullRequestIndex: null, archivedById: new Map(), teamConfigs: new Map(),
-      })
-      rows.set(id, row)
-    }
-    return row
-  }
-  return {
-    parents,
-    canView: (id) => (id === sessionId ? Promise.resolve(true) : canView(id)),
-    describe: async (id) => {
-      const device = localOnly ? null : hostForOrigin(await sessionOrigin(id))
-      if (device) {
-        const [state, address] = await Promise.all([device.state(id), device.address(id)])
-        return { host: { remote: true, id: device.id, name: device.name }, state, address }
-      }
-      const candidate = listedById.get(id)
-      const required = id === sessionId || id === rootId
-      if (!required && (candidate ? archiveReason(archive, id, candidate.mtimeMs, now) : !runtimeForSession(id))) return null
-      if (!candidate) {
-        const [state, address] = await Promise.all([readSessionState(id), localHost.address(id)])
-        return { host: { remote: false, id: localHost.id, name: localHost.name }, state, address }
-      }
-      // Recent activity as the session list reads it, so both call a member working alike.
-      const row = await rowOf(candidate)
-      const lastActivityMs = Date.parse(row?.lastActivityAt ?? "") || candidate.mtimeMs
-      const state = await readSessionState(id, { filePath: candidate.filePath, lastActivityMs })
-      return {
-        host: { remote: false, id: localHost.id, name: localHost.name },
-        state,
-        address: { dirName: candidate.dirName, fileName: candidate.fileName },
-      }
-    },
-    listed: async (id) => {
-      const candidate = listedById.get(id)
-      const row = candidate && await rowOf(candidate)
-      if (!row) return null
-      return {
-        customTitle: row.customTitle,
-        aiTitle: row.aiTitle,
-        firstUserMessage: row.firstUserMessage,
-        cwd: row.cwd,
-        model: row.model,
-        turnCount: row.turnCount,
-        lastActivityAt: row.lastActivityAt,
-        pullRequests: row.pullRequests,
-      }
-    },
-    tasks: () => {
-      try {
-        return orchestrationStore().tasks(commandScope(req))
-      } catch {
-        return []
-      }
-    },
-  }
 }
 
 export function registerSessionOrchestrationRoutes(use: UseFn) {
@@ -238,11 +150,12 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
     if (await authorizeSession(req, res, { sessionId }, "view") === null) return
     const visibleChildren = []
     for (const child of await sessionChildren(sessionId)) { const level = await accessLevelOf(req, child); if (level && accessAtLeast(level, "view")) visibleChildren.push(child) }
-    const located = await locateSessions(visibleChildren)
-    const children = await Promise.all(located.map(async ({ host, sessionId: childId }) => ({
-      ...await host.state(childId),
+    const located = await locateSessions(visibleChildren, scopeOf(req))
+    const states = await statesAcrossHosts(located)
+    const children = located.map(({ host }, index) => ({
+      ...states[index]!,
       ...(host.remote ? { device: { id: host.id, name: host.name } } : {}),
-    })))
+    }))
     sendJson(res, 200, { sessionId, children })
   })
 
@@ -255,17 +168,18 @@ export function registerSessionOrchestrationRoutes(use: UseFn) {
     sendJson(res, 200, { board: await sessionBoard(sessionId) })
   })
 
-  // GET /api/session-crew/:sessionId — the crew it belongs to, from its root,
-  // with each member's state and what it is waiting on
+  // GET /api/session-crew/:sessionId[?brief=1] — the crew it belongs to, from
+  // its root, with each member's state and what it is waiting on
   use("/api/session-crew/", async (req, res, next) => {
     if (req.method !== "GET") return next()
     const sessionId = singlePathParam(req)
     if (!sessionId) return next()
     try {
       if (await authorizeSession(req, res, { sessionId }, "view") === null) return
-      const crew = await readSessionCrew(sessionId, await crewSources(req, sessionId))
+      const brief = new URL(req.url || "/", "http://localhost").searchParams.get("brief") === "1"
+      const crew = await readCrewSnapshot(req, sessionId, { ...scopeOf(req), brief })
       if (!crew) return sendJson(res, 404, { error: "Session not found" })
-      sendJson(res, 200, crew)
+      sendJsonWithEtag(req, res, crew)
     } catch (error) {
       sendHostError(res, error, "Failed to read the crew")
     }

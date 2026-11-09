@@ -1,7 +1,9 @@
+import { Profiler } from "react"
 import { describe, expect, it } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
-import type { StreamingOverlay } from "@/lib/streamingOverlay"
+import { applyDeltas, EMPTY_OVERLAY, type StreamDeltaEvent, type StreamingOverlay } from "@/lib/streamingOverlay"
+import { createStreamingOverlayStore } from "@/lib/streamingOverlayStore"
 import { LiveSubagentTranscript } from "../LiveSubagentTranscript"
 
 const TOOL_ID = "toolu_live"
@@ -142,6 +144,35 @@ describe("LiveSubagentTranscript", () => {
     scroller.scrollTop = BOTTOM - 10
     fireEvent.scroll(scroller)
     expect(scroller.scrollTop).toBe(BOTTOM)
+  })
+
+  it("re-renders only on its own sub-agent's flushes, and joins every message's text in order", () => {
+    const store = createStreamingOverlayStore()
+    const delta = (messageId: string, toolUseId: string, text: string): StreamDeltaEvent =>
+      ({ messageId, parentToolUseId: toolUseId, blockIndex: 0, blockType: "text", delta: text })
+    const commits = { mine: 0, other: 0 }
+    render(
+      <StreamingOverlayProvider store={store}>
+        <Profiler id="mine" onRender={() => { commits.mine++ }}>
+          <LiveSubagentTranscript toolUseId={TOOL_ID} />
+        </Profiler>
+        <Profiler id="other" onRender={() => { commits.other++ }}>
+          <LiveSubagentTranscript toolUseId="toolu_other" />
+        </Profiler>
+      </StreamingOverlayProvider>,
+    )
+    act(() => store.publish(applyDeltas(EMPTY_OVERLAY, [delta("msg_1", TOOL_ID, "first message")])))
+    const mine = commits.mine
+
+    act(() => store.publish(applyDeltas(store.snapshot(), [delta("msg_x", "toolu_other", "elsewhere")])))
+    act(() => store.publish(applyDeltas(store.snapshot(), [delta("msg_x", "toolu_other", " again")])))
+    expect(commits.mine).toBe(mine)
+
+    act(() => store.publish(applyDeltas(store.snapshot(), [delta("msg_2", TOOL_ID, "second message")])))
+    expect(commits.mine).toBe(mine + 1)
+    const panes = screen.getAllByTestId("live-subagent-scroll")
+    expect(panes[0].textContent).toMatch(/first message\s*second message/)
+    expect(panes[1].textContent).toContain("elsewhere again")
   })
 
   describe("progress summary", () => {

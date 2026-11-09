@@ -95,6 +95,8 @@ export async function locateSessions(sessionIds: readonly string[], options: { l
   return Promise.all(sessionIds.map(async (sessionId) => ({ host: await hostForSession(sessionId, options), sessionId })))
 }
 
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
 /** A session's state, or its failure to answer as an error state, so one machine cannot sink a wait on several. */
 async function stateOrError(host: SessionHost, sessionId: string): Promise<SessionState> {
   try {
@@ -106,9 +108,46 @@ async function stateOrError(host: SessionHost, sessionId: string): Promise<Sessi
       live: false,
       running: false,
       waiting: [],
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     }
   }
+}
+
+/**
+ * The states of sessions spread over several machines, in their order. A
+ * device that fails to answer never sinks the rest: its sessions come back
+ * `unreachable` with its error, and after its first failure it is not asked
+ * about the others, so hundreds of sessions on a dead device cost one request.
+ */
+export async function statesAcrossHosts(sessions: readonly HostedSession[]): Promise<SessionState[]> {
+  // By position: a device may spell a session's id differently in its answer.
+  const groups = new Map<SessionHost, number[]>()
+  sessions.forEach(({ host }, index) => groups.set(host, [...(groups.get(host) ?? []), index]))
+  const states: SessionState[] = new Array(sessions.length)
+  await Promise.all([...groups].map(async ([host, indexes]) => {
+    if (!host.remote) {
+      await Promise.all(indexes.map(async (index) => { states[index] = await stateOrError(host, sessions[index]!.sessionId) }))
+      return
+    }
+    let failure: string | undefined
+    const ask = async (index: number): Promise<void> => {
+      const { sessionId } = sessions[index]!
+      if (failure === undefined) {
+        try {
+          const state = await host.state(sessionId)
+          if (state.outcome !== "unreachable") { states[index] = state; return }
+          failure ??= state.error ?? `${host.name} did not answer`
+        } catch (error) {
+          failure ??= errorMessage(error)
+        }
+      }
+      states[index] = { sessionId, outcome: "unreachable", live: false, running: false, waiting: [], error: failure }
+    }
+    const [first, ...rest] = indexes
+    await ask(first!)
+    await Promise.all(rest.map(ask))
+  }))
+  return states
 }
 
 /**

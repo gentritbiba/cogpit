@@ -40,6 +40,7 @@ import { allRuntimes, isSessionActive } from "./agents/runtimes"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
+import { resumeLocalCrewChat } from "./lib/crewChat"
 import { startTriggerScheduler, triggerExecutionsSettled } from "./lib/triggers/runner"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
@@ -190,6 +191,7 @@ export async function createServerComposition(
   const browserSupport = initBrowserSupport(isSessionActive)
   installSessionCli()
   resumeLocalDelegations()
+  resumeLocalCrewChat()
   startTriggerScheduler()
   const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()

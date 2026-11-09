@@ -4,7 +4,8 @@ import { orchestrationStore } from "../orchestration/storage"
 import { acknowledgeTask, cancelTask } from "../orchestration/delegatedTasks"
 import { commandScope } from "../lib/durableSend"
 import { delegationAuthority, resumeDelegations } from "../lib/delegationAuthority"
-import { isUnreadTask, type DelegatedTask } from "../../shared/contracts/orchestration"
+import { sendJsonWithEtag } from "../lib/jsonEtag"
+import { countDelegatedTasks, isUnreadTask, type DelegatedTask } from "../../shared/contracts/orchestration"
 import { sendAgentError } from "./agentErrors"
 
 /** The tasks whose child the caller may see, asking once per child. */
@@ -19,14 +20,23 @@ async function visible<T extends Pick<DelegatedTask, "childSessionId">>(tasks: r
 }
 
 export function registerDelegatedTaskRoutes(use: UseFn): void {
+  // GET /api/delegated-tasks?sessionId=<id>[&view=counts]
   use("/api/delegated-tasks", async (req, res, next) => {
     if (req.method === "GET") {
       try {
-        const parentSessionId = new URL(req.url || "/", "http://localhost").searchParams.get("sessionId")
+        const params = new URL(req.url || "/", "http://localhost").searchParams
+        const parentSessionId = params.get("sessionId")
         if (!parentSessionId) return sendJson(res, 400, { error: "sessionId is required" })
         if (await authorizeSession(req, res, { sessionId: parentSessionId }, "view") === null) return
         const authority = delegationAuthority(req, "view")
-        const tasks = await visible(orchestrationStore().tasks(commandScope(req), parentSessionId), (id) => authority.authorize(id))
+        const scope = commandScope(req)
+        if (params.get("view") === "counts") {
+          const tasks = await visible(orchestrationStore().taskStates(scope, { parentSessionId }), (id) => authority.authorize(id))
+          const counts = countDelegatedTasks(tasks)
+          if (counts.unread) resumeDelegations(req, parentSessionId)
+          return sendJsonWithEtag(req, res, { counts })
+        }
+        const tasks = await visible(orchestrationStore().tasks(scope, parentSessionId), (id) => authority.authorize(id))
         if (tasks.some(isUnreadTask)) resumeDelegations(req, parentSessionId)
         sendJson(res, 200, { tasks })
       } catch (error) { sendAgentError(res, error, "Failed to read delegated tasks") }

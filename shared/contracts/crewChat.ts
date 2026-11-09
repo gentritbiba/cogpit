@@ -30,10 +30,19 @@ export interface CrewChatPage {
   rootId: string
   messages: CrewChatMessage[]
   members: CrewChatMember[]
+  /** Changes whenever `members` does; absent from older servers. */
+  membersVersion?: string
   nextCursor: number
   hasMore: boolean
   canPost: boolean
 }
+
+/**
+ * `GET /api/crew-chat/:id`. With `?knownMembers=<membersVersion>` still
+ * current, `members` is left out. Answers with a weak ETag; send it back as
+ * `If-None-Match` and an unchanged page is a 304.
+ */
+export type CrewChatPageResponse = Omit<CrewChatPage, "members"> & Partial<Pick<CrewChatPage, "members">>
 
 export interface CrewChatDelivery {
   sequence: number
