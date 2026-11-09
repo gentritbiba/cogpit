@@ -1429,6 +1429,63 @@ describe("useLiveSession", () => {
       expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_pending"])
     })
 
+    it("hands over each batch's messages when its update is shown, even after a later batch parsed (review 3 #6)", async () => {
+      const first = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      const second = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      let answerFirst!: (session: SessionView) => void
+      workerAppend
+        .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve }))
+        .mockResolvedValueOnce(second)
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
+      )
+      const line = (id: string) => `{"type":"assistant","message":{"id":"${id}","content":[]}}`
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_one", "first"))
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_two", "second"))
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_live", "still going"))
+        getLastEventSource().simulateMessage({ type: "lines", lines: [line("msg_one")], start: 15, end: 80 })
+        // Waits for the worker, which is busy with the first batch.
+        getLastEventSource().simulateMessage({ type: "lines", lines: [line("msg_two")], start: 80, end: 140 })
+        flushRAF()
+      })
+      await act(async () => {
+        answerFirst(first)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(workerAppend).toHaveBeenCalledTimes(2)
+      expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(3)
+
+      // The first update reaches the screen after the second batch parsed.
+      act(() => { result.current.sessionShown(first) })
+      expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_two", "msg_live"])
+      act(() => { result.current.sessionShown(second) })
+      expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_live"])
+    })
+
+    it("hands over every batch up to the one shown when an update skipped the screen (review 3 #6)", async () => {
+      const first = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      const second = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
+      workerAppend.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
+      )
+      const line = (id: string) => `{"type":"assistant","message":{"id":"${id}","content":[]}}`
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_one", "first"))
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_two", "second"))
+        getLastEventSource().simulateMessage({ type: "lines", lines: [line("msg_one")], start: 15, end: 80 })
+        getLastEventSource().simulateMessage({ type: "lines", lines: [line("msg_two")], start: 80, end: 140 })
+        flushRAF()
+      })
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+      act(() => { result.current.sessionShown(second) })
+      expect(result.current.streamingOverlayStore.snapshot()).toEqual([])
+    })
+
     it("stream_clear empties the overlay", () => {
       const { result } = renderHook(() =>
         useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
