@@ -73,7 +73,7 @@ describe("durable orchestration", () => {
     original.putTask("owner", { sourceId: "saved-task", parentSessionId: "parent", childSessionId: "child" })
     original.close()
     const legacy = new DatabaseSync(path)
-    legacy.exec("DROP INDEX command_pending; DROP INDEX task_parent")
+    legacy.exec("DROP INDEX command_pending; DROP INDEX task_parent; DROP INDEX task_unread")
     legacy.close()
     const reopened = open(path)
     expect(reopened.queued()[0]?.payload).toEqual({ message: "keep me" })
@@ -83,6 +83,9 @@ describe("durable orchestration", () => {
       expect(plan.map((row) => row.detail).join(" ")).toContain("COVERING INDEX command_pending")
       const tasksPlan = db.prepare("EXPLAIN QUERY PLAN SELECT data FROM tasks WHERE scope=? AND json_extract(data,'$.parentSessionId')=?").all("owner", "parent")
       expect(tasksPlan.map((row) => row.detail).join(" ")).toContain("INDEX task_parent")
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'task_%' ORDER BY name").all().map((row) => row.name)).toEqual(["task_parent", "task_unread"])
+      const unreadPlan = db.prepare("EXPLAIN QUERY PLAN SELECT data FROM tasks WHERE scope=? AND json_extract(data,'$.parentSessionId')=? AND json_extract(data,'$.acknowledgedAt') IS NULL AND json_extract(data,'$.state')<>'cancelled'").all("owner", "parent")
+      expect(unreadPlan.map((row) => row.detail).join(" ")).toContain("INDEX task_unread")
       expect(reopened.tasks("owner", "parent")[0]?.childSessionId).toBe("child")
     } finally { db.close() }
   })
@@ -98,6 +101,26 @@ describe("durable orchestration", () => {
     store.updateTask("alice", first.id, { result: { reply: "finished" } })
     expect(store.tasks("alice", "parent")[0]?.result).toEqual({ reply: "finished" })
     expect(() => store.updateTask("bob", first.id, { state: "completed" })).toThrow("Delegated task not found")
+  })
+
+  it("reads unread tasks, single tasks and notices without decoding results", () => {
+    const store = open()
+    const done = store.putTask("alice", { sourceId: "lean-done", parentSessionId: "parent", childSessionId: "a" })
+    store.updateTask("alice", done.id, { state: "completed", result: { reply: "x".repeat(1000) }, notified: ["q-1"] })
+    const read = store.putTask("alice", { sourceId: "lean-read", parentSessionId: "parent", childSessionId: "a" })
+    store.updateTask("alice", read.id, { state: "completed", acknowledgedAt: 42, notified: ["q-2"] })
+    store.updateTask("alice", store.putTask("alice", { sourceId: "lean-cancelled", parentSessionId: "parent", childSessionId: "b" }).id, { state: "cancelled" })
+    const running = store.putTask("alice", { sourceId: "lean-running", parentSessionId: "other", childSessionId: "b", commandId: "follow-up" })
+    store.putTask("bob", { sourceId: "lean-bob", parentSessionId: "parent", childSessionId: "a" })
+
+    const unread = store.unreadTasks("alice", "parent")
+    expect(unread.map((task) => task.id)).toEqual([done.id])
+    expect(unread[0]).not.toHaveProperty("result")
+    expect(unread[0]).toMatchObject({ state: "completed", notified: ["q-1"] })
+    expect(store.unreadTasks("alice", "other")[0]).toMatchObject({ id: running.id, commandId: "follow-up" })
+    expect(store.taskNotices("alice", "parent", "a").sort()).toEqual(["q-1", "q-2"])
+    expect(store.task("alice", done.id)?.result).toEqual({ reply: "x".repeat(1000) })
+    expect(store.task("bob", done.id)).toBeNull()
   })
 
   it("cancels a notice when its agent becomes idle during authorization", async () => {
