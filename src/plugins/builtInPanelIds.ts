@@ -11,4 +11,5 @@ export const BUILT_IN_WORKSPACE_PANEL_IDS = {
   sessionInfo: workspacePanelId(BUILT_IN_PLUGIN_ID, "session-info"),
   automations: workspacePanelId(BUILT_IN_PLUGIN_ID, "automations"),
   crew: workspacePanelId(BUILT_IN_PLUGIN_ID, "crew"),
+  status: workspacePanelId(BUILT_IN_PLUGIN_ID, "status"),
 } as const

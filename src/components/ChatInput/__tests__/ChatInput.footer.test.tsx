@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   restoreImages: vi.fn(),
   clearImages: vi.fn(),
   images: [] as Array<{ id: string; data: string; mediaType: string }>,
+  promptSuggestion: null as string | null,
 }))
 
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
@@ -23,7 +24,7 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
     slashSuggestions: [],
     slashSuggestionsLoading: false,
     turnError: null,
-    promptSuggestion: null,
+    promptSuggestion: mocks.promptSuggestion,
   }),
   useSessionChatContext: () => ({
     chat: { status: "idle", error: null, isConnected: false, sendMessage: mocks.sendMessage, interrupt: vi.fn() },
@@ -50,7 +51,7 @@ import { ChatInput } from "../index"
 import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
 import { showSession } from "@/__tests__/sessionContextMock"
 
-beforeEach(() => { localStorage.clear(); resetUnsentRecoveriesForTest() })
+beforeEach(() => { localStorage.clear(); resetUnsentRecoveriesForTest(); mocks.promptSuggestion = null })
 
 describe("ChatInput footer", () => {
   it("stacks the message above a control row that ends with Send", () => {
@@ -247,5 +248,41 @@ describe("ChatInput sending", () => {
 
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("")
     })
+  })
+})
+
+describe("ChatInput prompt suggestion", () => {
+  it("waits in the empty composer as its placeholder and fills it on Tab without sending", () => {
+    mocks.sendMessage.mockClear()
+    mocks.promptSuggestion = "Run the tests"
+    render(<ChatInput />)
+    const message = screen.getByRole("combobox", { name: "Message" })
+    expect(message).toHaveAttribute("placeholder", "Run the tests  (Tab)")
+
+    fireEvent.keyDown(message, { key: "Tab" })
+    expect(message).toHaveValue("Run the tests")
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /Use the suggestion/ })).toBeNull()
+  })
+
+  it("fills the composer from the sparkle button, and steps aside once the user types", () => {
+    mocks.promptSuggestion = "Run the tests"
+    render(<ChatInput footer={<span>session controls</span>} />)
+    const message = screen.getByRole("combobox", { name: "Message" })
+
+    fireEvent.change(message, { target: { value: "Something else" } })
+    expect(message).toHaveAttribute("placeholder", expect.not.stringContaining("Run the tests"))
+    fireEvent.keyDown(message, { key: "Tab" })
+    expect(message).toHaveValue("Something else")
+
+    fireEvent.change(message, { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: "Use the suggestion: Run the tests" }))
+    expect(message).toHaveValue("Run the tests")
+  })
+
+  it("takes no room when the CLI sent no suggestion", () => {
+    render(<ChatInput />)
+    expect(screen.getByRole("combobox", { name: "Message" })).toHaveAttribute("placeholder", expect.stringContaining("Enter to send"))
+    expect(screen.queryByRole("button", { name: /Use the suggestion/ })).toBeNull()
   })
 })

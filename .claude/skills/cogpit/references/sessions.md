@@ -51,6 +51,9 @@ chain of command intact:
   your parent. Your parent should not need to read your children's transcripts.
 - Escalate a question to your parent only when neither you nor your children can
   answer it, and pass the answer back down.
+- Message your parent when you finish, are blocked, or need a decision it owns.
+  Every message wakes it, so progress goes on your board instead (see Status
+  board).
 - Stay within the scope of your own task. Delegation splits up the work you were
   given; it does not add new work.
 
@@ -100,6 +103,42 @@ installed or signed in, settles as outcome `error`. Its `failure.reason` is
 `not_installed`, `not_signed_in`, `http_status` (with `httpStatus`) or `other`,
 and `error` gives the plain explanation followed by the agent's own words. A
 person has to install or sign in to the CLI before a resend can work.
+
+## Status board
+
+Keep your own status current with `board`. The user reads every agent's board
+in Cogpit's Status panel without opening its conversation, and the session list
+shows a one-line summary under each session that keeps one. Only you can change
+your board; anyone may read it with `board get ID`.
+
+```bash
+cogpit-session board set - <<'EOF'
+title: Release 52
+progress: 34/41
+sections:
+  - title: Needs you
+    tone: warning
+    items: ["CF token for the router deploy"]
+  - title: Now
+    items: ["GL-180 nav fix in review"]
+  - title: Landed
+    tone: success
+    items: ["1c019e9 nav wrapper"]
+  - title: Next
+    items: ["Promotion #51 after CI"]
+EOF
+cogpit-session board progress 35/41
+cogpit-session board get "$CHILD"
+```
+
+- Update it when your state changes: a step starts or lands, you get blocked,
+  the user answers. Not on a timer.
+- Say where things stand now, not the history. What waits on the user goes in a
+  `warning` section, what finished in a `success` one.
+- Always keep a `Next` section: what is left, in order, or "Nothing left" when
+  done. `board set` answers with a `hint` when the board does not say it.
+- Up to 6 sections of 12 items, 160 characters each; links stay clickable.
+- Read a child's board before messaging it to ask how it is going.
 
 ## Orchestrator checklist
 

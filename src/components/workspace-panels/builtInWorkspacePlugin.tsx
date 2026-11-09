@@ -1,8 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from "react"
-import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, ListChecks, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
+import { needsYouCount } from "@/components/board/boardView"
 import { Spinner } from "@/components/ui/Spinner"
+import { useSessionBoards } from "@/hooks/useSessionBoards"
 import {
   definePlugin,
   type WorkspacePanelIndicatorProps,
@@ -25,6 +27,9 @@ const WorktreePanel = lazy(() =>
 )
 const CrewPanel = lazy(() =>
   import("@/components/crew/CrewPanel").then((module) => ({ default: module.CrewPanel })),
+)
+const StatusPanel = lazy(() =>
+  import("@/components/board/StatusPanel").then((module) => ({ default: module.StatusPanel })),
 )
 const BrowserPanel = lazy(() =>
   import("@/components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })),
@@ -126,6 +131,25 @@ function BrowserActivityIndicator() {
   )
 }
 
+function StatusWorkspacePanel(props: WorkspacePanelProps) {
+  return <Suspense fallback={<PanelFallback />}><StatusPanel {...props} /></Suspense>
+}
+
+/** A dot on the rail while a status in the open session's crew says something waits on the user. */
+function StatusIndicator({ context }: WorkspacePanelIndicatorProps) {
+  const boards = useSessionBoards()
+  const rootId = context.crew?.rootId ?? context.session?.sessionId
+  const waiting = [...boards.values()].some((board) => board.rootId === rootId && needsYouCount(board) > 0)
+  if (!waiting) return null
+  return (
+    <span
+      role="status"
+      aria-label="A status says something waits on you"
+      className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-warning"
+    />
+  )
+}
+
 function CrewWorkspacePanel(props: WorkspacePanelProps) {
   return (
     <Suspense fallback={<PanelFallback />}>
@@ -200,6 +224,17 @@ export const builtInWorkspacePlugin = definePlugin({
       minSize: "340px",
       maxSize: "60%",
       when: (context) => Boolean(context.crew),
+    },
+    {
+      id: "status",
+      title: "Status",
+      icon: ListChecks,
+      component: StatusWorkspacePanel,
+      indicator: StatusIndicator,
+      order: 2,
+      defaultSize: "30%",
+      minSize: "320px",
+      maxSize: "60%",
     },
     {
       id: "worktrees",
