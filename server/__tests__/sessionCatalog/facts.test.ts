@@ -111,13 +111,15 @@ describe("saved session catalog", () => {
 
 describe("pruning", () => {
   it("forgets files a full listing of their root no longer finds, and nothing outside that root", () => {
-    for (const filePath of ["/root/a.jsonl", "/root/b.jsonl", "/rooted/c.jsonl"]) {
+    const root = join("/", "root")
+    const [a, b, c] = [join(root, "a.jsonl"), join(root, "b.jsonl"), join("/", "rooted", "c.jsonl")]
+    for (const filePath of [a, b, c]) {
       recordFact(filePath, "project", { path: "/w", final: true, mtimeMs: 1, size: 1 })
     }
-    pruneFactsUnder("/root", new Set(["/root/a.jsonl"]))
-    expect(factsFor("/root/a.jsonl")).toBeDefined()
-    expect(factsFor("/root/b.jsonl")).toBeUndefined()
-    expect(factsFor("/rooted/c.jsonl")).toBeDefined()
+    pruneFactsUnder(root, new Set([a]))
+    expect(factsFor(a)).toBeDefined()
+    expect(factsFor(b)).toBeUndefined()
+    expect(factsFor(c)).toBeDefined()
   })
 })
 
