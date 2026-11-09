@@ -340,29 +340,44 @@ export function turnStartsWithIds(
   format: AgentFormat,
   lines: readonly string[],
 ): { line: number; id: string }[] | null {
-  const starts = turnBoundaryLines(format, lines)
+  return pairTurnIds(format, lines, turnBoundaryLines(format, lines))
+}
+
+function pairTurnIds(
+  format: AgentFormat,
+  lines: readonly string[],
+  starts: readonly number[],
+): { line: number; id: string }[] | null {
   const turns = format.parse(lines.join("\n"), { skipStats: true }).turns
   if (turns.length !== starts.length) return null
   return starts.map((line, index) => ({ line, id: turns[index].id }))
 }
 
 /**
- * The line to cut at to keep everything through the turn whose id is `turnId`.
+ * The turn a client names `turnId`: its index in file order, and the line the
+ * turn after it starts on, null for the last turn. Null when no turn answers
+ * to the id.
  *
- * `"keep-all"` means it is the last turn (nothing to remove); null means no
- * turn has that id — an agent may leave a turn unlabelled — and the caller
- * should fall back to an index-based cut.
+ * The id is the one a full parse gives the turn, or, for a client that paged
+ * the turn in from its middle, the one a parse opening on a record inside it
+ * gives it. A client holds the newest turns, so those are searched first.
  */
-export function cutLineAfterTurnId(
+export function findTurnById(
   format: AgentFormat,
   lines: readonly string[],
   turnId: string,
-): number | "keep-all" | null {
-  const starts = turnStartsWithIds(format, lines)
-  if (!starts) return null
-  const index = starts.findLastIndex((start) => start.id === turnId)
-  if (index < 0) return null
-  return starts[index + 1]?.line ?? "keep-all"
+): { index: number; nextLine: number | null } | null {
+  const starts = turnBoundaryLines(format, lines)
+  const found = (index: number) => ({ index, nextLine: starts[index + 1] ?? null })
+  const named = pairTurnIds(format, lines, starts)?.findLastIndex((start) => start.id === turnId) ?? -1
+  if (named >= 0) return found(named)
+  for (let turn = starts.length - 1; turn >= 0; turn--) {
+    const end = starts[turn + 1] ?? lines.length
+    for (let line = starts[turn]; line < end; line++) {
+      if (format.parse(lines[line], { skipStats: true }).turns[0]?.id === turnId) return found(turn)
+    }
+  }
+  return null
 }
 
 /**

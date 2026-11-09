@@ -170,11 +170,10 @@ export interface AcceptedAnswer {
   onDelivered?: () => void
 }
 
-/** Where to fork a session: the transcript as loaded, and the turn to keep through. */
+/** Where to fork a session: its transcript lines, and the line the first dropped turn starts on (null keeps every turn). */
 export interface ForkPoint {
   lines: string[]
-  turnIndex?: number
-  turnUuid?: string
+  cutLine: number | null
 }
 
 export interface ForkedSession {

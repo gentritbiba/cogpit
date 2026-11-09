@@ -132,7 +132,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(request),
         })
-        if (!res.ok) throw new Error(`Failed to copy session (${res.status})`)
+        if (!res.ok) throw new Error(await readError(res, "Could not copy session"))
         const data = await res.json()
         rememberCreatedSession(data.sessionId)
         return { dirName: data.dirName, fileName: data.fileName }
@@ -140,8 +140,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         reason: "copy",
         commit: ({ parsed, source }) => dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile }),
       })
-    } catch {
-      // silently fail
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not copy session")
     }
   }, [dispatch, isMobile, sessions])
 
@@ -169,11 +169,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const handleBranchFromHere = useCallback(async (turnIndex: number) => {
     if (!state.sessionSource) return
     const { dirName, fileName } = state.sessionSource
-    // turnIndex counts LOADED turns, which on a tail-loaded session differ from
-    // file-order turns. Send the turn's boundary-message uuid so the server can
-    // cut at the exact turn regardless of how much of the session is loaded.
-    // Synthetic ids (queued turns, uuid-less messages) won't match any line —
-    // the server falls back to turnIndex for those.
+    // turnIndex counts the loaded turns only, so the server finds the turn by
+    // its id, and refuses rather than guess when no turn in the file has it.
     const turnUuid = sessionStore.getState().session?.turns[turnIndex]?.id
     await openCopy({ dirName, fileName, turnIndex, turnUuid })
   }, [state.sessionSource, sessionStore, openCopy])

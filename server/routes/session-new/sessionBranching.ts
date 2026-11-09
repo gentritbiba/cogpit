@@ -8,7 +8,7 @@ import {
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import {
   cutLineAfterTurnIndex,
-  cutLineAfterTurnId,
+  findTurnById,
   formatFor,
   type AgentFormat,
 } from "../../../shared/session/agents"
@@ -19,22 +19,26 @@ import { sendJson, withJsonBody, type UseFn } from "../../http"
 import { reportSessionEvent, recordSessionOwner } from "../../edition"
 import { authorizeTranscript } from "../../edition/transcript"
 
+const TURN_NOT_FOUND = "Unable to locate the selected turn in the current session file"
+
 /**
- * Prefer the turn-id cut — exact regardless of how much of the session the
- * client had loaded. Fall back to the index cut when the id is absent or
- * unmatched (an agent may leave a turn unlabelled). Null keeps everything.
+ * The turn the client named, in file order, and the line to cut at after it
+ * (null keeps everything). An id is exact however much of the session the
+ * client had loaded; an index counts only the loaded turns, so it stands alone
+ * only for a client that sent no id. Null when the named turn is not in the file.
  */
-function branchCutLine(
+function branchPoint(
   format: AgentFormat,
   lines: readonly string[],
   turnIndex: number | undefined,
   turnId: string | undefined,
-): number | null {
+): { turnIndex: number | null; cutLine: number | null } | null {
   if (turnId) {
-    const byId = cutLineAfterTurnId(format, lines, turnId)
-    if (byId !== null) return byId === "keep-all" ? null : byId
+    const turn = findTurnById(format, lines, turnId)
+    return turn && { turnIndex: turn.index, cutLine: turn.nextLine }
   }
-  return turnIndex != null ? cutLineAfterTurnIndex(format, lines, turnIndex) : null
+  if (turnIndex == null) return { turnIndex: null, cutLine: null }
+  return { turnIndex, cutLine: cutLineAfterTurnIndex(format, lines, turnIndex) }
 }
 
 export function registerBranchSessionRoute(use: UseFn) {
@@ -78,6 +82,13 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
 
+        const format = formatFor(descriptor.kind)
+        const point = branchPoint(format, lines, turnIndex, turnUuid)
+        if (!point) {
+          sendJson(res, 409, { error: TURN_NOT_FOUND })
+          return
+        }
+
         if (descriptor.capabilities.nativeFork) {
           // The CLI forks its own session; the transcript is never copied.
           const originalId = source.transcriptSessionId
@@ -85,7 +96,7 @@ export function registerBranchSessionRoute(use: UseFn) {
             sendJson(res, 400, { error: `Invalid ${descriptor.displayName} session path` })
             return
           }
-          const forked = await runtimeForDirName(dirName).fork(originalId, { lines, turnIndex, turnUuid })
+          const forked = await runtimeForDirName(dirName).fork(originalId, { lines, cutLine: point.cutLine })
           recordBranch(forked.sessionId)
           sendJson(res, 200, {
             dirName,
@@ -96,15 +107,13 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
 
-        const format = formatFor(descriptor.kind)
-        const truncLine = branchCutLine(format, lines, turnIndex, turnUuid)
-        if (truncLine !== null) lines = lines.slice(0, truncLine)
+        if (point.cutLine !== null) lines = lines.slice(0, point.cutLine)
 
         const newSessionId = randomUUID()
         const { record, originalId } = format.brandBranch(
           JSON.parse(lines[0]) as Record<string, unknown>,
           newSessionId,
-          turnIndex ?? null,
+          point.turnIndex,
           Date.now(),
         )
         lines[0] = JSON.stringify(record)

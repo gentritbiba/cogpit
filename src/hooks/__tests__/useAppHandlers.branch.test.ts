@@ -108,6 +108,22 @@ describe("useAppHandlers copies", () => {
 
     expect(accessWhenOpened).toHaveBeenCalledWith("own")
   })
+
+  it("names the turn by its id and says why the server would not branch there", async () => {
+    mocks.toastError.mockReset()
+    const refusal = "Unable to locate the selected turn in the current session file"
+    mocks.authFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: refusal }), { status: 409 }))
+    const dispatch = vi.fn()
+    const { result } = renderHandlers(dispatch)
+
+    await act(() => result.current.handleBranchFromHere(0))
+
+    expect(mocks.authFetch).toHaveBeenCalledWith("/api/branch-session", expect.objectContaining({
+      body: JSON.stringify({ dirName: "-work-app", fileName: "original.jsonl", turnIndex: 0, turnUuid: "turn-1" }),
+    }))
+    expect(mocks.toastError).toHaveBeenCalledWith(refusal)
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "LOAD_SESSION" }))
+  })
 })
 
 describe("useAppHandlers delete", () => {
