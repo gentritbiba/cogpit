@@ -202,7 +202,7 @@ export function deliverCrewChat(rootId: string, req?: IncomingMessage): Promise<
   return work
 }
 
-/** Attempts before a delivery gives up; with the backoff below that is about 15 minutes of retrying. */
+/** Attempts before a delivery to an unreachable member gives up; with the backoff below that is about 10 minutes. */
 export const CREW_CHAT_DELIVERY_ATTEMPTS = 8
 const RETRY_BASE_MS = 5_000
 const RETRY_CAP_MS = 5 * 60_000
@@ -212,43 +212,66 @@ export function crewChatRetryDelay(attempt: number): number {
   return Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** (attempt - 1))
 }
 
+type DeliveryFailure = { kind: "unreachable" | "busy" | "failed"; reason: string }
+
+class CrewChatDeliveryError extends Error {
+  constructor(message: string, readonly kind: DeliveryFailure["kind"]) { super(message) }
+}
+
+function deliveryFailure(error: unknown): DeliveryFailure {
+  const reason = error instanceof Error && error.message ? error.message : "Chat delivery failed"
+  return { kind: error instanceof CrewChatDeliveryError ? error.kind : "failed", reason }
+}
+
 /**
  * One pass over the deliveries that are due. A member that fails once in a pass is not asked again in
- * that pass, so many messages to an offline device cost one request; each failure is one write that
- * pushes its delivery back, and the last allowed one settles it as `failed`.
+ * that pass, so many messages to an offline device cost one request. A notice to a member out of reach
+ * is skipped; any other failure is one write that pushes its delivery back. A busy member is reachable,
+ * so only the other failures count toward settling a delivery as `failed`.
  */
 async function flushCrewChat(rootId: string, scope: string, req?: IncomingMessage): Promise<void> {
   const activeGeneration = generation
   const store = orchestrationStore()
   const attempted = new Set<string>()
-  const unreachable = new Map<string, string>()
+  const blocked = new Map<string, DeliveryFailure>()
   for (;;) {
     const due = store.dueChatDeliveries(rootId, scope, Date.now()).filter((delivery) => !attempted.has(JSON.stringify([delivery.sequence, delivery.sessionId])))
     if (!due.length) return
-    const failures: { delivery: CrewChatDelivery; error: string }[] = []
+    const failures: (DeliveryFailure & { delivery: CrewChatDelivery })[] = []
     for (const delivery of due) {
       attempted.add(JSON.stringify([delivery.sequence, delivery.sessionId]))
       const message = store.chatMessage(delivery.sequence)
       if (!message) { store.settleChatDelivery(delivery, "skipped", "The message no longer exists"); continue }
-      const known = unreachable.get(delivery.sessionId)
-      if (known !== undefined) { failures.push({ delivery, error: known }); continue }
-      try {
-        await sendCrewChatDelivery(store, rootId, delivery, message, req, () => generation !== activeGeneration)
-      } catch (error) {
+      let failure = blocked.get(delivery.sessionId)
+      if (!failure) {
+        try {
+          await sendCrewChatDelivery(store, rootId, delivery, message, req, () => generation !== activeGeneration)
+        } catch (error) {
+          failure = deliveryFailure(error)
+          blocked.set(delivery.sessionId, failure)
+        }
         if (generation !== activeGeneration) return
-        const reason = error instanceof Error && error.message ? error.message : "Chat delivery failed"
-        unreachable.set(delivery.sessionId, reason)
-        failures.push({ delivery, error: reason })
       }
-      if (generation !== activeGeneration) return
+      if (!failure) continue
+      if (failure.kind === "unreachable" && delivery.kind !== "mention") store.settleChatDelivery(delivery, "skipped", failure.reason)
+      else failures.push({ ...failure, delivery })
     }
     const now = Date.now()
-    store.deferChatDeliveries(failures.map(({ delivery, error }) => ({
+    store.deferChatDeliveries(failures.map(({ delivery, kind, reason }) => ({
       delivery,
-      error,
+      error: reason,
       nextAttemptAt: now + crewChatRetryDelay(delivery.attempts + 1),
-      giveUp: delivery.attempts + 1 >= CREW_CHAT_DELIVERY_ATTEMPTS,
+      giveUp: kind !== "busy" && delivery.attempts + 1 >= CREW_CHAT_DELIVERY_ATTEMPTS,
     })))
+  }
+}
+
+async function crewMemberState(sessionId: string) {
+  try {
+    const host = await hostForSession(sessionId)
+    return { host, state: await host.state(sessionId) }
+  } catch (error) {
+    throw new CrewChatDeliveryError(deliveryFailure(error).reason, "unreachable")
   }
 }
 
@@ -256,10 +279,9 @@ async function flushCrewChat(rootId: string, scope: string, req?: IncomingMessag
 async function sendCrewChatDelivery(store: ReturnType<typeof orchestrationStore>, rootId: string, delivery: CrewChatDelivery, message: CrewChatMessage, req: IncomingMessage | undefined, closed: () => boolean): Promise<void> {
   const allowed = async () => await may(req, rootId, "interact") && await may(req, delivery.sessionId, "interact")
   if (!await allowed()) throw new Error("Not allowed to message this crew member")
-  const host = await hostForSession(delivery.sessionId)
-  const state = await host.state(delivery.sessionId)
+  const { host, state } = await crewMemberState(delivery.sessionId)
   if (closed()) return
-  if (["unreachable", "not_found"].includes(state.outcome)) throw new Error(state.error || "Crew member is unavailable")
+  if (["unreachable", "not_found"].includes(state.outcome)) throw new CrewChatDeliveryError(state.error || "Crew member is unavailable", "unreachable")
   const mentioned = delivery.kind === "mention"
   if (!mentioned && (!store.chatListener(rootId, delivery.sessionId).listening || !state.running || state.activeNotifications === false)) {
     store.settleChatDelivery(delivery, "skipped")
@@ -281,6 +303,6 @@ async function sendCrewChatDelivery(store: ReturnType<typeof orchestrationStore>
     req,
   })
   if (closed()) return
-  if (result.delivery === "busy") throw new Error("Crew member could not accept this message")
+  if (result.delivery === "busy") throw new CrewChatDeliveryError("Crew member could not accept this message", "busy")
   store.settleChatDelivery(delivery, "accepted")
 }

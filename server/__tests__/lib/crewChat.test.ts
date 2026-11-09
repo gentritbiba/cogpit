@@ -288,6 +288,8 @@ describe("crew chat", () => {
       mocks.host.mockResolvedValue({ has: async () => true, state: mocks.state, send: mocks.send, remote: true })
       mocks.state.mockRejectedValue(new Error('Device "MB Pro" returned HTTP 502 while minting a token'))
     }
+    const deliveryStates = () => (mocks.store as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }).db
+      .prepare("SELECT state, attempts, count(*) AS count FROM crew_chat_deliveries GROUP BY state, attempts").all()
     const postFor = (count: number) => {
       for (let index = 0; index < count; index++) {
         mocks.store.postChat("local", `offline-chat-${String(index).padStart(4, "0")}`, { rootId: "lead", author: { kind: "user", name: "You" }, text: `Note ${index}`, mentions: ["reviewer"] }, [{ sessionId: "reviewer", kind: "mention" }])
@@ -299,19 +301,73 @@ describe("crew chat", () => {
       offline()
       postFor(600)
       const defer = vi.spyOn(mocks.store, "deferChatDeliveries")
+      const settle = vi.spyOn(mocks.store, "settleChatDelivery")
       await readCrewChat("lead", {}, req)
       await vi.advanceTimersByTimeAsync(60 * 60_000)
       expect(mocks.state).toHaveBeenCalledTimes(CREW_CHAT_DELIVERY_ATTEMPTS)
       expect(defer).toHaveBeenCalledTimes(CREW_CHAT_DELIVERY_ATTEMPTS)
       expect(defer.mock.calls.reduce((rows, [failures]) => rows + failures.length, 0)).toBe(600 * CREW_CHAT_DELIVERY_ATTEMPTS)
-      expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
-      const settled = mocks.store.dueChatDeliveries("lead", "local", Number.MAX_SAFE_INTEGER)
-      expect(settled).toEqual([])
+      expect(settle).not.toHaveBeenCalled()
+      expect(deliveryStates()).toEqual([{ state: "failed", attempts: CREW_CHAT_DELIVERY_ATTEMPTS, count: 600 }])
       expect(vi.getTimerCount()).toBe(0)
       mocks.state.mockClear()
       await readCrewChat("lead", {}, req)
       await vi.advanceTimersByTimeAsync(10 * 60_000)
       expect(mocks.state).not.toHaveBeenCalled()
+    })
+
+    it("skips a notice to a member it cannot reach instead of retrying it, and still notifies the others", async () => {
+      vi.useFakeTimers()
+      for (const [unreachable, reason] of [[() => { throw new Error('Device "MB Pro" returned HTTP 502 while minting a token') }, 'Device "MB Pro" returned HTTP 502 while minting a token'], [() => ({ outcome: "unreachable", error: "Device offline" }), "Device offline"]] as const) {
+        mocks.store.close()
+        mocks.store = new OrchestrationStore(":memory:")
+        mocks.state.mockReset().mockImplementation(async (id: string) => (id === "reviewer" ? unreachable() : { outcome: "running", running: true, activeNotifications: true }))
+        mocks.send.mockClear()
+        expect((await post("Finding")).pending).toEqual([])
+        expect(mocks.send.mock.calls.map(([id]) => id)).toContain("lead")
+        expect(mocks.send.mock.calls.map(([id]) => id)).not.toContain("reviewer")
+        expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+        const db = (mocks.store as unknown as { db: { prepare: (sql: string) => { get: (id: string) => Record<string, unknown> } } }).db
+        expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries WHERE session_id=?").get("reviewer")).toEqual({ state: "skipped", error: reason, attempts: 0 })
+        mocks.state.mockClear()
+        await vi.advanceTimersByTimeAsync(10 * 60_000)
+        expect(mocks.state).not.toHaveBeenCalled()
+      }
+    })
+
+    it("asks a tagged member it cannot reach only at backoff steps and writes nothing on the ticks between", async () => {
+      vi.useFakeTimers()
+      mocks.state.mockImplementation(async (id: string) => (id === "reviewer" ? { outcome: "unreachable", error: "Device offline" } : { outcome: "running", running: true, activeNotifications: true }))
+      await post("@reviewer Check this")
+      expect(mocks.store.chatDeliveries("lead", "local")).toEqual([expect.objectContaining({ sessionId: "reviewer", error: "Device offline", attempts: 1 })])
+      const defer = vi.spyOn(mocks.store, "deferChatDeliveries")
+      const settle = vi.spyOn(mocks.store, "settleChatDelivery")
+      const asked: number[] = []
+      for (let second = 1; second <= 40; second++) {
+        mocks.state.mockClear()
+        await vi.advanceTimersByTimeAsync(1_000)
+        if (mocks.state.mock.calls.some(([id]) => id === "reviewer")) asked.push(second)
+      }
+      expect(asked).toEqual([5, 15, 35])
+      expect(defer.mock.calls.map(([failures]) => failures.length)).toEqual([1, 1, 1])
+      expect(settle).not.toHaveBeenCalled()
+    })
+
+    it("keeps retrying a tagged remote member that answers busy, without giving up, until it takes the message", async () => {
+      vi.useFakeTimers()
+      let busy = true
+      mocks.state.mockResolvedValue({ outcome: "running", running: true, activeNotifications: false })
+      mocks.host.mockResolvedValue({ has: async () => true, state: mocks.state, send: mocks.send, remote: true })
+      mocks.send.mockImplementation(async () => ({ delivery: busy ? "busy" : "enqueued" }))
+      postFor(1)
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(60 * 60_000)
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: mocks.send.mock.calls.length, count: 1 }])
+      expect(mocks.send.mock.calls.length).toBeGreaterThan(CREW_CHAT_DELIVERY_ATTEMPTS)
+      expect(mocks.send.mock.calls.length).toBeLessThan(CREW_CHAT_DELIVERY_ATTEMPTS + 60 / 5 + 1)
+      busy = false
+      await vi.advanceTimersByTimeAsync(crewChatRetryDelay(CREW_CHAT_DELIVERY_ATTEMPTS))
+      expect(deliveryStates()).toEqual([{ state: "accepted", attempts: expect.any(Number), count: 1 }])
     })
 
     it("keeps the last reason on a delivery that gave up", async () => {
