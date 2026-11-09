@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { EventEmitter } from "node:events"
 import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -43,6 +44,7 @@ import { setConfigPath, setDataRoot } from "../../config"
 import { __resetEditionForTest } from "../../edition"
 import { cleanupProcesses } from "../../processRegistry"
 import { codexAppServer } from "../../agents/codexAppServer"
+import { resetServerPortForTest, serverPort } from "../../lib/portFile"
 
 let fixtureRoot: string
 let staticDir: string
@@ -70,6 +72,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  resetServerPortForTest()
   __resetEditionForTest()
   if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
   else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
@@ -112,10 +115,14 @@ describe("share registry initialization parity", () => {
     // The dev shell's data root is the checkout; here, the fixture's folder.
     setDataRoot(userDataDir)
     try {
+      const httpServer = new EventEmitter() as EventEmitter & { address: () => { port: number } }
+      httpServer.address = () => ({ port: 5200 })
       await configureServer({
-        httpServer: { on: () => {} },
+        httpServer,
         middlewares: { use: () => {} },
       } as unknown as ViteDevServer)
+      httpServer.emit("listening")
+      expect(serverPort()).toBe(5200)
 
       expect(shareRegistryDirs).toHaveLength(1)
       expect(shareRegistryDirs[0]).toBe(deviceRegistryDirs[0])

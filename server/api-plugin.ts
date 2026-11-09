@@ -16,6 +16,7 @@ import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
 import { detachFromParentCogpit } from "./lib/parentCogpit"
+import { setServerPort } from "./lib/portFile"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -25,6 +26,11 @@ export function sessionApiPlugin(): Plugin {
       // The checkout is the dev shell's data root. First, before anything writes.
       const dataDir = getDataRoot()
       await beginServerStart(dataDir)
+
+      server.httpServer?.once("listening", () => {
+        const address = server.httpServer?.address()
+        if (address && typeof address === "object") setServerPort(address.port)
+      })
 
       // Kill all active child processes when the server shuts down
       server.httpServer?.on("close", () => {

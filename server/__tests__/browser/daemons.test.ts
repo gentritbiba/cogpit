@@ -26,6 +26,7 @@ import {
 import {
   BrowserNameError,
   profileDir,
+  RUN_SERVER_FILE,
   runRoot,
   sharedRunDir,
   shimPath,
@@ -36,6 +37,12 @@ import type { DaemonProcess } from "../../browser/processControl"
 /** One Cogpit session's throwaway-browser directory. */
 function sessionRunDir(id: string): string {
   return join(runRoot(), id)
+}
+
+/** What the shim writes: the port of the Cogpit that runs the session. */
+function stampServer(id: string, port: number): void {
+  mkdirSync(sessionRunDir(id), { recursive: true })
+  writeFileSync(join(sessionRunDir(id), RUN_SERVER_FILE), `${port}\n`)
 }
 
 /** Only the owner reaps named daemons, so a test about them has to claim the tree. */
@@ -594,17 +601,19 @@ describe("reapStrayDaemons", () => {
 
 describe("shutdownBrowsers", () => {
   it("is safe before the run tree exists", async () => {
-    await expect(shutdownBrowsers(fakeDeps())).resolves.toBeUndefined()
+    await expect(shutdownBrowsers(fakeDeps(), null)).resolves.toBeUndefined()
   })
 
-  it("reaps every session dir and stops every named daemon", async () => {
+  it("reaps the dirs of the sessions it runs and stops every named daemon", async () => {
     ownTree()
     writePid(sessionRunDir("sess1"), "tmp-a", "10")
     writePid(sessionRunDir("sess2"), "tmp-b", "20")
+    stampServer("sess1", 5200)
+    stampServer("sess2", 5200)
     writePid(sharedRunDir(), "default", "100")
     writePid(sharedRunDir(), "work", "200")
     const deps = fakeDeps({ alive: [10, 20, 100, 200] })
-    await shutdownBrowsers(deps)
+    await shutdownBrowsers(deps, 5200)
     expect(existsSync(sessionRunDir("sess1"))).toBe(false)
     expect(existsSync(sessionRunDir("sess2"))).toBe(false)
     expect(deps.spawns.map((s) => s.args.join(" ")).sort()).toEqual([
@@ -620,7 +629,7 @@ describe("shutdownBrowsers", () => {
     ownTree()
     writePid(sharedRunDir(), "tmp-orphan", "300")
     const deps = fakeDeps({ alive: [300] })
-    await shutdownBrowsers(deps)
+    await shutdownBrowsers(deps, null)
     expect(deps.spawns).toEqual([])
     expect(deps.kills).toEqual([{ pid: 300, signal: "SIGTERM" }])
     expect(runFiles(sharedRunDir(), "tmp-orphan")).toEqual([false, false])
@@ -631,30 +640,50 @@ describe("shutdownBrowsers", () => {
     writePid(sharedRunDir(), "default", "100")
     writePid(sharedRunDir(), "work", "200")
     const deps = fakeDeps({ alive: [100, 200], spawnError: new Error("ENOENT") })
-    await shutdownBrowsers(deps)
+    await shutdownBrowsers(deps, null)
     expect(killedPids(deps)).toEqual([100, 200])
   })
 
   it("hands ownership on, so the next Cogpit to start may sweep", async () => {
     ownTree()
-    await shutdownBrowsers(fakeDeps())
+    await shutdownBrowsers(fakeDeps(), null)
     expect(existsSync(sweepOwnerFile())).toBe(false)
   })
 
-  it("leaves another Cogpit's named daemons running, but still drops its own throwaways", async () => {
+  it("leaves another Cogpit's named daemons and session throwaways running, but drops its own", async () => {
     mkdirSync(join(root, "browser"), { recursive: true })
     writeFileSync(sweepOwnerFile(), JSON.stringify({ pid: 4242, startedAt: 1 }))
-    writePid(sessionRunDir("sess1"), "tmp-a", "10")
+    writePid(sessionRunDir("mine"), "tmp-a", "10")
+    writePid(sessionRunDir("theirs"), "tmp-b", "20")
+    stampServer("mine", 5200)
+    stampServer("theirs", 19384)
     writePid(sharedRunDir(), "default", "100")
-    const deps = fakeDeps({ alive: [10, 100, 4242] })
+    const deps = fakeDeps({ alive: [10, 20, 100, 4242] })
 
-    await shutdownBrowsers(deps)
+    await shutdownBrowsers(deps, 5200)
 
-    expect(existsSync(sessionRunDir("sess1"))).toBe(false)
+    expect(existsSync(sessionRunDir("mine"))).toBe(false)
+    expect(runFiles(sessionRunDir("theirs"), "tmp-b")).toEqual([true, true])
     expect(killedPids(deps)).toEqual([10])
     expect(deps.spawns).toEqual([])
     expect(runFiles(sharedRunDir(), "default")).toEqual([true, true])
     expect(existsSync(sweepOwnerFile())).toBe(true)
+  })
+
+  it("leaves a dir no shim has stamped, and reaps none without a port of its own", async () => {
+    ownTree()
+    writePid(sessionRunDir("unstamped"), "tmp-a", "10")
+    writePid(sessionRunDir("stamped"), "tmp-b", "20")
+    stampServer("stamped", 5200)
+    const deps = fakeDeps({ alive: [10, 20] })
+
+    await shutdownBrowsers(deps, null)
+    expect(killedPids(deps)).toEqual([])
+
+    await shutdownBrowsers(deps, 5200)
+    expect(existsSync(sessionRunDir("stamped"))).toBe(false)
+    expect(runFiles(sessionRunDir("unstamped"), "tmp-a")).toEqual([true, true])
+    expect(killedPids(deps)).toEqual([20])
   })
 
   it("gives up on a daemon that will not stop rather than holding the app open", async () => {
@@ -666,7 +695,7 @@ describe("shutdownBrowsers", () => {
       // A close that never returns is exactly the wedged daemon this bounds.
       deps.spawn = () => new Promise(() => {})
 
-      const shutdown = shutdownBrowsers(deps)
+      const shutdown = shutdownBrowsers(deps, null)
       const settled = expect(shutdown).rejects.toThrow(/did not stop/)
       await vi.advanceTimersByTimeAsync(20_000)
       await settled
