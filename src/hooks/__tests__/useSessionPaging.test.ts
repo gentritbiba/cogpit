@@ -238,6 +238,45 @@ describe("useSessionPaging", () => {
     expect(result.current.isLoadingOlder).toBe(false)
   })
 
+  // Review finding 5: a failing page was asked for again on every commit, in a tight loop.
+  it("waits before asking again for a page that failed, longer after each failure", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      mockAuthFetch.mockImplementation(async () => new Response("nope", { status: 503 }))
+      const { result } = setup()
+      const load = () => act(async () => { await result.current.loadMore() })
+
+      await load()
+      await load()
+      expect(mockAuthFetch).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(1_000)
+      await load()
+      expect(mockAuthFetch).toHaveBeenCalledTimes(2)
+      vi.advanceTimersByTime(1_000)
+      await load()
+      expect(mockAuthFetch).toHaveBeenCalledTimes(2)
+      vi.advanceTimersByTime(1_000)
+      mockAuthFetch.mockResolvedValue(beforeResponse())
+      await load()
+      expect(mockAuthFetch).toHaveBeenCalledTimes(3)
+      // A page that arrives ends the wait.
+      await load()
+      expect(mockAuthFetch).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("resolves with nothing, never rejects, when the request itself fails", async () => {
+    mockAuthFetch.mockRejectedValue(new TypeError("Failed to fetch"))
+    const { result, onOlderTurns } = setup()
+    await act(async () => {
+      await expect(result.current.loadMore()).resolves.toBe(0)
+    })
+    expect(onOlderTurns).not.toHaveBeenCalled()
+    expect(result.current.isLoadingOlder).toBe(false)
+  })
+
   it("only runs one load at a time", async () => {
     let release: (r: Response) => void = () => {}
     mockAuthFetch.mockImplementation(

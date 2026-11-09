@@ -32,6 +32,10 @@ const PAGE_COUNT = 30
 
 const NO_HISTORY: HistoryBytes = { remaining: 0, loaded: 0 }
 
+/** After a page fails, paging waits this long before trying again, doubling per failure up to the cap. */
+const RETRY_MS = 1_000
+const MAX_RETRY_MS = 30_000
+
 /** Transcript bytes before the paging cursor, and between it and the live end. */
 function historyBytesOf(entry: { nextByteOffset: number; hasMore: boolean; source: { watchOffset?: number } } | undefined): HistoryBytes {
   if (!entry?.hasMore) return NO_HISTORY
@@ -65,6 +69,9 @@ export function useSessionPaging({
   // Whether the paging cursor sits between two whole turns. Unknown at first:
   // the tail (or an older server) may have cut a turn there.
   const cursorOnTurnRef = useRef(false)
+  // A failed page (offline, an expired token, a dropped device) holds paging
+  // off until `at`; without it every commit would ask for the page again.
+  const retryRef = useRef<{ at: number; delay: number } | null>(null)
 
   const identity = `${dirName ?? ""}::${fileName ?? ""}::${sessionChangeKey}`
 
@@ -72,6 +79,7 @@ export function useSessionPaging({
     identityRef.current = identity
     flightRef.current = null
     cursorOnTurnRef.current = false
+    retryRef.current = null
     setIsLoadingOlder(false)
     const cached = dirName && fileName ? sessionCache.get(dirName, fileName) : undefined
     setHasMore(cached?.hasMore ?? false)
@@ -84,6 +92,7 @@ export function useSessionPaging({
 
   const loadMore = useCallback(async (): Promise<number> => {
     if (!dirName || !fileName || flightRef.current) return 0
+    if (retryRef.current && Date.now() < retryRef.current.at) return 0
     const key = `${dirName}::${fileName}::${sessionChangeKey}`
     const cached = sessionCache.get(dirName, fileName)
     if (!cached?.hasMore) {
@@ -97,6 +106,11 @@ export function useSessionPaging({
       return 0
     }
 
+    const failed = () => {
+      if (identityRef.current !== key) return
+      const delay = retryRef.current ? Math.min(retryRef.current.delay * 2, MAX_RETRY_MS) : RETRY_MS
+      retryRef.current = { at: Date.now() + delay, delay }
+    }
     const flight = Symbol("paging-flight")
     flightRef.current = flight
     setIsLoadingOlder(true)
@@ -104,9 +118,13 @@ export function useSessionPaging({
       const res = await authFetch(
         `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}&unit=turns&projection=${RESULT_PROJECTION}`,
       )
-      if (!res.ok) return 0
+      if (!res.ok) {
+        failed()
+        return 0
+      }
 
       const data: BeforeResponse = await res.json()
+      if (identityRef.current === key) retryRef.current = null
       const hasMorePages = data.lines.length > 0 && data.hasMore
       if (identityRef.current === key) setHasMore(hasMorePages)
       if (data.lines.length === 0) {
@@ -140,6 +158,9 @@ export function useSessionPaging({
       setHistoryBytes(historyBytesOf(sessionCache.get(dirName, fileName)))
       onOlderTurns(history)
       return olderParsed.turns.length
+    } catch {
+      failed()
+      return 0
     } finally {
       if (flightRef.current === flight) {
         flightRef.current = null
