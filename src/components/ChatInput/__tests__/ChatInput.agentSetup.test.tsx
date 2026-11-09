@@ -14,7 +14,6 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
-    session: { sessionId: "s1" },
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
     pendingInteraction: null,
@@ -48,6 +47,7 @@ vi.mock("@/lib/providerUpdates", async (importOriginal) => ({
 import { ChatInput } from "../index"
 import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
 import { _resetAgentAvailabilityForTests } from "@/lib/agents/availability"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const message = () => screen.getByRole("combobox", { name: "Message" })
 const send = (text: string) => {
@@ -56,6 +56,7 @@ const send = (text: string) => {
 }
 
 beforeEach(() => {
+  showSession({ sessionId: "s1" })
   localStorage.clear()
   resetUnsentRecoveriesForTest()
   _resetAgentAvailabilityForTests()

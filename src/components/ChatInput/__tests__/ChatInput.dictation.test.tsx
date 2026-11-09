@@ -2,13 +2,13 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ComposerDictation, DictationState } from "@/plugins/RuntimeDictation"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   restoreImages: vi.fn(),
   clearImages: vi.fn(),
   images: [] as Array<{ id: string; data: string; mediaType: string }>,
-  session: { sessionId: "session-one" } as { sessionId: string } | null,
   dictation: null as unknown as ComposerDictation & { state: DictationState },
   onTranscript: null as null | ((text: string, send: boolean) => void),
   update: () => {},
@@ -19,7 +19,6 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
-    session: mocks.session,
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
     pendingInteraction: null,
@@ -77,6 +76,7 @@ vi.mock("@/plugins/RuntimeDictation", async () => {
 import { ChatInput } from "../index"
 
 beforeEach(() => {
+  showSession({ sessionId: "session-one" })
   mocks.sendMessage.mockReset().mockResolvedValue(true)
   mocks.dictation = { title: "Dictate", state: { status: "idle" }, start: vi.fn(), finish: vi.fn(), cancel: vi.fn(), retry: vi.fn(), level: () => 0 }
 })

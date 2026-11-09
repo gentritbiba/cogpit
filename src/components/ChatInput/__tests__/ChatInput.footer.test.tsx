@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   restoreImages: vi.fn(),
   clearImages: vi.fn(),
   images: [] as Array<{ id: string; data: string; mediaType: string }>,
-  session: null as { sessionId: string } | null,
 }))
 
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
@@ -14,7 +13,6 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
   useSessionContextOptional: () => null,
   useSessionChatContextOptional: () => null,
   useSessionContext: () => ({
-    session: mocks.session,
     isLive: false,
     actions: { handleEditConfig: vi.fn() },
     pendingInteraction: null,
@@ -50,6 +48,7 @@ vi.mock("@/components/FileSuggestions", () => ({ FileSuggestions: () => null }))
 
 import { ChatInput } from "../index"
 import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 beforeEach(() => { localStorage.clear(); resetUnsentRecoveriesForTest() })
 
@@ -84,7 +83,7 @@ describe("ChatInput sending", () => {
     mocks.sendMessage.mockReset()
     mocks.restoreImages.mockReset()
     mocks.images = []
-    mocks.session = null
+    showSession(null)
   })
 
   function submit(text: string): HTMLElement {
@@ -146,11 +145,11 @@ describe("ChatInput sending", () => {
 
     /** The composer as App renders it for a session: the session's own project comes with it. */
     function composerFor(sessionId: string) {
-      mocks.session = { sessionId }
+      showSession({ sessionId })
       return <ChatInput projectCwd={`/work/${sessionId}`} />
     }
 
-    function showSession(sessionId: string) {
+    function mountFor(sessionId: string) {
       return render(composerFor(sessionId))
     }
 
@@ -158,13 +157,13 @@ describe("ChatInput sending", () => {
       const refuse = refuseLater()
       mocks.images = [{ id: "img-1", data: "eA==", mediaType: "image/png" }]
       const draft = mocks.images
-      const composer = showSession("refused-while-gone")
+      const composer = mountFor("refused-while-gone")
       submit("ship it")
       composer.unmount()
       await refuse()
       mocks.images = []
 
-      showSession("refused-while-gone")
+      mountFor("refused-while-gone")
 
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
       expect(screen.getByRole("img", { name: "Upload 1" })).toHaveAttribute("src", `data:${draft[0].mediaType};base64,${draft[0].data}`)
@@ -172,21 +171,21 @@ describe("ChatInput sending", () => {
 
     it("outlives the composer it was put back into", async () => {
       const refuse = refuseLater()
-      const composer = showSession("refused-then-gone")
+      const composer = mountFor("refused-then-gone")
       submit("ship it")
       await refuse()
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
 
       // The refusal lowered the caller's access, so a read-only notice replaces the composer.
       composer.unmount()
-      showSession("refused-then-gone")
+      mountFor("refused-then-gone")
 
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
     })
 
     it("stays with the session it was sent to, not the one on screen when the answer arrives", async () => {
       const refuse = refuseLater()
-      const composer = showSession("sent-to")
+      const composer = mountFor("sent-to")
       submit("ship it")
       composer.rerender(composerFor("moved-to"))
       await refuse()
@@ -198,11 +197,11 @@ describe("ChatInput sending", () => {
 
     it("keeps each session's newer typing separate from another session's refused send", async () => {
       const refuse = refuseLater()
-      const gone = showSession("refused-behind-text")
+      const gone = mountFor("refused-behind-text")
       submit("ship it")
       gone.unmount()
       await refuse()
-      const composer = showSession("typed-elsewhere")
+      const composer = mountFor("typed-elsewhere")
       fireEvent.change(screen.getByRole("combobox", { name: "Message" }), { target: { value: "for another session" } })
       composer.rerender(composerFor("refused-behind-text"))
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("ship it")
@@ -216,12 +215,12 @@ describe("ChatInput sending", () => {
     ])("leaves the composer with its session when it was %s", async (_case, broughtBack) => {
       const sessionId = `left-with-its-session-${broughtBack}`
       const refuse = refuseLater()
-      let composer = showSession(sessionId)
+      let composer = mountFor(sessionId)
       submit("ship it")
       if (broughtBack) {
         composer.unmount()
         await refuse()
-        composer = showSession(sessionId)
+        composer = mountFor(sessionId)
       } else {
         await refuse()
       }
@@ -236,7 +235,7 @@ describe("ChatInput sending", () => {
 
     it("is gone once it was sent after all", async () => {
       const refuse = refuseLater()
-      const composer = showSession("sent-after-all")
+      const composer = mountFor("sent-after-all")
       submit("ship it")
       await refuse()
       mocks.sendMessage.mockResolvedValueOnce(true)
@@ -244,7 +243,7 @@ describe("ChatInput sending", () => {
       await act(async () => {})
 
       composer.unmount()
-      showSession("sent-after-all")
+      mountFor("sent-after-all")
 
       expect(screen.getByRole("combobox", { name: "Message" })).toHaveValue("")
     })

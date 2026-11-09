@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import type { PermissionRequest } from "@/hooks/usePermissionRequests"
 import type { PendingInteraction } from "../../../shared/session/parser"
@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
-    session: { sessionId: "sess-1" },
     pendingInteraction: mocks.pendingInteraction,
     permissionRequests: mocks.permissionRequests,
   }),
@@ -18,6 +17,7 @@ vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sess
 
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { accessReadOnlyReason, SessionReadOnlyNotice } from "../SessionReadOnlyNotice"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const REQUEST: PermissionRequest = {
   requestId: "approval-1",
@@ -26,6 +26,8 @@ const REQUEST: PermissionRequest = {
   toolUseId: "tool-1",
   timestamp: 1,
 }
+
+beforeEach(() => showSession({ sessionId: "sess-1" }))
 
 afterEach(() => {
   cleanup()
