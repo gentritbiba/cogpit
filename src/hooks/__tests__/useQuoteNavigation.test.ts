@@ -13,11 +13,18 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
   const state = { turns: initial.turns, older: [...initial.older], sessionSource: initial.open ?? open() }
   const jumpToTurn = vi.fn(async (_turnKey: string) => true)
   const loadSession = vi.fn()
+  const layoutListeners = new Set<() => void>()
+  const subscribeTimeline = (listener: () => void) => {
+    layoutListeners.add(listener)
+    return () => { layoutListeners.delete(listener) }
+  }
+  const laidOut = () => act(() => { for (const listener of layoutListeners) listener() })
   const view = renderHook(() => useQuoteNavigation({
     session: session(state.turns),
     sessionSource: state.sessionSource,
     loadSession,
     jumpToTurn,
+    subscribeTimeline,
     hasMore: state.older.length > 0,
     // Like the real paging hook: the page arrives after a fetch, then the view renders it.
     loadMore: async () => {
@@ -28,7 +35,7 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
       return page.length
     },
   }))
-  return { view, state, jumpToTurn, loadSession }
+  return { view, state, jumpToTurn, loadSession, laidOut }
 }
 
 describe("useQuoteNavigation", () => {
@@ -86,13 +93,38 @@ describe("useQuoteNavigation", () => {
     await waitFor(() => expect(jumpToTurn).toHaveBeenCalledWith("t1"))
   })
 
-  it("tries the jump again while the timeline is not mounted yet, then reports the source found", async () => {
-    const { view, jumpToTurn } = harness({ turns: [turn("t1")], older: [] })
+  // Review finding 6: a jump that did not land re-rendered App every frame for 3 s, then reported success.
+  it("tries the jump again when the timeline next lays out, then reports the source found", async () => {
+    const { view, jumpToTurn, laidOut } = harness({ turns: [turn("t1")], older: [] })
     jumpToTurn.mockResolvedValueOnce(false).mockResolvedValueOnce(false)
     let found: boolean | undefined
     act(() => { void view.result.current(source("t1"), "reply t1").then((value) => { found = value }) })
+    await waitFor(() => expect(jumpToTurn).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    act(() => view.rerender())
+    expect(jumpToTurn).toHaveBeenCalledTimes(1)
+    laidOut()
+    await waitFor(() => expect(jumpToTurn).toHaveBeenCalledTimes(2))
+    laidOut()
     await waitFor(() => expect(found).toBe(true))
     expect(jumpToTurn).toHaveBeenCalledTimes(3)
     expect(jumpToTurn).toHaveBeenLastCalledWith("t1")
   })
+
+  it("reports the source not reached when the timeline never lands on it", async () => {
+    vi.useFakeTimers()
+    try {
+      const { view, jumpToTurn, laidOut } = harness({ turns: [turn("t1")], older: [] })
+      jumpToTurn.mockResolvedValue(false)
+      let found: boolean | undefined
+      act(() => { void view.result.current(source("t1"), "reply t1").then((value) => { found = value }) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+      laidOut()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_100) })
+      expect(found).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
 })

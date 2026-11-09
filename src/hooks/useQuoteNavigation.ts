@@ -8,17 +8,19 @@ import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 export const QUOTE_SEARCH_PAGES = 20
 /** How long a jump waits for another session to open. */
 const OPEN_TIMEOUT_MS = 15_000
-/** How long a found turn waits for the timeline to mount it (a mobile tab switch) before the jump gives up. */
+/** How long a found turn waits for the timeline to land on it (a mobile tab switch) before the jump gives up. */
 const LAND_MS = 3_000
 
 interface Pending {
   source: QuoteSource
   text: string
   pages: number
-  /** When the first jump to the found turn was tried. */
-  landingSince: number | null
+  /** The turn is found and the jump to it has started its `LAND_MS` clock. */
+  landing: boolean
   /** A page or a jump is in flight. */
   loading: boolean
+  /** A jump did not land; the next time the timeline lays out tries again. */
+  waiting: boolean
   resolve: (found: boolean) => void
   timer: ReturnType<typeof setTimeout>
 }
@@ -29,6 +31,8 @@ interface Inputs {
   loadSession: (dirName: string, fileName: string) => void
   /** Moves the timeline to the turn with this key; resolves false when it could not land. */
   jumpToTurn: (turnKey: string) => Promise<boolean>
+  /** Calls `listener` after the timeline lays out; returns the unsubscribe. */
+  subscribeTimeline: (listener: () => void) => () => void
   hasMore: boolean
   loadMore: () => Promise<number>
 }
@@ -69,23 +73,25 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
   const evaluate = useCallback(() => {
     const pending = pendingRef.current
     const { session, sessionSource, hasMore, loadMore, jumpToTurn } = latest.current
-    if (!pending || pending.loading || !session || !shows(sessionSource, pending.source)) return
+    if (!pending || pending.loading || pending.waiting || !session || !shows(sessionSource, pending.source)) return
     const index = quoteTurnIndex(session, pending.source, pending.text)
     if (index >= 0) {
       // By key, so a page of older history landing meanwhile cannot shift the target.
       const turnKey = turnKeysOf(session.turns)[index]
+      if (!pending.landing) {
+        pending.landing = true
+        clearTimeout(pending.timer)
+        pending.timer = setTimeout(() => settle(false), LAND_MS)
+      }
       pending.loading = true
-      pending.landingSince ??= performance.now()
       void jumpToTurn(turnKey).then((landed) => {
         if (pendingRef.current !== pending) return
-        if (landed || performance.now() - pending.landingSince! >= LAND_MS) {
+        if (landed) {
           settle(true)
           return
         }
         pending.loading = false
-        requestAnimationFrame(() => {
-          if (pendingRef.current === pending) rerender((tick) => tick + 1)
-        })
+        pending.waiting = true
       })
       return
     }
@@ -104,11 +110,18 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
 
   // Each render may bring the session that opened or the page that loaded.
   useEffect(evaluate)
+  const { subscribeTimeline } = inputs
+  useEffect(() => subscribeTimeline(() => {
+    const pending = pendingRef.current
+    if (!pending?.waiting) return
+    pending.waiting = false
+    evaluate()
+  }), [subscribeTimeline, evaluate])
   useEffect(() => () => settle(false), [settle])
 
   return useCallback((source: QuoteSource, text: string) => new Promise<boolean>((resolve) => {
     settle(false)
-    pendingRef.current = { source, text, pages: 0, landingSince: null, loading: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
+    pendingRef.current = { source, text, pages: 0, landing: false, loading: false, waiting: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
     const { sessionSource, loadSession } = latest.current
     if (shows(sessionSource, source)) evaluate()
     else loadSession(source.dirName, source.fileName)

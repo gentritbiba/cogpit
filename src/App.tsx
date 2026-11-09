@@ -877,6 +877,7 @@ export default function App() {
       if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
       return scroll.controller.scrollToTurn(turnKey, { align: "start" })
     }, [scroll.controller, isMobile, dispatch]),
+    subscribeTimeline: scroll.controller.subscribe,
     hasMore: chunkedSession.hasMore,
     loadMore: chunkedSession.loadMore,
   })
