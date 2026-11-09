@@ -1,4 +1,6 @@
 import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
+import { DisclosureScope, useDisclosure, useDisclosureKey, useTimelineState } from "./disclosure"
+import { useTimelineRowFacts } from "./TimelineRowsProvider"
 import { ChevronDown, ChevronRight, Eye, EyeOff, Hand, Maximize2, Terminal, Pencil, Users } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -7,7 +9,6 @@ import { getUserMessageText, getUserMessageImages } from "../../../shared/sessio
 import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
 import { parseComposerMessage } from "../../../shared/session/composerContext"
 import { ContextChips } from "@/components/ChatInput/ContextChips"
-import { useSessionContextOptional } from "@/contexts/SessionContext"
 import {
   extractCommandArgs,
   extractCommandName,
@@ -29,6 +30,7 @@ import { LocalCommandOutputCard } from "./LocalCommandOutput"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 import { Badge } from "@/components/ui/badge"
+import { ReservedImage } from "./ReservedImage"
 import { Button } from "@/components/ui/button"
 import {
   Collapsible,
@@ -61,6 +63,8 @@ function ExpandedCommandContent({ loading, content }: { loading: boolean; conten
 
 // ── Main component ───────────────────────────────────────────────────────
 
+type CommandFetch = null | "loading" | { content: string | null }
+
 interface UserMessageProps {
   content: UserContent
   timestamp: string
@@ -71,11 +75,13 @@ interface UserMessageProps {
 
 export const UserMessage = memo(function UserMessage({ content, timestamp, onEditCommand, onExpandCommand, compact = false }: UserMessageProps) {
   const imageGallery = useOptionalImageGallery()
-  const [expanded, setExpanded] = useState(false)
-  const [showRaw, setShowRaw] = useState(false)
-  const [commandExpanded, setCommandExpanded] = useState(false)
-  const [commandContent, setCommandContent] = useState<string | null>(null)
-  const [commandLoading, setCommandLoading] = useState(false)
+  const [expanded, setExpanded] = useDisclosure(useDisclosureKey("user:more"), false)
+  const [showRaw, setShowRaw] = useDisclosure(useDisclosureKey("user:raw"), false)
+  const [commandExpanded, setCommandExpanded] = useDisclosure(useDisclosureKey("user:command"), false)
+  // Fetched once and kept, so a remounted message neither refetches nor resizes.
+  const [commandFetch, setCommandFetch] = useTimelineState<CommandFetch>(useDisclosureKey("user:command:content"), null)
+  const commandLoading = commandFetch === "loading"
+  const commandContent = commandFetch !== null && commandFetch !== "loading" ? commandFetch.content : null
   const [standaloneViewer, setStandaloneViewer] = useState<{ index: number; open: boolean } | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
@@ -83,7 +89,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   // cleanup below is for what agents inject, and runs on the typed text alone.
   const composed = useMemo(() => parseComposerMessage(rawText), [rawText])
   const outerText = composed?.text ?? rawText
-  const openQuoteSource = useSessionContextOptional()?.actions.handleOpenQuoteSource
+  const openQuoteSource = useTimelineRowFacts()?.openQuoteSource
   const commandName = useMemo(() => extractCommandName(outerText), [outerText])
   const commandArgs = useMemo(() => extractCommandArgs(outerText), [outerText])
   const { sender: teammateId, body: unwrappedText, matched: isTeammate } = useMemo(
@@ -106,20 +112,20 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
       setCommandExpanded(false)
       return
     }
-    if (commandContent !== null) {
+    if (commandFetch !== null && (commandFetch === "loading" || commandFetch.content !== null)) {
       setCommandExpanded(true)
       return
     }
     if (!onExpandCommand || !commandName) return
-    setCommandLoading(true)
+    setCommandFetch("loading")
     setCommandExpanded(true)
+    let content: string | null = null
     try {
-      const result = await onExpandCommand(commandName, commandArgs ?? undefined)
-      setCommandContent(result)
+      content = await onExpandCommand(commandName, commandArgs ?? undefined)
     } finally {
-      setCommandLoading(false)
+      setCommandFetch({ content })
     }
-  }, [commandContent, onExpandCommand, commandName, commandArgs])
+  }, [commandFetch, setCommandFetch, setCommandExpanded, onExpandCommand, commandName, commandArgs])
 
   const images = useMemo(() => getUserMessageImages(content), [content])
   const imageUrls = useMemo(
@@ -269,13 +275,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                   "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                 )}
               >
-                <img
-                  src={url}
-                  alt={`Attachment ${i + 1}`}
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-64 max-w-full rounded-lg object-contain sm:max-w-md"
-                />
+                <ReservedImage src={url} alt={`Attachment ${i + 1}`} maxHeightRem={16} className="rounded-lg sm:max-w-md" />
                 <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-border bg-popover text-foreground/70 opacity-80 backdrop-blur transition-[color,opacity] group-hover/image:text-foreground sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
                   <Maximize2 className="size-3.5" data-icon="icon" />
                 </span>
@@ -290,12 +290,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {!showRaw && wakeup && <DelegatedResultRow wakeup={wakeup} timestamp={timestamp} />}
-        {!showRaw && crewDelivery && <CrewChatDeliveryCard delivery={crewDelivery} />}
+        {!showRaw && crewDelivery && <DisclosureScope id="crew"><CrewChatDeliveryCard delivery={crewDelivery} /></DisclosureScope>}
 
         {!showRaw && notifications.length > 0 && (
           <div className="mb-2 flex flex-col gap-2">
-            {notifications.map((n) => (
-              <TaskNotificationCard key={n.taskId} notification={n} />
+            {notifications.map((n, i) => (
+              <DisclosureScope key={n.taskId || i} id={`notification:${i}`}>
+                <TaskNotificationCard notification={n} />
+              </DisclosureScope>
             ))}
           </div>
         )}

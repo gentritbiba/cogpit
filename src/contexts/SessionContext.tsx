@@ -1,8 +1,9 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
-import { useChatScroll } from "@/hooks/useChatScroll"
+import { createContext, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type ReactNode } from "react"
+import { useTimelineScroll } from "@/hooks/useTimelineScroll"
 import { createSessionStore, useSessionSelector, useShownSession, type SessionStore } from "@/hooks/useSessionState"
 import { withStartPrompt } from "@/lib/startPrompts"
+import type { HistoryBytes, TimelineScrollController } from "@/lib/timelineScroll/controller"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
 import type { SseConnectionState } from "@/hooks/useLiveSession"
@@ -36,11 +37,10 @@ export interface ChatState {
 // ── Scroll ──────────────────────────────────────────────────────────────────
 
 export interface ScrollState {
+  /** The timeline's scroll engine; the timeline and its chrome attach to it. */
+  controller: TimelineScrollController
   chatScrollRef: RefObject<HTMLDivElement | null>
-  observeChatContent?: RefCallback<HTMLDivElement>
   canScrollDown: boolean
-  initialScrollDone: boolean
-  handleScroll: () => void
   scrollToBottomInstant: () => void
   requestScrollToTop: () => void
   resetTurnCount: (count: number) => void
@@ -130,7 +130,8 @@ interface OpenSessionProviderProps {
   store: SessionStore
   controls: SessionControls
   chat: ChatState
-  isLive: boolean
+  /** Transcript bytes behind and ahead of the paging cursor; sizes the history reserve. */
+  historyBytes: HistoryBytes
   /** The transcript's scroll controls, for the shell's own handlers. */
   scrollHandle?: Ref<ScrollState>
   /** Runs in the commit that first shows each session object. */
@@ -170,7 +171,7 @@ function onScreenTurn(act: (turnIndex: number) => void, toStore: (index: number)
  * selected fact, does not.
  */
 export function OpenSessionProvider({
-  store, controls, chat, isLive, scrollHandle, onSessionShown, children,
+  store, controls, chat, historyBytes, scrollHandle, onSessionShown, children,
 }: OpenSessionProviderProps): ReactNode {
   const { session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId } = useShownSession(store)
   const shown = useMemo(() => session && withStartPrompt(session), [session])
@@ -197,12 +198,11 @@ export function OpenSessionProvider({
     undoRedo: { ...undoRedo, requestUndo },
     actions: { ...actions, handleOpenBranches, handleBranchFromHere },
   }), [controls, undoRedo, actions, requestUndo, handleOpenBranches, handleBranchFromHere])
-  const scroll = useChatScroll({
+  const scroll = useTimelineScroll({
     session,
-    isLive,
     pendingMessages: chat.pendingMessages,
     consumePending: chat.consumePending,
-    sessionChangeKey,
+    historyBytes,
   })
   useImperativeHandle(scrollHandle, () => scroll, [scroll])
   const value = useMemo(

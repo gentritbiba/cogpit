@@ -1,51 +1,10 @@
-import type { Turn, TurnContentBlock, ToolCall, ThinkingBlock } from "../../shared/session/types"
-
-/** Check whether any part of a turn matches a search query. */
-export function matchesSearch(turn: Turn, query: string): boolean {
-  if (!query) return true
-  const q = query.toLowerCase()
-
-  if (turn.userMessage) {
-    const text =
-      typeof turn.userMessage === "string"
-        ? turn.userMessage
-        : JSON.stringify(turn.userMessage)
-    if (text.toLowerCase().includes(q)) return true
-  }
-
-  for (const t of turn.assistantText) {
-    if (t.toLowerCase().includes(q)) return true
-  }
-
-  for (const block of turn.contentBlocks) {
-    if (block.kind === "queued_prompt" && block.content.toLowerCase().includes(q)) {
-      return true
-    }
-    if (
-      block.kind === "agent_message" &&
-      (block.sender.toLowerCase().includes(q) || block.body.toLowerCase().includes(q))
-    ) {
-      return true
-    }
-  }
-
-  for (const tb of turn.thinking) {
-    if (tb.thinking.toLowerCase().includes(q)) return true
-  }
-
-  for (const tc of turn.toolCalls) {
-    if (tc.name.toLowerCase().includes(q)) return true
-    if (JSON.stringify(tc.input).toLowerCase().includes(q)) return true
-    if (tc.result?.toLowerCase().includes(q)) return true
-  }
-
-  return false
-}
+import type { TurnContentBlock, ToolCall, ThinkingBlock } from "../../shared/session/types"
 
 // ── Activity grouping (thinking + tool_calls) ──────────────────────────────
 
 export type ActivityItem =
-  | { kind: "thinking"; blocks: ThinkingBlock[]; thoughtForMs?: number }
+  /** `block` is the content block's index in its turn, where the caller knows it. */
+  | { kind: "thinking"; blocks: ThinkingBlock[]; thoughtForMs?: number; block?: number }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
 
 /** Upper bound on a single thinking block's attributed duration (10 minutes). */
@@ -67,10 +26,11 @@ function thinkingGapMs(
   return Math.min(delta, MAX_THINKING_BLOCK_MS)
 }
 
-/** Collect consecutive thinking + tool_calls blocks starting at `startIndex`. */
+/** Collect consecutive thinking + tool_calls blocks starting at `startIndex`; `indexOf` places a thinking block in its turn. */
 export function collectActivity(
   blocks: TurnContentBlock[],
   startIndex: number,
+  indexOf: (block: TurnContentBlock) => number,
 ): {
   items: ActivityItem[]
   toolCalls: ToolCall[]
@@ -87,7 +47,7 @@ export function collectActivity(
     const block = blocks[j]
     if (block.kind === "thinking") {
       const ms = thinkingGapMs(blocks, j)
-      items.push({ kind: "thinking", blocks: block.blocks, thoughtForMs: ms })
+      items.push({ kind: "thinking", blocks: block.blocks, thoughtForMs: ms, block: indexOf(block) })
       thinkingCount += block.blocks.length
       thoughtForMs += ms
       j++

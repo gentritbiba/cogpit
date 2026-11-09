@@ -1,4 +1,5 @@
-import { useState, memo } from "react"
+import { memo } from "react"
+import { useDisclosure } from "./disclosure"
 import { ChevronRight, ChevronDown, Minimize2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
@@ -11,6 +12,8 @@ interface Props {
   /** Summary written by the compacting model; absent when the transcript only recorded the boundary. */
   summary?: string
   meta?: CompactionMeta
+  /** Where its open state is kept: the list renders the marker outside the turn's row scope. */
+  disclosureKey?: string
 }
 
 const TRIGGER_LABELS: Partial<Record<string, string>> = {
@@ -32,8 +35,8 @@ function describe(meta?: CompactionMeta): string | null {
  * Divider marking where the conversation was compacted, expanding to the
  * summary the compacting model wrote.
  */
-export const CompactionMarker = memo(function CompactionMarker({ summary, meta }: Props) {
-  const [open, setOpen] = useState(false)
+export const CompactionMarker = memo(function CompactionMarker({ summary, meta, disclosureKey }: Props) {
+  const [open, setOpen] = useDisclosure(disclosureKey ?? null, false)
   const detail = describe(meta)
   const body = summary?.trim()
 

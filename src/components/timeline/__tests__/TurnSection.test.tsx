@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../../shared/session/sessionDigest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
+import { TimelineRowsProvider } from "../TimelineRowsProvider"
+import { revealToolCall, useTimelineStore, type TimelineStateStore } from "../disclosure"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../../shared/session/sessionDigest"
 import type { SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
 import { formatTaskAttention, formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
 import { formatCrewChatDelivery } from "../../../../shared/contracts/crewChat"
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   isLive: true,
   undoEnabled: false,
   isMobile: false,
+  activeToolCallId: null as string | null,
   /** What `useSessionContextOptional` hands rows that look up the open transcript. */
   optionalContext: null as null | { session: { turns: Turn[] }; permissions: { send: boolean }; actions: Record<string, never> },
 }))
@@ -26,13 +29,16 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => mocks.optionalContext,
   useSessionContext: () => ({
     session: makeSession(),
+    sessionSource: null,
     activeTurnIndex: 0,
-    activeToolCallId: "question-1",
+    activeToolCallId: mocks.activeToolCallId,
     isLive: mocks.isLive,
     isSubAgentView: false,
+    permissions: { send: true, answer: true },
+    pendingInteraction: null,
     undoRedo: mocks.undoEnabled
-      ? { enabled: true, requestUndo: vi.fn(), branchesAtTurn: () => [] }
-      : { enabled: false },
+      ? { enabled: true, requestUndo: vi.fn(), branchesAtTurn: () => [], branches: [] }
+      : { enabled: false, branches: [] },
     actions: mocks.undoEnabled
       ? { handleOpenBranches: vi.fn(), handleBranchFromHere: vi.fn() }
       : {},
@@ -116,6 +122,10 @@ const mailTurn: Turn = {
   assistantText: ["Final response"],
 }
 
+function wrapper({ children }: { children: React.ReactNode }) {
+  return <TimelineRowsProvider>{children}</TimelineRowsProvider>
+}
+
 function makeSession(): SessionView {
   return {
     sessionId: "session-1",
@@ -144,18 +154,19 @@ describe("TurnSection work disclosure", () => {
   beforeEach(() => {
     mocks.status = "thinking"
     mocks.isMobile = false
+    mocks.activeToolCallId = null
   })
 
   it("keeps desktop response metadata and controls enabled on mobile", () => {
     mocks.isMobile = true
-    render(<TurnSection turn={turn} index={0} />)
+    render(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />, { wrapper })
     for (const text of screen.getAllByTestId("assistant-text")) {
       expect(text).toHaveAttribute("data-compact", "false")
     }
   })
 
   it("keeps active streaming output and pending tool interactions open by default", () => {
-    render(<TurnSection turn={turn} index={0} />)
+    render(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByRole("button", { name: /working for/i })).toHaveAttribute(
       "aria-expanded",
@@ -171,17 +182,17 @@ describe("TurnSection work disclosure", () => {
     // "Waiting for your answer" with no answer form anywhere on screen.
     mocks.status = "completed"
 
-    render(<TurnSection turn={blockedTurn} index={0} />)
+    render(<TurnSection turn={blockedTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()
   })
 
   it("keeps work the reader watched open once the turn settles", () => {
-    const { rerender } = render(<TurnSection turn={turn} index={0} />)
+    const { rerender } = render(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />, { wrapper })
     expect(screen.getByRole("button", { name: /working for/i })).toHaveAttribute("aria-expanded", "true")
 
     mocks.status = "completed"
-    rerender(<TurnSection turn={turn} index={0} />)
+    rerender(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />)
 
     expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("Streaming response")).toBeInTheDocument()
@@ -191,7 +202,7 @@ describe("TurnSection work disclosure", () => {
   it("still folds completed work by default", () => {
     mocks.status = "completed"
 
-    render(<TurnSection turn={turn} index={0} />)
+    render(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute(
       "aria-expanded",
@@ -203,6 +214,28 @@ describe("TurnSection work disclosure", () => {
   })
 })
 
+describe("TurnSection navigation", () => {
+  beforeEach(() => {
+    mocks.status = "completed"
+    mocks.activeToolCallId = null
+  })
+
+  it("opens the folded work when navigation reveals a call inside it, by turn key", () => {
+    let store: TimelineStateStore | null = null
+    function Capture() {
+      store = useTimelineStore()
+      return null
+    }
+    render(<><Capture /><TurnSection turn={turn} index={0} turnKey="turn" isLast={true} /></>, { wrapper })
+    expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "false")
+
+    act(() => revealToolCall(store!, "turn", turn, "question-1"))
+
+    expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()
+  })
+})
+
 describe("TurnSection agent messages", () => {
   beforeEach(() => {
     mocks.isLive = true
@@ -211,7 +244,7 @@ describe("TurnSection agent messages", () => {
   it("renders a peer message as a card naming its sender", () => {
     mocks.status = "completed"
 
-    render(<TurnSection turn={mailTurn} index={0} />)
+    render(<TurnSection turn={mailTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
     expect(screen.getByText("One blocking question on finding #1.")).toBeInTheDocument()
@@ -220,7 +253,7 @@ describe("TurnSection agent messages", () => {
   it("keeps an unanswered peer message waiting while its turn is the live one", () => {
     mocks.status = "thinking"
 
-    render(<TurnSection turn={mailTurn} index={0} />)
+    render(<TurnSection turn={mailTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
   })
@@ -232,7 +265,7 @@ describe("TurnSection agent messages", () => {
     // The wait is a property of the session, not of the turn the message landed
     // in: a question you lost track of several turns ago is still answerable,
     // and is the single most valuable thing this card surfaces.
-    render(<TurnSection turn={mailTurn} index={1} />)
+    render(<TurnSection turn={mailTurn} index={1} turnKey="turn" isLast={false} />, { wrapper })
 
     expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
     expect(screen.queryByText(/Never answered/i)).not.toBeInTheDocument()
@@ -242,7 +275,7 @@ describe("TurnSection agent messages", () => {
     mocks.isLive = false
     mocks.status = "completed"
 
-    render(<TurnSection turn={mailTurn} index={0} />)
+    render(<TurnSection turn={mailTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
     expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
@@ -262,20 +295,20 @@ describe("TurnSection prompt context menu", () => {
     screen.getByText(text).closest("[data-slot='context-menu-trigger']")
 
   it("hangs the turn actions off the user message", () => {
-    render(<TurnSection turn={promptTurn} index={0} />)
+    render(<TurnSection turn={promptTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(triggerFor("Do the thing")).not.toBeNull()
   })
 
   it("leaves the rest of the turn to the platform's own context menu", () => {
-    render(<TurnSection turn={promptTurn} index={0} />)
+    render(<TurnSection turn={promptTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(triggerFor("Final response")).toBeNull()
   })
 
   it("skips redo ghosts, which sit past the last restorable turn", () => {
     // The mocked session holds one turn, so index 1 can only be a ghost.
-    render(<TurnSection turn={promptTurn} index={1} />)
+    render(<TurnSection turn={promptTurn} index={1} turnKey="turn" isLast={false} />, { wrapper })
 
     expect(triggerFor("Do the thing")).toBeNull()
   })
@@ -299,7 +332,7 @@ describe("TurnSection prompts", () => {
   })
 
   it("sets the reader's own prompt apart as a bubble on the opposite theme, with its time and Restore under it", () => {
-    const { container } = render(<TurnSection turn={{ ...turn, userMessage: "Do the thing" }} index={0} />)
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: "Do the thing" }} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     const [bubble] = bubblesOf(container)
     expect(bubble).toHaveAttribute("data-reader-prompt", "prompt")
@@ -310,7 +343,7 @@ describe("TurnSection prompts", () => {
   })
 
   it("shows a session reporting back as its row, not as the reader's bubble", () => {
-    const { container } = render(<TurnSection turn={{ ...turn, userMessage: wakeup }} index={0} />)
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: wakeup }} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(bubblesOf(container)).toEqual([])
     const row = container.querySelector("[data-session-row]")
@@ -339,7 +372,7 @@ describe("TurnSection prompts", () => {
     }
 
     const childWakeup = formatTaskWakeup({ id: "task-1", parentSessionId: "session-1", childSessionId: child, state: "completed", result: { turn: { reply: "Pricing copy fixed." } } })
-    render(<TurnSection turn={{ ...turn, userMessage: childWakeup }} index={0} />)
+    render(<TurnSection turn={{ ...turn, userMessage: childWakeup }} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByRole("button", { name: "pricing-copy, Finished: Pricing copy fixed." })).toBeInTheDocument()
   })
@@ -347,7 +380,7 @@ describe("TurnSection prompts", () => {
   it("shows a session that cannot go on alone as a row that asks for attention", () => {
     const attention = formatTaskAttention({ id: "task-2", childSessionId: "child-2" }, "It asked: which branch?", [])
 
-    render(<TurnSection turn={{ ...turn, userMessage: attention }} index={0} />)
+    render(<TurnSection turn={{ ...turn, userMessage: attention }} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     const row = screen.getByRole("button", { name: "Open Delegated session, Needs attention" })
     expect(row).toHaveTextContent("It asked: which branch?")
@@ -356,7 +389,7 @@ describe("TurnSection prompts", () => {
   it("runs a system event full width, without a bubble or a hover row", () => {
     const notification = "<task-notification><task-id>t</task-id><status>completed</status><summary>Build finished</summary></task-notification>"
 
-    const { container } = render(<TurnSection turn={{ ...turn, userMessage: notification }} index={0} />)
+    const { container } = render(<TurnSection turn={{ ...turn, userMessage: notification }} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(bubblesOf(container)).toEqual([])
     expect(container.querySelector("[data-task-notification]")).toHaveTextContent("Build finished")
@@ -365,7 +398,8 @@ describe("TurnSection prompts", () => {
 
   it("shows no prompt for one that only carries injected context, keeping the turn's actions", () => {
     const { container } = render(
-      <TurnSection turn={{ ...turn, userMessage: "<system-reminder>The date changed.</system-reminder>" }} index={0} />,
+      <TurnSection turn={{ ...turn, userMessage: "<system-reminder>The date changed.</system-reminder>" }} index={0} turnKey="turn" isLast={true} />,
+      { wrapper },
     )
 
     expect(bubblesOf(container)).toEqual([])
@@ -385,7 +419,7 @@ describe("TurnSection prompts", () => {
       toolCalls: [],
     }
 
-    const { container } = render(<TurnSection turn={queuedTurn} index={0} />)
+    const { container } = render(<TurnSection turn={queuedTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByText("Sent while it was working")).toBeInTheDocument()
     const queued = bubblesOf(container).find((bubble) => bubble.dataset.readerPrompt === "1")
@@ -410,7 +444,7 @@ describe("TurnSection prompts", () => {
       toolCalls: [],
     }
 
-    const { container } = render(<TurnSection turn={crewTurn} index={0} />)
+    const { container } = render(<TurnSection turn={crewTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByRole("article", { name: "Crew chat message from ring-deploy" })).toHaveTextContent("One correction on (B)")
     expect(screen.queryByText("Sent while it was working")).toBeNull()
@@ -456,7 +490,7 @@ describe("TurnSection sessions it started", () => {
   })
 
   it("shows a crew start as the session it started, in view while the rest of the work folds", () => {
-    render(<TurnSection turn={crewTurn(start)} index={0} />)
+    render(<TurnSection turn={crewTurn(start)} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     const fold = screen.getByRole("button", { name: /worked/i })
     expect(fold).toHaveAttribute("aria-expanded", "false")
@@ -477,7 +511,7 @@ describe("TurnSection sessions it started", () => {
     mocks.isLive = true
     mocks.status = "thinking"
 
-    render(<TurnSection turn={crewTurn({ ...start, result: null })} index={0} />)
+    render(<TurnSection turn={crewTurn({ ...start, result: null })} index={0} turnKey="turn" isLast={true} />, { wrapper })
 
     expect(screen.getByRole("button", { name: "audit, Starting: Audit the API routes" })).toBeInTheDocument()
   })
@@ -505,7 +539,7 @@ describe("TurnSection sessions it started", () => {
       subAgentActivity: [agentMessage],
     }
 
-    const { container } = render(<TurnSection turn={agentTurn} index={0} />)
+    const { container } = render(<TurnSection turn={agentTurn} index={0} turnKey="turn" isLast={true} />, { wrapper })
     fireEvent.click(screen.getByRole("button", { name: /worked/i }))
 
     expect(container.querySelector("[data-session-row]")).toBeNull()

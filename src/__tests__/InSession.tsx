@@ -6,6 +6,7 @@ import type { SessionView } from "../../shared/session/sessionDigest"
 
 const CHAT = { pendingMessages: [], consumePending: () => {} } as unknown as ChatState
 const NO_UNDO = { enabled: false, requestUndo: () => {} } as unknown as UseUndoRedoResult
+const NO_HISTORY = { remaining: 0, loaded: 0 }
 
 /** `children` with `session` open in the app's own session provider, from `controls.sessionSource`; tests hand in only the controls they read. */
 export function InSession({ session, controls = {}, children }: {
@@ -21,7 +22,7 @@ export function InSession({ session, controls = {}, children }: {
   }, [session, source])
   const withDefaults = useMemo(() => ({ undoRedo: NO_UNDO, actions: {}, ...controls }) as SessionControls, [controls])
   return (
-    <OpenSessionProvider store={store} controls={withDefaults} chat={CHAT} isLive={controls.isLive ?? false}>
+    <OpenSessionProvider store={store} controls={withDefaults} chat={CHAT} historyBytes={NO_HISTORY}>
       {children}
     </OpenSessionProvider>
   )

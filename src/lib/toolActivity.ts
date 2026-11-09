@@ -6,7 +6,7 @@ import type { ActivityItem } from "./timelineHelpers"
 
 export type ToolActivityEntry =
   | { kind: "tool_call"; toolCall: ToolCall }
-  | { kind: "thinking"; blocks: ThinkingBlock[] }
+  | { kind: "thinking"; blocks: ThinkingBlock[]; block?: number }
 
 export interface ToolActivityGroup {
   label: string
@@ -111,7 +111,7 @@ export function toolActivityEntries(
 ): ToolActivityEntry[] {
   if (!activityItems) return toolCalls.map((toolCall) => ({ kind: "tool_call", toolCall }))
   return activityItems.flatMap<ToolActivityEntry>((item) => item.kind === "thinking"
-    ? item.blocks.map((block) => ({ kind: "thinking", blocks: [block] }))
+    ? item.blocks.map((block) => ({ kind: "thinking", blocks: [block], block: item.block }))
     : item.toolCalls.map((toolCall) => ({ kind: "tool_call", toolCall })))
 }
 

@@ -583,23 +583,12 @@ export default function App() {
   const resetTurnCount = useCallback((count: number) => chatScroll.current?.resetTurnCount(count), [])
   const requestScrollToTop = useCallback(() => chatScroll.current?.requestScrollToTop(), [])
 
-  const handleTodosExpandedChange = useCallback((expanded: boolean) => {
-    setTodosExpanded(expanded)
-    // Scroll chat to compensate for padding change (pb-48 vs pb-32 = 64px)
-    requestAnimationFrame(() => {
-      const el = chatScroll.current?.chatScrollRef.current
-      if (el) {
-        el.scrollTo({ top: el.scrollTop + (expanded ? 64 : -64), behavior: "smooth" })
-      }
-    })
-  }, [])
-
   // Wire up the session-finalized bridge now that scroll is available. A layout
   // effect keeps render pure and installs the latest callback before user input
   // or passive effects can finalize a newly-created session.
   useLayoutEffect(() => {
     const handleSessionFinalized = (_parsed: SessionView) => {
-      // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
+      // Reset to 0 so usePendingPrompts detects "new turns" and clears pendingMessage
       resetTurnCount(0)
       scrollToBottomInstant()
     }
@@ -851,10 +840,14 @@ export default function App() {
     getSession,
     sessionSource: state.sessionSource,
     loadSession: handlers.handleLoadSessionScrollAware,
-    jumpToTurn: useCallback((index: number) => {
+    jumpToTurn: useCallback((turnKey: string) => {
       if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-      actions.handleJumpToTurn(index)
-    }, [actions, isMobile, dispatch]),
+      return chatScroll.current?.controller.scrollToTurn(turnKey, { align: "start" }) ?? Promise.resolve(false)
+    }, [isMobile, dispatch]),
+    subscribeTimeline: useCallback(
+      (listener: () => void) => chatScroll.current?.controller.subscribe(listener) ?? (() => {}),
+      [],
+    ),
     hasMore: chunkedSession.hasMore,
     loadMore: chunkedSession.loadMore,
   })
@@ -927,8 +920,8 @@ export default function App() {
       store={sessionStore}
       controls={sessionControls}
       chat={chatState}
-      isLive={isLive}
       scrollHandle={chatScroll}
+      historyBytes={chunkedSession.historyBytes}
       onSessionShown={sessionShown}
     >
       {node}
@@ -1366,7 +1359,7 @@ export default function App() {
             pendingTurns: pendingPreviewList,
             todoProgress,
             todosExpanded,
-            onTodosExpandedChange: handleTodosExpandedChange,
+            onTodosExpandedChange: setTodosExpanded,
             hasMoreTurns: chunkedSession.hasMore,
             isLoadingOlderTurns: chunkedSession.isLoadingOlder,
             onLoadMoreTurns: chunkedSession.loadMore,

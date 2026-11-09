@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { SectionHeading } from "@/components/stats/SectionHeading"
@@ -8,6 +8,7 @@ import { getUserMessageText } from "../../../shared/session/parser"
 import { generatedPromptSummary } from "@/lib/userMessageContent"
 import { useSessionNamer } from "@/hooks/useSessionNamer"
 import { getTurnKey } from "@/components/stats/turnKey"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import { Button } from "@/components/ui/button"
 
 interface TurnNavigatorProps {
@@ -16,7 +17,9 @@ interface TurnNavigatorProps {
 }
 
 export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): React.JSX.Element | null {
-  const [activeTurn, setActiveTurn] = useState<number | null>(null)
+  // By key: older turns arriving in front shift every index.
+  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const keys = useMemo(() => turnKeysOf(turns), [turns])
   const nameOf = useSessionNamer()
 
   if (turns.length === 0) return null
@@ -29,14 +32,14 @@ export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): Reac
           {turns.map((turn, i) => {
             const text = getUserMessageText(turn.userMessage)
             const preview = generatedPromptSummary(text, nameOf) ?? text
-            const isActive = activeTurn === i
+            const isActive = activeKey === keys[i]
             return (
               <Button
                 key={getTurnKey(turn, i)}
                 type="button"
                 variant="ghost"
                 onClick={() => {
-                  setActiveTurn(i)
+                  setActiveKey(keys[i])
                   onJumpToTurn?.(i)
                 }}
                 className={cn(

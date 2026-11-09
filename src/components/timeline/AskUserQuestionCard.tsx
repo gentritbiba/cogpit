@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useDisclosure, useDisclosureKey } from "./disclosure"
 import {
   AlertCircle,
   CheckCircle2,
@@ -198,7 +199,7 @@ export function AskUserQuestionCard({
   /** False for a viewer, who sees the open question without the form to answer it. */
   canAnswer: boolean
 }): React.ReactElement {
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useDisclosure(useDisclosureKey("details"), false)
   const questions = useMemo(() => getQuestions(toolCall), [toolCall])
   const answers = useMemo(() => getAnswers(toolCall, questions), [toolCall, questions])
   const showRawDetails = expandToolPayloads || detailsOpen

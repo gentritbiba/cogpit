@@ -83,7 +83,7 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("idle")
-    // Message stays in queue until consumed by useChatScroll on new turn
+    // Message stays in queue until consumed by usePendingPrompts on new turn
     expect(result.current.pendingMessages).toEqual(["hello"])
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/send-message", expect.objectContaining({
       method: "POST",

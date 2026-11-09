@@ -219,7 +219,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
         store={sessionStore}
         controls={sessionControls}
         chat={chat}
-        isLive={isLive}
+        historyBytes={paging.historyBytes}
         onSessionShown={sessionShown}
       >
         {children(view)}

@@ -1,7 +1,9 @@
-import { useMemo, memo, type RefObject } from "react"
-import { VirtualizedTimeline, type TimelineHandle } from "./timeline/VirtualizedTimeline"
-import { matchesSearch } from "@/lib/timelineHelpers"
+import { useMemo, memo } from "react"
+import { TimelineList } from "./timeline/TimelineList"
+import { turnMatches } from "@/lib/sessionFind"
 import { shouldShowEmptyState } from "@/lib/timelinePaging"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
+import type { TimelineScrollController } from "@/lib/timelineScroll/controller"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { SessionImageGalleryProvider } from "./timeline/SessionImageGallery"
@@ -17,33 +19,30 @@ import { MessageSquareText, SearchX } from "lucide-react"
 // ── Main component ───────────────────────────────────────────────────────────
 
 interface ConversationTimelineProps {
-  chatScrollRef: RefObject<HTMLDivElement | null>
+  controller: TimelineScrollController
   hasMore?: boolean
   isLoadingOlder?: boolean
-  pagingEnabled?: boolean
   onLoadMore?: () => void
-  timelineRef?: React.Ref<TimelineHandle>
 }
 
 export const ConversationTimeline = memo(function ConversationTimeline({
-  chatScrollRef,
-  hasMore,
-  isLoadingOlder,
-  pagingEnabled,
+  controller,
+  hasMore = false,
+  isLoadingOlder = false,
   onLoadMore,
-  timelineRef,
 }: ConversationTimelineProps) {
   const { state: { searchQuery } } = useAppContext()
   const { session, sessionChangeKey } = useSessionContext()
 
   const turns = session?.turns
-  const allTurns = useMemo(
-    () => turns ? turns.map((turn, index) => ({ turn, index })) : [],
-    [turns]
-  )
+  const allTurns = useMemo(() => {
+    if (!turns) return []
+    const keys = turnKeysOf(turns)
+    return turns.map((turn, index) => ({ turn, index, key: keys[index] }))
+  }, [turns])
   const filteredTurns = useMemo(
     () => searchQuery
-      ? allTurns.filter(({ turn }) => matchesSearch(turn, searchQuery))
+      ? allTurns.filter(({ turn }) => turnMatches(turn, searchQuery))
       : allTurns,
     [allTurns, searchQuery]
   )
@@ -52,7 +51,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   // the transcript in the background while a query is active.
   const showEmptyState = searchQuery
     ? filteredTurns.length === 0
-    : shouldShowEmptyState(filteredTurns.length, hasMore ?? false)
+    : shouldShowEmptyState(filteredTurns.length, hasMore)
 
   return (
     <SessionImageGalleryProvider>
@@ -71,17 +70,17 @@ export const ConversationTimeline = memo(function ConversationTimeline({
           </EmptyHeader>
         </Empty>
       ) : (
-        <VirtualizedTimeline
-          // Remount per session so the height cache and prepend detection
-          // never leak across different transcripts.
+        <TimelineList
+          // A fresh list per session load, so nothing it remembers leaks across transcripts.
           key={sessionChangeKey}
-          filteredTurns={filteredTurns}
-          scrollContainerRef={chatScrollRef}
+          rows={filteredTurns}
+          turnCount={turns?.length ?? 0}
+          controller={controller}
+          sessionKey={session?.sessionId ?? ""}
+          sessionChangeKey={sessionChangeKey}
           hasMore={hasMore}
           isLoadingOlder={isLoadingOlder}
-          pagingEnabled={pagingEnabled}
           onLoadMore={onLoadMore}
-          timelineRef={timelineRef}
         />
       )}
     </SessionImageGalleryProvider>

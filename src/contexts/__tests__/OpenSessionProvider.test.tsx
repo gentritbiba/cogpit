@@ -40,6 +40,7 @@ function session(turns: Turn[], sessionId = "s1"): SessionView {
   }
 }
 
+const NO_HISTORY = { remaining: 0, loaded: 0 }
 const controls = { sessionSource: null, isLive: true, undoRedo: { enabled: false, requestUndo: vi.fn() }, actions: {} } as unknown as SessionControls
 const chat = { pendingMessages: [], consumePending: vi.fn() } as unknown as ChatState
 const renders = { shell: 0, controls: 0, fact: 0, transcript: 0 }
@@ -83,7 +84,7 @@ describe("OpenSessionProvider", () => {
     const shown = vi.fn()
     Object.assign(renders, { shell: 0, controls: 0, fact: 0, transcript: 0 })
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive scrollHandle={scrollHandle} onSessionShown={shown}>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY} scrollHandle={scrollHandle} onSessionShown={shown}>
         <Shell />
         <Transcript />
       </OpenSessionProvider>,
@@ -115,7 +116,7 @@ describe("OpenSessionProvider", () => {
       return null
     }
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive onSessionShown={shown}>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY} onSessionShown={shown}>
         <Transcript />
         <Probe />
       </OpenSessionProvider>,
@@ -140,7 +141,7 @@ describe("OpenSessionProvider", () => {
       return null
     }
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY}>
         <Keyed />
       </OpenSessionProvider>,
     )
@@ -160,7 +161,7 @@ describe("OpenSessionProvider", () => {
       return null
     }
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY}>
         <Ring />
       </OpenSessionProvider>,
     )
@@ -182,7 +183,7 @@ describe("OpenSessionProvider", () => {
       return null
     }
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY}>
         <Transcript />
         <Probe />
       </OpenSessionProvider>,
@@ -201,7 +202,7 @@ describe("OpenSessionProvider", () => {
       return null
     }
     render(
-      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+      <OpenSessionProvider store={store} controls={controls} chat={chat} historyBytes={NO_HISTORY}>
         <Paired />
       </OpenSessionProvider>,
     )
@@ -228,7 +229,7 @@ describe("OpenSessionProvider", () => {
         return null
       }
       render(
-        <OpenSessionProvider store={store} controls={actionControls} chat={chat} isLive>
+        <OpenSessionProvider store={store} controls={actionControls} chat={chat} historyBytes={NO_HISTORY}>
           <Row />
         </OpenSessionProvider>,
       )
@@ -278,7 +279,7 @@ describe("OpenSessionProvider", () => {
         return null
       }
       const tree = (actionControls: SessionControls) => (
-        <OpenSessionProvider store={store} controls={actionControls} chat={chat} isLive>
+        <OpenSessionProvider store={store} controls={actionControls} chat={chat} historyBytes={NO_HISTORY}>
           <Row />
         </OpenSessionProvider>
       )

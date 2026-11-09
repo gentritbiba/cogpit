@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { ChevronRight, Terminal } from "lucide-react"
 import { parseLocalCommandOutputs, type LocalCommandOutput } from "@/lib/userMessageContent"
 import { readableContextUsage, readableUsageLimits } from "@/lib/localCommandReports"
@@ -34,7 +35,7 @@ export function LocalCommandOutputCard({ output }: { output: LocalCommandOutput 
  * that recorded its structured twin draws as a card; older records keep the
  * text.
  */
-export function LocalCommandBlock({ content, contextUsage, usageReport }: {
+export const LocalCommandBlock = memo(function LocalCommandBlock({ content, contextUsage, usageReport }: {
   content: string
   contextUsage?: LocalCommandContextUsage
   usageReport?: LocalCommandUsageReport
@@ -55,4 +56,4 @@ export function LocalCommandBlock({ content, contextUsage, usageReport }: {
       ))}
     </div>
   )
-}
+})

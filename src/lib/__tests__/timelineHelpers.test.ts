@@ -1,36 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { collectActivity, matchesSearch, segmentActivity, type ActivityItem } from "../timelineHelpers"
-import type { ThinkingBlock, ToolCall, Turn, TurnContentBlock } from "../../../shared/session/types"
-import { emptyTurn } from "@/__tests__/fixtures"
-
-const makeTurn = (overrides: Partial<Turn> = {}) =>
-  emptyTurn({
-    userMessage: "Initial request",
-    model: "opus",
-    timestamp: "2025-01-15T10:00:00Z",
-    contentBlocks: [{
-      kind: "queued_prompt",
-      content: "Also verify the mobile layout",
-      timestamp: "2025-01-15T10:00:01Z",
-    }],
-    ...overrides,
-  })
-
-describe("matchesSearch", () => {
-  it("finds text from a prompt queued during an active turn", () => {
-    expect(matchesSearch(makeTurn(), "mobile layout")).toBe(true)
-  })
-
-  it("matches an agent message by sender and by body", () => {
-    const turn = makeTurn({
-      contentBlocks: [{ kind: "agent_message", sender: "csp-and-proxy", body: "lenderdesk hardening" }],
-    })
-
-    expect(matchesSearch(turn, "csp-and")).toBe(true)
-    expect(matchesSearch(turn, "lenderdesk")).toBe(true)
-    expect(matchesSearch(turn, "nothing here")).toBe(false)
-  })
-})
+import { collectActivity, segmentActivity, type ActivityItem } from "../timelineHelpers"
+import type { ThinkingBlock, ToolCall, TurnContentBlock } from "../../../shared/session/types"
 
 function call(id: string): ToolCall {
   return { id, name: "Bash", input: {}, result: "ok", isError: false, timestamp: "2025-01-15T10:00:00Z" }
@@ -46,9 +16,9 @@ describe("collectActivity", () => {
       { kind: "tool_calls", toolCalls: [call("b")], timestamp: "2025-01-15T10:00:04Z" },
     ]
 
-    const { items, thoughtForMs } = collectActivity(blocks, 0)
+    const { items, thoughtForMs } = collectActivity(blocks, 0, (block) => blocks.indexOf(block))
 
-    expect(items[1]).toEqual({ kind: "thinking", blocks: [thought("hmm")], thoughtForMs: 3_000 })
+    expect(items[1]).toEqual({ kind: "thinking", blocks: [thought("hmm")], thoughtForMs: 3_000, block: 1 })
     expect(thoughtForMs).toBe(3_000)
   })
 })

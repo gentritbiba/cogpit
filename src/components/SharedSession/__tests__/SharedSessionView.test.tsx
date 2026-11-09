@@ -38,7 +38,7 @@ vi.mock("@/components/ConversationTimeline", async () => {
       const { session } = useSessionContext()
       return (
         <div data-testid="timeline">
-          {session?.turns.map((turn, i) => <TurnSection key={i} turn={turn} index={i} />)}
+          {session?.turns.map((turn, i) => <TurnSection key={i} turn={turn} index={i} turnKey={turn.id} isLast={i === session.turns.length - 1} />)}
         </div>
       )
     },

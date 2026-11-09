@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { DisclosureScope, useDisclosure, useDisclosureKey } from "./disclosure"
 import type { ElidedResult } from "../../../shared/session/types"
 import {
   Check,
@@ -260,7 +261,7 @@ function CommandRow({
   expandAll: boolean
   cwd: string | undefined
 }): React.ReactElement {
-  const [localOpen, setLocalOpen] = useState(false)
+  const [localOpen, setLocalOpen] = useDisclosure(useDisclosureKey("open"), false)
   const open = expandAll || localOpen
   const hasOutput = row.section.output !== null && row.section.output !== ""
   const rowLabel = `${sectionName(row.section)} section: ${row.section.command}`
@@ -374,11 +375,15 @@ export function BashCommandCard({
             {call.rows.map((row, rowIndex) => (
               <div key={rowIndex} className="min-w-0">
                 {rowIndex > 0 && <Separator />}
-                <CommandRow row={row} expandAll={expandAll} cwd={cwd} />
+                <DisclosureScope id={`cmd:${rowIndex}`}>
+                  <CommandRow row={row} expandAll={expandAll} cwd={cwd} />
+                </DisclosureScope>
               </div>
             ))}
             {toolCall.resultRef && (
-              <ToolResultPanel result={toolCall.result ?? ""} resultRef={toolCall.resultRef} isError={toolCall.isError} />
+              <DisclosureScope id="all">
+                <ToolResultPanel result={toolCall.result ?? ""} resultRef={toolCall.resultRef} isError={toolCall.isError} />
+              </DisclosureScope>
             )}
           </div>
         )}

@@ -1,9 +1,10 @@
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
-import type { TimelineHandle } from "@/components/timeline/VirtualizedTimeline"
+import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { makeTurn } from "@/__tests__/fixtures"
+import { DisclosureProvider, revealKey, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
 import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
 import { renderComposerMessage } from "../../../shared/session/composerContext"
 import type { Turn } from "../../../shared/session/types"
@@ -46,35 +47,66 @@ const crewPost = (text: string) => formatCrewChatDelivery(
 /**
  * Stands in for the timeline: `bubbles[i]` lists the reader bubbles turn `i`
  * renders by `data-reader-prompt` key, and null leaves the turn unrendered, as
- * the virtualizer does far from the viewport.
+ * the virtualizer does far from the viewport. The handle reports the first row
+ * crossing the viewport top and notifies once per frame after a scroll, as the
+ * engine does.
  */
 function Harness({
   session,
   bubbles,
-  timeline,
+  mountedBlocks,
+  onScrollToTurn,
 }: {
   session: SessionView
   bubbles: Array<string[] | null>
-  timeline?: TimelineHandle
+  /** The content blocks a windowed turn has mounted, as its items' `data-blocks` ranges. */
+  mountedBlocks?: string[]
+  onScrollToTurn?: TimelineHandle["scrollToTurn"]
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const timelineRef = useRef<TimelineHandle | null>(timeline ?? null)
+  const onScrollToTurnRef = useRef(onScrollToTurn)
+  onScrollToTurnRef.current = onScrollToTurn
+  const [timeline] = useState(() => fakeTimeline(scrollRef, (...args) => onScrollToTurnRef.current?.(...args) ?? Promise.resolve(false)))
+  const timelineRef = useRef<TimelineHandle | null>(timeline)
   return (
     <div>
       <StickyPromptBanner session={session} scrollContainerRef={scrollRef} timelineRef={timelineRef} />
       <div ref={scrollRef} data-testid="scroll-container">
         {session.turns.map((turn, index) => bubbles[index] && (
-          <div key={turn.id} data-testid={`turn-${index}`} data-turn-index={index}>
+          <div key={turn.id} data-testid={`turn-${index}`} data-turn-key={turn.id}>
             {bubbles[index].map((key) => (
               <div key={key} data-testid={`bubble-${index}-${key}`} data-reader-prompt={key}>
                 Message {index + 1}.{key}
               </div>
             ))}
+            {mountedBlocks?.map((range) => <div key={range} data-blocks={range} />)}
           </div>
         ))}
       </div>
     </div>
   )
+}
+
+function fakeTimeline(scrollRef: React.RefObject<HTMLElement | null>, scrollToTurn: TimelineHandle["scrollToTurn"]): TimelineHandle {
+  return {
+    scrollToTurn,
+    scrollToBottom: vi.fn(),
+    subscribe(listener) {
+      const el = scrollRef.current!
+      let frame: number | null = null
+      const schedule = () => {
+        if (frame === null) frame = requestAnimationFrame(() => { frame = null; listener() })
+      }
+      el.addEventListener("scroll", schedule)
+      return () => el.removeEventListener("scroll", schedule)
+    },
+    getViewport() {
+      const el = scrollRef.current!
+      const top = el.getBoundingClientRect().top
+      const first = [...el.querySelectorAll<HTMLElement>("[data-turn-key]")].find((row) => row.getBoundingClientRect().bottom > top)
+      return { firstVisibleKey: first?.dataset.turnKey ?? null, atBottom: false }
+    },
+  }
 }
 
 function setRect(element: Element, top: number, bottom: number): void {
@@ -110,7 +142,9 @@ describe("StickyPromptBanner", () => {
     vi.unstubAllGlobals()
   })
 
-  function flushAnimationFrame(): void {
+  /** A scroll, then the frame in which the timeline notifies. */
+  function scrollAndSettle(): void {
+    fireEvent.scroll(screen.getByTestId("scroll-container"))
     const callbacks = animationFrames
     animationFrames = []
     act(() => {
@@ -129,33 +163,56 @@ describe("StickyPromptBanner", () => {
     setRect(secondTurn, 60, 600)
     setRect(secondPrompt, 110, 170)
 
-    flushAnimationFrame()
+    scrollAndSettle()
     expect(screen.queryByRole("button", { name: /scroll to your message/i })).not.toBeInTheDocument()
 
     setRect(secondTurn, -40, 500)
     setRect(secondPrompt, 20, 90)
-    fireEvent.scroll(container)
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(2)).toHaveTextContent("Fix the preview")
   })
 
-  it("scrolls to the exact prompt instead of the start of a long turn", () => {
-    render(<Harness session={makeSession("session-a", ["First prompt", "Second prompt"])} bubbles={[["prompt"], ["prompt"]]} />)
+  it("asks the timeline to land on the exact prompt instead of the start of a long turn", () => {
+    const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => Promise.resolve(true))
+    render(<Harness session={makeSession("session-a", ["First prompt", "Second prompt"])} bubbles={[["prompt"], ["prompt"]]} onScrollToTurn={scrollToTurn} />)
 
     const container = screen.getByTestId("scroll-container")
     setRect(container, 100, 700)
-    container.scrollTop = 500
     setRect(screen.getByTestId("turn-0"), -500, -200)
     setRect(screen.getByTestId("turn-1"), -100, 600)
     setRect(screen.getByTestId("bubble-1-prompt"), -60, 90)
-    const scrollTo = vi.fn()
-    container.scrollTo = scrollTo
 
-    flushAnimationFrame()
+    scrollAndSettle()
     fireEvent.click(banner(2))
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 340, behavior: "smooth" })
+    expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-1", expect.objectContaining({ target: expect.any(Function) }))
+    const { target } = scrollToTurn.mock.calls[0][1]!
+    expect(target!(screen.getByTestId("turn-1"))).toBe(screen.getByTestId("bubble-1-prompt"))
+  })
+
+  // Review finding 8: the banner held a turn index, so a prepend showed another turn's message until it caught up.
+  it("keeps showing the same message, under its new turn number, when older turns arrive", () => {
+    const first = { id: "first", userMessage: "First prompt" }
+    const second = { id: "second", userMessage: "Second prompt" }
+    const shown: string[] = []
+    function Shown() {
+      useLayoutEffect(() => { shown.push(screen.queryByRole("button", { name: /scroll to your message/i })?.textContent ?? "") })
+      return null
+    }
+    const view = render(<><Harness session={makeSession("session-a", [first, second])} bubbles={[["prompt"], ["prompt"]]} /><Shown /></>)
+
+    setRect(screen.getByTestId("scroll-container"), 100, 700)
+    setRect(screen.getByTestId("turn-0"), -500, -200)
+    setRect(screen.getByTestId("turn-1"), -100, 600)
+    setRect(screen.getByTestId("bubble-1-prompt"), -60, 90)
+    scrollAndSettle()
+    expect(banner(2)).toHaveTextContent("Second prompt")
+
+    shown.length = 0
+    view.rerender(<><Harness session={makeSession("session-a", [{ id: "older", userMessage: "Older prompt" }, first, second])} bubbles={[null, ["prompt"], ["prompt"]]} /><Shown /></>)
+    expect(shown.every((text) => text.includes("Turn 3") && text.includes("Second prompt"))).toBe(true)
+    expect(banner(3)).toHaveTextContent("Second prompt")
   })
 
   it("shows what the reader typed, not a task report quoted in the same prompt", () => {
@@ -168,7 +225,7 @@ describe("StickyPromptBanner", () => {
     setRect(screen.getByTestId("turn-1"), -100, 600)
     setRect(screen.getByTestId("bubble-1-prompt"), -60, 90)
 
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(2)).toHaveTextContent("now ship it")
   })
@@ -185,7 +242,7 @@ describe("StickyPromptBanner", () => {
     setRect(screen.getByTestId("turn-0"), -500, 600)
     setRect(screen.getByTestId("bubble-0-prompt"), -480, -400)
 
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(1)).toHaveTextContent("Apply this to the pricing page")
     expect(banner(1)).not.toHaveTextContent("context")
@@ -199,34 +256,33 @@ describe("StickyPromptBanner", () => {
     setRect(screen.getByTestId("turn-0"), -500, -200)
     setRect(screen.getByTestId("turn-1"), -100, 600)
 
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(1)).toHaveTextContent("Keep this context")
   })
 
   it("passes over a crew chat post to the reader's own message, even while the post is in view", () => {
+    const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => Promise.resolve(true))
     render(
       <Harness
         session={makeSession("session-a", ["Ship the ring deploy", crewPost("@Lead thanks. One correction on (B)")])}
         bubbles={[["prompt"], []]}
+        onScrollToTurn={scrollToTurn}
       />,
     )
 
     const container = screen.getByTestId("scroll-container")
     setRect(container, 100, 700)
-    container.scrollTop = 800
     setRect(screen.getByTestId("turn-0"), -500, 60)
     setRect(screen.getByTestId("bubble-0-prompt"), -480, -420)
     setRect(screen.getByTestId("turn-1"), 80, 600)
-    const scrollTo = vi.fn()
-    container.scrollTo = scrollTo
 
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(1)).toHaveTextContent("Ship the ring deploy")
     expect(screen.queryByText(/crew chat/)).toBeNull()
     fireEvent.click(banner(1))
-    expect(scrollTo).toHaveBeenCalledWith({ top: 220, behavior: "smooth" })
+    expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-0", expect.objectContaining({ target: expect.any(Function) }))
   })
 
   it("tracks a message the reader sent mid-turn", () => {
@@ -246,30 +302,68 @@ describe("StickyPromptBanner", () => {
     setRect(screen.getByTestId("bubble-0-prompt"), -880, -820)
     setRect(screen.getByTestId("bubble-0-1"), -300, -250)
 
-    flushAnimationFrame()
+    scrollAndSettle()
 
     expect(banner(1)).toHaveTextContent("Also check mobile")
   })
 
-  it("reaches a message the timeline has not rendered, passing over what the crew sent after it", async () => {
+  it("tracks a mid-turn message in a block a giant turn has not mounted, and has the turn mount it to land", () => {
+    const turn: Partial<Turn> = {
+      userMessage: "Start the audit",
+      contentBlocks: [
+        { kind: "text", text: ["Working on it"] },
+        { kind: "queued_prompt", content: "Also check mobile" },
+        ...Array.from({ length: 30 }, (_, i) => ({ kind: "text" as const, text: [`step ${i}`] })),
+      ],
+    }
+    const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => new Promise(() => {}))
+    let store: TimelineStateStore | null = null
+    function CaptureStore() {
+      store = useTimelineStore()
+      return null
+    }
+    render(
+      <DisclosureProvider>
+        <CaptureStore />
+        <Harness session={makeSession("session-a", [turn])} bubbles={[["prompt"]]} mountedBlocks={["0-0", "21-21"]} onScrollToTurn={scrollToTurn} />
+      </DisclosureProvider>,
+    )
+
+    const container = screen.getByTestId("scroll-container")
+    setRect(container, 100, 700)
+    setRect(screen.getByTestId("turn-0"), -9000, 600)
+    setRect(screen.getByTestId("bubble-0-prompt"), -8980, -8920)
+    // A block pinned below the prompt does not count; the range above the line does.
+    const [pinned, mounted] = [...screen.getByTestId("turn-0").querySelectorAll("[data-blocks]")]
+    setRect(pinned, 800, 900)
+    setRect(mounted, -40, 300)
+
+    scrollAndSettle()
+    expect(banner(1)).toHaveTextContent("Also check mobile")
+
+    fireEvent.click(banner(1))
+    expect(store!.get(revealKey("session-a-turn-0"))).toBe(1)
+    const { target } = scrollToTurn.mock.calls[0][1]!
+    expect(target!(screen.getByTestId("turn-0"))).toBeNull()
+  })
+
+  it("reaches a message the timeline has not rendered, passing over what the crew sent after it", () => {
     const earlier: Partial<Turn> = {
       userMessage: "Start the audit",
       contentBlocks: [{ kind: "queued_prompt", content: crewPost("Lane B is done") }],
     }
-    const scrollToTurn = vi.fn<(index: number) => boolean>(() => true)
+    const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => Promise.resolve(true))
 
     function Virtualized() {
       const [mounted, setMounted] = useState(false)
-      const session = makeSession("session-a", [earlier, crewPost("Lane C is done")])
+      const [session] = useState(() => makeSession("session-a", [earlier, crewPost("Lane C is done")]))
       return (
         <Harness
           session={session}
           bubbles={[mounted ? ["prompt"] : null, []]}
-          timeline={{
-            scrollToTurn: (index) => {
-              setMounted(true)
-              return scrollToTurn(index)
-            },
+          onScrollToTurn={(key, opts) => {
+            setMounted(true)
+            return scrollToTurn(key, opts)
           }}
         />
       )
@@ -278,19 +372,21 @@ describe("StickyPromptBanner", () => {
 
     const container = screen.getByTestId("scroll-container")
     setRect(container, 100, 700)
-    container.scrollTop = 5000
     setRect(screen.getByTestId("turn-1"), -100, 600)
-    const scrollTo = vi.fn()
-    container.scrollTo = scrollTo
 
-    flushAnimationFrame()
+    scrollAndSettle()
     fireEvent.click(banner(1))
 
-    expect(scrollToTurn).toHaveBeenCalledWith(0)
-    setRect(screen.getByTestId("bubble-0-prompt"), 150, 210)
-    flushAnimationFrame()
-    expect(scrollTo).not.toHaveBeenCalled()
-    flushAnimationFrame()
-    expect(scrollTo).toHaveBeenCalledWith({ top: 5050 })
+    expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-0", expect.objectContaining({ target: expect.any(Function) }))
+    const { target } = scrollToTurn.mock.calls[0][1]!
+    expect(target!(screen.getByTestId("turn-0"))).toBe(screen.getByTestId("bubble-0-prompt"))
+  })
+
+  it("follows the timeline's notifications and never observes the scroller's DOM", () => {
+    const observe = vi.fn()
+    vi.stubGlobal("MutationObserver", class { observe = observe; disconnect() {} })
+    render(<Harness session={makeSession("session-a", ["First prompt", "Fix the preview"])} bubbles={[["prompt"], ["prompt"]]} />)
+
+    expect(observe).not.toHaveBeenCalled()
   })
 })

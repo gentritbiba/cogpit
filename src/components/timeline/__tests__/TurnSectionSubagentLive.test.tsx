@@ -5,6 +5,7 @@ import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import type { StreamingOverlay } from "@/lib/streamingOverlay"
 import { emptyTurn } from "@/__tests__/fixtures"
 import { TurnSection } from "../TurnSection"
+import { TimelineRowsProvider } from "../TimelineRowsProvider"
 import type { SubAgentMessage, ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
 
 // The real tool group, tool card, activity panel and live pane render here;
@@ -28,8 +29,8 @@ vi.mock("@/contexts/SessionContext", () => ({
     isLive: true,
     isSubAgentView: false,
     pendingInteraction: null,
-    permissions: { answer: false },
-    undoRedo: { enabled: false },
+    permissions: { send: false, answer: false },
+    undoRedo: { enabled: false, branches: [] },
     actions: {},
   }),
 }))
@@ -68,7 +69,9 @@ function renderTurn(call: ToolCall, block: TurnContentBlock) {
   mocks.turns = [turn]
   return render(
     <StreamingOverlayProvider value={overlay}>
-      <TurnSection turn={turn} index={0} />
+      <TimelineRowsProvider>
+        <TurnSection turn={turn} index={0} turnKey="turn" isLast />
+      </TimelineRowsProvider>
     </StreamingOverlayProvider>,
   )
 }
