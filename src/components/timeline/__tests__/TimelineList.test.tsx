@@ -515,6 +515,14 @@ describe("TimelineList with the scroll engine", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  // Review finding 4: a ref closure stayed for every row key ever rendered, across sessions.
+  it("drops the row refs of another session's rows when a session starts", () => {
+    const { rerender, controller } = mount({ turns: makeTurns(ids(0, 30)) })
+    const left = controller.rowRef("t29")
+    rerender({ turns: makeTurns(ids(100, 120)), sessionChangeKey: 2 })
+    expect(controller.rowRef("t29")).not.toBe(left)
+  })
+
   it("marks the list as a feed with positioned articles", () => {
     mount({ turns: makeTurns(ids(0, 3)) })
     const feed = scroller!.querySelector('[role="feed"]')!

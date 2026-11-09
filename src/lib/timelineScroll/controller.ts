@@ -397,6 +397,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     this.endNavigation(false)
     this.anchor = null
     this.liveHeights.clear()
+    for (const key of this.rowRefs.keys()) if (!this.rowEls.has(key)) this.rowRefs.delete(key)
     this.renderedTops = new Map()
     this.pins.clear()
     this.follow = { following: this.placement === "bottom", userInput: false }
