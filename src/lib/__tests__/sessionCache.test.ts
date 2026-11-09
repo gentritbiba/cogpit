@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { sessionCache } from "@/lib/sessionCache"
+import { MAX_CACHED_TRANSCRIPT_BYTES, sessionCache } from "@/lib/sessionCache"
 import {
   __resetDeviceRevisionsForTest,
   __resetIdentityForTest,
@@ -118,5 +118,49 @@ describe("sessionCache.evictSession", () => {
     expect(sessionCache.get("-work", `${OTHER}.jsonl`)).toBeDefined()
     setPath("/d/dev_x/")
     expect(sessionCache.get("-work", `${SESSION}.jsonl`)).toBeDefined()
+  })
+})
+
+describe("sessionCache bounds", () => {
+  beforeEach(() => {
+    sessionCache.clear()
+    __resetDeviceRevisionsForTest()
+    __resetIdentityForTest()
+    setPath("/")
+  })
+
+  const views = new Map<SessionView, string>()
+  function cache(fileName: string, bytes: number, at: number) {
+    const view = { turns: [] } as unknown as SessionView
+    views.set(view, fileName)
+    sessionCache.set(view, { dirName: "-d", fileName, watchOffset: bytes, loadId: 1 }, 0, false)
+    sessionCache.update("-d", fileName, { lastAccessed: at })
+  }
+
+  it("keeps at most five entries, releasing the least recently used", () => {
+    const released: string[] = []
+    const stop = sessionCache.onRelease((view) => released.push(views.get(view) ?? "?"))
+    for (let index = 0; index < 6; index++) cache(`s${index}.jsonl`, 10, index)
+    stop()
+    expect(released).toEqual(["s0.jsonl"])
+    expect(sessionCache.get("-d", "s0.jsonl")).toBeUndefined()
+    expect(sessionCache.get("-d", "s5.jsonl")).toBeDefined()
+  })
+
+  it("drops other entries once the transcript they cover passes the byte bound, never the one just written", () => {
+    const third = MAX_CACHED_TRANSCRIPT_BYTES / 3
+    cache("a.jsonl", third, 1)
+    cache("b.jsonl", third, 2)
+    cache("c.jsonl", third, 3)
+
+    // History paged in above b's tail moves its cursor back past the bound.
+    sessionCache.update("-d", "b.jsonl", { nextByteOffset: -third, olderTurns: [] })
+    expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
+    expect(sessionCache.get("-d", "c.jsonl")).toBeDefined()
+
+    // A single session larger than the bound stays while it is the one in use.
+    sessionCache.update("-d", "c.jsonl", { nextByteOffset: -2 * MAX_CACHED_TRANSCRIPT_BYTES })
+    expect(sessionCache.get("-d", "c.jsonl")).toBeDefined()
+    expect(sessionCache.get("-d", "b.jsonl")).toBeUndefined()
   })
 })
