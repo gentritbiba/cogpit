@@ -32,6 +32,8 @@ import { TimelineList } from "../TimelineList"
 const VIEWPORT = 500
 const BLOCK = 50
 const blockHeights = new Map<string, number>()
+/** Height of a block the test has not sized. */
+let blockSize = BLOCK
 let rawScrollTop = 0
 let scroller: HTMLElement | null = null
 const writes: number[] = []
@@ -39,7 +41,7 @@ let resizeCallback: ResizeObserverCallback | null = null
 
 function heightOf(el: Element): number {
   if (!(el instanceof HTMLElement)) return 0
-  if (el.dataset.block) return blockHeights.get(el.dataset.block) ?? BLOCK
+  if (el.dataset.block) return blockHeights.get(el.dataset.block) ?? blockSize
   if (el.classList.contains("absolute")) return 0
   if (el.style.height) return parseFloat(el.style.height)
   let total = 0
@@ -69,10 +71,12 @@ function patch(name: string, descriptor: PropertyDescriptor) {
 
 beforeEach(() => {
   blockHeights.clear()
+  blockSize = BLOCK
   rawScrollTop = 0
   writes.length = 0
   appState.activeTurnIndex = null
   appState.activeToolCallId = null
+  appState.expandAll = false
   patch("scrollTop", {
     get(this: Element) { return isScroller(this) ? scrollTop() : 0 },
     set(this: Element, value: number) {
@@ -123,9 +127,10 @@ interface Props {
   hasMore?: boolean
   onLoadMore?: () => void
   sessionChangeKey?: number
+  sessionKey?: string
 }
 
-function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChangeKey = 1 }: Props & { controller: TimelineScrollController }) {
+function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChangeKey = 1, sessionKey = "s1" }: Props & { controller: TimelineScrollController }) {
   const keys = turnKeysOf(turns)
   const rows = turns.map((turn, index) => ({ turn, index, key: keys[index] }))
   return (
@@ -135,7 +140,7 @@ function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChange
           rows={rows}
           turnCount={turns.length}
           controller={controller}
-          sessionKey="s1"
+          sessionKey={sessionKey}
           sessionChangeKey={sessionChangeKey}
           hasMore={hasMore}
           isLoadingOlder={false}
@@ -456,6 +461,21 @@ describe("TimelineList with the scroll engine", () => {
     appState.activeToolCallId = "call-6"
     rerender({ turns: makeTurns(ids(0, 200)) })
     expect(jump).toHaveBeenCalledTimes(2)
+  })
+
+  // Review finding 3: rows measured before an expand-all toggle kept their old heights while unmounted.
+  it("forgets measured heights when expand-all toggles", () => {
+    const turns = makeTurns(ids(0, 200))
+    const { rerender, controller } = mount({ turns, sessionKey: "expand-toggle" })
+    userScrollTo(scrollTop() - 6000)
+    expect(renderedKeys()).not.toContain("t199")
+    blockSize = 150
+    appState.expandAll = true
+    rerender({ turns, sessionKey: "expand-toggle" })
+    // Rows below are measured expanded or estimated, none carried at its collapsed 100 px.
+    const plan = controller.getPlan()
+    const below = 199 - Number(plan.segments.at(-1)!.last.slice(1))
+    expect(plan.bottomPad).toBeGreaterThanOrEqual(below * 240)
   })
 
   it("loads older history once the first row is within three viewports", () => {

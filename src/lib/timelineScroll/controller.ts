@@ -381,7 +381,9 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       this.heightStore = timelineHeights.forSession(input.sessionKey)
       this.blockStore = blockHeights.forSession(input.sessionKey)
     }
-    if (previous?.expandAll !== input.expandAll || !sameKeys(input.keys, this.keys)) {
+    const expandToggled = previous?.expandAll !== input.expandAll
+    if (expandToggled) this.liveHeights.clear()
+    if (expandToggled || !sameKeys(input.keys, this.keys)) {
       this.keys = input.keys
       this.indexOf = new Map(input.keys.map((key, index) => [key, index]))
       this.rebuildHeights()
