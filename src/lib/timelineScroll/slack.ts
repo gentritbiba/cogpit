@@ -45,6 +45,24 @@ export function normalizeTop({ topPad, target, scrollTop }: { topPad: number; ta
   return { topPad: target, scrollTop: Math.max(0, scrollTop + target - topPad) }
 }
 
+/**
+ * Whether the top pad holds more than its target (history reserve plus the
+ * rows above the range) and that excess, the pad's topmost part, is within a
+ * viewport above the view. Nothing stands for that space, so reaching it
+ * shows a blank screen; it cannot wait for scroll idle to be trimmed.
+ */
+export function excessNearView({ topPad, target, padTop, viewTop, viewport }: {
+  topPad: number
+  target: number
+  /** Content offset of the pad's top edge. */
+  padTop: number
+  viewTop: number
+  viewport: number
+}): boolean {
+  const excess = topPad - target
+  return excess >= 1 && viewTop - viewport < padTop + excess
+}
+
 /** Bottom slack left after dropping the part below the viewport. */
 export function trimBottomSlack({ bottomSlack, scrollHeight, scrollTop, clientHeight }: {
   bottomSlack: number

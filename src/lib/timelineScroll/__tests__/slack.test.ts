@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { absorb, isClamp, normalizeTop, slackForTarget, trimBottomSlack } from "../slack"
+import { absorb, excessNearView, isClamp, normalizeTop, slackForTarget, trimBottomSlack } from "../slack"
 
 describe("absorb", () => {
   it("takes a shift above the anchor out of the top slack without a scroll write", () => {
@@ -62,5 +62,27 @@ describe("trimBottomSlack", () => {
   })
   it("keeps the slack the reader is looking at", () => {
     expect(trimBottomSlack({ bottomSlack: 300, scrollHeight: 3000, scrollTop: 2400, clientHeight: 500 })).toBe(200)
+  })
+})
+
+describe("excessNearView", () => {
+  // Regression: the mid session opened with a 10k px reserve estimated from its tail's bytes. Its two
+  // older pages turned out to be 3k px, and once the history ran out (target 0 above row 0) the pad
+  // kept the rest. Trimming waited for scroll idle, which a trackpad never reaches, so the reader
+  // scrolled through thousands of px of pad with every row below the viewport.
+  it("flags pad that stands for nothing once the view comes within a viewport of it", () => {
+    const stale = { topPad: 9000, target: 0, padTop: 0, viewport: 900 }
+    expect(excessNearView({ ...stale, viewTop: 9500 })).toBe(true)
+    expect(normalizeTop({ topPad: 9000, target: 0, scrollTop: 9500 })).toEqual({ topPad: 0, scrollTop: 500 })
+    expect(excessNearView({ ...stale, viewTop: 6000 })).toBe(true)
+  })
+
+  it("leaves the pad alone while its excess is more than a viewport above the view", () => {
+    expect(excessNearView({ topPad: 3000, target: 2000, padTop: 100, viewTop: 2500, viewport: 900 })).toBe(false)
+  })
+
+  it("leaves a pad that is all reserve and rows", () => {
+    expect(excessNearView({ topPad: 2000, target: 2000, padTop: 0, viewTop: 0, viewport: 900 })).toBe(false)
+    expect(excessNearView({ topPad: 1500, target: 2000, padTop: 0, viewTop: 0, viewport: 900 })).toBe(false)
   })
 })

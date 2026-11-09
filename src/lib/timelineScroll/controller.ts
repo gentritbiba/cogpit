@@ -4,7 +4,7 @@ import type { BlockWindow, BlockWindowHost, WindowViewport } from "./blockWindow
 import { blockHeights, timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
 import { reserveHeight, shouldLoadOlder } from "./history"
 import { layoutTops, mergeSegments, planRange, rowsOverlapping, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
-import { absorb, normalizeTop, slackForTarget, trimBottomSlack } from "./slack"
+import { absorb, excessNearView, normalizeTop, slackForTarget, trimBottomSlack } from "./slack"
 import type { ScrollToTurnOptions, TimelineHandle, TimelineViewport } from "./types"
 
 /**
@@ -430,6 +430,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       this.measureRows()
     }
 
+    this.trimExcessNearView()
     if (fromCommit || this.replanPending || !this.viewportCovered()) this.replan()
     else this.replanPending = true
     this.recordAnchor()
@@ -817,6 +818,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     })
     this.lastScrollTop = current
     if (this.input) {
+      this.trimExcessNearView()
       this.recordAnchor()
       this.replan()
       this.updateWindows(false)
@@ -906,6 +908,23 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     this.updateWindows(true)
     this.updateIndicators()
     this.maybeLoadOlder()
+  }
+
+  /**
+   * Drops top pad that stands for nothing (an overestimated reserve whose
+   * history has loaded, or slack from absorbed shifts) before scrolling
+   * reaches it. Pad and `scrollTop` move together, so nothing on screen moves.
+   */
+  private trimExcessNearView(): void {
+    const scroller = this.scroller
+    if (!scroller || !this.topPadEl || this.placement !== null) return
+    const target = this.topPadTarget()
+    if (!excessNearView({ topPad: this.topPad, target, padTop: this.contentTop(this.topPadEl), viewTop: scroller.scrollTop, viewport: scroller.clientHeight })) return
+    const next = normalizeTop({ topPad: this.topPad, target, scrollTop: scroller.scrollTop })
+    this.writeTopPad(next.topPad)
+    this.writeScrollTop(next.scrollTop)
+    this.renderedTops = new Map()
+    this.measureRows()
   }
 
   private maybeLoadOlder(): void {
