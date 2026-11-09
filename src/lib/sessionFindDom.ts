@@ -80,16 +80,38 @@ export function spanElement(span: Span): Element | null {
 export interface ActiveMatch {
   turnKey: string
   callId: string | null
+  /** The content block holding the match outside a tool card; null for the turn's head. */
+  block: number | null
   /** Which occurrence in that scope, counted from the start, or from the end when `fromEnd`. */
   nth: number
   fromEnd: boolean
 }
 
-/** The occurrences that stand for an active match in its mounted row: the tool card's own, or the row's outside tool cards. */
-export function scopeSpans(row: Element, query: string, callId: string | null): { scope: Element; spans: Span[] } | null {
-  const scope = callId === null ? row : row.querySelector(toolSelector(callId))
-  if (!scope) return null
-  return { scope, spans: occurrenceSpans(scope, query, callId === null ? TOOL_SELECTOR : undefined) }
+const BLOCK_SELECTOR = "[data-blocks]"
+const OUTSIDE_SCOPE = `${TOOL_SELECTOR}, ${BLOCK_SELECTOR}`
+
+function holdsBlock(el: HTMLElement, block: number): boolean {
+  const [first, last] = el.dataset.blocks!.split("-").map(Number)
+  return first <= block && block <= last
+}
+
+/**
+ * The occurrences that stand for an active match in its mounted row: a tool
+ * card's own; a content block's, from the innermost elements rendering it
+ * (a long turn mounts only some of its blocks, so a block is the widest scope
+ * whose text is all there); or the turn head's, outside every block. Null
+ * until the scope is mounted.
+ */
+export function scopeSpans(row: Element, query: string, callId: string | null, block: number | null): { scope: Element; spans: Span[] } | null {
+  if (callId !== null) {
+    const card = row.querySelector(toolSelector(callId))
+    return card ? { scope: card, spans: occurrenceSpans(card, query) } : null
+  }
+  if (block === null) return { scope: row, spans: occurrenceSpans(row, query, OUTSIDE_SCOPE) }
+  const holders = [...row.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)].filter((el) => holdsBlock(el, block))
+  const innermost = holders.filter((el) => !holders.some((other) => other !== el && el.contains(other)))
+  if (innermost.length === 0) return null
+  return { scope: innermost[0], spans: innermost.flatMap((el) => occurrenceSpans(el, query, OUTSIDE_SCOPE)) }
 }
 
 /** The occurrence an active match stands for; the nearest one when the DOM shows fewer. */
@@ -132,6 +154,7 @@ export class FindPainter {
 
   update(scroller: HTMLElement | null, query: string, active: ActiveMatch | null): void {
     const sameActive = active?.turnKey === this.active?.turnKey && active?.callId === this.active?.callId
+      && active?.block === this.active?.block
       && active?.nth === this.active?.nth && active?.fromEnd === this.active?.fromEnd
     if (scroller === this.scroller && query === this.query && sameActive) return
     if (scroller !== this.scroller || query !== this.query) {
@@ -225,7 +248,7 @@ export class FindPainter {
     if (this.active) {
       activeRow = scroller.querySelector(rowSelector(this.active.turnKey))
       if (activeRow && this.activeSpan?.row !== activeRow) {
-        const found = scopeSpans(activeRow, this.query, this.active.callId)
+        const found = scopeSpans(activeRow, this.query, this.active.callId, this.active.block)
         this.activeSpan = { row: activeRow, span: found ? pickSpan(found.spans, this.active.nth, this.active.fromEnd) : null }
       }
       activeSpan = activeRow ? this.activeSpan?.span ?? null : null

@@ -64,3 +64,6 @@ export class HeightCache {
 }
 
 export const timelineHeights = new HeightCache()
+
+/** Heights of items inside windowed rows (blocks of a giant turn, calls of a long group). */
+export const blockHeights = new HeightCache(20, 20000)

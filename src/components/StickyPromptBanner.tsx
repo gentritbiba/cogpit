@@ -3,6 +3,7 @@ import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
+import { revealKey, useTimelineStore } from "@/components/timeline/disclosure"
 import type { ParsedSession, Turn, UserContent } from "../../shared/session/types"
 import { getUserMessageImages, getUserMessageText } from "../../shared/session/parser"
 import { composerPromptText } from "../../shared/session/composerContext"
@@ -97,14 +98,24 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
   const row = container.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(firstVisibleKey)}"]`)
 
   if (row && row.getBoundingClientRect().top <= rootTop) {
-    const bubbles = row.querySelectorAll<HTMLElement>(READER_SELECTOR)
-    for (let index = bubbles.length - 1; index >= 0; index--) {
-      const rect = bubbles[index].getBoundingClientRect()
+    const bubbles = new Map<string, HTMLElement>()
+    for (const bubble of row.querySelectorAll<HTMLElement>(READER_SELECTOR)) bubbles.set(bubble.dataset.readerPrompt!, bubble)
+    const firstMounted = firstMountedBlock(row)
+    const messages = readerMessages(turns[turnIndex])
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const { key } = messages[index]
+      const bubble = bubbles.get(key)
+      // A giant turn mounts only the blocks near the viewport; a prompt in a block before them is above it.
+      if (!bubble) {
+        if (key !== "prompt" && Number(key) < firstMounted) return { turnIndex, key }
+        continue
+      }
+      const rect = bubble.getBoundingClientRect()
       if (rect.top > rootTop) continue
-      return rect.bottom > rootTop ? null : { turnIndex, key: bubbles[index].dataset.readerPrompt! }
+      return rect.bottom > rootTop ? null : { turnIndex, key }
     }
     // The reader opened this turn and their prompt is just below the top.
-    if (bubbles[0]?.dataset.readerPrompt === "prompt") return null
+    if (messages[0]?.key === "prompt") return null
   }
 
   // None in this turn starts above the viewport, so it is the last one sent
@@ -117,6 +128,15 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
   return null
 }
 
+/** The first content block a windowed turn has mounted; Infinity when it mounts none. */
+function firstMountedBlock(row: Element): number {
+  let first = Infinity
+  for (const item of row.querySelectorAll<HTMLElement>("[data-blocks]")) {
+    first = Math.min(first, Number(item.dataset.blocks!.split("-")[0]))
+  }
+  return first
+}
+
 /** Where the viewport starts below the session chrome floating over it, which the scroller's `scroll-padding-top` reserves. */
 function visibleTop(container: HTMLElement): number {
   return container.getBoundingClientRect().top + (parseFloat(getComputedStyle(container).scrollPaddingTop) || 0)
@@ -127,6 +147,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
   scrollContainerRef,
   timelineRef,
 }: StickyPromptBannerProps) {
+  const store = useTimelineStore()
   const [sticky, setSticky] = useState<MessageAddress & { sessionId: string } | null>(null)
   const turns = session.turns
   const keys = useMemo(() => turnKeysOf(turns), [turns])
@@ -174,7 +195,12 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     const turnKey = keys[message.turnIndex]
     if (turnKey === undefined) return
     const selector = `[data-reader-prompt="${CSS.escape(message.key)}"]`
-    void timelineRef.current?.scrollToTurn(turnKey, { target: (row) => row.querySelector(selector) })
+    // A prompt sent mid-turn sits in a content block, which a giant turn may not have mounted.
+    const block = message.key === "prompt" ? null : Number(message.key)
+    if (store && block !== null) store.set(revealKey(turnKey), block)
+    void timelineRef.current?.scrollToTurn(turnKey, { target: (row) => row.querySelector(selector) }).then(() => {
+      if (store && block !== null && store.get(revealKey(turnKey)) === block) store.set(revealKey(turnKey), null)
+    })
   }
 
   return (

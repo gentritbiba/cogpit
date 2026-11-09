@@ -1,5 +1,7 @@
+import { isAnimatingSize } from "./animation"
 import { followReducer, RESUME_DISTANCE, type FollowEvent, type FollowState } from "./follow"
-import { timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
+import type { BlockWindow, BlockWindowHost, WindowViewport } from "./blockWindow"
+import { blockHeights, timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
 import { reserveHeight, shouldLoadOlder } from "./history"
 import { layoutTops, mergeSegments, planRange, rowsOverlapping, sumHeights, type Extent } from "./layout"
 import { absorb, normalizeTop, slackForTarget, trimBottomSlack } from "./slack"
@@ -75,7 +77,6 @@ const NAVIGATION_HOLD_MS = 1500
 const TARGET_RETRY_FRAMES = 10
 const EMPTY_PLAN: RenderPlan = { segments: [], gaps: [], bottomPad: 0 }
 const PLAN_TOLERANCE = 2
-const SIZE_PROPERTIES = new Set(["height", "maxHeight", "minHeight", "blockSize", "gridTemplateRows"])
 
 function sameKeys(a: readonly string[], b: readonly string[]): boolean {
   if (a === b) return true
@@ -121,18 +122,7 @@ function isActivatable(target: EventTarget | null): target is Element {
   return target instanceof Element && target.closest("button, a[href], summary, [role=button], [aria-expanded]") !== null
 }
 
-/** A height animation is running somewhere in the row, so its size is not final. */
-function isAnimatingSize(element: Element): boolean {
-  if (typeof element.getAnimations !== "function") return false
-  return element.getAnimations({ subtree: true }).some((animation) => {
-    if (animation.playState !== "running") return false
-    const effect = animation.effect
-    if (!(effect instanceof KeyframeEffect)) return false
-    return effect.getKeyframes().some((frame) => Object.keys(frame).some((property) => SIZE_PROPERTIES.has(property)))
-  })
-}
-
-export class TimelineScrollController implements TimelineHandle {
+export class TimelineScrollController implements TimelineHandle, BlockWindowHost {
   readonly scrollerRef: { current: HTMLDivElement | null } = { current: null }
 
   private scroller: HTMLDivElement | null = null
@@ -147,6 +137,8 @@ export class TimelineScrollController implements TimelineHandle {
   private input: TimelineRowsInput | null = null
   private history: HistoryBytes = { remaining: 0, loaded: 0 }
   private heightStore: SessionHeights | null = null
+  private blockStore: SessionHeights | null = null
+  private readonly windows = new Set<BlockWindow>()
   private bucket = 0
   private keys: readonly string[] = []
   private indexOf = new Map<string, number>()
@@ -384,7 +376,10 @@ export class TimelineScrollController implements TimelineHandle {
     const previous = this.input
     this.input = input
     if (input.sessionChangeKey !== this.sessionChangeKey) this.startSession(input.sessionChangeKey)
-    if (!this.heightStore || previous?.sessionKey !== input.sessionKey) this.heightStore = timelineHeights.forSession(input.sessionKey)
+    if (!this.heightStore || previous?.sessionKey !== input.sessionKey) {
+      this.heightStore = timelineHeights.forSession(input.sessionKey)
+      this.blockStore = blockHeights.forSession(input.sessionKey)
+    }
     if (previous?.expandAll !== input.expandAll || !sameKeys(input.keys, this.keys)) {
       this.keys = input.keys
       this.indexOf = new Map(input.keys.map((key, index) => [key, index]))
@@ -445,6 +440,7 @@ export class TimelineScrollController implements TimelineHandle {
     if (fromCommit || this.replanPending || !this.viewportCovered()) this.replan()
     else this.replanPending = true
     this.recordAnchor()
+    if (fromCommit) this.updateWindows()
     this.updateIndicators()
     this.maybeLoadOlder()
     this.notifyViewport()
@@ -832,6 +828,7 @@ export class TimelineScrollController implements TimelineHandle {
     if (this.input) {
       this.recordAnchor()
       this.replan()
+      this.updateWindows()
       this.maybeLoadOlder()
     }
     this.updateIndicators()
@@ -915,6 +912,7 @@ export class TimelineScrollController implements TimelineHandle {
     this.measureRows()
     this.replan()
     this.recordAnchor()
+    this.updateWindows()
     this.updateIndicators()
     this.maybeLoadOlder()
   }
@@ -952,6 +950,44 @@ export class TimelineScrollController implements TimelineHandle {
       this.notifyFrame = null
       for (const listener of this.viewportListeners) listener()
     })
+  }
+
+  // ── Windows inside rows ────────────────────────────────────────────────────
+
+  attachWindow = (blockWindow: BlockWindow): (() => void) => {
+    this.windows.add(blockWindow)
+    if (this.scroller && this.input) blockWindow.update(this.windowViewport())
+    return () => this.windows.delete(blockWindow)
+  }
+
+  windowCommitted = (): void => {
+    if (this.scroller && this.input) this.layoutPass(false)
+  }
+
+  viewOffsetInRow = (rowKey: string): number => {
+    const index = this.indexOf.get(rowKey)
+    if (!this.scroller || this.placement === "top" || index === undefined || this.navigation?.key === rowKey) return -Infinity
+    if (this.follow.following) return Infinity
+    return this.scroller.scrollTop - this.geometry()[index]
+  }
+
+  viewportHeight = (): number => this.scroller?.clientHeight ?? window.innerHeight
+
+  blockHeight = (key: string): number | undefined => this.blockStore?.get(key, this.bucket, this.input?.expandAll ?? false)
+
+  setBlockHeight = (key: string, height: number): void => {
+    this.blockStore?.set(key, this.bucket, this.input?.expandAll ?? false, height)
+  }
+
+  private windowViewport(): WindowViewport {
+    const scroller = this.scroller!
+    return { top: scroller.getBoundingClientRect().top, height: scroller.clientHeight }
+  }
+
+  private updateWindows(): void {
+    if (this.windows.size === 0 || !this.scroller) return
+    const viewport = this.windowViewport()
+    for (const blockWindow of this.windows) blockWindow.update(viewport)
   }
 
   // ── TimelineHandle ─────────────────────────────────────────────────────────

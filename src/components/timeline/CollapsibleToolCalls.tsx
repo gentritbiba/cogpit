@@ -9,7 +9,10 @@ import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { useDisclosureKey, useRevealTarget, useTimelineState } from "./disclosure"
-import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
+import { WindowedItems, type WindowItem } from "./WindowedItems"
+
+const NO_PINS: readonly string[] = []
+import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity, type ToolActivityEntry } from "@/lib/toolActivity"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls, expandAll, expandToolPayloads, activeToolCallId,
@@ -39,12 +42,33 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   // Navigation (find, a jump to a call) opens the group holding its target.
   const revealTarget = useRevealTarget()
-  const holdsRevealTarget = revealTarget !== null && (typeof revealTarget === "string"
+  const holdsRevealTarget = typeof revealTarget === "string"
     ? toolCalls.some((call) => call.id === revealTarget)
-    : activityItems?.some((item) => item.kind === "thinking" && item.blocks === revealTarget) === true)
+    : Array.isArray(revealTarget) && activityItems?.some((item) => item.kind === "thinking" && item.blocks === revealTarget) === true
   useEffect(() => {
     if (holdsRevealTarget) setOpenOverride(true)
   }, [holdsRevealTarget, setOpenOverride])
+
+  const thinkingOrdinal = useMemo(() => {
+    const ordinals = new Map<ToolActivityEntry, number>()
+    for (const entry of entries) if (entry.kind === "thinking") ordinals.set(entry, ordinals.size)
+    return ordinals
+  }, [entries])
+  const items: WindowItem[] = tail.visible.map((entry) => entry.kind === "tool_call"
+    ? { key: entry.toolCall.id, node: renderCall(entry.toolCall) }
+    : {
+      key: `thinking-${thinkingOrdinal.get(entry)}`,
+      blocks: entry.block === undefined ? undefined : [entry.block, entry.block],
+      node: <div data-scroll-anchor="" className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>,
+    })
+  const pinned = revealTarget === null || typeof revealTarget === "number"
+    ? NO_PINS
+    : typeof revealTarget === "string"
+      ? [revealTarget]
+      : items.filter((_, index) => {
+        const entry = tail.visible[index]
+        return entry.kind === "thinking" && revealTarget.includes(entry.blocks[0])
+      }).map((item) => item.key)
 
   function renderCall(call: ToolCall) {
     const isActive = activeToolCallId === call.id
@@ -93,9 +117,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         <CollapsibleContent id={panelId}>
           <div className="ml-[15px] min-w-0 border-l border-border/60 py-0.5 pl-2">
             {tail.hidden > 0 && <Button type="button" variant="ghost" size="xs" className="mb-0.5 text-muted-foreground" onClick={() => setOpenOverride(true)}>Show {tail.hidden} earlier {tail.hidden === 1 ? "step" : "steps"}</Button>}
-            {tail.visible.map((entry) => entry.kind === "tool_call"
-              ? renderCall(entry.toolCall)
-              : <div key={`thinking-${entries.filter((item) => item.kind === "thinking").indexOf(entry)}`} data-scroll-anchor="" className="px-2 py-1"><ThinkingBlock blocks={entry.blocks} /></div>)}
+            <WindowedItems id="calls" items={items} pinned={pinned} />
           </div>
         </CollapsibleContent>
       </Collapsible>

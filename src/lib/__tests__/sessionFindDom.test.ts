@@ -44,13 +44,30 @@ describe("scopeSpans and pickSpan", () => {
   const row = el(`<div data-row-key="t"><p>needle a</p><div data-tool-call-id="c1"><b>needle</b><i>needle</i></div><p>needle b</p></div>`)
 
   it("counts a turn's text outside its tool cards, and a tool card's own text", () => {
-    expect(scopeSpans(row, "needle", null)!.spans.map((span) => spanElement(span)!.textContent)).toEqual(["needle a", "needle b"])
-    expect(scopeSpans(row, "needle", "c1")!.scope).toBe(row.querySelector("[data-tool-call-id]"))
-    expect(scopeSpans(row, "needle", "missing")).toBeNull()
+    expect(scopeSpans(row, "needle", null, null)!.spans.map((span) => spanElement(span)!.textContent)).toEqual(["needle a", "needle b"])
+    expect(scopeSpans(row, "needle", "c1", null)!.scope).toBe(row.querySelector("[data-tool-call-id]"))
+    expect(scopeSpans(row, "needle", "missing", null)).toBeNull()
+  })
+
+  it("scopes a block's text to the innermost elements rendering it, leaving out nested blocks and tool cards", () => {
+    const turn = el(`<div data-row-key="t">
+      <p>needle head</p>
+      <div data-blocks="3-5"><p>needle text</p>
+        <div data-blocks="4-4"><i>needle thought one</i></div>
+        <div data-tool-call-id="c9">needle call</div>
+        <div data-blocks="4-4"><i>needle thought two</i></div>
+      </div>
+    </div>`)
+    const words = (block: number | null) => scopeSpans(turn, "needle", null, block)!.spans.map((span) => spanElement(span)!.textContent)
+    expect(words(3)).toEqual(["needle text"])
+    expect(words(4)).toEqual(["needle thought one", "needle thought two"])
+    expect(words(null)).toEqual(["needle head"])
+    // A block a long turn has not mounted yet has no scope to count in.
+    expect(scopeSpans(turn, "needle", null, 9)).toBeNull()
   })
 
   it("picks from the start or the end, and the nearest occurrence when the DOM shows fewer", () => {
-    const spans = scopeSpans(row, "needle", "c1")!.spans
+    const spans = scopeSpans(row, "needle", "c1", null)!.spans
     expect(spanElement(pickSpan(spans, 0, false)!)!.tagName).toBe("B")
     expect(spanElement(pickSpan(spans, 0, true)!)!.tagName).toBe("I")
     expect(spanElement(pickSpan(spans, 5, false)!)!.tagName).toBe("I")

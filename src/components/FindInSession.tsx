@@ -70,6 +70,11 @@ function isResult(part: FindPart): boolean {
   return part.kind === "tool" && part.result
 }
 
+/** The content block whose rendered text holds a part's occurrences; null for a tool card or the turn's head. */
+function scopeBlock(part: FindPart): number | null {
+  return part.kind === "block" || part.kind === "thinking" ? part.block : null
+}
+
 /**
  * What hit `index` is: its turn and part, and which DOM occurrence stands for
  * it. A tool card counts its own occurrences; a result renders last in the
@@ -85,7 +90,10 @@ function describeHit(results: FindResults, turns: readonly Turn[], keys: readonl
   const first = firstGroupOfTurn(results, group.turn)
   const within = index - results.starts[g]
   const callId = part.kind === "tool" ? part.callId : null
-  const sameScope = (other: FindPart) => (other.kind === "tool" ? other.callId : null) === callId && isResult(other) === isResult(part)
+  const block = scopeBlock(part)
+  const sameScope = (other: FindPart) => (other.kind === "tool" ? other.callId : null) === callId
+    && isResult(other) === isResult(part)
+    && scopeBlock(other) === block
   const fromEnd = isResult(part)
   let nth = fromEnd ? group.count - 1 - within : within
   if (fromEnd) {
@@ -98,7 +106,7 @@ function describeHit(results: FindResults, turns: readonly Turn[], keys: readonl
     }
   }
   const turnKey = keys[group.turn]
-  return { turn, turnKey, part, ordinal: index - results.starts[first], active: { turnKey, callId, nth, fromEnd } }
+  return { turn, turnKey, part, ordinal: index - results.starts[first], active: { turnKey, callId, block, nth, fromEnd } }
 }
 
 /** The hit a selection stands for now, or -1 when its turn has none. */
@@ -121,10 +129,12 @@ function revealStructure(store: TimelineStateStore, turnKey: string, turn: Turn,
     store.open(`${turnKey}:call:${part.callId}:panel`)
     return part.callId
   }
-  if ("block" in part) openWorkFoldFor(store, turnKey, turn, part.block)
-  if (part.kind !== "thinking") return null
-  store.set(revealKey(turnKey), part.blocks)
-  return part.blocks
+  if (!("block" in part)) return null
+  openWorkFoldFor(store, turnKey, turn, part.block)
+  // The thinking reveal also opens the group holding it; any other block only has to be mounted.
+  const target = part.kind === "thinking" ? part.blocks : part.block
+  store.set(revealKey(turnKey), target)
+  return target
 }
 
 /** Opens what cuts long content short where `part` renders; returns how many opened. */
@@ -197,7 +207,7 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
       if (total === 0) return
       const hit = describeHit(results, turns, keys, ((index % total) + total) % total)
       const { turnKey, part } = hit
-      const { callId, nth, fromEnd } = hit.active
+      const { callId, block, nth, fromEnd } = hit.active
       setSelection({ turnKey, ordinal: hit.ordinal })
 
       const timeline = timelineRef.current
@@ -212,7 +222,7 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
         target: (row) => {
           // The first try runs before React has rendered what the reveal opened.
           if (++attempts === 1) return null
-          const found = scopeSpans(row, q, callId)
+          const found = scopeSpans(row, q, callId, block)
           if (!found) return null
           if (found.spans.length > nth) return spanElement(pickSpan(found.spans, nth, fromEnd)!)
           if (!lengthOpened) {

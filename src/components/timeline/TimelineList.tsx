@@ -4,6 +4,7 @@ import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
 import { revealKey, revealToolCall, useTimelineStore } from "./disclosure"
+import { BlockWindowHostContext } from "./WindowedItems"
 import { toolSelector } from "@/lib/sessionFindDom"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -216,7 +217,7 @@ export function TimelineList({
   })
 
   return (
-    <>
+    <BlockWindowHostContext.Provider value={controller}>
       <div ref={controller.setList} role="feed" aria-busy={isLoadingOlder} className="motion-fade-enter">
         {showBeginning && (
           <div className={HISTORY_STATUS} data-testid="history-status">Beginning of session</div>
@@ -235,6 +236,6 @@ export function TimelineList({
       <div ref={controller.observeFooter}>
         <RedoSection />
       </div>
-    </>
+    </BlockWindowHostContext.Provider>
   )
 }

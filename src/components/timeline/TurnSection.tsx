@@ -26,7 +26,8 @@ import { isReaderPrompt, promptSource, type PromptSource } from "@/lib/userMessa
 import { InverseColorScheme } from "@/components/InverseColorScheme"
 import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
 import { useAppContext } from "@/contexts/AppContext"
-import { DisclosureScope, useDisclosureKey, useTimelineState } from "./disclosure"
+import { DisclosureScope, revealedBlock, useDisclosureKey, useRevealTarget, useTimelineState } from "./disclosure"
+import { WindowedItems, type WindowItem } from "./WindowedItems"
 import { useTimelineLiveStatus, useTimelineRowFacts } from "./TimelineRowsProvider"
 import { newContextId } from "../../../shared/session/composerContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
@@ -242,11 +243,13 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [foldPlan, turn.contentBlocks, workVisible])
 
+  const blockIndex = useMemo(() => new Map(turn.contentBlocks.map((block, index) => [block, index])), [turn.contentBlocks])
   const liveOnCallRow = useLiveOnCallRow(turn.toolCalls)
 
-  const contentBlockProps = {
+  const contentBlockProps: ContentItemsProps = {
     turnId: turn.id,
-    originalBlocks: turn.contentBlocks,
+    blockIndex,
+    lastTextIndex: finalTextIndex(turn.contentBlocks),
     liveOnCallRow,
     model: turn.model,
     effort: turn.effort,
@@ -257,6 +260,36 @@ const TurnSectionInner = memo(function TurnSectionInner({
     isSessionLive,
     skillMetadata,
   }
+
+  const keyFor = blockKeyer(blockIndex)
+  const items: WindowItem[] = foldPlan.foldable
+    ? [
+      ...contentItems(leadingBlocks, keyFor, contentBlockProps),
+      {
+        key: "work-fold",
+        node: (
+          <div data-scroll-anchor="">
+            <TurnWorkFold
+              label={
+                <TurnWorkLabel
+                  turn={turn}
+                  isTurnDone={isTurnDone}
+                  hiddenToolCalls={foldPlan.hiddenToolCalls}
+                />
+              }
+              expanded={workVisible}
+              onToggle={() => setWorkExpanded(!workVisible)}
+            />
+          </div>
+        ),
+      },
+      ...contentItems(trailingBlocks, keyFor, contentBlockProps),
+    ]
+    : contentItems(turn.contentBlocks, keyFor, contentBlockProps)
+
+  // Navigation keeps the block holding its target mounted.
+  const revealed = revealedBlock(turn, useRevealTarget())
+  const pinned = revealed < 0 ? NO_PINS : items.filter((item) => item.blocks && item.blocks[0] <= revealed && revealed <= item.blocks[1]).map((item) => item.key)
 
   return (
     <div
@@ -290,40 +323,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
           />
         )}
 
-        {foldPlan.foldable ? (
-          <>
-            {leadingBlocks.length > 0 && (
-              <ContentBlocks
-                blocks={leadingBlocks}
-                {...contentBlockProps}
-              />
-            )}
-            <div data-scroll-anchor="">
-              <TurnWorkFold
-                label={
-                  <TurnWorkLabel
-                    turn={turn}
-                    isTurnDone={isTurnDone}
-                    hiddenToolCalls={foldPlan.hiddenToolCalls}
-                  />
-                }
-                expanded={workVisible}
-                onToggle={() => setWorkExpanded(!workVisible)}
-              />
-            </div>
-            {trailingBlocks.length > 0 && (
-              <ContentBlocks
-                blocks={trailingBlocks}
-                {...contentBlockProps}
-              />
-            )}
-          </>
-        ) : (
-          <ContentBlocks
-            blocks={turn.contentBlocks}
-            {...contentBlockProps}
-          />
-        )}
+        <WindowedItems id="blocks" items={items} pinned={pinned} className="flex flex-col gap-2.5" />
 
         {isTurnDone && hasFileChanges && (
           <div data-scroll-anchor="">
@@ -638,41 +638,52 @@ function finalTextIndex(blocks: TurnContentBlock[]): number {
   return -1
 }
 
-/**
- * The blocks of a turn, each its own memoized element under its own
- * disclosure scope: a record that changes one block re-renders that block.
- */
-function ContentBlocks({
-  blocks,
-  turnId,
-  originalBlocks,
-  liveOnCallRow,
-  model,
-  effort,
-  isSessionLive,
-  ...activity
-}: ActivityProps & {
-  blocks: TurnContentBlock[]
+const NO_PINS: readonly string[] = []
+
+type KeyFor = (block: TurnContentBlock) => string
+
+/** Keys for the blocks of one render, made unique where two blocks share an identity. */
+function blockKeyer(blockIndex: ReadonlyMap<TurnContentBlock, number>): KeyFor {
+  const keyUses = new Map<string, number>()
+  return (block) => {
+    const base = blockIdentity(block) ?? `at-${blockIndex.get(block)}`
+    const used = keyUses.get(base) ?? 0
+    keyUses.set(base, used + 1)
+    return used === 0 ? base : `${base}#${used}`
+  }
+}
+
+type ContentItemsProps = ActivityProps & {
   turnId: string
-  originalBlocks: TurnContentBlock[]
+  /** Each block's index in the turn. */
+  blockIndex: ReadonlyMap<TurnContentBlock, number>
+  lastTextIndex: number
   /** Calls whose own row streams their sub-agent's live output. */
   liveOnCallRow: ReadonlySet<string>
   model: string | null
   effort?: string
   isSessionLive: boolean
-}) {
-  const elements: React.ReactNode[] = []
-  const lastTextIndex = finalTextIndex(originalBlocks)
+}
 
-  const keyUses = new Map<string, number>()
-  const keyFor = (block: TurnContentBlock) => {
-    const base = blockIdentity(block) ?? `at-${originalBlocks.indexOf(block)}`
-    const used = keyUses.get(base) ?? 0
-    keyUses.set(base, used + 1)
-    return used === 0 ? base : `${base}#${used}`
-  }
-  const push = (key: string, element: React.ReactNode) => {
-    elements.push(<DisclosureScope key={key} id={key}>{element}</DisclosureScope>)
+/**
+ * The blocks of a turn as window items, each its own memoized element under
+ * its own disclosure scope: a record that changes one block re-renders that
+ * block, and a giant turn mounts only the items near the viewport.
+ */
+function contentItems(blocks: TurnContentBlock[], keyFor: KeyFor, {
+  turnId,
+  blockIndex,
+  lastTextIndex,
+  liveOnCallRow,
+  model,
+  effort,
+  isSessionLive,
+  ...activity
+}: ContentItemsProps): WindowItem[] {
+  const items: WindowItem[] = []
+  const indexOf = (block: TurnContentBlock) => blockIndex.get(block) ?? -1
+  const push = (key: string, first: TurnContentBlock, last: TurnContentBlock, element: React.ReactNode) => {
+    items.push({ key, blocks: [indexOf(first), indexOf(last)], node: <DisclosureScope id={key}>{element}</DisclosureScope> })
   }
 
   let i = 0
@@ -680,24 +691,24 @@ function ContentBlocks({
     const block = blocks[i]
 
     if (block.kind === "thinking" || block.kind === "tool_calls") {
-      const { items, nextIndex } = collectActivity(blocks, i)
-      push(keyFor(block), <ActivityRun items={items} {...activity} />)
+      const { items: activityItems, nextIndex } = collectActivity(blocks, i, indexOf)
+      push(keyFor(block), block, blocks[nextIndex - 1], <ActivityRun items={activityItems} {...activity} />)
       i = nextIndex
       continue
     }
 
     if (block.kind === "text") {
-      const { items, nextIndex } = collectActivity(blocks, i + 1)
-      const blockIndex = originalBlocks.indexOf(block)
-      push(keyFor(block), (
+      const { items: activityItems, nextIndex } = collectActivity(blocks, i + 1, indexOf)
+      const index = indexOf(block)
+      push(keyFor(block), block, blocks[nextIndex - 1], (
         <TextRun
           block={block}
-          blockIndex={blockIndex}
-          isFinalText={blockIndex === lastTextIndex}
+          blockIndex={index}
+          isFinalText={index === lastTextIndex}
           turnId={turnId}
           model={model}
           effort={effort}
-          items={items}
+          items={activityItems}
           {...activity}
         />
       ))
@@ -709,18 +720,18 @@ function ContentBlocks({
     const key = keyFor(block)
     switch (block.kind) {
       case "queued_prompt":
-        push(key, (
+        push(key, block, block, (
           <div data-scroll-anchor="">
             <QueuedPrompt
               content={block.content}
               timestamp={block.timestamp ?? ""}
-              messageKey={String(originalBlocks.indexOf(block))}
+              messageKey={String(indexOf(block))}
             />
           </div>
         ))
         break
       case "agent_message":
-        push(key, (
+        push(key, block, block, (
           <div data-scroll-anchor="">
             <AgentMessageCard
               sender={block.sender}
@@ -734,7 +745,7 @@ function ContentBlocks({
         break
       case "sub_agent":
       case "background_agent":
-        push(key, (
+        push(key, block, block, (
           <div data-scroll-anchor="">
             <AgentPanel
               messages={block.messages}
@@ -747,10 +758,10 @@ function ContentBlocks({
         ))
         break
       case "hook_event":
-        push(key, <div data-scroll-anchor=""><HookEventChip events={block.events} /></div>)
+        push(key, block, block, <div data-scroll-anchor=""><HookEventChip events={block.events} /></div>)
         break
       case "plan_mode":
-        push(key, (
+        push(key, block, block, (
           <div data-scroll-anchor="">
             <PlanModeBlock
               plan={block.plan}
@@ -766,13 +777,13 @@ function ContentBlocks({
         ))
         break
       case "recap":
-        push(key, <div data-scroll-anchor=""><RecapBanner content={block.content} /></div>)
+        push(key, block, block, <div data-scroll-anchor=""><RecapBanner content={block.content} /></div>)
         break
       case "task_notification":
-        push(key, <div data-scroll-anchor=""><TaskNotificationBlock content={block.content} /></div>)
+        push(key, block, block, <div data-scroll-anchor=""><TaskNotificationBlock content={block.content} /></div>)
         break
       case "local_command":
-        push(key, (
+        push(key, block, block, (
           <div data-scroll-anchor="">
             <LocalCommandBlock
               content={block.content}
@@ -785,5 +796,5 @@ function ContentBlocks({
     }
   }
 
-  return <>{elements}</>
+  return items
 }

@@ -125,11 +125,21 @@ export function useScopeTurnKey(): string | null {
   return useContext(ScopeContext)?.root ?? null
 }
 
-/** What find asks a turn to show: a tool call by id, or a run of thinking. */
-export type RevealTarget = string | readonly ThinkingBlock[]
+/** What navigation asks a turn to show: a tool call by id, a run of thinking, or a content block by index. */
+export type RevealTarget = string | readonly ThinkingBlock[] | number
 
 export function revealKey(turnKey: string): string {
   return `${turnKey}:reveal`
+}
+
+/** The index in `turn.contentBlocks` of the block holding `target`, or -1. */
+export function revealedBlock(turn: Turn, target: RevealTarget | null): number {
+  if (target === null) return -1
+  if (typeof target === "number") return target
+  if (typeof target === "string") {
+    return turn.contentBlocks.findIndex((b) => (b.kind === "tool_calls" || b.kind === "plan_mode") && b.toolCalls.some((call) => call.id === target))
+  }
+  return turn.contentBlocks.findIndex((b) => b.kind === "thinking" && b.blocks === target)
 }
 
 /** Opens the turn's work fold when it hides `turn.contentBlocks[block]`. */

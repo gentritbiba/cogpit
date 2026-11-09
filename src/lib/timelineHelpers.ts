@@ -3,7 +3,8 @@ import type { TurnContentBlock, ToolCall, ThinkingBlock } from "../../shared/ses
 // ── Activity grouping (thinking + tool_calls) ──────────────────────────────
 
 export type ActivityItem =
-  | { kind: "thinking"; blocks: ThinkingBlock[]; thoughtForMs?: number }
+  /** `block` is the content block's index in its turn, where the caller knows it. */
+  | { kind: "thinking"; blocks: ThinkingBlock[]; thoughtForMs?: number; block?: number }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
 
 /** Upper bound on a single thinking block's attributed duration (10 minutes). */
@@ -25,10 +26,11 @@ function thinkingGapMs(
   return Math.min(delta, MAX_THINKING_BLOCK_MS)
 }
 
-/** Collect consecutive thinking + tool_calls blocks starting at `startIndex`. */
+/** Collect consecutive thinking + tool_calls blocks starting at `startIndex`; `indexOf` places a thinking block in its turn. */
 export function collectActivity(
   blocks: TurnContentBlock[],
   startIndex: number,
+  indexOf?: (block: TurnContentBlock) => number,
 ): {
   items: ActivityItem[]
   toolCalls: ToolCall[]
@@ -45,7 +47,9 @@ export function collectActivity(
     const block = blocks[j]
     if (block.kind === "thinking") {
       const ms = thinkingGapMs(blocks, j)
-      items.push({ kind: "thinking", blocks: block.blocks, thoughtForMs: ms })
+      items.push(indexOf
+        ? { kind: "thinking", blocks: block.blocks, thoughtForMs: ms, block: indexOf(block) }
+        : { kind: "thinking", blocks: block.blocks, thoughtForMs: ms })
       thinkingCount += block.blocks.length
       thoughtForMs += ms
       j++

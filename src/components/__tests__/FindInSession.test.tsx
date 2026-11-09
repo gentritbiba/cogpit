@@ -147,7 +147,7 @@ afterEach(() => {
 
 describe("FindInSession", () => {
   it("counts matches in unmounted rows and collapsed content, and navigates only through scrollToTurn", async () => {
-    const scroller = mountScroller(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
+    const scroller = mountScroller(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p><p>needle twice</p></div></div>`)
     const { handle, navigations } = makeHandle()
     const findRef = createRef<FindInSessionHandle>()
     render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
@@ -255,7 +255,7 @@ describe("FindInSession", () => {
   })
 
   it("never mutates the timeline's DOM", async () => {
-    const scroller = mountScroller(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
+    const scroller = mountScroller(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p><p>needle twice</p></div></div>`)
     const records: MutationRecord[] = []
     const observer = new MutationObserver((batch) => records.push(...batch))
     observer.observe(scroller, { subtree: true, childList: true, characterData: true, attributes: true })
@@ -274,12 +274,12 @@ describe("FindInSession", () => {
     records.push(...observer.takeRecords())
     observer.disconnect()
     expect(records).toEqual([])
-    expect(scroller.innerHTML).toBe(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
+    expect(scroller.innerHTML).toBe(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p><p>needle twice</p></div></div>`)
   })
 
   it("falls back to a ring over the active row where the Highlight API is missing", async () => {
     expect("highlights" in CSS).toBe(false)
-    const scroller = mountScroller(`<div data-row-key="t2"><p>needle once</p></div>`)
+    const scroller = mountScroller(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p></div></div>`)
     const row = scroller.firstElementChild!
     vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 600, height: 800 }))
     vi.spyOn(row, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ x: 20, y: 100, width: 500, height: 200 }))
@@ -309,7 +309,7 @@ describe("FindInSession", () => {
     vi.stubGlobal("Highlight", FakeHighlight)
     Object.defineProperty(CSS, "highlights", { value: registry, configurable: true })
     try {
-      const scroller = mountScroller(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
+      const scroller = mountScroller(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p><p>needle twice</p></div></div>`)
       const { handle } = makeHandle("t2")
       const findRef = createRef<FindInSessionHandle>()
       const view = render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
@@ -323,7 +323,7 @@ describe("FindInSession", () => {
       expect(active.ranges[0].startContainer.parentElement).toBe(scroller.querySelectorAll("p")[1])
       expect(screen.queryByTestId("find-ring")).toBeNull()
       // Highlights style ranges; the rows' DOM is untouched.
-      expect(scroller.innerHTML).toBe(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
+      expect(scroller.innerHTML).toBe(`<div data-row-key="t2"><div data-blocks="0-0"><p>needle once</p><p>needle twice</p></div></div>`)
 
       act(() => findRef.current!.close())
       await frame()
