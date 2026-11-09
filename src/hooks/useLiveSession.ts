@@ -73,7 +73,8 @@ export function useLiveSession(
   workerAppendRef.current = workerAppend
   const loadedSessionRef = useRef(loadedSession)
   loadedSessionRef.current = loadedSession
-  const lastResyncAtRef = useRef(0)
+  /** The last resync, and the transcript it was for: the cooldown holds for that transcript only. */
+  const lastResyncRef = useRef<{ transcript: string; at: number } | null>(null)
   // Streamed lines whose overlay messages go once the update holding them is on screen.
   const landingRef = useRef<{ digest: SessionDigest; lines: string[] } | null>(null)
 
@@ -210,10 +211,12 @@ export function useLiveSession(
       setAgentProgress(EMPTY_AGENT_PROGRESS)
     }
 
+    const transcript = `${dirName}/${fileName}`
     const resync = () => {
       const now = Date.now()
-      if (!onResyncRef.current || now - lastResyncAtRef.current < RESYNC_COOLDOWN_MS) return
-      lastResyncAtRef.current = now
+      const last = lastResyncRef.current
+      if (!onResyncRef.current || (last?.transcript === transcript && now - last.at < RESYNC_COOLDOWN_MS)) return
+      lastResyncRef.current = { transcript, at: now }
       onResyncRef.current({ keepBackoff: true })
     }
 

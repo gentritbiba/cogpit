@@ -776,6 +776,29 @@ describe("useLiveSession", () => {
       act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
       expect(onResync).toHaveBeenCalledTimes(2)
     })
+
+    it("reloads another transcript that resets within the cooldown of the last one (review 3 #3)", () => {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      const onResync = vi.fn()
+      const a: SessionSource = { dirName: "dir", fileName: "a.jsonl", loadId: 1, watchOffset: 100 }
+      const b: SessionSource = { dirName: "dir", fileName: "b.jsonl", loadId: 2, watchOffset: 100 }
+      const { rerender } = renderHook(
+        ({ source }) => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession),
+        { initialProps: { source: a } },
+      )
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "gap" }) })
+      expect(onResync).toHaveBeenCalledOnce()
+
+      vi.advanceTimersByTime(1_000)
+      rerender({ source: b })
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "gap" }) })
+      expect(onResync).toHaveBeenCalledTimes(2)
+
+      // Opening A again starts its cooldown afresh, as any switch does.
+      rerender({ source: { ...a, loadId: 3 } })
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "gap" }) })
+      expect(onResync).toHaveBeenCalledTimes(3)
+    })
   })
 
   it("closes EventSource on unmount", () => {
