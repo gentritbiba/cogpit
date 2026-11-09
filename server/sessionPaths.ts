@@ -1,8 +1,10 @@
+import { stat } from "node:fs/promises"
 import type { AgentKind } from "../shared/session/agent-descriptors"
 import { splitInstanceSessionId } from "../shared/session/instances"
-import { allStores, storeFor, storeForDirName } from "./agents"
+import { SESSION_LOOKUP_ORDER, allStores, storeFor, storeForDirName } from "./agents"
 import { isSinglePathSegment } from "./agents/containment"
 import { getSessionMeta } from "./sessionMetadata"
+import { sessionFileFor } from "./sessionCatalog"
 
 /**
  * Session-path resolution, expressed over the agent store registry.
@@ -26,24 +28,17 @@ export function resolveSessionFilePath(
   return storeForDirName(dirName).resolveSessionFile(dirName, fileName)
 }
 
-/**
- * Order in which storage is searched for a bare session id.
- *
- * Not `AGENT_KINDS`: this preserves the historical resolution order, and the
- * ids are near-unique across agents anyway, so the only thing the order really
- * decides is which store pays for the walk first.
- */
-const LOOKUP_ORDER: readonly AgentKind[] = ["claude", "codex", "copilot", "acp"]
-
 /** Find the transcript for a session id across every agent's storage. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {
   if (!isSinglePathSegment(sessionId)) return null
+  const known = sessionFileFor(sessionId)
+  if (known && await stat(known).then(() => true, () => false)) return known
   const instanceId = splitInstanceSessionId(sessionId).instanceId
   if (instanceId !== "default") {
     const store = allStores().find((store) => store.instanceId === instanceId)
     return store ? store.findSessionFile(sessionId) : null
   }
-  for (const kind of LOOKUP_ORDER) {
+  for (const kind of SESSION_LOOKUP_ORDER) {
     try {
       const filePath = await storeFor(kind).findSessionFile(sessionId)
       if (filePath) return filePath

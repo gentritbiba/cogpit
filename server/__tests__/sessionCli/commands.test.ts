@@ -696,6 +696,13 @@ describe("board", () => {
     expect(out(await run(["board", "clear"]))).toEqual({ sessionId: "parent-1", cleared: true })
   })
 
+  it("asks for what is left when a board does not say it", async () => {
+    expect(out(await run(["board", "set", "title: Wave 3\nsections:\n  - { title: Now, items: [parser] }"])))
+      .toMatchObject({ hint: expect.stringContaining("Next section") })
+    expect(out(await run(["board", "set", "title: Wave 3\nsections:\n  - { title: Next, items: [renderer] }"]))).not.toHaveProperty("hint")
+    expect(out(await run(["board", "set", "title: Wave 3\nprogress: 9/9"]))).not.toHaveProperty("hint")
+  })
+
   it("explains what it needs", async () => {
     expect(await run(["board", "set", "title: [unclosed"])).toMatchObject({ exitCode: EXIT.error, stderr: expect.stringContaining("could not read that") })
     expect(await run(["board", "set", "nothing: here"])).toMatchObject({ exitCode: EXIT.error, stderr: expect.stringContaining("needs a title, progress or sections") })

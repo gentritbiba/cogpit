@@ -1,10 +1,13 @@
 import type { ServerResponse } from "node:http"
 import type { AgentFormat } from "../../../shared/session/agents"
 import { RESULT_PROJECTION } from "../../../shared/contracts/toolResults"
-import { projectLines, type TranscriptAddress } from "../../agents/resultRefs"
+import { linesBeforeFirstTurn } from "../../../shared/session/pageCuts"
+import { projectLine, type TranscriptAddress } from "../../agents/resultRefs"
 import { openTranscript, readTranscriptText } from "../../agents/transcriptFile"
 import { sendJson } from "../../http"
-import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
+import { DEFAULT_PAGE_BYTE_BUDGET, DEFAULT_TAIL_BYTE_BUDGET, lineBytes, oldestKeptLine, parseByteBudget } from "./tailBudget"
+import { extractCompleteLines, splitLines, type LineRun } from "./transcriptLines"
+import { readTurnPage } from "./turnPages"
 
 const HEADER_BYTES = 4096
 /** Upper bound for growing the header read when the first line is oversized. */
@@ -21,80 +24,18 @@ const MAX_BEFORE_WINDOW_BYTES = 4 * 1024 * 1024
 /** Initial window for reading a transcript's last lines on a `?before=` page. */
 const LAST_LINES_BYTES = 65536
 
-/** Each line's native byte offset; identical lines share the first, which holds the same bytes. */
-type LineOffsets = Map<string, number>
-
-interface TailResult {
-  lines: string[]
-  byteOffset: number
-  totalSize: number
-  offsets: LineOffsets
-}
-
-interface RangeResult {
-  lines: string[]
-  byteOffset: number
-  offsets: LineOffsets
-}
-
 /** Names the raw lines a transcript's agent writes only for itself. */
 type NoiseTest = (line: string) => boolean
 
-type PageFormat = Pick<AgentFormat, "isNoiseLine" | "pageHeaderLine" | "projectResults">
+type PageFormat = Pick<AgentFormat, "isNoiseLine" | "pageHeaderLine" | "projectResults" | "pageCuts">
 
 const countLines = (lines: readonly string[], isNoise: NoiseTest): number =>
   lines.reduce((count, line) => (isNoise(line) ? count : count + 1), 0)
 
 interface HeaderResult {
   lines: string[]
+  starts: number[]
   bytesRead: number
-  offsets: LineOffsets
-}
-
-const NEWLINE = 0x0a
-
-/**
- * Extracts complete JSONL lines from a byte window starting at `readStart`.
- * When the window begins mid-file the first (potentially partial) line is
- * discarded and `byteOffset` advances to the next line boundary — computed on
- * the raw bytes so multibyte UTF-8 content cannot skew offsets. When
- * `truncatedEnd` is set (window ends mid-file without a trailing newline) the
- * final partial segment is discarded as well, so callers never emit a line
- * fragment that overlaps content at or after the window end.
- */
-function extractCompleteLines(buf: Buffer, readStart: number, truncatedEnd: boolean): RangeResult {
-  let contentStart = 0
-  if (readStart > 0) {
-    const firstNewline = buf.indexOf(NEWLINE)
-    if (firstNewline === -1) return { lines: [], byteOffset: readStart, offsets: new Map() }
-    contentStart = firstNewline + 1
-  }
-  let content = buf.subarray(contentStart)
-  if (truncatedEnd) {
-    const lastNewline = content.lastIndexOf(NEWLINE)
-    if (lastNewline === -1) return { lines: [], byteOffset: readStart, offsets: new Map() }
-    content = content.subarray(0, lastNewline + 1)
-  }
-  const { lines, offsets } = splitLines(content, readStart + contentStart)
-  if (lines.length === 0) return { lines: [], byteOffset: readStart, offsets }
-  return { lines, byteOffset: readStart + contentStart, offsets }
-}
-
-/** Non-blank lines of `content`, with each one's byte offset counted on the raw bytes from `start`. */
-function splitLines(content: Buffer, start: number): { lines: string[]; offsets: LineOffsets } {
-  const lines: string[] = []
-  const offsets: LineOffsets = new Map()
-  for (let from = 0; from < content.length;) {
-    const newline = content.indexOf(NEWLINE, from)
-    const end = newline === -1 ? content.length : newline
-    const line = content.subarray(from, end).toString("utf-8")
-    if (line.trim().length > 0) {
-      lines.push(line)
-      if (!offsets.has(line)) offsets.set(line, start + from)
-    }
-    from = end + 1
-  }
-  return { lines, offsets }
 }
 
 /**
@@ -105,7 +46,7 @@ function splitLines(content: Buffer, start: number): { lines: string[]; offsets:
  * `MAX_TAIL_WINDOW_BYTES` — so one fat line cannot reduce the tail to a
  * near-empty page. Noise lines are returned but not counted.
  */
-async function readTail(filePath: string, byteCount: number, minLines: number, isNoise: NoiseTest): Promise<TailResult> {
+async function readTail(filePath: string, byteCount: number, minLines: number, isNoise: NoiseTest): Promise<LineRun & { totalSize: number }> {
   const fh = await openTranscript(filePath)
   try {
     const fileStat = await fh.stat()
@@ -116,11 +57,11 @@ async function readTail(filePath: string, byteCount: number, minLines: number, i
       const readStart = totalSize - window
       const buf = Buffer.allocUnsafe(window)
       const { bytesRead } = await fh.read(buf, 0, window, readStart)
-      const { lines, byteOffset, offsets } = extractCompleteLines(buf.subarray(0, bytesRead), readStart, false)
+      const run = extractCompleteLines(buf.subarray(0, bytesRead), readStart, false)
 
       const canGrow = readStart > 0 && window < MAX_TAIL_WINDOW_BYTES
-      if (!canGrow || countLines(lines, isNoise) >= minLines) {
-        return { lines, byteOffset, totalSize, offsets }
+      if (!canGrow || countLines(run.lines, isNoise) >= minLines) {
+        return { ...run, totalSize }
       }
       window = Math.min(window * 2, MAX_TAIL_WINDOW_BYTES, totalSize)
     }
@@ -138,7 +79,7 @@ async function readTail(filePath: string, byteCount: number, minLines: number, i
  * page that reaches the start of the file can come back empty. The returned
  * `byteOffset` is the exact byte position of the first line in the window, so
  * paging with `?before=byteOffset` reconstructs the file, less its noise, with
- * no gaps or duplicates.
+ * no gaps or duplicates. Noise lines are left out of the result.
  */
 async function readRangeBefore(
   filePath: string,
@@ -146,13 +87,13 @@ async function readRangeBefore(
   initialWindow: number,
   minLines: number,
   isNoise: NoiseTest,
-): Promise<RangeResult> {
+): Promise<LineRun> {
   const fh = await openTranscript(filePath)
   try {
     const fileStat = await fh.stat()
     const totalSize = fileStat.size
     let end = Math.min(Math.max(endOffset, 0), totalSize)
-    if (end <= 0) return { lines: [], byteOffset: 0, offsets: new Map() }
+    if (end <= 0) return { lines: [], starts: [], byteOffset: 0, end: 0 }
 
     let window = Math.min(Math.max(initialWindow, 1), end)
     for (;;) {
@@ -160,17 +101,17 @@ async function readRangeBefore(
       const buf = Buffer.allocUnsafe(window)
       const { bytesRead } = await fh.read(buf, 0, window, readStart)
       const view = buf.subarray(0, bytesRead)
-      const truncatedEnd = end < totalSize && view[view.length - 1] !== NEWLINE
-      const { lines, byteOffset, offsets } = extractCompleteLines(view, readStart, truncatedEnd)
-      const kept = lines.filter((line) => !isNoise(line))
+      const truncatedEnd = end < totalSize && view[view.length - 1] !== 0x0a
+      const run = extractCompleteLines(view, readStart, truncatedEnd)
+      const keptAt = run.lines.flatMap((line, index) => (isNoise(line) ? [] : [index]))
 
-      if (readStart > 0 && window < MAX_BEFORE_WINDOW_BYTES && kept.length < minLines) {
+      if (readStart > 0 && window < MAX_BEFORE_WINDOW_BYTES && keptAt.length < minLines) {
         window = Math.min(window * 2, MAX_BEFORE_WINDOW_BYTES, end)
-      } else if (readStart > 0 && kept.length === 0) {
-        end = byteOffset
+      } else if (readStart > 0 && keptAt.length === 0) {
+        end = run.byteOffset
         window = Math.min(window, end)
       } else {
-        return { lines: kept, byteOffset, offsets }
+        return { ...run, lines: keptAt.map((index) => run.lines[index]), starts: keptAt.map((index) => run.starts[index]) }
       }
     }
   } finally {
@@ -189,23 +130,22 @@ export async function readSessionHeader(filePath: string): Promise<HeaderResult>
   try {
     const fileStat = await fh.stat()
     let readLen = Math.min(HEADER_BYTES, fileStat.size)
-    let text = ""
-    let bytesRead = 0
+    let buf = Buffer.alloc(0)
     for (;;) {
-      const buf = Buffer.allocUnsafe(readLen)
-      const result = await fh.read(buf, 0, readLen, 0)
-      bytesRead = result.bytesRead
-      text = buf.subarray(0, bytesRead).toString("utf-8")
+      buf = Buffer.allocUnsafe(readLen)
+      const { bytesRead } = await fh.read(buf, 0, readLen, 0)
+      buf = buf.subarray(0, bytesRead)
       const isWholeFile = bytesRead >= fileStat.size
-      if (isWholeFile || text.includes("\n") || readLen >= MAX_HEADER_BYTES) break
+      if (isWholeFile || buf.includes(0x0a) || readLen >= MAX_HEADER_BYTES) break
       readLen = Math.min(readLen * 4, Math.min(fileStat.size, MAX_HEADER_BYTES))
     }
-    const { lines: parts, offsets } = splitLines(Buffer.from(text, "utf-8"), 0)
+    const { lines, starts } = splitLines(buf, 0)
     // Drop the last element if we didn't read the whole file — it's likely truncated
-    if (bytesRead < fileStat.size && parts.length > 0) {
-      parts.pop()
+    if (buf.length < fileStat.size && lines.length > 0) {
+      lines.pop()
+      starts.pop()
     }
-    return { lines: parts, bytesRead, offsets }
+    return { lines, starts, bytesRead: buf.length }
   } finally {
     await fh.close()
   }
@@ -220,11 +160,9 @@ async function firstLineForPages(
   format: PageFormat,
   header: HeaderResult,
   lastLines: () => Promise<readonly string[]>,
-): Promise<(lines: string[], byteOffset: number) => string[]> {
+): Promise<string | undefined> {
   const first = header.lines[0]
-  const rewritten = first !== undefined && format.pageHeaderLine ? await format.pageHeaderLine(first, lastLines) : first
-  if (rewritten === first) return (lines) => lines
-  return (lines, byteOffset) => (byteOffset === 0 && lines[0] === first ? [rewritten, ...lines.slice(1)] : lines)
+  return first !== undefined && format.pageHeaderLine ? format.pageHeaderLine(first, lastLines) : first
 }
 
 /**
@@ -233,6 +171,9 @@ async function firstLineForPages(
  * otherwise the whole file as text. Pages leave out the format's noise lines;
  * the whole file is sent byte for byte, because its readers count its lines
  * and bytes against the file on disk (undo, the live stream's start offset).
+ *
+ * With `unit=turns` a page holds whole turns (see `readTurnPage`); without it,
+ * pages are cut by lines, as older readers expect.
  */
 export async function serveTranscript(
   res: ServerResponse,
@@ -243,66 +184,82 @@ export async function serveTranscript(
 ): Promise<void> {
   const isNoise = format.isNoiseLine
   // Opt-in: heavy result bodies stay on the server; offsets and line counts stay native.
-  const project = params.get("projection") === RESULT_PROJECTION
-    ? (lines: string[], ...offsets: LineOffsets[]) => projectLines(format, lines, address, (line) => offsets.find((known) => known.has(line))?.get(line))
-    : (lines: string[]) => lines
+  const projected = params.get("projection") === RESULT_PROJECTION
   const tailParam = params.get("tail")
   const beforeParam = params.get("before")
   const countParam = params.get("count")
+  const byTurns = params.get("unit") === "turns"
 
   try {
-    if (tailParam !== null) {
-      // ?tail=N — return last N turns worth of lines plus header lines,
-      // trimmed to a byte budget so big sessions stay cheap over tunnels.
-      // A min-line floor guarantees real pages even around fat lines.
-      const requestedTurns = Math.max(1, Math.min(parseInt(tailParam) || 30, 200))
-      const minLines = Math.max(requestedTurns, MIN_PAGE_LINES)
-      const bytesToRead = requestedTurns * PAGE_WINDOW_BYTES_PER_TURN
-      const byteBudget = parseTailByteBudget(params.get("maxBytes"))
-
-      const [header, tail] = await Promise.all([
-        readSessionHeader(filePath),
-        readTail(filePath, bytesToRead, minLines, isNoise),
-      ])
-
-      const trimmed = trimTailToByteBudget(tail.lines, tail.byteOffset, byteBudget, minLines, isNoise)
-      const hasMore = trimmed.byteOffset > header.bytesRead
-      const forPage = await firstLineForPages(format, header, async () => tail.lines)
-
-      sendJson(res, 200, {
-        headerLines: project(forPage(header.lines, 0).filter((line) => !isNoise(line)), header.offsets),
-        tailLines: project(forPage(trimmed.lines, trimmed.byteOffset), tail.offsets, header.offsets),
-        byteOffset: trimmed.byteOffset,
-        totalSize: tail.totalSize,
-        hasMore,
-      })
-    } else if (beforeParam !== null) {
-      // ?before=offset&count=N — return lines before the given byte offset,
-      // extending the read window until the page has enough complete lines
-      const endOffset = Math.max(0, parseInt(beforeParam) || 0)
-      const requestedTurns = Math.max(1, Math.min(parseInt(countParam || "") || 30, 200))
-      const minLines = Math.max(requestedTurns, MIN_PAGE_LINES)
-      const initialWindow = requestedTurns * PAGE_WINDOW_BYTES_PER_TURN
-
-      const [header, range] = await Promise.all([
-        readSessionHeader(filePath),
-        readRangeBefore(filePath, endOffset, initialWindow, minLines, isNoise),
-      ])
-
-      const forPage = await firstLineForPages(format, header, async () =>
-        (await readTail(filePath, LAST_LINES_BYTES, 1, () => false)).lines)
-
-      sendJson(res, 200, {
-        headerLines: project(forPage(header.lines, 0).filter((line) => !isNoise(line)), header.offsets),
-        lines: project(forPage(range.lines, range.byteOffset), range.offsets, header.offsets),
-        byteOffset: range.byteOffset,
-        hasMore: range.byteOffset > header.bytesRead,
-      })
-    } else {
+    if (tailParam === null && beforeParam === null) {
       // Default: return full file as text/plain (original behavior)
       const content = await readTranscriptText(filePath)
       res.setHeader("Content-Type", "text/plain")
       res.end(content)
+      return
+    }
+
+    const requested = Math.max(1, Math.min(parseInt((tailParam ?? countParam) || "") || 30, 200))
+    const minLines = Math.max(requested, MIN_PAGE_LINES)
+    const initialWindow = requested * PAGE_WINDOW_BYTES_PER_TURN
+    const before = tailParam !== null || beforeParam === null ? null : Math.max(0, parseInt(beforeParam) || 0)
+    // A line tail is the end of the file, so its lines also serve the header line's lookup.
+    const [header, lineTail] = await Promise.all([
+      readSessionHeader(filePath),
+      byTurns || before !== null ? undefined : readTail(filePath, initialWindow, minLines, isNoise),
+    ])
+    const firstLine = await firstLineForPages(format, header, async () =>
+      (lineTail ?? await readTail(filePath, LAST_LINES_BYTES, 1, () => false)).lines)
+    const sendLine = (line: string, offset: number): string => {
+      if (offset === 0 && firstLine !== undefined) return firstLine
+      return projected ? projectLine(format, line, address, offset) : line
+    }
+    const headerLines = header.lines.flatMap((line, index) => (isNoise(line) ? [] : [sendLine(line, header.starts[index])]))
+
+    if (byTurns) {
+      const pageHeader = linesBeforeFirstTurn(format, headerLines)
+      const page = await readTurnPage(filePath, format, {
+        before: before ?? "tail",
+        turns: requested,
+        budget: parseByteBudget(params.get("maxBytes"), DEFAULT_PAGE_BYTE_BUDGET),
+        headerLines: pageHeader,
+        send: sendLine,
+      })
+      const common = { headerLines: pageHeader, byteOffset: page.byteOffset, hasMore: page.hasMore, unit: "turns", cutTurn: page.cutTurn }
+      sendJson(res, 200, before === null
+        ? { ...common, tailLines: page.lines, totalSize: page.totalSize, end: page.end }
+        : { ...common, lines: page.lines })
+    } else if (before === null) {
+      // ?tail=N — return last N turns worth of lines plus header lines,
+      // trimmed to a byte budget so big sessions stay cheap over tunnels.
+      // A min-line floor guarantees real pages even around fat lines.
+      const tail = lineTail!
+      const budget = parseByteBudget(params.get("maxBytes"), DEFAULT_TAIL_BYTE_BUDGET)
+      const oldest = oldestKeptLine(tail.lines, budget, minLines, isNoise)
+      const byteOffset = oldest < tail.lines.length ? tail.starts[oldest] : tail.end
+      sendJson(res, 200, {
+        headerLines,
+        tailLines: tail.lines.slice(oldest).flatMap((line, index) => (isNoise(line) ? [] : [sendLine(line, tail.starts[oldest + index])])),
+        byteOffset,
+        totalSize: tail.totalSize,
+        hasMore: byteOffset > header.bytesRead,
+      })
+    } else {
+      // ?before=offset&count=N — return lines before the given byte offset,
+      // extending the read window until the page has enough complete lines,
+      // then keeping the newest that fit the page budget as sent
+      const range = await readRangeBefore(filePath, before, initialWindow, minLines, isNoise)
+      const sent: string[] = []
+      const sentAt = (index: number) => (sent[index] ??= sendLine(range.lines[index], range.starts[index]))
+      const budget = parseByteBudget(params.get("maxBytes"), DEFAULT_PAGE_BYTE_BUDGET)
+      const oldest = oldestKeptLine(range.lines, budget, minLines, undefined, (_, index) => lineBytes(sentAt(index)))
+      const byteOffset = oldest < range.lines.length ? range.starts[oldest] : range.byteOffset
+      sendJson(res, 200, {
+        headerLines,
+        lines: range.lines.slice(oldest).map((_, index) => sentAt(oldest + index)),
+        byteOffset,
+        hasMore: byteOffset > header.bytesRead,
+      })
     }
   } catch {
     sendJson(res, 404, { error: "File not found" })

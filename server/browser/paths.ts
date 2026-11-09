@@ -19,6 +19,13 @@ export const SHARED_RUN_NAME = "shared"
 export const THROWAWAY_USED_SUFFIX = ".used"
 
 /**
+ * In a session's run directory, the `COGPIT_PORT` of the Cogpit that runs the
+ * session, written by the shim on every throwaway call. A quitting Cogpit reaps
+ * only the directories naming its own port.
+ */
+export const RUN_SERVER_FILE = ".server"
+
+/**
  * What Cogpit passes for `COGPIT_SESSION_ID` when the process it is spawning
  * serves every session rather than one — a shared app-server, a headless CLI.
  * Deliberately not a valid id: the shim then files throwaways under

@@ -4,7 +4,7 @@
     "These numbers may only go DOWN. Cogpit's scripts/check-agents.ts fails if a",
     "file exceeds its budget, and also if it comes in under — so a cleanup must",
     "lower the number in the same commit. Delete the entry once a file reaches zero.",
-    "Seeded at 115 files / 372 lines."
+    "Seeded at 113 files / 367 lines."
   ],
   "files": {
     "electron/main.ts": 1,
@@ -54,7 +54,7 @@
     "server/routes/undo/transaction.ts": 4,
     "server/routes/usage.ts": 8,
     "server/sdk-session.ts": 10,
-    "server/sessionPaths.ts": 6,
+    "server/sessionPaths.ts": 5,
     "server/share/passphrase.ts": 1,
     "server/subagentWatcher.ts": 2,
     "shared/contracts/configBrowser.ts": 1,
@@ -91,8 +91,6 @@
     "src/components/LiveSessions/LiveSessionsChrome.tsx": 1,
     "src/components/LiveSessions/types.ts": 1,
     "src/components/ProjectSwitcherModal.tsx": 1,
-    "src/components/SessionInfoBar.mobile.tsx": 3,
-    "src/components/SessionInfoBar.tsx": 1,
     "src/components/stats/AgentsPanel.tsx": 1,
     "src/components/stats/ToolCallIndex.tsx": 1,
     "src/components/timeline/CodexExecToolInput.tsx": 4,
@@ -115,7 +113,7 @@
     "src/lib/copilotPlanApi.ts": 1,
     "src/lib/device.ts": 2,
     "src/lib/fileOpener.ts": 1,
-    "src/lib/format.ts": 2,
+    "src/lib/format.ts": 1,
     "src/lib/sessionConfig.ts": 2,
     "src/lib/shareApi.ts": 1,
     "src/lib/timelineHelpers.ts": 1,

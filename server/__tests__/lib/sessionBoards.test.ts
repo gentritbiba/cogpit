@@ -12,14 +12,27 @@ vi.mock("../../helpers", async () => {
   return { dirs: mockDirs, join: path.join, mkdir: fs.mkdir, readFile: fs.readFile }
 })
 
-import { parseBoardContent, parseBoardProgress } from "../../../shared/contracts/board"
+import { parseBoardContent, parseBoardProgress, saysWhatIsLeft } from "../../../shared/contracts/board"
 import {
   __resetSessionBoardsForTest,
+  allSessionBoards,
   clearSessionBoard,
   sessionBoard,
   setSessionBoard,
   setSessionBoardProgress,
 } from "../../lib/sessionBoards"
+
+describe("saysWhatIsLeft", () => {
+  it("needs a Next-like section with items, or complete progress", () => {
+    const section = (title: string, items: string[]) => ({ sections: [{ title, items }] })
+    expect(saysWhatIsLeft(section("Next", ["renderer"]))).toBe(true)
+    expect(saysWhatIsLeft(section("Still to do", ["docs"]))).toBe(true)
+    expect(saysWhatIsLeft(section("Next", []))).toBe(false)
+    expect(saysWhatIsLeft(section("Now", ["parser"]))).toBe(false)
+    expect(saysWhatIsLeft({ progress: { done: 9, total: 9 }, sections: [] })).toBe(true)
+    expect(saysWhatIsLeft({ progress: { done: 8, total: 9 }, sections: [] })).toBe(false)
+  })
+})
 
 describe("parseBoardContent", () => {
   it("keeps a title, progress and sections with their tone", () => {
@@ -69,6 +82,13 @@ describe("sessionBoards", () => {
     __resetSessionBoardsForTest()
     expect(await sessionBoard("lead")).toEqual({ sessionId: "lead", title: "Wave 3", sections: [{ title: "Now", items: ["a"] }], updatedAt: 100 })
     expect(JSON.parse(await readFile(join(mockDirs.SESSION_CONFIG_DIR, "session-boards.json"), "utf-8")).version).toBe(1)
+  })
+
+  it("lists every board, the most recently updated first", async () => {
+    await setSessionBoard("lead", { title: "Wave 3", sections: [] }, 100)
+    await setSessionBoard("worker", { title: "Nav fix", sections: [] }, 300)
+    await setSessionBoard("reviewer", { title: "Review", sections: [] }, 200)
+    expect((await allSessionBoards()).map((board) => board.sessionId)).toEqual(["worker", "reviewer", "lead"])
   })
 
   it("moves only the progress, and starts a board for it", async () => {

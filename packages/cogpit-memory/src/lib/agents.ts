@@ -24,6 +24,7 @@ import { getCodexExecCalls, isCodexExecCall, type CodexExecCall } from "./codex-
 import {
   appendClaudeSession,
   brandClaudeBranch,
+  claudePageCuts,
   claudeTurnBoundaries,
   deriveClaudeSessionStatus,
   extractClaudeMetadataFromLines,
@@ -35,6 +36,7 @@ import {
 import {
   appendCodexSession,
   brandCodexBranch,
+  codexPageCuts,
   codexPageHeaderLine,
   codexTurnBoundaries,
   deriveCodexSessionStatus,
@@ -114,8 +116,11 @@ export interface AgentFormat {
   detectsRecords(records: readonly { type?: unknown }[]): boolean
   /** Full parse into the shared session model. */
   parse(jsonlText: string, options?: ParseSessionOptions): ParsedSession
-  /** Incremental append of newly written lines. */
-  append(existing: ParsedSession, newJsonlText: string): ParsedSession
+  /**
+   * Incremental append of newly written lines. Leaves `existing` as it was,
+   * unless `inPlace` lets the format extend its records instead of copying them.
+   */
+  append(existing: ParsedSession, newJsonlText: string, inPlace?: boolean): ParsedSession
   /** Cheap header metadata read from already-split transcript lines. */
   metadataFromLines(lines: readonly string[]): AgentSessionMetadata
   /** Status derived from raw records. */
@@ -157,6 +162,13 @@ export interface AgentFormat {
    */
   turnBoundaries(records: readonly Record<string, unknown>[]): number[]
   /**
+   * Indexes of the records at which a page of the transcript may start, one
+   * per turn boundary: the boundary moved back over the records written ahead
+   * of it that its turn owns, so a page cut there holds whole turns. Paging
+   * only; undo cuts on `turnBoundaries`.
+   */
+  pageCuts(records: readonly Record<string, unknown>[]): number[]
+  /**
    * Visits the tool-result bodies a record carries, in a fixed order, and
    * writes back what the visitor returns (result projection v1). Must leave
    * everything the parser reads besides those bodies as it was.
@@ -188,6 +200,7 @@ const codexFormat: AgentFormat = {
   pageHeaderLine: codexPageHeaderLine,
   brandBranch: brandCodexBranch,
   turnBoundaries: codexTurnBoundaries,
+  pageCuts: codexPageCuts,
   projectResults: projectCodexResults,
 }
 
@@ -203,6 +216,7 @@ const copilotFormat: AgentFormat = {
   isNoiseLine: hasNoNoiseLines,
   brandBranch: brandCopilotBranch,
   turnBoundaries: copilotTurnBoundaries,
+  pageCuts: copilotTurnBoundaries,
   projectResults: projectCopilotResults,
 }
 
@@ -219,6 +233,7 @@ const claudeFormat: AgentFormat = {
   isNoiseLine: isClaudeNoiseLine,
   brandBranch: brandClaudeBranch,
   turnBoundaries: claudeTurnBoundaries,
+  pageCuts: claudePageCuts,
   projectResults: projectClaudeResults,
 }
 
@@ -228,7 +243,7 @@ const FORMATS: Readonly<Record<AgentKind, AgentFormat>> = Object.freeze({
     detectsText: (text) => text.split("\n", 1)[0]?.includes('"type":"acp_session"') ?? false,
     detectsRecords: (records) => records[0]?.type === "acp_session",
     parse: (text, options) => ({ ...parseClaudeSession(text, options), agentKind: "acp" }),
-    append: (session, text) => ({ ...appendClaudeSession(session, text), agentKind: "acp" }),
+    append: (session, text, inPlace) => ({ ...appendClaudeSession(session, text, inPlace), agentKind: "acp" }),
   },
   claude: claudeFormat,
   codex: codexFormat,
@@ -325,29 +340,44 @@ export function turnStartsWithIds(
   format: AgentFormat,
   lines: readonly string[],
 ): { line: number; id: string }[] | null {
-  const starts = turnBoundaryLines(format, lines)
+  return pairTurnIds(format, lines, turnBoundaryLines(format, lines))
+}
+
+function pairTurnIds(
+  format: AgentFormat,
+  lines: readonly string[],
+  starts: readonly number[],
+): { line: number; id: string }[] | null {
   const turns = format.parse(lines.join("\n"), { skipStats: true }).turns
   if (turns.length !== starts.length) return null
   return starts.map((line, index) => ({ line, id: turns[index].id }))
 }
 
 /**
- * The line to cut at to keep everything through the turn whose id is `turnId`.
+ * The turn a client names `turnId`: its index in file order, and the line the
+ * turn after it starts on, null for the last turn. Null when no turn answers
+ * to the id.
  *
- * `"keep-all"` means it is the last turn (nothing to remove); null means no
- * turn has that id — an agent may leave a turn unlabelled — and the caller
- * should fall back to an index-based cut.
+ * The id is the one a full parse gives the turn, or, for a client that paged
+ * the turn in from its middle, the one a parse opening on a record inside it
+ * gives it. A client holds the newest turns, so those are searched first.
  */
-export function cutLineAfterTurnId(
+export function findTurnById(
   format: AgentFormat,
   lines: readonly string[],
   turnId: string,
-): number | "keep-all" | null {
-  const starts = turnStartsWithIds(format, lines)
-  if (!starts) return null
-  const index = starts.findLastIndex((start) => start.id === turnId)
-  if (index < 0) return null
-  return starts[index + 1]?.line ?? "keep-all"
+): { index: number; nextLine: number | null } | null {
+  const starts = turnBoundaryLines(format, lines)
+  const found = (index: number) => ({ index, nextLine: starts[index + 1] ?? null })
+  const named = pairTurnIds(format, lines, starts)?.findLastIndex((start) => start.id === turnId) ?? -1
+  if (named >= 0) return found(named)
+  for (let turn = starts.length - 1; turn >= 0; turn--) {
+    const end = starts[turn + 1] ?? lines.length
+    for (let line = starts[turn]; line < end; line++) {
+      if (format.parse(lines[line], { skipStats: true }).turns[0]?.id === turnId) return found(turn)
+    }
+  }
+  return null
 }
 
 /**

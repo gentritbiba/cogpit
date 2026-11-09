@@ -105,7 +105,8 @@ function observeModelRejection(receipt: CommandReceipt, sendRequest: (model: str
   const owner = conversationStateFor(receipt.sessionId)
   let stopped = false
   let unsubscribe = () => {}
-  const stop = () => { if (stopped) return; stopped = true; clearTimeout(timer); unsubscribe(); options.signal?.removeEventListener("abort", stop); options.onReceiptSettled?.() }
+  const unwatch = owner.watch(receipt.id)
+  const stop = () => { if (stopped) return; stopped = true; clearTimeout(timer); unsubscribe(); unwatch(); options.signal?.removeEventListener("abort", stop); options.onReceiptSettled?.() }
   const timer = setTimeout(stop, 24 * 60 * 60 * 1000)
   const inspect = () => {
     if (stopped) return

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Dirent, FSWatcher } from "node:fs"
+import { join } from "node:path"
 
 vi.mock("../../helpers", () => ({
   dirs: {
@@ -361,7 +362,7 @@ describe("team routes", () => {
       const onChange: Array<() => void> = []
       let tasksDirExists = false
       mockedWatch.mockImplementation(((dir: string, _options: unknown, listener: () => void) => {
-        if (dir.startsWith("/tmp/test-tasks") && !tasksDirExists) throw new Error("ENOENT")
+        if (dir === join("/tmp/test-tasks", "late-tasks") && !tasksDirExists) throw new Error("ENOENT")
         onChange.push(listener)
         return { on: vi.fn(), close: vi.fn() } as unknown as FSWatcher
       }) as unknown as typeof watch)
@@ -370,7 +371,7 @@ describe("team routes", () => {
       expect(mockedWatch).toHaveBeenCalledTimes(2)
       tasksDirExists = true
       onChange[0]()
-      expect(mockedWatch).toHaveBeenLastCalledWith("/tmp/test-tasks/late-tasks", { recursive: true }, expect.any(Function))
+      expect(mockedWatch).toHaveBeenLastCalledWith(join("/tmp/test-tasks", "late-tasks"), { recursive: true }, expect.any(Function))
       onChange[0]()
       expect(mockedWatch).toHaveBeenCalledTimes(3)
       stream.close()
@@ -381,12 +382,12 @@ describe("team routes", () => {
       const { existsSync } = await import("node:fs")
       const { tmpdir } = await import("node:os")
       const helpers = await import("../../helpers")
-      const root = await mkdtemp(`${tmpdir()}/cogpit-team-watch-`)
+      const root = await mkdtemp(join(tmpdir(), "cogpit-team-watch-"))
       const saved = { ...helpers.dirs }
-      Object.assign(helpers.dirs, { TEAMS_DIR: `${root}/teams`, TASKS_DIR: `${root}/tasks` })
+      Object.assign(helpers.dirs, { TEAMS_DIR: join(root, "teams"), TASKS_DIR: join(root, "tasks") })
       try {
-        await mkdir(`${root}/teams/t`, { recursive: true })
-        await mkdir(`${root}/tasks/t`, { recursive: true })
+        await mkdir(join(root, "teams", "t"), { recursive: true })
+        await mkdir(join(root, "tasks", "t"), { recursive: true })
         const opened: Array<{ dir: string; fail: () => void }> = []
         mockedWatch.mockImplementation(((dir: string) => {
           if (!existsSync(dir)) throw new Error("ENOENT")
@@ -397,13 +398,13 @@ describe("team routes", () => {
         }) as unknown as typeof watch)
 
         const first = await openStream("t")
-        expect(opened.map((o) => o.dir)).toEqual([`${root}/teams/t`, `${root}/tasks/t`])
+        expect(opened.map((o) => o.dir)).toEqual([join(root, "teams", "t"), join(root, "tasks", "t")])
 
         opened[1].fail()
-        await rename(`${root}/teams/t`, `${root}/teams/t-old`)
-        await mkdir(`${root}/teams/t`)
+        await rename(join(root, "teams", "t"), join(root, "teams", "t-old"))
+        await mkdir(join(root, "teams", "t"))
         const second = await openStream("t")
-        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([`${root}/tasks/t`, `${root}/teams/t`])
+        expect(opened.map((o) => o.dir).slice(2).sort()).toEqual([join(root, "tasks", "t"), join(root, "teams", "t")])
 
         const third = await openStream("t")
         expect(opened).toHaveLength(4)

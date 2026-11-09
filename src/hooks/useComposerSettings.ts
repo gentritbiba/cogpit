@@ -1,14 +1,17 @@
 import { splitInstanceDirName } from "../../shared/session/instances"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelCapabilities } from "@/hooks/useModelCapabilities"
-import type { SessionSource } from "@/hooks/useLiveSession"
-import type { ParsedSession } from "../../shared/session/types"
+import type { SessionSource } from "@/lib/sessionSource"
+import type { ModelFallbackNotice } from "../../shared/session/sessionDigest"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind, descriptorFor } from "@/lib/agents"
 import { isUltracodeCapableModel } from "@/lib/utils"
 
 interface UseComposerSettingsOptions {
   agentKind: AgentKind | undefined
-  session: ParsedSession | null
+  /** The model the open session last ran, if one is open. */
+  sessionModel: string | undefined
+  /** The open session's latest model fallback. */
+  modelFallback: ModelFallbackNotice | null
   sessionSource: SessionSource | null
   pendingDirName: string | null
   isLive: boolean
@@ -20,7 +23,8 @@ interface UseComposerSettingsOptions {
  */
 export function useComposerSettings({
   agentKind,
-  session,
+  sessionModel,
+  modelFallback: fallback,
   sessionSource,
   pendingDirName,
   isLive,
@@ -42,7 +46,7 @@ export function useComposerSettings({
   } = useModelCapabilities(effectiveAgentKind, selectedModel, splitInstanceDirName(sessionSource?.dirName ?? pendingDirName).instanceId)
   const ultracodeAvailable = isUltracodeCapableModel(
     effectiveAgentKind,
-    selectedModel || session?.model,
+    selectedModel || sessionModel,
   )
   const ultracodeActive = ultracodeEnabled && ultracodeAvailable
   const effectiveEffort = normalizeEffort(selectedEffort)
@@ -100,31 +104,16 @@ export function useComposerSettings({
     return () => clearTimeout(timer)
   }, [modelFallbackNotice])
 
-  const rawMessages = session?.rawMessages
   useEffect(() => {
-    if (!isLive || !rawMessages) return
+    if (!isLive || !fallback) return
     if (!capabilitiesFor(effectiveAgentKind).modelFallbackNotices) return
-    let fallback: (typeof rawMessages)[number] | undefined
-    for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
-      const message = rawMessages[index]
-      if (message.type === "system" && message.subtype === "model_refusal_fallback") {
-        fallback = message
-        break
-      }
-    }
-    if (!fallback) return
-    const identity = typeof fallback.uuid === "string"
-      ? fallback.uuid
-      : `${String(fallback.original_model)}:${String(fallback.fallback_model)}:${String(fallback.request_id)}`
-    if (lastFallbackRef.current === identity) return
-    lastFallbackRef.current = identity
-    const original = typeof fallback.original_model === "string" ? fallback.original_model : "Fable"
-    const replacement = typeof fallback.fallback_model === "string" ? fallback.fallback_model : "Opus"
-    const explanation = typeof fallback.api_refusal_explanation === "string"
-      ? ` ${fallback.api_refusal_explanation}`
-      : ""
+    if (lastFallbackRef.current === fallback.id) return
+    lastFallbackRef.current = fallback.id
+    const original = fallback.originalModel ?? "Fable"
+    const replacement = fallback.fallbackModel ?? "Opus"
+    const explanation = fallback.explanation ? ` ${fallback.explanation}` : ""
     setModelFallbackNotice(`${original} could not handle this request, so Claude continued with ${replacement}.${explanation}`)
-  }, [isLive, rawMessages, effectiveAgentKind])
+  }, [isLive, fallback, effectiveAgentKind])
 
   return {
     contextWindowTokens,

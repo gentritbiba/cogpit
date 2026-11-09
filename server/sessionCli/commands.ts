@@ -29,7 +29,7 @@ import {
 import { markDelegatedRequestAnswered, watchDelegatedRequestsOf } from "../sessionHosts/delegatedRequests"
 import { resolveDeviceName } from "../lib/standalone-bootstrap"
 import { load as loadYaml } from "js-yaml"
-import { parseBoardContent, parseBoardProgress } from "../../shared/contracts/board"
+import { parseBoardContent, parseBoardProgress, saysWhatIsLeft } from "../../shared/contracts/board"
 import { clearSessionBoard, sessionBoard, setSessionBoard, setSessionBoardProgress } from "../lib/sessionBoards"
 import {
   discardWorkspace,
@@ -121,9 +121,11 @@ Start and drive other agent sessions through Cogpit. Output is JSON unless noted
   stop ID... | --children   End sessions and cancel messages still queued for them;
                             --children stops every session you started.
   children [ID]             Sessions started by ID (default: you), with their state.
-  board set YAML|-          Replace your board, the summary pinned above your crew's
-                            composer: title, progress (DONE/TOTAL) and sections of
-                            { title, tone: warning|success, items }. YAML or JSON.
+  board set YAML|-          Replace your board, your own status: the user reads it in
+                            the Status panel without opening your conversation, and a
+                            crew lead's is pinned above its crew's composer. Title,
+                            progress (DONE/TOTAL) and sections of { title,
+                            tone: warning|success, items }. YAML or JSON.
   board progress DONE/TOTAL Move only your board's progress, such as 35/99.
   board get [ID]            Print a session's board (default: yours).
   board clear               Remove your board.
@@ -806,6 +808,8 @@ async function transitionCommand(inv: CliInvocation, rest: string[]): Promise<Cl
   return json(result)
 }
 
+const NEXT_HINT = "Add a Next section with what is left, in order (\"Nothing left\" when done): the user reads it in the Status panel."
+
 /** The calling session, which the board verbs that change a board act on. */
 async function boardOwner(inv: CliInvocation, verb: string): Promise<string> {
   if (!inv.callerSessionId) throw new UsageError(`board ${verb} needs COGPIT_SESSION_ID; run it from a Cogpit session`)
@@ -829,7 +833,8 @@ async function boardCommand(inv: CliInvocation, rest: string[]): Promise<CliOutp
       }
       const content = parseBoardContent(document)
       if (!content) throw new UsageError("board set needs a title, progress or sections")
-      return json(await setSessionBoard(owner, content))
+      const board = await setSessionBoard(owner, content)
+      return json(saysWhatIsLeft(content) ? board : { ...board, hint: NEXT_HINT })
     }
     case "progress": {
       const owner = await boardOwner(inv, "progress")

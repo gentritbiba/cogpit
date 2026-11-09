@@ -39,17 +39,22 @@ function procs(...sessionIds: string[]): Map<string, RunningProcess> {
 }
 
 describe("foldCrewRows", () => {
-  it("places every level of a crew under its root, in the order they were started", () => {
+  it("places every level of a crew under its root, the most recently active first", () => {
     const rows = [
       row("coordinator"),
-      member("reviewer", "lane-a", 3),
-      member("lane-b", "coordinator", 2),
+      member("reviewer", "lane-a", 3, { lastActivityAt: minutesAgo(20) }),
+      member("lane-b", "coordinator", 2, { lastActivityAt: minutesAgo(40) }),
       row("other"),
-      member("lane-a", "coordinator", 1),
+      member("lane-a", "coordinator", 1, { lastActivityAt: minutesAgo(5) }),
     ]
     const { topLevel, crewOf } = foldCrewRows(rows)
     expect(ids(topLevel)).toEqual(["coordinator", "other"])
-    expect(ids(crewOf.get("coordinator")!)).toEqual(["lane-a", "lane-b", "reviewer"])
+    expect(ids(crewOf.get("coordinator")!)).toEqual(["lane-a", "reviewer", "lane-b"])
+  })
+
+  it("puts the member started last first when members were last active together", () => {
+    const rows = [row("coordinator"), member("lane-a", "coordinator", 1), member("lane-b", "coordinator", 2)]
+    expect(ids(foldCrewRows(rows).crewOf.get("coordinator")!)).toEqual(["lane-b", "lane-a"])
   })
 
   it("keeps a member on its own when no ancestor is listed", () => {
@@ -104,7 +109,7 @@ describe("foldCrewRows", () => {
     ]
     const { topLevel, crewOf } = foldCrewRows(rows)
     expect(ids(topLevel)).toEqual(["coordinator"])
-    expect(ids(crewOf.get("coordinator")!)).toEqual(["lane-a", "reviewer"])
+    expect(ids(crewOf.get("coordinator")!)).toEqual(["reviewer", "lane-a"])
   })
 })
 

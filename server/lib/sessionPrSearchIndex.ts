@@ -4,8 +4,10 @@ import { join } from "node:path"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { dirs } from "../sessionPaths"
 import { PR_SEARCH_INDEX_FILE } from "./sessionConfigDir"
+import { markCatalogChanged } from "../sessionCatalog/changes"
 import {
   getCompleteSessionPullRequestData,
+  setCompletedPullRequestLookup,
   type SessionPullRequestData,
 } from "./sessionPrIndex"
 
@@ -109,19 +111,30 @@ function entryIsCurrent(entry: IndexEntry | undefined, candidate: SessionFileCan
   return entry?.size === candidate.size && entry.mtimeMs === candidate.mtimeMs
 }
 
+function newestQueued(): SessionFileCandidate {
+  let newest: SessionFileCandidate | null = null
+  for (const candidate of queue.values()) if (!newest || candidate.mtimeMs > newest.mtimeMs) newest = candidate
+  return newest!
+}
+
+function samePullRequests(previous: IndexEntry | undefined, next: SessionPullRequestData): boolean {
+  return JSON.stringify(previous?.pullRequests ?? []) === JSON.stringify(next.pullRequests)
+}
+
 async function runQueue(expectedGeneration: number): Promise<void> {
   let sincePersist = 0
   try {
     while (expectedGeneration === generation && queue.size > 0) {
-      const next = queue.entries().next().value as [string, SessionFileCandidate] | undefined
-      if (!next) break
-      const [filePath, candidate] = next
+      const candidate = newestQueued()
+      const { filePath } = candidate
       queue.delete(filePath)
-      if (entryIsCurrent(entries.get(filePath), candidate)) continue
+      const previous = entries.get(filePath)
+      if (entryIsCurrent(previous, candidate)) continue
 
       const data = await getCompleteSessionPullRequestData(filePath, candidate.size)
       if (expectedGeneration !== generation) return
       entries.set(filePath, { ...data, size: candidate.size, mtimeMs: candidate.mtimeMs })
+      if (!samePullRequests(previous, data)) markCatalogChanged("visible")
       sincePersist += 1
       if (sincePersist >= PERSIST_EVERY) {
         await persistIndex(expectedGeneration).catch(() => undefined)
@@ -176,6 +189,28 @@ export async function getSessionPrSearchSnapshot(
     total: candidates.length,
   }
 }
+
+/**
+ * The pull requests a listed session is known to have opened, without scanning
+ * on the caller's time. A transcript written since its scan keeps its last
+ * result until the background index catches up (and then bumps the session
+ * catalog); one never scanned, or rewritten shorter, has none yet.
+ */
+export async function peekSessionPullRequests(candidate: SessionFileCandidate): Promise<SessionPullRequestData | null> {
+  await loadIndex()
+  const entry = entries.get(candidate.filePath)
+  if (!entryIsCurrent(entry, candidate)) {
+    queue.set(candidate.filePath, candidate)
+    startIndexing()
+  }
+  if (!entry || entry.size > candidate.size) return null
+  return { pullRequests: entry.pullRequests, references: entry.references }
+}
+
+setCompletedPullRequestLookup((filePath, size) => {
+  const entry = entries.get(filePath)
+  return entry?.size === size ? entry.pullRequests : null
+})
 
 /** Test helper. */
 export function resetSessionPrSearchIndex(): void {

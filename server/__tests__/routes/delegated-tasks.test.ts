@@ -97,4 +97,16 @@ describe("GET /api/delegated-tasks", () => {
     expect(body.tasks).toHaveLength(4)
     expect(body.tasks.find((task: { id: string }) => task.id === done.id).result).toEqual({ reply: "x".repeat(5000) })
   })
+
+  it("re-arms result delivery only for a parent with unread tasks", async () => {
+    seed()
+    await get("/?sessionId=parent")
+    expect(mocks.resumeDelegations).toHaveBeenCalledWith(expect.anything(), "parent")
+    mocks.resumeDelegations.mockClear()
+    await get("/?sessionId=nobody")
+    const read = orchestrationStore().putTask("local", { sourceId: "all-read", parentSessionId: "reader", childSessionId: "z" })
+    orchestrationStore().updateTask("local", read.id, { state: "completed", acknowledgedAt: 1 })
+    expect((await get("/?sessionId=reader")).body.tasks).toHaveLength(1)
+    expect(mocks.resumeDelegations).not.toHaveBeenCalled()
+  })
 })

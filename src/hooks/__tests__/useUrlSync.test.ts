@@ -1,20 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 
-vi.mock("@/lib/sessionLoader", () => ({
-  loadSessionTailCached: vi.fn(),
-}))
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
 }))
 
 import { authFetch } from "@/lib/auth"
-import { loadSessionTailCached } from "@/lib/sessionLoader"
-import type { ParsedSession } from "../../../shared/session/types"
+import type { LoadedSession, SessionAddress, SessionController } from "@/lib/sessionLoader"
+import type { SessionView } from "../../../shared/session/sessionDigest"
 import { useUrlSync } from "../useUrlSync"
 import type { SessionState } from "../useSessionState"
 
-const mockedLoadTail = vi.mocked(loadSessionTailCached)
+/** Loads what an open resolved; the controller's own behaviour has its own suite. */
+const mockedLoadTail = vi.fn<(address: SessionAddress) => Promise<LoadedSession>>()
+const sessions: SessionController = {
+  openSession: vi.fn(),
+  prefetchSession: vi.fn(),
+  reloadCurrent: vi.fn(),
+  leave: vi.fn(),
+}
 const mockedAuthFetch = vi.mocked(authFetch)
 
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
@@ -31,8 +35,8 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
 
 function loadedSession(dirName: string, fileName: string) {
   return {
-    parsed: { turns: [{ index: 0 }] } as unknown as ParsedSession,
-    source: { dirName, fileName, rawText: "", watchOffset: 100 },
+    parsed: { turns: [{ index: 0 }] } as unknown as SessionView,
+    source: { dirName, fileName, loadId: 1, watchOffset: 100 },
   }
 }
 
@@ -40,7 +44,6 @@ describe("useUrlSync", () => {
   const dispatch = vi.fn()
   const resetTurnCount = vi.fn()
   const scrollToBottomInstant = vi.fn()
-  const workerParse = vi.fn()
 
   function renderUrlSync(state: SessionState = makeState()) {
     return renderHook(() =>
@@ -50,13 +53,18 @@ describe("useUrlSync", () => {
         isMobile: false,
         resetTurnCount,
         scrollToBottomInstant,
-        workerParse,
+        sessions,
       })
     )
   }
 
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(sessions.openSession).mockImplementation(async (target, { commit }) => {
+      const address = typeof target === "function" ? await target(new AbortController().signal) : target
+      commit(await mockedLoadTail(address))
+      return "opened"
+    })
     sessionStorage.clear()
     // Reset URL to root
     window.history.replaceState(null, "", "/")
@@ -78,12 +86,7 @@ describe("useUrlSync", () => {
 
     // Wait for async load — tail-loaded via the shared session loader
     await vi.waitFor(() => {
-      expect(mockedLoadTail).toHaveBeenCalledWith(
-        "my-project",
-        "session-123.jsonl",
-        workerParse,
-        "session",
-      )
+      expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: "my-project", fileName: "session-123.jsonl" })
       expect(dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "LOAD_SESSION",
@@ -106,13 +109,8 @@ describe("useUrlSync", () => {
     renderUrlSync()
 
     await vi.waitFor(() => {
-      expect(mockedAuthFetch).toHaveBeenCalledWith("/api/find-session/session-123")
-      expect(mockedLoadTail).toHaveBeenCalledWith(
-        "my-project",
-        "session-123.jsonl",
-        workerParse,
-        "session preview",
-      )
+      expect(mockedAuthFetch).toHaveBeenCalledWith("/api/find-session/session-123", { signal: expect.any(AbortSignal) })
+      expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: "my-project", fileName: "session-123.jsonl" })
       expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "LOAD_SESSION" }))
     })
     expect(window.location.pathname).toBe("/preview/session-123")
@@ -172,11 +170,23 @@ describe("useUrlSync", () => {
     })
   })
 
+  it("leaves the screen alone when a later open superseded the URL's", async () => {
+    window.history.replaceState(null, "", "/proj/slow-session")
+    vi.mocked(sessions.openSession).mockResolvedValueOnce("superseded")
+
+    renderUrlSync()
+
+    await vi.waitFor(() => expect(sessions.openSession).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe("/proj/slow-session")
+  })
+
   it("pushes URL state when sessionSource changes", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const state = makeState({
-      sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
+      sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", watchOffset: 0, loadId: 1 },
     })
 
     renderUrlSync(state)
@@ -192,7 +202,7 @@ describe("useUrlSync", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const { unmount } = renderUrlSync(makeState({
-      sessionSource: { dirName, fileName, rawText: "" },
+      sessionSource: { dirName, fileName, watchOffset: 0, loadId: 1 },
     }))
 
     expect(pushStateSpy).toHaveBeenCalledWith(
@@ -208,7 +218,7 @@ describe("useUrlSync", () => {
     renderUrlSync()
 
     await vi.waitFor(() => {
-      expect(mockedLoadTail).toHaveBeenCalledWith(dirName, fileName, workerParse, "session")
+      expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: dirName, fileName: fileName })
     })
   })
 
@@ -219,7 +229,7 @@ describe("useUrlSync", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 
     const { unmount } = renderUrlSync(makeState({
-      sessionSource: { dirName, fileName, rawText: "" },
+      sessionSource: { dirName, fileName, watchOffset: 0, loadId: 1 },
     }))
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", `/${dirName}/${sessionId}`)
@@ -231,7 +241,7 @@ describe("useUrlSync", () => {
     renderUrlSync()
 
     await vi.waitFor(() => {
-      expect(mockedLoadTail).toHaveBeenCalledWith(dirName, fileName, workerParse, "session")
+      expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: dirName, fileName: fileName })
     })
   })
 
@@ -292,12 +302,7 @@ describe("useUrlSync", () => {
 
       // The device segment is stripped; the load targets the remainder only.
       await vi.waitFor(() => {
-        expect(mockedLoadTail).toHaveBeenCalledWith(
-          "-Users-foo",
-          "uuid.jsonl",
-          workerParse,
-          "session",
-        )
+        expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: "-Users-foo", fileName: "uuid.jsonl" })
         expect(dispatch).toHaveBeenCalledWith(
           expect.objectContaining({ type: "LOAD_SESSION" })
         )
@@ -342,7 +347,7 @@ describe("useUrlSync", () => {
       const pushStateSpy = vi.spyOn(window.history, "pushState")
 
       const state = makeState({
-        sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
+        sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", watchOffset: 0, loadId: 1 },
       })
 
       renderUrlSync(state)
@@ -364,12 +369,7 @@ describe("useUrlSync", () => {
       renderUrlSync()
 
       await vi.waitFor(() => {
-        expect(mockedLoadTail).toHaveBeenCalledWith(
-          "-Users-foo",
-          "uuid.jsonl",
-          workerParse,
-          "session",
-        )
+        expect(mockedLoadTail).toHaveBeenCalledWith({ dirName: "-Users-foo", fileName: "uuid.jsonl" })
       })
     })
 

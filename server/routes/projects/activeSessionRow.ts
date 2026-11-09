@@ -2,17 +2,17 @@ import {
   matchesPullRequestTarget,
   type PullRequestSearch,
 } from "../../../shared/session/sessionSearch"
-import { searchSessionMessages } from "../../helpers"
 import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { teamLeadFor, type TeamConfigCache } from "../../agents/lineage"
 import { listedSessionId } from "../../agents/listedSession"
 import { sessionAgentsRunning } from "../../agents/agentsRunning"
 import { runtimeFor } from "../../agents/runtimes"
 import type { TopLevelSessionInfo } from "../../agents/types"
-import { lastActivityOf, listedMeta } from "../../lib/listedSessionMeta"
-import { getSessionPullRequests } from "../../lib/sessionPrIndex"
-import type { SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
+import { catalogRow } from "../../sessionCatalog"
+import { peekSessionPullRequests, type SessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import type { ArchiveReason } from "../../lib/sessionArchive"
+import { searchTranscript } from "../../sessionList/searchMemo"
+import type { AwaitingRow } from "../../sessionList/versionInputs"
 import { projectLabel } from "./projectLabel"
 
 /** What every row of one /api/active-sessions request is read against. */
@@ -24,6 +24,10 @@ export interface ActiveSessionQuery {
   archivedById: ReadonlyMap<string, ArchiveReason>
   /** Teammate sessions carry a teamName; each team's config is read once per request. */
   teamConfigs: TeamConfigCache
+  /** Aborted once nobody waits for the list any more. */
+  signal?: AbortSignal
+  /** Collects the rows read that await their agents. */
+  awaitingAgents?: AwaitingRow[]
 }
 
 const TITLE_LENGTH = 80
@@ -31,7 +35,7 @@ const TITLE_LENGTH = 80
 /** What a session is called where its row is not listed: its own title, else its first prompt. */
 export async function readSessionTitle(c: TopLevelSessionInfo): Promise<string | undefined> {
   try {
-    const { meta } = await listedMeta(c)
+    const { meta } = await catalogRow(c)
     const title = meta.customTitle || meta.aiTitle || meta.firstUserMessage || meta.slug
     const line = title?.split("\n").map((part) => part.trim()).find(Boolean)
     return line ? line.slice(0, TITLE_LENGTH) : undefined
@@ -46,10 +50,10 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
   try {
     const indexedPullRequestData = pullRequestIndex?.byFile.get(c.filePath)
     const [cached, pullRequests] = await Promise.all([
-      listedMeta(c),
+      catalogRow(c),
       indexedPullRequestData
         ? Promise.resolve(indexedPullRequestData.pullRequests)
-        : getSessionPullRequests(c.filePath, c.size),
+        : peekSessionPullRequests(c).then((data) => data?.pullRequests ?? []),
     ])
     const references = indexedPullRequestData?.references ?? pullRequests
     const { meta, status: statusInfo } = cached
@@ -78,7 +82,8 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       if (metaMatch) {
         matchedMessage = meta.lastUserMessage || meta.firstUserMessage || meta.slug || ""
       } else {
-        const found = await searchSessionMessages(c.filePath, search)
+        query.signal?.throwIfAborted()
+        const found = await searchTranscript(c, search)
         if (!found) return null
         matchedMessage = found
       }
@@ -97,6 +102,9 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
     // untouched while its agents work, which is exactly what it cannot see.
     const hasRunningAgents = statusInfo.status === "awaiting_agents"
       && await sessionAgentsRunning(c.dirName, sessionId)
+    if (statusInfo.status === "awaiting_agents") {
+      query.awaitingAgents?.push({ sessionId, dirName: c.dirName, running: hasRunningAgents, mtimeMs: c.mtimeMs })
+    }
     const archivedReason = query.archivedById.get(sessionId)
 
     return {
@@ -114,7 +122,7 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       gitBranch: meta.gitBranch,
       cwd: meta.cwd,
       lastModified,
-      lastActivityAt: lastActivityOf(meta, c.mtimeMs),
+      lastActivityAt: meta.lastTimestamp || lastModified,
       turnCount: meta.turnCount,
       size: c.size,
       isActive: isRuntimeActive || hasRunningAgents,
@@ -132,7 +140,8 @@ export async function readActiveSessionRow(c: TopLevelSessionInfo, query: Active
       }),
       ...(matchedMessage !== undefined && { matchedMessage }),
     }
-  } catch {
+  } catch (error) {
+    if (query.signal?.aborted) throw error
     return null
   }
 }

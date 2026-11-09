@@ -19,6 +19,16 @@ export interface SessionBoard {
   updatedAt: number
 }
 
+/** A board in the list of every board the caller may see, placed in its keeper's crew. */
+export interface ListedBoard extends SessionBoard {
+  /** The session that started its keeper; absent when nothing did. */
+  parentSessionId?: string
+  /** The top of its keeper's crew: the keeper itself when nothing started it. */
+  rootId: string
+  /** The name its keeper was started with, for a session the list does not carry. */
+  name?: string
+}
+
 /** What a board may say, read from the document an agent sent; null when it says nothing. */
 export type BoardContent = Omit<SessionBoard, "sessionId" | "updatedAt">
 
@@ -69,4 +79,12 @@ export function parseBoardContent(document: unknown): BoardContent | null {
   })
   if (!title && !progress && sections.length === 0) return null
   return { ...(title && { title }), ...(progress && { progress }), sections }
+}
+
+const LEFT_TITLE = /^(next|left|remaining|still to do|to ?do|up next)\b/i
+
+/** Whether a board says what is left: a section such as Next with items, or progress that is complete. */
+export function saysWhatIsLeft(content: BoardContent): boolean {
+  return content.sections.some((section) => LEFT_TITLE.test(section.title) && section.items.length > 0)
+    || (content.progress !== undefined && content.progress.done === content.progress.total)
 }

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
-import type { SessionState, SessionAction } from "./useSessionState"
-import type { ParsedSession } from "../../shared/session/types"
-import { loadSessionTailCached } from "@/lib/sessionLoader"
+import type { SessionShellState, SessionAction } from "./useSessionState"
+import type { LoadedSession, SessionController } from "@/lib/sessionLoader"
 import { devicePathPrefix, getActiveDeviceId, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
@@ -9,13 +8,12 @@ import { fileNameFromUrlId } from "@/lib/agents"
 import { sessionPath } from "@/lib/revealSession"
 
 interface UseUrlSyncOpts {
-  state: SessionState
+  state: SessionShellState
   dispatch: Dispatch<SessionAction>
   isMobile: boolean
   resetTurnCount: (count: number) => void
   scrollToBottomInstant: () => void
-  /** Off-main-thread session parser from App's `useParserWorker`. */
-  workerParse: (text: string) => Promise<ParsedSession>
+  sessions: SessionController
 }
 
 // ── URL scheme ──────────────────────────────────────────────────────────────
@@ -58,7 +56,7 @@ function fileNameFromSessionId(dirName: string, sessionId: string): string {
   return fileNameFromUrlId(dirName, sessionId)
 }
 
-function stateToPath(state: SessionState): string {
+function stateToPath(state: SessionShellState): string {
   const prefix = devicePathPrefix()
   if (state.sessionSource) return sessionPath(state.sessionSource.dirName, state.sessionSource.fileName)
   if (state.pendingDirName) {
@@ -112,7 +110,7 @@ export function useUrlSync({
   isMobile,
   resetTurnCount,
   scrollToBottomInstant,
-  workerParse,
+  sessions,
 }: UseUrlSyncOpts) {
   const [previewLoadError, setPreviewLoadError] = useState<string | null>(null)
   // Depth counter, not a boolean: two overlapping loads (e.g. a notification
@@ -120,43 +118,35 @@ export function useUrlSync({
   // *last* one settles, or a stale path from the outgoing session gets pushed.
   const skipPushDepthRef = useRef(0)
   const lastPushedRef = useRef(window.location.pathname)
-  const initialLoadDone = useRef(false)
 
   const loadFromUrl = useCallback(
     async (parsed: ParsedUrl) => {
+      const showSession = ({ parsed: session, source }: LoadedSession) => {
+        dispatch({ type: "LOAD_SESSION", session, source, isMobile })
+        resetTurnCount(session.turns.length)
+        scrollToBottomInstant()
+      }
       skipPushDepthRef.current++
       try {
         if (parsed.type === "preview" && parsed.sessionId) {
+          const sessionId = parsed.sessionId
           setPreviewLoadError(null)
           try {
-            const lookup = await authFetch(
-              `/api/find-session/${encodeURIComponent(parsed.sessionId)}`,
-            )
-            if (!lookup.ok) {
-              throw new Error(
-                lookup.status === 404
-                  ? `Session ${parsed.sessionId} was not found.`
-                  : `Failed to resolve session (${lookup.status}).`,
-              )
-            }
-            const location = await lookup.json() as { dirName?: string; fileName?: string }
-            if (!location.dirName || !location.fileName) {
-              throw new Error("Cogpit returned an invalid session location.")
-            }
-            const loaded = await loadSessionTailCached(
-              location.dirName,
-              location.fileName,
-              workerParse,
-              "session preview",
-            )
-            dispatch({
-              type: "LOAD_SESSION",
-              session: loaded.parsed,
-              source: loaded.source,
-              isMobile,
-            })
-            resetTurnCount(loaded.parsed.turns.length)
-            scrollToBottomInstant()
+            await sessions.openSession(async (signal) => {
+              const lookup = await authFetch(`/api/find-session/${encodeURIComponent(sessionId)}`, { signal })
+              if (!lookup.ok) {
+                throw new Error(
+                  lookup.status === 404
+                    ? `Session ${sessionId} was not found.`
+                    : `Failed to resolve session (${lookup.status}).`,
+                )
+              }
+              const location = await lookup.json() as { dirName?: string; fileName?: string }
+              if (!location.dirName || !location.fileName) {
+                throw new Error("Cogpit returned an invalid session location.")
+              }
+              return { dirName: location.dirName, fileName: location.fileName }
+            }, { reason: "url", commit: showSession })
           } catch (error) {
             dispatch({ type: "GO_HOME", isMobile })
             setPreviewLoadError(
@@ -166,27 +156,15 @@ export function useUrlSync({
         } else if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
           setPreviewLoadError(null)
           const fileName = fileNameFromSessionId(parsed.dirName, parsed.sessionId)
-          let loaded: Awaited<ReturnType<typeof loadSessionTailCached>>
           try {
-            // Bottom-first tail load (worker parse + cache) — same pipeline as
-            // every other open path, so deep-links open instantly too.
-            loaded = await loadSessionTailCached(parsed.dirName, fileName, workerParse, "session")
+            await sessions.openSession({ dirName: parsed.dirName, fileName }, { reason: "url", commit: showSession })
           } catch {
             dispatch({ type: "GO_HOME", isMobile })
             const home = deviceHomePath()
             window.history.replaceState(null, "", home)
             lastPushedRef.current = home
             saveLastPath(getActiveDeviceId(), home)
-            return
           }
-          dispatch({
-            type: "LOAD_SESSION",
-            session: loaded.parsed,
-            source: loaded.source,
-            isMobile,
-          })
-          resetTurnCount(loaded.parsed.turns.length)
-          scrollToBottomInstant()
         } else if (parsed.type === "project" && parsed.dirName) {
           setPreviewLoadError(null)
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: parsed.dirName })
@@ -204,23 +182,24 @@ export function useUrlSync({
         skipPushDepthRef.current--
       }
     },
-    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse]
+    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, sessions]
   )
 
   // On mount: if URL has a path, load the corresponding session or project.
+  // Once per mount, not per hook instance: an unmount leaves the session, so a
+  // remount (StrictMode's in development) opens the link again.
+  const loadFromUrlRef = useRef(loadFromUrl)
+  loadFromUrlRef.current = loadFromUrl
   useEffect(() => {
-    if (initialLoadDone.current) return
-    initialLoadDone.current = true
-
     // Remember the entry path so switching away and back restores it (incl.
     // deep links, whose URL never changes and so would otherwise never save).
     saveLastPath(getActiveDeviceId(), window.location.pathname)
 
     const parsed = parsePath(window.location.pathname)
     if (parsed.type !== "home" || parsed.normalizeHome) {
-      loadFromUrl(parsed)
+      void loadFromUrlRef.current(parsed)
     }
-  }, [loadFromUrl])
+  }, [])
 
   // Sync state changes → URL (pushState)
   useEffect(() => {

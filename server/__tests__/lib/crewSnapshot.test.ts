@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
     tasks: [] as Array<{ id: string; parentSessionId: string; childSessionId: string; state: string; createdAt: number; updatedAt: number; acknowledgedAt?: number }>,
     getSessionMeta: vi.fn(),
     getSessionStatus: vi.fn(),
-    getSessionPullRequests: vi.fn(async (_filePath: string, _size: number) => [] as unknown[]),
+    peekSessionPullRequests: vi.fn(async (_candidate: { filePath: string }) => ({ pullRequests: [] as unknown[], references: [] as unknown[] })),
     readSessionState: vi.fn(),
     deviceState: vi.fn(),
     watchCrewChat: vi.fn(),
@@ -41,10 +41,11 @@ vi.mock("../../agents/runtimes", () => ({
 vi.mock("../../agents/pendingInput", () => ({ listPendingInput: (id: string) => mocks.signals.get(id)?.waiting ?? [] }))
 vi.mock("../../agents/agentsRunning", () => ({ sessionAgentsRunning: async () => false }))
 vi.mock("../../helpers", () => ({ getSessionMeta: mocks.getSessionMeta, getSessionStatus: mocks.getSessionStatus }))
-vi.mock("../../lib/sessionPrIndex", () => ({
-  getSessionPullRequests: mocks.getSessionPullRequests,
-  getScannedSessionPullRequests: () => [],
+vi.mock("../../sessionCatalog", () => ({
+  catalogRow: async (file: { filePath: string }) => ({ meta: await mocks.getSessionMeta(file.filePath), status: await mocks.getSessionStatus(file.filePath) }),
 }))
+vi.mock("../../lib/sessionPrIndex", () => ({ getScannedSessionPullRequests: () => [] }))
+vi.mock("../../lib/sessionPrSearchIndex", () => ({ peekSessionPullRequests: mocks.peekSessionPullRequests }))
 vi.mock("../../lib/sessionArchive", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/sessionArchive")>(),
   readArchive: async () => ({ archived: new Map(), kept: new Set() }),
@@ -126,9 +127,9 @@ beforeEach(() => {
 describe("readCrewSnapshot", () => {
   it("reads a settled member once, until something it changes by moves", async () => {
     expect(await member("done")).toMatchObject({ outcome: "completed", firstUserMessage: "Prompt for done", name: "done-lane", address: { dirName: "-work", fileName: "done.jsonl" } })
-    const reads = mocks.getSessionPullRequests.mock.calls.length
+    const reads = mocks.peekSessionPullRequests.mock.calls.length
     await read("lead")
-    expect(mocks.getSessionPullRequests.mock.calls.length).toBe(reads)
+    expect(mocks.peekSessionPullRequests.mock.calls.length).toBe(reads)
 
     mocks.meta.set("done", { firstUserMessage: "Edited" })
     list("done", Date.now(), 200)
@@ -151,7 +152,7 @@ describe("readCrewSnapshot", () => {
     mocks.status.set("done", { status: "thinking" })
     mocks.status.set("busy", { status: "awaiting_agents" })
     expect((await member("done"))?.outcome).toBe("completed")
-    const reads = (id: string) => mocks.getSessionPullRequests.mock.calls.filter(([path]) => path === `/work/${id}.jsonl`).length
+    const reads = (id: string) => mocks.peekSessionPullRequests.mock.calls.filter(([candidate]) => candidate.filePath === `/work/${id}.jsonl`).length
     await read("lead")
     expect(reads("done")).toBe(1)
     expect(reads("busy")).toBe(2)

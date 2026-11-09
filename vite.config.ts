@@ -41,7 +41,7 @@ export default defineConfig({
   },
   server: {
     watch: {
-      ignored: ['**/undo-history/**', '**/.claude/worktrees/**'],
+      ignored: ['**/undo-history/**', '**/session-config/**', '**/.claude/worktrees/**'],
     },
   },
 })

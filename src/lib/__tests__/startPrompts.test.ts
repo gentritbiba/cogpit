@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { makeTurn } from "@/__tests__/fixtures"
-import type { ParsedSession } from "../../../shared/session/types"
 import { _resetStartPromptsForTests, rememberStartPrompt, withStartPrompt } from "@/lib/startPrompts"
+import { type SessionView } from "../../../shared/session/sessionDigest"
 
-const makeParsedSession = (overrides: Partial<ParsedSession>) => ({ sessionId: "", turns: [], ...overrides }) as ParsedSession
+const makeParsedSession = (overrides: Partial<SessionView>) => ({ sessionId: "", turns: [], ...overrides }) as SessionView
 
 beforeEach(() => _resetStartPromptsForTests())
 

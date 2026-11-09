@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { readFile, writeFile } from "node:fs/promises"
 import { resolve, join } from "node:path"
 import { createProviderInstance } from "../../agents/instanceConfigurations"
@@ -12,6 +12,7 @@ import { scopeParsedSession } from "../../../shared/session/instances"
 import type { AgentRuntime } from "../../agents/runtimeTypes"
 import { subscribe, type StreamBusEvent } from "../../lib/streamBus"
 import { registerPluginSkills } from "../../plugins/skillContext"
+import { resetServerPortForTest, setServerPort } from "../../lib/portFile"
 const originalBrowserHome = process.env.COGPIT_BROWSER_HOME
 beforeEach(() => { process.env.COGPIT_BROWSER_HOME = join(process.env.COGPIT_ORCHESTRATION_ROOT!, "browser") })
 afterEach(() => { if (originalBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME; else process.env.COGPIT_BROWSER_HOME = originalBrowserHome })
@@ -24,6 +25,18 @@ async function instance(label: string, args: string[] = []) {
   return { configuration, runtime, store: createInstanceStore(configuration) }
 }
 async function until(predicate: () => boolean, timeout = 10000) { const deadline = Date.now() + timeout; while (!predicate()) { if (Date.now() > deadline) throw new Error("Provider state did not arrive"); await new Promise((resolve) => setTimeout(resolve, 20)) } }
+describe("provider instance environment", () => {
+  afterEach(() => { resetServerPortForTest(); vi.unstubAllEnvs() })
+
+  it("gives the worker this server's port, never one it inherited", async () => {
+    const { configuration } = await instance("Port")
+    vi.stubEnv("COGPIT_PORT", "19384")
+    expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_PORT).toBeUndefined()
+    setServerPort(5200)
+    expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_PORT).toBe("5200")
+  })
+})
+
 describe("provider instances and ACP", () => {
 
   it("awaits the parent readiness gate before a worker receives its first prompt", async () => {

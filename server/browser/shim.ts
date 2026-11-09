@@ -22,6 +22,7 @@ import {
   COGPIT_SESSION_ID_RE,
   DEFAULT_BROWSER,
   OWNERS_DIR_NAME,
+  RUN_SERVER_FILE,
   SHARED_RUN_NAME,
   THROWAWAY_PREFIX,
   THROWAWAY_USED_SUFFIX,
@@ -195,6 +196,7 @@ if [[ "$name" == ${THROWAWAY_PREFIX}* ]]; then
   export AGENT_BROWSER_SOCKET_DIR="$home/run/$sid"
   mkdir -p "$AGENT_BROWSER_SOCKET_DIR"
   touch "$AGENT_BROWSER_SOCKET_DIR/$name${THROWAWAY_USED_SUFFIX}" 2>/dev/null || true
+  if [ "$sid" != "${SHARED_RUN_NAME}" ] && [ -n "\${COGPIT_PORT:-}" ]; then printf '%s\\n' "$COGPIT_PORT" > "$AGENT_BROWSER_SOCKET_DIR/${RUN_SERVER_FILE}" 2>/dev/null || true; fi
   run_browser "$@"
 fi
 ${renderOwnedDefault()}profile="$home/profiles/$name"
@@ -324,6 +326,9 @@ if (name.startsWith(${JSON.stringify(THROWAWAY_PREFIX)})) {
   env.AGENT_BROWSER_SOCKET_DIR = join(home, "run", sid)
   mkdirSync(env.AGENT_BROWSER_SOCKET_DIR, { recursive: true })
   try { writeFileSync(join(env.AGENT_BROWSER_SOCKET_DIR, \`\${name}${THROWAWAY_USED_SUFFIX}\`), "") } catch {}
+  if (sid !== ${JSON.stringify(SHARED_RUN_NAME)} && env.COGPIT_PORT) {
+    try { writeFileSync(join(env.AGENT_BROWSER_SOCKET_DIR, ${JSON.stringify(RUN_SERVER_FILE)}), \`\${env.COGPIT_PORT}\\n\`) } catch {}
+  }
   runBrowser()
 }
 

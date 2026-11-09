@@ -10,6 +10,7 @@ import type { TopLevelSessionInfo } from "../agents/types"
 import { accessLevelOf } from "../edition"
 import { getSessionStatus } from "../helpers"
 import { orchestrationStore } from "../orchestration/storage"
+import { catalogRow } from "../sessionCatalog"
 import { hostForOrigin, localHost } from "../sessionHosts"
 import { crewRootOf } from "./crew"
 import { watchCrewChat } from "./crewChat"
@@ -17,9 +18,9 @@ import { commandScope } from "./durableSend"
 import { recencyCache } from "./recencyCache"
 import { archiveReason, readArchive } from "./sessionArchive"
 import { readSessionCrew, type CrewSources, type DescribedSession } from "./sessionCrew"
-import { lastActivityOf, listedMeta } from "./listedSessionMeta"
 import { sessionOrigin, sessionParents } from "./sessionOrigins"
-import { getScannedSessionPullRequests, getSessionPullRequests } from "./sessionPrIndex"
+import { getScannedSessionPullRequests } from "./sessionPrIndex"
+import { peekSessionPullRequests } from "./sessionPrSearchIndex"
 import { readSessionSignals, readSessionState, sessionStateFrom, type SessionSignals } from "./sessionWait"
 
 /**
@@ -70,16 +71,16 @@ function clockCanChange(status: string | undefined, lastActivityMs: number): boo
 async function describeListed(id: string, candidate: TopLevelSessionInfo, signals: SessionSignals | null): Promise<{ described: DescribedSession; settled: boolean }> {
   const host = { remote: false, id: localHost.id, name: localHost.name }
   const address = { dirName: candidate.dirName, fileName: candidate.fileName }
-  const cached = await listedMeta(candidate).catch(() => null)
+  const cached = await catalogRow(candidate).catch(() => null)
   const statusInfo = cached?.status ?? await getSessionStatus(candidate.filePath)
-  const lastActivityAt = cached ? lastActivityOf(cached.meta, candidate.mtimeMs) : undefined
+  const lastActivityAt = cached ? cached.meta.lastTimestamp || new Date(candidate.mtimeMs).toISOString() : undefined
   const lastActivityMs = Date.parse(lastActivityAt ?? "") || candidate.mtimeMs
   const state = signals
     ? await sessionStateFrom(id, signals, { filePath: candidate.filePath, statusInfo, lastActivityMs })
     : { sessionId: id, outcome: "not_found" as const, live: false, running: false, waiting: [] }
   if (!cached) return { described: { host, state, address, listed: null }, settled: false }
   const { meta } = cached
-  const pullRequests = await getSessionPullRequests(candidate.filePath, candidate.size)
+  const pullRequests = (await peekSessionPullRequests(candidate))?.pullRequests ?? []
   return {
     described: {
       host,

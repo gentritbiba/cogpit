@@ -10,6 +10,7 @@ import type { useSessionContext } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const contextMocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("@/contexts/AppContext", () => ({
   useAppContext: contextMocks.useAppContext,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: contextMocks.useSessionContext,
 }))
 
@@ -131,8 +132,6 @@ function setContexts({
       sessionSource: null,
       pendingDirName,
       pendingCwd,
-      activeTurnIndex: null,
-      activeToolCallId: null,
       searchQuery: "",
       expandAll: false,
       sessionChangeKey: 1,
@@ -147,12 +146,12 @@ function setContexts({
     config: { openConfigDialog: vi.fn() },
   } as unknown as ReturnType<typeof useAppContext>)
 
+  showSession(session)
   contextMocks.useSessionContext.mockReturnValue({
-    session,
     sessionSource: session ? {
       dirName: "-workspace-current",
       fileName: "session-1.jsonl",
-      rawText: "",
+      watchOffset: 0, loadId: 1,
     } : null,
     isSubAgentView: false,
   } as ReturnType<typeof useSessionContext>)

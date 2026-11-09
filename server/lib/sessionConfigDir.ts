@@ -8,6 +8,7 @@ export const SESSION_ARCHIVE_FILE = "archived-sessions.json"
 export const PR_SEARCH_INDEX_FILE = "pr-search-index.json"
 export const SESSION_ORIGINS_FILE = "session-origins.json"
 export const SESSION_BOARDS_FILE = "session-boards.json"
+export const SESSION_CATALOG_FILE = "session-catalog.json"
 /** The parent-only record session origins replaced; its entries are a subset of an origin. */
 export const LEGACY_SESSION_LINEAGE_FILE = "session-lineage.json"
 
@@ -16,6 +17,7 @@ const STORE_FILES: ReadonlySet<string> = new Set([
   PR_SEARCH_INDEX_FILE,
   SESSION_ORIGINS_FILE,
   SESSION_BOARDS_FILE,
+  SESSION_CATALOG_FILE,
   LEGACY_SESSION_LINEAGE_FILE,
 ])
 

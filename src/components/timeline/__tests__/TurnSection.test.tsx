@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../../shared/session/sessionDigest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
-import type { ParsedSession, SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
+import type { SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
 import { formatTaskAttention, formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
 import { formatCrewChatDelivery } from "../../../../shared/contracts/crewChat"
 
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: 0, activeToolCallId: "question-1", expandAll: false },
+    state: { expandAll: false },
     isMobile: mocks.isMobile,
   }),
 }))
@@ -25,6 +26,8 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => mocks.optionalContext,
   useSessionContext: () => ({
     session: makeSession(),
+    activeTurnIndex: 0,
+    activeToolCallId: "question-1",
     isLive: mocks.isLive,
     isSubAgentView: false,
     undoRedo: mocks.undoEnabled
@@ -38,10 +41,6 @@ vi.mock("@/contexts/SessionContext", () => ({
 
 vi.mock("@/hooks/useSkillMetadata", () => ({
   useSkillMetadata: () => new Map(),
-}))
-
-vi.mock("../../../../shared/session/sessionStatus", () => ({
-  deriveSessionStatus: () => ({ status: mocks.status }),
 }))
 
 vi.mock("../AgentStatusIndicator", () => ({
@@ -117,7 +116,7 @@ const mailTurn: Turn = {
   assistantText: ["Final response"],
 }
 
-function makeSession(): ParsedSession {
+function makeSession(): SessionView {
   return {
     sessionId: "session-1",
     version: "1.0",
@@ -137,7 +136,7 @@ function makeSession(): ParsedSession {
       totalDurationMs: 0,
       turnCount: 1,
     },
-    rawMessages: [],
+    digest: { ...EMPTY_SESSION_DIGEST, status: { status: mocks.status } },
   }
 }
 

@@ -6,6 +6,7 @@ import { authFetch } from "@/lib/auth"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useOpenSession } from "@/contexts/SessionContext"
 import type { Turn } from "../../../shared/session/types"
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -228,4 +229,11 @@ export function BackgroundServers({
       </div>
     </section>
   )
+}
+
+/** Finds the open session's servers where no panel shows them; only this re-renders as it streams. */
+export function OpenSessionBackgroundServers({ onServersChanged }: Pick<BackgroundServersProps, "onServersChanged">): React.JSX.Element | null {
+  const session = useOpenSession((open) => open)
+  if (!session) return null
+  return <BackgroundServers cwd={session.cwd} turns={session.turns} onServersChanged={onServersChanged} />
 }

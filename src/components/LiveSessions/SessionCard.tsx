@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import {
   Archive,
   ArchiveRestore,
@@ -12,6 +12,7 @@ import {
   Users,
   X,
 } from "lucide-react"
+import { SessionStatusLine, useStatusLinkBoard } from "@/components/board/StatusLink"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ProjectFavicon } from "@/components/ProjectFavicon"
@@ -77,7 +78,7 @@ export interface CardLineage {
  * the last prompt and vitals, the same actions as the row, and a hover
  * preview with the full prompts for when that is still not enough.
  */
-export function SessionCard({
+export const SessionCard = memo(function SessionCard({
   session: s,
   projectLabel,
   projectPath,
@@ -136,6 +137,10 @@ export function SessionCard({
   const hasPullRequests = Boolean(s.matchedPullRequestNumber) || Boolean(s.pullRequests?.length)
   const hasFooter = canResume || hasTeamToggle || hasPullRequests
 
+  const statusBoard = useStatusLinkBoard(s.sessionId)
+  // The hover actions take the bottom corner unless a crew or a status line ends the card there.
+  const corner = crew || (statusBoard && !hasFooter) ? "top-1.5" : "bottom-1.5"
+
   const { onHoverStart, onHoverEnd } = useHoverPrefetch(
     onPrefetchSession && !isActiveSession
       ? () => onPrefetchSession(s.dirName, s.fileName)
@@ -154,7 +159,7 @@ export function SessionCard({
       data-session-card
       data-archived={isArchived || undefined}
       className={cn(
-        "motion-list-item group relative flex flex-col rounded-lg border transition-colors",
+        "motion-list-item list-row-lazy group relative flex flex-col rounded-lg border transition-colors",
         surface(isActiveSession, justFinished),
         isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
@@ -302,6 +307,8 @@ export function SessionCard({
         </TooltipContent>
       </Tooltip>
 
+      {statusBoard && <SessionStatusLine board={statusBoard} />}
+
       {hasFooter && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-[26px]">
           {s.matchedPullRequestNumber ? (
@@ -316,7 +323,7 @@ export function SessionCard({
               type="button"
               variant="ghost"
               size="xs"
-              onClick={onToggleTeammates}
+              onClick={() => onToggleTeammates?.(s.sessionId)}
               aria-expanded={!teammatesCollapsed}
               aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
             >
@@ -368,7 +375,7 @@ export function SessionCard({
           onClick={archiveAction.run}
           className={cn(
             "absolute right-1.5 bg-popover text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-foreground",
-            crew ? "top-1.5" : "bottom-1.5",
+            corner,
           )}
           title={archiveAction.label}
           aria-label={archiveAction.label}
@@ -386,7 +393,7 @@ export function SessionCard({
           disabled={killingPids.has(proc.pid)}
           className={cn(
             "absolute right-1.5 bg-popover text-destructive opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-            crew ? "top-1.5" : "bottom-1.5",
+            corner,
           )}
           title={`Kill PID ${proc.pid}`}
           aria-label={`Kill process ${proc.pid}`}
@@ -415,7 +422,7 @@ export function SessionCard({
   }
 
   return card
-}
+})
 
 /** A crew's root wears the crew's state: someone waiting outranks someone working. */
 function crewDot(

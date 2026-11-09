@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  appendCodexSession,
   codexPageHeaderLine,
   createCodexPromptReader,
   extractApplyPatchInputs,
@@ -2029,6 +2030,26 @@ describe("parseCodexSession paged windows", () => {
     expect(turns).toHaveLength(2)
     expect(turns[0].id).not.toBe(turns[1].id)
     expect(new Set(turns.map((t) => t.id)).size).toBe(2)
+  })
+
+  it("names turns sharing a turn id and start time the same in a full parse and after an append (review #9)", () => {
+    const lines = [
+      sessionMeta(),
+      turnContext({ turn_id: "turn-1", timestamp: "2024-01-01T00:00:01.000Z" }),
+      userMessage("First", "2024-01-01T00:00:01.000Z"),
+      assistantMessage("done", "2024-01-01T00:00:02.000Z"),
+      turnContext({ turn_id: "turn-1", timestamp: "2024-01-01T00:00:01.000Z" }),
+      userMessage("Again", "2024-01-01T00:00:01.000Z"),
+      assistantMessage("done again", "2024-01-01T00:00:03.000Z"),
+    ]
+    const full = parseCanonicalCodexSession(lines.join("\n")).turns.map((turn) => turn.id)
+    expect(full).toEqual(["turn-1@2024-01-01T00:00:01.000Z", "turn-1@2024-01-01T00:00:01.000Z#2"])
+
+    for (let split = 1; split < lines.length; split++) {
+      const start = parseCanonicalCodexSession(lines.slice(0, split).join("\n"))
+      const appended = appendCodexSession(start, lines.slice(split).join("\n"))
+      expect(appended.turns.map((turn) => turn.id)).toEqual(full)
+    }
   })
 
   it("reassembles a turn split across pages without losing its prompt", () => {

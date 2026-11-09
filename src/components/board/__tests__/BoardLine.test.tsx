@@ -1,16 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { SessionBoard } from "../../../../shared/contracts/board"
+import type { ListedBoard } from "../../../../shared/contracts/board"
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), board: null as SessionBoard | null }))
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), board: null as ListedBoard | null }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.fetch }))
 vi.mock("@/hooks/useSessionNamer", () => ({ useSessionNamer: () => (id: string) => (id === "lead" ? "Wave 3 coordinator" : undefined) }))
 
+import { __resetSessionBoardsForTest } from "@/hooks/useSessionBoards"
 import { BoardLine } from "../BoardLine"
 
 beforeEach(() => {
   localStorage.clear()
-  mocks.fetch.mockReset().mockImplementation(async () => ({ ok: true, json: async () => ({ board: mocks.board }) }))
+  __resetSessionBoardsForTest()
+  mocks.fetch.mockReset().mockImplementation(async () => ({ ok: true, json: async () => ({ boards: mocks.board ? [mocks.board] : [] }) }))
 })
 afterEach(cleanup)
 
@@ -18,6 +20,7 @@ describe("BoardLine", () => {
   it("says where the work stands in a line and opens to its sections", async () => {
     mocks.board = {
       sessionId: "lead",
+      rootId: "lead",
       title: "Wave 3",
       progress: { done: 35, total: 99 },
       sections: [
@@ -30,7 +33,7 @@ describe("BoardLine", () => {
     render(<BoardLine boardSessionId="lead" />)
 
     const line = await screen.findByRole("button", { expanded: false })
-    expect(mocks.fetch).toHaveBeenCalledWith("/api/session-board/lead")
+    expect(mocks.fetch).toHaveBeenCalledWith("/api/session-boards")
     expect(line).toHaveTextContent("Wave 3")
     expect(line).toHaveTextContent("35 of 99")
     expect(line).toHaveTextContent("Now 2")

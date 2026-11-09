@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { ChevronRight } from "lucide-react"
+import { MemberStatusButton } from "@/components/board/StatusLink"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { getSessionRecencyMs } from "../../../shared/session-ordering"
 import { workingChip } from "./attentionGroups"
 import { memberName, reportCounts, type CrewCounts, type MemberNeed, type MemberStatus } from "./crew"
 import { STATUS_DOT } from "./statusDot"
@@ -117,7 +117,7 @@ function FoldList({
           : ""
         const reportsLabel = via || (reportCount > 0 ? ` · ${reportCount} ${reportCount === 1 ? "session" : "sessions"}` : "")
         return (
-          <li key={value.sessionId}>
+          <li key={value.sessionId} className="flex items-center gap-0.5">
             <button
               type="button"
               data-crew-member={value.sessionId}
@@ -125,7 +125,7 @@ function FoldList({
               aria-label={`${name}${reportsLabel}, ${activity}`}
               onClick={() => onSelectSession(value.dirName, value.fileName)}
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                 isActive && "bg-accent",
               )}
             >
@@ -138,6 +138,7 @@ function FoldList({
                 {activity}
               </span>
             </button>
+            <MemberStatusButton sessionId={value.sessionId} name={name} />
           </li>
         )
       })}
@@ -160,8 +161,9 @@ function FoldList({
  * The members the fold lists, in one pass over the crew: two levels, the
  * sessions the host started and any deeper one waiting on someone so it
  * never hides behind the session that started it; those needing someone
- * first, then working, then done by latest activity. Done members come last,
- * so the ones folded away are the tail.
+ * first, then working, then done, each in the order the crew arrives in
+ * (newest activity first). Done members come last, so the ones folded away
+ * are the tail.
  */
 function foldOrder(host: ActiveSessionInfo, members: readonly ActiveSessionInfo[], statusOf: (member: ActiveSessionInfo) => MemberStatus) {
   const byId = new Map([host, ...members].map((value) => [value.sessionId, value]))
@@ -170,12 +172,8 @@ function foldOrder(host: ActiveSessionInfo, members: readonly ActiveSessionInfo[
     !value.crew || value.crew.parentId === host.sessionId || !byId.has(value.crew.parentId)
     || statusById.get(value.sessionId)!.state === "needs-you"
   ))
-  const recency = new Map(listed.map((value) => [value.sessionId, getSessionRecencyMs(value)]))
   const stateOf = (value: ActiveSessionInfo) => statusById.get(value.sessionId)!.state
-  const ordered = [...listed].sort((a, b) => (
-    STATE_ORDER[stateOf(a)] - STATE_ORDER[stateOf(b)]
-    || (stateOf(a) === "done" ? recency.get(b.sessionId)! - recency.get(a.sessionId)! : 0)
-  ))
+  const ordered = [...listed].sort((a, b) => STATE_ORDER[stateOf(a)] - STATE_ORDER[stateOf(b)])
   const done = ordered.reduce((count, value) => count + Number(stateOf(value) === "done"), 0)
   return { byId, statusById, reports: reportCounts(members), ordered, done }
 }

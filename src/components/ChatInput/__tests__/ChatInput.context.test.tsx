@@ -5,12 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   source: null as { dirName: string; fileName: string; rawText: string } | null,
-  session: { sessionId: "session-1" } as { sessionId: string } | null,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
-    session: mocks.session,
     sessionSource: mocks.source,
     isLive: false,
     actions: { handleEditConfig: vi.fn(), handleOpenQuoteSource: vi.fn(async () => true) },
@@ -37,6 +35,7 @@ vi.mock("@/plugins/RuntimePluginActions", () => ({ RuntimePluginActions: () => n
 import { ChatInput, type ChatInputHandle } from "../index"
 import { resetUnsentRecoveriesForTest } from "../unsentRecovery"
 import { renderComposerMessage, type ComposerContextItem } from "../../../../shared/session/composerContext"
+import { showSession, shownSession } from "@/__tests__/sessionContextMock"
 
 const excerpt: ComposerContextItem = { id: "ctx-excerpt01", kind: "file", path: "src/app.ts", startLine: 4, endLine: 6, text: "const x = 1", comment: "Why?" }
 const capture: ComposerContextItem = { id: "ctx-capture01", kind: "browser", note: "Overlap", url: "https://example.test", title: "Home", viewport: { width: 800, height: 600 }, region: { x: 0, y: 0, width: 100, height: 50 }, capturedAt: "2026-10-29T12:00:00.000Z", browser: "default", image: 1 }
@@ -50,7 +49,7 @@ function mount(props: Parameters<typeof ChatInput>[0] = {}) {
 beforeEach(() => {
   localStorage.clear(); resetUnsentRecoveriesForTest(); mocks.source = null
   mocks.sendMessage.mockReset().mockResolvedValue(true)
-  mocks.session = { sessionId: crypto.randomUUID() }
+  showSession({ sessionId: crypto.randomUUID() })
 })
 
 describe("ChatInput context", () => {
@@ -135,18 +134,18 @@ it.each(["text", "context", "capture", "switch"])("keeps an immutable failed cap
   let refuse!: (sent: boolean) => void
   mocks.sendMessage.mockReturnValueOnce(new Promise<boolean>((resolve) => { refuse = resolve }))
   const view = mount({ projectCwd: "/repo" })
-  const firstSession = mocks.session
+  const firstSession = shownSession()!
   act(() => { view.ref.current!.setDraft({ v: 1, text: "first capture", context: [capture], attachments: [{ id: "capture-a", mediaType: "image/png", data: "eA==", contextId: capture.id }] }) })
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send message" })) })
   if (newer === "text" || newer === "switch") fireEvent.change(screen.getByRole("combobox"), { target: { value: "newer typing" } })
   if (newer === "context") act(() => { view.ref.current!.addContext(excerpt) })
   if (newer === "capture") act(() => { view.ref.current!.addContext({ ...capture, id: "ctx-capture02" }, [{ id: "capture-b", mediaType: "image/png", data: "eQ==" }]) })
   const current = view.ref.current!.getDraft()
-  if (newer === "switch") { mocks.session = { sessionId: "elsewhere" }; view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" allowImages={false} />) }
+  if (newer === "switch") { showSession({ sessionId: "elsewhere" }); view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" allowImages={false} />) }
   await act(async () => { refuse(false) })
   if (newer === "switch") {
     expect(view.ref.current!.getDraft().text).toBe("")
-    mocks.session = firstSession; view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" />)
+    showSession(firstSession); view.rerender(<ChatInput ref={view.ref} projectCwd="/repo" />)
   }
   expect(view.ref.current!.getDraft()).toEqual(current)
   expect(screen.getByRole("button", { name: "Restore unsent message" })).toBeDisabled()

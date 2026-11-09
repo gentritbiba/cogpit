@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { CommandReceipt } from "../../../shared/contracts/orchestration"
 import type { ConversationState } from "../conversationState"
 
-const owner = vi.hoisted(() => ({ state: {} as ConversationState, listeners: new Set<() => void>() }))
-vi.mock("../conversationState", () => ({ conversationStateFor: () => ({ snapshot: () => owner.state, subscribe: (listener: () => void) => { owner.listeners.add(listener); return () => owner.listeners.delete(listener) } }) }))
+const owner = vi.hoisted(() => ({ state: {} as ConversationState, listeners: new Set<() => void>(), watched: new Set<string>() }))
+vi.mock("../conversationState", () => ({ conversationStateFor: () => ({ snapshot: () => owner.state, subscribe: (listener: () => void) => { owner.listeners.add(listener); return () => owner.listeners.delete(listener) }, watch: (id: string) => { owner.watched.add(id); return () => owner.watched.delete(id) } }) }))
 import { fetchWithModelFallback } from "../agents/modelFallback"
 
 const receipt: CommandReceipt = { id: "accepted-command", conversationId: "conversation", sessionId: "native", bindingRevision: 1, state: "queued", intent: "queue", createdAt: 1, updatedAt: 1, position: 1 }
@@ -11,7 +11,8 @@ const options = { model: "unavailable", agentKind: "codex", errorFallback: "Fail
 function update(patch: Partial<CommandReceipt>) { owner.state = { ...owner.state, commands: [{ ...receipt, ...patch }] }; for (const listener of owner.listeners) listener() }
 beforeEach(() => {
   owner.listeners.clear()
-  owner.state = { conversation: { id: "conversation", revision: 1, binding: { hostId: "local", agent: "codex", instanceId: "default", sessionId: "native" }, createdAt: 1, updatedAt: 1 }, commands: [receipt], cursor: 1, freshness: "current" }
+  owner.watched.clear()
+  owner.state = { conversation: { id: "conversation", revision: 1, binding: { hostId: "local", agent: "codex", instanceId: "default", sessionId: "native" }, createdAt: 1, updatedAt: 1 }, commands: [receipt], freshness: "current" }
 })
 describe("accepted command model fallback", () => {
   it("returns the accepted receipt so the timeline can show it from the queue", async () => {
@@ -25,12 +26,14 @@ describe("accepted command model fallback", () => {
     const accepted = await fetchWithModelFallback(send, { ...options, onModelRejected })
     expect(accepted.res.status).toBe(202)
     expect(send).toHaveBeenCalledTimes(1)
+    expect(owner.watched).toEqual(new Set([receipt.id]))
     update({ state: "failed", errorCode: "MODEL_REJECTED" })
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     update({ state: "failed", errorCode: "MODEL_REJECTED" })
     expect(send).toHaveBeenLastCalledWith(undefined)
     expect(onModelRejected).toHaveBeenCalledExactlyOnceWith("unavailable")
     expect(owner.listeners.size).toBe(0)
+    expect(owner.watched.size).toBe(0)
   })
   it.each([{ state: "unknown" as const }, { state: "failed" as const }, { state: "failed" as const, errorCode: "MODEL_REJECTED", delivery: "started" as const }])("does not replay ambiguous or already delivered commands: %j", async (patch) => {
     const send = vi.fn(async () => new Response(JSON.stringify({ receipt }), { status: 202 }))
@@ -47,5 +50,6 @@ describe("accepted command model fallback", () => {
     update({ state: "failed", errorCode: "MODEL_REJECTED" })
     expect(send).toHaveBeenCalledOnce()
     expect(owner.listeners.size).toBe(0)
+    expect(owner.watched.size).toBe(0)
   })
 })

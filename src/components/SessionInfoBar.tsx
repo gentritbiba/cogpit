@@ -3,7 +3,6 @@ import { MobileSessionInfoBar, type SessionInfoBarProps } from "@/components/Ses
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubAgentPath } from "@/lib/format"
-import type { RawMessage } from "../../shared/session/types"
 import { capabilitiesForDirName } from "@/lib/agents"
 
 export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBarProps) {
@@ -12,9 +11,7 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
   if (!isMobile || !session) return null
 
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
-  const contextRawMessages = (
-    capabilitiesForDirName(sessionSource?.dirName).contextWindow ? session.rawMessages : []
-  ) as readonly RawMessage[]
+  const contextUsage = capabilitiesForDirName(sessionSource?.dirName).contextWindow ? session.digest.contextUsage : null
 
   return (
     <MobileSessionInfoBar
@@ -25,7 +22,7 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
       isLive={isLive}
       canArchive={permissions.archive}
       onProviderHandoff={permissions.send && subAgentInfo === null ? actions.handleProviderHandoff : undefined}
-      claudeRawMessages={contextRawMessages}
+      contextUsage={contextUsage}
     />
   )
 })

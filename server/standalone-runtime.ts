@@ -14,6 +14,7 @@ import {
   setConfigPath,
 } from "./config"
 import { removePortFile, setServerPort, writePortFile } from "./lib/portFile"
+import { detachFromParentCogpit } from "./lib/parentCogpit"
 import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import { startDelegatedRequestWatcher } from "./sessionHosts/delegatedRequests"
 import { startSlack, stopSlack } from "./slack"
@@ -25,6 +26,7 @@ import {
 } from "./lib/standalone-bootstrap"
 import { validatePasswordStrength } from "./security"
 import { editionOwnsSignIn, loadEdition } from "./edition"
+import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 
 export interface StartStandaloneServerOptions {
   staticDir: string
@@ -81,6 +83,7 @@ export async function startStandaloneServer({
   publishPort = false,
   legacyClickUpPath,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
+  detachFromParentCogpit()
   // First, before this start writes anything of its own.
   await beginServerStart(dataDir)
   const legacyPluginHost = await captureLegacyPluginHost(dataDir)
@@ -130,6 +133,7 @@ export async function startStandaloneServer({
     legacyClickUpPath,
     viteDevUrl: process.env.ELECTRON_RENDERER_URL,
   })
+  startSessionCatalogAfterFirstResponse(composition.httpServer)
   let boundPort: number
   try {
     boundPort = await listen(composition.httpServer, port, host)
@@ -160,6 +164,7 @@ export async function startStandaloneServer({
       if (publishPort) removePortFile()
       if (slack) await stopSlack()
       await composition.dispose()
+      await flushSessionCatalog()
     },
   }
 }

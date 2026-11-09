@@ -27,7 +27,7 @@ Read only the guide your task needs:
 | Need | Guide |
 | --- | --- |
 | What the user sees, where Cogpit keeps things, its local API | [How Cogpit works](references/how-cogpit-works.md) |
-| Start, follow up, wait for, answer or stop other sessions | [Sessions](references/sessions.md) |
+| Start, follow up, wait for, answer or stop other sessions; keep your status board | [Sessions](references/sessions.md) |
 | Run a session on another computer | [Devices](references/devices.md) |
 | Chat with your crew, or reply in a linked Slack thread | [Messaging](references/messaging.md) |
 | Find or read earlier sessions, turns and tool calls | [Memory](references/memory.md) |

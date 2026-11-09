@@ -2,7 +2,7 @@ import { Send, Square, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { useSessionChatContext, useSessionControls } from "@/contexts/SessionContext"
 import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
 import { agentInterruptLabel } from "@/lib/agents/presentation"
 
@@ -17,7 +17,7 @@ export function ActionButtons({
   onSubmit,
   submitLabel = "Send message",
 }: ActionButtonsProps) {
-  const { isLive, sessionSource, actions: { handleStopSession: onStopSession } } = useSessionContext()
+  const { isLive, sessionSource, actions: { handleStopSession: onStopSession } } = useSessionControls()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
   const showAgentControls = isConnected || isLive
   const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)

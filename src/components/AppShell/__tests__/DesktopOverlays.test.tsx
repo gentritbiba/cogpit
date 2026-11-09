@@ -11,6 +11,7 @@ import type { useSessionContext } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
+import { showSession } from "@/__tests__/sessionContextMock"
 
 const mocks = vi.hoisted(() => ({
   useAppContext: vi.fn(),
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/contexts/AppContext", () => ({ useAppContext: mocks.useAppContext }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContext: mocks.useSessionContext }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContext: mocks.useSessionContext }))
 vi.mock("@/hooks/useDevices", () => ({ useDevices: mocks.useDevices }))
 
 // Keep the real FIND_IN_CONVERSATION_EVENT so this test breaks if the name
@@ -97,8 +98,8 @@ function setContexts(
     theme: { theme: "dark" },
   } as unknown as ReturnType<typeof useAppContext>)
 
+  showSession(session)
   mocks.useSessionContext.mockReturnValue({
-    session,
     sessionSource: session ? { dirName: "-workspace-cogpit", fileName: "s.jsonl" } : null,
   } as unknown as ReturnType<typeof useSessionContext>)
 }

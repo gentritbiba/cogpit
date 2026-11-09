@@ -382,6 +382,10 @@ export class OrchestrationStore {
     return row ? { receipt: receipt(row), scope, payload: decode(row.payload), fingerprint: String(row.fingerprint), attempt: Number(row.attempt), epoch: Number(row.epoch) } : null
   }
   commands(conversationId: string, scope: string): CommandReceipt[] { return (this.db.prepare("SELECT * FROM commands WHERE conversation_id=? AND scope=? ORDER BY position").all(conversationId, scope) as Row[]).map(receipt) }
+  /** The conversation's commands that are not completed or cancelled, plus `include` whatever their state. */
+  openCommands(conversationId: string, scope: string, include: readonly string[] = []): CommandReceipt[] {
+    return (this.db.prepare("SELECT * FROM commands WHERE conversation_id=? AND scope=? AND (state NOT IN ('completed','cancelled') OR id IN (SELECT value FROM json_each(?))) ORDER BY position").all(conversationId, scope, JSON.stringify(include)) as Row[]).map(receipt)
+  }
   pending(scope?: string): StoredCommand[] {
     const rows = (scope === undefined ? this.db.prepare("SELECT scope,id FROM commands WHERE state IN ('queued','held','dispatching','delivered','unknown') ORDER BY position").all() : this.db.prepare("SELECT scope,id FROM commands WHERE scope=? AND state IN ('queued','held','dispatching','delivered','unknown') ORDER BY position").all(scope)) as Row[]
     return rows.map((r) => this.command(String(r.scope), String(r.id))!)

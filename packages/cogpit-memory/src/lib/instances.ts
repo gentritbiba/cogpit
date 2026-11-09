@@ -16,7 +16,8 @@ export function splitInstanceDirName(dirName: string | null | undefined): { inst
   const match = /^instance__([A-Za-z0-9-]+)__(.+)$/.exec(dirName ?? "")
   return match ? { instanceId: match[1]!, nativeDirName: match[2]! } : { instanceId: "default", nativeDirName: dirName ?? "" }
 }
-export function scopeParsedSession(session: ParsedSession, instanceId: string): ParsedSession {
+/** A parsed session, or any view of one, renamed into an agent instance. */
+export function scopeParsedSession<T extends Pick<ParsedSession, "sessionId" | "branchedFrom" | "instanceId">>(session: T, instanceId: string): T {
   if (instanceId === "default") return session
   return { ...session, instanceId, sessionId: instanceSessionId(instanceId, splitInstanceSessionId(session.sessionId).nativeId), ...(session.branchedFrom ? { branchedFrom: { ...session.branchedFrom, sessionId: instanceSessionId(instanceId, splitInstanceSessionId(session.branchedFrom.sessionId).nativeId) } } : {}) }
 }

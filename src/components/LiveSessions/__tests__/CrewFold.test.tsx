@@ -39,10 +39,10 @@ const listed = () => [...document.querySelectorAll("[data-crew-member]")].map((e
 afterEach(cleanup)
 
 describe("CrewFold", () => {
-  it("lists who needs someone, then who works, then the finished by latest activity, with a deeper waiting member via its parent", () => {
+  it("lists who needs someone, then who works, then the finished in the crew's newest-first order, with a deeper waiting member via its parent", () => {
     const members = [
-      row("old", "host", 50), row("lane", "host", 5), row("busy", "host", 20), row("recent", "host", 2),
-      row("deep", "lane", 1), row("deep-done", "lane", 1),
+      row("deep", "lane", 1), row("deep-done", "lane", 1), row("recent", "host", 2), row("lane", "host", 5),
+      row("busy", "host", 20), row("old", "host", 50),
     ]
     renderFold(members, { busy: { state: "working" }, deep: { state: "needs-you", need: "question" } })
     expect(listed()).toEqual(["deep", "busy", "recent", "lane", "old"])

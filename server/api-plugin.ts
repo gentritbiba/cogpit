@@ -15,7 +15,9 @@ import { beginServerStart } from "./lib/installState"
 import { CLICKUP_CONFIG_FILE } from "./lib/clickupConfig"
 import { answersUnconfigured } from "./lib/configGuard"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
+import { flushSessionCatalog, startSessionCatalogAfterFirstResponse } from "./sessionCatalog"
 import { detachFromParentCogpit } from "./lib/parentCogpit"
+import { setServerPort } from "./lib/portFile"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -25,6 +27,11 @@ export function sessionApiPlugin(): Plugin {
       // The checkout is the dev shell's data root. First, before anything writes.
       const dataDir = getDataRoot()
       await beginServerStart(dataDir)
+
+      server.httpServer?.once("listening", () => {
+        const address = server.httpServer?.address()
+        if (address && typeof address === "object") setServerPort(address.port)
+      })
 
       // Kill all active child processes when the server shuts down
       server.httpServer?.on("close", () => {
@@ -53,7 +60,7 @@ export function sessionApiPlugin(): Plugin {
       if (suppression) console.warn(suppression)
       const pluginManager = await initializeAppPlugins(dataDir, { legacyHost, legacyClickUpPath: CLICKUP_CONFIG_FILE })
       server.httpServer?.on("close", () => {
-        void Promise.all([pluginManager.close(), disposeHubPluginRelay()])
+        void Promise.all([pluginManager.close(), disposeHubPluginRelay(), flushSessionCatalog()])
       })
 
       // Security middleware (before all routes)
@@ -82,6 +89,7 @@ export function sessionApiPlugin(): Plugin {
         next()
       })
 
+      if (server.httpServer) startSessionCatalogAfterFirstResponse(server.httpServer)
       const use = server.middlewares.use.bind(server.middlewares)
       registerApiRoutes(use, { mode: "dev" })
       use("/api", apiNotFound)

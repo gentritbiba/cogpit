@@ -4,7 +4,6 @@ import { Loader2, Redo2 } from "lucide-react"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
-import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isNearTop, isPrepend, type TimelineSnapshot } from "@/lib/timelinePaging"
 import type { Turn } from "../../../shared/session/types"
@@ -110,8 +109,7 @@ export function VirtualizedTimeline({
   onLoadMore,
   timelineRef,
 }: VirtualizedTimelineProps) {
-  const { state: { activeTurnIndex } } = useAppContext()
-  const { undoRedo } = useSessionContext()
+  const { undoRedo, activeTurnIndex } = useSessionContext()
   const handleRef = useRef<VirtualizerHandle>(null)
   const listWrapRef = useRef<HTMLDivElement>(null)
   const [startMargin, setStartMargin] = useState(0)

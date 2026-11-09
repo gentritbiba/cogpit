@@ -12,6 +12,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path"
 
 import { resolveNavigationUrl } from "../../shared/browser/url"
 import { resolveAgentCommand } from "../lib/binaryResolver"
+import { serverPort } from "../lib/portFile"
 import {
   assertBrowserName,
   assertNamedBrowser,
@@ -20,6 +21,7 @@ import {
   isValidBrowserName,
   isValidCogpitSessionId,
   profileDir,
+  RUN_SERVER_FILE,
   runRoot,
   SHARED_RUN_NAME,
   sharedRunDir,
@@ -436,11 +438,22 @@ export function sweep(isCogpitSessionLive: (id: string) => boolean, deps = defau
   reapBrowserProfileNotes(isCogpitSessionLive)
 }
 
-async function shutdownAll(deps: DaemonDeps): Promise<void> {
-  // Throwaway trees are scratch space with no user state in them, so they go
-  // with whoever is quitting. Named browsers hold the user's logins and are
-  // shared with any other Cogpit here: only their owner may stop them.
-  for (const dir of listRunSubdirs()) reapRunDir(join(runRoot(), dir), deps)
+function runServerPort(dir: string): string | null {
+  try {
+    return readFileSync(join(dir, RUN_SERVER_FILE), "utf8").trim()
+  } catch {
+    return null
+  }
+}
+
+async function shutdownAll(ownPort: number | null, deps: DaemonDeps): Promise<void> {
+  // A session's throwaway tree goes with the Cogpit that runs the session; any
+  // other Cogpit sharing this browser home leaves it to the sweep. Named
+  // browsers hold the user's logins: only the sweep owner may stop them.
+  for (const dir of listRunSubdirs()) {
+    const path = join(runRoot(), dir)
+    if (ownPort !== null && runServerPort(path) === String(ownPort)) reapRunDir(path, deps)
+  }
   if (!holdsSweepOwnership()) return
   await Promise.all(
     listPidFiles(sharedRunDir()).map(async ({ name, pid }) => {
@@ -455,9 +468,9 @@ async function shutdownAll(deps: DaemonDeps): Promise<void> {
   releaseSweepOwnership()
 }
 
-export function shutdownBrowsers(deps = defaultDaemonDeps): Promise<void> {
+export function shutdownBrowsers(deps = defaultDaemonDeps, ownPort = serverPort()): Promise<void> {
   return withTimeout(
-    shutdownAll(deps),
+    shutdownAll(ownPort, deps),
     SHUTDOWN_TIMEOUT_MS,
     `The browser daemons did not stop in ${SHUTDOWN_TIMEOUT_MS / 1_000}s`,
   )
