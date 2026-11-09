@@ -210,8 +210,12 @@ export function deliverCrewChat(rootId: string, req?: IncomingMessage): Promise<
 export const CREW_CHAT_DELIVERY_ATTEMPTS = 8
 const RETRY_BASE_MS = 5_000
 const RETRY_CAP_MS = 5 * 60_000
-/** A busy member is reachable and free again soon, so a mention to it is retried on a short fixed delay. */
+/** A busy member is reachable and usually free again soon, so it is asked again on a short fixed delay. */
 export const CREW_CHAT_BUSY_RETRY_MS = 10_000
+/** How long a mention waits on a member that answers busy every time before it gives up. */
+export const CREW_CHAT_BUSY_GIVE_UP_MS = 60 * 60_000
+/** Busy answers a notice gets before it is skipped. */
+export const CREW_CHAT_NOTICE_BUSY_ANSWERS = 3
 
 /** How long to wait after the `attempt`th failure (1-based). */
 export function crewChatRetryDelay(attempt: number): number {
@@ -225,22 +229,27 @@ class CrewMemberUnreachable extends Error {}
 function deliveryFailure(error: unknown): DeliveryFailure {
   const reason = error instanceof Error && error.message ? error.message : "Chat delivery failed"
   if (error instanceof CrewMemberUnreachable) return { kind: "unreachable", reason }
-  // A device answers 409 when the session cannot take a message right now.
-  if (error instanceof DeviceRequestError && error.status === 409) return { kind: "busy", reason }
+  // session-send's answer when the session cannot take a message right now; other 409s are permanent.
+  if (error instanceof DeviceRequestError && error.status === 409 && error.code === "CONFLICT") return { kind: "busy", reason }
   return { kind: "failed", reason }
 }
 
 function deferral(delivery: CrewChatDelivery, { kind, reason }: DeliveryFailure, now: number) {
-  if (kind === "busy") return { delivery, error: reason, attempts: delivery.attempts, nextAttemptAt: now + CREW_CHAT_BUSY_RETRY_MS, giveUp: false }
+  if (kind === "busy") {
+    const busySince = delivery.busySince || now
+    const patience = delivery.kind === "mention" ? CREW_CHAT_BUSY_GIVE_UP_MS : (CREW_CHAT_NOTICE_BUSY_ANSWERS - 1) * CREW_CHAT_BUSY_RETRY_MS
+    return { delivery, error: reason, attempts: delivery.attempts, busySince, nextAttemptAt: now + CREW_CHAT_BUSY_RETRY_MS, giveUp: now - busySince >= patience }
+  }
   const attempts = delivery.attempts + 1
-  return { delivery, error: reason, attempts, nextAttemptAt: now + crewChatRetryDelay(attempts), giveUp: attempts >= CREW_CHAT_DELIVERY_ATTEMPTS }
+  return { delivery, error: reason, attempts, busySince: 0, nextAttemptAt: now + crewChatRetryDelay(attempts), giveUp: attempts >= CREW_CHAT_DELIVERY_ATTEMPTS }
 }
 
 /**
  * One pass over the deliveries that are due. A member that fails once in a pass is not asked again in
- * that pass, so many messages to an offline device cost one request. A notice the member cannot take
- * now is skipped. A mention to a busy member is retried shortly without counting an attempt; any other
- * failure counts one, backs off, and the last allowed one settles the delivery as `failed`.
+ * that pass, so many messages to an offline device cost one request. A notice to a member out of reach is
+ * skipped, and one to a busy member after a few short retries. A mention to a busy member is retried
+ * shortly without counting an attempt, for up to an hour; any other failure counts one, backs off, and
+ * the last allowed one settles the delivery as `failed`.
  */
 async function flushCrewChat(rootId: string, scope: string, req?: IncomingMessage): Promise<void> {
   const activeGeneration = generation
@@ -275,8 +284,9 @@ async function flushCrewChat(rootId: string, scope: string, req?: IncomingMessag
           }
         }
         if (!failure) continue
-        if (delivery.kind !== "mention" && failure.kind !== "failed") store.settleChatDelivery(delivery, "skipped", failure.reason)
-        else deferrals.push(deferral(delivery, failure, Date.now()))
+        const next = deferral(delivery, failure, Date.now())
+        if (delivery.kind !== "mention" && (failure.kind === "unreachable" || (failure.kind === "busy" && next.giveUp))) store.settleChatDelivery(delivery, "skipped", failure.reason)
+        else deferrals.push(next)
       }
     } finally {
       if (generation === activeGeneration) store.deferChatDeliveries(deferrals)

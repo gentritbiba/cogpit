@@ -21,7 +21,7 @@ it("migrates a version 3 database and persists history, subscriptions, cursors a
     store = new OrchestrationStore(path)
     expect(store.chatMessages("lead", { limit: 100 })).toEqual([message])
     expect(store.chatListener("lead", "review")).toEqual({ listening: false, cursor: message.sequence })
-    expect(store.chatDeliveries("lead", "owner")).toEqual([expect.objectContaining({ sessionId: "review", kind: "mention", state: "pending", attempts: 0, nextAttemptAt: 0 })])
+    expect(store.chatDeliveries("lead", "owner")).toEqual([expect.objectContaining({ sessionId: "review", kind: "mention", state: "pending", attempts: 0, nextAttemptAt: 0, busySince: 0 })])
     expect(store.chatDeliveries("lead", "other-owner")).toEqual([])
   } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
 })
@@ -40,6 +40,6 @@ it("adds attempt tracking to a version 5 database that already holds pending del
   legacy.close()
   const store = new OrchestrationStore(path)
   try {
-    expect(store.dueChatDeliveries("lead", "owner", 0)).toEqual([expect.objectContaining({ sessionId: "review", state: "pending", error: "Crew member is unavailable", attempts: 0, nextAttemptAt: 0 })])
+    expect(store.dueChatDeliveries("lead", "owner", 0)).toEqual([expect.objectContaining({ sessionId: "review", state: "pending", error: "Crew member is unavailable", attempts: 0, nextAttemptAt: 0, busySince: 0 })])
   } finally { store.close(); rmSync(root, { recursive: true, force: true }) }
 })
