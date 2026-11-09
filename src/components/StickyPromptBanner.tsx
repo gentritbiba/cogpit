@@ -24,9 +24,9 @@ interface StickyPromptBannerProps {
   timelineRef: React.RefObject<TimelineHandle | null>
 }
 
-/** Where one of the reader's messages is: its turn, and the `data-reader-prompt` key of its bubble. */
+/** Where one of the reader's messages is: its turn, by key so a prepend cannot shift it, and the `data-reader-prompt` key of its bubble. */
 interface MessageAddress {
-  turnIndex: number
+  turnKey: string
   key: string
 }
 
@@ -107,12 +107,12 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
       // A giant turn mounts only the blocks near the viewport; a prompt in a block that comes
       // before one already above the line is above it too.
       if (!bubble) {
-        if (key !== "prompt" && laterBlockAbove(row, Number(key), rootTop)) return { turnIndex, key }
+        if (key !== "prompt" && laterBlockAbove(row, Number(key), rootTop)) return { turnKey: firstVisibleKey, key }
         continue
       }
       const rect = bubble.getBoundingClientRect()
       if (rect.top > rootTop) continue
-      return rect.bottom > rootTop ? null : { turnIndex, key }
+      return rect.bottom > rootTop ? null : { turnKey: firstVisibleKey, key }
     }
     // The reader opened this turn and their prompt is just below the top.
     if (messages[0]?.key === "prompt") return null
@@ -123,7 +123,7 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
   const before = row && row.getBoundingClientRect().top <= rootTop ? turnIndex : turnIndex - 1
   for (let index = Math.min(before, turns.length) - 1; index >= 0; index--) {
     const last = readerMessages(turns[index]).at(-1)
-    if (last) return { turnIndex: index, key: last.key }
+    if (last) return { turnKey: keys[index], key: last.key }
   }
   return null
 }
@@ -161,7 +161,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     const address = scrolledPastMessage(container, turns, keys, timeline.getViewport().firstVisibleKey)
     setSticky((current) => {
       if (address === null) return null
-      if (current?.sessionId === sessionId && current.turnIndex === address.turnIndex && current.key === address.key) return current
+      if (current?.sessionId === sessionId && current.turnKey === address.turnKey && current.key === address.key) return current
       return { sessionId, ...address }
     })
   }, [scrollContainerRef, timelineRef])
@@ -183,16 +183,16 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
 
   const message = useMemo(() => {
     if (!sticky || sticky.sessionId !== session.sessionId) return null
-    const turn = session.turns[sticky.turnIndex]
+    const turnIndex = keys.indexOf(sticky.turnKey)
+    const turn = session.turns[turnIndex]
     const text = turn && readerMessages(turn).find((candidate) => candidate.key === sticky.key)?.text
-    return text ? { ...sticky, text } : null
-  }, [session.sessionId, session.turns, sticky])
+    return text ? { ...sticky, turnIndex, text } : null
+  }, [session.sessionId, session.turns, keys, sticky])
 
   if (!message) return null
 
   const scrollToMessage = () => {
-    const turnKey = keys[message.turnIndex]
-    if (turnKey === undefined) return
+    const { turnKey } = message
     const selector = `[data-reader-prompt="${CSS.escape(message.key)}"]`
     // A prompt sent mid-turn sits in a content block, which a giant turn may not have mounted.
     const block = message.key === "prompt" ? null : Number(message.key)

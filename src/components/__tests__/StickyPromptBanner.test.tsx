@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
@@ -188,6 +188,30 @@ describe("StickyPromptBanner", () => {
     expect(scrollToTurn).toHaveBeenCalledWith("session-a-turn-1", expect.objectContaining({ target: expect.any(Function) }))
     const { target } = scrollToTurn.mock.calls[0][1]!
     expect(target!(screen.getByTestId("turn-1"))).toBe(screen.getByTestId("bubble-1-prompt"))
+  })
+
+  // Review finding 8: the banner held a turn index, so a prepend showed another turn's message until it caught up.
+  it("keeps showing the same message, under its new turn number, when older turns arrive", () => {
+    const first = { id: "first", userMessage: "First prompt" }
+    const second = { id: "second", userMessage: "Second prompt" }
+    const shown: string[] = []
+    function Shown() {
+      useLayoutEffect(() => { shown.push(screen.queryByRole("button", { name: /scroll to your message/i })?.textContent ?? "") })
+      return null
+    }
+    const view = render(<><Harness session={makeSession("session-a", [first, second])} bubbles={[["prompt"], ["prompt"]]} /><Shown /></>)
+
+    setRect(screen.getByTestId("scroll-container"), 100, 700)
+    setRect(screen.getByTestId("turn-0"), -500, -200)
+    setRect(screen.getByTestId("turn-1"), -100, 600)
+    setRect(screen.getByTestId("bubble-1-prompt"), -60, 90)
+    scrollAndSettle()
+    expect(banner(2)).toHaveTextContent("Second prompt")
+
+    shown.length = 0
+    view.rerender(<><Harness session={makeSession("session-a", [{ id: "older", userMessage: "Older prompt" }, first, second])} bubbles={[null, ["prompt"], ["prompt"]]} /><Shown /></>)
+    expect(shown.every((text) => text.includes("Turn 3") && text.includes("Second prompt"))).toBe(true)
+    expect(banner(3)).toHaveTextContent("Second prompt")
   })
 
   it("shows what the reader typed, not a task report quoted in the same prompt", () => {
