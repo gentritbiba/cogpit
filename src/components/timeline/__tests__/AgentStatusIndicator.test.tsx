@@ -1,10 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  SessionProvider,
-  type SessionChatContextValue,
-  type SessionContextValue,
-} from "@/contexts/SessionContext"
+import { InSession } from "@/__tests__/InSession"
+import type { SessionControls } from "@/contexts/SessionContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { EMPTY_OVERLAY } from "@/lib/streamingOverlay"
 import { AgentStatusIndicator, LiveElapsed } from "../AgentStatusIndicator"
@@ -75,8 +72,6 @@ function thinkingSession(): MockSession {
   }
 }
 
-const unusedChatContext = {} as SessionChatContextValue
-
 function indicatorWithContext({
   session = completedSession(),
   isLive = true,
@@ -88,25 +83,24 @@ function indicatorWithContext({
   session?: MockSession
   isLive?: boolean
   isCompacting?: boolean
-  pendingInteraction?: SessionContextValue["pendingInteraction"]
+  pendingInteraction?: SessionControls["pendingInteraction"]
   agentProgress?: Record<string, string>
   dirName?: string
 } = {}) {
-  const value = {
-    session: session as unknown as SessionView,
+  const controls = {
     sessionSource: dirName ? { dirName, fileName: "s.jsonl", watchOffset: 0, loadId: 1 } : null,
     isLive,
     sseState: "connected",
     isCompacting,
     pendingInteraction,
-  } as SessionContextValue
+  } as SessionControls
 
   return (
-    <SessionProvider value={value} chatValue={unusedChatContext}>
+    <InSession session={session as unknown as SessionView} controls={controls}>
       <StreamingOverlayProvider value={EMPTY_OVERLAY} agentProgress={agentProgress}>
         <AgentStatusIndicator />
       </StreamingOverlayProvider>
-    </SessionProvider>
+    </InSession>
   )
 }
 

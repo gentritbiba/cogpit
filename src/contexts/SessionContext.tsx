@@ -123,28 +123,6 @@ const SessionChatContext = createContext<SessionChatContextValue | null>(null)
 
 // ── Providers ────────────────────────────────────────────────────────────────
 
-interface SessionProviderProps {
-  value: SessionContextValue
-  chatValue: SessionChatContextValue
-  children: ReactNode
-}
-
-/** Provides a session that is already loaded and does not stream. */
-export function SessionProvider({ value, chatValue, children }: SessionProviderProps): ReactNode {
-  const store = useMemo(() => createSessionStore(value.session), [value.session])
-  return (
-    <SessionStoreContext.Provider value={store}>
-      <SessionControlsContext.Provider value={value}>
-        <SessionContext.Provider value={value}>
-          <SessionChatContext.Provider value={chatValue}>
-            {children}
-          </SessionChatContext.Provider>
-        </SessionContext.Provider>
-      </SessionControlsContext.Provider>
-    </SessionStoreContext.Provider>
-  )
-}
-
 interface OpenSessionProviderProps {
   store: SessionStore
   controls: SessionControls
@@ -209,7 +187,7 @@ export function useSessionContextOptional(): SessionContextValue | null {
 export function useSessionContext(): SessionContextValue {
   const ctx = useContext(SessionContext)
   if (!ctx) {
-    throw new Error("useSessionContext must be used within a SessionProvider")
+    throw new Error("useSessionContext must be used within an OpenSessionProvider")
   }
   return ctx
 }
@@ -218,7 +196,7 @@ export function useSessionContext(): SessionContextValue {
 export function useSessionControls(): SessionControls {
   const ctx = useContext(SessionControlsContext)
   if (!ctx) {
-    throw new Error("useSessionControls must be used within a SessionProvider")
+    throw new Error("useSessionControls must be used within an OpenSessionProvider")
   }
   return ctx
 }
@@ -247,7 +225,7 @@ export function useSessionChatContextOptional(): SessionChatContextValue | null 
 export function useSessionChatContext(): SessionChatContextValue {
   const ctx = useContext(SessionChatContext)
   if (!ctx) {
-    throw new Error("useSessionChatContext must be used within a SessionProvider")
+    throw new Error("useSessionChatContext must be used within an OpenSessionProvider")
   }
   return ctx
 }

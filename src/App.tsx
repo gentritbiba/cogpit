@@ -582,8 +582,6 @@ export default function App() {
   const scrollToBottomInstant = useCallback(() => chatScroll.current?.scrollToBottomInstant(), [])
   const resetTurnCount = useCallback((count: number) => chatScroll.current?.resetTurnCount(count), [])
   const requestScrollToTop = useCallback(() => chatScroll.current?.requestScrollToTop(), [])
-  const resetFinalizedSessionTurnCount = resetTurnCount
-  const scrollFinalizedSessionToBottom = scrollToBottomInstant
 
   const handleTodosExpandedChange = useCallback((expanded: boolean) => {
     setTodosExpanded(expanded)
@@ -602,8 +600,8 @@ export default function App() {
   useLayoutEffect(() => {
     const handleSessionFinalized = (_parsed: SessionView) => {
       // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
-      resetFinalizedSessionTurnCount(0)
-      scrollFinalizedSessionToBottom()
+      resetTurnCount(0)
+      scrollToBottomInstant()
     }
     sessionFinalizedRef.current = handleSessionFinalized
     return () => {
@@ -611,7 +609,7 @@ export default function App() {
         sessionFinalizedRef.current = null
       }
     }
-  }, [resetFinalizedSessionTurnCount, scrollFinalizedSessionToBottom, sessionFinalizedRef])
+  }, [resetTurnCount, scrollToBottomInstant, sessionFinalizedRef])
 
   // Pre-session-switch cleanup: abort in-flight send-message and session creation
   // requests to free HTTP connections before fetching the new session data.
@@ -840,8 +838,6 @@ export default function App() {
     isMobile,
   }), [state, dispatch, config, themeCtx, isMobile])
 
-  // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
-  // so timeline components don't re-render when chat status or scroll indicators change.
   const handleAddComposerContext = useCallback((item: ComposerContextItem, attachments?: ComposerAttachment[]): string | null => {
     const input = chatInputRef.current
     if (!input) return "Open a session or start a new one to add context"
@@ -863,6 +859,8 @@ export default function App() {
     loadMore: chunkedSession.loadMore,
   })
 
+  // Everything the session context carries but the session itself, which the
+  // provider reads from the store. Chat and scroll live in their own context.
   const sessionControls = useMemo<SessionControls>(() => ({
     sessionSource: state.sessionSource,
     isLive,
@@ -906,8 +904,7 @@ export default function App() {
     canHandoff, handleProviderHandoff, handleAddComposerContext, handleOpenQuoteSource,
   ])
 
-  // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
-  // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
+  // The chat's status and actions; the provider pairs them with its scroll state.
   const chatState = useMemo<ChatState>(() => ({
     status: agentChat.status,
     error: agentChat.error,

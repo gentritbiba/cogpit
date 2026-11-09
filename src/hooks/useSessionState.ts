@@ -335,16 +335,16 @@ function selectShell({ session: _session, windowTurns: _window, olderTurns: _old
   return shell
 }
 
-/**
- * The session state of one shell. The open session's content stays in
- * `store`: components select what they show from it, so a streamed batch
- * re-renders only those, never everything below the caller.
- */
 /** A store holding `session`, open with nothing paged in; empty by default. */
 export function createSessionStore(session: SessionView | null = null): SessionStore {
   return createStore(sessionReducer, { ...initialState, ...openSession(session) })
 }
 
+/**
+ * The session state of one shell. The open session's content stays in
+ * `store`: components select what they show from it, so a streamed batch
+ * re-renders only those, never everything below the caller.
+ */
 export function useSessionState(): readonly [SessionShellState, SessionStore["dispatch"], SessionStore] {
   const [store] = useState(() => createSessionStore())
   const state = useStoreSelector(store, selectShell, shallowEqual)
