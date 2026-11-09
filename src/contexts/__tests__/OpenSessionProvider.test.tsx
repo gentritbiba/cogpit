@@ -10,7 +10,8 @@ import {
   type ScrollState,
   type SessionControls,
 } from "@/contexts/SessionContext"
-import { createSessionStore } from "@/hooks/useSessionState"
+import { createSessionStore, type SessionStore } from "@/hooks/useSessionState"
+import type { SessionSource } from "@/lib/sessionSource"
 import { makeTurn } from "@/__tests__/fixtures"
 import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import type { Turn } from "../../../shared/session/types"
@@ -42,6 +43,14 @@ function session(turns: Turn[], sessionId = "s1"): SessionView {
 const controls = { sessionSource: null, isLive: true } as unknown as SessionControls
 const chat = { pendingMessages: [], consumePending: vi.fn() } as unknown as ChatState
 const renders = { shell: 0, controls: 0, fact: 0, transcript: 0 }
+
+function source(fileName: string, loadId = 1): SessionSource {
+  return { dirName: "d", fileName, watchOffset: 0, loadId }
+}
+
+function load(store: SessionStore, open: SessionView) {
+  act(() => store.dispatch({ type: "LOAD_SESSION", session: open, source: source(`${open.sessionId}.jsonl`), isMobile: false }))
+}
 
 /** Stands in for the activity bar, sidebar and panels: below the provider, reading nothing of the session. */
 function Shell() {
@@ -140,5 +149,27 @@ describe("OpenSessionProvider", () => {
     }
 
     expect(pairs).toEqual([[undefined, 0], ["s1", 1], ["s2", 2]])
+  })
+
+  it("hands the focused turn over with the turns it counts, so a page in front never points it at another turn (review 3 #1)", () => {
+    const store = createSessionStore()
+    const focused: Array<string | undefined> = []
+    function Ring() {
+      const { session: open, activeTurnIndex } = useSessionContext()
+      if (activeTurnIndex !== null) focused.push(open?.turns[activeTurnIndex]?.id)
+      return null
+    }
+    render(
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+        <Ring />
+      </OpenSessionProvider>,
+    )
+    load(store, session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })]))
+    act(() => store.dispatch({ type: "JUMP_TO_TURN", index: 1 }))
+    act(() => store.dispatch({ type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-1" }), makeTurn({ id: "t0" })] }))
+
+    expect(store.getState().activeTurnIndex).toBe(3)
+    expect(focused.length).toBeGreaterThan(1)
+    expect(new Set(focused)).toEqual(new Set(["t2"]))
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import { showSession } from "./sessionContextMock"
+import { showSession, shownSession } from "./sessionContextMock"
 
 vi.mock("@/contexts/SessionContext", async () => (await import("./sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({ isLive: false }),
@@ -25,6 +25,10 @@ describe("withSessionHooks", () => {
 
     expect(screen.getByTestId("id")).toHaveTextContent("s2")
     expect(screen.getByTestId("turns")).toHaveTextContent("2")
+  })
+
+  it("starts each test with no session open", () => {
+    expect(shownSession()).toBeNull()
   })
 
   it("refuses a session handed in through the mocked context", async () => {

@@ -132,8 +132,6 @@ function setContexts({
       sessionSource: null,
       pendingDirName,
       pendingCwd,
-      activeTurnIndex: null,
-      activeToolCallId: null,
       searchQuery: "",
       expandAll: false,
       sessionChangeKey: 1,

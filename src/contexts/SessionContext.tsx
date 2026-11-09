@@ -1,8 +1,7 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, useDeferredValue, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
 import { useChatScroll } from "@/hooks/useChatScroll"
-import { createSessionStore, useSessionSelector, type SessionState, type SessionStore } from "@/hooks/useSessionState"
-import { shallowEqual, useStoreSelector } from "@/lib/store"
+import { createSessionStore, useSessionSelector, useShownSession, type SessionStore } from "@/hooks/useSessionState"
 import { withStartPrompt } from "@/lib/startPrompts"
 import type { SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -54,6 +53,9 @@ export interface SessionContextValue {
   session: SessionView | null
   /** Changes with every load of a session; it always belongs to `session`. */
   sessionChangeKey: number
+  /** The turn in focus, counted in `session.turns`. */
+  activeTurnIndex: number | null
+  activeToolCallId: string | null
   /** Source metadata for the loaded session */
   sessionSource: SessionSource | null
   /** Whether the session is actively streaming */
@@ -106,7 +108,7 @@ export interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue | null>(null)
 
 /** Everything in the session context but the session's content, which changes on every live batch. */
-export type SessionControls = Omit<SessionContextValue, "session" | "sessionChangeKey">
+export type SessionControls = Omit<SessionContextValue, "session" | "sessionChangeKey" | "activeTurnIndex" | "activeToolCallId">
 
 const SessionControlsContext = createContext<SessionControls | null>(null)
 const SessionStoreContext = createContext<SessionStore | null>(null)
@@ -135,23 +137,16 @@ interface OpenSessionProviderProps {
   children: ReactNode
 }
 
-function selectOpen({ session, sessionChangeKey }: SessionState) {
-  return { session, sessionChangeKey }
-}
-
 /**
- * Provides the session open in `store`. Only this provider and the components
- * that read the session's content re-render on a live batch; whatever renders
- * it, and what reads only the controls or a selected fact, does not.
- *
- * A store update always renders at once, so the content follows a deferred
- * copy: a live batch or a switch renders the transcript at low priority,
- * where input or the next batch interrupts it.
+ * Provides the session open in `store`, as `useShownSession` shows it. Only
+ * this provider and the components that read the session's content re-render
+ * on a live batch; whatever renders it, and what reads only the controls or a
+ * selected fact, does not.
  */
 export function OpenSessionProvider({
   store, controls, chat, isLive, scrollHandle, onSessionShown, children,
 }: OpenSessionProviderProps): ReactNode {
-  const { session, sessionChangeKey } = useDeferredValue(useStoreSelector(store, selectOpen, shallowEqual))
+  const { session, sessionChangeKey, activeTurnIndex, activeToolCallId } = useShownSession(store)
   const shown = useMemo(() => session && withStartPrompt(session), [session])
   useLayoutEffect(() => { onSessionShown?.(session) }, [session, onSessionShown])
   const scroll = useChatScroll({
@@ -162,7 +157,10 @@ export function OpenSessionProvider({
     sessionChangeKey,
   })
   useImperativeHandle(scrollHandle, () => scroll, [scroll])
-  const value = useMemo(() => ({ ...controls, session: shown, sessionChangeKey }), [controls, shown, sessionChangeKey])
+  const value = useMemo(
+    () => ({ ...controls, session: shown, sessionChangeKey, activeTurnIndex, activeToolCallId }),
+    [controls, shown, sessionChangeKey, activeTurnIndex, activeToolCallId],
+  )
   const chatValue = useMemo(() => ({ chat, scroll }), [chat, scroll])
   return (
     <SessionStoreContext.Provider value={store}>

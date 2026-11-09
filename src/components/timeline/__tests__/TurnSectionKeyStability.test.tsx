@@ -6,7 +6,7 @@ import { emptyTurn } from "@/__tests__/fixtures"
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: null, activeToolCallId: null, expandAll: false, expandToolPayloads: false },
+    state: { expandAll: false, expandToolPayloads: false },
     isMobile: false,
   }),
 }))
@@ -14,6 +14,8 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => null,
   useSessionContext: () => ({
+    activeTurnIndex: null,
+    activeToolCallId: null,
     session: { turns: [], digest: { status: { status: "thinking" } }, cwd: "/tmp" },
     isLive: true,
     isSubAgentView: false,

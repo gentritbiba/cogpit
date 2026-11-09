@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
-    state: { activeTurnIndex: 0, activeToolCallId: "question-1", expandAll: false },
+    state: { expandAll: false },
     isMobile: mocks.isMobile,
   }),
 }))
@@ -26,6 +26,8 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContextOptional: () => mocks.optionalContext,
   useSessionContext: () => ({
     session: makeSession(),
+    activeTurnIndex: 0,
+    activeToolCallId: "question-1",
     isLive: mocks.isLive,
     isSubAgentView: false,
     undoRedo: mocks.undoEnabled
