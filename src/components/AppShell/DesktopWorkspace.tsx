@@ -11,6 +11,7 @@ import { FloatingChrome } from "@/components/FloatingChrome"
 import { SidebarHeader } from "@/components/SidebarHeader"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { DesktopWorkspacePanels } from "@/components/workspace-panels/DesktopWorkspacePanels"
+import { StatusPanelProvider } from "@/components/board/StatusPanelContext"
 import { ViewPanelProvider } from "@/components/views/ViewPanelContext"
 import { availableWorkspacePanels } from "@/components/workspace-panels/WorkspaceActivityBar"
 import { useAppContext } from "@/contexts/AppContext"
@@ -337,6 +338,11 @@ export function DesktopWorkspace({
     openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.views)
   }
 
+  function revealStatusPanel(): void {
+    if (project.showPreview) project.onCloseRightWorkspace()
+    openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.status)
+  }
+
   function openWorktreeSession(session: WorktreeSessionRef): void {
     navigation.actions.handleDashboardSelect(session.dirName, `${session.sessionId}.jsonl`)
     navigation.panels.closeWorkspacePanel()
@@ -367,6 +373,7 @@ export function DesktopWorkspace({
   return (
     <RuntimePluginContributions runtime={runtimePlugins} workspacePath={project.currentCwd ?? null}>
     <ViewPanelProvider shown={activePanel?.id === BUILT_IN_WORKSPACE_PANEL_IDS.views} onReveal={revealViewPanel}>
+    <StatusPanelProvider openSessionId={session?.sessionId ?? null} onReveal={revealStatusPanel}>
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">
@@ -442,6 +449,7 @@ export function DesktopWorkspace({
       </Suspense>}
 
     </div>
+    </StatusPanelProvider>
     </ViewPanelProvider>
     </RuntimePluginContributions>
   )

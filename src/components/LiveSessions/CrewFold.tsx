@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { ChevronRight } from "lucide-react"
+import { MemberStatusButton } from "@/components/board/StatusLink"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { getSessionRecencyMs } from "../../../shared/session-ordering"
 import { workingChip } from "./attentionGroups"
 import { directReports, memberName, type CrewCounts, type MemberNeed, type MemberStatus } from "./crew"
 import { STATUS_DOT } from "./statusDot"
@@ -55,10 +55,7 @@ export function CrewFold({
   // someone so it never hides behind the session that started it.
   const isDirect = (value: ActiveSessionInfo) => !value.crew || value.crew.parentId === host.sessionId || !byId.has(value.crew.parentId)
   const listed = members.filter((value) => isDirect(value) || statusOf(value).state === "needs-you")
-  const ordered = [...listed].sort((a, b) => (
-    STATE_ORDER[statusOf(a).state] - STATE_ORDER[statusOf(b).state]
-    || (statusOf(a).state === "done" ? getSessionRecencyMs(b) - getSessionRecencyMs(a) : 0)
-  ))
+  const ordered = [...listed].sort((a, b) => STATE_ORDER[statusOf(a).state] - STATE_ORDER[statusOf(b).state])
   const done = ordered.filter((value) => statusOf(value).state === "done")
   const hiddenDone = showAllDone ? [] : done.slice(DONE_VISIBLE)
   const shown = ordered.filter((value) => !hiddenDone.includes(value))
@@ -93,7 +90,7 @@ export function CrewFold({
               : ""
             const reportsLabel = via || (reports > 0 ? ` · ${reports} ${reports === 1 ? "session" : "sessions"}` : "")
             return (
-              <li key={value.sessionId}>
+              <li key={value.sessionId} className="flex items-center gap-0.5">
                 <button
                   type="button"
                   data-crew-member={value.sessionId}
@@ -101,7 +98,7 @@ export function CrewFold({
                   aria-label={`${name}${reportsLabel}, ${activity}`}
                   onClick={() => onSelectSession(value.dirName, value.fileName)}
                   className={cn(
-                    "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                     isActive && "bg-accent",
                   )}
                 >
@@ -114,6 +111,7 @@ export function CrewFold({
                     {activity}
                   </span>
                 </button>
+                <MemberStatusButton sessionId={value.sessionId} name={name} />
               </li>
             )
           })}
