@@ -1,5 +1,5 @@
 import type { ComposerCreated } from "@/lib/composerDraftIdentity"
-import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
+import { createContext, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, type Ref, type RefObject, type RefCallback, type ReactNode } from "react"
 import { useChatScroll } from "@/hooks/useChatScroll"
 import { createSessionStore, useSessionSelector, useShownSession, type SessionStore } from "@/hooks/useSessionState"
 import { withStartPrompt } from "@/lib/startPrompts"
@@ -56,7 +56,7 @@ export interface SessionContextValue {
   /** The turn in focus, counted in `session.turns`. */
   activeTurnIndex: number | null
   activeToolCallId: string | null
-  /** Source metadata for the loaded session */
+  /** Where the open session was loaded from; in the session context, where `session` was. */
   sessionSource: SessionSource | null
   /** Whether the session is actively streaming */
   isLive: boolean
@@ -92,6 +92,7 @@ export interface SessionContextValue {
     handleEditConfig?: (filePath: string) => void
     handleEditCommand?: (commandName: string) => void
     handleExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+    /** Turn indices from the provider's contexts count the turns on screen. */
     handleOpenBranches?: (turnIndex: number) => void
     handleBranchFromHere?: (turnIndex: number) => void
     handleToggleExpandAll: () => void
@@ -138,6 +139,41 @@ interface OpenSessionProviderProps {
 }
 
 /**
+ * Where the turn at `index` of the session on screen sits in the store's
+ * session, which can be ahead of it: a batch or page not shown yet, or
+ * another session already open. Null when the store's session lacks it.
+ */
+function storeTurnIndex(shown: SessionView | null, open: SessionView | null, index: number): number | null {
+  if (!shown || !open || shown.sessionId !== open.sessionId) return null
+  const turn = shown.turns[index]
+  if (!turn) return null
+  // Batches add turns behind it and pages in front of it, so look there first.
+  for (const at of [index, index + open.turns.length - shown.turns.length]) {
+    if (open.turns[at]?.id === turn.id) return at
+  }
+  const at = open.turns.findIndex(({ id }) => id === turn.id)
+  return at < 0 ? null : at
+}
+
+/** `controls` with the actions that take a turn index counting the turns on screen. */
+function onScreenTurns(controls: SessionControls, toStore: (index: number) => number | null): SessionControls {
+  const resolved = (act: (turnIndex: number) => void) => (index: number) => {
+    const at = toStore(index)
+    if (at !== null) act(at)
+  }
+  const { undoRedo, actions } = controls
+  return {
+    ...controls,
+    undoRedo: { ...undoRedo, requestUndo: resolved(undoRedo.requestUndo) },
+    actions: {
+      ...actions,
+      handleOpenBranches: actions.handleOpenBranches && resolved(actions.handleOpenBranches),
+      handleBranchFromHere: actions.handleBranchFromHere && resolved(actions.handleBranchFromHere),
+    },
+  }
+}
+
+/**
  * Provides the session open in `store`, as `useShownSession` shows it. Only
  * this provider and the components that read the session's content re-render
  * on a live batch; whatever renders it, and what reads only the controls or a
@@ -146,9 +182,18 @@ interface OpenSessionProviderProps {
 export function OpenSessionProvider({
   store, controls, chat, isLive, scrollHandle, onSessionShown, children,
 }: OpenSessionProviderProps): ReactNode {
-  const { session, sessionChangeKey, activeTurnIndex, activeToolCallId } = useShownSession(store)
+  const { session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId } = useShownSession(store)
   const shown = useMemo(() => session && withStartPrompt(session), [session])
-  useLayoutEffect(() => { onSessionShown?.(session) }, [session, onSessionShown])
+  const onScreenRef = useRef<SessionView | null>(null)
+  useLayoutEffect(() => {
+    onScreenRef.current = session
+    onSessionShown?.(session)
+  }, [session, onSessionShown])
+  // A row acts after the commit that showed it, which the store may be ahead of.
+  const screenControls = useMemo(
+    () => onScreenTurns(controls, (index) => storeTurnIndex(onScreenRef.current, store.getState().session, index)),
+    [controls, store],
+  )
   const scroll = useChatScroll({
     session,
     isLive,
@@ -158,13 +203,13 @@ export function OpenSessionProvider({
   })
   useImperativeHandle(scrollHandle, () => scroll, [scroll])
   const value = useMemo(
-    () => ({ ...controls, session: shown, sessionChangeKey, activeTurnIndex, activeToolCallId }),
-    [controls, shown, sessionChangeKey, activeTurnIndex, activeToolCallId],
+    () => ({ ...screenControls, session: shown, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }),
+    [screenControls, shown, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId],
   )
   const chatValue = useMemo(() => ({ chat, scroll }), [chat, scroll])
   return (
     <SessionStoreContext.Provider value={store}>
-      <SessionControlsContext.Provider value={controls}>
+      <SessionControlsContext.Provider value={screenControls}>
         <SessionContext.Provider value={value}>
           <SessionChatContext.Provider value={chatValue}>
             {children}

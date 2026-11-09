@@ -40,7 +40,7 @@ function session(turns: Turn[], sessionId = "s1"): SessionView {
   }
 }
 
-const controls = { sessionSource: null, isLive: true } as unknown as SessionControls
+const controls = { sessionSource: null, isLive: true, undoRedo: { enabled: false, requestUndo: vi.fn() }, actions: {} } as unknown as SessionControls
 const chat = { pendingMessages: [], consumePending: vi.fn() } as unknown as ChatState
 const renders = { shell: 0, controls: 0, fact: 0, transcript: 0 }
 
@@ -171,5 +171,115 @@ describe("OpenSessionProvider", () => {
     expect(store.getState().activeTurnIndex).toBe(3)
     expect(focused.length).toBeGreaterThan(1)
     expect(new Set(focused)).toEqual(new Set(["t2"]))
+  })
+
+  it("shows a session opened onto an empty screen in the commit that opens it", () => {
+    const store = createSessionStore()
+    const seen: Array<string | undefined> = []
+    function Probe() {
+      const id = useOpenSession((open) => open?.sessionId)
+      useLayoutEffect(() => { seen.push(screen.getByTestId("turns").textContent ?? undefined) }, [id])
+      return null
+    }
+    render(
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+        <Transcript />
+        <Probe />
+      </OpenSessionProvider>,
+    )
+    seen.length = 0
+    load(store, session([makeTurn({ id: "t1" })]))
+    expect(seen).toEqual(["1"])
+  })
+
+  it("pairs the source with the session it shows", () => {
+    const store = createSessionStore()
+    const pairs: Array<[string | undefined, string | undefined]> = []
+    function Paired() {
+      const { session: open, sessionSource } = useSessionContext()
+      pairs.push([open?.sessionId, sessionSource?.fileName])
+      return null
+    }
+    render(
+      <OpenSessionProvider store={store} controls={controls} chat={chat} isLive>
+        <Paired />
+      </OpenSessionProvider>,
+    )
+    load(store, session([makeTurn({ id: "a1" })], "a"))
+    load(store, session([makeTurn({ id: "b1" })], "b"))
+    expect(pairs.filter(([id, file]) => id !== undefined && `${id}.jsonl` !== file)).toEqual([])
+    expect(pairs.at(-1)).toEqual(["b", "b.jsonl"])
+  })
+
+  describe("actions a row takes with its index (review 3 #2)", () => {
+    function setup() {
+      const store = createSessionStore()
+      const requestUndo = vi.fn()
+      const handleOpenBranches = vi.fn()
+      const handleBranchFromHere = vi.fn()
+      const actionControls = {
+        ...controls,
+        undoRedo: { enabled: true, requestUndo },
+        actions: { handleOpenBranches, handleBranchFromHere },
+      } as unknown as SessionControls
+      let row!: Pick<SessionControls, "undoRedo" | "actions">
+      function Row() {
+        row = useSessionContext()
+        return null
+      }
+      render(
+        <OpenSessionProvider store={store} controls={actionControls} chat={chat} isLive>
+          <Row />
+        </OpenSessionProvider>,
+      )
+      return { store, row: () => row, requestUndo, handleOpenBranches, handleBranchFromHere }
+    }
+
+    it("acts on the turn the row shows when pages went in front of it before the screen caught up", () => {
+      const { store, row, requestUndo, handleOpenBranches, handleBranchFromHere } = setup()
+      load(store, session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })]))
+      const onScreen = row()
+
+      act(() => {
+        store.dispatch({ type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-1" }), makeTurn({ id: "t0" })] })
+        // The click lands before the deferred render shows the pages.
+        onScreen.undoRedo.requestUndo(1)
+        onScreen.actions.handleOpenBranches?.(1)
+        onScreen.actions.handleBranchFromHere?.(0)
+      })
+      expect(requestUndo).toHaveBeenCalledWith(3)
+      expect(handleOpenBranches).toHaveBeenCalledWith(3)
+      expect(handleBranchFromHere).toHaveBeenCalledWith(2)
+
+      // Once the pages are on screen, the row's index is the store's.
+      row().undoRedo.requestUndo(3)
+      expect(requestUndo).toHaveBeenLastCalledWith(3)
+    })
+
+    it("acts on the turn the row shows when a live batch added turns behind it", () => {
+      const { store, row, requestUndo } = setup()
+      load(store, session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" })]))
+      const onScreen = row()
+      act(() => {
+        store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: session([makeTurn({ id: "t1" }), makeTurn({ id: "t2" }), makeTurn({ id: "t3" })]) })
+        onScreen.undoRedo.requestUndo(1)
+      })
+      expect(requestUndo).toHaveBeenCalledWith(1)
+    })
+
+    it("does nothing when another session opened before the screen caught up", () => {
+      const { store, row, requestUndo, handleOpenBranches, handleBranchFromHere } = setup()
+      load(store, session([makeTurn({ id: "a1" }), makeTurn({ id: "a2" })], "a"))
+      const onScreen = row()
+      act(() => {
+        store.dispatch({ type: "LOAD_SESSION", session: session([makeTurn({ id: "b1" }), makeTurn({ id: "b2" })], "b"), source: source("b.jsonl"), isMobile: false })
+        onScreen.undoRedo.requestUndo(1)
+        onScreen.actions.handleOpenBranches?.(1)
+        onScreen.actions.handleBranchFromHere?.(1)
+      })
+      expect(requestUndo).not.toHaveBeenCalled()
+      expect(handleOpenBranches).not.toHaveBeenCalled()
+      expect(handleBranchFromHere).not.toHaveBeenCalled()
+    })
   })
 })

@@ -61,7 +61,7 @@ type SessionContentKey = "session" | "windowTurns" | "olderTurns" | "seamOpen" |
 export type SessionShellState = Omit<SessionState, SessionContentKey>
 
 /** The open session as the transcript shows it, with what counts its turns. */
-export type ShownSession = Pick<SessionState, "session" | "sessionChangeKey" | "activeTurnIndex" | "activeToolCallId">
+export type ShownSession = Pick<SessionState, "session" | "sessionChangeKey" | "sessionSource" | "activeTurnIndex" | "activeToolCallId">
 
 export type SessionAction =
   | { type: "LOAD_SESSION"; session: SessionView; source: SessionSource; isMobile: boolean }
@@ -345,8 +345,8 @@ function selectShell({
   return shell
 }
 
-function selectShown({ session, sessionChangeKey, activeTurnIndex, activeToolCallId }: SessionState): ShownSession {
-  return { session, sessionChangeKey, activeTurnIndex, activeToolCallId }
+function selectShown({ session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }: SessionState): ShownSession {
+  return { session, sessionChangeKey, sessionSource, activeTurnIndex, activeToolCallId }
 }
 
 /** A store holding `session`, open with nothing paged in; empty by default. */
@@ -369,10 +369,14 @@ export function useSessionState(): readonly [SessionShellState, SessionStore["di
  * The open session as the transcript shows it. A store update always renders
  * at once, so this follows a deferred copy: a live batch or a switch renders
  * at low priority, where input or the next batch interrupts it. What counts
- * the turns comes in the same copy, so an index never meets another list.
+ * the turns comes in the same copy, so an index never meets another list. A
+ * session opened onto an empty screen shows at once, as there is nothing to
+ * keep on screen meanwhile.
  */
 export function useShownSession(store: SessionStore): ShownSession {
-  return useDeferredValue(useStoreSelector(store, selectShown, shallowEqual))
+  const open = useStoreSelector(store, selectShown, shallowEqual)
+  const shown = useDeferredValue(open)
+  return shown.session === null ? open : shown
 }
 
 /**
