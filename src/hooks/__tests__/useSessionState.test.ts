@@ -684,6 +684,34 @@ describe("useSessionState", () => {
 
   // ── RELOAD_SESSION_CONTENT ────────────────────────────────────────
 
+  describe("SET_OLDER_TURNS", () => {
+    it("keeps the active turn on the same turn as pages go in front of it", () => {
+      const hook = renderState()
+      const window = [makeTurn({ id: "t1", userMessage: "one" }), makeTurn({ id: "t2", userMessage: "two" })]
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: window }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 1, toolCallId: "call-2" })
+
+      const page = [makeTurn({ id: "t-1", userMessage: "minus one" }), makeTurn({ id: "t0", userMessage: "zero" })]
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: page })
+      expect(getState(hook).activeTurnIndex).toBe(3)
+      expect(getSession(hook).turns[3]!.id).toBe("t2")
+      expect(getState(hook).activeToolCallId).toBe("call-2")
+
+      // The next page repeats the window's first turn, which the merge keeps once.
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-2", userMessage: "minus two" }), ...page, window[0]!] })
+      const active = getState(hook).activeTurnIndex!
+      expect(getSession(hook).turns.map(({ id }) => id)).toEqual(["t-2", "t-1", "t0", "t1", "t2"])
+      expect(getSession(hook).turns[active]!.id).toBe("t2")
+    })
+
+    it("leaves no active turn as it was", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
+      expect(getState(hook).activeTurnIndex).toBeNull()
+    })
+  })
+
   describe("RELOAD_SESSION_CONTENT", () => {
     it("sets session and source and increments changeKey", () => {
       const hook = renderState()

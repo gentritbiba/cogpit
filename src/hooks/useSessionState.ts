@@ -131,7 +131,7 @@ function composeSession(
   windowTurns: Turn[],
   olderTurns: Turn[],
   agentKind?: AgentKind,
-): Pick<SessionState, "session" | "seamOpen"> {
+): { session: SessionView; seamOpen: boolean } {
   if (olderTurns.length === 0) return { session, seamOpen: false }
   const turns = prependTurns(windowTurns, olderTurns, agentKind)
   const offset = turns.length - windowTurns.length
@@ -265,15 +265,16 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "SET_OLDER_TURNS": {
       if (!state.session || action.turns === state.olderTurns) return state
+      const composed = composeSession(state.session, state.windowTurns, action.turns, state.sessionSource?.agentKind)
+      // The pages go in front, so the turn in focus moves down by however many they added.
+      const active = state.activeTurnIndex === null
+        ? null
+        : state.activeTurnIndex + composed.session.turns.length - state.session.turns.length
       return {
         ...state,
         olderTurns: action.turns,
-        ...composeSession(
-          state.session,
-          state.windowTurns,
-          action.turns,
-          state.sessionSource?.agentKind,
-        ),
+        ...composed,
+        activeTurnIndex: active !== null && active >= 0 ? active : null,
       }
     }
 
