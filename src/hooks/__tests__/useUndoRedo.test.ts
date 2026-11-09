@@ -401,12 +401,13 @@ describe("useUndoRedo", () => {
 
     it("stays the same callback while the session streams, and restores against the latest turns", async () => {
       const source = makeSource()
-      const store = createSessionStore(makeSession(3))
+      const store = createSessionStore()
+      store.dispatch({ type: "LOAD_SESSION", session: makeSession(3), source, isMobile: false })
       const { result } = renderHook(() => useUndoRedo(store, source, vi.fn()))
       await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled())
       const first = result.current.requestUndo
 
-      act(() => store.dispatch({ type: "UPDATE_SESSION", session: makeSession(5) }))
+      act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: makeSession(5) }))
       expect(result.current.requestUndo).toBe(first)
 
       act(() => result.current.requestUndo(4))

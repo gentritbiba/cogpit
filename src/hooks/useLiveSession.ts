@@ -22,16 +22,21 @@ export type SseConnectionState = "connecting" | "connected" | "disconnected"
 /** Shared empty map so an unchanged "no progress" state never re-renders consumers. */
 const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
 
-/** A parse that keeps failing, or a session the worker lost, would otherwise reload on every batch. */
+/** A parse that keeps failing, a session the worker lost, or a reset repeated on every reconnect would otherwise reload each time. */
 export const RESYNC_COOLDOWN_MS = 10_000
 
 export function useLiveSession(
   source: SessionSource | null,
-  onUpdate: (session: SessionView) => void,
+  /** A streamed update of the load `loadId`. */
+  onUpdate: (session: SessionView, loadId: number) => void,
   workerParse: (text: string) => Promise<SessionView>,
   workerAppend: (existing: SessionView, newText: string) => Promise<SessionView>,
-  /** Reload the session from disk: when the stream cannot resume, the worker lost the session, or a batch keeps failing. */
-  onResync: (() => void) | undefined,
+  /**
+   * Reload the session from disk: when the stream cannot resume, the worker
+   * lost the session, or a batch keeps failing. A reload already waiting to
+   * retry keeps its wait.
+   */
+  onResync: ((options: { keepBackoff: boolean }) => void) | undefined,
   /** The session `source` loaded, read when the stream starts. */
   loadedSession: () => SessionView | null,
 ) {
@@ -147,7 +152,7 @@ export function useLiveSession(
       pendingUpdate = false
       rafId = null
       if (sessionRef.current) {
-        onUpdateRef.current(sessionRef.current)
+        onUpdateRef.current(sessionRef.current, loadId)
       }
     }
 
@@ -205,6 +210,13 @@ export function useLiveSession(
       setAgentProgress(EMPTY_AGENT_PROGRESS)
     }
 
+    const resync = () => {
+      const now = Date.now()
+      if (!onResyncRef.current || now - lastResyncAtRef.current < RESYNC_COOLDOWN_MS) return
+      lastResyncAtRef.current = now
+      onResyncRef.current({ keepBackoff: true })
+    }
+
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
       const toFlush = pendingText
@@ -223,15 +235,15 @@ export function useLiveSession(
       parsePromise
         .then((parsedResult) => {
           const result = scopeParsedSession(parsedResult, splitInstanceDirName(dirName).instanceId)
+          // Cached even after the stream closed: the worker already holds this
+          // version, and a switch back resumes from the entry.
+          sessionCache.update(dirName, fileName, loadId, {
+            parsed: result,
+            source: { watchOffset: flushedEnd },
+          })
           if (closed) return
           sessionRef.current = result
           landingRef.current = { digest: result.digest, lines: [...(landingRef.current?.lines ?? []), ...flushedLines] }
-          if (dirName && fileName) {
-            sessionCache.update(dirName, fileName, {
-              parsed: result,
-              source: { watchOffset: flushedEnd },
-            })
-          }
           scheduleUpdate()
         }, (err) => {
           console.error("[useLiveSession] worker parse failed:", err)
@@ -241,11 +253,7 @@ export function useLiveSession(
           failed = true
           pendingText = toFlush + pendingText
           pendingLines = [...flushedLines, ...pendingLines]
-          const now = Date.now()
-          if (onResyncRef.current && now - lastResyncAtRef.current >= RESYNC_COOLDOWN_MS) {
-            lastResyncAtRef.current = now
-            onResyncRef.current()
-          }
+          resync()
         })
         .catch((err) => {
           console.error("[useLiveSession] live update failed:", err)
@@ -328,8 +336,10 @@ export function useLiveSession(
           clearOverlay()
           setIsCompacting(false)
         } else if (data.type === "reset") {
-          // The file shrank under us, or we fell too far behind: load it again.
-          onResyncRef.current?.()
+          // The stream cannot resume from here, so load the session again. The
+          // server ends the stream and repeats this on every reconnect until the
+          // reload lands.
+          resync()
         } else if (data.type === "lines") {
           if (typeof data.end === "number") {
             if (data.end <= appliedEnd) return

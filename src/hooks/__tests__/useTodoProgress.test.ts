@@ -45,8 +45,15 @@ function makeSession(turns: Turn[]): SessionView {
   }
 }
 
+/** A store with `session` loaded, as the live stream updates it. */
+function loadedStore(session: SessionView | null) {
+  const store = createSessionStore()
+  if (session) store.dispatch({ type: "LOAD_SESSION", session, source: { dirName: "d", fileName: "s.jsonl", watchOffset: 0, loadId: 1 }, isMobile: false })
+  return store
+}
+
 function renderProgress(session: SessionView | null) {
-  const store = createSessionStore(session)
+  const store = loadedStore(session)
   return { store, ...renderHook(() => useTodoProgress(store)) }
 }
 
@@ -55,16 +62,16 @@ describe("useTodoProgress", () => {
     const todos = [{ content: "Step 1", status: "in_progress" as const, activeForm: "Doing step 1" }]
     const first = makeSession([makeTurn([makeToolCall({ name: "TodoWrite", input: { todos } })])])
     let renders = 0
-    const store = createSessionStore(first)
+    const store = loadedStore(first)
     const { result } = renderHook(() => { renders++; return useTodoProgress(store) })
     const shown = result.current
 
-    act(() => store.dispatch({ type: "UPDATE_SESSION", session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "Read" })])]) }))
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "Read" })])]) }))
     expect(renders).toBe(1)
     expect(result.current).toBe(shown)
 
     const done = [{ ...todos[0], status: "completed" as const }]
-    act(() => store.dispatch({ type: "UPDATE_SESSION", session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "TodoWrite", input: { todos: done } })])]) }))
+    act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: makeSession([...first.turns, makeTurn([makeToolCall({ name: "TodoWrite", input: { todos: done } })])]) }))
     expect(renders).toBe(2)
     expect(result.current!.completed).toBe(1)
   })
@@ -349,7 +356,7 @@ describe("useTodoProgress", () => {
       expect(result.current!.total).toBe(1)
       expect(result.current!.completed).toBe(0)
 
-      act(() => store.dispatch({ type: "UPDATE_SESSION", session: session2 }))
+      act(() => store.dispatch({ type: "UPDATE_SESSION", loadId: 1, session: session2 }))
 
       expect(result.current!.total).toBe(2)
       expect(result.current!.completed).toBe(1)

@@ -548,7 +548,7 @@ describe("useLiveSession", () => {
       flushRAF()
     })
 
-    expect(onUpdate).toHaveBeenCalledWith(mockParsedSession)
+    expect(onUpdate).toHaveBeenCalledWith(mockParsedSession, 1)
   })
 
   it("uses workerAppend when session already exists", async () => {
@@ -610,7 +610,7 @@ describe("useLiveSession", () => {
       await settle()
       expect(workerAppend).toHaveBeenLastCalledWith(mockParsedSession, '{"n":1}\n{"n":2}\n')
       act(() => { flushRAF() })
-      expect(onUpdate).toHaveBeenCalledWith(mockParsedSession)
+      expect(onUpdate).toHaveBeenCalledWith(mockParsedSession, 1)
     })
 
     it("resyncs at most once per cooldown", async () => {
@@ -652,6 +652,27 @@ describe("useLiveSession", () => {
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
+  it("still caches an append that lands after the user switched away, under its own load (review #1)", async () => {
+    let answer: (view: SessionView) => void = () => {}
+    workerAppend.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
+    const a: SessionSource = { dirName: "dir", fileName: "a.jsonl", loadId: 7, watchOffset: 100 }
+    const { rerender } = renderHook(
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
+      { initialProps: { src: a } },
+    )
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "lines", lines: ['{"n":1}'], start: 100, end: 108 })
+    })
+    rerender({ src: { dirName: "dir", fileName: "b.jsonl", loadId: 8, watchOffset: 0 } })
+
+    const later = { ...mockParsedSession, sessionId: "a-v6" }
+    await act(async () => { answer(later) })
+    act(() => { flushRAF() })
+
+    expect(sessionCache.update).toHaveBeenCalledWith("dir", "a.jsonl", 7, { parsed: later, source: { watchOffset: 108 } })
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
   it("advances its resume offset over lines the server left out", async () => {
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
     const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
@@ -670,7 +691,7 @@ describe("useLiveSession", () => {
     })
 
     // 100 + 500 + 20 + "{}\n"
-    expect(sessionCache.update).toHaveBeenLastCalledWith("dir", "file.jsonl", expect.objectContaining({
+    expect(sessionCache.update).toHaveBeenLastCalledWith("dir", "file.jsonl", 1, expect.objectContaining({
       source: expect.objectContaining({ watchOffset: 623 }),
     }))
   })
@@ -687,7 +708,7 @@ describe("useLiveSession", () => {
       await Promise.resolve()
     })
 
-    expect(sessionCache.update).toHaveBeenLastCalledWith("dir", "file.jsonl", expect.objectContaining({
+    expect(sessionCache.update).toHaveBeenLastCalledWith("dir", "file.jsonl", 1, expect.objectContaining({
       source: expect.objectContaining({ watchOffset: 90_100 }),
     }))
   })
@@ -738,6 +759,22 @@ describe("useLiveSession", () => {
       renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
       act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
       expect(onResync).toHaveBeenCalledTimes(1)
+    })
+
+    it("asks for a reload once per cooldown however often the reset repeats (review 2 #9)", () => {
+      vi.useFakeTimers({ toFake: ["Date"] })
+      const onResync = vi.fn()
+      const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
+
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "diverged" }) })
+      expect(onResync).toHaveBeenCalledOnce()
+      expect(onResync).toHaveBeenCalledWith({ keepBackoff: true })
+
+      vi.advanceTimersByTime(RESYNC_COOLDOWN_MS)
+      act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
+      expect(onResync).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -1360,7 +1397,7 @@ describe("useLiveSession", () => {
       await act(async () => { await Promise.resolve() })
       act(() => { flushRAF() })
       // The worker answered and the update went out, but it is not on screen yet.
-      expect(onUpdate).toHaveBeenLastCalledWith(landed)
+      expect(onUpdate).toHaveBeenLastCalledWith(landed, 1)
       expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(2)
 
       act(() => { result.current.sessionShown(mockParsedSession) })

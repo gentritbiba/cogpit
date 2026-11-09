@@ -89,7 +89,7 @@ describe("useSessionPaging", () => {
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
     expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
     expect(added).toBe(1)
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns,
@@ -131,7 +131,7 @@ describe("useSessionPaging", () => {
     })
 
     expect(onOlderTurns).not.toHaveBeenCalled()
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: false,
       nextByteOffset: 100,
     })
@@ -205,7 +205,7 @@ describe("useSessionPaging", () => {
     expect(onOlderTurns).not.toHaveBeenCalled()
     // The stale page is still banked on the old session's entry, cursor and
     // turns together, so reopening it picks up where this left off.
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns,
@@ -261,7 +261,7 @@ describe("useSessionPaging", () => {
 
     // The new (older) page lands in front of what was already loaded.
     expect(onOlderTurns).toHaveBeenLastCalledWith([...olderTurns, ...previous])
-    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", 1, {
       hasMore: true,
       nextByteOffset: 100,
       olderTurns: [...olderTurns, ...previous],

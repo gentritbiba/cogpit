@@ -84,7 +84,7 @@ export function useSessionPaging({
       const hasMorePages = data.lines.length > 0 && data.hasMore
       if (identityRef.current === key) setHasMore(hasMorePages)
       if (data.lines.length === 0) {
-        sessionCache.update(dirName, fileName, {
+        sessionCache.update(dirName, fileName, cached.source.loadId, {
           hasMore: hasMorePages,
           nextByteOffset: data.byteOffset,
         })
@@ -98,7 +98,7 @@ export function useSessionPaging({
       // The byte cursor and the pages it consumed advance together: a cursor
       // that moves without them strands that history behind it forever.
       const history = prependTurns(cached.olderTurns, olderParsed.turns, cached.source.agentKind)
-      sessionCache.update(dirName, fileName, {
+      sessionCache.update(dirName, fileName, cached.source.loadId, {
         hasMore: hasMorePages,
         nextByteOffset: data.byteOffset,
         olderTurns: history,

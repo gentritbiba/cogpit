@@ -210,19 +210,22 @@ describe("useParserWorker releases", () => {
     return session
   }
 
-  it("never lets go of the session on screen while hovers push it out of the cache", async () => {
+  it("never lets go of the session on screen, through hovers and after its entry goes", async () => {
     const hook = renderHook(() => useParserWorker())
     const screen = {}
     const open = await cached(hook, 1)
-    sessionCache.show(screen, open)
+    sessionCache.show(screen, { dirName: "-d", fileName: "1.jsonl", view: open })
 
     for (const handle of [2, 3, 4, 5, 6]) await cached(hook, handle)
+    expect(sessionCache.get("-d", "1.jsonl")).toBeDefined()
+    expect(releases()).toEqual([2])
 
-    expect(sessionCache.get("-d", "1.jsonl")).toBeUndefined()
-    expect(releases()).toEqual([])
+    // A reload drops the entry before it reads the transcript again.
+    sessionCache.evict("-d", "1.jsonl")
+    expect(releases()).toEqual([2])
 
     sessionCache.show(screen, null)
-    expect(releases()).toEqual([1])
+    expect(releases()).toEqual([2, 1])
   })
 
   it("releases a session once neither the cache nor a screen holds it", async () => {
@@ -238,7 +241,7 @@ describe("useParserWorker releases", () => {
     const session = await cached(hook, 1)
     const appended = hook.result.current.append(session, "more\n")
     latest().reply({ type: "delta", delta: { fromTurn: 1, turns: [], turnVersions: [], stats: session.stats, digest: session.digest, meta: {} }, kept: { handle: 1, version: 2 } })
-    sessionCache.update("-d", "1.jsonl", { parsed: await appended })
+    sessionCache.update("-d", "1.jsonl", 1, { parsed: await appended })
     expect(releases()).toEqual([])
   })
 

@@ -72,9 +72,11 @@ export interface SessionController {
    * Re-read the session on screen from disk, dropping the history paged in
    * above it. A failed read is retried after `RELOAD_RETRY_DELAYS_MS` while
    * the session stays on screen. A no-op with nothing on screen or while
-   * another open is landing; a call during a reload joins it.
+   * another open is landing. A call during a reload joins it, and cuts short
+   * a wait before its next retry unless it passes `keepBackoff`, as the live
+   * stream's repeated resets do.
    */
-  reloadCurrent(): Promise<void>
+  reloadCurrent(options?: { keepBackoff?: boolean }): Promise<void>
   /** The user left the session on screen; nothing pending may land after this. */
   leave(): void
 }
@@ -222,6 +224,8 @@ export function createSessionController({
   /** This shell's screen in the cache, which holds the view it shows. */
   const screen = {}
   let reloading: Promise<void> | null = null
+  /** Ends the wait before the reload's next retry. */
+  let retryNow: (() => void) | null = null
 
   const dropPending = () => {
     if (!pending) return
@@ -245,7 +249,7 @@ export function createSessionController({
     const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
       pending = null
       shown = address
-      sessionCache.show(screen, loaded.parsed)
+      sessionCache.show(screen, { ...address, view: loaded.parsed })
       commit(loaded)
       return "opened"
     }
@@ -298,7 +302,14 @@ export function createSessionController({
         // The session already on screen stays there.
       }
       if (delay === null) return
-      await new Promise((resolve) => setTimeout(resolve, delay))
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay)
+        retryNow = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
+      retryNow = null
       // Another open took over the screen, or the user left it.
       if (pending || shown !== address) return
     }
@@ -316,8 +327,11 @@ export function createSessionController({
       })
     },
 
-    reloadCurrent() {
-      if (reloading) return reloading
+    reloadCurrent(options) {
+      if (reloading) {
+        if (!options?.keepBackoff) retryNow?.()
+        return reloading
+      }
       if (pending || !shown) return Promise.resolve()
       reloading = reload(shown).finally(() => { reloading = null })
       return reloading

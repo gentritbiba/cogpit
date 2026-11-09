@@ -101,8 +101,8 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
     void loadSession()
   }, [loadSession])
 
-  const handleLiveUpdate = useCallback((session: SessionView) => {
-    dispatch({ type: "UPDATE_SESSION", session })
+  const handleLiveUpdate = useCallback((session: SessionView, loadId: number) => {
+    dispatch({ type: "UPDATE_SESSION", session, loadId })
   }, [dispatch])
 
   const getSession = useCallback(() => sessionStore.getState().session, [sessionStore])

@@ -352,8 +352,8 @@ export default function App() {
   // The stream starts from the session the open controller already parsed, so
   // the worker does not parse it twice. After a reconnect or a failed parse,
   // the session reloads to catch missed messages.
-  const handleLiveUpdate = useCallback((updated: SessionView) => {
-    dispatch({ type: "UPDATE_SESSION", session: updated })
+  const handleLiveUpdate = useCallback((session: SessionView, loadId: number) => {
+    dispatch({ type: "UPDATE_SESSION", session, loadId })
   }, [dispatch])
   const {
     isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit,

@@ -71,7 +71,7 @@ describe("useSessionState", () => {
       const shell = hook.result.current[0]
       const rendered = renders
 
-      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }) })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1" })] }) })
       dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
       expect(renders).toBe(rendered)
       expect(hook.result.current[0]).toBe(shell)
@@ -92,10 +92,10 @@ describe("useSessionState", () => {
       expect(selected.result.current).toBe(1)
       const rendered = renders
 
-      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1", assistantText: ["more"] })] }) })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1", assistantText: ["more"] })] }) })
       expect(renders).toBe(rendered)
 
-      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" }), makeTurn({ id: "t2" })] }) })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [makeTurn({ id: "t1" }), makeTurn({ id: "t2" })] }) })
       expect(selected.result.current).toBe(2)
       expect(renders).toBe(rendered + 1)
     })
@@ -529,10 +529,24 @@ describe("useSessionState", () => {
       dispatch(hook, { type: "JUMP_TO_TURN", index: 3 })
 
       const session2 = makeSession({ sessionId: "s2" })
-      dispatch(hook, { type: "UPDATE_SESSION", session: session2 })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: session2 })
       expect(getState(hook).session).toBe(session2)
       // activeTurnIndex should NOT be reset
       expect(getState(hook).activeTurnIndex).toBe(3)
+    })
+
+    it("drops an update from an earlier load of the session (review #5)", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ sessionId: "s1" }), source: makeSource(), isMobile: false })
+      const reloaded = makeSession({ sessionId: "after-undo" })
+      dispatch(hook, { type: "RELOAD_SESSION_CONTENT", session: reloaded, source: makeSource({ loadId: 2 }) })
+
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ sessionId: "before-undo" }) })
+      expect(getState(hook).session).toBe(reloaded)
+
+      const streamed = makeSession({ sessionId: "after-undo", turns: [makeTurn({ id: "t1" })] })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 2, session: streamed })
+      expect(getState(hook).session).toBe(streamed)
     })
 
     // The live pipeline only ever knows the window the session opened with, so
@@ -559,6 +573,7 @@ describe("useSessionState", () => {
       const rebuiltWindowTurn = { ...windowTurn, assistantText: ["updated"] }
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ turns: [rebuiltWindowTurn] }),
       })
 
@@ -588,6 +603,7 @@ describe("useSessionState", () => {
 
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ turns: [{ ...cutHead, assistantText: ["second half", "more"] }] }),
       })
 
@@ -610,7 +626,7 @@ describe("useSessionState", () => {
 
       const grown = { ...last, assistantText: ["more"] }
       const added = makeTurn({ id: "live-4", userMessage: "fourth" })
-      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [head, middle, grown, added] }) })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [head, middle, grown, added] }) })
 
       const after = getSession(hook).turns
       expect(after.map((t) => t.id)).toEqual(["old-1", "live-1", "live-2", "live-3", "live-4"])
@@ -633,7 +649,7 @@ describe("useSessionState", () => {
 
       const reply = makeToolCall({ name: "SendMessage", input: { to: "peer", summary: "answered" } })
       const answering = makeTurn({ id: "live-2", userMessage: "reply", toolCalls: [reply], contentBlocks: [{ kind: "tool_calls", toolCalls: [reply] }] })
-      dispatch(hook, { type: "UPDATE_SESSION", session: makeSession({ turns: [head, answering] }) })
+      dispatch(hook, { type: "UPDATE_SESSION", loadId: 1, session: makeSession({ turns: [head, answering] }) })
 
       const paired = getSession(hook).turns[0]!.contentBlocks[0]
       expect(paired).toMatchObject({ kind: "agent_message", reply: { summary: "answered" } })
@@ -658,6 +674,7 @@ describe("useSessionState", () => {
       })
       dispatch(hook, {
         type: "UPDATE_SESSION",
+        loadId: 1,
         session: makeSession({ sessionId: "other", turns: [nextWindowTurn] }),
       })
 
@@ -666,6 +683,34 @@ describe("useSessionState", () => {
   })
 
   // ── RELOAD_SESSION_CONTENT ────────────────────────────────────────
+
+  describe("SET_OLDER_TURNS", () => {
+    it("keeps the active turn on the same turn as pages go in front of it", () => {
+      const hook = renderState()
+      const window = [makeTurn({ id: "t1", userMessage: "one" }), makeTurn({ id: "t2", userMessage: "two" })]
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: window }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "JUMP_TO_TURN", index: 1, toolCallId: "call-2" })
+
+      const page = [makeTurn({ id: "t-1", userMessage: "minus one" }), makeTurn({ id: "t0", userMessage: "zero" })]
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: page })
+      expect(getState(hook).activeTurnIndex).toBe(3)
+      expect(getSession(hook).turns[3]!.id).toBe("t2")
+      expect(getState(hook).activeToolCallId).toBe("call-2")
+
+      // The next page repeats the window's first turn, which the merge keeps once.
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t-2", userMessage: "minus two" }), ...page, window[0]!] })
+      const active = getState(hook).activeTurnIndex!
+      expect(getSession(hook).turns.map(({ id }) => id)).toEqual(["t-2", "t-1", "t0", "t1", "t2"])
+      expect(getSession(hook).turns[active]!.id).toBe("t2")
+    })
+
+    it("leaves no active turn as it was", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession({ turns: [makeTurn({ id: "t1" })] }), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "t0" })] })
+      expect(getState(hook).activeTurnIndex).toBeNull()
+    })
+  })
 
   describe("RELOAD_SESSION_CONTENT", () => {
     it("sets session and source and increments changeKey", () => {
