@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { makeTurn } from "@/__tests__/fixtures"
+import { DisclosureProvider, revealKey, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
 import { formatCrewChatDelivery } from "../../../shared/contracts/crewChat"
 import { renderComposerMessage } from "../../../shared/session/composerContext"
 import type { ParsedSession, Turn } from "../../../shared/session/types"
@@ -52,10 +53,13 @@ const crewPost = (text: string) => formatCrewChatDelivery(
 function Harness({
   session,
   bubbles,
+  mountedBlocks,
   onScrollToTurn,
 }: {
   session: ParsedSession
   bubbles: Array<string[] | null>
+  /** The content blocks a windowed turn has mounted, as its items' `data-blocks` ranges. */
+  mountedBlocks?: string[]
   onScrollToTurn?: TimelineHandle["scrollToTurn"]
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -74,6 +78,7 @@ function Harness({
                 Message {index + 1}.{key}
               </div>
             ))}
+            {mountedBlocks?.map((range) => <div key={range} data-blocks={range} />)}
           </div>
         ))}
       </div>
@@ -275,6 +280,42 @@ describe("StickyPromptBanner", () => {
     scrollAndSettle()
 
     expect(banner(1)).toHaveTextContent("Also check mobile")
+  })
+
+  it("tracks a mid-turn message in a block a giant turn has not mounted, and has the turn mount it to land", () => {
+    const turn: Partial<Turn> = {
+      userMessage: "Start the audit",
+      contentBlocks: [
+        { kind: "text", text: ["Working on it"] },
+        { kind: "queued_prompt", content: "Also check mobile" },
+        ...Array.from({ length: 30 }, (_, i) => ({ kind: "text" as const, text: [`step ${i}`] })),
+      ],
+    }
+    const scrollToTurn = vi.fn<TimelineHandle["scrollToTurn"]>(() => new Promise(() => {}))
+    let store: TimelineStateStore | null = null
+    function CaptureStore() {
+      store = useTimelineStore()
+      return null
+    }
+    render(
+      <DisclosureProvider>
+        <CaptureStore />
+        <Harness session={makeSession("session-a", [turn])} bubbles={[["prompt"]]} mountedBlocks={["20-20", "21-21"]} onScrollToTurn={scrollToTurn} />
+      </DisclosureProvider>,
+    )
+
+    const container = screen.getByTestId("scroll-container")
+    setRect(container, 100, 700)
+    setRect(screen.getByTestId("turn-0"), -9000, 600)
+    setRect(screen.getByTestId("bubble-0-prompt"), -8980, -8920)
+
+    scrollAndSettle()
+    expect(banner(1)).toHaveTextContent("Also check mobile")
+
+    fireEvent.click(banner(1))
+    expect(store!.get(revealKey("session-a-turn-0"))).toBe(1)
+    const { target } = scrollToTurn.mock.calls[0][1]!
+    expect(target!(screen.getByTestId("turn-0"))).toBeNull()
   })
 
   it("reaches a message the timeline has not rendered, passing over what the crew sent after it", () => {

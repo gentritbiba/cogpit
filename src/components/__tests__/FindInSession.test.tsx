@@ -35,13 +35,15 @@ function makeTurns(): Turn[] {
 interface Navigation {
   key: string
   opts: ScrollToTurnOptions
+  /** What the turn was asked to reveal when navigation started. */
+  reveal: unknown
 }
 
 function makeHandle(viewportKey: string | null = null) {
   const navigations: Navigation[] = []
   const handle: TimelineHandle = {
     scrollToTurn: vi.fn(async (key: string, opts: ScrollToTurnOptions = {}) => {
-      navigations.push({ key, opts })
+      navigations.push({ key, opts, reveal: store?.get(`${key}:reveal`) })
       return true
     }),
     scrollToBottom: vi.fn(),
@@ -158,6 +160,8 @@ describe("FindInSession", () => {
     expect(screen.getByText("1/4")).toBeInTheDocument()
     expect(navigations.map((n) => n.key)).toEqual(["t0"])
     expect(navigations[0].opts.align).toBe("center")
+    // A long turn mounts only the blocks near the viewport; the one holding the match is asked for.
+    expect(navigations[0].reveal).toBe(0)
 
     press("Enter")
     expect(screen.getByText("2/4")).toBeInTheDocument()
