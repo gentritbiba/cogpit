@@ -22,8 +22,10 @@ vi.mock("../../edition", () => ({ accessLevelOf: mocks.access, editionModule: ()
 vi.mock("../../sessionHosts", () => ({ hostForSession: mocks.host }))
 vi.mock("../../routes/hello", () => ({ getDeviceName: () => "coordinator-box" }))
 
-import { closeCrewChatMonitor, deliverCrewChat, postCrewChat, readCrewChat, setCrewChatListening } from "../../lib/crewChat"
+import { DeviceRequestError } from "../../hub/deviceRequest"
+import { closeCrewChatMonitor, CREW_CHAT_BUSY_GIVE_UP_MS, CREW_CHAT_BUSY_RETRY_MS, CREW_CHAT_DELIVERY_ATTEMPTS, CREW_CHAT_NOTICE_BUSY_ANSWERS, crewChatRetryDelay, deliverCrewChat, postCrewChat, readCrewChat, setCrewChatListening } from "../../lib/crewChat"
 const req = {} as IncomingMessage
+const deviceBusy = () => new DeviceRequestError("mb-pro", 409, "Session is already active", "CONFLICT")
 const post = (text: string, commandId = "chat-message-001", senderSessionId = "parser", mentions?: string[]) => postCrewChat("parser", { text, commandId, senderSessionId, mentions }, req)
 
 beforeEach(() => {
@@ -73,27 +75,31 @@ describe("crew chat", () => {
   })
 
   it("never leaves a remote member's message in the device's queue, keeping it here until the device takes it", async () => {
+    vi.useFakeTimers()
     let busy = true
     mocks.state.mockResolvedValue({ outcome: "running", running: true, activeNotifications: false })
     mocks.host.mockResolvedValue({ has: async () => true, state: mocks.state, send: mocks.send, remote: true })
-    mocks.send.mockImplementation(async () => ({ delivery: busy ? "busy" : "enqueued" }))
+    mocks.send.mockImplementation(async () => { if (busy) throw deviceBusy(); return { delivery: "accepted" } })
     const first = await post("@reviewer Check this")
-    expect(first.pending).toEqual([{ sessionId: "reviewer", error: "Crew member could not accept this message" }])
+    expect(first.pending).toEqual([{ sessionId: "reviewer", error: "Session is already active" }])
     for (const [, , options] of mocks.send.mock.calls) {
       expect(options).not.toHaveProperty("commandId")
       expect(options).not.toHaveProperty("leadSessionId")
     }
     busy = false
+    await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS)
     await deliverCrewChat("lead", req)
     expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
   })
 
   it("deduplicates posts and retries failed deliveries with the same command ID", async () => {
+    vi.useFakeTimers()
     mocks.send.mockRejectedValue(new Error("offline"))
     const first = await post("Retryable finding")
     expect(first.pending).toHaveLength(2)
     const ids = mocks.send.mock.calls.map(([, , options]) => options.commandId)
     mocks.send.mockResolvedValue({ delivery: "queued" })
+    await vi.advanceTimersByTimeAsync(crewChatRetryDelay(1))
     expect((await post("Retryable finding")).message).toEqual(first.message)
     expect(mocks.send.mock.calls.slice(2).map(([, , options]) => options.commandId)).toEqual(ids)
     expect(mocks.store.chatMessages("lead", { limit: 100 })).toHaveLength(1)
@@ -106,7 +112,7 @@ describe("crew chat", () => {
     const first = await post("@reviewer Retry this finding")
     expect(first.pending).toHaveLength(2)
     mocks.send.mockClear().mockResolvedValue({ delivery: "queued" })
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(crewChatRetryDelay(1) + 1_000)
     expect(mocks.send).toHaveBeenCalledTimes(2)
     expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
   })
@@ -193,5 +199,251 @@ describe("crew chat", () => {
     await setCrewChatListening("lead", "reviewer", false, req)
     await deliverCrewChat("lead", req)
     expect(mocks.send.mock.calls.some(([id]) => id === "reviewer")).toBe(false)
+  })
+
+  describe("deliveries to a member that stays out of reach", () => {
+    const offline = () => {
+      mocks.host.mockResolvedValue({ has: async () => true, state: mocks.state, send: mocks.send, remote: true })
+      mocks.state.mockRejectedValue(new Error('Device "MB Pro" returned HTTP 502 while minting a token'))
+    }
+    const deliveryStates = () => (mocks.store as unknown as { db: { prepare: (sql: string) => { all: () => unknown[] } } }).db
+      .prepare("SELECT state, attempts, count(*) AS count FROM crew_chat_deliveries GROUP BY state, attempts").all()
+    const postFor = (count: number) => {
+      for (let index = 0; index < count; index++) {
+        mocks.store.postChat("local", `offline-chat-${String(index).padStart(4, "0")}`, { rootId: "lead", author: { kind: "user", name: "You" }, text: `Note ${index}`, mentions: ["reviewer"] }, [{ sessionId: "reviewer", kind: "mention" }])
+      }
+    }
+
+    it("asks the device once per backoff step, writes once per delivery per step, and settles every delivery as failed", async () => {
+      vi.useFakeTimers()
+      offline()
+      postFor(600)
+      const defer = vi.spyOn(mocks.store, "deferChatDeliveries")
+      const settle = vi.spyOn(mocks.store, "settleChatDelivery")
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(60 * 60_000)
+      expect(mocks.state).toHaveBeenCalledTimes(CREW_CHAT_DELIVERY_ATTEMPTS)
+      expect(defer).toHaveBeenCalledTimes(CREW_CHAT_DELIVERY_ATTEMPTS)
+      expect(defer.mock.calls.reduce((rows, [failures]) => rows + failures.length, 0)).toBe(600 * CREW_CHAT_DELIVERY_ATTEMPTS)
+      expect(settle).not.toHaveBeenCalled()
+      expect(deliveryStates()).toEqual([{ state: "failed", attempts: CREW_CHAT_DELIVERY_ATTEMPTS, count: 600 }])
+      expect(vi.getTimerCount()).toBe(0)
+      mocks.state.mockClear()
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(mocks.state).not.toHaveBeenCalled()
+    })
+
+    it("skips a notice to a member it cannot reach instead of retrying it, and still notifies the others", async () => {
+      vi.useFakeTimers()
+      for (const [unreachable, reason] of [[() => { throw new Error('Device "MB Pro" returned HTTP 502 while minting a token') }, 'Device "MB Pro" returned HTTP 502 while minting a token'], [() => ({ outcome: "unreachable", error: "Device offline" }), "Device offline"]] as const) {
+        mocks.store.close()
+        mocks.store = new OrchestrationStore(":memory:")
+        mocks.state.mockReset().mockImplementation(async (id: string) => (id === "reviewer" ? unreachable() : { outcome: "running", running: true, activeNotifications: true }))
+        mocks.send.mockClear()
+        expect((await post("Finding")).pending).toEqual([])
+        expect(mocks.send.mock.calls.map(([id]) => id)).toContain("lead")
+        expect(mocks.send.mock.calls.map(([id]) => id)).not.toContain("reviewer")
+        expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+        const db = (mocks.store as unknown as { db: { prepare: (sql: string) => { get: (id: string) => Record<string, unknown> } } }).db
+        expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries WHERE session_id=?").get("reviewer")).toEqual({ state: "skipped", error: reason, attempts: 0 })
+        mocks.state.mockClear()
+        await vi.advanceTimersByTimeAsync(10 * 60_000)
+        expect(mocks.state).not.toHaveBeenCalled()
+      }
+    })
+
+    it("asks a tagged member it cannot reach only at backoff steps and writes nothing on the ticks between", async () => {
+      vi.useFakeTimers()
+      mocks.state.mockImplementation(async (id: string) => (id === "reviewer" ? { outcome: "unreachable", error: "Device offline" } : { outcome: "running", running: true, activeNotifications: true }))
+      await post("@reviewer Check this")
+      expect(mocks.store.chatDeliveries("lead", "local")).toEqual([expect.objectContaining({ sessionId: "reviewer", error: "Device offline", attempts: 1 })])
+      const defer = vi.spyOn(mocks.store, "deferChatDeliveries")
+      const settle = vi.spyOn(mocks.store, "settleChatDelivery")
+      const asked: number[] = []
+      for (let second = 1; second <= 40; second++) {
+        mocks.state.mockClear()
+        await vi.advanceTimersByTimeAsync(1_000)
+        if (mocks.state.mock.calls.some(([id]) => id === "reviewer")) asked.push(second)
+      }
+      expect(asked).toEqual([5, 15, 35])
+      expect(defer.mock.calls.map(([failures]) => failures.length)).toEqual([1, 1, 1])
+      expect(settle).not.toHaveBeenCalled()
+    })
+
+    const remoteAnswers = (answer: () => unknown) => {
+      mocks.state.mockResolvedValue({ outcome: "running", running: true, activeNotifications: false })
+      mocks.host.mockResolvedValue({ has: async () => true, state: mocks.state, send: mocks.send, remote: true })
+      mocks.send.mockImplementation(async () => answer())
+    }
+
+    it("retries a mention to a busy remote member every few seconds, without spending attempts, until it takes it", async () => {
+      vi.useFakeTimers()
+      let busy = true
+      remoteAnswers(() => { if (busy) throw deviceBusy(); return { delivery: "accepted" } })
+      postFor(1)
+      const defer = vi.spyOn(mocks.store, "deferChatDeliveries")
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(0)
+      for (let step = 1; step <= 3; step++) {
+        await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS - 1_000)
+        expect(mocks.send, `before retry ${step}`).toHaveBeenCalledTimes(step)
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(mocks.send, `retry ${step}`).toHaveBeenCalledTimes(step + 1)
+      }
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_GIVE_UP_MS - 5 * CREW_CHAT_BUSY_RETRY_MS)
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: 0, count: 1 }])
+      expect(defer).toHaveBeenCalledTimes(mocks.send.mock.calls.length)
+      busy = false
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS)
+      expect(deliveryStates()).toEqual([{ state: "accepted", attempts: 0, count: 1 }])
+    })
+
+    it("gives up a mention after an hour of busy answers, keeping the reason", async () => {
+      vi.useFakeTimers()
+      remoteAnswers(() => { throw deviceBusy() })
+      postFor(1)
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_GIVE_UP_MS - 2 * CREW_CHAT_BUSY_RETRY_MS)
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: 0, count: 1 }])
+      await vi.advanceTimersByTimeAsync(4 * CREW_CHAT_BUSY_RETRY_MS)
+      const db = (mocks.store as unknown as { db: { prepare: (sql: string) => { get: () => Record<string, unknown> } } }).db
+      expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries").get()).toEqual({ state: "failed", error: "Session is already active", attempts: 0 })
+      const asked = mocks.send.mock.calls.length
+      expect(asked).toBeLessThanOrEqual(CREW_CHAT_BUSY_GIVE_UP_MS / CREW_CHAT_BUSY_RETRY_MS + 2)
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(mocks.send).toHaveBeenCalledTimes(asked)
+    })
+
+    it("treats a 409 that is not the busy answer as a failure that gives up", async () => {
+      for (const [code, message] of [["SESSION_UNCONFIRMED", "The native worktree directory is not available yet."], ["ACP_ERROR", "This ACP provider cannot reload sessions."]]) {
+        vi.useFakeTimers()
+        mocks.store.close()
+        mocks.store = new OrchestrationStore(":memory:")
+        remoteAnswers(() => { throw new DeviceRequestError("mb-pro", 409, message, code) })
+        mocks.send.mockClear()
+        postFor(1)
+        await readCrewChat("lead", {}, req)
+        await vi.advanceTimersByTimeAsync(60 * 60_000)
+        expect(deliveryStates(), code).toEqual([{ state: "failed", attempts: CREW_CHAT_DELIVERY_ATTEMPTS, count: 1 }])
+        expect(mocks.send, code).toHaveBeenCalledTimes(CREW_CHAT_DELIVERY_ATTEMPTS)
+        closeCrewChatMonitor()
+        vi.useRealTimers()
+      }
+    })
+
+    it("counts only real failures toward giving up, however often the member was busy", async () => {
+      vi.useFakeTimers()
+      let answer: "busy" | "offline" = "busy"
+      remoteAnswers(() => { throw answer === "busy" ? deviceBusy() : new DeviceRequestError("mb-pro", 502, "Bad gateway") })
+      postFor(1)
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS * (CREW_CHAT_DELIVERY_ATTEMPTS + 2))
+      answer = "offline"
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS)
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: 1, count: 1 }])
+      expect(mocks.store.chatDeliveries("lead", "local")[0]).toMatchObject({ busySince: 0, error: "Bad gateway" })
+    })
+
+    it("asks a busy member twice more about a notice, shortly, then skips it", async () => {
+      vi.useFakeTimers()
+      let busy = true
+      remoteAnswers(() => { if (busy) throw deviceBusy(); return { delivery: "accepted" } })
+      mocks.state.mockResolvedValue({ outcome: "running", running: true, activeNotifications: true })
+      await post("Finding")
+      const recipients = new Set(mocks.send.mock.calls.map(([id]) => id)).size
+      expect(recipients).toBeGreaterThan(0)
+      for (let answer = 2; answer <= CREW_CHAT_NOTICE_BUSY_ANSWERS; answer++) {
+        expect(deliveryStates()).toEqual([{ state: "pending", attempts: 0, count: recipients }])
+        await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS)
+        expect(mocks.send).toHaveBeenCalledTimes(answer * recipients)
+      }
+      expect(deliveryStates()).toEqual([{ state: "skipped", attempts: 0, count: recipients }])
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mocks.send).toHaveBeenCalledTimes(CREW_CHAT_NOTICE_BUSY_ANSWERS * recipients)
+
+      mocks.send.mockClear()
+      await post("Second finding", "chat-message-002")
+      busy = false
+      await vi.advanceTimersByTimeAsync(CREW_CHAT_BUSY_RETRY_MS)
+      expect(deliveryStates()).toContainEqual({ state: "accepted", attempts: 0, count: recipients })
+    })
+
+    it("keeps the deferrals it collected when a pass throws partway", async () => {
+      offline()
+      postFor(2)
+      const chatMessage = mocks.store.chatMessage.bind(mocks.store)
+      vi.spyOn(mocks.store, "chatMessage").mockImplementationOnce(chatMessage).mockImplementationOnce(() => { throw new Error("database is locked") })
+      await expect(deliverCrewChat("lead", req)).rejects.toThrow("database is locked")
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: 0, count: 1 }, { state: "pending", attempts: 1, count: 1 }])
+      expect(mocks.store.dueChatDeliveries("lead", "local", Date.now())).toHaveLength(1)
+    })
+
+    it("settles a message the member took without sending it again when the first settle throws", async () => {
+      vi.useFakeTimers()
+      postFor(1)
+      const settle = mocks.store.settleChatDelivery.bind(mocks.store)
+      vi.spyOn(mocks.store, "settleChatDelivery").mockImplementationOnce(() => { throw new Error("database is locked") }).mockImplementation(settle)
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.send).toHaveBeenCalledOnce()
+      expect(deliveryStates()).toEqual([{ state: "pending", attempts: 0, count: 1 }])
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(mocks.send).toHaveBeenCalledOnce()
+      expect(deliveryStates()).toEqual([{ state: "accepted", attempts: 0, count: 1 }])
+    })
+
+    it("keeps the last reason on a delivery that gave up", async () => {
+      vi.useFakeTimers()
+      offline()
+      postFor(1)
+      const [delivery] = mocks.store.chatDeliveries("lead", "local")
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(60 * 60_000)
+      mocks.store.settleChatDelivery(delivery!, "skipped")
+      expect(mocks.store.chatDeliveries("lead", "local")).toEqual([])
+      const db = (mocks.store as unknown as { db: { prepare: (sql: string) => { get: () => Record<string, unknown> } } }).db
+      expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries").get()).toEqual({ state: "failed", error: 'Device "MB Pro" returned HTTP 502 while minting a token', attempts: CREW_CHAT_DELIVERY_ATTEMPTS })
+    })
+
+    it("waits out each backoff step, even when crew reads ask for delivery sooner", async () => {
+      vi.useFakeTimers()
+      offline()
+      postFor(1)
+      await readCrewChat("lead", {}, req)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.state).toHaveBeenCalledTimes(1)
+      for (let attempt = 1; attempt < CREW_CHAT_DELIVERY_ATTEMPTS; attempt++) {
+        const delay = crewChatRetryDelay(attempt)
+        await vi.advanceTimersByTimeAsync(delay - 1_500)
+        await readCrewChat("lead", {}, req)
+        await deliverCrewChat("lead", req)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(mocks.state, `before retry ${attempt}`).toHaveBeenCalledTimes(attempt)
+        await vi.advanceTimersByTimeAsync(1_500)
+        expect(mocks.state, `retry ${attempt}`).toHaveBeenCalledTimes(attempt + 1)
+      }
+      expect(crewChatRetryDelay(CREW_CHAT_DELIVERY_ATTEMPTS)).toBe(5 * 60_000)
+    })
+
+    it("never brings back a delivery that was settled elsewhere while a pass was out", async () => {
+      for (const outcome of ["fails", "succeeds"] as const) {
+        mocks.store.close()
+        mocks.store = new OrchestrationStore(":memory:")
+        let answer!: () => void
+        mocks.state.mockImplementation(() => new Promise((resolve, reject) => { answer = () => (outcome === "fails" ? reject(new Error("offline")) : resolve({ outcome: "running", running: true, activeNotifications: true })) }))
+        postFor(1)
+        const [delivery] = mocks.store.chatDeliveries("lead", "local")
+        const pass = deliverCrewChat("lead", req)
+        await vi.waitFor(() => expect(mocks.state).toHaveBeenCalled())
+        expect(mocks.store.settleChatDelivery(delivery!, "skipped", "Settled by hand")).toBe(true)
+        answer()
+        await pass
+        expect(mocks.store.chatDeliveries("lead", "local"), outcome).toEqual([])
+        const db = (mocks.store as unknown as { db: { prepare: (sql: string) => { get: () => Record<string, unknown> } } }).db
+        expect(db.prepare("SELECT state,error,attempts FROM crew_chat_deliveries").get(), outcome).toEqual({ state: "skipped", error: "Settled by hand", attempts: 0 })
+        mocks.state.mockReset()
+      }
+    })
   })
 })

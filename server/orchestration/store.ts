@@ -122,6 +122,8 @@ export class OrchestrationStore {
         if (!(this.db.prepare("PRAGMA table_info(events)").all() as Row[]).some((row) => row.name === "scope")) this.db.exec("ALTER TABLE events ADD COLUMN scope TEXT")
         if (!(this.db.prepare("PRAGMA table_info(operations)").all() as Row[]).some((row) => row.name === "updated_at")) this.db.exec("ALTER TABLE operations ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
         if (!(this.db.prepare("PRAGMA table_info(questions)").all() as Row[]).some((row) => row.name === "answer_scope")) this.db.exec("ALTER TABLE questions ADD COLUMN answer_scope TEXT")
+        const deliveryColumns = new Set((this.db.prepare("PRAGMA table_info(crew_chat_deliveries)").all() as Row[]).map((row) => row.name))
+        for (const column of ["attempts", "next_attempt_at", "busy_since"]) if (!deliveryColumns.has(column)) this.db.exec(`ALTER TABLE crew_chat_deliveries ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`)
         if (!(this.db.prepare("PRAGMA table_info(transitions)").all() as Row[]).some((row) => row.name === "scope")) {
           this.db.exec("ALTER TABLE transitions ADD COLUMN scope TEXT")
           this.db.exec("UPDATE transitions SET scope=(SELECT scope FROM operations WHERE id=transitions.operation_id) WHERE (SELECT COUNT(*) FROM operations WHERE id=transitions.operation_id)=1")
@@ -205,11 +207,35 @@ export class OrchestrationStore {
     return options.after !== undefined ? messages : messages.reverse()
   }
   chatDeliveries(rootId: string, scope: string): CrewChatDelivery[] {
-    return (this.db.prepare("SELECT d.* FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE m.root_id=? AND d.scope=? AND d.state='pending' ORDER BY d.sequence").all(rootId, scope) as Row[]).map((row) => ({ sequence: Number(row.sequence), sessionId: String(row.session_id), scope: String(row.scope), kind: row.kind as CrewChatDelivery["kind"], state: "pending", ...(row.error ? { error: String(row.error) } : {}) }))
+    return (this.db.prepare("SELECT d.* FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE m.root_id=? AND d.scope=? AND d.state='pending' ORDER BY d.sequence").all(rootId, scope) as Row[]).map((row) => this.chatDeliveryRow(row))
   }
-  updateChatDelivery(delivery: CrewChatDelivery, state: CrewChatDelivery["state"], error?: string): void {
-    this.transaction(() => this.db.prepare("UPDATE crew_chat_deliveries SET state=?,error=? WHERE sequence=? AND session_id=?").run(state, error ?? null, delivery.sequence, delivery.sessionId))
+  /** Pending deliveries whose backoff has run out by `now`. */
+  dueChatDeliveries(rootId: string, scope: string, now: number): CrewChatDelivery[] {
+    return (this.db.prepare("SELECT d.* FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE m.root_id=? AND d.scope=? AND d.state='pending' AND d.next_attempt_at<=? ORDER BY d.sequence").all(rootId, scope, now) as Row[]).map((row) => this.chatDeliveryRow(row))
   }
+  hasPendingChatDeliveries(rootId: string, scope: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM crew_chat_deliveries d JOIN crew_chat_messages m ON m.sequence=d.sequence WHERE m.root_id=? AND d.scope=? AND d.state='pending' LIMIT 1").get(rootId, scope))
+  }
+  private chatDeliveryRow(row: Row): CrewChatDelivery {
+    return { sequence: Number(row.sequence), sessionId: String(row.session_id), scope: String(row.scope), kind: row.kind as CrewChatDelivery["kind"], state: row.state as CrewChatDelivery["state"], ...(row.error ? { error: String(row.error) } : {}), attempts: Number(row.attempts), nextAttemptAt: Number(row.next_attempt_at), busySince: Number(row.busy_since) }
+  }
+  /** Settles a pending delivery; false when another pass already settled it. */
+  settleChatDelivery(delivery: CrewChatDelivery, state: "accepted" | "skipped" | "failed", error?: string): boolean {
+    return this.transaction(() => Number(this.db.prepare("UPDATE crew_chat_deliveries SET state=?,error=? WHERE sequence=? AND session_id=? AND state='pending'").run(state, error ?? null, delivery.sequence, delivery.sessionId).changes) > 0)
+  }
+  /**
+   * Records failed attempts in one write each: the attempt count, when a busy streak began, a later attempt
+   * time, or `failed` once `giveUp` is set. A row another pass already moved on (settled, or counted this
+   * attempt) is left alone.
+   */
+  deferChatDeliveries(deferrals: readonly { delivery: CrewChatDelivery; error: string; attempts: number; busySince: number; nextAttemptAt: number; giveUp: boolean }[]): void {
+    if (!deferrals.length) return
+    this.transaction(() => {
+      const update = this.db.prepare("UPDATE crew_chat_deliveries SET attempts=?,busy_since=?,error=?,next_attempt_at=?,state=? WHERE sequence=? AND session_id=? AND state='pending' AND attempts=?")
+      for (const { delivery, error, attempts, busySince, nextAttemptAt, giveUp } of deferrals) update.run(attempts, busySince, error, nextAttemptAt, giveUp ? "failed" : "pending", delivery.sequence, delivery.sessionId, delivery.attempts)
+    })
+  }
+
   subscribe(listener: (event: ConversationEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
   private event(conversationId: string, type: ConversationEvent["type"], data: unknown, scope?: string): void {
     const createdAt = this.now()
