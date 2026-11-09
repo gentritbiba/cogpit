@@ -7,6 +7,14 @@ import type { CrewChatAuthor, CrewChatDelivery, CrewChatMessage } from "../../sh
 import { isTerminalOccurrence, occurrenceCommandId, occurrenceCreationId, type ExecutionGrant, type GrantRef, type OccurrenceHold, type OccurrenceInput, type OccurrenceState, type TriggerOccurrence, type TriggerRecord, type UnattendedAction } from "../../shared/contracts/triggers"
 
 type Row = Record<string, unknown>
+/** Task fields the task reads filter on. */
+const TASK_FIELD = {
+  parent: "json_extract(data,'$.parentSessionId')",
+  child: "json_extract(data,'$.childSessionId')",
+  state: "json_extract(data,'$.state')",
+  acknowledgedAt: "json_extract(data,'$.acknowledgedAt')",
+} as const
+const UNREAD_TASK = `${TASK_FIELD.acknowledgedAt} IS NULL AND ${TASK_FIELD.state}<>'cancelled'`
 export interface StoredCommand {
   receipt: CommandReceipt
   scope: string
@@ -92,6 +100,7 @@ export class OrchestrationStore {
           CREATE TABLE IF NOT EXISTS dispatcher(id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, epoch INTEGER NOT NULL, expires_at INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, scope TEXT NOT NULL, source_id TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(scope,source_id));
           CREATE INDEX IF NOT EXISTS task_parent ON tasks(scope,json_extract(data,'$.parentSessionId'));
+          CREATE INDEX IF NOT EXISTS task_unread ON tasks(scope,${TASK_FIELD.parent}) WHERE ${UNREAD_TASK};
           CREATE TABLE IF NOT EXISTS instances(id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS transitions(conversation_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS operations(scope TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,input TEXT NOT NULL,result TEXT,PRIMARY KEY(scope,id));
@@ -546,6 +555,20 @@ export class OrchestrationStore {
       ? this.db.prepare("SELECT data FROM tasks WHERE scope=?").all(scope)
       : this.db.prepare("SELECT data FROM tasks WHERE scope=? AND json_extract(data,'$.parentSessionId')=?").all(scope, parentSessionId)) as Row[]
     return rows.map((row) => decode<DelegatedTask>(row.data))
+  }
+  task(scope: string, id: string): DelegatedTask | null {
+    const row = this.db.prepare("SELECT data FROM tasks WHERE scope=? AND id=?").get(scope, id) as Row | undefined
+    return row ? decode<DelegatedTask>(row.data) : null
+  }
+  /** A parent's tasks it has not acknowledged and nobody cancelled, without their results. */
+  unreadTasks(scope: string, parentSessionId: string): Omit<DelegatedTask, "result">[] {
+    return (this.db.prepare(`SELECT json_remove(data,'$.result') data FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=? AND ${UNREAD_TASK}`).all(scope, parentSessionId) as Row[])
+      .map((row) => decode<Omit<DelegatedTask, "result">>(row.data))
+  }
+  /** What a parent has been told about one child, across all its tasks for it. */
+  taskNotices(scope: string, parentSessionId: string, childSessionId: string): string[] {
+    return (this.db.prepare(`SELECT json_extract(data,'$.notified') notified FROM tasks WHERE scope=? AND ${TASK_FIELD.parent}=? AND ${TASK_FIELD.child}=?`).all(scope, parentSessionId, childSessionId) as Row[])
+      .flatMap((row) => (row.notified ? decode<string[]>(row.notified) : []))
   }
   updateTask(scope: string, id: string, patch: Partial<Pick<DelegatedTask, "state" | "result" | "wakeupCommandId" | "acknowledgedAt" | "deliveryDisposition" | "blockingDeadline" | "notified">>, expectedState?: DelegatedTask["state"]): DelegatedTask {
     return this.transaction(() => {
