@@ -12,6 +12,7 @@ function makeHost(overrides: Partial<BlockWindowHost> = {}) {
     windowCommitted: vi.fn(),
     viewOffsetInRow: () => Infinity,
     viewportHeight: () => 500,
+    layoutKey: () => "40|0",
     blockHeight: (key) => heights.get(key),
     setBlockHeight: (key, height) => { heights.set(key, height) },
     ...overrides,
@@ -57,6 +58,28 @@ describe("planWindowRange", () => {
     expect(planWindowRange({ heights: uniform(100, 100), gap: 0, known: new Map(), current, viewTop: 5100, viewport: 500 })).toBe(current)
   })
 })
+
+/** A window over 100 items of 64px, its head mounted and laid out from y = 0. */
+function mountedWindow() {
+  const setBlockHeight = vi.fn()
+  const { host } = makeHost({ viewOffsetInRow: () => -Infinity })
+  const blockWindow = new BlockWindow({ ...host, setBlockHeight }, "w", "row")
+  blockWindow.setItems(keys(100), [])
+  const container = document.createElement("div")
+  vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(0, 6400))
+  blockWindow.attach(container)
+  const els: HTMLElement[] = []
+  const first = blockWindow.getPlan().runs[0]
+  for (let i = first.start; i < first.end; i++) {
+    const el = document.createElement("div")
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue(rect(i * 64, 64))
+    blockWindow.itemRef(`k${i}`)(el)
+    els.push(el)
+  }
+  blockWindow.update({ top: 0, height: 500 }, true)
+  setBlockHeight.mockClear()
+  return { blockWindow, els, setBlockHeight }
+}
 
 describe("BlockWindow", () => {
   it("starts at the tail while the host follows the bottom, and at the head when it lands on the row", () => {
@@ -115,15 +138,106 @@ describe("BlockWindow", () => {
     const listener = vi.fn()
     blockWindow.subscribe(listener)
 
-    blockWindow.update({ top: 0, height: 500 })
+    blockWindow.update({ top: 0, height: 500 }, true)
     expect(listener).not.toHaveBeenCalled()
     expect(heights.get("w:k0")).toBe(64)
 
-    blockWindow.update({ top: 3000, height: 500 })
+    blockWindow.update({ top: 3000, height: 500 }, true)
     expect(listener).toHaveBeenCalledTimes(1)
     const runs = blockWindow.getPlan().runs
     expect(runs[0].start * 64).toBeLessThanOrEqual(2500)
     expect(runs[0].end * 64).toBeGreaterThanOrEqual(4000)
+  })
+
+  it("on scroll inside the band, reads only the range's edge rects and neither measures nor re-plans", () => {
+    const { blockWindow, els, setBlockHeight } = mountedWindow()
+    const listener = vi.fn()
+    blockWindow.subscribe(listener)
+    const reads = els.map((el) => vi.mocked(el.getBoundingClientRect).mock.calls.length)
+    blockWindow.update({ top: 100, height: 500 }, false)
+    const after = els.map((el) => vi.mocked(el.getBoundingClientRect).mock.calls.length)
+    expect(after.reduce((a, b) => a + b, 0) - reads.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(2)
+    expect(setBlockHeight).not.toHaveBeenCalled()
+    expect(listener).not.toHaveBeenCalled()
+
+    // Past the band, the same scroll path re-plans.
+    blockWindow.update({ top: 3000, height: 500 }, false)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("caches only measured items, never sizes taken while a height animation runs", () => {
+    const { host, heights } = makeHost({ viewOffsetInRow: () => -Infinity })
+    const blockWindow = new BlockWindow(host, "w", "row")
+    blockWindow.setItems(keys(100), [])
+    const container = document.createElement("div")
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(0, 6400))
+    blockWindow.attach(container)
+    const animating = document.createElement("div")
+    vi.spyOn(animating, "getBoundingClientRect").mockReturnValue(rect(0, 40))
+    class FakeKeyframeEffect {
+      getKeyframes() { return [{ height: "0px" }] }
+    }
+    vi.stubGlobal("KeyframeEffect", FakeKeyframeEffect)
+    Object.assign(animating, { getAnimations: () => [{ playState: "running", effect: new FakeKeyframeEffect() }] })
+    blockWindow.itemRef("k0")(animating)
+    blockWindow.update({ top: 0, height: 500 }, true)
+    expect(heights.has("w:k0")).toBe(false)
+    // Spacers stand in for unmounted items; nothing is cached for them.
+    expect([...heights.keys()]).toEqual([])
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps the item holding focus mounted when the range moves away from it", () => {
+    const { blockWindow, els } = mountedWindow()
+    const input = document.createElement("input")
+    els[0].appendChild(input)
+    document.body.appendChild(els[0])
+    input.focus()
+    blockWindow.update({ top: 3000, height: 500 }, true)
+    expect(blockWindow.getPlan().runs[0]).toEqual({ start: 0, end: 1 })
+    els[0].remove()
+  })
+
+  it("keeps what the list had mounted before it was windowed until its first measured pass", () => {
+    const { host } = makeHost()
+    const blockWindow = new BlockWindow(host, "w", "row", ["k3", "k4"])
+    blockWindow.setItems(keys(100), [])
+    expect(blockWindow.getPlan().runs[0]).toEqual({ start: 3, end: 5 })
+    const container = document.createElement("div")
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(0, 6400))
+    blockWindow.attach(container)
+    blockWindow.update({ top: 6000, height: 500 }, true)
+    expect(blockWindow.getPlan().runs).toHaveLength(1)
+    expect(blockWindow.getPlan().runs[0].end).toBe(100)
+  })
+
+  it("drops heights measured for another width or expand-all setting", () => {
+    let layout = "40|0"
+    const cache = new Map<string, number>()
+    const { host } = makeHost({
+      viewOffsetInRow: () => -Infinity,
+      layoutKey: () => layout,
+      blockHeight: (key) => cache.get(`${layout}|${key}`),
+      setBlockHeight: (key, height) => { cache.set(`${layout}|${key}`, height) },
+    })
+    const blockWindow = new BlockWindow(host, "w", "row")
+    blockWindow.setItems(keys(100), [])
+    const container = document.createElement("div")
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(0, 6400))
+    blockWindow.attach(container)
+    const el = document.createElement("div")
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue(rect(0, 500))
+    blockWindow.itemRef("k0")(el)
+    blockWindow.update({ top: 0, height: 500 }, true)
+    blockWindow.itemRef("k0")(null)
+    blockWindow.update({ top: 5000, height: 500 }, true)
+    const measuredBefore = blockWindow.getPlan().before[0]
+
+    layout = "60|0"
+    blockWindow.setItems(keys(101), [])
+    blockWindow.update({ top: 5200, height: 500 }, true)
+    // k0's 500px belonged to the old width; at this one it is an estimate again.
+    expect(blockWindow.getPlan().before[0]).toBeLessThan(measuredBefore - 300)
   })
 
   it("asks the host to keep its anchor after every rendered range but the first", () => {

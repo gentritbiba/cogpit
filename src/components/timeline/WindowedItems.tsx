@@ -13,6 +13,7 @@ export interface WindowItem {
 }
 
 const NO_KEYS: readonly string[] = []
+const NO_ITEMS: readonly WindowItem[] = []
 const noSubscription = () => () => {}
 const noPlan = () => null
 
@@ -32,8 +33,12 @@ export function WindowedItems({ id, items, pinned = NO_KEYS, className }: {
   const rowKey = useScopeTurnKey()
   const windowId = useDisclosureKey(id)
   const long = items.length > WINDOW_MIN_ITEMS
+  // The items mounted while the list rendered whole, which a window taking it over keeps until it measures.
+  const mountedWhole = useRef<readonly WindowItem[]>(NO_ITEMS)
   const active = useMemo(
-    () => (long && host && rowKey !== null && windowId !== null ? new BlockWindow(host, windowId, rowKey) : null),
+    () => (long && host && rowKey !== null && windowId !== null
+      ? new BlockWindow(host, windowId, rowKey, mountedWhole.current.map((item) => item.key))
+      : null),
     [long, host, rowKey, windowId],
   )
   if (active) active.setItems(items.map((item) => item.key), pinned)
@@ -52,6 +57,7 @@ export function WindowedItems({ id, items, pinned = NO_KEYS, className }: {
 
   useLayoutEffect(() => {
     if (active && plan) active.rendered(plan)
+    mountedWhole.current = active ? NO_ITEMS : items
   })
 
   if (items.length === 0) return null
@@ -76,7 +82,7 @@ function renderPlan(plan: WindowPlan, items: readonly WindowItem[], blockWindow:
 }
 
 function Spacer({ height }: { height: number }) {
-  return <div aria-hidden data-scroll-anchor="" style={{ height }} />
+  return <div aria-hidden data-window-spacer="" style={{ height }} />
 }
 
 function Item({ item, itemRef }: { item: WindowItem; itemRef?: (el: HTMLElement | null) => () => void }) {

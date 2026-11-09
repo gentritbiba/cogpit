@@ -433,7 +433,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     if (fromCommit || this.replanPending || !this.viewportCovered()) this.replan()
     else this.replanPending = true
     this.recordAnchor()
-    if (fromCommit) this.updateWindows()
+    this.updateWindows(fromCommit)
     this.updateIndicators()
     this.maybeLoadOlder()
     this.notifyViewport()
@@ -626,6 +626,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       })
       return
     }
+    // Mount what surrounds the target before navigation releases its pin on it.
+    this.updateWindows(true)
     this.endNavigation(true)
   }
 
@@ -817,7 +819,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     if (this.input) {
       this.recordAnchor()
       this.replan()
-      this.updateWindows()
+      this.updateWindows(false)
       this.maybeLoadOlder()
     }
     this.updateIndicators()
@@ -901,7 +903,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     this.measureRows()
     this.replan()
     this.recordAnchor()
-    this.updateWindows()
+    this.updateWindows(true)
     this.updateIndicators()
     this.maybeLoadOlder()
   }
@@ -945,7 +947,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
 
   attachWindow = (blockWindow: BlockWindow): (() => void) => {
     this.windows.add(blockWindow)
-    if (this.scroller && this.input) blockWindow.update(this.windowViewport())
+    if (this.scroller && this.input) blockWindow.update(this.windowViewport(), true)
     return () => this.windows.delete(blockWindow)
   }
 
@@ -962,6 +964,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
 
   viewportHeight = (): number => this.scroller?.clientHeight ?? window.innerHeight
 
+  layoutKey = (): string => `${this.bucket}|${this.input?.expandAll ? 1 : 0}`
+
   blockHeight = (key: string): number | undefined => this.blockStore?.get(key, this.bucket, this.input?.expandAll ?? false)
 
   setBlockHeight = (key: string, height: number): void => {
@@ -973,10 +977,11 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     return { top: scroller.getBoundingClientRect().top, height: scroller.clientHeight }
   }
 
-  private updateWindows(): void {
+  /** `measure` false on scroll, where a window whose range still covers the viewport only checks that. */
+  private updateWindows(measure: boolean): void {
     if (this.windows.size === 0 || !this.scroller) return
     const viewport = this.windowViewport()
-    for (const blockWindow of this.windows) blockWindow.update(viewport)
+    for (const blockWindow of this.windows) blockWindow.update(viewport, measure)
   }
 
   // ── TimelineHandle ─────────────────────────────────────────────────────────

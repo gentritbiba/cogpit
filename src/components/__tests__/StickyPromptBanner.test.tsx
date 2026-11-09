@@ -300,7 +300,7 @@ describe("StickyPromptBanner", () => {
     render(
       <DisclosureProvider>
         <CaptureStore />
-        <Harness session={makeSession("session-a", [turn])} bubbles={[["prompt"]]} mountedBlocks={["20-20", "21-21"]} onScrollToTurn={scrollToTurn} />
+        <Harness session={makeSession("session-a", [turn])} bubbles={[["prompt"]]} mountedBlocks={["0-0", "21-21"]} onScrollToTurn={scrollToTurn} />
       </DisclosureProvider>,
     )
 
@@ -308,6 +308,10 @@ describe("StickyPromptBanner", () => {
     setRect(container, 100, 700)
     setRect(screen.getByTestId("turn-0"), -9000, 600)
     setRect(screen.getByTestId("bubble-0-prompt"), -8980, -8920)
+    // A block pinned below the prompt does not count; the range above the line does.
+    const [pinned, mounted] = [...screen.getByTestId("turn-0").querySelectorAll("[data-blocks]")]
+    setRect(pinned, 800, 900)
+    setRect(mounted, -40, 300)
 
     scrollAndSettle()
     expect(banner(1)).toHaveTextContent("Also check mobile")

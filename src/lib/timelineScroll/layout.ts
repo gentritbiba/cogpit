@@ -82,9 +82,9 @@ export function rowsOverlapping(tops: ArrayLike<number>, heights: ArrayLike<numb
 /** Overscan rendered beyond each edge of the viewport, in viewports. */
 const OVERSCAN = 1
 /** The committed range is kept while it covers this much beyond each edge. */
-const INNER_BAND = 0.5
+export const INNER_BAND = 0.5
 /** ...and while it reaches no further than this. */
-const OUTER_BAND = 2
+export const OUTER_BAND = 2
 
 interface PlanInput {
   tops: ArrayLike<number>

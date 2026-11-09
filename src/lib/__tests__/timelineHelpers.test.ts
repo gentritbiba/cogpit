@@ -16,9 +16,9 @@ describe("collectActivity", () => {
       { kind: "tool_calls", toolCalls: [call("b")], timestamp: "2025-01-15T10:00:04Z" },
     ]
 
-    const { items, thoughtForMs } = collectActivity(blocks, 0)
+    const { items, thoughtForMs } = collectActivity(blocks, 0, (block) => blocks.indexOf(block))
 
-    expect(items[1]).toEqual({ kind: "thinking", blocks: [thought("hmm")], thoughtForMs: 3_000 })
+    expect(items[1]).toEqual({ kind: "thinking", blocks: [thought("hmm")], thoughtForMs: 3_000, block: 1 })
     expect(thoughtForMs).toBe(3_000)
   })
 })

@@ -100,14 +100,14 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
   if (row && row.getBoundingClientRect().top <= rootTop) {
     const bubbles = new Map<string, HTMLElement>()
     for (const bubble of row.querySelectorAll<HTMLElement>(READER_SELECTOR)) bubbles.set(bubble.dataset.readerPrompt!, bubble)
-    const firstMounted = firstMountedBlock(row)
     const messages = readerMessages(turns[turnIndex])
     for (let index = messages.length - 1; index >= 0; index--) {
       const { key } = messages[index]
       const bubble = bubbles.get(key)
-      // A giant turn mounts only the blocks near the viewport; a prompt in a block before them is above it.
+      // A giant turn mounts only the blocks near the viewport; a prompt in a block that comes
+      // before one already above the line is above it too.
       if (!bubble) {
-        if (key !== "prompt" && Number(key) < firstMounted) return { turnIndex, key }
+        if (key !== "prompt" && laterBlockAbove(row, Number(key), rootTop)) return { turnIndex, key }
         continue
       }
       const rect = bubble.getBoundingClientRect()
@@ -128,13 +128,12 @@ function scrolledPastMessage(container: HTMLElement, turns: Turn[], keys: string
   return null
 }
 
-/** The first content block a windowed turn has mounted; Infinity when it mounts none. */
-function firstMountedBlock(row: Element): number {
-  let first = Infinity
+/** Whether a mounted item rendering content blocks after `block` starts above `line`. */
+function laterBlockAbove(row: Element, block: number, line: number): boolean {
   for (const item of row.querySelectorAll<HTMLElement>("[data-blocks]")) {
-    first = Math.min(first, Number(item.dataset.blocks!.split("-")[0]))
+    if (Number(item.dataset.blocks!.split("-")[0]) > block && item.getBoundingClientRect().top <= line) return true
   }
-  return first
+  return false
 }
 
 /** Where the viewport starts below the session chrome floating over it, which the scroller's `scroll-padding-top` reserves. */

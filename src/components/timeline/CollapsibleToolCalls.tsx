@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { useDisclosureKey, useRevealTarget, useTimelineState } from "./disclosure"
 import { WindowedItems, type WindowItem } from "./WindowedItems"
+import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity, type ToolActivityEntry } from "@/lib/toolActivity"
 
 const NO_PINS: readonly string[] = []
-import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity, type ToolActivityEntry } from "@/lib/toolActivity"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls, expandAll, expandToolPayloads, activeToolCallId,

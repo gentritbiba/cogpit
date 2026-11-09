@@ -1,5 +1,5 @@
 import { isAnimatingSize } from "./animation"
-import { layoutTops, mergeSegments, planRange, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
+import { INNER_BAND, OUTER_BAND, layoutTops, mergeSegments, planRange, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
 
 /**
  * Virtualization inside one row. A turn with hundreds of blocks, or a tool
@@ -27,6 +27,8 @@ export interface BlockWindowHost {
    */
   viewOffsetInRow(rowKey: string): number
   viewportHeight(): number
+  /** Changes when measured heights stop applying: another width bucket, or expand-all toggled. */
+  layoutKey(): string
   blockHeight(key: string): number | undefined
   setBlockHeight(key: string, height: number): void
 }
@@ -96,7 +98,10 @@ export class BlockWindow {
   private readonly indexOf = new Map<string, number>()
   private heights = new Float64Array(0)
   private readonly measured = new Map<string, number>()
+  private measuredLayout = ""
   private pinnedKeys: readonly string[] = []
+  /** Items holding focus or the selection, which unmounting would lose. */
+  private heldKeys: readonly string[] = []
   private range: KeyRange | null = null
   private plan: WindowPlan = EMPTY_PLAN
   private renderedPlan: WindowPlan | null = null
@@ -106,8 +111,19 @@ export class BlockWindow {
   private readonly itemRefs = new Map<string, (el: HTMLElement | null) => () => void>()
   private readonly listeners = new Set<() => void>()
 
-  /** `id` prefixes the height cache keys; `rowKey` is the row the window sits in. */
-  constructor(private readonly host: BlockWindowHost, private readonly id: string, private readonly rowKey: string) {}
+  /**
+   * `id` prefixes the height cache keys; `rowKey` is the row the window sits
+   * in. `carried` are the items the list had mounted before a window took it
+   * over (it grew past the threshold, or a fold opened): they stay mounted
+   * until the first measured pass, so nothing under the reader is swapped for
+   * a guess.
+   */
+  constructor(
+    private readonly host: BlockWindowHost,
+    private readonly id: string,
+    private readonly rowKey: string,
+    private carried: readonly string[] = [],
+  ) {}
 
   /**
    * The items, in order, and the ones that must stay mounted (a navigation
@@ -120,6 +136,7 @@ export class BlockWindow {
     const previous = this.keys
     this.pinnedKeys = pinned
     if (keysChanged) {
+      this.syncLayout()
       this.keys = keys
       this.indexOf.clear()
       keys.forEach((key, index) => this.indexOf.set(key, index))
@@ -173,10 +190,16 @@ export class BlockWindow {
     if (!first) this.host.windowCommitted()
   }
 
-  /** Measures the mounted items and re-plans the range for the viewport. */
-  update(viewport: WindowViewport): void {
+  /**
+   * Re-plans the range for the viewport. A scroll (`measure` false) costs a
+   * few rect reads while the mounted range still covers its band, and does no
+   * React work; a commit or idle pass also measures the mounted items.
+   */
+  update(viewport: WindowViewport, measure: boolean): void {
     const container = this.container
     if (!container || this.keys.length === 0) return
+    if (!measure && this.coversBand(viewport)) return
+    if (this.syncLayout()) this.rebuildHeights()
     const containerTop = container.getBoundingClientRect().top
     const known = new Map<number, number>()
     for (const [key, el] of this.items) {
@@ -198,9 +221,50 @@ export class BlockWindow {
       viewport: viewport.height,
     })
     const next = toKeyRange(this.keys, range)
-    if (next?.first === this.range?.first && next?.last === this.range?.last) return
+    const carried = this.carried.length > 0
+    this.carried = []
+    if (!carried && next?.first === this.range?.first && next?.last === this.range?.last) return
     this.range = next
+    this.heldKeys = this.findHeldKeys()
     this.publish(this.buildPlan())
+  }
+
+  /** Forgets heights measured for another layout; true when it did. */
+  private syncLayout(): boolean {
+    const layout = this.host.layoutKey()
+    if (layout === this.measuredLayout) return false
+    this.measuredLayout = layout
+    this.measured.clear()
+    return true
+  }
+
+  /** The mounted range still covers the viewport's inner band and reaches no further than its outer band. */
+  private coversBand(viewport: WindowViewport): boolean {
+    const range = this.currentRange()
+    if (!range) return false
+    const first = this.items.get(this.keys[range.start])
+    const last = this.items.get(this.keys[range.end - 1])
+    if (!first || !last) return false
+    const firstRect = first.getBoundingClientRect()
+    const lastRect = last.getBoundingClientRect()
+    const top = range.start === 0 ? -Infinity : firstRect.top
+    const bottom = range.end === this.keys.length ? Infinity : lastRect.bottom
+    const viewBottom = viewport.top + viewport.height
+    return top <= viewport.top - viewport.height * INNER_BAND
+      && bottom >= viewBottom + viewport.height * INNER_BAND
+      && firstRect.bottom >= viewport.top - viewport.height * OUTER_BAND
+      && lastRect.top <= viewBottom + viewport.height * OUTER_BAND
+  }
+
+  /** Mounted items holding the focused element or an end of the selection. */
+  private findHeldKeys(): string[] {
+    const selection = document.getSelection()
+    const nodes: Array<Node | null> = [document.activeElement, selection?.anchorNode ?? null, selection?.focusNode ?? null]
+    const held: string[] = []
+    for (const [key, el] of this.items) {
+      if (nodes.some((node) => node !== null && node !== document.body && el.contains(node))) held.push(key)
+    }
+    return held
   }
 
   private publish(plan: WindowPlan): void {
@@ -242,7 +306,7 @@ export class BlockWindow {
   private buildPlan(): WindowPlan {
     const range = this.currentRange() ?? { start: 0, end: 0 }
     const pinned: number[] = []
-    for (const key of this.pinnedKeys) {
+    for (const key of [...this.pinnedKeys, ...this.heldKeys, ...this.carried]) {
       const index = this.indexOf.get(key)
       if (index !== undefined) pinned.push(index)
     }

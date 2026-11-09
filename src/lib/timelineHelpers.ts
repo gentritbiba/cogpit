@@ -30,7 +30,7 @@ function thinkingGapMs(
 export function collectActivity(
   blocks: TurnContentBlock[],
   startIndex: number,
-  indexOf?: (block: TurnContentBlock) => number,
+  indexOf: (block: TurnContentBlock) => number,
 ): {
   items: ActivityItem[]
   toolCalls: ToolCall[]
@@ -47,9 +47,7 @@ export function collectActivity(
     const block = blocks[j]
     if (block.kind === "thinking") {
       const ms = thinkingGapMs(blocks, j)
-      items.push(indexOf
-        ? { kind: "thinking", blocks: block.blocks, thoughtForMs: ms, block: indexOf(block) }
-        : { kind: "thinking", blocks: block.blocks, thoughtForMs: ms })
+      items.push({ kind: "thinking", blocks: block.blocks, thoughtForMs: ms, block: indexOf(block) })
       thinkingCount += block.blocks.length
       thoughtForMs += ms
       j++

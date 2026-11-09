@@ -72,6 +72,7 @@ function makeHost(offset: number): BlockWindowHost {
     windowCommitted: () => {},
     viewOffsetInRow: () => offset,
     viewportHeight: () => 500,
+    layoutKey: () => "40|0",
     blockHeight: () => undefined,
     setBlockHeight: () => {},
   }
@@ -106,7 +107,7 @@ describe("a giant turn in the timeline", () => {
     expect(screen.getByText("reply 199")).toBeInTheDocument()
     expect(screen.queryByText("reply 0")).toBeNull()
     expect(document.querySelectorAll("[data-block-key]").length).toBeLessThan(60)
-    expect(document.querySelector("[data-scroll-anchor][aria-hidden]")).not.toBeNull()
+    expect(document.querySelector("[data-window-spacer]")).not.toBeNull()
   })
 
   it("marks each item with the content blocks it renders, for find", () => {

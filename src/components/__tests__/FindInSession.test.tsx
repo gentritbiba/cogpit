@@ -185,6 +185,38 @@ describe("FindInSession", () => {
     expect(land(navigations.at(-1)!, t2)).toBe(t2.querySelectorAll("p")[0])
   })
 
+  it("counts a match within its content block, so blocks a long turn has not mounted do not shift it", async () => {
+    sessionTurns = [emptyTurn({
+      id: "t0",
+      contentBlocks: [
+        { kind: "text", text: ["needle a", "needle b"] },
+        { kind: "thinking", blocks: [{ type: "thinking", thinking: "no match here" }] as never },
+        { kind: "text", text: ["needle c", "needle d"] },
+      ],
+    })]
+    // Block 0 sits in a spacer; only block 2 is mounted.
+    const scroller = mountScroller(`<div data-row-key="t0"><div data-blocks="2-2"><p>needle c</p><p>needle d</p></div></div>`)
+    const { handle, navigations } = makeHandle()
+    const findRef = createRef<FindInSessionHandle>()
+    render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
+    act(() => findRef.current!.open())
+    await search("needle")
+    expect(screen.getByText("1/4")).toBeInTheDocument()
+    // Hit 1 is in block 0: nothing to land on until that block mounts.
+    expect(navigations[0].reveal).toBe(0)
+    expect(land(navigations[0], scroller.querySelector<HTMLElement>("[data-row-key=t0]")!)).toBeNull()
+
+    press("Enter")
+    press("Enter")
+    expect(screen.getByText("3/4")).toBeInTheDocument()
+    expect(navigations.at(-1)!.reveal).toBe(2)
+    const row = scroller.querySelector<HTMLElement>("[data-row-key=t0]")!
+    // Counted across the whole row this would be the third occurrence, which the row does not show.
+    expect(land(navigations.at(-1)!, row)).toBe(row.querySelectorAll("p")[0])
+    press("Enter")
+    expect(land(navigations.at(-1)!, row)).toBe(row.querySelectorAll("p")[1])
+  })
+
   it("starts at the first match from the top of the view down", async () => {
     const scroller = mountScroller("")
     const { handle, navigations } = makeHandle("t2")
