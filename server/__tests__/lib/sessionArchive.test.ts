@@ -21,6 +21,7 @@ import {
   REACTIVATION_GRACE_MS,
   readArchive,
   setSessionsArchived,
+  subscribeArchiveChanges,
 } from "../../lib/sessionArchive"
 
 describe("sessionArchive", () => {
@@ -114,5 +115,20 @@ describe("sessionArchive", () => {
     expect(archiveReason(snapshot, "fresh", now - 1_000, now)).toBe(null)
     expect(archiveReason(snapshot, "idle", now - AUTO_ARCHIVE_AFTER_MS - 1, now)).toBe("inactive")
     expect(archiveReason(snapshot, "kept", now - AUTO_ARCHIVE_AFTER_MS - 1, now)).toBe(null)
+  })
+
+  it("tells subscribers after every write that changed the archive", async () => {
+    const changed = vi.fn()
+    const unsubscribe = subscribeArchiveChanges(changed)
+    await setSessionsArchived(["a"], true)
+    await setSessionsArchived(["a"], true)
+    expect(changed).toHaveBeenCalledTimes(1)
+    await setSessionsArchived(["a"], false)
+    await forgetSessions(["a"])
+    await forgetSessions(["a"])
+    expect(changed).toHaveBeenCalledTimes(3)
+    unsubscribe()
+    await setSessionsArchived(["b"], true)
+    expect(changed).toHaveBeenCalledTimes(3)
   })
 })

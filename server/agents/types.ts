@@ -128,8 +128,17 @@ export interface AgentStore {
   sessionsRoot(): string | null
   /** True when an absolute path lives inside this agent's storage. */
   ownsPath(filePath: string): boolean
-  /** Every transcript under the root, stat-only — no file contents are read. */
+  /**
+   * Every transcript under the root, stat-only — no file contents are read.
+   * Always a fresh walk, for a caller that must see a file written just now.
+   */
   listSessionFiles(): Promise<SessionFileInfo[]>
+  /** The same transcripts from the session catalog, a fresh walk only while it is not running. */
+  listedSessionFiles(): Promise<SessionFileInfo[]>
+  /** The transcript the running session catalog knows for `sessionId`, without touching the disk. */
+  knownSessionFile(sessionId: string): string | null
+  /** Stop watching this store's files. */
+  dispose(): void
   /** Untrusted `{dirName, fileName}` to a safe absolute path, or null. */
   resolveSessionFile(dirName: string, fileName: string): Promise<string | null>
   /** Locate a session by id within this agent's storage. */

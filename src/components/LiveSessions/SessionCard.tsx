@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import {
   Archive,
   ArchiveRestore,
@@ -78,7 +78,7 @@ export interface CardLineage {
  * the last prompt and vitals, the same actions as the row, and a hover
  * preview with the full prompts for when that is still not enough.
  */
-export function SessionCard({
+export const SessionCard = memo(function SessionCard({
   session: s,
   projectLabel,
   projectPath,
@@ -159,7 +159,7 @@ export function SessionCard({
       data-session-card
       data-archived={isArchived || undefined}
       className={cn(
-        "motion-list-item group relative flex flex-col rounded-lg border transition-colors",
+        "motion-list-item list-row-lazy group relative flex flex-col rounded-lg border transition-colors",
         surface(isActiveSession, justFinished),
         isArchived && "opacity-60 hover:opacity-100 focus-within:opacity-100",
       )}
@@ -323,7 +323,7 @@ export function SessionCard({
               type="button"
               variant="ghost"
               size="xs"
-              onClick={onToggleTeammates}
+              onClick={() => onToggleTeammates?.(s.sessionId)}
               aria-expanded={!teammatesCollapsed}
               aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
             >
@@ -422,7 +422,7 @@ export function SessionCard({
   }
 
   return card
-}
+})
 
 /** A crew's root wears the crew's state: someone waiting outranks someone working. */
 function crewDot(

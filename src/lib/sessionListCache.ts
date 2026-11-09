@@ -32,8 +32,10 @@ function filteredCacheKey(base: string, filterKey: string | null): string {
   return filterKey === null ? base : `${base}:${filterKey}`
 }
 
-export function activeSessionsCacheKey(filterKey: string | null): string {
-  return filteredCacheKey(sessionListCacheKeys.activeSessions, filterKey)
+/** A list that includes archived sessions is cached apart from the default list. */
+export function activeSessionsCacheKey(filterKey: string | null, includeArchived = false): string {
+  const base = includeArchived ? `${sessionListCacheKeys.activeSessions}:archived` : sessionListCacheKeys.activeSessions
+  return filteredCacheKey(base, filterKey)
 }
 
 const memoryCache = new Map<string, CacheState>()
@@ -89,13 +91,12 @@ function readEntry(key: string): unknown | undefined {
   return entry.value
 }
 
-function writeEntry(key: string, value: unknown): void {
+function writeEntries(values: ReadonlyArray<readonly [string, unknown]>): void {
   const scopedKey = storageKey()
-  if (scopedKey === null) return
-  const entries = {
-    ...loadState(scopedKey).entries,
-    [key]: { savedAt: Date.now(), value },
-  }
+  if (scopedKey === null || values.length === 0) return
+  const savedAt = Date.now()
+  const entries = { ...loadState(scopedKey).entries }
+  for (const [key, value] of values) entries[key] = { savedAt, value }
 
   const ordered = Object.entries(entries).sort(([, a], [, b]) => b.savedAt - a.savedAt)
   saveState(scopedKey, {
@@ -130,7 +131,12 @@ export function readCachedList<T>(key: string): T[] | undefined {
 }
 
 export function writeCachedList<T>(key: string, value: T[]): void {
-  writeEntry(key, value)
+  writeEntries([[key, value]])
+}
+
+/** Several lists in one storage write. */
+export function writeCachedLists(values: ReadonlyArray<readonly [string, unknown[]]>): void {
+  writeEntries(values)
 }
 
 function sessionPageKey(dirName: string, filterKey: string | null): string {
@@ -143,7 +149,7 @@ export function readCachedSessionPage<T>(dirName: string, filterKey: string | nu
 }
 
 export function writeCachedSessionPage<T>(dirName: string, filterKey: string | null, value: CachedSessionPage<T>): void {
-  writeEntry(sessionPageKey(dirName, filterKey), value)
+  writeEntries([[sessionPageKey(dirName, filterKey), value]])
 }
 
 /** Drop a session from every list cached for the active device and user: each filter's list and each project's page. */

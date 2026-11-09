@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Dirent } from "node:fs"
 import { vi, type Mock } from "vitest"
@@ -65,6 +66,8 @@ export function createMockReqRes(method: string, url = "/", opts: MockReqResOpti
   const dataHandlers: ((chunk: Buffer) => void)[] = []
   const endHandlers: (() => void)[] = []
   let endData = ""
+  let ended = false
+  const events = new EventEmitter()
   let statusCode = 200
   const headers: Record<string, string> = {}
   const req = {
@@ -89,7 +92,20 @@ export function createMockReqRes(method: string, url = "/", opts: MockReqResOpti
     removeHeader: (name: string) => {
       for (const key of Object.keys(headers)) if (key.toLowerCase() === name.toLowerCase()) delete headers[key]
     },
-    end: vi.fn((data?: string) => { endData = data || "" }),
+    end: vi.fn((data?: string) => {
+      endData = data || ""
+      ended = true
+    }),
+    get writableEnded() { return ended },
+    once: vi.fn((event: string, listener: () => void) => {
+      events.once(event, listener)
+      return res
+    }),
+    off: vi.fn((event: string, listener: () => void) => {
+      events.off(event, listener)
+      return res
+    }),
+    emit: (event: string) => events.emit(event),
     write: vi.fn(),
     writeHead: vi.fn(),
     _getData: () => endData,

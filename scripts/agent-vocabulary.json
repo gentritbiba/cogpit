@@ -54,7 +54,7 @@
     "server/routes/undo/transaction.ts": 4,
     "server/routes/usage.ts": 8,
     "server/sdk-session.ts": 10,
-    "server/sessionPaths.ts": 6,
+    "server/sessionPaths.ts": 5,
     "server/share/passphrase.ts": 1,
     "server/subagentWatcher.ts": 2,
     "shared/contracts/configBrowser.ts": 1,

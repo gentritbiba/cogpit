@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type MouseEvent } from "react"
+import { Fragment, useCallback, useMemo, useState, type MouseEvent } from "react"
 import { History, Loader2 } from "lucide-react"
 
 import type { PendingSessionInfo } from "@/components/session-browser/types"
@@ -85,7 +85,7 @@ export function SessionCardList({
   const permissionsOf = useListedPermissions()
   // Shelf labels come out of the same memo as the ordering they describe. A
   // session carrying a crew is placed by the crew's latest activity.
-  const { topLevelSessions, teammatesByLead, crewOf, shelves } = useMemo(() => {
+  const ordered = useMemo(() => {
     const folded = groupCrews ? foldCrewRows(sessions) : { topLevel: sessions, crewOf: new Map<string, ActiveSessionInfo[]>() }
     const split = splitTeammates(folded.topLevel)
     const activityAt = (s: ActiveSessionInfo) => {
@@ -96,28 +96,36 @@ export function SessionCardList({
     const topLevelSessions = sortSessionsByRecency([...placed.keys()]).map((key) => placed.get(key)!)
     const now = Date.now()
     const buckets = topLevelSessions.map((s) => recencyBucket(activityAt(s), now))
-    const shelves = buckets.map((bucket, i) => (bucket === buckets[i - 1] ? null : bucket))
-    return { topLevelSessions, teammatesByLead: split.teammatesByLead, crewOf: folded.crewOf, shelves }
+    return { topLevelSessions, teammatesByLead: split.teammatesByLead, crewOf: folded.crewOf, buckets }
   }, [sessions, groupCrews])
+  // While the pointer is over the list its order holds still; rows still update in place.
+  const [frozen, setFrozen] = useState<FrozenOrder | null>(null)
+  const { shown, shelves } = useMemo(
+    () => placeRows(ordered.topLevelSessions, ordered.buckets, frozen),
+    [ordered, frozen],
+  )
   const [openCrews, setOpenCrews] = useLocalStorage<string[]>(deviceScopedKey("live-sessions-open-crews"), [])
-  const openCrewIds = new Set(Array.isArray(openCrews) ? openCrews : [])
-  const toggleCrew = (rootId: string) => {
-    const open = Array.isArray(openCrews) ? openCrews : []
-    setOpenCrews(open.includes(rootId) ? open.filter((id) => id !== rootId) : [...open, rootId])
-  }
+  const { teammatesByLead, crewOf } = ordered
+  const openCrewIds = useMemo(() => new Set(Array.isArray(openCrews) ? openCrews : []), [openCrews])
+  const toggleCrew = useCallback((rootId: string) => {
+    setOpenCrews((current) => {
+      const open = Array.isArray(current) ? current : []
+      return open.includes(rootId) ? open.filter((id) => id !== rootId) : [...open, rootId]
+    })
+  }, [setOpenCrews])
   const knownById = useMemo(
     () => new Map([...(lineageSessions ?? []), ...sessions].map((s) => [s.sessionId, s])),
     [lineageSessions, sessions],
   )
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
-  const toggleTeam = (leadId: string) => {
+  const toggleTeam = useCallback((leadId: string) => {
     setCollapsedTeams((previous) => {
       const next = new Set(previous)
       if (next.has(leadId)) next.delete(leadId)
       else next.add(leadId)
       return next
     })
-  }
+  }, [])
 
   const rowProps = (session: ActiveSessionInfo): SessionRowProps => {
     const permissions = permissionsOf(session.access)
@@ -141,9 +149,14 @@ export function SessionCardList({
   }
 
   return (
-    <div className="flex flex-col gap-1.5" data-session-card-list>
+    <div
+      className="flex flex-col gap-1.5"
+      data-session-card-list
+      onPointerEnter={() => setFrozen(freezeOrder(ordered.topLevelSessions, ordered.buckets))}
+      onPointerLeave={() => setFrozen(null)}
+    >
       {pendingSession && <PendingSessionRow firstMessage={pendingSession.firstMessage} />}
-      {topLevelSessions.map((session, index) => {
+      {shown.map((session, index) => {
         const key = sessionKey(session)
         const path = session.cwd ?? dirNameToPath(session.dirName)
         const worktree = parseWorktreePath(path)
@@ -160,6 +173,7 @@ export function SessionCardList({
           open: openCrewIds.has(session.sessionId),
           onToggle: () => toggleCrew(session.sessionId),
         }
+        // Cards are memoized: only a crew card needs the open session and the names its members show.
         const card = (
           <SessionCard
             {...rowProps(session)}
@@ -169,11 +183,11 @@ export function SessionCardList({
             showProject={showProject}
             teammateCount={teammates?.length}
             teammatesCollapsed={teammates ? collapsed : undefined}
-            onToggleTeammates={teammates ? () => toggleTeam(session.sessionId) : undefined}
+            onToggleTeammates={teammates ? toggleTeam : undefined}
             crew={crew}
             lineage={lineageOf(session, knownById, sessionNames, onSelectSession)}
-            sessionNames={sessionNames}
-            activeSessionKey={activeSessionKey}
+            sessionNames={crew ? sessionNames : undefined}
+            activeSessionKey={crew ? activeSessionKey : undefined}
           />
         )
         return (
@@ -232,6 +246,55 @@ function lineageOf(
       ? () => onSelectSession(parent.dirName, parent.fileName)
       : () => void revealSessionById(crew.parentId),
   }
+}
+
+interface FrozenOrder {
+  keys: string[]
+  bucketOf: Map<string, string>
+}
+
+function freezeOrder(sessions: readonly ActiveSessionInfo[], buckets: readonly string[]): FrozenOrder {
+  const keys = sessions.map(sessionKey)
+  return { keys, bucketOf: new Map(keys.map((key, index) => [key, buckets[index]])) }
+}
+
+/**
+ * The rows in their display order with the shelf label each one opens. Frozen,
+ * the rows that were there when the pointer arrived keep their order and
+ * shelf; rows that joined since take their natural place (usually the top).
+ * A shelf label shows once, at its first row.
+ */
+function placeRows(
+  sessions: readonly ActiveSessionInfo[],
+  buckets: readonly string[],
+  frozen: FrozenOrder | null,
+): { shown: ActiveSessionInfo[]; shelves: Array<string | null> } {
+  let shown: ActiveSessionInfo[] = [...sessions]
+  let shownBuckets: string[] = [...buckets]
+  if (frozen) {
+    const byKey = new Map(sessions.map((session) => [sessionKey(session), session]))
+    const held = frozen.keys.filter((key) => byKey.has(key))
+    let nextHeld = 0
+    shown = []
+    shownBuckets = []
+    sessions.forEach((session, index) => {
+      if (!frozen.bucketOf.has(sessionKey(session))) {
+        shown.push(session)
+        shownBuckets.push(buckets[index])
+        return
+      }
+      const key = held[nextHeld++]
+      shown.push(byKey.get(key)!)
+      shownBuckets.push(frozen.bucketOf.get(key)!)
+    })
+  }
+  const labelled = new Set<string>()
+  const shelves = shownBuckets.map((bucket) => {
+    if (labelled.has(bucket)) return null
+    labelled.add(bucket)
+    return bucket
+  })
+  return { shown, shelves }
 }
 
 function RecencyDivider({ label }: { label: string }) {

@@ -4,9 +4,9 @@ import { descriptorForDirName } from "../../../shared/session/agent-descriptors"
 import { instanceDirName, instanceSessionId } from "../../../shared/session/instances"
 
 const mocks = vi.hoisted(() => ({ runtimeFor: vi.fn(), activity: vi.fn().mockReturnValue({ running: true }) }))
-vi.mock("../../helpers", async (original) => ({
-  ...await original<typeof import("../../helpers")>(),
-  getSessionMeta: async () => ({ sessionId: "native-thread", cwd: "/work/repo", isSubagent: false }),
+vi.mock("../../sessionMetadata", async (original) => ({
+  ...await original<typeof import("../../sessionMetadata")>(),
+  getSessionMeta: async () => ({ sessionId: "native-thread", cwd: "/work/repo", isSubagent: false, firstUserMessage: "", lastUserMessage: "" }),
   getSessionStatus: async () => ({ status: "tool_use" }),
 }))
 vi.mock("../../lib/sessionOrigins", () => ({ sessionParents: async () => new Map() }))
@@ -18,7 +18,7 @@ describe("instance notification addresses", () => {
     mocks.runtimeFor.mockReturnValue({ activity: mocks.activity })
     const snapshot = await loadSnapshot({
       agentKind: "codex", instanceId: "account-1", dirName: null, fileName: "rollout.jsonl",
-      filePath: "/isolated/account-1/rollout.jsonl", mtimeMs: 123,
+      filePath: "/isolated/account-1/rollout.jsonl", mtimeMs: 123, size: 1,
     })
     expect(snapshot).toMatchObject({ sessionId: instanceSessionId("account-1", "rollout"), instanceId: "account-1", isActiveTurn: true })
     expect(snapshot?.dirName.startsWith(instanceDirName("account-1", "codex__"))).toBe(true)
@@ -33,7 +33,7 @@ describe("instance notification addresses", () => {
   ] as const)("round-trips %s notification URLs to their actual transcript", async (agentKind, fileName, nativeDir) => {
     const snapshot = await loadSnapshot({
       agentKind, instanceId: "account-1", dirName: nativeDir && instanceDirName("account-1", nativeDir), fileName,
-      filePath: `/isolated/account-1/${agentKind}/${fileName}`, mtimeMs: 321,
+      filePath: `/isolated/account-1/${agentKind}/${fileName}`, mtimeMs: 321, size: 1,
     })
     expect(snapshot).not.toBeNull()
     expect(snapshot!.sessionId).toBe(instanceSessionId("account-1", snapshot!.urlId))
