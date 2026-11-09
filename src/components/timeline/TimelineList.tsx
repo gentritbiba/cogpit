@@ -3,7 +3,7 @@ import { Loader2, Redo2 } from "lucide-react"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
-import { revealKey, revealToolCall, useTimelineStore } from "./disclosure"
+import { ACTIVE_TURN_KEY, revealKey, revealToolCall, useTimelineStore } from "./disclosure"
 import { BlockWindowHostContext } from "./WindowedItems"
 import { toolSelector } from "@/lib/sessionFindDom"
 import { useAppContext } from "@/contexts/AppContext"
@@ -170,6 +170,7 @@ export function TimelineList({
   useEffect(() => {
     if (activeTurnIndex === null) {
       jumpedRef.current = null
+      store?.set(ACTIVE_TURN_KEY, null)
       return
     }
     const target = rows.find((row) => row.index === activeTurnIndex)
@@ -180,6 +181,7 @@ export function TimelineList({
     }
     if (!target) return
     jumpedRef.current = { index: activeTurnIndex, key: target.key, callId: activeToolCallId }
+    store?.set(ACTIVE_TURN_KEY, target.key)
     if (!activeToolCallId) {
       void controller.scrollToTurn(target.key, { align: "start" })
       return

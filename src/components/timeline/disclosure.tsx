@@ -198,6 +198,19 @@ export function useTimelineDraft<T = string>(key: string | null, initial: Initia
   return useTimelineState(key, initial)
 }
 
+/** The key of the turn the panels' selection jumped to; the timeline resolves the selected index to it once. */
+export const ACTIVE_TURN_KEY = "timeline:active-turn"
+
+/** Whether `turnKey` is the selected turn. Only the rows whose answer changes re-render. */
+export function useIsActiveTurn(turnKey: string): boolean {
+  const store = useContext(StoreContext)
+  const subscribe = useCallback(
+    (listener: Listener) => (store ? store.subscribe(ACTIVE_TURN_KEY, listener) : noSubscription()),
+    [store],
+  )
+  return useSyncExternalStore(subscribe, () => store !== null && store.get<string | null>(ACTIVE_TURN_KEY) === turnKey)
+}
+
 /** The reveal request of the turn this sits in, for the group that holds its target to open itself. */
 export function useRevealTarget(): RevealTarget | null {
   const turnKey = useScopeTurnKey()

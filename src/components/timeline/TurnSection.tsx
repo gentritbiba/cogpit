@@ -26,7 +26,7 @@ import { isReaderPrompt, promptSource, type PromptSource } from "@/lib/userMessa
 import { InverseColorScheme } from "@/components/InverseColorScheme"
 import { getUserMessageImages, getUserMessageText } from "../../../shared/session/parser"
 import { useAppContext } from "@/contexts/AppContext"
-import { DisclosureScope, revealedBlock, useDisclosureKey, useRevealTarget, useTimelineState } from "./disclosure"
+import { DisclosureScope, revealedBlock, useDisclosureKey, useIsActiveTurn, useRevealTarget, useTimelineState } from "./disclosure"
 import { WindowedItems, type WindowItem } from "./WindowedItems"
 import { useTimelineLiveStatus, useTimelineRowFacts } from "./TimelineRowsProvider"
 import { newContextId } from "../../../shared/session/composerContext"
@@ -64,7 +64,7 @@ interface TurnSectionProps {
  */
 export const TurnSection = memo(function TurnSection({ turn, index, turnKey, isLast, branchCount = 0 }: TurnSectionProps) {
   const {
-    state: { activeTurnIndex, activeToolCallId, expandAll, expandToolPayloads },
+    state: { activeToolCallId, expandAll, expandToolPayloads },
     isMobile,
   } = useAppContext()
   const facts = useTimelineRowFacts()
@@ -75,7 +75,7 @@ export const TurnSection = memo(function TurnSection({ turn, index, turnKey, isL
   const isTurnDone = !isAgentActive || !status.working
   const cwd = facts?.cwd ?? ""
   const skillMetadata = useSkillMetadata(cwd)
-  const isActive = activeTurnIndex === index
+  const isActive = useIsActiveTurn(turnKey)
 
   return (
     <DisclosureScope id={turnKey} root>

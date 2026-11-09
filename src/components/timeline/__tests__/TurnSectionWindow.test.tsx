@@ -3,7 +3,7 @@ import { act, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
 import { TimelineRowsProvider } from "../TimelineRowsProvider"
 import { BlockWindowHostContext } from "../WindowedItems"
-import { revealKey, useTimelineStore, type TimelineStateStore } from "../disclosure"
+import { ACTIVE_TURN_KEY, revealKey, useTimelineStore, type TimelineStateStore } from "../disclosure"
 import { emptyTurn } from "@/__tests__/fixtures"
 import type { BlockWindowHost } from "@/lib/timelineScroll/blockWindow"
 import type { ParsedSession, ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
@@ -121,6 +121,18 @@ describe("a giant turn in the timeline", () => {
     act(() => store!.set(revealKey("giant"), 3))
     expect(screen.getByText("reply 3")).toBeInTheDocument()
     expect(screen.queryByText("reply 2")).toBeNull()
+  })
+
+  // LOAD QA F7 (crew 2275): the ring followed the selected index, so a prepend moved it to another turn.
+  it("rings the turn whose key the timeline marks as selected, whatever its index", () => {
+    const turn = giantTurn(3)
+    show(turn, makeHost(Infinity))
+    const ringed = () => document.querySelector(".ring-1") !== null
+    expect(ringed()).toBe(false)
+    act(() => store!.set(ACTIVE_TURN_KEY, "giant"))
+    expect(ringed()).toBe(true)
+    act(() => store!.set(ACTIVE_TURN_KEY, "another"))
+    expect(ringed()).toBe(false)
   })
 
   it("renders every block outside the timeline list", () => {

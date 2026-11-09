@@ -15,17 +15,22 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: () => ({ undoRedo: { enabled: false, branchesAtTurn: undefined }, isSubAgentView: false, session: null }),
 }))
 vi.mock("@/components/UndoRedoBar", () => ({ UndoRedoBar: () => null }))
-// Each turn renders two anchored blocks whose heights the test controls.
-vi.mock("../TurnSection", () => ({
-  TurnSection: ({ turnKey }: { turnKey: string }) => (
-    <>
-      <div data-scroll-anchor="" data-block={`${turnKey}:a`} />
-      <div data-scroll-anchor="" data-block={`${turnKey}:b`}><button type="button">toggle</button></div>
-    </>
-  ),
-}))
+// Each turn renders two anchored blocks whose heights the test controls, and marks itself when it is the selected turn.
+vi.mock("../TurnSection", async () => {
+  const { useIsActiveTurn } = await vi.importActual<typeof import("../disclosure")>("../disclosure")
+  return {
+    TurnSection: ({ turnKey }: { turnKey: string }) => (
+      <>
+        <div data-scroll-anchor="" data-block={`${turnKey}:a`} />
+        <div data-scroll-anchor="" data-block={`${turnKey}:b`}><button type="button">toggle</button></div>
+        {useIsActiveTurn(turnKey) && <span data-active-turn={turnKey} />}
+      </>
+    ),
+  }
+})
 
 import { TimelineList } from "../TimelineList"
+import { DisclosureProvider } from "../disclosure"
 
 // ── A block layout model over jsdom ──────────────────────────────────────────
 
@@ -134,6 +139,7 @@ function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChange
   const keys = turnKeysOf(turns)
   const rows = turns.map((turn, index) => ({ turn, index, key: keys[index] }))
   return (
+    <DisclosureProvider sessionKey={sessionKey}>
     <div ref={(el) => { scroller = el; controller.setScroller(el as HTMLDivElement | null) }}>
       <div>
         <TimelineList
@@ -149,6 +155,7 @@ function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChange
       </div>
       <div ref={controller.setBottomSlack} />
     </div>
+    </DisclosureProvider>
   )
 }
 
@@ -451,6 +458,20 @@ describe("TimelineList with the scroll engine", () => {
     appState.activeTurnIndex = 10
     rerender({ turns: makeTurns(ids(80, 200)) })
     expect(jump).toHaveBeenCalledWith("t90", { align: "start" })
+  })
+
+  // LOAD QA F7 (crew 2275): the selected turn's ring stayed on the index after older turns were prepended.
+  it("marks the turn the selection jumped to, not whatever turn later takes its index", () => {
+    const { rerender } = mount({ turns: makeTurns(ids(100, 200)), sessionKey: "active-turn" })
+    appState.activeTurnIndex = 40
+    rerender({ turns: makeTurns(ids(100, 200)), sessionKey: "active-turn" })
+    const marked = () => [...scroller!.querySelectorAll<HTMLElement>("[data-active-turn]")].map((el) => el.dataset.activeTurn)
+    expect(marked()).toEqual(["t140"])
+    rerender({ turns: makeTurns(ids(80, 200)), sessionKey: "active-turn" })
+    expect(marked()).toEqual(["t140"])
+    appState.activeTurnIndex = null
+    rerender({ turns: makeTurns(ids(80, 200)), sessionKey: "active-turn" })
+    expect(marked()).toEqual([])
   })
 
   it("jumps to a tool call by key: asks its turn to reveal it, then centres its card", () => {
