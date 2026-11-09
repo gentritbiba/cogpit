@@ -52,10 +52,10 @@ function PanelTarget() {
   return <output data-testid="panel-target">{panel?.target ? `${panel.target.id}@${panel.target.version}` : "none"}</output>
 }
 
-function renderBrowser(props: Partial<Parameters<typeof ViewBrowser>[0]> = {}, onReveal = vi.fn()) {
+function renderBrowser(onReveal = vi.fn()) {
   render(
     <ViewPanelProvider shown={false} onReveal={onReveal}>
-      <ViewBrowser scope={null} {...props} />
+      <ViewBrowser />
       <PanelTarget />
     </ViewPanelProvider>,
   )
@@ -98,37 +98,22 @@ describe("ViewBrowser", () => {
     expect(within(screen.getByText("Kept funnel").closest("button")!).getByRole("img", { name: "Pinned" })).toBeInTheDocument()
   })
 
-  it("narrows to the sidebar's project and names projects only across all of them", async () => {
+  it("names each view's project", async () => {
     serve([
       summary({ id: "shop-view", title: "Shop view", project: "/Users/me/code/shop" }),
       summary({ id: "blog-view", title: "Blog view", project: "/Users/me/code/blog" }),
     ])
-    renderBrowser({ scope: "code/shop" })
-
-    await screen.findByText("Shop view")
-    expect(screen.queryByText("Blog view")).not.toBeInTheDocument()
-    expect(document.querySelector("[data-view-project]")).toBeNull()
-
-    cleanup()
-    renderBrowser({ scope: null, labelFor: (key) => (key === "code/blog" ? "Blog" : key) })
+    renderBrowser()
     await screen.findByText("Blog view")
     const projects = [...document.querySelectorAll("[data-view-project]")].map((node) => node.textContent)
-    expect(projects).toEqual(["code/shop", "Blog"])
+    expect(projects).toEqual(["code/shop", "code/blog"])
   })
 
-  it("explains an empty list, and offers every project when a focused one has none", async () => {
+  it("explains an empty list", async () => {
     serve([])
     renderBrowser()
     expect(await screen.findByText("No views yet")).toBeInTheDocument()
     expect(screen.getByText(/When an agent builds an interactive view/)).toBeInTheDocument()
-
-    cleanup()
-    const showAll = vi.fn()
-    serve([summary({ id: "blog-view", title: "Blog view", project: "/Users/me/code/blog" })])
-    renderBrowser({ scope: "code/shop", scopeLabel: "Shop", onShowAllProjects: showAll })
-    expect(await screen.findByText("No views in Shop")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: "All projects" }))
-    expect(showAll).toHaveBeenCalled()
   })
 
   it("opens a view's newest version in the panel", async () => {

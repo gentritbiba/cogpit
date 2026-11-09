@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from "react"
-import { AlertTriangle, AppWindow, Folder, Layers, MoreHorizontal, Pencil, Pin, PinOff, Trash2, type LucideIcon } from "lucide-react"
+import { AlertTriangle, AppWindow, Folder, MoreHorizontal, Pencil, Pin, PinOff, Trash2, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -21,16 +21,6 @@ import type { ViewSummary } from "../../../shared/views/stored"
 import { useViewPanel } from "./ViewPanelContext"
 import { sortViews, useViews } from "./useViews"
 
-interface ViewBrowserProps {
-  /** The project group key the list is narrowed to, as the sidebar's scope stores it; null lists every project. */
-  scope: string | null
-  /** What the focused project is called, for its empty state. */
-  scopeLabel?: string | null
-  /** The name a project group key is shown with. */
-  labelFor?: (key: string) => string
-  onShowAllProjects?: () => void
-}
-
 interface RowAction {
   label: string
   icon: LucideIcon
@@ -45,19 +35,18 @@ const SKELETON_ROWS = ["first", "second", "third"]
  * last built, on the same date shelves as the sessions list. Opening one shows
  * it in the view panel; each row can be pinned, renamed or deleted.
  */
-export function ViewBrowser({ scope, scopeLabel, labelFor = (key) => key, onShowAllProjects }: ViewBrowserProps) {
+export function ViewBrowser() {
   const { views, error, refresh, update, remove } = useViews()
   const panel = useViewPanel()
   const [renaming, setRenaming] = useState<ViewSummary | null>(null)
   const [deleting, setDeleting] = useState<ViewSummary | null>(null)
 
   const listed = useMemo(() => {
-    const scoped = (views ?? []).filter((view) => scope === null || projectGroupKey(view.project) === scope)
-    const sorted = sortViews(scoped)
+    const sorted = sortViews(views ?? [])
     const now = Date.now()
     const shelves = sorted.map((view) => (view.pinned ? "Pinned" : recencyBucket(view.updatedAt, now)))
     return sorted.map((view, index) => ({ view, shelf: shelves[index] === shelves[index - 1] ? null : shelves[index] }))
-  }, [views, scope])
+  }, [views])
 
   const togglePin = async (view: ViewSummary) => {
     const failure = await update(view.id, { pinned: !view.pinned })
@@ -102,19 +91,9 @@ export function ViewBrowser({ scope, scopeLabel, labelFor = (key) => key, onShow
           <Empty className="min-h-56 px-4 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon"><AppWindow /></EmptyMedia>
-              <EmptyTitle>{scope === null ? "No views yet" : `No views in ${scopeLabel ?? scope}`}</EmptyTitle>
-              <EmptyDescription>
-                {scope === null
-                  ? "When an agent builds an interactive view, it is kept here to open again."
-                  : "Interactive views agents build in this project are kept here."}
-              </EmptyDescription>
+              <EmptyTitle>No views yet</EmptyTitle>
+              <EmptyDescription>When an agent builds an interactive view, it is kept here to open again.</EmptyDescription>
             </EmptyHeader>
-            {scope !== null && onShowAllProjects && (
-              <Button variant="outline" size="sm" onClick={onShowAllProjects}>
-                <Layers data-icon="inline-start" />
-                All projects
-              </Button>
-            )}
           </Empty>
         )}
 
@@ -123,7 +102,6 @@ export function ViewBrowser({ scope, scopeLabel, labelFor = (key) => key, onShow
             {shelf && <div className="px-1 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground/80 first:pt-0">{shelf}</div>}
             <ViewRow
               view={view}
-              projectLabel={scope === null ? labelFor(projectGroupKey(view.project)) : null}
               active={Boolean(panel?.shown) && panel?.target?.id === view.id}
               onOpen={panel ? (version) => panel.open({ id: view.id, version }) : undefined}
               actions={actionsFor(view)}
@@ -155,10 +133,8 @@ export function ViewBrowser({ scope, scopeLabel, labelFor = (key) => key, onShow
   )
 }
 
-function ViewRow({ view, projectLabel, active, onOpen, actions }: {
+function ViewRow({ view, active, onOpen, actions }: {
   view: ViewSummary
-  /** Printed above the title when the list mixes projects. */
-  projectLabel: string | null
   active: boolean
   onOpen?: (version: number) => void
   actions: RowAction[]
@@ -179,12 +155,10 @@ function ViewRow({ view, projectLabel, active, onOpen, actions }: {
               active ? "border-foreground/15 bg-accent" : "border-border/70 bg-card hover:border-border hover:bg-accent",
             )}
           >
-            {projectLabel && (
-              <span className="flex items-center gap-1.5 text-[11px] leading-tight text-muted-foreground" data-view-project>
-                <ProjectFavicon projectPath={view.project} fallback={<Folder className="size-3 shrink-0" aria-hidden="true" />} className="size-3" />
-                <span className="truncate">{projectLabel}</span>
-              </span>
-            )}
+            <span className="flex items-center gap-1.5 text-[11px] leading-tight text-muted-foreground" data-view-project>
+              <ProjectFavicon projectPath={view.project} fallback={<Folder className="size-3 shrink-0" aria-hidden="true" />} className="size-3" />
+              <span className="truncate">{projectGroupKey(view.project)}</span>
+            </span>
             <span className="flex items-start gap-1.5">
               {view.pinned && <Pin className="mt-1 size-3 shrink-0 text-muted-foreground" role="img" aria-label="Pinned" />}
               <span className="line-clamp-2 flex-1 text-sm font-medium leading-snug text-foreground">{view.title}</span>

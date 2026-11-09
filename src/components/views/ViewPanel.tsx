@@ -35,7 +35,7 @@ export function ViewPanel({ closePanel }: WorkspacePanelProps) {
           </Button>
         </div>
         <Separator />
-        <ViewBrowser scope={null} />
+        <ViewBrowser />
       </aside>
     )
   }

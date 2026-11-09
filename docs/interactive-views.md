@@ -61,7 +61,7 @@ else it uses. Each module's `doc` is written into the skill's
 `bun run sync-cogpit-skill`, whose check fails CI when they drift.
 
 `server/routes/views.ts` serves `GET /api/views` (`?project=` filters; the
-sidebar's list), `GET /api/views/<id>/v/<n>`, and `PATCH` (rename, pin) and
+Views panel's list), `GET /api/views/<id>/v/<n>`, and `PATCH` (rename, pin) and
 `DELETE` on `/api/views/<id>`. A view belongs to the session that made it
 (`view.json`'s `sessionId`): the list shows the views of sessions the caller
 may see, and the others authorize that session (`authorizeSession`, view to

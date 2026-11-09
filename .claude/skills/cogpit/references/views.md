@@ -67,9 +67,8 @@ Edit the files in the view's folder and run `view build` again, then put the new
 block (`sales-funnel@2`) in your reply. Earlier replies keep showing the
 version they named and offer the newer one. `cogpit-session view list` shows
 this project's views, and `view show ID` shows a view's folder and versions.
-The user also finds every view in the sidebar's Views list, where they can
-open it in the Views panel beside the chat, pick any version, pin, rename or
-delete it.
+The user also finds every view in the Views panel beside the chat, where they
+can open it, pick any version, pin, rename or delete it.
 
 A view belongs to the session that made it: whoever may see that session may
 see the view, including a guest of a shared session, and whoever may work in

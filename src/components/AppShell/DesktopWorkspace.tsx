@@ -65,7 +65,7 @@ function DesktopSessionContent({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="relative flex h-full min-h-0 flex-1 flex-col">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {floatingChrome}
         {sessionView.teamMembersBar && (
           <div className="pt-10">{sessionView.teamMembersBar}</div>
