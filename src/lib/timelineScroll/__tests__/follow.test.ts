@@ -59,6 +59,12 @@ describe("followReducer", () => {
     expect(followReducer(anchored, { type: "resume" }).following).toBe(true)
   })
 
+  // Review finding 2: PageDown or End with focus on the body sends no key event to the timeline.
+  it("resumes when a scroll down it did not write reaches the bottom, with no input seen", () => {
+    expect(followReducer(anchored, { type: "scroll", previous: 700, current: 800, maxScrollTop: 800, own: false, distanceToBottom: 0 }).following).toBe(true)
+    expect(followReducer(anchored, { type: "scroll", previous: 600, current: 700, maxScrollTop: 800, own: false, distanceToBottom: 100 }).following).toBe(false)
+  })
+
   it("forgets user input at idle", () => {
     expect(followReducer({ following: false, userInput: true }, { type: "idle", distanceToBottom: 500, anchored: false }).userInput).toBe(false)
   })

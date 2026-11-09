@@ -63,7 +63,9 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowSta
       if (event.own) return state
       const up = event.current < event.previous - 0.5
       if (up && !isClamp(event)) return next(state, false, state.userInput)
-      if (state.userInput && event.distanceToBottom <= RESUME_DISTANCE) return next(state, true, true)
+      // Only the reader scrolls down: keys with focus outside the timeline, the scrollbar's arrows, find.
+      const down = event.current > event.previous + 0.5
+      if ((state.userInput || down) && event.distanceToBottom <= RESUME_DISTANCE) return next(state, true, true)
       return state
     }
     case "resume":

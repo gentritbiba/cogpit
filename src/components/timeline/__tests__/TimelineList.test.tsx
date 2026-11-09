@@ -260,6 +260,19 @@ describe("TimelineList with the scroll engine", () => {
     expect(scrollTop()).toBe(maxScroll())
   })
 
+  // Review finding 2: with focus on the body, PageDown or End scroll the timeline without a key event on it.
+  it("resumes following when a scroll it did not write reaches the bottom", () => {
+    vi.useFakeTimers()
+    mount({ turns: makeTurns(ids(0, 50)) })
+    act(() => { scroller!.dispatchEvent(new WheelEvent("wheel", { deltaY: -40 })) })
+    userScrollTo(scrollTop() - 600)
+    act(() => { vi.advanceTimersByTime(200) })
+    userScrollTo(maxScroll())
+    blockHeights.set("t49:b", 400)
+    resize()
+    expect(scrollTop()).toBe(maxScroll())
+  })
+
   it("does not resume following when a collapse clamps the reader to the bottom", () => {
     mount({ turns: makeTurns(ids(0, 50)) })
     act(() => { scroller!.dispatchEvent(new WheelEvent("wheel", { deltaY: -40 })) })
