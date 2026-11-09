@@ -2,7 +2,7 @@ import { isAnimatingSize } from "./animation"
 import { followReducer, RESUME_DISTANCE, type FollowEvent, type FollowState } from "./follow"
 import type { BlockWindow, BlockWindowHost, WindowViewport } from "./blockWindow"
 import { blockHeights, timelineHeights, widthBucket, type SessionHeights } from "./heightCache"
-import { reserveHeight, shouldLoadOlder } from "./history"
+import { HISTORY_LATE_MS, historyNeeded, reserveHeight } from "./history"
 import { layoutTops, mergeSegments, planRange, rowsOverlapping, sameKeys, sumHeights, toExtent, toKeyRange, type Extent, type KeyRange } from "./layout"
 import { absorb, excessNearView, normalizeTop, slackForTarget, trimBottomSlack } from "./slack"
 import type { ScrollToTurnOptions, TimelineHandle, TimelineViewport } from "./types"
@@ -166,6 +166,10 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private lastScrollTop = 0
   private ownScrollTop: number | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
+  /** Runs out when needed history has not arrived in time; see `historyLate`. */
+  private lateTimer: ReturnType<typeof setTimeout> | null = null
+  /** Needed history is late, so the reserve shrinks to the loading status. */
+  private historyLate = false
   private touching = false
   private scrollbarHeld = false
   private touchY = 0
@@ -328,6 +332,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       this.observer?.unobserve(el)
       if (this.idleTimer) clearTimeout(this.idleTimer)
       this.idleTimer = null
+      this.resetHistoryClock()
     }
   }
 
@@ -381,6 +386,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       this.heightStore = timelineHeights.forSession(input.sessionKey)
       this.blockStore = blockHeights.forSession(input.sessionKey)
     }
+    // Older turns arrived in front: whatever was late has landed.
+    if (input.keys[0] !== this.keys[0]) this.resetHistoryClock()
     const expandToggled = previous?.expandAll !== input.expandAll
     if (expandToggled) this.liveHeights.clear()
     if (expandToggled || !sameKeys(input.keys, this.keys)) {
@@ -554,6 +561,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       remainingBytes: this.history.remaining,
       loadedBytes: this.history.loaded,
       loadedHeight: sumHeights(this.heights, 0, this.heights.length),
+      late: this.historyLate,
     })
   }
 
@@ -947,15 +955,40 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     const input = this.input
     const scroller = this.scroller
     if (!input?.onLoadMore || !scroller) return
-    const firstRowTop = this.keys.length > 0 ? this.geometry()[0] : 0
-    if (shouldLoadOlder({
+    const needed = historyNeeded({
       hasMore: input.hasMore,
-      loading: input.isLoadingOlder,
       placed: this.placed,
       viewport: scroller.clientHeight,
       viewTop: scroller.scrollTop,
-      firstRowTop,
-    })) input.onLoadMore()
+      firstRowTop: this.keys.length > 0 ? this.geometry()[0] : 0,
+    })
+    this.watchHistory(needed)
+    if (needed && !input.isLoadingOlder) input.onLoadMore()
+  }
+
+  /**
+   * Starts the late clock when history becomes needed and stops it when it is
+   * not. A page that lands resets it through `applyInput`. Once late, the
+   * reserve shrinks and the near-view trim removes the rest before the reader
+   * reaches it.
+   */
+  private watchHistory(needed: boolean): void {
+    if (!needed) {
+      this.resetHistoryClock()
+      return
+    }
+    if (this.lateTimer !== null || this.historyLate) return
+    this.lateTimer = setTimeout(() => {
+      this.lateTimer = null
+      this.historyLate = true
+      if (this.scroller && this.input) this.layoutPass(false)
+    }, HISTORY_LATE_MS)
+  }
+
+  private resetHistoryClock(): void {
+    if (this.lateTimer !== null) clearTimeout(this.lateTimer)
+    this.lateTimer = null
+    this.historyLate = false
   }
 
   private updateIndicators(): void {

@@ -523,6 +523,22 @@ describe("TimelineList with the scroll engine", () => {
     expect(onLoadMore).toHaveBeenCalled()
   })
 
+  // Harness final pass: with a page late, the reader scrolled through 12 viewports of placeholder and sat there blank.
+  it("stops the reader at the loaded top while needed history is late, without moving what is on screen", () => {
+    vi.useFakeTimers()
+    const onLoadMore = vi.fn()
+    mount({ turns: makeTurns(ids(0, 200)), hasMore: true, onLoadMore, sessionKey: "late-history" })
+    userScrollTo(1600)
+    expect(onLoadMore).toHaveBeenCalled()
+    const anchor = block(`${renderedKeys()[1]}:a`)
+    const before = viewportTopOf(anchor)
+    act(() => { vi.advanceTimersByTime(600) })
+    flushScroll()
+    expect(viewportTopOf(anchor)).toBeCloseTo(before)
+    userScrollTo(0)
+    expect(viewportTopOf('[data-row-key="t0"]')).toBeLessThanOrEqual(48)
+  })
+
   it("normalizes the top pad at idle without moving the reader", () => {
     vi.useFakeTimers()
     mount({ turns: makeTurns(ids(0, 200)) })
