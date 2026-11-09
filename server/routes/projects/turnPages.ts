@@ -9,7 +9,7 @@ const FIRST_WINDOW_BYTES = 256 * 1024
 /** Most a page reads back before it settles for what it found. */
 const MAX_WINDOW_BYTES = 64 * 1024 * 1024
 /** A turn bigger than this, in bytes sent, is the one a page may cut. */
-export const TURN_HARD_CAP_BYTES = 8 * 1024 * 1024
+const TURN_HARD_CAP_BYTES = 8 * 1024 * 1024
 
 type PageFormat = Pick<AgentFormat, "isNoiseLine" | "pageCuts">
 
