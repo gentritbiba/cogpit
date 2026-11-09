@@ -6,12 +6,13 @@ import { ChatArea } from "@/components/ChatArea"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { AgentCheckHost } from "@/components/AgentCheck/AgentCheckHost"
 import { FolderBrowserHost } from "@/components/FolderBrowserHost"
-import { MobileNav, type MobileTab } from "@/components/MobileNav"
+import { MobileNav } from "@/components/MobileNav"
+import type { MobileTab } from "@/hooks/useSessionState"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useEditionUi, useMainView } from "@/edition/hooks"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { can } from "@/lib/capabilities"
@@ -37,7 +38,7 @@ export function MobileAppShell({
   chrome,
 }: MobileAppShellProps) {
   const { state, config } = useAppContext()
-  const { session } = useSessionContext()
+  const hasSession = useOpenSession((open) => open !== null)
   const [searchOpen, setSearchOpen] = useState(false)
   const { AccountControl } = useEditionUi()
   const extensionView = useMainView(state.mainView === "extension" ? state.extensionViewId : null)
@@ -83,7 +84,7 @@ export function MobileAppShell({
       {chrome.backgroundServers}
       <UpdateBanner />
       <ProviderUpdateBanner />
-      {!(state.mobileTab === "chat" && session) && (
+      {!(state.mobileTab === "chat" && hasSession) && (
         <div className="motion-slide-down-in flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />
           {headerAccessory}
@@ -140,17 +141,22 @@ export function MobileAppShell({
         defaultAgentKind={config.defaultAgentKind}
       />
       <AgentCheckHost />
-      {session && project.hasFileChanges && (
-        <Suspense fallback={null}>
-          <MobileFileChanges
-            open={chrome.fileChangesOpen}
-            onClose={() => chrome.onFileChangesOpenChange(false)}
-            session={session}
-            sessionChangeKey={state.sessionChangeKey}
-          />
-        </Suspense>
+      {hasSession && project.hasFileChanges && (
+        <OpenSessionFileChanges open={chrome.fileChangesOpen} onClose={() => chrome.onFileChangesOpenChange(false)} />
       )}
     </div>
+  )
+}
+
+/** Reads the session itself, so only the sheet follows the stream. */
+function OpenSessionFileChanges({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { state } = useAppContext()
+  const session = useOpenSession((current) => current)
+  if (!session) return null
+  return (
+    <Suspense fallback={null}>
+      <MobileFileChanges open={open} onClose={onClose} session={session} sessionChangeKey={state.sessionChangeKey} />
+    </Suspense>
   )
 }
 
@@ -164,11 +170,12 @@ function MobileChat({
   navigation, sessionView, project, chrome, headerAccessory, searchOpen, onSearchOpenChange,
 }: MobileChatProps) {
   const { state, config } = useAppContext()
-  const { session, isSubAgentView } = useSessionContext()
+  const { isSubAgentView } = useSessionControls()
+  const hasSession = useOpenSession((open) => open !== null)
 
   return (
     <>
-      {session ? (
+      {hasSession ? (
         <div className="flex flex-1 min-h-0 flex-col">
           {sessionView.teamMembersBar}
           <SessionInfoBar
@@ -228,11 +235,11 @@ function MobileChat({
       )}
       <div className="shrink-0">
         {chrome.processPanel}
-        {(session || state.pendingDirName) && (
+        {(hasSession || state.pendingDirName) && (
           <>
             {sessionView.todoProgress}
-            {!session && <WorktreeStartupStatus projectCwd={sessionView.pendingPath} />}
-            {session ? sessionView.activeComposer : sessionView.pendingComposer}
+            {!hasSession && <WorktreeStartupStatus projectCwd={sessionView.pendingPath} />}
+            {hasSession ? sessionView.activeComposer : sessionView.pendingComposer}
           </>
         )}
       </div>

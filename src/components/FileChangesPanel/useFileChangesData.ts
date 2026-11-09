@@ -4,7 +4,7 @@ import type { SessionView } from "../../../shared/session/sessionDigest"
 import { computeNetDiff, type EditOp } from "../../../shared/diff-utils"
 import { expandEditToolCalls } from "../../../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionControls } from "@/contexts/SessionContext"
 import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
 import { agentKindForDirName } from "@/lib/agents"
 import { useCapability } from "@/hooks/useCapability"
@@ -21,7 +21,7 @@ const bgAgentCache = new Map<string, ToolCall[]>()
 
 export function useFileChangesData(session: SessionView) {
   const canAccessHostFiles = useCapability("hostFiles")
-  const { sessionSource } = useSessionContext()
+  const { sessionSource } = useSessionControls()
   const dirName = sessionSource?.dirName
   const isCodexSession = agentKindForDirName(dirName) === "codex"
 

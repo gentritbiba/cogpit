@@ -1,5 +1,5 @@
-import { useMemo } from "react"
 import type { SessionView } from "../../shared/session/sessionDigest"
+import { useSessionSelector, type SessionStore } from "@/hooks/useSessionState"
 
 export interface TodoItem {
   id?: string
@@ -28,91 +28,98 @@ export interface TodoProgress {
  * panel then does not render at all. Kept for older sessions and for anyone
  * who opts the tools back in.
  */
-export function useTodoProgress(session: SessionView | null): TodoProgress | null {
-  return useMemo(() => {
-    if (!session) return null
+export function todoProgressOf(session: SessionView | null): TodoProgress | null {
+  if (!session) return null
 
-    let lastTodos: TodoItem[] | null = null
-    const structuredTasks = new Map<string, TodoItem>()
-    let createIndex = 0
+  let lastTodos: TodoItem[] | null = null
+  const structuredTasks = new Map<string, TodoItem>()
+  let createIndex = 0
 
-    for (const turn of session.turns) {
-      for (const tc of turn.toolCalls) {
-        if (tc.name === "TodoWrite") {
-          const input = tc.input as { todos?: TodoItem[] }
-          if (Array.isArray(input.todos)) {
-            lastTodos = input.todos
-          }
+  for (const turn of session.turns) {
+    for (const tc of turn.toolCalls) {
+      if (tc.name === "TodoWrite") {
+        const input = tc.input as { todos?: TodoItem[] }
+        if (Array.isArray(input.todos)) {
+          lastTodos = input.todos
+        }
+        continue
+      }
+
+      if (tc.name === "TaskCreate") {
+        const input = tc.input as {
+          subject?: string
+          description?: string
+          activeForm?: string
+          owner?: string
+        }
+        createIndex += 1
+        const resultId = tc.result?.match(/(?:Task\s*#?|task[_ ]?id["': ]+)(\d+)/i)?.[1]
+        const id = resultId ?? String(createIndex)
+        structuredTasks.set(id, {
+          id,
+          content: input.subject || input.description || `Task ${id}`,
+          activeForm: input.activeForm || input.subject || `Working on task ${id}`,
+          status: "pending",
+          owner: input.owner,
+        })
+        continue
+      }
+
+      if (tc.name === "TaskUpdate") {
+        const input = tc.input as {
+          taskId?: string
+          status?: TodoItem["status"] | "deleted"
+          subject?: string
+          description?: string
+          activeForm?: string
+          owner?: string
+          addBlockedBy?: string[]
+        }
+        const id = String(input.taskId ?? "")
+        if (!id) continue
+        if (input.status === "deleted") {
+          structuredTasks.delete(id)
           continue
         }
-
-        if (tc.name === "TaskCreate") {
-          const input = tc.input as {
-            subject?: string
-            description?: string
-            activeForm?: string
-            owner?: string
-          }
-          createIndex += 1
-          const resultId = tc.result?.match(/(?:Task\s*#?|task[_ ]?id["': ]+)(\d+)/i)?.[1]
-          const id = resultId ?? String(createIndex)
-          structuredTasks.set(id, {
-            id,
-            content: input.subject || input.description || `Task ${id}`,
-            activeForm: input.activeForm || input.subject || `Working on task ${id}`,
-            status: "pending",
-            owner: input.owner,
-          })
-          continue
+        const current = structuredTasks.get(id) ?? {
+          id,
+          content: input.subject || input.description || `Task ${id}`,
+          activeForm: input.activeForm || input.subject || `Working on task ${id}`,
+          status: "pending" as const,
         }
-
-        if (tc.name === "TaskUpdate") {
-          const input = tc.input as {
-            taskId?: string
-            status?: TodoItem["status"] | "deleted"
-            subject?: string
-            description?: string
-            activeForm?: string
-            owner?: string
-            addBlockedBy?: string[]
-          }
-          const id = String(input.taskId ?? "")
-          if (!id) continue
-          if (input.status === "deleted") {
-            structuredTasks.delete(id)
-            continue
-          }
-          const current = structuredTasks.get(id) ?? {
-            id,
-            content: input.subject || input.description || `Task ${id}`,
-            activeForm: input.activeForm || input.subject || `Working on task ${id}`,
-            status: "pending" as const,
-          }
-          structuredTasks.set(id, {
-            ...current,
-            content: input.subject || input.description || current.content,
-            activeForm: input.activeForm || current.activeForm,
-            status: input.status || current.status,
-            owner: input.owner ?? current.owner,
-            blockedBy: input.addBlockedBy
-              ? [...new Set([...(current.blockedBy ?? []), ...input.addBlockedBy])]
-              : current.blockedBy,
-          })
-        }
+        structuredTasks.set(id, {
+          ...current,
+          content: input.subject || input.description || current.content,
+          activeForm: input.activeForm || current.activeForm,
+          status: input.status || current.status,
+          owner: input.owner ?? current.owner,
+          blockedBy: input.addBlockedBy
+            ? [...new Set([...(current.blockedBy ?? []), ...input.addBlockedBy])]
+            : current.blockedBy,
+        })
       }
     }
+  }
 
-    const todos = structuredTasks.size > 0 ? [...structuredTasks.values()] : lastTodos
-    if (!todos || todos.length === 0) return null
+  const todos = structuredTasks.size > 0 ? [...structuredTasks.values()] : lastTodos
+  if (!todos || todos.length === 0) return null
 
-    const completed = todos.filter((t) => t.status === "completed").length
-    const inProgress = todos.find((t) => t.status === "in_progress") ?? null
+  const completed = todos.filter((t) => t.status === "completed").length
+  const inProgress = todos.find((t) => t.status === "in_progress") ?? null
 
-    return {
-      todos,
-      completed,
-      total: todos.length,
-      inProgress,
-    }
-  }, [session])
+  return {
+    todos,
+    completed,
+    total: todos.length,
+    inProgress,
+  }
+}
+
+function sameProgress(a: TodoProgress | null, b: TodoProgress | null): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** The open session's progress; the caller re-renders only when it changes. */
+export function useTodoProgress(store: SessionStore): TodoProgress | null {
+  return useSessionSelector(store, todoProgressOf, sameProgress)
 }

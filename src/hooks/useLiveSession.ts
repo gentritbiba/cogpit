@@ -1,5 +1,5 @@
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { openSessionStream } from "@/lib/sessionStream"
 import type { SessionDigest, SessionView } from "../../shared/session/sessionDigest"
 import type { RateLimitBlock } from "../../shared/session/rateLimit"
@@ -32,11 +32,8 @@ export function useLiveSession(
   workerAppend: (existing: SessionView, newText: string) => Promise<SessionView>,
   /** Reload the session from disk: when the stream cannot resume, the worker lost the session, or a batch keeps failing. */
   onResync: (() => void) | undefined,
-  /**
-   * The session on screen: the one `source` loaded when the stream starts,
-   * and later the committed result of each update.
-   */
-  initialSession: SessionView | null,
+  /** The session `source` loaded, read when the stream starts. */
+  loadedSession: () => SessionView | null,
 ) {
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
@@ -69,25 +66,25 @@ export function useLiveSession(
   workerParseRef.current = workerParse
   const workerAppendRef = useRef(workerAppend)
   workerAppendRef.current = workerAppend
-  // Read when a load lands, without re-running on every state.session change.
-  const initialSessionRef = useRef(initialSession)
-  initialSessionRef.current = initialSession
+  const loadedSessionRef = useRef(loadedSession)
+  loadedSessionRef.current = loadedSession
   const lastResyncAtRef = useRef(0)
   // Streamed lines whose overlay messages go once the update holding them is on screen.
   const landingRef = useRef<{ digest: SessionDigest; lines: string[] } | null>(null)
 
   // Dropping an overlay message when its line arrives would blank its text for
   // as long as the worker and the render take; dropping it with the commit that
-  // shows the parsed line hands the text over in one frame.
-  useLayoutEffect(() => {
+  // shows the parsed line hands the text over in one frame. Called from a
+  // layout effect of whatever renders the session.
+  const sessionShown = useCallback((shown: SessionView | null) => {
     const landing = landingRef.current
-    if (!landing || initialSession?.digest !== landing.digest) return
+    if (!landing || shown?.digest !== landing.digest) return
     landingRef.current = null
     const next = reconcileWithLines(overlayRef.current, landing.lines)
     if (next === overlayRef.current) return
     overlayRef.current = next
     streamingOverlayStore.publish(next)
-  }, [initialSession, streamingOverlayStore])
+  }, [streamingOverlayStore])
 
   const dirName = source?.dirName ?? null
   const fileName = source?.fileName ?? null
@@ -97,7 +94,7 @@ export function useLiveSession(
   // The stream restarts on every load from disk (a switch, a reload after undo),
   // never while it streams.
   useEffect(() => {
-    sessionRef.current = initialSessionRef.current
+    sessionRef.current = loadedSessionRef.current()
     // A prediction belongs to the turn that produced it — never to whatever
     // session is loaded next. A block or a failed turn belongs to the session
     // that hit it; the watcher replays a standing block on connect.
@@ -386,5 +383,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, loadId, watchOffset, streamingOverlayStore])
 
-  return { isLive, sseState, isCompacting, streamingOverlayStore, turnError, agentProgress, promptSuggestion, rateLimit }
+  return { isLive, sseState, isCompacting, streamingOverlayStore, sessionShown, turnError, agentProgress, promptSuggestion, rateLimit }
 }

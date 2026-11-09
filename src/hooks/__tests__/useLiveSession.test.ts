@@ -141,13 +141,13 @@ describe("useLiveSession", () => {
   }
 
   it("returns initial disconnected state with null source", () => {
-    const { result } = renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
     expect(result.current.isLive).toBe(false)
     expect(result.current.sseState).toBe("disconnected")
   })
 
   it("does not create EventSource with null source", () => {
-    renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
     expect(MockEventSource.instances).toHaveLength(0)
   })
 
@@ -158,7 +158,7 @@ describe("useLiveSession", () => {
       watchOffset: 15, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(MockEventSource.instances).toHaveLength(1)
     expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=15")
@@ -172,7 +172,7 @@ describe("useLiveSession", () => {
       watchOffset: 4096,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?projection=results-v1&stream=2&offset=4096")
   })
@@ -184,7 +184,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
     expect(result.current.sseState).toBe("connecting")
   })
 
@@ -195,7 +195,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -211,7 +211,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -229,7 +229,7 @@ describe("useLiveSession", () => {
   it("passes on what the server says about the caller's access to the watched session", () => {
     const lost = vi.fn()
     window.addEventListener(SESSION_ACCESS_LOST_EVENT, lost)
-    renderHook(() => useLiveSession({ dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession({ dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().dispatchEvent(new MessageEvent("access", { data: JSON.stringify({ sessionId: "s1", level: "none" }) }))
@@ -248,7 +248,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "turn_error", message: "CLI exited with code 1" })
@@ -263,7 +263,7 @@ describe("useLiveSession", () => {
 
   it("collects subagent progress summaries by tool_use id and drops them when the turn clears", () => {
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(result.current.agentProgress).toEqual({})
 
@@ -304,7 +304,7 @@ describe("useLiveSession", () => {
     // The suggestion arrives after `result`, i.e. after stream_clear, so a
     // clear must not wipe it — only a new turn's tokens supersede it.
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(result.current.promptSuggestion).toBeNull()
 
@@ -325,7 +325,7 @@ describe("useLiveSession", () => {
     // session would put an unrelated prompt in that composer.
     const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -341,7 +341,7 @@ describe("useLiveSession", () => {
   it("raises a rate-limit block and lifts it when the allowance returns", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(result.current.rateLimit).toBeNull()
 
@@ -363,7 +363,7 @@ describe("useLiveSession", () => {
   it("keeps the block across the stream_clear the refused turn triggers", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "rate_limit", block })
@@ -375,7 +375,7 @@ describe("useLiveSession", () => {
   it("drops the block once a later turn produces tokens", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", watchOffset: 2, loadId: 1 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "rate_limit", block })
@@ -388,7 +388,7 @@ describe("useLiveSession", () => {
     const block = { limit: "five_hour", resetsAt: 1_760_000_000, lowPriority: true }
     const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -404,7 +404,7 @@ describe("useLiveSession", () => {
   it("does not carry a failed turn's error into the next session", () => {
     const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", watchOffset: 2, loadId: 1 }
     const { result, rerender } = renderHook(
-      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { src: source } },
     )
 
@@ -424,7 +424,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "compacting", active: true })
@@ -448,7 +448,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "compacting", active: true })
@@ -472,7 +472,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -490,7 +490,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -509,7 +509,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -527,7 +527,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -558,7 +558,7 @@ describe("useLiveSession", () => {
       watchOffset: 15, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     // Let the mount effects settle
     await act(async () => {
@@ -599,7 +599,7 @@ describe("useLiveSession", () => {
     it("asks for a resync and retries the kept lines with the next batch", async () => {
       const onResync = vi.fn()
       workerAppend.mockRejectedValueOnce(new Error("Worker did not answer"))
-      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
 
       sendLine('{"n":1}')
       await settle()
@@ -617,7 +617,7 @@ describe("useLiveSession", () => {
       vi.useFakeTimers({ toFake: ["Date"] })
       const onResync = vi.fn()
       workerAppend.mockRejectedValue(new Error("boom"))
-      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
 
       sendLine('{"n":1}')
       await settle()
@@ -640,7 +640,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: [] })
@@ -654,7 +654,7 @@ describe("useLiveSession", () => {
 
   it("advances its resume offset over lines the server left out", async () => {
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: [], skippedBytes: 500 })
@@ -677,7 +677,7 @@ describe("useLiveSession", () => {
 
   it("advances its resume offset by the native bytes a projected stream states, not by its lighter lines", async () => {
     const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: ['{"elided":true}'], bytes: 90_000 })
@@ -701,7 +701,7 @@ describe("useLiveSession", () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
       const onResync = vi.fn()
       const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
-      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
       const streamed = [
         { type: "lines", lines: [first], start: 100, end: 130 },
         { type: "lines", lines: [second], start: 130, end: 160 },
@@ -735,7 +735,7 @@ describe("useLiveSession", () => {
     it("reloads when the server says the stream cannot resume", () => {
       const onResync = vi.fn()
       const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", loadId: 1, watchOffset: 100 }
-      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, mockParsedSession))
+      renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, onResync, () => mockParsedSession))
       act(() => { getLastEventSource().simulateMessage({ type: "reset", reason: "truncated" }) })
       expect(onResync).toHaveBeenCalledTimes(1)
     })
@@ -748,7 +748,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
     const es = getLastEventSource()
     expect(es.closed).toBe(false)
 
@@ -769,7 +769,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { source: source1 } }
     )
 
@@ -791,7 +791,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     expect(getLastEventSource().url).toBe(
       "/api/watch/dir%20with%20spaces/file%20name.jsonl?projection=results-v1&stream=2&offset=2"
@@ -806,7 +806,7 @@ describe("useLiveSession", () => {
     }
 
     const { result, rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { source: source as SessionSource | null } }
     )
 
@@ -841,7 +841,7 @@ describe("useLiveSession", () => {
     // Provide an initialSession so the mount-time parse is skipped — this
     // isolates the burst test to only count appends triggered by SSE.
     renderHook(() =>
-      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
     )
 
     // Fire a burst of 20 SSE messages synchronously; the worker promise from
@@ -875,7 +875,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     // Send multiple messages rapidly
     act(() => {
@@ -905,7 +905,7 @@ describe("useLiveSession", () => {
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     // Send invalid JSON via onmessage directly
     act(() => {
@@ -929,7 +929,7 @@ describe("useLiveSession", () => {
     }
 
     renderHook(() =>
-      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
     )
 
     await act(async () => { await Promise.resolve() })
@@ -946,7 +946,7 @@ describe("useLiveSession", () => {
     }
 
     renderHook(() =>
-      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
     )
 
     // No initial parse work.
@@ -977,7 +977,7 @@ describe("useLiveSession", () => {
       watchOffset: 0, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
     expect(result.current.isLive).toBe(false)
   })
 
@@ -994,7 +994,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { source: source1 } }
     )
 
@@ -1019,7 +1019,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     // Send a message to schedule a rAF
     act(() => {
@@ -1045,7 +1045,7 @@ describe("useLiveSession", () => {
       watchOffset: 0, loadId: 1,
     }
 
-    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, null))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => null))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -1072,7 +1072,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(source, props.onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      (props) => useLiveSession(source, props.onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       { initialProps: { onUpdate: onUpdate1 } }
     )
 
@@ -1105,7 +1105,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     // Before any message, it's connecting
     expect(result.current.sseState).toBe("connecting")
@@ -1126,7 +1126,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -1152,7 +1152,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "runtime_activity" })
@@ -1178,7 +1178,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -1202,7 +1202,7 @@ describe("useLiveSession", () => {
       watchOffset: 2, loadId: 1,
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -1254,7 +1254,7 @@ describe("useLiveSession", () => {
 
     it("stream_delta updates the overlay without any worker call", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
       workerParse.mockClear()
       workerAppend.mockClear()
@@ -1276,7 +1276,7 @@ describe("useLiveSession", () => {
       let renders = 0
       const { result } = renderHook(() => {
         renders++
-        return useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+        return useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession)
       })
       const es = MockEventSource.instances.at(-1)!
       act(() => { es.simulateMessage(textDeltaEvent("msg1", "first")); flushRAF() })
@@ -1293,7 +1293,7 @@ describe("useLiveSession", () => {
 
     it("coalesces overlay updates to one rAF flush per burst", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1310,7 +1310,7 @@ describe("useLiveSession", () => {
 
     it("stream_snapshot replaces the overlay wholesale", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1337,9 +1337,8 @@ describe("useLiveSession", () => {
     it("drops a landed overlay message in the commit that shows its parsed line, not before", async () => {
       const landed = { ...mockParsedSession, digest: { ...mockParsedSession.digest } }
       workerAppend.mockResolvedValue(landed)
-      const { result, rerender } = renderHook(
-        ({ shown }) => useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, shown),
-        { initialProps: { shown: mockParsedSession } },
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1364,13 +1363,15 @@ describe("useLiveSession", () => {
       expect(onUpdate).toHaveBeenLastCalledWith(landed)
       expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(2)
 
-      rerender({ shown: landed })
+      act(() => { result.current.sessionShown(mockParsedSession) })
+      expect(result.current.streamingOverlayStore.snapshot()).toHaveLength(2)
+      act(() => { result.current.sessionShown(landed) })
       expect(result.current.streamingOverlayStore.snapshot().map((m) => m.messageId)).toEqual(["msg_pending"])
     })
 
     it("stream_clear empties the overlay", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1388,7 +1389,7 @@ describe("useLiveSession", () => {
 
     it("SSE error clears the overlay (snapshot rebuilds on reconnect)", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1406,7 +1407,7 @@ describe("useLiveSession", () => {
 
     it("compaction clears the overlay", () => {
       const { result } = renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {
@@ -1429,7 +1430,7 @@ describe("useLiveSession", () => {
       )
 
       renderHook(() =>
-        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, () => mockParsedSession),
       )
 
       act(() => {

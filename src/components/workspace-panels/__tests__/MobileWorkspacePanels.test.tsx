@@ -8,7 +8,7 @@ import type { RegisteredWorkspacePanel, WorkspacePanelContext, WorkspacePanelPro
 afterEach(cleanup)
 
 const context: WorkspacePanelContext = {
-  session: null, sessionChangeKey: 0, projectPath: "/repo/project", hasFileChanges: false,
+  sessionId: null, sessionChangeKey: 0, projectPath: "/repo/project", hasFileChanges: false,
   canAccessHostFiles: true, canUseBrowser: true, supportsWorktrees: true,
 }
 
@@ -19,7 +19,7 @@ function Preview({ active }: WorkspacePanelProps) {
 
 const panels: RegisteredWorkspacePanel[] = [
   { id: "test.browser", pluginId: "test", localId: "browser", title: "Browser", icon: Circle, component: Preview, keepAlive: true, when: (value) => value.canAccessHostFiles },
-  { id: "test.details", pluginId: "test", localId: "details", title: "Session details", icon: Circle, component: Preview, when: (value) => value.session !== null },
+  { id: "test.details", pluginId: "test", localId: "details", title: "Session details", icon: Circle, component: Preview, when: (value) => value.sessionId !== null },
   { id: "plugin.custom", pluginId: "plugin", localId: "custom", title: "Custom plugin", icon: Circle, component: Preview, badge: () => 3 },
 ]
 

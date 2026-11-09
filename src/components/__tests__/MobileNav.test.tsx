@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   hapticLight: vi.fn(),
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({ session: mocks.session, isLive: mocks.isLive }),
 }))
 

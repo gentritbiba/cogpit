@@ -45,7 +45,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
  * until the user picks another filter.
  */
 export function CrewPanel({ context, closePanel }: WorkspacePanelProps) {
-  const sessionId = context.session?.sessionId ?? null
+  const sessionId = context.sessionId
   const { crew, error, busy, respond, markRead, stop } = useSessionCrew(sessionId)
   const { names } = useSessionNames()
   const [tab, setTab] = useState("overview")

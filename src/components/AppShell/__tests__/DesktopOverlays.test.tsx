@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/contexts/AppContext", () => ({ useAppContext: mocks.useAppContext }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContext: mocks.useSessionContext }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContext: mocks.useSessionContext }))
 vi.mock("@/hooks/useDevices", () => ({ useDevices: mocks.useDevices }))
 
 // Keep the real FIND_IN_CONVERSATION_EVENT so this test breaks if the name

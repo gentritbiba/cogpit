@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   permissionRequests: [] as PermissionRequest[],
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
     session: { sessionId: "sess-1" },
     pendingInteraction: mocks.pendingInteraction,

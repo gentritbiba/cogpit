@@ -20,7 +20,7 @@ vi.mock("@/contexts/AppContext", () => ({
   useAppContext: contextMocks.useAppContext,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: contextMocks.useSessionContext,
 }))
 

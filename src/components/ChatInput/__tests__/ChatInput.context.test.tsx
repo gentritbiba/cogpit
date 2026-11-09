@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   session: { sessionId: "session-1" } as { sessionId: string } | null,
 }))
 
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
     session: mocks.session,
     sessionSource: mocks.source,

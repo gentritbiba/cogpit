@@ -3,10 +3,9 @@ import type { LucideIcon } from "lucide-react"
 import { MessageSquare, FolderOpen, PanelsTopLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionControls } from "@/contexts/SessionContext"
 import { hapticLight } from "@/lib/haptics"
-
-export type MobileTab = "chat" | "sessions" | "workspace"
+import type { MobileTab } from "@/hooks/useSessionState"
 
 interface TabDefinition {
   id: MobileTab
@@ -29,7 +28,7 @@ export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
 }: MobileNavProps) {
-  const { isLive } = useSessionContext()
+  const { isLive } = useSessionControls()
 
   return (
     <nav

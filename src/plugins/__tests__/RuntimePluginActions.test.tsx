@@ -5,7 +5,7 @@ import { RuntimePluginActions } from "../RuntimePluginActions"
 
 const state = vi.hoisted(() => ({ runtime: null as unknown, session: { session: { sessionId: "session-one" }, permissions: { send: true } }, send: vi.fn<(...args: unknown[]) => Promise<boolean>>() }))
 vi.mock("../RuntimePluginContributions", () => ({ useRuntimeContributions: () => state.runtime }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContextOptional: () => state.session, useSessionChatContextOptional: () => ({ chat: { sendMessage: state.send } }) }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContextOptional: () => state.session, useSessionChatContextOptional: () => ({ chat: { sendMessage: state.send } }) }))
 vi.mock("../runtimeClient", () => ({ clientRuntimeDescriptor: () => ({ appVersion: "3.3.6", apiVersions: ["1.2.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, browser: [] }) }))
 const manifest = parseManifest({ manifestVersion: 1, id: "example.speech", publisher: "example", name: "Speech", version: "1.0.0", runtime: "browser-iife-v1", engines: { pluginApi: "^1.2.0", client: "*", host: "*" }, requires: { client: {}, host: {} }, permissions: {}, stateVersion: 1,
   contributes: { skills: [{ id: "speech", title: "Speech", description: "Speak", source: "SKILL.md" }], sessionActions: [{ id: "summary", title: "Spoken summary", skill: "speech", prompt: "Summarize this conversation in short spoken prose." }] } })

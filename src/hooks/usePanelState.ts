@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef, startTransition } from "react"
 import { useLocalStorage } from "./useLocalStorage"
 import { useMainViews } from "@/edition/hooks"
-import type { MainView, SessionState, SessionAction } from "./useSessionState"
+import type { MainView, SessionShellState, SessionAction } from "./useSessionState"
 import { canonicalPluginPanelId } from "@/plugins/panelAliases"
 import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
@@ -82,7 +82,7 @@ function initialWorkspacePanel(): string | null {
 }
 
 export function usePanelState(
-  state: SessionState,
+  state: SessionShellState,
   dispatch: React.Dispatch<SessionAction>,
 ): PanelState {
   const [showSidebar, setShowSidebar] = usePersistedFlag("panel-sidebar-visible", true)

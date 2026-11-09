@@ -19,7 +19,7 @@ function deferred(): { promise: Promise<boolean>; resolve: (sent: boolean) => vo
 
 function renderGoalUi(session: SessionView, onSendCommand: (command: string) => Promise<boolean>) {
   return render(
-    <TranscriptGoalProvider agentKind="claude" session={session} onSendCommand={onSendCommand}>
+    <TranscriptGoalProvider agentKind="claude" goal={session.digest.goal} onSendCommand={onSendCommand}>
       <GoalSection />
       <GoalTrigger />
     </TranscriptGoalProvider>,

@@ -5,7 +5,7 @@ import type { CommandPaletteDevice, CommandPaletteExtraAction } from "@/componen
 import { DevicesDialog } from "@/components/DevicesDialog"
 import { FolderBrowserHost } from "@/components/FolderBrowserHost"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useOpenSession, useSessionControls } from "@/contexts/SessionContext"
 import { useMainViews } from "@/edition/hooks"
 import { useDevices } from "@/hooks/useDevices"
 import { can } from "@/lib/capabilities"
@@ -41,7 +41,10 @@ export function DesktopOverlays({
   chrome,
 }: DesktopOverlaysProps) {
   const { state, config, theme } = useAppContext()
-  const { session, sessionSource } = useSessionContext()
+  const { sessionSource } = useSessionControls()
+  const sessionId = useOpenSession((open) => open?.sessionId ?? null)
+  const sessionCwd = useOpenSession((open) => open?.cwd)
+  const hasSession = sessionId !== null
   const { devices, activeDeviceId } = useDevices()
   const [devicesDialogMode, setDevicesDialogMode] = useState<null | "add" | "manage">(null)
   const canManageDevices = can("manageDevices")
@@ -99,10 +102,10 @@ export function DesktopOverlays({
   }), [mainViews, openMainViewId, openMainView, closeMainView])
 
   const handleCopyResumeCommand = useCallback(() => {
-    if (!session) return
+    if (sessionId === null) return
     const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
-    void copyToClipboard(getResumeCommand(agentKind, session.sessionId, session.cwd))
-  }, [session, sessionSource])
+    void copyToClipboard(getResumeCommand(agentKind, sessionId, sessionCwd))
+  }, [sessionId, sessionCwd, sessionSource])
 
   const handleFindInConversation = useCallback(() => {
     window.dispatchEvent(new Event(FIND_IN_CONVERSATION_EVENT))
@@ -132,7 +135,7 @@ export function DesktopOverlays({
           onNewFolder={navigation.onStartNewFolder}
           defaultAgentKind={config.defaultAgentKind}
           currentProjectDirName={sessionSource?.dirName ?? state.pendingDirName ?? null}
-          currentProjectCwd={session?.cwd ?? state.pendingCwd ?? null}
+          currentProjectCwd={sessionCwd ?? state.pendingCwd ?? null}
         />
       </Suspense>
 
@@ -172,9 +175,9 @@ export function DesktopOverlays({
           )}
           onToggleMissionControl={navigation.panels.handleToggleMission}
           extraActions={mainViewActions}
-          onDuplicateSession={session ? navigation.handlers.handleDuplicateSession : undefined}
-          onCopyResumeCommand={session ? handleCopyResumeCommand : undefined}
-          onFindInConversation={session ? handleFindInConversation : undefined}
+          onDuplicateSession={hasSession ? navigation.handlers.handleDuplicateSession : undefined}
+          onCopyResumeCommand={hasSession ? handleCopyResumeCommand : undefined}
+          onFindInConversation={hasSession ? handleFindInConversation : undefined}
           onKillAll={can("killAny") ? chrome.onKillAll : undefined}
           onOpenConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
           onOpenSettings={config.openConfigDialog}
@@ -194,15 +197,15 @@ export function DesktopOverlays({
           onExpandAll={chrome.onExpandAll}
           onExpandToolPayloads={chrome.onExpandToolPayloads}
           onCollapseAll={chrome.onCollapseAll}
-          canFocusComposer={Boolean(session || state.pendingDirName)}
+          canFocusComposer={Boolean(hasSession || state.pendingDirName)}
           canOpenTerminal={can("terminal") && Boolean(
-            session?.cwd
+            sessionCwd
             ?? pendingPath
             ?? sessionSource?.dirName
             ?? state.pendingDirName
             ?? state.dashboardProject
           )}
-          hasSession={Boolean(session)}
+          hasSession={hasSession}
           hasFileChanges={can("hostFiles") && project.hasFileChanges}
           supportsWorktrees={project.supportsWorktrees}
           showSidebar={navigation.panels.showSidebar}
@@ -214,7 +217,7 @@ export function DesktopOverlays({
           showConfig={state.mainView === "config"}
           showMission={state.mainView === "mission"}
           currentProjectDirName={currentDirName}
-          projectCwd={session?.cwd ?? pendingPath ?? null}
+          projectCwd={sessionCwd ?? pendingPath ?? null}
           onProcessStarted={project.processPanel.addProcess}
           launchTerminalRequest={project.launchTerminalRequest}
         />

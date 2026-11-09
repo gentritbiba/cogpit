@@ -1,4 +1,4 @@
-import type { MobileTab } from "@/components/MobileNav"
+import type { MobileTab } from "@/hooks/useSessionState"
 
 export const MOBILE_TAB_ORDER: readonly MobileTab[] = ["sessions", "chat", "workspace"]
 

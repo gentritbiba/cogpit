@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, startTransition, type Dispatch } from "r
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
-import type { MobileTab } from "@/components/MobileNav"
+import type { MobileTab } from "@/hooks/useSessionState"
 import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
 import type { LoadedSession, SessionController } from "@/lib/sessionLoader"

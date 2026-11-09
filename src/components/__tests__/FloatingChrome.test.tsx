@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({ config: mocks.config, dispatch: mocks.dispatch }),
 }))
-vi.mock("@/contexts/SessionContext", () => ({
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({
   useSessionContext: () => ({
     session: mocks.session,
     sessionSource: mocks.sessionSource,

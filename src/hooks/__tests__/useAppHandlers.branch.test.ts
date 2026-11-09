@@ -20,7 +20,7 @@ import {
   sessionAccessTicket,
 } from "@/lib/sessionAccess"
 import type { PermissionsConfig } from "@/lib/permissions"
-import type { SessionAction } from "@/hooks/useSessionState"
+import { createSessionStore, type SessionAction } from "@/hooks/useSessionState"
 import type { SessionController } from "@/lib/sessionLoader"
 import type { SessionView } from "../../../shared/session/sessionDigest"
 import { NO_CAPABILITIES } from "../../../shared/contracts/identity"
@@ -45,9 +45,10 @@ function handlerDeps(dispatch: (action: SessionAction) => void): Parameters<type
   const parsed = { sessionId: "original", turns: [{ id: "turn-1" }] } as unknown as SessionView
   return {
     state: {
-      session: parsed,
+      sessionId: parsed.sessionId,
       sessionSource: { dirName: "-work-app", fileName: "original.jsonl", watchOffset: 0, loadId: 1 },
     },
+    sessionStore: createSessionStore(parsed),
     dispatch,
     isMobile: false,
     handleJumpToTurn: vi.fn(),

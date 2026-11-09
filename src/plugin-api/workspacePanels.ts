@@ -1,6 +1,5 @@
 import type { ComponentType } from "react"
 import type { LucideIcon } from "lucide-react"
-import type { SessionView } from "../../shared/session/sessionDigest"
 
 export interface ProjectPromptContext {
   path: string
@@ -21,8 +20,9 @@ export interface OpenSessionCrew {
 
 /** Stable workspace data available to every compile-time panel plugin. */
 export interface WorkspacePanelContext {
-  session: SessionView | null
-  /** Storage address of `session`, for hosts that need to name it to a server. */
+  /** The open session's id; a panel that shows its content selects it with `useOpenSession`. */
+  sessionId: string | null
+  /** Storage address of the open session, for hosts that need to name it to a server. */
   sessionAddress?: { dirName: string; fileName: string } | null
   sessionChangeKey: number
   projectPath: string | null

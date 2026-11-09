@@ -1,6 +1,6 @@
 import type { ThemeId } from "@/lib/themes"
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
-import type { SessionState, SessionAction } from "@/hooks/useSessionState"
+import type { SessionShellState, SessionAction } from "@/hooks/useSessionState"
 import type { AgentKind } from "@/lib/agents"
 
 // ── App Config ──────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ export interface ThemeContext {
 // ── Combined App Context ────────────────────────────────────────────────────
 
 export interface AppContextValue {
-  state: SessionState
+  state: SessionShellState
   dispatch: Dispatch<SessionAction>
   config: AppConfig
   theme: ThemeContext

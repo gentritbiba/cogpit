@@ -44,6 +44,7 @@ vi.mock("../../../shared/session/parser", () => ({
 }))
 
 import { useUndoRedo } from "@/hooks/useUndoRedo"
+import { createSessionStore, type SessionStore } from "@/hooks/useSessionState"
 import { authFetch, jsonFetch } from "@/lib/auth"
 import { buildUndoOperations, type FileOperation } from "@/lib/undo-engine"
 import { type SessionView, EMPTY_SESSION_DIGEST } from "../../../shared/session/sessionDigest"
@@ -69,6 +70,16 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
     model: "claude-opus-4-6-20250115",
     ...overrides,
   }
+}
+
+const NO_SESSION = createSessionStore()
+const stores = new WeakMap<SessionView, SessionStore>()
+/** One store per session object, so a rerender with the same session keeps its store. */
+function storeOf(session: SessionView | null): SessionStore {
+  if (!session) return NO_SESSION
+  let store = stores.get(session)
+  if (!store) stores.set(session, store = createSessionStore(session))
+  return store
 }
 
 function makeSession(turnCount = 3, overrides: Partial<SessionView> = {}): SessionView {
@@ -173,7 +184,7 @@ describe("useUndoRedo", () => {
   describe("initial state", () => {
     it("starts with null undoState when no session", () => {
       const { result } = renderHook(() =>
-        useUndoRedo(null, null, vi.fn())
+        useUndoRedo(storeOf(null), null, vi.fn())
       )
       expect(result.current.undoState).toBeNull()
       expect(result.current.canRedo).toBe(false)
@@ -187,7 +198,7 @@ describe("useUndoRedo", () => {
 
     it("does not fetch undo state or expose enabled controls without host-file access", () => {
       const { result } = renderHook(() =>
-        useUndoRedo(makeSession(), makeSource(), vi.fn(), false)
+        useUndoRedo(storeOf(makeSession()), makeSource(), vi.fn(), false)
       )
 
       expect(result.current.enabled).toBe(false)
@@ -203,7 +214,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -218,7 +229,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result, rerender } = renderHook(
-        ({ s }) => useUndoRedo(s, makeSource(), vi.fn()),
+        ({ s }) => useUndoRedo(storeOf(s), makeSource(), vi.fn()),
         { initialProps: { s: session } }
       )
 
@@ -246,7 +257,7 @@ describe("useUndoRedo", () => {
       )
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -261,7 +272,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result, rerender } = renderHook(
-        ({ s }) => useUndoRedo(s, s ? makeSource() : null, vi.fn()),
+        ({ s }) => useUndoRedo(storeOf(s), s ? makeSource() : null, vi.fn()),
         { initialProps: { s: session as SessionView | null } }
       )
 
@@ -280,7 +291,7 @@ describe("useUndoRedo", () => {
     it("returns false when no branches exist", () => {
       const session = makeSession(3)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
       expect(result.current.canRedo).toBe(false)
       expect(result.current.redoTurnCount).toBe(0)
@@ -295,7 +306,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -312,7 +323,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -328,7 +339,7 @@ describe("useUndoRedo", () => {
   describe("branches", () => {
     it("returns empty array when no undo state", () => {
       const { result } = renderHook(() =>
-        useUndoRedo(null, null, vi.fn())
+        useUndoRedo(storeOf(null), null, vi.fn())
       )
       expect(result.current.branches).toEqual([])
     })
@@ -340,7 +351,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -357,7 +368,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -382,7 +393,7 @@ describe("useUndoRedo", () => {
   describe("requestUndo", () => {
     it("does nothing when session is null", () => {
       const { result } = renderHook(() =>
-        useUndoRedo(null, null, vi.fn())
+        useUndoRedo(storeOf(null), null, vi.fn())
       )
       act(() => result.current.requestUndo(1))
       expect(result.current.confirmState).toBeNull()
@@ -390,13 +401,12 @@ describe("useUndoRedo", () => {
 
     it("stays the same callback while the session streams, and restores against the latest turns", async () => {
       const source = makeSource()
-      const { result, rerender } = renderHook(({ session }) => useUndoRedo(session, source, vi.fn()), {
-        initialProps: { session: makeSession(3) },
-      })
+      const store = createSessionStore(makeSession(3))
+      const { result } = renderHook(() => useUndoRedo(store, source, vi.fn()))
       await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled())
       const first = result.current.requestUndo
 
-      rerender({ session: makeSession(5) })
+      act(() => store.dispatch({ type: "UPDATE_SESSION", session: makeSession(5) }))
       expect(result.current.requestUndo).toBe(first)
 
       act(() => result.current.requestUndo(4))
@@ -406,7 +416,7 @@ describe("useUndoRedo", () => {
     it("sets confirmState for valid undo request", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       // Wait for the initial undo-state fetch to settle
@@ -424,7 +434,7 @@ describe("useUndoRedo", () => {
     it("calls buildUndoOperations to compute ops", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -442,7 +452,7 @@ describe("useUndoRedo", () => {
     it("ignores undo request that would keep all turns", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -457,7 +467,7 @@ describe("useUndoRedo", () => {
     it("ignores undo request with negative effective target", async () => {
       const session = makeSession(3)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -472,7 +482,7 @@ describe("useUndoRedo", () => {
     it("allows undo to target index 0 (keep only first turn)", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -488,7 +498,7 @@ describe("useUndoRedo", () => {
     it("allows undo to target index -1 (remove all turns)", async () => {
       const session = makeSession(3)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -516,7 +526,7 @@ describe("useUndoRedo", () => {
         files: [{ path: "src/App.tsx" }],
       }), { status: 200 }))
 
-      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), vi.fn()))
+      const { result } = renderHook(() => useUndoRedo(storeOf(session), makeSource(COPILOT_DIR), vi.fn()))
       act(() => result.current.requestUndo(1))
 
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())
@@ -543,7 +553,7 @@ describe("useUndoRedo", () => {
         turns: [makeTurn({ id: "event-a" }), makeTurn({ id: "event-b" })],
       })
       const { result, rerender } = renderHook(
-        ({ current }) => useUndoRedo(current, makeSource(COPILOT_DIR), vi.fn()),
+        ({ current }) => useUndoRedo(storeOf(current), makeSource(COPILOT_DIR), vi.fn()),
         { initialProps: { current: first } },
       )
 
@@ -563,7 +573,7 @@ describe("useUndoRedo", () => {
     it("does nothing when canRedo is false", () => {
       const session = makeSession(3)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       act(() => result.current.requestRedoAll())
@@ -577,7 +587,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -597,7 +607,7 @@ describe("useUndoRedo", () => {
     it("does nothing when canRedo is false", () => {
       const session = makeSession(3)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
       act(() => result.current.requestRedoUpTo(0))
       expect(result.current.confirmState).toBeNull()
@@ -632,7 +642,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -653,7 +663,7 @@ describe("useUndoRedo", () => {
   describe("requestBranchSwitch", () => {
     it("does nothing when session is null", () => {
       const { result } = renderHook(() =>
-        useUndoRedo(null, null, vi.fn())
+        useUndoRedo(storeOf(null), null, vi.fn())
       )
       act(() => result.current.requestBranchSwitch("branch-1"))
       expect(result.current.confirmState).toBeNull()
@@ -665,7 +675,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -683,7 +693,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -711,7 +721,7 @@ describe("useUndoRedo", () => {
       setupMockFetch(undoState)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -729,7 +739,7 @@ describe("useUndoRedo", () => {
     it("clears confirmState and applyError", async () => {
       const session = makeSession(5)
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await waitFor(() => {
@@ -750,7 +760,7 @@ describe("useUndoRedo", () => {
   describe("confirmApply", () => {
     it("clears confirmState when session or source is null", async () => {
       const { result } = renderHook(() =>
-        useUndoRedo(null, null, vi.fn())
+        useUndoRedo(storeOf(null), null, vi.fn())
       )
 
       await act(async () => {
@@ -762,7 +772,7 @@ describe("useUndoRedo", () => {
     it("clears confirmState when there is no pending confirm", async () => {
       const session = makeSession()
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
 
       await act(async () => {
@@ -790,7 +800,7 @@ describe("useUndoRedo", () => {
         }
         return new Response("not found", { status: 404 })
       })
-      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), onReload))
+      const { result } = renderHook(() => useUndoRedo(storeOf(session), makeSource(COPILOT_DIR), onReload))
 
       act(() => result.current.requestUndo(1))
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())
@@ -810,7 +820,7 @@ describe("useUndoRedo", () => {
       const onReload = vi.fn().mockResolvedValue(undefined)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, source, onReload)
+        useUndoRedo(storeOf(session), source, onReload)
       )
 
       await waitFor(() => {
@@ -835,7 +845,7 @@ describe("useUndoRedo", () => {
       const onReload = vi.fn().mockResolvedValue(undefined)
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, source, onReload)
+        useUndoRedo(storeOf(session), source, onReload)
       )
 
       await waitFor(() => {
@@ -887,7 +897,7 @@ describe("useUndoRedo", () => {
       })
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, source, onReload)
+        useUndoRedo(storeOf(session), source, onReload)
       )
 
       await waitFor(() => {
@@ -930,7 +940,7 @@ describe("useUndoRedo", () => {
       })
 
       const { result } = renderHook(() =>
-        useUndoRedo(session, source, onReload)
+        useUndoRedo(storeOf(session), source, onReload)
       )
 
       await waitFor(() => {
@@ -953,7 +963,7 @@ describe("useUndoRedo", () => {
     it("returns empty array when no redo branch", () => {
       const session = makeSession()
       const { result } = renderHook(() =>
-        useUndoRedo(session, makeSource(), vi.fn())
+        useUndoRedo(storeOf(session), makeSource(), vi.fn())
       )
       expect(result.current.redoGhostTurns).toEqual([])
     })

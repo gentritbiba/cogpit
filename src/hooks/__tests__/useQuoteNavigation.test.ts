@@ -15,7 +15,7 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
   const jumpToTurn = vi.fn()
   const loadSession = vi.fn()
   const view = renderHook(() => useQuoteNavigation({
-    session: session(state.turns),
+    getSession: () => session(state.turns),
     sessionSource: state.sessionSource,
     loadSession,
     jumpToTurn,

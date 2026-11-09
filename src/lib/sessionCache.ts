@@ -19,6 +19,17 @@ export interface CacheEntry {
 }
 
 const MAX_ENTRIES = 5
+/**
+ * Transcript bytes the entries may cover together. A tail covers well under a
+ * megabyte; history paged in above it is what grows, so a few sessions read far
+ * back cannot keep hundreds of megabytes of turns alive after the user left.
+ */
+export const MAX_CACHED_TRANSCRIPT_BYTES = 64 * 1024 * 1024
+
+/** The transcript span an entry holds turns for: from its oldest page to where the stream has read. */
+function coveredBytes(entry: CacheEntry): number {
+  return Math.max(0, entry.source.watchOffset - entry.nextByteOffset)
+}
 
 // Device-scoped so cross-device dirName collisions are impossible and switching
 // back to a device keeps its entries warm. This module is a singleton that
@@ -91,10 +102,6 @@ class SessionCache {
     const key = sessionCacheKey(source.dirName, source.fileName)
 
     const replaced = this.cache.get(key)
-    if (!replaced && this.cache.size >= MAX_ENTRIES) {
-      this.evictLRU()
-    }
-
     this.cache.set(key, {
       parsed,
       olderTurns: [],
@@ -104,6 +111,7 @@ class SessionCache {
       lastAccessed: Date.now(),
     })
     if (replaced) this.release(replaced.parsed)
+    this.trim(key)
   }
 
   update(dirName: string, fileName: string, partial: Partial<Omit<CacheEntry, "source">> & { source?: Partial<CacheEntry["source"]> }): void {
@@ -121,6 +129,7 @@ class SessionCache {
       entry.source = { ...entry.source, ...partial.source }
     }
     if (entry.parsed !== previous) this.release(previous)
+    this.trim(key)
   }
 
   evict(dirName?: string, fileName?: string): void {
@@ -143,20 +152,33 @@ class SessionCache {
     for (const key of [...this.cache.keys()]) this.drop(key)
   }
 
+  /** Drops least recently used entries, never `keep`, until the cache is within both bounds. */
+  private trim(keep: string): void {
+    let bytes = 0
+    for (const entry of this.cache.values()) bytes += coveredBytes(entry)
+    while (this.cache.size > MAX_ENTRIES || bytes > MAX_CACHED_TRANSCRIPT_BYTES) {
+      const key = this.leastRecentlyUsed(keep)
+      if (key === undefined) return
+      bytes -= coveredBytes(this.cache.get(key)!)
+      this.drop(key)
+    }
+  }
+
   private evictLRU(): void {
+    const key = this.leastRecentlyUsed()
+    if (key !== undefined) this.drop(key)
+  }
+
+  private leastRecentlyUsed(except?: string): string | undefined {
     let oldestKey: string | undefined
     let oldestTime = Infinity
-
     for (const [key, entry] of this.cache) {
-      if (entry.lastAccessed < oldestTime) {
+      if (key !== except && entry.lastAccessed < oldestTime) {
         oldestTime = entry.lastAccessed
         oldestKey = key
       }
     }
-
-    if (oldestKey !== undefined) {
-      this.drop(oldestKey)
-    }
+    return oldestKey
   }
 }
 

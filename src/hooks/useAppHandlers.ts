@@ -4,9 +4,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { SessionView } from "../../shared/session/sessionDigest"
 import type { SessionSource } from "@/lib/sessionSource"
-import type { SessionAction } from "./useSessionState"
+import type { SessionAction, SessionStore } from "./useSessionState"
 import { toast } from "sonner"
 import { authFetch, jsonFetch } from "@/lib/auth"
 import { readError } from "@/lib/httpJson"
@@ -21,9 +20,11 @@ import type { SessionSettingField } from "../../shared/contracts/sessionSettings
 
 interface AppHandlersDeps {
   state: {
-    session: SessionView | null
+    sessionId: string | null
     sessionSource: SessionSource | null
   }
+  /** Holds the open session's turns, read when a handler runs. */
+  sessionStore: SessionStore
   dispatch: React.Dispatch<SessionAction>
   isMobile: boolean
   handleJumpToTurn: (index: number, toolCallId?: string) => void
@@ -102,7 +103,7 @@ interface AppHandlersResult {
 
 export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
-    state, dispatch, isMobile, handleJumpToTurn,
+    state, sessionStore, dispatch, isMobile, handleJumpToTurn,
     markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
     settingsChange, onSettingsChangeSent,
     selectedModel,
@@ -173,9 +174,9 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     // cut at the exact turn regardless of how much of the session is loaded.
     // Synthetic ids (queued turns, uuid-less messages) won't match any line —
     // the server falls back to turnIndex for those.
-    const turnUuid = state.session?.turns[turnIndex]?.id
+    const turnUuid = sessionStore.getState().session?.turns[turnIndex]?.id
     await openCopy({ dirName, fileName, turnIndex, turnUuid })
-  }, [state.sessionSource, state.session, openCopy])
+  }, [state.sessionSource, sessionStore, openCopy])
 
   // ── Mobile jump to turn ────────────────────────────────────────────────────
   const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
@@ -203,7 +204,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const onSettingsChangeSentRef = useRef(onSettingsChangeSent)
   onSettingsChangeSentRef.current = onSettingsChangeSent
 
-  const currentSessionId = state.session?.sessionId ?? null
+  const currentSessionId = state.sessionId
   const prevSessionIdRef = useRef<string | null>(null)
   // Records what each session's process was started with. Never written back
   // into the composer: useSessionConfigSync owns that state, and replaying a

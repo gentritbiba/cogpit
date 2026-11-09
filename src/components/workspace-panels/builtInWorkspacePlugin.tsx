@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
@@ -9,6 +9,7 @@ import {
   type WorkspacePanelProps,
 } from "@/plugin-api"
 import { BUILT_IN_PLUGIN_ID } from "@/plugins/builtInPanelIds"
+import { useOpenSession } from "@/contexts/SessionContext"
 import { latestBrowserActivity } from "../../../shared/session/browserActivity"
 import { useBuiltInPanelServices } from "./BuiltInPanelServices"
 
@@ -61,10 +62,11 @@ function ProjectFilesWorkspacePanel({ context, closePanel }: WorkspacePanelProps
 }
 
 function FileChangesWorkspacePanel({ context }: WorkspacePanelProps) {
-  if (!context.session) return null
+  const session = useOpenSession((open) => open)
+  if (!session) return null
   return (
     <FileChangesPanel
-      session={context.session}
+      session={session}
       sessionChangeKey={context.sessionChangeKey}
     />
   )
@@ -98,13 +100,9 @@ function BrowserWorkspacePanel(props: WorkspacePanelProps) {
  * worth opening. One timeout, armed for the moment the last call goes stale —
  * a new call re-arms it, and a session that never browses schedules nothing.
  */
-function BrowserActivityIndicator({ context }: WorkspacePanelIndicatorProps) {
+function BrowserActivityIndicator() {
   const [, expire] = useState(0)
-  // The rail re-renders on anything; the transcript is only walked when it moves.
-  const at = useMemo(
-    () => Date.parse(latestBrowserActivity(context.session)?.timestamp ?? ""),
-    [context.session],
-  )
+  const at = useOpenSession((open) => Date.parse(latestBrowserActivity(open)?.timestamp ?? ""))
 
   useEffect(() => {
     const remaining = at + BROWSING_MS - Date.now()
@@ -252,7 +250,7 @@ export const builtInWorkspacePlugin = definePlugin({
       order: 20,
       defaultSize: "36%",
       minSize: "320px",
-      when: (context) => context.canAccessHostFiles && context.hasFileChanges && context.session !== null,
+      when: (context) => context.canAccessHostFiles && context.hasFileChanges && context.sessionId !== null,
     },
     {
       id: "automations",
@@ -272,7 +270,7 @@ export const builtInWorkspacePlugin = definePlugin({
       order: 30,
       defaultSize: "36%",
       minSize: "320px",
-      when: (context) => context.session !== null,
+      when: (context) => context.sessionId !== null,
     },
   ],
 })

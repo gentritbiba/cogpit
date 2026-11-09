@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
   startRecording: vi.fn<() => Promise<unknown>>(),
 }))
 vi.mock("../RuntimePluginContributions", () => ({ useRuntimeContributions: () => state.runtime }))
-vi.mock("@/contexts/SessionContext", () => ({ useSessionContextOptional: () => state.session, useSessionChatContextOptional: () => ({ chat: { sendMessage: vi.fn() } }) }))
+vi.mock("@/contexts/SessionContext", async () => (await import("@/__tests__/sessionContextMock")).withSessionHooks({ useSessionContextOptional: () => state.session, useSessionChatContextOptional: () => ({ chat: { sendMessage: vi.fn() } }) }))
 vi.mock("../runtimeClient", async importOriginal => ({ ...await importOriginal<typeof import("../runtimeClient")>(),
   clientRuntimeDescriptor: () => ({ appVersion: "3.5.1", apiVersions: ["1.3.0"], manifestVersions: [1], protocolVersions: [1], runtimes: ["browser-iife-v1"], capabilities: {}, browser: [] }) }))
 vi.mock("../dictation/recorder", () => ({ canRecord: () => true, MAX_DICTATION_SECONDS: 240, startRecording: state.startRecording }))
