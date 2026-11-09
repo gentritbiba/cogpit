@@ -118,7 +118,6 @@ export function useUrlSync({
   // *last* one settles, or a stale path from the outgoing session gets pushed.
   const skipPushDepthRef = useRef(0)
   const lastPushedRef = useRef(window.location.pathname)
-  const initialLoadDone = useRef(false)
 
   const loadFromUrl = useCallback(
     async (parsed: ParsedUrl) => {
@@ -187,19 +186,20 @@ export function useUrlSync({
   )
 
   // On mount: if URL has a path, load the corresponding session or project.
+  // Once per mount, not per hook instance: an unmount leaves the session, so a
+  // remount (StrictMode's in development) opens the link again.
+  const loadFromUrlRef = useRef(loadFromUrl)
+  loadFromUrlRef.current = loadFromUrl
   useEffect(() => {
-    if (initialLoadDone.current) return
-    initialLoadDone.current = true
-
     // Remember the entry path so switching away and back restores it (incl.
     // deep links, whose URL never changes and so would otherwise never save).
     saveLastPath(getActiveDeviceId(), window.location.pathname)
 
     const parsed = parsePath(window.location.pathname)
     if (parsed.type !== "home" || parsed.normalizeHome) {
-      loadFromUrl(parsed)
+      void loadFromUrlRef.current(parsed)
     }
-  }, [loadFromUrl])
+  }, [])
 
   // Sync state changes → URL (pushState)
   useEffect(() => {
