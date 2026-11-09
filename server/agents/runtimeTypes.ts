@@ -81,7 +81,10 @@ export interface StartedSession {
   /** Transcript path relative to the agent's sessions root. */
   fileName: string
   filePath: string
-  /** Transcript bytes already on disk, when the spawn managed to read them. */
+  /**
+   * Transcript bytes already on disk, when the spawn managed to read them.
+   * Only older clients read it; the current one loads the tail instead.
+   */
   initialContent?: string
 }
 

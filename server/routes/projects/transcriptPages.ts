@@ -203,9 +203,13 @@ export async function serveTranscript(
     const minLines = Math.max(requested, MIN_PAGE_LINES)
     const initialWindow = requested * PAGE_WINDOW_BYTES_PER_TURN
     const before = tailParam !== null || beforeParam === null ? null : Math.max(0, parseInt(beforeParam) || 0)
-    const header = await readSessionHeader(filePath)
+    // A line tail is the end of the file, so its lines also serve the header line's lookup.
+    const [header, lineTail] = await Promise.all([
+      readSessionHeader(filePath),
+      byTurns || before !== null ? undefined : readTail(filePath, initialWindow, minLines, isNoise),
+    ])
     const firstLine = await firstLineForPages(format, header, async () =>
-      (await readTail(filePath, LAST_LINES_BYTES, 1, () => false)).lines)
+      (lineTail ?? await readTail(filePath, LAST_LINES_BYTES, 1, () => false)).lines)
     const sendLine = (line: string, offset: number): string => {
       if (offset === 0 && firstLine !== undefined) return firstLine
       return projected ? projectLine(format, line, address, offset) : line
@@ -229,7 +233,7 @@ export async function serveTranscript(
       // ?tail=N — return last N turns worth of lines plus header lines,
       // trimmed to a byte budget so big sessions stay cheap over tunnels.
       // A min-line floor guarantees real pages even around fat lines.
-      const tail = await readTail(filePath, initialWindow, minLines, isNoise)
+      const tail = lineTail!
       const budget = parseByteBudget(params.get("maxBytes"), DEFAULT_TAIL_BYTE_BUDGET)
       const oldest = oldestKeptLine(tail.lines, budget, minLines, isNoise)
       const byteOffset = oldest < tail.lines.length ? tail.starts[oldest] : tail.end

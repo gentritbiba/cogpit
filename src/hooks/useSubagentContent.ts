@@ -3,7 +3,7 @@ import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isSharedPath } from "@/lib/sharePath"
-import type { TailResponse } from "@/lib/sessionLoader"
+import { joinLinePage, type TailResponse } from "@/lib/sessionLoader"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "../../shared/session/types"
 import { isCodexSessionText, parseCodexSession } from "../../shared/session/codex"
 import { liftElidedCalls } from "../../shared/session/resultProjection"
@@ -140,11 +140,16 @@ interface OlderPage {
   cutTurn?: boolean
 }
 
+/** How far back past the tail a return that may have begun above its page is followed. */
+export const RETURN_READ_BACK_BYTES = 1024 * 1024
+
 /**
  * The end of a finished sub-agent's transcript, back to its return: the last
  * message carrying text, all the panel shows of it. A short tail usually
  * holds it. Pages go back a turn at a time while there is none yet, or while
- * it is the page's first message and so may have begun above the page.
+ * it is the page's first message and so may have begun above the page, up to
+ * `RETURN_READ_BACK_BYTES`. An older server pages by lines, which say nothing
+ * of where turns begin, so there the first text found is the return.
  */
 export async function loadSubagentReturn(
   transcriptUrl: string,
@@ -155,24 +160,29 @@ export async function loadSubagentReturn(
   if (!tailRes.ok) return null
   const tail = await tailRes.json() as TailResponse
   const prologue = linesBeforeFirstTurn(format, tail.headerLines)
-  const inPrologue = new Set(prologue)
-  let lines = tail.tailLines.filter((line) => !inPrologue.has(line))
+  let lines = tail.tailLines
   let { byteOffset, hasMore } = tail
+  let turnPage = false
   let startsOnTurn = false
+  let pagesLines = false
 
   for (;;) {
-    const messages = parseSubagentJsonl([...prologue, ...lines].join("\n"), agentId)
+    const text = turnPage ? [...prologue, ...lines] : joinLinePage(tail.headerLines, prologue, lines, hasMore)
+    const messages = parseSubagentJsonl(text.join("\n"), agentId)
     const shown = messages.findLastIndex((message) => message.text.length > 0)
-    if (!hasMore || (shown >= 0 && (shown > 0 || startsOnTurn))) {
+    const whole = shown > 0 || startsOnTurn || pagesLines || tail.byteOffset - byteOffset >= RETURN_READ_BACK_BYTES
+    if (!hasMore || (shown >= 0 && whole)) {
       for (const message of messages) liftElidedCalls(message.toolCalls)
       return messages
     }
     const olderRes = await authFetch(`${transcriptUrl}?before=${byteOffset}&count=1&unit=turns&projection=${RESULT_PROJECTION}`)
     if (!olderRes.ok) return null
     const older = await olderRes.json() as OlderPage
-    lines = [...older.lines.filter((line) => !inPrologue.has(line)), ...lines]
+    lines = [...older.lines, ...lines]
     ;({ byteOffset, hasMore } = older)
-    startsOnTurn = older.unit === "turns" && !older.cutTurn
+    turnPage = older.unit === "turns"
+    startsOnTurn = turnPage && !older.cutTurn
+    pagesLines = !turnPage
   }
 }
 

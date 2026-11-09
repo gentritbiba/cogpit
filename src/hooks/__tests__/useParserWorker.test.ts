@@ -4,6 +4,7 @@ import { SessionHandleLostError, WORKER_REQUEST_TIMEOUT_MS, useParserWorker } fr
 import { EMPTY_SESSION_DIGEST, type SessionView } from "../../../shared/session/sessionDigest"
 import type { Turn } from "../../../shared/session/types"
 import type { SessionDelta } from "@/workers/session-parser.worker"
+import { sessionCache } from "@/lib/sessionCache"
 
 class FakeWorker {
   static instances: FakeWorker[] = []
@@ -107,6 +108,16 @@ describe("useParserWorker", () => {
   })
 })
 
+const turn = (id: string, text: string): Turn => ({
+  id, userMessage: null, contentBlocks: [{ kind: "text", text: [text] }], thinking: [], assistantText: [text],
+  toolCalls: [], subAgentActivity: [], timestamp: "", durationMs: null, tokenUsage: null, model: null,
+})
+const view = (turns: Turn[]): SessionView => ({
+  sessionId: "s", version: "", gitBranch: "", cwd: "", slug: "", name: "", model: "", turns,
+  stats: { totalInputTokens: 0, totalOutputTokens: 0, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, toolCallCounts: {}, errorCount: 0, totalDurationMs: 0, turnCount: turns.length },
+  digest: EMPTY_SESSION_DIGEST,
+})
+
 describe("useParserWorker appends", () => {
   beforeEach(() => {
     FakeWorker.instances = []
@@ -114,15 +125,6 @@ describe("useParserWorker appends", () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
-  const turn = (id: string, text: string): Turn => ({
-    id, userMessage: null, contentBlocks: [{ kind: "text", text: [text] }], thinking: [], assistantText: [text],
-    toolCalls: [], subAgentActivity: [], timestamp: "", durationMs: null, tokenUsage: null, model: null,
-  })
-  const view = (turns: Turn[]): SessionView => ({
-    sessionId: "s", version: "", gitBranch: "", cwd: "", slug: "", name: "", model: "", turns,
-    stats: { totalInputTokens: 0, totalOutputTokens: 0, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, toolCallCounts: {}, errorCount: 0, totalDurationMs: 0, turnCount: turns.length },
-    digest: EMPTY_SESSION_DIGEST,
-  })
   const delta = (fromTurn: number, turns: Turn[], turnVersions: number[]): SessionDelta => {
     const { turns: _turns, stats, digest, ...meta } = view(turns)
     return { fromTurn, turns, turnVersions, stats, digest, meta }
@@ -182,5 +184,92 @@ describe("useParserWorker appends", () => {
     const { result } = renderHook(() => useParserWorker())
     result.current.append(view([]), "first\n").catch(() => {})
     expect(latest().posted[0]).toMatchObject({ type: "parse", text: "first\n", keep: true })
+  })
+})
+
+describe("useParserWorker releases", () => {
+  beforeEach(() => {
+    FakeWorker.instances = []
+    vi.stubGlobal("Worker", FakeWorker)
+    sessionCache.clear()
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const source = (fileName: string) => ({ dirName: "-d", fileName, watchOffset: 0, loadId: 1 })
+  const releases = () => latest().posted.filter((message) => message.type === "release").map(({ handle }) => handle)
+
+  async function parsed(hook: ReturnType<typeof renderHook<ReturnType<typeof useParserWorker>, unknown>>, handle: number) {
+    const pending = hook.result.current.parse(`session ${handle}`)
+    latest().answer(view([turn(`t${handle}`, "one")]), { handle, version: 1 })
+    return pending
+  }
+
+  async function cached(hook: Parameters<typeof parsed>[0], handle: number) {
+    const session = await parsed(hook, handle)
+    sessionCache.set(session, source(`${handle}.jsonl`), 0, false)
+    return session
+  }
+
+  it("never lets go of the session on screen while hovers push it out of the cache", async () => {
+    const hook = renderHook(() => useParserWorker())
+    const screen = {}
+    const open = await cached(hook, 1)
+    sessionCache.show(screen, open)
+
+    for (const handle of [2, 3, 4, 5, 6]) await cached(hook, handle)
+
+    expect(sessionCache.get("-d", "1.jsonl")).toBeUndefined()
+    expect(releases()).toEqual([])
+
+    sessionCache.show(screen, null)
+    expect(releases()).toEqual([1])
+  })
+
+  it("releases a session once neither the cache nor a screen holds it", async () => {
+    const hook = renderHook(() => useParserWorker())
+    await cached(hook, 1)
+    sessionCache.discard(await parsed(hook, 2))
+    sessionCache.evict("-d", "1.jsonl")
+    expect(releases()).toEqual([2, 1])
+  })
+
+  it("keeps a session through a live update of its cache entry", async () => {
+    const hook = renderHook(() => useParserWorker())
+    const session = await cached(hook, 1)
+    const appended = hook.result.current.append(session, "more\n")
+    latest().reply({ type: "delta", delta: { fromTurn: 1, turns: [], turnVersions: [], stats: session.stats, digest: session.digest, meta: {} }, kept: { handle: 1, version: 2 } })
+    sessionCache.update("-d", "1.jsonl", { parsed: await appended })
+    expect(releases()).toEqual([])
+  })
+
+  it("keeps the session the live stream appends to until it appends to another", async () => {
+    const hook = renderHook(() => useParserWorker())
+    const first = await cached(hook, 1)
+    hook.result.current.append(first, "a\n").catch(() => {})
+    sessionCache.evict("-d", "1.jsonl")
+    expect(releases()).toEqual([])
+
+    const second = await cached(hook, 2)
+    hook.result.current.append(second, "b\n").catch(() => {})
+    expect(releases()).toEqual([1])
+  })
+
+  it("forgets every session when the worker is replaced, so none can name the new worker's", async () => {
+    const hook = renderHook(() => useParserWorker())
+    const session = await cached(hook, 1)
+    latest().onerror?.({ message: "crashed" } as ErrorEvent)
+
+    await expect(hook.result.current.append(session, "a\n")).rejects.toBeInstanceOf(SessionHandleLostError)
+    sessionCache.evict("-d", "1.jsonl")
+    expect(latest().posted).toEqual([])
+  })
+
+  it("stops releasing once unmounted", async () => {
+    const hook = renderHook(() => useParserWorker())
+    await cached(hook, 1)
+    const worker = latest()
+    hook.unmount()
+    sessionCache.evict("-d", "1.jsonl")
+    expect(worker.posted.filter((message) => message.type === "release")).toEqual([])
   })
 })

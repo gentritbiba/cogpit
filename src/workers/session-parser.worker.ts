@@ -7,9 +7,11 @@ import type { ParsedSession, SessionStats, Turn } from "../../shared/session/typ
  * The worker keeps the sessions it parsed, raw records included, and the
  * renderer holds only a `SessionView` of each. `KeptVersion` names one: an
  * append to it answers with what changed, and the kept session moves on to the
- * next version. An append naming a version the worker no longer holds (it
- * restarted, let the session go, or another append moved it on) is answered
- * `missing`, and the renderer loads the session again.
+ * next version. The renderer decides how long a session is kept and releases
+ * it when it holds no view of it any more. An append naming a version the
+ * worker no longer holds (it restarted, the session was released, or another
+ * append moved it on) is answered `missing`, and the renderer loads the session
+ * again.
  */
 export interface KeptVersion { handle: number; version: number }
 
@@ -33,6 +35,7 @@ export interface SessionDelta {
 export type WorkerRequest =
   | { type: "parse"; id: number; text: string; keep: boolean }
   | { type: "append"; id: number; base: KeptVersion; newText: string }
+  | { type: "release"; handle: number }
 
 export type WorkerResponse =
   | { type: "parsed"; id: number; view: SessionView; turnVersions: number[]; kept: KeptVersion | null }
@@ -49,18 +52,10 @@ interface Held {
   scannedTo: number
 }
 
-/** As many sessions as the renderer's session cache holds; the least recently used goes first. */
-export const KEPT_SESSIONS = 5
 const kept = new Map<number, Held>()
 let nextHandle = 0
 let lastStamp = 0
 const stamp = () => ++lastStamp
-
-function hold(handle: number, held: Held): void {
-  kept.delete(handle)
-  kept.set(handle, held)
-  while (kept.size > KEPT_SESSIONS) kept.delete(kept.keys().next().value!)
-}
 
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true
@@ -92,7 +87,7 @@ function parse(text: string, keep: boolean): WorkerResponse & { type: "parsed" }
   let keptVersion: KeptVersion | null = null
   if (keep) {
     keptVersion = { handle: nextHandle++, version: 1 }
-    hold(keptVersion.handle, { version: 1, session, turnVersions, digest, scannedTo: session.rawMessages.length })
+    kept.set(keptVersion.handle, { version: 1, session, turnVersions, digest, scannedTo: session.rawMessages.length })
   }
   return { type: "parsed", id: 0, view: toSessionView(session, digest), turnVersions, kept: keptVersion }
 }
@@ -131,7 +126,7 @@ function append(base: KeptVersion, newText: string): (WorkerResponse & { type: "
 
   const digest = computeSessionDigest(session.rawMessages, { digest: held.digest, scannedTo })
   const version = held.version + 1
-  hold(base.handle, { version, session, turnVersions, digest, scannedTo: session.rawMessages.length })
+  kept.set(base.handle, { version, session, turnVersions, digest, scannedTo: session.rawMessages.length })
   return {
     type: "delta",
     id: 0,
@@ -149,6 +144,10 @@ function append(base: KeptVersion, newText: string): (WorkerResponse & { type: "
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data
+  if (msg.type === "release") {
+    kept.delete(msg.handle)
+    return
+  }
   try {
     const response: WorkerResponse = msg.type === "parse"
       ? parse(msg.text, msg.keep)

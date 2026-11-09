@@ -17,6 +17,8 @@ vi.mock("@/lib/sessionCache", async () => {
       update: vi.fn(),
       evict: vi.fn(),
       clear: vi.fn(),
+      show: vi.fn(),
+      discard: vi.fn(),
     },
     sessionCacheKey: (dirName: string, fileName: string) => `${device.getActiveDeviceScope()}:${dirName}/${fileName}`,
   }

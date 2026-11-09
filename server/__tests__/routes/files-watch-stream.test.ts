@@ -526,6 +526,21 @@ describe("/api/watch stream v2", () => {
     closeConnection()
   })
 
+  it("resets when a line sent before its newline turns out to go on (review #8)", async () => {
+    const file = liveFile(`${a}\n`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size}&stream=2`)
+    file.write(b)
+    await file.poke()
+    await file.poke()
+    expect(lineEvents(frames)).toHaveLength(1)
+    file.write(`${c}\n`)
+    await file.poke()
+    expect(parseFrames(frames).at(-1)).toEqual({ type: "reset", reason: "diverged" })
+    expect(lineEvents(frames)).toHaveLength(1)
+    expect(res.end).toHaveBeenCalledOnce()
+    closeConnection()
+  })
+
   it("resumes a client one byte past the end, whose line's newline is still owed", async () => {
     const file = liveFile(`${a}\n${b}`)
     const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size + 1}&stream=2`)
@@ -536,18 +551,20 @@ describe("/api/watch stream v2", () => {
     closeConnection()
   })
 
-  it("resets a client whose offset is past the end of a shorter file, and sends nothing after", async () => {
+  it("resets a client whose offset is past the end of a shorter file, and ends the stream", async () => {
     const file = liveFile(`${a}\n`)
-    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size + 50}&stream=2`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size + 50}&stream=2`)
     expect(parseFrames(frames)).toEqual([{ type: "reset", reason: "truncated" }])
+    expect(res.end).toHaveBeenCalledOnce()
     closeConnection()
   })
 
   it("resets when the file shrinks below what was streamed", async () => {
     const file = liveFile(`${a}\n${b}\n`)
-    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size}&stream=2`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=${file.size}&stream=2`)
     file.truncate(bytes(`${a}\n`))
     await file.poke()
+    expect(res.end).toHaveBeenCalledOnce()
     file.write(`${c}\n`)
     await file.poke()
     const events = parseFrames(frames)
@@ -558,8 +575,9 @@ describe("/api/watch stream v2", () => {
 
   it("resets a client too far behind to catch up line by line", async () => {
     const file = liveFile(`${"x".repeat(3 * 1024 * 1024)}\n`)
-    const { frames, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=0&stream=2`)
+    const { frames, res, closeConnection } = await connect(`/proj-a/${SESSION}.jsonl?offset=0&stream=2`)
     expect(parseFrames(frames)).toEqual([{ type: "reset", reason: "gap" }])
+    expect(res.end).toHaveBeenCalledOnce()
     expect(file.size).toBeGreaterThan(0)
     closeConnection()
   })

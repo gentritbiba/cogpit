@@ -8,7 +8,7 @@ vi.mock("@/lib/device", () => ({
   getActiveIdentity: vi.fn(() => null),
 }))
 
-import { createSessionController, type LoadedSession, type SessionAddress } from "@/lib/sessionLoader"
+import { createSessionController, RELOAD_RETRY_DELAYS_MS, type LoadedSession, type SessionAddress } from "@/lib/sessionLoader"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
@@ -86,10 +86,15 @@ function cacheEntry(fileName: string, overrides: Partial<SessionView> = {}) {
   return parsed
 }
 
+/** Views the cache or a screen let go of, so the worker can drop their sessions. */
+let released: SessionView[] = []
+sessionCache.onRelease((view) => { released.push(view) })
+
 beforeEach(() => {
   vi.clearAllMocks()
   fetches = []
   sessionCache.clear()
+  released = []
   mockDeviceScope.mockReturnValue("local")
   mockIdentity.mockReturnValue(null)
   deferFetches()
@@ -160,13 +165,50 @@ describe("openSession", () => {
     expect(entry.nextByteOffset).toBe(40)
   })
 
-  it("drops header lines a small file repeats in an older server's line page", async () => {
+  it("reads a small file's header once from an older server's line page", async () => {
     const { click } = setup()
     const opening = click("a.jsonl")
     await flush()
-    fetches[0].resolve(tail('{"h":1}', { unit: undefined }))
+    fetches[0].resolve(tail('{"h":1}', { unit: undefined, byteOffset: 0, hasMore: false }))
     await opening
     expect(parse).toHaveBeenCalledWith('{"h":1}')
+  })
+
+  it("puts only the prologue of an older server's header in front of a line tail", async () => {
+    const mode = JSON.stringify({ type: "permission-mode", permissionMode: "default" })
+    const firstTurn = [
+      JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "first prompt" } }),
+      JSON.stringify({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [{ type: "text", text: "first answer" }] } }),
+    ]
+    const later = JSON.stringify({ type: "user", uuid: "u9", message: { role: "user", content: "much later" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(later, { unit: undefined, headerLines: [mode, ...firstTurn], byteOffset: 50_000, hasMore: true }))
+    await opening
+    expect(parse).toHaveBeenCalledWith(`${mode}\n${later}`)
+  })
+
+  it("joins the whole header to a line tail that starts where the header ends", async () => {
+    const lines = ["mode", "prompt", "answer"].map((name) => JSON.stringify({ type: name === "mode" ? "permission-mode" : "user", uuid: name, message: { role: "user", content: name } }))
+    const later = JSON.stringify({ type: "user", uuid: "u9", message: { role: "user", content: "later" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(later, { unit: undefined, headerLines: lines, byteOffset: 3000, hasMore: false }))
+    await opening
+    expect(parse).toHaveBeenCalledWith([...lines, later].join("\n"))
+  })
+
+  it("keeps a line that only repeats a header line in an older server's line tail", async () => {
+    const mode = JSON.stringify({ type: "permission-mode", permissionMode: "default" })
+    const prompt = JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "go" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(prompt, { unit: undefined, headerLines: [mode], tailLines: [mode, prompt, mode], byteOffset: 0, hasMore: false }))
+    await opening
+    expect(parse).toHaveBeenCalledWith([mode, prompt, mode].join("\n"))
   })
 
   it("commits a cached session synchronously, without a request", () => {
@@ -299,6 +341,7 @@ describe("stale results (R1)", () => {
     expect(shown).toHaveLength(0)
     mockDeviceScope.mockReturnValue("local")
     expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
+    expect(released.map(({ sessionId }) => sessionId)).toEqual(['{"h":1}\na'])
   })
 
   it("drops a result when the signed-in identity changed while it loaded", async () => {
@@ -378,6 +421,44 @@ describe("shared loads (R2)", () => {
     expect(shown[0].parsed).toBe(live)
     await flush()
     expect(sessionCache.get("-d", "a.jsonl")?.parsed).toBe(live)
+    expect(released.map(({ sessionId }) => sessionId)).toEqual(['{"h":1}\na'])
+  })
+})
+
+describe("the view on screen (review #2)", () => {
+  it("stays held while hover prefetches push it out of the cache, until the user leaves", async () => {
+    const { sessions, click, shown } = setup()
+    const a = click("a.jsonl")
+    await flush()
+    fetchFor("a.jsonl").resolve(tail("a"))
+    await a
+    const onScreen = shown[0].parsed
+
+    for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
+      sessions.prefetchSession({ dirName: "-d", fileName: `${name}.jsonl` })
+      await flush()
+      fetchFor(`${name}.jsonl`).resolve(tail(name))
+      await flush()
+    }
+
+    expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
+    expect(released).toContain(onScreen)
+    expect([...sessionCache.heldViews()]).toContain(onScreen)
+
+    released = []
+    sessions.leave()
+    expect(released).toEqual([onScreen])
+    expect([...sessionCache.heldViews()]).not.toContain(onScreen)
+  })
+
+  it("lets the previous view go when another open lands", () => {
+    const { click } = setup()
+    const a = cacheEntry("a.jsonl")
+    cacheEntry("b.jsonl")
+    void click("a.jsonl")
+    void click("b.jsonl")
+    sessionCache.evict("-d", "a.jsonl")
+    expect([...sessionCache.heldViews()]).not.toContain(a)
   })
 })
 
@@ -463,19 +544,85 @@ describe("reloadCurrent", () => {
     expect(fetches.map((f) => f.url)).toEqual([expect.stringContaining("/b.jsonl?")])
   })
 
-  it("keeps the session on screen when the reload fails, and can reload it later", async () => {
-    const { sessions, dispatch } = await openA()
-    const failing = sessions.reloadCurrent()
-    await flush()
-    fetches[0].resolve({}, 500)
-    await failing
-    expect(dispatch).not.toHaveBeenCalled()
+  describe("after a failed read (review #4)", () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+    const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms)
 
-    const retry = sessions.reloadCurrent()
-    await flush()
-    fetches[1].resolve(tail("a3"))
-    await retry
-    expect(dispatch).toHaveBeenCalledOnce()
+    async function failingReload() {
+      const ctx = setup()
+      const a = ctx.click("a.jsonl")
+      await tick()
+      fetchFor("a.jsonl").resolve(tail("a"))
+      await a
+      fetches = []
+      const reloading = ctx.sessions.reloadCurrent()
+      await tick()
+      fetches[0].resolve({}, 502)
+      await tick()
+      return { ...ctx, reloading }
+    }
+
+    it("keeps the session on screen and retries after a wait", async () => {
+      const { dispatch, reloading } = await failingReload()
+      expect(dispatch).not.toHaveBeenCalled()
+      await tick(RELOAD_RETRY_DELAYS_MS[0]! - 1)
+      expect(fetches).toHaveLength(1)
+      await tick(1)
+      expect(fetches).toHaveLength(2)
+      fetches[1].resolve(tail("a3"))
+      await reloading
+      expect(dispatch).toHaveBeenCalledOnce()
+    })
+
+    it("folds a reset that arrives while it waits into the retry", async () => {
+      const { sessions, reloading } = await failingReload()
+      void sessions.reloadCurrent()
+      void sessions.reloadCurrent()
+      await tick()
+      expect(fetches).toHaveLength(1)
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      expect(fetches).toHaveLength(2)
+      fetches[1].resolve(tail("a3"))
+      await reloading
+    })
+
+    it("gives up after the last wait, and a later reset starts over", async () => {
+      const { sessions, dispatch, reloading } = await failingReload()
+      for (const delay of RELOAD_RETRY_DELAYS_MS) {
+        await tick(delay)
+        fetches.at(-1)!.resolve({}, 502)
+        await tick()
+      }
+      await reloading
+      expect(fetches).toHaveLength(RELOAD_RETRY_DELAYS_MS.length + 1)
+      expect(dispatch).not.toHaveBeenCalled()
+
+      const again = sessions.reloadCurrent()
+      await tick()
+      fetches.at(-1)!.resolve(tail("a4"))
+      await again
+      expect(dispatch).toHaveBeenCalledOnce()
+    })
+
+    it("stops once the user opens another session", async () => {
+      const { click, reloading } = await failingReload()
+      const b = click("b.jsonl")
+      await tick()
+      fetchFor("b.jsonl").resolve(tail("b"))
+      await b
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      await reloading
+      expect(fetches.filter((f) => f.url.includes("/a.jsonl?"))).toHaveLength(1)
+    })
+
+    it("stops once the user leaves", async () => {
+      const { sessions, reloading } = await failingReload()
+      sessions.leave()
+      await tick(RELOAD_RETRY_DELAYS_MS[0]!)
+      await reloading
+      expect(fetches).toHaveLength(1)
+    })
   })
 
   it("does not join a load that started before the transcript changed, and later opens join the reload", async () => {

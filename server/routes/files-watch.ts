@@ -326,7 +326,8 @@ export function registerFileWatchRoutes(use: UseFn) {
               if (newlineOwed && raw) {
                 newlineOwed = false
                 if (raw.startsWith("\n")) raw = raw.slice(1)
-                // The line sent early was not complete after all; what follows is a line of its own.
+                // The line sent early was not complete after all, and a v2 client already resumes past its newline.
+                else if (v2) return reset("diverged")
                 else lineStart -= 1
               }
               const start = lineStart
@@ -446,11 +447,12 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (agentsPoller) clearInterval(agentsPoller)
     }
 
-    /** Tells a v2 client it has to reload, then stops sending until it reconnects with a new offset. */
+    /** Tells a v2 client it has to reload, then ends the stream so it reconnects, and hears it again until it has. */
     function reset(reason: WatchResetReason) {
       if (closed) return
       res.write(`data: ${JSON.stringify({ type: "reset", reason } satisfies WatchResetEvent)}\n\n`)
       cleanup()
+      res.end()
     }
 
     // Establish the baseline after the client snapshot. When the client sends

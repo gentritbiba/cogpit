@@ -4,7 +4,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const state = vi.hoisted(() => ({ filePath: "", kind: "claude" as "claude" | "codex", requests: [] as string[] }))
+const state = vi.hoisted(() => ({
+  filePath: "",
+  kind: "claude" as "claude" | "codex",
+  requests: [] as string[],
+  /** Answers like a server from before turn pages, which ignores `unit=turns`. */
+  linePagesOnly: false,
+  /** Canned answers, in place of the real routes. */
+  answer: null as ((url: string) => Record<string, unknown>) | null,
+}))
 vi.mock("../../../server/sessionPaths", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../server/sessionPaths")>(),
   resolveSessionFilePath: vi.fn(async () => state.filePath),
@@ -20,8 +28,10 @@ vi.mock("../../../server/lib/sessionArchive", () => ({
 }))
 // The client's requests go to the real page and tool-result routes.
 vi.mock("@/lib/auth", () => ({
-  authFetch: async (url: string) => {
-    state.requests.push(url)
+  authFetch: async (requested: string) => {
+    state.requests.push(requested)
+    if (state.answer) return new Response(JSON.stringify(state.answer(requested)))
+    const url = state.linePagesOnly ? requested.replace("&unit=turns", "") : requested
     const route = url.startsWith("/api/tool-result/") ? "/api/tool-result/" : "/api/sessions/"
     const handler = getRouteHandler(collectRoutes(url.startsWith("/api/tool-result/") ? registerToolResultRoutes : registerProjectRoutes), route)
     const { req, res, next } = createMockReqRes("GET", url.slice(route.length))
@@ -38,7 +48,7 @@ import { descriptorFor } from "../../../shared/session/agent-descriptors"
 import { formatFor } from "../../../shared/session/agents"
 import { textAssistant, toJsonl, toolUseAssistant, userMsg } from "../../__tests__/fixtures"
 import { fetchBodyChunk } from "@/lib/toolResultBodies"
-import { loadSubagentReturn, parseSubagentJsonl } from "@/hooks/useSubagentContent"
+import { loadSubagentReturn, parseSubagentJsonl, RETURN_READ_BACK_BYTES } from "@/hooks/useSubagentContent"
 import type { SubAgentMessage } from "../../../shared/session/types"
 
 const roots: string[] = []
@@ -47,6 +57,8 @@ beforeEach(() => {
   roots.push(root)
   setDataRoot(root)
   state.requests = []
+  state.linePagesOnly = false
+  state.answer = null
 })
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
@@ -170,6 +182,47 @@ describe("loadSubagentReturn", () => {
     expect(returnOf(messages)).toEqual(returnOf(parseSubagentJsonl(text, "a1")))
     expect(state.requests[1]).toMatch(/\?before=\d+&count=1&unit=turns&projection=results-v1$/)
     expect(messages.some((m) => m.text.includes("First answer"))).toBe(false)
+  })
+
+  it("drops only the page's own copy of the prologue, never a later line equal to it (review #6)", async () => {
+    const greeting = JSON.stringify(textAssistant("Hello"))
+    const lines = [greeting, JSON.stringify(userMsg("Do the task")), JSON.stringify(textAssistant("Working")), greeting]
+    state.answer = () => ({ headerLines: [greeting], tailLines: lines, byteOffset: 0, totalSize: 500, hasMore: false })
+    // A format whose first turn starts after the opening line, so that line is the prologue.
+    const format = { pageCuts: () => [1] }
+
+    const messages = (await loadSubagentReturn("/api/sessions/proj-a/parent-1/subagents/agent-a1.jsonl", "a1", format))!
+
+    expect(messages.map((m) => m.text)).toEqual([["Hello"], ["Working"], ["Hello"]])
+  })
+
+  it("takes the first text it finds as the return when the server pages by lines (review #7)", async () => {
+    state.linePagesOnly = true
+    const results = (count: number) => Array.from({ length: count }, () => userMsg([{ type: "tool_result", tool_use_id: "none", content: `ok ${PAD}` }]))
+    const text = toJsonl([userMsg("Do the task"), textAssistant("Earlier"), ...results(200), textAssistant("All done"), ...results(6)])
+    const url = writeTranscript("claude", text)
+
+    const messages = (await load(url))!
+
+    expect(returnOf(messages)).toEqual(["All done"])
+    expect(messages.some((m) => m.text.includes("Earlier"))).toBe(false)
+  })
+
+  it("stops following a return up a cut turn after a bounded read (review #7)", async () => {
+    const step = 400 * 1024
+    const tailOffset = 50 * 1024 * 1024
+    const say = JSON.stringify(textAssistant("Done"))
+    const note = JSON.stringify(userMsg([{ type: "tool_result", tool_use_id: "x", content: "ok" }]))
+    state.answer = (url) => {
+      const before = /before=(\d+)/.exec(url)
+      if (!before) return { headerLines: [], tailLines: [say], byteOffset: tailOffset, totalSize: tailOffset + 100, hasMore: true }
+      return { lines: [note], byteOffset: Number(before[1]) - step, hasMore: true, unit: "turns", cutTurn: true }
+    }
+
+    const messages = (await load("/api/sessions/proj-a/parent-1/subagents/agent-a1.jsonl"))!
+
+    expect(returnOf(messages)).toEqual(["Done"])
+    expect(state.requests).toHaveLength(1 + Math.ceil(RETURN_READ_BACK_BYTES / step))
   })
 
   it("reports a transcript the server refuses", async () => {

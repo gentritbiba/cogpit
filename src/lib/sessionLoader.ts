@@ -19,6 +19,8 @@ import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import { authFetch } from "@/lib/auth"
 import { sessionCache, sessionCacheKey } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
+import { formatFor } from "../../shared/session/agents"
+import { linesBeforeFirstTurn } from "../../shared/session/pageCuts"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 
@@ -68,12 +70,17 @@ export interface SessionController {
   prefetchSession(address: SessionAddress): void
   /**
    * Re-read the session on screen from disk, dropping the history paged in
-   * above it. A no-op with nothing on screen or while another open is landing.
+   * above it. A failed read is retried after `RELOAD_RETRY_DELAYS_MS` while
+   * the session stays on screen. A no-op with nothing on screen or while
+   * another open is landing; a call during a reload joins it.
    */
   reloadCurrent(): Promise<void>
   /** The user left the session on screen; nothing pending may land after this. */
   leave(): void
 }
+
+/** The waits before each retry of a failed reload; after the last one it gives up. */
+export const RELOAD_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
 
 /** Turns a tail page asks for; the server stops earlier at its byte budget. */
 export const TAIL_TURNS = 10
@@ -86,14 +93,35 @@ function tailUrl({ dirName, fileName }: SessionAddress): string {
 }
 
 /**
- * Header plus tail. A turn page's header holds only the lines before the
- * first turn, so the two are joined exactly as sent; an older server's line
- * page can repeat a small file's header in its tail.
+ * A line page with what goes in front of it. `headerLines` are the file's
+ * first lines and `prologue` those before its first turn. Below a gap
+ * (`hasMore`), only the prologue goes in front: the rest of the header is a
+ * turn far above the page. A page that reaches the head joins the whole
+ * header, less the lines of it the page repeats.
  */
-function tailText(data: TailResponse): string {
+export function joinLinePage(
+  headerLines: readonly string[],
+  prologue: readonly string[],
+  lines: readonly string[],
+  hasMore: boolean,
+): string[] {
+  if (hasMore) return [...prologue, ...lines]
+  for (let overlap = Math.min(headerLines.length, lines.length); overlap > 0; overlap--) {
+    if (headerLines.slice(-overlap).every((line, index) => lines[index] === line)) return [...headerLines, ...lines.slice(overlap)]
+  }
+  return [...headerLines, ...lines]
+}
+
+/**
+ * Header plus tail. A turn page's header holds only the lines before the
+ * first turn, so the two are joined exactly as sent. An older server's line
+ * page sends the file's first lines as its header, which can hold the first
+ * turn (see `joinLinePage`).
+ */
+function tailText(data: TailResponse, dirName: string): string {
   if (data.unit === "turns") return [...data.headerLines, ...data.tailLines].join("\n")
-  const headerSet = new Set(data.headerLines)
-  return [...data.headerLines, ...data.tailLines.filter((line) => !headerSet.has(line))].join("\n")
+  const prologue = linesBeforeFirstTurn(formatFor(agentKindForDirName(dirName)), data.headerLines)
+  return joinLinePage(data.headerLines, prologue, data.tailLines, data.hasMore).join("\n")
 }
 
 // ── Shared loads ─────────────────────────────────────────────────────────────
@@ -124,12 +152,18 @@ function startFlight(key: string, address: SessionAddress, parse: Parse, fresh: 
       if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
       const data: TailResponse = await res.json()
       flight.fetched = true
-      const parsed = scopeParsedSession(await parse(tailText(data)), splitInstanceDirName(dirName).instanceId)
+      const parsed = scopeParsedSession(await parse(tailText(data, dirName)), splitInstanceDirName(dirName).instanceId)
       // Never write one device's or identity's transcript under another's key.
-      if (sessionCacheKey(dirName, fileName) !== key) return null
+      if (sessionCacheKey(dirName, fileName) !== key) {
+        sessionCache.discard(parsed)
+        return null
+      }
       // A load that finished first, which a live stream may have advanced since, wins.
       const raced = fresh ? undefined : sessionCache.get(dirName, fileName)
-      if (raced) return { parsed: raced.parsed, source: raced.source }
+      if (raced) {
+        sessionCache.discard(parsed)
+        return { parsed: raced.parsed, source: raced.source }
+      }
       const source: SessionSource = {
         dirName,
         fileName,
@@ -185,6 +219,9 @@ export function createSessionController({
   let pending: PendingOpen | null = null
   /** The session the last committed open put on screen. */
   let shown: SessionAddress | null = null
+  /** This shell's screen in the cache, which holds the view it shows. */
+  const screen = {}
+  let reloading: Promise<void> | null = null
 
   const dropPending = () => {
     if (!pending) return
@@ -208,6 +245,7 @@ export function createSessionController({
     const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
       pending = null
       shown = address
+      sessionCache.show(screen, loaded.parsed)
       commit(loaded)
       return "opened"
     }
@@ -249,6 +287,23 @@ export function createSessionController({
     return land(address, loaded)
   }
 
+  async function reload(address: SessionAddress): Promise<void> {
+    for (const delay of [...RELOAD_RETRY_DELAYS_MS, null]) {
+      try {
+        await open(address, "reload", ({ parsed, source }) => {
+          dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
+        })
+        return
+      } catch {
+        // The session already on screen stays there.
+      }
+      if (delay === null) return
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      // Another open took over the screen, or the user left it.
+      if (pending || shown !== address) return
+    }
+  }
+
   return {
     openSession: (target, { reason, commit, recover }) => open(target, reason, commit, recover),
 
@@ -261,21 +316,18 @@ export function createSessionController({
       })
     },
 
-    async reloadCurrent() {
-      if (pending || !shown) return
-      try {
-        await open(shown, "reload", ({ parsed, source }) => {
-          dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
-        })
-      } catch {
-        // The session already on screen stays there.
-      }
+    reloadCurrent() {
+      if (reloading) return reloading
+      if (pending || !shown) return Promise.resolve()
+      reloading = reload(shown).finally(() => { reloading = null })
+      return reloading
     },
 
     leave() {
       dropPending()
       token += 1
       shown = null
+      sessionCache.show(screen, null)
     },
   }
 }

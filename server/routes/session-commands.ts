@@ -76,13 +76,15 @@ export function registerSessionCommandRoutes(use: UseFn): void {
         const ctx = await context(req, res, query.get("sessionId"), false)
         if (!ctx) return
         const { dispatcher, conversation, scope } = ctx
+        // Only older clients send a cursor, and they wait to see each receipt finish in the full list.
         const after = query.get("after")
         sendTagged(req, res, {
           conversation,
           currentAddress: await localHost.address(conversation.binding.sessionId),
           pendingTransition: dispatcher.store.pendingTransition(conversation.id, scope),
-          commands: dispatcher.store.openCommands(conversation.id, scope, query.getAll("commandId")),
-          ...(after !== null && { replay: dispatcher.store.events(conversation.id, Number(after), 200, scope) }),
+          ...(after === null
+            ? { commands: dispatcher.store.openCommands(conversation.id, scope, query.getAll("commandId")) }
+            : { commands: dispatcher.store.commands(conversation.id, scope), replay: dispatcher.store.events(conversation.id, Number(after), 200, scope) }),
         })
       } catch (error) { sendAgentError(res, error, "Failed to read the queue") }
       return
