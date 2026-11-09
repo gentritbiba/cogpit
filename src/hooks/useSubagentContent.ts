@@ -3,7 +3,7 @@ import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isSharedPath } from "@/lib/sharePath"
-import type { TailResponse } from "@/lib/sessionLoader"
+import { joinLinePage, type TailResponse } from "@/lib/sessionLoader"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "../../shared/session/types"
 import { isCodexSessionText, parseCodexSession } from "../../shared/session/codex"
 import { liftElidedCalls } from "../../shared/session/resultProjection"
@@ -160,20 +160,15 @@ export async function loadSubagentReturn(
   if (!tailRes.ok) return null
   const tail = await tailRes.json() as TailResponse
   const prologue = linesBeforeFirstTurn(format, tail.headerLines)
-  // A line page from the start of the file opens with the prologue, which travels as the header too.
-  const ownLines = (lines: string[], byteOffset: number) => {
-    if (byteOffset !== 0) return lines
-    let index = 0
-    while (index < prologue.length && lines[index] === prologue[index]) index++
-    return lines.slice(index)
-  }
-  let lines = ownLines(tail.tailLines, tail.byteOffset)
+  let lines = tail.tailLines
   let { byteOffset, hasMore } = tail
+  let turnPage = false
   let startsOnTurn = false
   let pagesLines = false
 
   for (;;) {
-    const messages = parseSubagentJsonl([...prologue, ...lines].join("\n"), agentId)
+    const text = turnPage ? [...prologue, ...lines] : joinLinePage(tail.headerLines, prologue, lines, hasMore)
+    const messages = parseSubagentJsonl(text.join("\n"), agentId)
     const shown = messages.findLastIndex((message) => message.text.length > 0)
     const whole = shown > 0 || startsOnTurn || pagesLines || tail.byteOffset - byteOffset >= RETURN_READ_BACK_BYTES
     if (!hasMore || (shown >= 0 && whole)) {
@@ -183,10 +178,11 @@ export async function loadSubagentReturn(
     const olderRes = await authFetch(`${transcriptUrl}?before=${byteOffset}&count=1&unit=turns&projection=${RESULT_PROJECTION}`)
     if (!olderRes.ok) return null
     const older = await olderRes.json() as OlderPage
-    lines = [...(older.unit === "turns" ? older.lines : ownLines(older.lines, older.byteOffset)), ...lines]
+    lines = [...older.lines, ...lines]
     ;({ byteOffset, hasMore } = older)
-    startsOnTurn = older.unit === "turns" && !older.cutTurn
-    pagesLines = older.unit !== "turns"
+    turnPage = older.unit === "turns"
+    startsOnTurn = turnPage && !older.cutTurn
+    pagesLines = !turnPage
   }
 }
 

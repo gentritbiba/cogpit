@@ -19,6 +19,8 @@ import { nextLoadId, type SessionSource } from "@/lib/sessionSource"
 import { authFetch } from "@/lib/auth"
 import { sessionCache, sessionCacheKey } from "@/lib/sessionCache"
 import { agentKindForDirName } from "@/lib/agents"
+import { formatFor } from "../../shared/session/agents"
+import { linesBeforeFirstTurn } from "../../shared/session/pageCuts"
 import { scopeParsedSession, splitInstanceDirName } from "../../shared/session/instances"
 import { RESULT_PROJECTION } from "../../shared/contracts/toolResults"
 
@@ -91,14 +93,35 @@ function tailUrl({ dirName, fileName }: SessionAddress): string {
 }
 
 /**
- * Header plus tail. A turn page's header holds only the lines before the
- * first turn, so the two are joined exactly as sent; an older server's line
- * page can repeat a small file's header in its tail.
+ * A line page with what goes in front of it. `headerLines` are the file's
+ * first lines and `prologue` those before its first turn. Below a gap
+ * (`hasMore`), only the prologue goes in front: the rest of the header is a
+ * turn far above the page. A page that reaches the head joins the whole
+ * header, less the lines of it the page repeats.
  */
-function tailText(data: TailResponse): string {
+export function joinLinePage(
+  headerLines: readonly string[],
+  prologue: readonly string[],
+  lines: readonly string[],
+  hasMore: boolean,
+): string[] {
+  if (hasMore) return [...prologue, ...lines]
+  for (let overlap = Math.min(headerLines.length, lines.length); overlap > 0; overlap--) {
+    if (headerLines.slice(-overlap).every((line, index) => lines[index] === line)) return [...headerLines, ...lines.slice(overlap)]
+  }
+  return [...headerLines, ...lines]
+}
+
+/**
+ * Header plus tail. A turn page's header holds only the lines before the
+ * first turn, so the two are joined exactly as sent. An older server's line
+ * page sends the file's first lines as its header, which can hold the first
+ * turn (see `joinLinePage`).
+ */
+function tailText(data: TailResponse, dirName: string): string {
   if (data.unit === "turns") return [...data.headerLines, ...data.tailLines].join("\n")
-  const headerSet = new Set(data.headerLines)
-  return [...data.headerLines, ...data.tailLines.filter((line) => !headerSet.has(line))].join("\n")
+  const prologue = linesBeforeFirstTurn(formatFor(agentKindForDirName(dirName)), data.headerLines)
+  return joinLinePage(data.headerLines, prologue, data.tailLines, data.hasMore).join("\n")
 }
 
 // ── Shared loads ─────────────────────────────────────────────────────────────
@@ -129,7 +152,7 @@ function startFlight(key: string, address: SessionAddress, parse: Parse, fresh: 
       if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
       const data: TailResponse = await res.json()
       flight.fetched = true
-      const parsed = scopeParsedSession(await parse(tailText(data)), splitInstanceDirName(dirName).instanceId)
+      const parsed = scopeParsedSession(await parse(tailText(data, dirName)), splitInstanceDirName(dirName).instanceId)
       // Never write one device's or identity's transcript under another's key.
       if (sessionCacheKey(dirName, fileName) !== key) {
         sessionCache.discard(parsed)

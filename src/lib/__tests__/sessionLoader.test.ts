@@ -165,13 +165,50 @@ describe("openSession", () => {
     expect(entry.nextByteOffset).toBe(40)
   })
 
-  it("drops header lines a small file repeats in an older server's line page", async () => {
+  it("reads a small file's header once from an older server's line page", async () => {
     const { click } = setup()
     const opening = click("a.jsonl")
     await flush()
-    fetches[0].resolve(tail('{"h":1}', { unit: undefined }))
+    fetches[0].resolve(tail('{"h":1}', { unit: undefined, byteOffset: 0, hasMore: false }))
     await opening
     expect(parse).toHaveBeenCalledWith('{"h":1}')
+  })
+
+  it("puts only the prologue of an older server's header in front of a line tail", async () => {
+    const mode = JSON.stringify({ type: "permission-mode", permissionMode: "default" })
+    const firstTurn = [
+      JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "first prompt" } }),
+      JSON.stringify({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [{ type: "text", text: "first answer" }] } }),
+    ]
+    const later = JSON.stringify({ type: "user", uuid: "u9", message: { role: "user", content: "much later" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(later, { unit: undefined, headerLines: [mode, ...firstTurn], byteOffset: 50_000, hasMore: true }))
+    await opening
+    expect(parse).toHaveBeenCalledWith(`${mode}\n${later}`)
+  })
+
+  it("joins the whole header to a line tail that starts where the header ends", async () => {
+    const lines = ["mode", "prompt", "answer"].map((name) => JSON.stringify({ type: name === "mode" ? "permission-mode" : "user", uuid: name, message: { role: "user", content: name } }))
+    const later = JSON.stringify({ type: "user", uuid: "u9", message: { role: "user", content: "later" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(later, { unit: undefined, headerLines: lines, byteOffset: 3000, hasMore: false }))
+    await opening
+    expect(parse).toHaveBeenCalledWith([...lines, later].join("\n"))
+  })
+
+  it("keeps a line that only repeats a header line in an older server's line tail", async () => {
+    const mode = JSON.stringify({ type: "permission-mode", permissionMode: "default" })
+    const prompt = JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "go" } })
+    const { click } = setup()
+    const opening = click("a.jsonl")
+    await flush()
+    fetches[0].resolve(tail(prompt, { unit: undefined, headerLines: [mode], tailLines: [mode, prompt, mode], byteOffset: 0, hasMore: false }))
+    await opening
+    expect(parse).toHaveBeenCalledWith([mode, prompt, mode].join("\n"))
   })
 
   it("commits a cached session synchronously, without a request", () => {
