@@ -204,6 +204,29 @@ describe("useSessionPaging", () => {
     expect(mockAuthFetch).not.toHaveBeenCalled()
   })
 
+  it("shows history a page banked while another session was open", async () => {
+    // A → B → A: the page in flight for A lands after the switch, reaches the
+    // head of the transcript and is banked but never shown.
+    let resolvePage!: (res: Response) => void
+    mockAuthFetch.mockReturnValue(new Promise<Response>((resolve) => { resolvePage = resolve }))
+    const { result, rerender, initial, onOlderTurns } = setup()
+    let inFlight!: Promise<number>
+    act(() => { inFlight = result.current.loadMore() })
+
+    rerender({ ...initial, fileName: "other.jsonl", sessionChangeKey: 2 })
+    rerender({ ...initial, sessionChangeKey: 3 })
+    await act(async () => {
+      resolvePage(beforeResponse({ hasMore: false }))
+      await inFlight
+    })
+    expect(onOlderTurns).not.toHaveBeenCalledWith(olderTurns)
+
+    mockGet.mockReturnValue(cachedEntry({ hasMore: false, olderTurns }))
+    await act(async () => { await result.current.loadMore() })
+    expect(onOlderTurns).toHaveBeenLastCalledWith(olderTurns)
+    expect(result.current.hasMore).toBe(false)
+  })
+
   it("ignores failed responses", async () => {
     mockAuthFetch.mockResolvedValue(new Response("nope", { status: 500 }))
     const { result, onOlderTurns } = setup()

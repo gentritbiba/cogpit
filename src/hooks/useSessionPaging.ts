@@ -87,7 +87,13 @@ export function useSessionPaging({
     const key = `${dirName}::${fileName}::${sessionChangeKey}`
     const cached = sessionCache.get(dirName, fileName)
     if (!cached?.hasMore) {
-      if (identityRef.current === key) setHasMore(false)
+      if (identityRef.current === key) {
+        setHasMore(false)
+        // A page that landed while another session was shown reached the
+        // cache but not the screen; with nothing left to fetch, this is the
+        // only chance to show it.
+        if (cached && cached.olderTurns.length > 0) onOlderTurns(cached.olderTurns)
+      }
       return 0
     }
 
