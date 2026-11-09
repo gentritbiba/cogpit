@@ -369,12 +369,13 @@ class CatalogImpl implements StoreCatalog {
         if (generation !== this.generation) return
         for (const dir of this.dirStates.keys()) this.watchFound(dir)
       }
-    } catch {
+    } catch (error) {
       this.unwatchAll()
-      this.retryWatching(generation)
+      this.retryWatching(generation, (error as NodeJS.ErrnoException).code === "ENOENT")
       return
     }
-    if (generation !== this.generation) return
+    // A watcher that failed while the batches ran gave up watching and scheduled its own retry.
+    if (generation !== this.generation || !this.watchWanted) return
     this.watching = true
     this.backstop = setInterval(() => { void this.serially(() => this.rescan()) }, BACKSTOP_MS)
     this.backstop.unref?.()
@@ -383,11 +384,11 @@ class CatalogImpl implements StoreCatalog {
   }
 
   /**
-   * Watching failed, typically because the root does not exist yet (an agent
-   * installed later). Try again on the backstop, and at once when the nearest
-   * existing parent of the root reports a change.
+   * Watching failed. Try again on the backstop and, while the root does not
+   * exist yet (an agent installed later), at once when the nearest existing
+   * parent of the root reports a change.
    */
-  private retryWatching(generation: number): void {
+  private retryWatching(generation: number, viaAncestor: boolean): void {
     if (generation !== this.generation || this.retryTimer) return
     const retry = () => {
       if (generation !== this.generation) return
@@ -399,7 +400,7 @@ class CatalogImpl implements StoreCatalog {
     }
     this.retryTimer = setTimeout(retry, BACKSTOP_MS)
     this.retryTimer.unref?.()
-    void this.watchNearestAncestor(generation, retry)
+    if (viaAncestor) void this.watchNearestAncestor(generation, retry)
   }
 
   private async watchNearestAncestor(generation: number, retry: () => void): Promise<void> {
@@ -462,11 +463,16 @@ class CatalogImpl implements StoreCatalog {
     this.backstop = null
   }
 
-  /** A failed watcher may have missed events: rescan, and stay on the 2 s listing if watching keeps failing. */
+  /**
+   * A failed watcher may have missed events: rescan once, read from the 2 s
+   * listing meanwhile, and try watching again on the backstop. Retrying at once
+   * spins when the failure persists (ENOSPC: the inotify watch limit is used up).
+   */
   private onWatcherError(): void {
     this.unwatchAll()
     const generation = this.generation
-    void this.serially(() => this.rescan()).then(() => this.watchAll(generation))
+    void this.serially(() => this.rescan())
+    this.retryWatching(generation, false)
   }
 
   private onRecursiveEvent(event: string, name: string | null): void {
