@@ -2,16 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { QuoteSource } from "../../shared/session/composerContext"
 import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
+import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 
 /** Older pages a jump loads looking for its turn before it calls the source missing. */
 export const QUOTE_SEARCH_PAGES = 20
 /** How long a jump waits for another session to open. */
 const OPEN_TIMEOUT_MS = 15_000
+/** How long a found turn waits for the timeline to mount it (a mobile tab switch) before the jump gives up. */
+const LAND_MS = 3_000
 
 interface Pending {
   source: QuoteSource
   text: string
   pages: number
+  /** When the first jump to the found turn was tried. */
+  landingSince: number | null
+  /** A page or a jump is in flight. */
   loading: boolean
   resolve: (found: boolean) => void
   timer: ReturnType<typeof setTimeout>
@@ -21,7 +27,8 @@ interface Inputs {
   session: ParsedSession | null
   sessionSource: SessionSource | null
   loadSession: (dirName: string, fileName: string) => void
-  jumpToTurn: (index: number) => void
+  /** Moves the timeline to the turn with this key; resolves false when it could not land. */
+  jumpToTurn: (turnKey: string) => Promise<boolean>
   hasMore: boolean
   loadMore: () => Promise<number>
 }
@@ -65,8 +72,21 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
     if (!pending || pending.loading || !session || !shows(sessionSource, pending.source)) return
     const index = quoteTurnIndex(session, pending.source, pending.text)
     if (index >= 0) {
-      jumpToTurn(index)
-      settle(true)
+      // By key, so a page of older history landing meanwhile cannot shift the target.
+      const turnKey = turnKeysOf(session.turns)[index]
+      pending.loading = true
+      pending.landingSince ??= performance.now()
+      void jumpToTurn(turnKey).then((landed) => {
+        if (pendingRef.current !== pending) return
+        if (landed || performance.now() - pending.landingSince! >= LAND_MS) {
+          settle(true)
+          return
+        }
+        pending.loading = false
+        requestAnimationFrame(() => {
+          if (pendingRef.current === pending) rerender((tick) => tick + 1)
+        })
+      })
       return
     }
     if (!hasMore || pending.pages >= QUOTE_SEARCH_PAGES) {
@@ -88,7 +108,7 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
 
   return useCallback((source: QuoteSource, text: string) => new Promise<boolean>((resolve) => {
     settle(false)
-    pendingRef.current = { source, text, pages: 0, loading: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
+    pendingRef.current = { source, text, pages: 0, landingSince: null, loading: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
     const { sessionSource, loadSession } = latest.current
     if (shows(sessionSource, source)) evaluate()
     else loadSession(source.dirName, source.fileName)

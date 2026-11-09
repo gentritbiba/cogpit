@@ -11,7 +11,7 @@ const open = (fileName = "a.jsonl") => ({ dirName: "-repo", fileName, rawText: "
 
 function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource }) {
   const state = { turns: initial.turns, older: [...initial.older], sessionSource: initial.open ?? open() }
-  const jumpToTurn = vi.fn()
+  const jumpToTurn = vi.fn(async (_turnKey: string) => true)
   const loadSession = vi.fn()
   const view = renderHook(() => useQuoteNavigation({
     session: session(state.turns),
@@ -37,8 +37,8 @@ describe("useQuoteNavigation", () => {
     let found: boolean | undefined
     act(() => { void view.result.current(source("t5"), "reply t5").then((value) => { found = value }) })
     await waitFor(() => expect(found).toBe(true))
-    // t5 is the first of six loaded turns once both pages came in.
-    expect(jumpToTurn).toHaveBeenCalledWith(0)
+    // By key: t5 is index 0 now, and would not be after another page came in.
+    expect(jumpToTurn).toHaveBeenCalledWith("t5")
   })
 
   it("finds a renumbered turn by the quoted text, and reports a deleted source without paging forever", async () => {
@@ -46,7 +46,7 @@ describe("useQuoteNavigation", () => {
     let found: boolean | undefined
     act(() => { void renumbered.view.result.current(source("old-id"), "the exact saved quote").then((value) => { found = value }) })
     await waitFor(() => expect(found).toBe(true))
-    expect(renumbered.jumpToTurn).toHaveBeenCalledWith(0)
+    expect(renumbered.jumpToTurn).toHaveBeenCalledWith("new-id")
 
     const pages = Array.from({ length: QUOTE_SEARCH_PAGES + 5 }, (_, i) => [turn(`older-${i}`)])
     const deleted = harness({ turns: [turn("t1")], older: pages })
@@ -69,5 +69,30 @@ describe("useQuoteNavigation", () => {
       expect(found).toBe(false)
       expect(jumpToTurn).not.toHaveBeenCalled()
     } finally { vi.useRealTimers() }
+  })
+
+  it("jumps by turn key, which a prepend does not shift the way it shifts indices", async () => {
+    const { view, jumpToTurn, state } = harness({ turns: [turn("t1"), turn("dup"), turn("dup")], older: [] })
+    let found: boolean | undefined
+    act(() => { void view.result.current(source("dup"), "reply dup").then((value) => { found = value }) })
+    await waitFor(() => expect(found).toBe(true))
+    expect(jumpToTurn).toHaveBeenCalledWith("dup")
+
+    // A prepend moves every index; the key the list renders stays the same.
+    state.turns = [turn("t0"), ...state.turns]
+    act(() => view.rerender())
+    jumpToTurn.mockClear()
+    act(() => { void view.result.current(source("t1"), "reply t1").then((value) => { found = value }) })
+    await waitFor(() => expect(jumpToTurn).toHaveBeenCalledWith("t1"))
+  })
+
+  it("tries the jump again while the timeline is not mounted yet, then reports the source found", async () => {
+    const { view, jumpToTurn } = harness({ turns: [turn("t1")], older: [] })
+    jumpToTurn.mockResolvedValueOnce(false).mockResolvedValueOnce(false)
+    let found: boolean | undefined
+    act(() => { void view.result.current(source("t1"), "reply t1").then((value) => { found = value }) })
+    await waitFor(() => expect(found).toBe(true))
+    expect(jumpToTurn).toHaveBeenCalledTimes(3)
+    expect(jumpToTurn).toHaveBeenLastCalledWith("t1")
   })
 })

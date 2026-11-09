@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo } from "react"
+import { memo, useMemo } from "react"
 import { RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
 import { AgentMessageCard } from "./AgentMessageCard"
@@ -185,14 +185,6 @@ function TurnWorkLabel({
   )
 }
 
-/** Whether any folded block holds the tool call navigation is landing on. */
-function foldHidesCall(blocks: TurnContentBlock[], folded: readonly number[], toolCallId: string): boolean {
-  return folded.some((index) => {
-    const block = blocks[index]
-    return (block.kind === "tool_calls" || block.kind === "plan_mode") && block.toolCalls.some((call) => call.id === toolCallId)
-  })
-}
-
 const TurnSectionInner = memo(function TurnSectionInner({
   turn,
   turnKey,
@@ -233,12 +225,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
     () => isTurnDone ? undefined : true,
   )
   const workVisible = workExpanded ?? (expandAll || !isTurnDone)
-
-  const revealCall = activeToolCallId !== null && !workVisible && foldPlan.foldable
-    && foldHidesCall(turn.contentBlocks, foldPlan.foldedIndices, activeToolCallId)
-  useEffect(() => {
-    if (revealCall) setWorkExpanded(true)
-  }, [revealCall, setWorkExpanded])
 
   const { leadingBlocks, trailingBlocks } = useMemo(() => {
     if (!foldPlan.foldable) {

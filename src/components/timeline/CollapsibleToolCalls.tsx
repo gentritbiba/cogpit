@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useId, memo } from "react"
+import { useEffect, useMemo, useId, memo } from "react"
 import { Brain, ChevronRight, ListTree, Loader2 } from "lucide-react"
 import { ToolCallCard } from "./ToolCallCard"
 import { ThinkingBlock } from "./ThinkingBlock"
@@ -8,8 +8,7 @@ import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
-import { useDisclosureKey, useScopeTurnKey, useTimelineState } from "./disclosure"
-import { useTimelineNavigation } from "./TimelineRowsProvider"
+import { useDisclosureKey, useRevealTarget, useTimelineState } from "./disclosure"
 import { activitySentence, summarizeToolActivity, toolActivityEntries, visibleToolActivity } from "@/lib/toolActivity"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
@@ -38,29 +37,14 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const entries = useMemo(() => toolActivityEntries(toolCalls, activityItems), [toolCalls, activityItems])
   const tail = useMemo(() => visibleToolActivity(entries, tailOnly, isAgentActive), [entries, tailOnly, isAgentActive])
 
-  // Navigation to a call opens its group first, then lands once the call is rendered.
-  const turnKey = useScopeTurnKey()
-  const timeline = useTimelineNavigation()
-  const revealedRef = useRef<string | null>(null)
-  const pendingRevealRef = useRef<string | null>(null)
-  const holdsActiveCall = activeToolCallId !== null && toolCalls.some((call) => call.id === activeToolCallId)
+  // Navigation (find, a jump to a call) opens the group holding its target.
+  const revealTarget = useRevealTarget()
+  const holdsRevealTarget = revealTarget !== null && (typeof revealTarget === "string"
+    ? toolCalls.some((call) => call.id === revealTarget)
+    : activityItems?.some((item) => item.kind === "thinking" && item.blocks === revealTarget) === true)
   useEffect(() => {
-    if (!holdsActiveCall || !activeToolCallId) {
-      revealedRef.current = null
-      return
-    }
-    if (revealedRef.current === activeToolCallId) return
-    revealedRef.current = activeToolCallId
-    pendingRevealRef.current = activeToolCallId
-    setOpenOverride(true)
-  }, [holdsActiveCall, activeToolCallId, setOpenOverride])
-  useEffect(() => {
-    const callId = pendingRevealRef.current
-    if (!callId || !isOpen || !turnKey || !timeline) return
-    pendingRevealRef.current = null
-    const selector = `[data-tool-call-id="${CSS.escape(callId)}"]`
-    void timeline.scrollToTurn(turnKey, { align: "center", target: (row) => row.querySelector(selector) })
-  }, [activeToolCallId, isOpen, turnKey, timeline])
+    if (holdsRevealTarget) setOpenOverride(true)
+  }, [holdsRevealTarget, setOpenOverride])
 
   function renderCall(call: ToolCall) {
     const isActive = activeToolCallId === call.id

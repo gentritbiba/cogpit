@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
 import { TimelineRowsProvider } from "../TimelineRowsProvider"
+import { revealToolCall, useTimelineStore, type TimelineStateStore } from "../disclosure"
 import type { ParsedSession, SubAgentMessage, ToolCall, Turn } from "../../../../shared/session/types"
 import { formatTaskAttention, formatTaskWakeup } from "../../../../shared/contracts/taskWakeup"
 import { formatCrewChatDelivery } from "../../../../shared/contracts/crewChat"
@@ -220,10 +221,16 @@ describe("TurnSection navigation", () => {
     mocks.activeToolCallId = null
   })
 
-  it("opens the folded work when navigation lands on a call inside it", () => {
-    mocks.activeToolCallId = "question-1"
+  it("opens the folded work when navigation reveals a call inside it, by turn key", () => {
+    let store: TimelineStateStore | null = null
+    function Capture() {
+      store = useTimelineStore()
+      return null
+    }
+    render(<><Capture /><TurnSection turn={turn} index={0} turnKey="turn" isLast={true} /></>, { wrapper })
+    expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "false")
 
-    render(<TurnSection turn={turn} index={0} turnKey="turn" isLast={true} />, { wrapper })
+    act(() => revealToolCall(store!, "turn", turn, "question-1"))
 
     expect(screen.getByRole("button", { name: /worked for/i })).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()

@@ -3,6 +3,8 @@ import { Loader2, Redo2 } from "lucide-react"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
+import { revealKey, revealToolCall, useTimelineStore } from "./disclosure"
+import { toolSelector } from "@/lib/sessionFindDom"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { TimelineScrollController } from "@/lib/timelineScroll/controller"
@@ -138,7 +140,8 @@ export function TimelineList({
   isLoadingOlder,
   onLoadMore,
 }: TimelineListProps) {
-  const { state: { activeTurnIndex, expandAll } } = useAppContext()
+  const { state: { activeTurnIndex, activeToolCallId, expandAll } } = useAppContext()
+  const store = useTimelineStore()
   const { undoRedo } = useSessionContext()
   const plan = useSyncExternalStore(controller.subscribePlan, controller.getPlan)
   const [, forceRender] = useReducer((count: number) => count + 1, 0)
@@ -157,19 +160,34 @@ export function TimelineList({
     if (controller.getPlan() !== plan) forceRender()
   })
 
-  // Jump to the turn selected in the stats and sidebar panels.
-  const jumpedRef = useRef<number | null>(null)
+  // Jump to the turn (or one of its tool calls) selected in the stats and
+  // sidebar panels. The selection is an index, so a prepend either leaves it
+  // pointing at another turn or moves it with its turn; neither is a new
+  // selection to jump to. Everything after resolving the key goes by key.
+  const jumpedRef = useRef<{ index: number; key: string; callId: string | null } | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {
       jumpedRef.current = null
       return
     }
-    if (activeTurnIndex === jumpedRef.current) return
     const target = rows.find((row) => row.index === activeTurnIndex)
+    const jumped = jumpedRef.current
+    if (jumped && jumped.callId === activeToolCallId && (activeTurnIndex === jumped.index || target?.key === jumped.key)) {
+      jumped.index = activeTurnIndex
+      return
+    }
     if (!target) return
-    jumpedRef.current = activeTurnIndex
-    void controller.scrollToTurn(target.key, { align: "start" })
-  }, [activeTurnIndex, rows, controller])
+    jumpedRef.current = { index: activeTurnIndex, key: target.key, callId: activeToolCallId }
+    if (!activeToolCallId) {
+      void controller.scrollToTurn(target.key, { align: "start" })
+      return
+    }
+    if (store) revealToolCall(store, target.key, target.turn, activeToolCallId)
+    const selector = toolSelector(activeToolCallId)
+    void controller.scrollToTurn(target.key, { align: "center", target: (row) => row.querySelector(selector) }).then(() => {
+      if (store?.get(revealKey(target.key)) === activeToolCallId) store.set(revealKey(target.key), null)
+    })
+  }, [activeTurnIndex, activeToolCallId, rows, controller, store])
 
   const setSize = hasMore ? -1 : turnCount
   const children: ReactNode[] = []

@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import type { ThinkingBlock, Turn } from "../../../shared/session/types"
+import { planTurnFold } from "@/lib/turnFold"
 
 type Listener = () => void
 type Initial<T> = T | (() => T)
@@ -34,6 +36,17 @@ export class TimelineStateStore {
   /** Opens a disclosure, for navigation that has to reveal what it lands on. */
   open(key: string): void {
     this.set(key, true)
+  }
+
+  /** Opens every closed disclosure under `prefix` that `accept` takes; returns how many opened. */
+  openClosed(prefix: string, accept: (key: string) => boolean): number {
+    let opened = 0
+    for (const [key, value] of this.values) {
+      if (value !== false || !key.startsWith(prefix) || !accept(key)) continue
+      this.set(key, true)
+      opened++
+    }
+    return opened
   }
 
   subscribe(key: string, listener: Listener): () => void {
@@ -112,6 +125,25 @@ export function useScopeTurnKey(): string | null {
   return useContext(ScopeContext)?.root ?? null
 }
 
+/** What find asks a turn to show: a tool call by id, or a run of thinking. */
+export type RevealTarget = string | readonly ThinkingBlock[]
+
+export function revealKey(turnKey: string): string {
+  return `${turnKey}:reveal`
+}
+
+/** Opens the turn's work fold when it hides `turn.contentBlocks[block]`. */
+export function openWorkFoldFor(store: TimelineStateStore, turnKey: string, turn: Turn, block: number): void {
+  if (planTurnFold(turn.contentBlocks).foldedIndices.includes(block)) store.open(`${turnKey}:work`)
+}
+
+/** Makes a turn render one of its tool calls: unfolds the work and has the group holding it open. */
+export function revealToolCall(store: TimelineStateStore, turnKey: string, turn: Turn, callId: string): void {
+  const block = turn.contentBlocks.findIndex((b) => (b.kind === "tool_calls" || b.kind === "plan_mode") && b.toolCalls.some((call) => call.id === callId))
+  if (block >= 0) openWorkFoldFor(store, turnKey, turn, block)
+  store.set(revealKey(turnKey), callId)
+}
+
 function resolve<T>(initial: Initial<T>): T {
   return typeof initial === "function" ? (initial as () => T)() : initial
 }
@@ -154,4 +186,10 @@ export function useDisclosure(key: string | null, initial: Initial<boolean>): [b
 /** Text or answers the reader is still writing, kept when the row unmounts. */
 export function useTimelineDraft<T = string>(key: string | null, initial: Initial<T>): [T, (next: T | ((current: T) => T)) => void] {
   return useTimelineState(key, initial)
+}
+
+/** The reveal request of the turn this sits in, for the group that holds its target to open itself. */
+export function useRevealTarget(): RevealTarget | null {
+  const turnKey = useScopeTurnKey()
+  return useTimelineState<RevealTarget | null>(turnKey === null ? null : revealKey(turnKey), null)[0]
 }

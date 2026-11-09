@@ -352,14 +352,11 @@ html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
   animation: none !important;
 }
 
-mark.find-in-session-highlight {
+::highlight(find-match) {
   background-color: color-mix(in oklab, var(--warning) 35%, transparent);
-  color: inherit;
-  border-radius: 2px;
-  padding: 0;
 }
-mark.find-in-session-active {
-  background-color: color-mix(in oklab, var(--warning) 65%, transparent);
+::highlight(find-active) {
+  background-color: color-mix(in oklab, var(--warning) 75%, transparent);
 }
 
 .xterm .xterm-viewport {
