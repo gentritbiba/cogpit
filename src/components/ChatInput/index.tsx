@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, useLayoutEffect, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
-import { X } from "lucide-react"
+import { Sparkles, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
@@ -19,7 +19,6 @@ import { registerComposer, emitComposerEvent, dispatchComposerKey, type Composer
 import { RuntimePluginActions } from "@/plugins/RuntimePluginActions"
 import { DictationBar, DictationButton, useComposerDictation } from "@/plugins/RuntimeDictation"
 import { ErrorBanner } from "./ErrorBanner"
-import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import { capabilitiesFor, DEFAULT_AGENT_KIND, descriptorFor, type AgentKind } from "@/lib/agents"
 import { isAgentInstalled, useAgentAvailability } from "@/lib/agents/availability"
 import { signInTargetFor, startAgentSignIn } from "@/lib/agents/signIn"
@@ -389,6 +388,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     setText(suggestion)
     focusComposerAtEnd()
   }, [focusComposerAtEnd])
+  const isPlanApproval = pendingInteraction?.type === "plan"
+  const isUserQuestion = pendingInteraction?.type === "question"
+  const hasPermissions = permissionRequests.length > 0
+  // The CLI's predicted next prompt waits in the empty composer as its
+  // placeholder, taking no room of its own; Tab or the sparkle button takes it.
+  const offeredSuggestion = !text && !hasPermissions && !isPlanApproval && !isUserQuestion ? promptSuggestion : null
 
   const handleFileSelect = useCallback((path: string) => {
     if (!fileMention) return
@@ -514,11 +519,12 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = filteredSlashList[slashSelectedIndex]; if (selected) handleSlashSelect(selected); return }
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
+    if (offeredSuggestion && e.key === "Tab" && !e.shiftKey) { e.preventDefault(); applySuggestion(offeredSuggestion); return }
     if (dictationStatus !== "idle" && e.key === "Escape") { e.preventDefault(); dictation?.cancel(); return }
     if (recording && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); dictation?.finish(true); return }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!dictating) void handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer, dictationStatus, dictating, recording, dictation])
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, composer, dictationStatus, dictating, recording, dictation, offeredSuggestion, applySuggestion])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { textRef.current = e.target.value; setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
@@ -540,9 +546,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     },
   }), [updateMultiline, addContext, draftNow, applyDraft])
 
-  const isPlanApproval = pendingInteraction?.type === "plan"
-  const isUserQuestion = pendingInteraction?.type === "question"
-  const hasPermissions = permissionRequests.length > 0
   // With session controls inside the card the message always gets its own
   // row, so the inline single-line grid only applies to the mobile composer.
   const stacked = Boolean(footer)
@@ -559,7 +562,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
     <div
       className={cn(
         "relative pb-0",
-        compact ? "px-2 pt-2" : "px-3 pt-2",
+        compact ? "px-2 pt-1" : "px-3 pt-1",
         isDragOver && "ring-2 ring-info/40 ring-inset",
       )}
       onDragOver={handleDragOver}
@@ -597,10 +600,6 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
               onReject={() => { void submitPlanResponse(false) }}
             />
           )}
-
-        {/* Sits above the composer it fills. Renders nothing when the CLI sent
-            no suggestion, which is most turns. */}
-        <PromptSuggestionBar suggestion={promptSuggestion} onAccept={applySuggestion} />
 
         {snapshot.messages.filter((message) => !message.pending).map((message) => <div key={message.id} role="status" className="mb-2 rounded border p-2 text-xs">
           <p>Unsent message: {message.draft.text.slice(0, 100) || "Context / attachments"}. Kept in this tab.</p>
@@ -664,7 +663,7 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
                 // On mobile, scroll textarea into view after virtual keyboard opens
                 setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
               }}
-              placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
+              placeholder={offeredSuggestion ? `${offeredSuggestion}  (Tab)` : getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
               aria-label="Message"
               role="combobox"
               aria-autocomplete="list"
@@ -684,6 +683,19 @@ const ScopedChatInput = forwardRef<ChatInputHandle, ChatInputProps & { scope: st
               {footer}
               {dictation && dictationStatus !== "idle" ? <DictationBar dictation={dictation} /> : <>
                 <RuntimePluginActions />
+                {offeredSuggestion && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => applySuggestion(offeredSuggestion)}
+                    className="text-muted-foreground"
+                    title="Use the suggestion (Tab)"
+                    aria-label={`Use the suggestion: ${offeredSuggestion}`}
+                  >
+                    <Sparkles data-icon="icon" />
+                  </Button>
+                )}
                 {dictation && <DictationButton dictation={dictation} onStart={() => textareaRef.current?.focus()} />}
               </>}
               <ActionButtons hasContent={recording || hasContent && !dictating} onSubmit={recording ? () => dictation?.finish(true) : handleSubmit}
