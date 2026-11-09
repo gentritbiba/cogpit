@@ -185,7 +185,7 @@ export function TimelineList({
     if (store) revealToolCall(store, target.key, target.turn, activeToolCallId)
     const selector = toolSelector(activeToolCallId)
     void controller.scrollToTurn(target.key, { align: "center", target: (row) => row.querySelector(selector) }).then(() => {
-      store?.set(revealKey(target.key), null)
+      if (store?.get(revealKey(target.key)) === activeToolCallId) store.set(revealKey(target.key), null)
     })
   }, [activeTurnIndex, activeToolCallId, rows, controller, store])
 

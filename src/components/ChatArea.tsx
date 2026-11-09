@@ -136,6 +136,7 @@ export const ChatArea = memo(function ChatArea({
       <TimelineRowsProvider sessionKey={currentSession.sessionId}>
       <div className="relative min-h-0 flex-1">
         <FindInSession
+          key={currentSession.sessionId}
           ref={findRef}
           scrollContainerRef={chatScrollRef}
           timelineRef={timelineRef}

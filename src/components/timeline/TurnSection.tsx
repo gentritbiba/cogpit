@@ -226,7 +226,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
   )
   const workVisible = workExpanded ?? (expandAll || !isTurnDone)
 
-
   const { leadingBlocks, trailingBlocks } = useMemo(() => {
     if (!foldPlan.foldable) {
       return { leadingBlocks: [] as TurnContentBlock[], trailingBlocks: [] as TurnContentBlock[] }

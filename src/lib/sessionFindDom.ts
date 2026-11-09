@@ -1,9 +1,9 @@
-import { foldCase, occurrencesIn } from "@/lib/sessionFind"
+import { occurrencesIn, queryPattern } from "@/lib/sessionFind"
 
-export const ROW_SELECTOR = "[data-row-key]"
-export const TOOL_SELECTOR = "[data-tool-call-id]"
+const ROW_SELECTOR = "[data-row-key]"
+const TOOL_SELECTOR = "[data-tool-call-id]"
 
-export function rowSelector(turnKey: string): string {
+function rowSelector(turnKey: string): string {
   return `[data-row-key="${CSS.escape(turnKey)}"]`
 }
 
@@ -11,17 +11,24 @@ export function toolSelector(callId: string): string {
   return `[data-tool-call-id="${CSS.escape(callId)}"]`
 }
 
+/** Where one occurrence sits in the DOM; turned into a Range or StaticRange as needed. */
+export interface Span {
+  startContainer: Text
+  startOffset: number
+  endContainer: Text
+  endOffset: number
+}
+
 /**
- * The occurrences of `query` in the text `scope` renders, as Ranges, in
- * document order. Text is read across element boundaries, so a match split
- * by highlighting spans is still found. Subtrees matching `skip` are left out.
- * Reads the DOM only.
+ * The occurrences of `query` in the text `scope` renders, in document order.
+ * Text is read across element boundaries, so a match split by highlighting
+ * spans is still found. Subtrees matching `skip` are left out. Reads the DOM
+ * only.
  */
-export function occurrenceRanges(scope: Element, query: string, skip?: string): Range[] {
-  const q = foldCase(query)
-  if (!q) return []
-  const doc = scope.ownerDocument
-  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+export function occurrenceSpans(scope: Element, query: string, skip?: string): Span[] {
+  const pattern = queryPattern(query)
+  if (!pattern) return []
+  const walker = scope.ownerDocument.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
       if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT
       return skip && node !== scope && (node as Element).matches(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP
@@ -50,36 +57,54 @@ export function occurrenceRanges(scope: Element, query: string, skip?: string): 
     return [nodes[lo], offset - starts[lo]]
   }
 
-  return occurrencesIn(foldCase(text), q).map((at) => {
-    const range = doc.createRange()
-    range.setStart(...locate(at, false))
-    range.setEnd(...locate(at + q.length, true))
-    return range
+  return occurrencesIn(text, pattern).map(([from, to]) => {
+    const [startContainer, startOffset] = locate(from, false)
+    const [endContainer, endOffset] = locate(to, true)
+    return { startContainer, startOffset, endContainer, endOffset }
   })
 }
 
-/** The element a Range starts in, for navigation to land on. */
-export function rangeElement(range: Range): Element | null {
-  const node = range.startContainer
-  return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
+export function toRange(span: Span): Range {
+  const range = span.startContainer.ownerDocument.createRange()
+  range.setStart(span.startContainer, span.startOffset)
+  range.setEnd(span.endContainer, span.endOffset)
+  return range
 }
 
-export function supportsHighlights(): boolean {
-  return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight === "function"
+/** The element a match starts in, for navigation to land on. */
+export function spanElement(span: Span): Element | null {
+  return span.startContainer.parentElement
 }
 
-/** The match find is on: the `nth` occurrence inside its turn's row, or inside one tool call of it. */
+/** The match find is on, inside its turn's row or inside one tool call of it. */
 export interface ActiveMatch {
   turnKey: string
   callId: string | null
+  /** Which occurrence in that scope, counted from the start, or from the end when `fromEnd`. */
   nth: number
+  fromEnd: boolean
 }
 
-/** The occurrences that stand for `active` in its mounted row, in the order the model counted them. */
-export function activeScopeRanges(row: Element, query: string, callId: string | null): { scope: Element; ranges: Range[] } | null {
+/** The occurrences that stand for an active match in its mounted row: the tool card's own, or the row's outside tool cards. */
+export function scopeSpans(row: Element, query: string, callId: string | null): { scope: Element; spans: Span[] } | null {
   const scope = callId === null ? row : row.querySelector(toolSelector(callId))
   if (!scope) return null
-  return { scope, ranges: occurrenceRanges(scope, query, callId === null ? TOOL_SELECTOR : undefined) }
+  return { scope, spans: occurrenceSpans(scope, query, callId === null ? TOOL_SELECTOR : undefined) }
+}
+
+/** The occurrence an active match stands for; the nearest one when the DOM shows fewer. */
+export function pickSpan(spans: readonly Span[], nth: number, fromEnd: boolean): Span | null {
+  if (spans.length === 0) return null
+  const index = Math.min(nth, spans.length - 1)
+  return spans[fromEnd ? spans.length - 1 - index : index]
+}
+
+function supportsHighlights(): boolean {
+  return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight === "function"
+}
+
+function staticRange(span: Span): AbstractRange {
+  return typeof StaticRange === "function" ? new StaticRange(span) : toRange(span)
 }
 
 const MATCH_HIGHLIGHT = "find-match"
@@ -87,25 +112,27 @@ const ACTIVE_HIGHLIGHT = "find-active"
 
 /**
  * Paints find's matches in the mounted rows with the CSS Custom Highlight API,
- * which styles Ranges without touching the DOM. Rows are re-read when they
- * mount or their content changes. Where the API is missing, or the active
- * match is not in the row's text, it reports the active row so find can draw
- * a ring over it instead.
+ * which styles ranges without touching the DOM. A row is re-read when it
+ * mounts or its content changes. Where the API is missing, or the active match
+ * is not in its row's text, it reports the active row so find can draw a ring
+ * over it instead.
  */
 export class FindPainter {
   private scroller: HTMLElement | null = null
   private query = ""
   private active: ActiveMatch | null = null
-  private readonly rows = new Map<Element, Range[]>()
-  private activeRanges: { row: Element; ranges: Range[] | null } | null = null
+  private readonly rows = new Map<Element, AbstractRange[]>()
+  private activeSpan: { row: Element; span: Span | null } | null = null
+  private ringRow: Element | null = null
   private observer: MutationObserver | null = null
   private frame: number | null = null
-  private readonly highlights = supportsHighlights()
+  private ringOnly = true
 
   constructor(private readonly onRing: (row: Element | null) => void) {}
 
   update(scroller: HTMLElement | null, query: string, active: ActiveMatch | null): void {
-    const sameActive = active?.turnKey === this.active?.turnKey && active?.callId === this.active?.callId && active?.nth === this.active?.nth
+    const sameActive = active?.turnKey === this.active?.turnKey && active?.callId === this.active?.callId
+      && active?.nth === this.active?.nth && active?.fromEnd === this.active?.fromEnd
     if (scroller === this.scroller && query === this.query && sameActive) return
     if (scroller !== this.scroller || query !== this.query) {
       this.rows.clear()
@@ -115,7 +142,7 @@ export class FindPainter {
     this.scroller = scroller
     this.query = query
     this.active = active
-    this.activeRanges = null
+    this.activeSpan = null
     if (scroller && query && !this.observer && typeof MutationObserver === "function") {
       this.observer = new MutationObserver((records) => this.invalidate(records))
       this.observer.observe(scroller, { childList: true, subtree: true, characterData: true })
@@ -123,11 +150,26 @@ export class FindPainter {
     this.schedule()
   }
 
-  /** Repaint on the next frame; also the hook for scroll, which moves the ring. */
+  /** Repaint everything on the next frame. */
   schedule = (): void => {
+    this.ringOnly = false
+    this.request()
+  }
+
+  /** Scrolling moves only the ring; highlights follow their text by themselves. */
+  scheduleRing = (): void => {
+    if (this.ringRow) this.request()
+  }
+
+  private request(): void {
     if (this.frame !== null) return
     this.frame = requestAnimationFrame(() => {
       this.frame = null
+      if (this.ringOnly) {
+        this.onRing(this.ringRow?.isConnected ? this.ringRow : null)
+        return
+      }
+      this.ringOnly = true
       this.paint()
     })
   }
@@ -139,65 +181,74 @@ export class FindPainter {
     this.observer = null
     this.rows.clear()
     this.scroller = null
+    this.ringRow = null
     this.clearHighlights()
     this.onRing(null)
   }
 
   private invalidate(records: MutationRecord[]): void {
+    let touched = false
     for (const record of records) {
       const target = record.target
       const el = target.nodeType === Node.ELEMENT_NODE ? target as Element : target.parentElement
       const row = el?.closest(ROW_SELECTOR)
-      if (!row) continue
-      this.rows.delete(row)
-      if (this.activeRanges?.row === row) this.activeRanges = null
+      if (row) {
+        this.rows.delete(row)
+        if (this.activeSpan?.row === row) this.activeSpan = null
+        touched = true
+      } else if (record.type === "childList") {
+        // Rows mounted or unmounted.
+        touched = true
+      }
     }
-    this.schedule()
+    if (touched) this.schedule()
   }
 
   private clearHighlights(): void {
-    if (!this.highlights) return
+    if (!supportsHighlights()) return
     CSS.highlights.delete(MATCH_HIGHLIGHT)
     CSS.highlights.delete(ACTIVE_HIGHLIGHT)
   }
 
-  /** Paints now; exposed so tests and a landed navigation need not wait a frame. */
-  paint(): void {
+  private paint(): void {
     const scroller = this.scroller
     if (!scroller || !this.query) {
       this.clearHighlights()
+      this.ringRow = null
       this.onRing(null)
       return
     }
     for (const row of this.rows.keys()) if (!row.isConnected) this.rows.delete(row)
 
-    let activeRange: Range | null = null
     let activeRow: Element | null = null
+    let activeSpan: Span | null = null
     if (this.active) {
       activeRow = scroller.querySelector(rowSelector(this.active.turnKey))
-      if (activeRow && this.activeRanges?.row !== activeRow) {
-        this.activeRanges = { row: activeRow, ranges: activeScopeRanges(activeRow, this.query, this.active.callId)?.ranges ?? null }
+      if (activeRow && this.activeSpan?.row !== activeRow) {
+        const found = scopeSpans(activeRow, this.query, this.active.callId)
+        this.activeSpan = { row: activeRow, span: found ? pickSpan(found.spans, this.active.nth, this.active.fromEnd) : null }
       }
-      const ranges = activeRow ? this.activeRanges?.ranges : null
-      if (ranges && ranges.length > 0) activeRange = ranges[Math.min(this.active.nth, ranges.length - 1)]
+      activeSpan = activeRow ? this.activeSpan?.span ?? null : null
     }
 
-    if (this.highlights) {
+    const highlights = supportsHighlights()
+    if (highlights) {
       const all = new Highlight()
       for (const row of scroller.querySelectorAll(ROW_SELECTOR)) {
         let ranges = this.rows.get(row)
-        if (!ranges) this.rows.set(row, ranges = occurrenceRanges(row, this.query))
+        if (!ranges) this.rows.set(row, ranges = occurrenceSpans(row, this.query).map(staticRange))
         for (const range of ranges) all.add(range)
       }
       CSS.highlights.set(MATCH_HIGHLIGHT, all)
-      if (activeRange) {
-        const current = new Highlight(activeRange)
+      if (activeSpan) {
+        const current = new Highlight(staticRange(activeSpan))
         current.priority = 1
         CSS.highlights.set(ACTIVE_HIGHLIGHT, current)
       } else {
         CSS.highlights.delete(ACTIVE_HIGHLIGHT)
       }
     }
-    this.onRing(activeRow && (!this.highlights || !activeRange) ? activeRow : null)
+    this.ringRow = activeRow && (!highlights || !activeSpan) ? activeRow : null
+    this.onRing(this.ringRow)
   }
 }

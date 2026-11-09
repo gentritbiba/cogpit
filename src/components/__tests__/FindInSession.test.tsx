@@ -67,6 +67,8 @@ function CaptureStore() {
   return null
 }
 
+let replaceTurns: (turns: Turn[]) => void = () => {}
+
 function Harness({ scroller, handle, findRef, older, onLoadMore }: {
   scroller: HTMLDivElement
   handle: TimelineHandle
@@ -81,6 +83,7 @@ function Harness({ scroller, handle, findRef, older, onLoadMore }: {
   const [pages, setPages] = useState(older ?? [])
   const [loading, setLoading] = useState(false)
   sessionTurns = turns
+  replaceTurns = setTurns
   const loadMore = () => {
     onLoadMore?.()
     setLoading(true)
@@ -116,6 +119,13 @@ async function frame() {
 
 function press(key: string, shiftKey = false) {
   fireEvent.keyDown(screen.getByLabelText("Find in conversation"), { key, shiftKey })
+}
+
+/** The engine retries `target` across layout passes; the first pass precedes the reveal's render. */
+function land(navigation: Navigation, row: HTMLElement): Element | null {
+  const target = navigation.opts.target!
+  expect(target(row)).toBeNull()
+  return target(row)
 }
 
 function rowEl(html: string): HTMLElement {
@@ -157,18 +167,18 @@ describe("FindInSession", () => {
     expect(store!.get("t1:reveal")).toBe("c1")
     expect(store!.get("t1:call:c1:panel")).toBe(true)
     const t1 = rowEl(`<div data-row-key="t1"><div data-tool-call-id="c1"><span>found the </span><b>nee</b>dle in output</div></div>`)
-    expect(navigations.at(-1)!.opts.target!(t1)).toBe(t1.querySelector("b"))
+    expect(land(navigations.at(-1)!, t1)).toBe(t1.querySelector("b"))
 
     press("Enter")
     press("Enter")
     expect(screen.getByText("4/4")).toBeInTheDocument()
     // The model only picks the turn; the second occurrence is found in the row's own text.
     const t2 = scroller.querySelector<HTMLElement>("[data-row-key=t2]")!
-    expect(navigations.at(-1)!.opts.target!(t2)).toBe(t2.querySelectorAll("p")[1])
+    expect(land(navigations.at(-1)!, t2)).toBe(t2.querySelectorAll("p")[1])
 
     press("Enter", true)
     expect(screen.getByText("3/4")).toBeInTheDocument()
-    expect(navigations.at(-1)!.opts.target!(t2)).toBe(t2.querySelectorAll("p")[0])
+    expect(land(navigations.at(-1)!, t2)).toBe(t2.querySelectorAll("p")[0])
   })
 
   it("starts at the first match from the top of the view down", async () => {
@@ -192,16 +202,56 @@ describe("FindInSession", () => {
     // Mounted disclosures register their first value; the result preview starts closed.
     store!.init("t0:call:c1:result", false)
     store!.init("t0:call:c1:input", false)
+    // Booleans that are not "open" switches: a code block's fold, a sent answer, an image fetch.
+    store!.init("t0:call:c1:answers:q1:sent", false)
+    store!.init("t0:call:c1:image:ref1", false)
+    store!.init("t0:text-1:code:120", false)
     await search("needle")
 
     const preview = rowEl(`<div data-row-key="t0"><div data-tool-call-id="c1">x x x</div></div>`)
     const target = navigations[0].opts.target!
-    expect(target(preview)).toBeNull()
+    expect(land(navigations[0], preview)).toBeNull()
     expect(store!.get("t0:call:c1:result")).toBe(true)
-    // Raw input would only repeat the input; it stays closed.
+    // Raw input would only repeat the input; it stays closed. Nothing outside the allow-list moves.
     expect(store!.get("t0:call:c1:input")).toBe(false)
+    expect(store!.get("t0:call:c1:answers:q1:sent")).toBe(false)
+    expect(store!.get("t0:call:c1:image:ref1")).toBe(false)
+    expect(store!.get("t0:text-1:code:120")).toBe(false)
     const expanded = rowEl(`<div data-row-key="t0"><div data-tool-call-id="c1">x <i>needle</i></div></div>`)
     expect(target(expanded)).toBe(expanded.querySelector("i"))
+  })
+
+  it("counts a result's hits from the card's end, past the header and inputs that repeat the indexed text", async () => {
+    sessionTurns = [emptyTurn({ id: "t0", contentBlocks: [{ kind: "tool_calls", toolCalls: [{ ...call("c1", "grep found needle"), input: { command: "grep needle" } }] }] })]
+    const scroller = mountScroller("")
+    const { handle, navigations } = makeHandle()
+    const findRef = createRef<FindInSessionHandle>()
+    render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
+    act(() => findRef.current!.open())
+    await search("needle")
+    expect(screen.getByText("1/2")).toBeInTheDocument()
+    // The card shows the command in its header and its panel, then the result.
+    const row = rowEl(`<div data-row-key="t0"><div data-tool-call-id="c1"><b>grep needle</b><pre>grep needle</pre><i>grep found needle</i></div></div>`)
+    expect(land(navigations[0], row)).toBe(row.querySelector("b"))
+    press("Enter")
+    expect(screen.getByText("2/2")).toBeInTheDocument()
+    expect(land(navigations[1], row)).toBe(row.querySelector("i"))
+  })
+
+  it("goes to the last match on Previous when the selected turn is gone", async () => {
+    const scroller = mountScroller("")
+    const { handle, navigations } = makeHandle()
+    const findRef = createRef<FindInSessionHandle>()
+    render(<Harness scroller={scroller} handle={handle} findRef={findRef} />)
+    act(() => findRef.current!.open())
+    await search("needle")
+    expect(navigations.at(-1)!.key).toBe("t0")
+    // The selected turn leaves the session (a rewind): nothing is selected now.
+    act(() => replaceTurns(makeTurns().slice(1)))
+    expect(screen.getByText("0/3")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }))
+    expect(navigations.at(-1)!.key).toBe("t2")
+    expect(screen.getByText("3/3")).toBeInTheDocument()
   })
 
   it("never mutates the timeline's DOM", async () => {
@@ -267,11 +317,13 @@ describe("FindInSession", () => {
       await search("needle")
       press("Enter")
       await frame()
-      expect(registry.get("find-match")!.ranges.map((r) => r.toString())).toEqual(["needle", "needle"])
+      expect(registry.get("find-match")!.ranges.map((r) => r.startContainer.textContent!.slice(r.startOffset, r.endOffset))).toEqual(["needle", "needle"])
       const active = registry.get("find-active")!
       expect(active.ranges).toHaveLength(1)
       expect(active.ranges[0].startContainer.parentElement).toBe(scroller.querySelectorAll("p")[1])
       expect(screen.queryByTestId("find-ring")).toBeNull()
+      // Highlights style ranges; the rows' DOM is untouched.
+      expect(scroller.innerHTML).toBe(`<div data-row-key="t2"><p>needle once</p><p>needle twice</p></div>`)
 
       act(() => findRef.current!.close())
       await frame()

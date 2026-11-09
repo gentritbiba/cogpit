@@ -8,9 +8,9 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { useSessionContext } from "@/contexts/SessionContext"
-import { openWorkFoldFor, revealKey, revealToolCall, useTimelineStore, type TimelineStateStore } from "@/components/timeline/disclosure"
-import { findInTurns, turnSegments, type FindHit, type FindPart } from "@/lib/sessionFind"
-import { activeScopeRanges, FindPainter, rangeElement, type ActiveMatch } from "@/lib/sessionFindDom"
+import { openWorkFoldFor, revealKey, revealToolCall, useTimelineStore, type RevealTarget, type TimelineStateStore } from "@/components/timeline/disclosure"
+import { findInTurns, firstGroupOfTurn, groupOfHit, NO_RESULTS, turnSegments, type FindPart, type FindResults } from "@/lib/sessionFind"
+import { FindPainter, pickSpan, scopeSpans, spanElement, type ActiveMatch } from "@/lib/sessionFindDom"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import type { TimelineHandle } from "@/lib/timelineScroll/types"
 import { QUOTE_SEARCH_PAGES } from "@/hooks/useQuoteNavigation"
@@ -31,13 +31,14 @@ interface FindInSessionProps {
 }
 
 const NO_TURNS: Turn[] = []
-const NO_HITS: FindHit[] = []
 /** Landing attempts that may wait for revealed content before settling for the closest occurrence. */
 const SETTLE_ATTEMPTS = 4
-/** Disclosures that only shorten long text, opened when the match lies past the cut. */
-const LENGTH_DISCLOSURE = /:(user:more|message|code:\d+)$/
+/** Disclosures inside a tool card that only cut long content short. */
+const TOOL_LENGTH = /^(result|details|text:[^:]+|cmd:\d+:open|all:result)$/
+/** Disclosures elsewhere in a turn that only cut long text short. */
+const TEXT_LENGTH = /(^|:)(user:more|message)$/
 
-/** The turn's position, and which occurrence of that turn, a hit index stands for. */
+/** The turn, and which of its occurrences, the selected match is. Survives prepends and live updates. */
 interface Selection {
   turnKey: string
   ordinal: number
@@ -56,33 +57,83 @@ interface OlderSearch {
   boundaryKey: string | null
 }
 
-function partOf(turns: readonly Turn[], hit: FindHit): FindPart {
-  return turnSegments(turns[hit.turn])[hit.segment].part
+interface Hit {
+  turn: Turn
+  turnKey: string
+  part: FindPart
+  /** Index among the turn's own hits. */
+  ordinal: number
+  active: ActiveMatch
 }
 
-function scopeOf(part: FindPart): string | null {
-  return part.kind === "tool" ? part.callId : null
+function isResult(part: FindPart): boolean {
+  return part.kind === "tool" && part.result
 }
 
-/** Opens what hides `part` so its row renders it: the work fold, the group, the tool's panel. */
-function revealStructure(store: TimelineStateStore, turnKey: string, turn: Turn, part: FindPart): void {
+/**
+ * What hit `index` is: its turn and part, and which DOM occurrence stands for
+ * it. A tool card counts its own occurrences; a result renders last in the
+ * card, so its hits count from the card's end, past the header and inputs
+ * that repeat what the model indexed once.
+ */
+function describeHit(results: FindResults, turns: readonly Turn[], keys: readonly string[], index: number): Hit {
+  const g = groupOfHit(results, index)
+  const group = results.groups[g]
+  const turn = turns[group.turn]
+  const segments = turnSegments(turn)
+  const part = segments[group.segment].part
+  const first = firstGroupOfTurn(results, group.turn)
+  const within = index - results.starts[g]
+  const callId = part.kind === "tool" ? part.callId : null
+  const sameScope = (other: FindPart) => (other.kind === "tool" ? other.callId : null) === callId && isResult(other) === isResult(part)
+  const fromEnd = isResult(part)
+  let nth = fromEnd ? group.count - 1 - within : within
+  if (fromEnd) {
+    for (let h = g + 1; h < results.groups.length && results.groups[h].turn === group.turn; h++) {
+      if (sameScope(segments[results.groups[h].segment].part)) nth += results.groups[h].count
+    }
+  } else {
+    for (let h = g - 1; h >= first; h--) {
+      if (sameScope(segments[results.groups[h].segment].part)) nth += results.groups[h].count
+    }
+  }
+  const turnKey = keys[group.turn]
+  return { turn, turnKey, part, ordinal: index - results.starts[first], active: { turnKey, callId, nth, fromEnd } }
+}
+
+/** The hit a selection stands for now, or -1 when its turn has none. */
+function indexOfSelection(results: FindResults, keys: readonly string[], selection: Selection | null): number {
+  if (!selection) return -1
+  const turn = keys.indexOf(selection.turnKey)
+  const first = turn < 0 ? -1 : firstGroupOfTurn(results, turn)
+  if (first < 0) return -1
+  let last = first
+  while (last + 1 < results.groups.length && results.groups[last + 1].turn === turn) last++
+  const turnEnd = results.starts[last] + results.groups[last].count
+  return Math.min(results.starts[first] + selection.ordinal, turnEnd - 1)
+}
+
+/** Opens what hides `part` so its row renders it; returns the reveal request it made, if any. */
+function revealStructure(store: TimelineStateStore, turnKey: string, turn: Turn, part: FindPart): RevealTarget | null {
   if (part.kind === "compaction") store.open(`${turnKey}:compaction`)
   if (part.kind === "tool") {
     revealToolCall(store, turnKey, turn, part.callId)
     store.open(`${turnKey}:call:${part.callId}:panel`)
-    return
+    return part.callId
   }
   if ("block" in part) openWorkFoldFor(store, turnKey, turn, part.block)
-  if (part.kind === "thinking") store.set(revealKey(turnKey), part.blocks)
+  if (part.kind !== "thinking") return null
+  store.set(revealKey(turnKey), part.blocks)
+  return part.blocks
 }
 
-/** Opens what cuts long text short where `part` renders; returns how many opened. */
+/** Opens what cuts long content short where `part` renders; returns how many opened. */
 function revealLength(store: TimelineStateStore, turnKey: string, part: FindPart): number {
   if (part.kind === "tool") {
     const prefix = `${turnKey}:call:${part.callId}:`
-    return store.openClosed(prefix, (key) => key !== `${prefix}input`)
+    return store.openClosed(prefix, (key) => TOOL_LENGTH.test(key.slice(prefix.length)))
   }
-  return store.openClosed(`${turnKey}:`, (key) => !key.includes(":call:") && LENGTH_DISCLOSURE.test(key))
+  return store.openClosed(`${turnKey}:`, (key) => !key.includes(":call:") && TEXT_LENGTH.test(key))
 }
 
 /** A ring over the visible part of `row`, in the coordinates of the scroller's frame. */
@@ -103,7 +154,7 @@ function ringOver(row: Element | null, scroller: HTMLElement | null): Ring | nul
  * too, and the count is exact over everything loaded. It moves the timeline
  * only through `scrollToTurn`, opens what hides a match through the timeline
  * store, and paints matches with the CSS Custom Highlight API; it never
- * changes the timeline's DOM.
+ * changes the timeline's DOM. Mount one per session.
  */
 export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>(
   function FindInSession({ scrollContainerRef, timelineRef, hasMore = false, isLoadingOlder = false, onLoadMore }, ref) {
@@ -121,29 +172,13 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
     const navSeq = useRef(0)
 
     const keys = useMemo(() => turnKeysOf(turns), [turns])
-    const hits = useMemo(() => (isOpen && searched ? findInTurns(turns, searched) : NO_HITS), [isOpen, searched, turns])
-
-    const activeIndex = useMemo(() => {
-      if (!selection) return -1
-      const turn = keys.indexOf(selection.turnKey)
-      if (turn < 0) return -1
-      const first = hits.findIndex((hit) => hit.turn === turn)
-      if (first < 0) return -1
-      let last = first
-      while (last + 1 < hits.length && hits[last + 1].turn === turn) last++
-      return Math.min(first + selection.ordinal, last)
-    }, [selection, keys, hits])
-
-    const active = useMemo<ActiveMatch | null>(() => {
-      if (activeIndex < 0) return null
-      const hit = hits[activeIndex]
-      const callId = scopeOf(partOf(turns, hit))
-      let nth = 0
-      for (let i = activeIndex - 1; i >= 0 && hits[i].turn === hit.turn; i--) {
-        if (scopeOf(partOf(turns, hits[i])) === callId) nth++
-      }
-      return { turnKey: keys[hit.turn], callId, nth }
-    }, [activeIndex, hits, turns, keys])
+    const results = useMemo(() => (isOpen && searched ? findInTurns(turns, searched) : NO_RESULTS), [isOpen, searched, turns])
+    const total = results.total
+    const activeIndex = useMemo(() => indexOfSelection(results, keys, selection), [results, keys, selection])
+    const active = useMemo(
+      () => (activeIndex < 0 ? null : describeHit(results, turns, keys, activeIndex).active),
+      [activeIndex, results, turns, keys],
+    )
 
     // ── Painting ──────────────────────────────────────────────────────────────
     const [painter] = useState(() => new FindPainter((row) => setRing(ringOver(row, scrollContainerRef.current))))
@@ -153,30 +188,21 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
     useEffect(() => {
       const timeline = timelineRef.current
       if (!isOpen || !timeline) return
-      return timeline.subscribe(painter.schedule)
+      return timeline.subscribe(painter.scheduleRing)
     }, [isOpen, timelineRef, painter])
     useEffect(() => () => painter.dispose(), [painter])
 
     // ── Navigation ────────────────────────────────────────────────────────────
     const navigate = useCallback((index: number) => {
-      if (hits.length === 0) return
-      const i = ((index % hits.length) + hits.length) % hits.length
-      const hit = hits[i]
-      const turn = turns[hit.turn]
-      const turnKey = keys[hit.turn]
-      const part = partOf(turns, hit)
-      const callId = scopeOf(part)
-      let ordinal = 0
-      let nth = 0
-      for (let j = i - 1; j >= 0 && hits[j].turn === hit.turn; j--) {
-        ordinal++
-        if (scopeOf(partOf(turns, hits[j])) === callId) nth++
-      }
-      setSelection({ turnKey, ordinal })
+      if (total === 0) return
+      const hit = describeHit(results, turns, keys, ((index % total) + total) % total)
+      const { turnKey, part } = hit
+      const { callId, nth, fromEnd } = hit.active
+      setSelection({ turnKey, ordinal: hit.ordinal })
 
       const timeline = timelineRef.current
       if (!timeline) return
-      if (store) revealStructure(store, turnKey, turn, part)
+      const revealed = store ? revealStructure(store, turnKey, hit.turn, part) : null
       const seq = ++navSeq.current
       const q = searched
       let attempts = 0
@@ -184,54 +210,59 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
       void timeline.scrollToTurn(turnKey, {
         align: "center",
         target: (row) => {
-          attempts++
-          const found = activeScopeRanges(row, q, callId)
+          // The first try runs before React has rendered what the reveal opened.
+          if (++attempts === 1) return null
+          const found = scopeSpans(row, q, callId)
           if (!found) return null
-          if (found.ranges.length > nth) return rangeElement(found.ranges[nth])
+          if (found.spans.length > nth) return spanElement(pickSpan(found.spans, nth, fromEnd)!)
           if (!lengthOpened) {
             lengthOpened = true
             if (store && revealLength(store, turnKey, part) > 0) return null
           }
           if (attempts < SETTLE_ATTEMPTS) return null
-          const closest = found.ranges.at(-1)
-          return closest ? rangeElement(closest) : found.scope === row ? null : found.scope
+          const closest = pickSpan(found.spans, nth, fromEnd)
+          return closest ? spanElement(closest) : found.scope === row ? null : found.scope
         },
       }).then(() => {
-        if (store && navSeq.current === seq) store.set(revealKey(turnKey), null)
-        painter.schedule()
+        if (store && revealed !== null && store.get(revealKey(turnKey)) === revealed) store.set(revealKey(turnKey), null)
+        if (navSeq.current === seq) painter.schedule()
       })
-    }, [hits, turns, keys, timelineRef, store, searched, painter])
+    }, [results, total, turns, keys, timelineRef, store, searched, painter])
 
-    // A new query starts at the first match from the top of the view down.
+    const step = (direction: 1 | -1) => navigate(activeIndex < 0 ? (direction > 0 ? 0 : -1) : activeIndex + direction)
+
+    // A new query starts at the first match from the top of the view down,
+    // or at the first match that turns up later (a live reply, a page loaded).
     const navigatedFor = useRef<string | null>(null)
     useEffect(() => {
-      if (!isOpen || navigatedFor.current === searched) return
-      if (!searched) {
-        navigatedFor.current = searched
+      if (!isOpen || navigatedFor.current === searched || older) return
+      if (!searched || total === 0) {
         setSelection(null)
         return
       }
       navigatedFor.current = searched
-      setOlderExhausted(false)
-      if (hits.length === 0) {
-        setSelection(null)
-        return
-      }
       const firstVisible = timelineRef.current?.getViewport().firstVisibleKey ?? null
       const from = firstVisible === null ? 0 : Math.max(0, keys.indexOf(firstVisible))
-      const start = hits.findIndex((hit) => hit.turn >= from)
-      navigate(start < 0 ? 0 : start)
-    }, [isOpen, searched, hits, keys, navigate, timelineRef])
+      const group = results.groups.findIndex((g) => g.turn >= from)
+      navigate(group < 0 ? 0 : results.starts[group])
+    }, [isOpen, searched, older, results, total, keys, navigate, timelineRef])
+
+    useEffect(() => setOlderExhausted(false), [searched])
 
     // ── Older history ─────────────────────────────────────────────────────────
     useEffect(() => {
       if (!older || isLoadingOlder) return
       const boundary = older.boundaryKey === null ? 0 : keys.indexOf(older.boundaryKey)
-      let newest = -1
-      for (let i = 0; i < hits.length && hits[i].turn < boundary; i++) newest = i
-      if (newest >= 0) {
+      if (boundary < 0) {
         setOlder(null)
-        navigate(newest)
+        return
+      }
+      let above = -1
+      for (let g = 0; g < results.groups.length && results.groups[g].turn < boundary; g++) above = g
+      if (above >= 0) {
+        setOlder(null)
+        navigatedFor.current = searched
+        navigate(results.starts[above] + results.groups[above].count - 1)
         return
       }
       if (!hasMore || older.pages >= QUOTE_SEARCH_PAGES || !onLoadMore) {
@@ -241,7 +272,7 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
       }
       setOlder({ ...older, pages: older.pages + 1 })
       onLoadMore()
-    }, [older, isLoadingOlder, hasMore, hits, keys, navigate, onLoadMore])
+    }, [older, isLoadingOlder, hasMore, results, keys, navigate, onLoadMore, searched])
 
     const searchOlder = useCallback(() => {
       setOlderExhausted(false)
@@ -290,13 +321,13 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
       if (e.key === "Enter") {
         e.preventDefault()
         if (searched !== query) setSearched(query)
-        else navigate(activeIndex + (e.shiftKey ? -1 : 1))
+        else step(e.shiftKey ? -1 : 1)
       }
     }
 
     if (!isOpen) return null
 
-    const count = hits.length
+    const count = total
     const status = searched
       ? count > 0 ? `${activeIndex + 1}/${count}` : "0/0"
       : ""
@@ -329,10 +360,10 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
                 <span className="min-w-12 text-center text-xs tabular-nums" aria-live="polite">{status}</span>
               </InputGroupAddon>
             </InputGroup>
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(activeIndex - 1)} disabled={count === 0} className={navButton} aria-label="Previous match">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => step(-1)} disabled={count === 0} className={navButton} aria-label="Previous match">
               <ChevronUp data-icon="inline-start" />
             </Button>
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => navigate(activeIndex + 1)} disabled={count === 0} className={navButton} aria-label="Next match">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => step(1)} disabled={count === 0} className={navButton} aria-label="Next match">
               <ChevronDown data-icon="inline-start" />
             </Button>
             <Button type="button" variant="ghost" size="icon-sm" onClick={handleClose} className="text-muted-foreground hover:text-foreground" aria-label="Close search">

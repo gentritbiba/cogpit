@@ -71,7 +71,7 @@ describe("useQuoteNavigation", () => {
     } finally { vi.useRealTimers() }
   })
 
-  it("jumps by turn key, so a page of older history landing first does not shift the target", async () => {
+  it("jumps by turn key, which a prepend does not shift the way it shifts indices", async () => {
     const { view, jumpToTurn, state } = harness({ turns: [turn("t1"), turn("dup"), turn("dup")], older: [] })
     let found: boolean | undefined
     act(() => { void view.result.current(source("dup"), "reply dup").then((value) => { found = value }) })

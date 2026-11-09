@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findInTurns, foldCase, occurrencesIn, turnMatches, turnSegments } from "../sessionFind"
+import { findInTurns, firstGroupOfTurn, groupOfHit, occurrencesIn, queryPattern, turnMatches, turnSegments } from "../sessionFind"
 import type { ThinkingBlock, ToolCall, Turn } from "../../../shared/session/types"
 import { emptyTurn } from "@/__tests__/fixtures"
 
@@ -12,36 +12,43 @@ function turn(id: string, overrides: Partial<Turn> = {}): Turn {
 }
 
 describe("turn text index", () => {
-  it("reads every part of a turn the timeline shows, in render order", () => {
+  it("reads every part of a turn the timeline shows, in render order, from the turn's own strings", () => {
+    const result = "src/lexer.ts:12"
     const t = turn("a", {
       compactionSummary: "summary of earlier work",
       userMessage: "<system-reminder>hidden</system-reminder>please fix the parser",
       contentBlocks: [
         { kind: "thinking", blocks: [thought("consider the lexer")] },
-        { kind: "tool_calls", toolCalls: [call("c1", { command: "grep lexer src", flags: ["-n", 3] }, "src/lexer.ts:12")] },
+        { kind: "tool_calls", toolCalls: [call("c1", { command: "grep lexer src", flags: ["-n"] }, result)] },
         { kind: "text", text: ["The lexer", "is fixed"] },
-        { kind: "queued_prompt", content: "also check mobile" },
-        { kind: "agent_message", sender: "csp-and-proxy", body: "lenderdesk hardening" },
+        { kind: "agent_message", sender: "csp-and-proxy", body: "lenderdesk hardening", reply: { summary: "answered", timestamp: "t" } },
+        { kind: "task_notification", content: "<task-notification><summary>build passed</summary></task-notification>" },
       ],
     })
     const segments = turnSegments(t)
-    expect(segments.map((s) => s.part.kind)).toEqual(["compaction", "prompt", "thinking", "tool", "block", "block", "block"])
-    expect(segments[1].text).toBe("please fix the parser")
-    expect(segments[3].text).toBe("grep lexer src\n-n\n3\nsrc/lexer.ts:12")
-    expect(segments[3].part).toEqual({ kind: "tool", block: 1, callId: "c1" })
-    // Cached per Turn object.
+    expect(segments.map((s) => s.text.trim())).toEqual([
+      "summary of earlier work", "please fix the parser", "consider the lexer",
+      "grep lexer src", "-n", result, "The lexer", "is fixed",
+      "csp-and-proxy", "lenderdesk hardening", "answered", "build passed",
+    ])
+    expect(segments[3].part).toEqual({ kind: "tool", block: 1, callId: "c1", result: false })
+    expect(segments[5].part).toEqual({ kind: "tool", block: 1, callId: "c1", result: true })
+    // The result is the turn's own string, not a copy; the index is cached per Turn object.
+    expect(segments[5].text).toBe(result)
     expect(turnSegments(t)).toBe(segments)
   })
 
-  it("does not index what the timeline never renders: tool names, JSON syntax and system tags", () => {
+  it("leaves out what the timeline hides, and the filter still matches tool names", () => {
     const t = turn("a", {
       userMessage: "<system-reminder>secret</system-reminder>hello",
+      toolCalls: [call("c1", { file_path: "/x.ts" })],
       contentBlocks: [{ kind: "tool_calls", toolCalls: [call("c1", { file_path: "/x.ts" })] }],
     })
     expect(turnMatches(t, "secret")).toBe(false)
-    expect(turnMatches(t, "bash")).toBe(false)
     expect(turnMatches(t, "file_path")).toBe(false)
     expect(turnMatches(t, "/X.TS")).toBe(true)
+    expect(turnMatches(t, "bash")).toBe(true)
+    expect(findInTurns([t], "bash").total).toBe(0)
   })
 
   it("matches queued prompts and agent messages by sender and body", () => {
@@ -64,8 +71,12 @@ describe("findInTurns", () => {
     const turns = Array.from({ length: 400 }, (_, i) => turn(`t${i}`, {
       contentBlocks: [{ kind: "text", text: [i === 3 ? "needle and NEEDLE" : i === 399 ? "a needle" : "hay"] }],
     }))
-    const hits = findInTurns(turns, "Needle")
-    expect(hits).toEqual([{ turn: 3, segment: 0 }, { turn: 3, segment: 0 }, { turn: 399, segment: 0 }])
+    const results = findInTurns(turns, "Needle")
+    expect(results.total).toBe(3)
+    expect(results.groups).toEqual([{ turn: 3, segment: 0, count: 2 }, { turn: 399, segment: 0, count: 1 }])
+    expect([0, 1, 2].map((i) => results.groups[groupOfHit(results, i)].turn)).toEqual([3, 3, 399])
+    expect(firstGroupOfTurn(results, 399)).toBe(1)
+    expect(firstGroupOfTurn(results, 4)).toBe(-1)
   })
 
   it("counts matches inside content the timeline keeps collapsed", () => {
@@ -77,20 +88,28 @@ describe("findInTurns", () => {
       ],
       compactionSummary: "a folded idea from before",
     })]
-    const hits = findInTurns(turns, "folded idea")
-    expect(hits.map((hit) => turnSegments(turns[0])[hit.segment].part.kind)).toEqual(["compaction", "thinking", "tool"])
+    const results = findInTurns(turns, "folded idea")
+    expect(results.groups.map((g) => turnSegments(turns[0])[g.segment].part.kind)).toEqual(["compaction", "thinking", "tool"])
   })
 
-  it("counts non-overlapping occurrences, and an empty query finds nothing", () => {
-    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["aaaa"] }] })], "aa")).toHaveLength(2)
-    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["aaaa"] }] })], "")).toEqual([])
+  it("recounts only the turns a live update replaced", () => {
+    const stable = turn("a", { contentBlocks: [{ kind: "text", text: ["needle"] }] })
+    const first = findInTurns([stable, turn("b")], "needle")
+    const grown = turn("b", { contentBlocks: [{ kind: "text", text: ["needle needle"] }] })
+    expect(first.total).toBe(1)
+    expect(findInTurns([stable, grown], "needle").total).toBe(3)
+  })
+
+  it("treats the query literally, counts non-overlapping occurrences, and finds nothing for an empty query", () => {
+    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["aaaa"] }] })], "aa").total).toBe(2)
+    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["a.b axb (x)"] }] })], "a.b").total).toBe(1)
+    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["(x)"] }] })], "(x)").total).toBe(1)
+    expect(findInTurns([turn("a", { contentBlocks: [{ kind: "text", text: ["aaaa"] }] })], "").total).toBe(0)
   })
 })
 
-describe("foldCase", () => {
-  it("keeps every offset where lower-casing would change the length", () => {
-    const text = "İstanbul NEEDLE"
-    expect(foldCase(text)).toHaveLength(text.length)
-    expect(occurrencesIn(foldCase(text), "needle")).toEqual([9])
+describe("queryPattern", () => {
+  it("keeps offsets in the original text, whatever lower-casing does to its length", () => {
+    expect(occurrencesIn("İstanbul NEEDLE", queryPattern("needle")!)).toEqual([[9, 15]])
   })
 })
