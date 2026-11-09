@@ -245,7 +245,7 @@ export function createSessionController({
     const land = (address: SessionAddress, loaded: LoadedSession): OpenOutcome => {
       pending = null
       shown = address
-      sessionCache.show(screen, loaded.parsed)
+      sessionCache.show(screen, { ...address, view: loaded.parsed })
       commit(loaded)
       return "opened"
     }

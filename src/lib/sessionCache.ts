@@ -49,8 +49,8 @@ type ReleaseListener = (view: SessionView) => void
 
 class SessionCache {
   private cache = new Map<string, CacheEntry>()
-  /** The view each session shell has on screen, which outlives its entry. */
-  private screens = new Map<object, SessionView>()
+  /** The view each session shell has on screen, which outlives its entry, and that entry's key. */
+  private screens = new Map<object, { view: SessionView; key: string }>()
   private releaseListeners = new Set<ReleaseListener>()
 
   /** Calls `listener` with every view the cache or a screen lets go of. */
@@ -62,15 +62,19 @@ class SessionCache {
   /** Every view still held: each entry's, and each screen's. */
   *heldViews(): Generator<SessionView> {
     for (const entry of this.cache.values()) yield entry.parsed
-    yield* this.screens.values()
+    for (const { view } of this.screens.values()) yield view
   }
 
-  /** `screen` now shows `view`, or nothing; the view it showed before is let go of. */
-  show(screen: object, view: SessionView | null): void {
-    const previous = this.screens.get(screen)
-    if (view) this.screens.set(screen, view)
+  /**
+   * `screen` now shows `shown.view`, the transcript `shown` names, or nothing.
+   * The view it showed before is let go of. The byte bound never drops the
+   * entry of a transcript on screen, which its paging and stream still write.
+   */
+  show(screen: object, shown: { dirName: string; fileName: string; view: SessionView } | null): void {
+    const previous = this.screens.get(screen)?.view
+    if (shown) this.screens.set(screen, { view: shown.view, key: sessionCacheKey(shown.dirName, shown.fileName) })
     else this.screens.delete(screen)
-    if (previous && previous !== view) this.release(previous)
+    if (previous && previous !== shown?.view) this.release(previous)
   }
 
   /** A view that was loaded but is not kept. */
@@ -158,16 +162,19 @@ class SessionCache {
     }
   }
 
+  /** Forgets every entry and every screen. */
   clear(): void {
     for (const key of [...this.cache.keys()]) this.drop(key)
+    for (const screen of [...this.screens.keys()]) this.show(screen, null)
   }
 
-  /** Drops least recently used entries, never `keep`, until the cache is within both bounds. */
+  /** Drops least recently used entries, never `keep` or one on screen, until the cache is within both bounds. */
   private trim(keep: string): void {
     let bytes = 0
     for (const entry of this.cache.values()) bytes += coveredBytes(entry)
+    const kept = new Set([keep, ...[...this.screens.values()].map(({ key }) => key)])
     while (this.cache.size > MAX_ENTRIES || bytes > MAX_CACHED_TRANSCRIPT_BYTES) {
-      const key = this.leastRecentlyUsed(keep)
+      const key = this.leastRecentlyUsed(kept)
       if (key === undefined) return
       bytes -= coveredBytes(this.cache.get(key)!)
       this.drop(key)
@@ -175,15 +182,15 @@ class SessionCache {
   }
 
   private evictLRU(): void {
-    const key = this.leastRecentlyUsed()
+    const key = this.leastRecentlyUsed(new Set())
     if (key !== undefined) this.drop(key)
   }
 
-  private leastRecentlyUsed(except?: string): string | undefined {
+  private leastRecentlyUsed(except: ReadonlySet<string>): string | undefined {
     let oldestKey: string | undefined
     let oldestTime = Infinity
     for (const [key, entry] of this.cache) {
-      if (key !== except && entry.lastAccessed < oldestTime) {
+      if (!except.has(key) && entry.lastAccessed < oldestTime) {
         oldestTime = entry.lastAccessed
         oldestKey = key
       }

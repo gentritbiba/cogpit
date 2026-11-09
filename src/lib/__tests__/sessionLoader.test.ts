@@ -10,7 +10,7 @@ vi.mock("@/lib/device", () => ({
 
 import { createSessionController, RELOAD_RETRY_DELAYS_MS, type LoadedSession, type SessionAddress } from "@/lib/sessionLoader"
 import { authFetch } from "@/lib/auth"
-import { sessionCache } from "@/lib/sessionCache"
+import { MAX_CACHED_TRANSCRIPT_BYTES, sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 const mockAuthFetch = vi.mocked(authFetch)
@@ -426,29 +426,53 @@ describe("shared loads (R2)", () => {
 })
 
 describe("the view on screen (review #2)", () => {
-  it("stays held while hover prefetches push it out of the cache, until the user leaves", async () => {
-    const { sessions, click, shown } = setup()
-    const a = click("a.jsonl")
+  async function openA() {
+    const ctx = setup()
+    const a = ctx.click("a.jsonl")
     await flush()
     fetchFor("a.jsonl").resolve(tail("a"))
     await a
-    const onScreen = shown[0].parsed
+    return { ...ctx, onScreen: ctx.shown[0].parsed }
+  }
 
-    for (const name of ["p1", "p2", "p3", "p4", "p5"]) {
-      sessions.prefetchSession({ dirName: "-d", fileName: `${name}.jsonl` })
-      await flush()
-      fetchFor(`${name}.jsonl`).resolve(tail(name))
-      await flush()
-    }
+  async function hover(sessions: ReturnType<typeof setup>["sessions"], name: string) {
+    sessions.prefetchSession({ dirName: "-d", fileName: `${name}.jsonl` })
+    await flush()
+    fetchFor(`${name}.jsonl`).resolve(tail(name))
+    await vi.waitFor(() => expect(sessionCache.get("-d", `${name}.jsonl`)).toBeDefined())
+  }
 
-    expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
-    expect(released).toContain(onScreen)
+  it("stays cached and held through hover prefetches, until the user leaves", async () => {
+    const { sessions, onScreen } = await openA()
+    for (const name of ["p1", "p2", "p3", "p4", "p5"]) await hover(sessions, name)
+
+    expect(sessionCache.get("-d", "a.jsonl")?.parsed).toBe(onScreen)
+    expect(released).not.toContain(onScreen)
+
+    // A reload drops the entry first; the view stays held while it is on screen.
+    sessionCache.evict("-d", "a.jsonl")
     expect([...sessionCache.heldViews()]).toContain(onScreen)
 
     released = []
     sessions.leave()
     expect(released).toEqual([onScreen])
     expect([...sessionCache.heldViews()]).not.toContain(onScreen)
+  })
+
+  it("keeps a large session on screen through a prefetch that goes over the byte bound (review 2 #2)", async () => {
+    const { sessions } = await openA()
+    const entry = sessionCache.get("-d", "a.jsonl")!
+    // Search paged the whole transcript in above the tail.
+    sessionCache.update("-d", "a.jsonl", entry.source.loadId, { nextByteOffset: entry.source.watchOffset - MAX_CACHED_TRANSCRIPT_BYTES - 1 })
+
+    await hover(sessions, "p1")
+    expect(sessionCache.get("-d", "a.jsonl")).toBe(entry)
+    expect(sessionCache.get("-d", "p1.jsonl")).toBeDefined()
+
+    // Once the user leaves it, the next write may drop it.
+    sessions.leave()
+    await hover(sessions, "p2")
+    expect(sessionCache.get("-d", "a.jsonl")).toBeUndefined()
   })
 
   it("lets the previous view go when another open lands", () => {
