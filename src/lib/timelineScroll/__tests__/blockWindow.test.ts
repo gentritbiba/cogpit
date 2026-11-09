@@ -240,14 +240,27 @@ describe("BlockWindow", () => {
     expect(blockWindow.getPlan().before[0]).toBeLessThan(measuredBefore - 300)
   })
 
-  it("asks the host to keep its anchor after every rendered range but the first", () => {
-    const { host } = makeHost()
+  // Review finding 7: every key or pin change built a new plan, and each one cost the host an extra layout pass.
+  it("asks the host to keep its anchor only after a range it moved itself", () => {
+    const windowCommitted = vi.fn()
+    const { host } = makeHost({ viewOffsetInRow: () => -Infinity, windowCommitted })
     const blockWindow = new BlockWindow(host, "w", "row")
     blockWindow.setItems(keys(100), [])
+    const first = blockWindow.getPlan()
+    blockWindow.rendered(first)
+    blockWindow.setItems(keys(100), ["k1"])
+    expect(blockWindow.getPlan()).toBe(first)
+    // An appended block and a pin come with a render of the row, which the host measures itself.
+    blockWindow.setItems(keys(101), ["k90"])
     blockWindow.rendered(blockWindow.getPlan())
-    expect(host.windowCommitted).not.toHaveBeenCalled()
-    blockWindow.setItems(keys(100), ["k0"])
+    expect(windowCommitted).not.toHaveBeenCalled()
+
+    const container = document.createElement("div")
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(0, 6464))
+    blockWindow.attach(container)
+    blockWindow.update({ top: 5000, height: 500 }, true)
     blockWindow.rendered(blockWindow.getPlan())
-    expect(host.windowCommitted).toHaveBeenCalledTimes(1)
+    expect(windowCommitted).toHaveBeenCalledTimes(1)
   })
+
 })

@@ -104,6 +104,8 @@ export class BlockWindow {
   private heldKeys: readonly string[] = []
   private range: KeyRange | null = null
   private plan: WindowPlan = EMPTY_PLAN
+  /** The last plan `update` published: a range the window moved itself, which no commit of its row accounts for. */
+  private publishedPlan: WindowPlan | null = null
   private renderedPlan: WindowPlan | null = null
   private container: HTMLElement | null = null
   private gap = 0
@@ -146,7 +148,8 @@ export class BlockWindow {
       if (range && (!this.indexOf.has(range.first) || !this.indexOf.has(range.last))) this.range = null
     }
     if (!this.range) this.range = toKeyRange(this.keys, this.initialRange())
-    this.plan = this.buildPlan()
+    const plan = this.buildPlan()
+    if (!samePlan(plan, this.plan)) this.plan = plan
   }
 
   getPlan = (): WindowPlan => this.plan
@@ -182,12 +185,11 @@ export class BlockWindow {
     return ref
   }
 
-  /** After a commit that rendered `plan`: tell the host when the range changed under the anchor. */
+  /** After a commit that rendered `plan`: tell the host when the window moved its own range under the anchor. */
   rendered(plan: WindowPlan): void {
     if (this.renderedPlan === plan) return
-    const first = this.renderedPlan === null
     this.renderedPlan = plan
-    if (!first) this.host.windowCommitted()
+    if (plan === this.publishedPlan) this.host.windowCommitted()
   }
 
   /**
@@ -270,6 +272,7 @@ export class BlockWindow {
   private publish(plan: WindowPlan): void {
     if (samePlan(plan, this.plan)) return
     this.plan = plan
+    this.publishedPlan = plan
     for (const listener of this.listeners) listener()
   }
 
