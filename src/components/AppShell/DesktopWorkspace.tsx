@@ -375,7 +375,7 @@ export function DesktopWorkspace({
   return (
     <RuntimePluginContributions runtime={runtimePlugins} workspacePath={project.currentCwd ?? null}>
     <ViewPanelProvider shown={activePanel?.id === BUILT_IN_WORKSPACE_PANEL_IDS.views} onReveal={revealViewPanel}>
-    <StatusPanelProvider openSessionId={session?.sessionId ?? null} onReveal={revealStatusPanel}>
+    <StatusPanelProvider openSessionId={sessionId} onReveal={revealStatusPanel}>
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">

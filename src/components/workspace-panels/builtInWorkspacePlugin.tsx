@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { AppWindow, CalendarClock, FileCode2, FolderTree, GitBranch, Globe, ListChecks, Network, PanelRight } from "lucide-react"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { StatsPanel } from "@/components/StatsPanel"
@@ -138,7 +138,7 @@ function StatusWorkspacePanel(props: WorkspacePanelProps) {
 /** A dot on the rail while a status in the open session's crew says something waits on the user. */
 function StatusIndicator({ context }: WorkspacePanelIndicatorProps) {
   const boards = useSessionBoards()
-  const rootId = context.crew?.rootId ?? context.session?.sessionId
+  const rootId = context.crew?.rootId ?? context.sessionId
   const waiting = [...boards.values()].some((board) => board.rootId === rootId && needsYouCount(board) > 0)
   if (!waiting) return null
   return (
