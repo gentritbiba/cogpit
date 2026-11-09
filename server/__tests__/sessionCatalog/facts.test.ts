@@ -51,7 +51,7 @@ describe("saved session catalog", () => {
     })
     recordFact("/t/b.jsonl", "project", { path: "/w", final: true, mtimeMs: 1, size: 1 })
     await saveFacts()
-    expect(statSync(savedPath()).mode & 0o777).toBe(0o600)
+    if (process.platform !== "win32") expect(statSync(savedPath()).mode & 0o777).toBe(0o600)
     const lines = readFileSync(savedPath(), "utf-8").split("\n")
     expect(lines).toHaveLength(3)
     expect(lines.every((line) => !line.includes("\n  "))).toBe(true)
