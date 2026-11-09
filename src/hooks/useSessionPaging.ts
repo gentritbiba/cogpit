@@ -117,7 +117,7 @@ export function useSessionPaging({
     }
     const flight = Symbol("paging-flight")
     flightRef.current = flight
-    setIsLoadingOlder(true)
+    if (identityRef.current === key) setIsLoadingOlder(true)
     try {
       const res = await authFetch(
         `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?before=${cached.nextByteOffset}&count=${PAGE_COUNT}&unit=turns&projection=${RESULT_PROJECTION}`,

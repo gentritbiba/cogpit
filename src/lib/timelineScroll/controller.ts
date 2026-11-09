@@ -954,7 +954,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private maybeLoadOlder(): void {
     const input = this.input
     const scroller = this.scroller
-    if (!input?.onLoadMore || !scroller) return
+    // With no list mounted, `input` is the last session's: never page it.
+    if (!input?.onLoadMore || !scroller || !this.list) return
     const needed = historyNeeded({
       hasMore: input.hasMore,
       placed: this.placed,

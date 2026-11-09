@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { LATE_RESERVE, historyNeeded, reserveHeight, shouldLoadOlder } from "../history"
+import { LATE_RESERVE, historyNeeded, reserveHeight } from "../history"
 
 describe("reserveHeight", () => {
   const base = { hasMore: true, viewport: 800, loadedHeight: 10_000, loadedBytes: 100_000 }
@@ -28,34 +28,20 @@ describe("reserveHeight", () => {
   })
 })
 
-describe("shouldLoadOlder", () => {
-  const base = { hasMore: true, loading: false, placed: true, viewport: 500, viewTop: 4000 }
+describe("historyNeeded", () => {
+  const base = { hasMore: true, placed: true, viewport: 500, viewTop: 4000 }
 
-  it("loads when the first loaded row is within 3 viewports of the viewport top", () => {
-    expect(shouldLoadOlder({ ...base, firstRowTop: 2600 })).toBe(true)
-    expect(shouldLoadOlder({ ...base, firstRowTop: 5400 })).toBe(true)
-  })
-
-  it("waits while the first row is further away", () => {
-    expect(shouldLoadOlder({ ...base, firstRowTop: 2400 })).toBe(false)
+  it("holds while the first loaded row is within 3 viewports of the viewport top", () => {
+    expect(historyNeeded({ ...base, firstRowTop: 2600 })).toBe(true)
+    expect(historyNeeded({ ...base, firstRowTop: 5400 })).toBe(true)
+    expect(historyNeeded({ ...base, firstRowTop: 2400 })).toBe(false)
   })
 
   it.each([
     [{ hasMore: false }],
-    [{ loading: true }],
     [{ placed: false }],
     [{ viewport: 0 }],
   ])("is gated by %j", (patch) => {
-    expect(shouldLoadOlder({ ...base, firstRowTop: 4000, ...patch })).toBe(false)
-  })
-})
-
-describe("historyNeeded", () => {
-  const base = { hasMore: true, placed: true, viewport: 500, viewTop: 4000 }
-
-  it("holds while the first loaded row is within 3 viewports, whether or not a load is running", () => {
-    expect(historyNeeded({ ...base, firstRowTop: 2600 })).toBe(true)
-    expect(historyNeeded({ ...base, firstRowTop: 2400 })).toBe(false)
-    expect(shouldLoadOlder({ ...base, firstRowTop: 2600, loading: true })).toBe(false)
+    expect(historyNeeded({ ...base, firstRowTop: 4000, ...patch })).toBe(false)
   })
 })

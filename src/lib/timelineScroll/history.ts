@@ -50,6 +50,3 @@ export function historyNeeded({ hasMore, placed, viewport, viewTop, firstRowTop 
   return viewTop - firstRowTop <= viewport * LOAD_TRIGGER_VIEWPORTS
 }
 
-export function shouldLoadOlder(input: NeedInput & { loading: boolean }): boolean {
-  return !input.loading && historyNeeded(input)
-}
