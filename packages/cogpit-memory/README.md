@@ -167,8 +167,14 @@ cogpit-memory index config --off
 | `apiKey` | none | Sent as a bearer token |
 | `dimensions` | `256` | Leading dimensions kept per vector (Matryoshka models) |
 | `queryPrefix` | none | Prepended to queries only, for instruction-tuned models |
-| `minScore` | `0.5` | Similarity a hit by meaning must reach |
+| `minScore` | `0.55` | Similarity a hit by meaning must reach; depends on the model (see below) |
 | `timeoutMs` | `1500` | How long a search waits for its query embedding |
+
+The `minScore` default was measured on Qwen3-Embedding-0.6B at 256 dimensions
+with an instruction query prefix: questions with an answer scored 0.62–0.81 at
+the top, questions with none 0.37–0.54. Other models spread similarities
+differently; for one whose real matches score lower, lower `minScore` until a
+question you know the answer to finds it.
 
 Vectors are normalised, stored as int8 and compared by brute force in process.
 Identical passages share one vector. A vector made by another model or size

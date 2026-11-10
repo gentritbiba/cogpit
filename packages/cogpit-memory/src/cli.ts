@@ -287,7 +287,7 @@ Commands:
     --url <url> --model <name>  OpenAI-compatible /v1/embeddings endpoint and model
     --dimensions <256>        Dimensions kept per vector
     --query-prefix <text>     Prepended to queries (instruction-tuned models)
-    --min-score <0.5>         Similarity a hit by meaning must reach
+    --min-score <0.55>        Similarity a hit by meaning must reach
     --timeout-ms <1500>       Query embedding timeout
     --api-key <key>           Bearer token, if the endpoint needs one
     --off                     Turn embeddings off

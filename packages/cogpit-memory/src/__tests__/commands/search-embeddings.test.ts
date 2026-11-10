@@ -76,7 +76,7 @@ describe("search and index with an embedding endpoint", () => {
     const path = join(process.env.COGPIT_MEMORY_DIR!, "config.json")
     expect(statSync(path).mode & 0o777).toBe(0o600)
     expect(JSON.parse(readFileSync(path, "utf8")).embeddings.apiKey).toBe("secret")
-    expect(await indexConfig({})).toMatchObject({ embeddings: { state: "configured", config: { apiKey: "(set)", minScore: 0.5 } } })
+    expect(await indexConfig({})).toMatchObject({ embeddings: { state: "configured", config: { apiKey: "(set)", minScore: 0.55 } } })
     expect(await indexConfig({ dimensions: 2 })).toEqual({ error: expect.stringContaining("dimensions") })
     expect(await indexConfig({}, true)).toMatchObject({ embeddings: null })
     expect(await indexConfig({})).toMatchObject({ embeddings: { state: "off" } })

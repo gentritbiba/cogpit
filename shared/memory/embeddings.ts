@@ -24,7 +24,7 @@ export interface EmbeddingConfig {
 
 export const MEMORY_CONFIG_FILE = "config.json"
 export const DEFAULT_DIMENSIONS = 256
-export const DEFAULT_MIN_SCORE = 0.5
+export const DEFAULT_MIN_SCORE = 0.55
 export const DEFAULT_QUERY_TIMEOUT_MS = 1500
 const DOCUMENT_TIMEOUT_MS = 120_000
 const ATTEMPTS = 3
