@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   indexer: null as null | { store(): unknown; counts(): { pendingFiles: number; pendingEmbeddings: number }; embedder(): unknown },
   existing: new Set<string>(),
   hidden: new Set<string>(),
+  everything: true,
+  listed: [] as Array<{ filePath: string; fileName: string; dirName: string; sessionId: string; mtimeMs: number; size: number }>,
   admin: true,
   sessionFiles: new Map<string, string>(),
 }))
@@ -19,6 +21,7 @@ vi.mock("../../memory/store", () => ({ transcriptExists: (path: string) => mocks
 vi.mock("../../sessionCatalog", () => ({ sessionFileFor: (id: string) => mocks.sessionFiles.get(id) ?? null }))
 vi.mock("../../agents", () => ({
   allStores: () => [],
+  allTopLevelSessions: async () => mocks.listed,
   storeForPath: () => ({
     sessionAddress: async (path: string) => ({ dirName: "-work-project", fileName: path.split("/").pop() }),
   }),
@@ -28,7 +31,7 @@ vi.mock("../../edition", async (original) => ({
   mayActHostWide: () => mocks.admin,
   visibilityFor: () => Object.assign(
     async (sessionId: string) => (mocks.hidden.has(sessionId) ? "hidden" : { annotate: async <T>(item: T) => item }),
-    { everything: false, nothing: false },
+    { everything: mocks.everything, nothing: false },
   ),
 }))
 
@@ -54,6 +57,17 @@ const ALPHA_AGENT = sourceFile({ path: "/t/alpha/subagents/agent-a1.jsonl", sess
 const BETA = sourceFile({ path: "/t/beta.jsonl", sessionId: "beta", agentKind: "codex" })
 const GONE = sourceFile({ path: "/t/gone.jsonl", sessionId: "gone", agentKind: "claude" })
 
+function listed(...files: Array<{ path: string; sessionId: string }>) {
+  return files.map((file) => ({ filePath: file.path, fileName: file.path.split("/").pop()!, dirName: "-work-project", sessionId: file.sessionId, mtimeMs: 1, size: 1 }))
+}
+
+/** A member of a team edition: sees only what the check lets through, never archived text. */
+function asMember(hidden: string[] = []): void {
+  mocks.everything = false
+  mocks.admin = false
+  mocks.hidden = new Set(hidden)
+}
+
 let store: MemoryStore
 
 beforeEach(() => {
@@ -68,6 +82,8 @@ beforeEach(() => {
   mocks.indexer = { store: () => store, counts: () => ({ pendingFiles: 3, pendingEmbeddings: 0 }), embedder: () => null }
   mocks.existing = new Set([ALPHA.path, ALPHA_AGENT.path, BETA.path])
   mocks.hidden = new Set()
+  mocks.everything = true
+  mocks.listed = listed(ALPHA, BETA)
   mocks.admin = true
   mocks.sessionFiles = new Map([["alpha", ALPHA.path]])
 })
@@ -127,21 +143,44 @@ describe("GET /api/session-search", () => {
     expect(gone.hits[0].text).toBe("the old websocket server")
   })
 
-  it("keeps an archived session out of an admin's answer when it is outside the scope asked for", async () => {
-    mocks.hidden = new Set(["gone"])
+  it("keeps archived sessions out of an admin's answer in a narrower scope", async () => {
+    mocks.everything = false
     const body = await search("q=websocket&scope=mine")
     expect(body.results.map((result) => result.sessionId).sort()).toEqual(["alpha", "beta"])
   })
 
   it("keeps archived sessions and sessions the caller may not see out of a member's answer", async () => {
-    mocks.admin = false
-    mocks.hidden = new Set(["beta"])
+    asMember(["beta"])
     const body = await search("q=websocket")
     expect(body.results.map((result) => result.sessionId)).toEqual(["alpha"])
   })
 
+  it("searches only what a member may see, so higher-ranked hidden sessions never take its places", async () => {
+    const others = Array.from({ length: 12 }, (_, index) => sourceFile({ path: `/t/other-${index}.jsonl`, sessionId: `other-${index}` }))
+    for (const [index, other] of others.entries()) store.syncSession(other, makeSession([{ user: `websocket websocket websocket note${index}` }]))
+    mocks.listed = listed(ALPHA, BETA, ...others)
+    for (const other of others) mocks.existing.add(other.path)
+    asMember(["alpha", ...others.map((other) => other.sessionId)])
+
+    const body = await search("q=websocket&limit=1")
+    expect(body.results.map((result) => result.sessionId)).toEqual(["beta"])
+  })
+
+  it.each([["before", "after"], ["after", "before"]])("keeps a member's hit when a hidden fork with the same text was indexed %s it", async (forkAt) => {
+    const mine = sourceFile({ path: "/t/mine.jsonl", sessionId: "mine" })
+    const fork = sourceFile({ path: "/t/fork.jsonl", sessionId: "fork" })
+    const text = makeSession([{ user: "the flaky turbine gauge" }])
+    for (const file of forkAt === "before" ? [fork, mine] : [mine, fork]) store.syncSession(file, text)
+    mocks.listed = listed(mine, fork)
+    mocks.existing.add(mine.path).add(fork.path)
+    asMember(["fork"])
+
+    const body = await search("q=turbine")
+    expect(body.results.map((result) => result.sessionId)).toEqual(["mine"])
+  })
+
   it("keeps an archived sub-agent hit out of a member's answer while its session stays", async () => {
-    mocks.admin = false
+    asMember()
     mocks.existing.delete(ALPHA_AGENT.path)
     const alpha = (await search("q=handshake")).results
     expect(alpha).toEqual([])
