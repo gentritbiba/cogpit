@@ -840,15 +840,18 @@ export default function App() {
     getSession,
     sessionSource: state.sessionSource,
     loadSession: handlers.handleLoadSessionScrollAware,
-    jumpToTurn: useCallback((turnKey: string) => {
+    onNavigate: useCallback(() => {
       if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-      return chatScroll.current?.controller.scrollToTurn(turnKey, { align: "start" }) ?? Promise.resolve(false)
     }, [isMobile, dispatch]),
+    jumpToTurn: useCallback((turnKey: string) => (
+      chatScroll.current?.controller.scrollToTurn(turnKey, { align: "start" }) ?? Promise.resolve(false)
+    ), []),
     subscribeTimeline: useCallback(
       (listener: () => void) => chatScroll.current?.controller.subscribe(listener) ?? (() => {}),
       [],
     ),
     hasMore: chunkedSession.hasMore,
+    historyReady: chunkedSession.ready,
     loadMore: chunkedSession.loadMore,
   })
 

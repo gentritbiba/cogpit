@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import { SessionsView } from "../SessionsView"
@@ -192,4 +192,17 @@ describe("SessionsView", () => {
     expect(screen.getByText("Stopped — turn limit reached")).toBeInTheDocument()
     expect(screen.queryByText("Active")).not.toBeInTheDocument()
   })
+})
+
+
+it("keeps conversation matches reachable below metadata matches from the search box", () => {
+  const props = renderView({ searchFilter: "release", conversationSearch: { query: "release", semantic: { state: "off" }, indexing: { pendingFiles: 0, pendingEmbeddings: 0 }, results: [{ sessionId: "content", title: "Earlier release", cwd: "/workspace/cogpit", dirName: "-workspace-cogpit", fileName: "content.jsonl", agentKind: "", archived: false, hits: [{ chunkId: 1, kind: "user", snippet: "Release note", timestamp: null, match: "keyword", score: 1, automated: false, agentId: null, openTurnId: null, openTurn: null }] }] } })
+  const input = screen.getByRole("searchbox")
+  input.focus()
+  fireEvent.keyDown(input, { key: "ArrowDown" })
+  expect(screen.getByRole("button", { name: /first-session/ })).toHaveFocus()
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" })
+  expect(screen.getByRole("button", { name: /Release note/ })).toHaveFocus()
+  fireEvent.keyDown(document.activeElement!, { key: "Enter" })
+  expect(props.onSelectSession).toHaveBeenCalledWith("-workspace-cogpit", "content.jsonl")
 })

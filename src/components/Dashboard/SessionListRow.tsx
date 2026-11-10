@@ -134,6 +134,7 @@ export function SessionListRow({ session, customName, onSelect }: SessionListRow
     <div className="motion-list-item list-row-lazy group flex w-full items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-within:bg-muted">
       <button
         type="button"
+        data-session-search-item
         onClick={onSelect}
         title={detailTooltip(session)}
         className="flex min-w-0 flex-1 items-start gap-3 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"

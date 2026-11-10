@@ -1012,3 +1012,29 @@ describe("LiveSessions list filter", () => {
     expect(JSON.parse(String(archive?.[1]?.body))).toEqual({ sessionIds: ["mine"], archived: true })
   })
 })
+
+describe("LiveSessions conversation matches", () => {
+  it("finds content separately from the immediate local filter and supports keyboard selection", async () => {
+    vi.useFakeTimers()
+    try {
+      writeCachedList(activeSessionsCacheKey(null), [session("local")])
+      mocks.authFetch.mockImplementation((url: string) => url.startsWith("/api/session-search?")
+        ? Promise.resolve(jsonResponse({ query: "release", semantic: { state: "off" }, indexing: { pendingFiles: 0, pendingEmbeddings: 0 }, results: [{ sessionId: "earlier", dirName: "project-b", fileName: "earlier.jsonl", title: "Earlier decision", cwd: "/work/b", agentKind: "", archived: false, hits: [{ chunkId: 1, kind: "assistant", snippet: "The release decision", timestamp: null, match: "keyword", score: 1, automated: false, agentId: null, openTurnId: "t2", openTurn: 2 }] }] }))
+        : new Promise<Response>(() => {}))
+      const onOpenQuoteSource = vi.fn(async () => true)
+      renderLive(<LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} onOpenQuoteSource={onOpenQuoteSource} />)
+      const input = screen.getByRole("searchbox")
+      fireEvent.change(input, { target: { value: "release" } })
+      expect(screen.queryByTestId("card-local")).not.toBeInTheDocument()
+      expect(screen.queryByText("In conversations")).not.toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(screen.getByText("Earlier decision")).toBeInTheDocument()
+      expect(screen.queryByText("No matching sessions")).not.toBeInTheDocument()
+      input.focus()
+      fireEvent.keyDown(input, { key: "ArrowDown" })
+      expect(screen.getByRole("button", { name: /The release decision/ })).toHaveFocus()
+      fireEvent.keyDown(document.activeElement!, { key: "Enter" })
+      expect(onOpenQuoteSource).toHaveBeenCalledWith(expect.objectContaining({ turnId: "t2" }), "", 2)
+    } finally { vi.useRealTimers() }
+  })
+})

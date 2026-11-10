@@ -14,6 +14,7 @@ const LAND_MS = 3_000
 interface Pending {
   source: QuoteSource
   text: string
+  turn?: number | null
   pages: number
   /** The turn is found and the jump to it has started its `LAND_MS` clock. */
   landing: boolean
@@ -34,6 +35,8 @@ interface Inputs {
   jumpToTurn: (turnKey: string) => Promise<boolean>
   /** Calls `listener` after the timeline lays out; returns the unsubscribe. */
   subscribeTimeline: (listener: () => void) => () => void
+  onNavigate?: () => void
+  historyReady?: boolean
   hasMore: boolean
   loadMore: () => Promise<number>
 }
@@ -42,6 +45,7 @@ interface Inputs {
 export function quoteTurnIndex(session: SessionView, source: QuoteSource, text: string): number {
   const byId = session.turns.findIndex((turn) => turn.id === source.turnId)
   if (byId >= 0) return byId
+  if (!text) return -1
   const probe = text.slice(0, 200)
   return session.turns.findIndex((turn) => turn.assistantText.some((reply) => reply.includes(probe)))
 }
@@ -57,7 +61,7 @@ function shows(sessionSource: SessionSource | null, source: QuoteSource): boolea
  * the source cannot be found — deleted, denied or out of reach — and the
  * saved quote stands on its own.
  */
-export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: string) => Promise<boolean> {
+export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: string, turn?: number | null) => Promise<boolean> {
   const latest = useRef(inputs)
   latest.current = inputs
   const pendingRef = useRef<Pending | null>(null)
@@ -73,10 +77,13 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
 
   const evaluate = useCallback(() => {
     const pending = pendingRef.current
-    const { getSession, sessionSource, hasMore, loadMore, jumpToTurn } = latest.current
+    const { getSession, sessionSource, hasMore, loadMore, jumpToTurn, historyReady } = latest.current
     const session = getSession()
-    if (!pending || pending.loading || pending.waiting || !session || !shows(sessionSource, pending.source)) return
-    const index = quoteTurnIndex(session, pending.source, pending.text)
+    if (historyReady === false || !pending || pending.loading || pending.waiting || !session || !shows(sessionSource, pending.source)) return
+    let index = quoteTurnIndex(session, pending.source, pending.text)
+    // Ordinals count from the transcript start, never from a loaded tail.
+    if (index < 0 && !hasMore && pending.turn != null && Number.isInteger(pending.turn)
+      && pending.turn >= 0 && pending.turn < session.turns.length) index = pending.turn
     if (index >= 0) {
       // By key, so a page of older history landing meanwhile cannot shift the target.
       const turnKey = turnKeysOf(session.turns)[index]
@@ -121,10 +128,11 @@ export function useQuoteNavigation(inputs: Inputs): (source: QuoteSource, text: 
   }), [subscribeTimeline, evaluate])
   useEffect(() => () => settle(false), [settle])
 
-  return useCallback((source: QuoteSource, text: string) => new Promise<boolean>((resolve) => {
+  return useCallback((source: QuoteSource, text: string, turn?: number | null) => new Promise<boolean>((resolve) => {
     settle(false)
-    pendingRef.current = { source, text, pages: 0, landing: false, loading: false, waiting: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
-    const { sessionSource, loadSession } = latest.current
+    pendingRef.current = { source, text, turn, pages: 0, landing: false, loading: false, waiting: false, resolve, timer: setTimeout(() => settle(false), OPEN_TIMEOUT_MS) }
+    const { sessionSource, loadSession, onNavigate } = latest.current
+    onNavigate?.()
     if (shows(sessionSource, source)) evaluate()
     else loadSession(source.dirName, source.fileName)
   }), [settle, evaluate])
