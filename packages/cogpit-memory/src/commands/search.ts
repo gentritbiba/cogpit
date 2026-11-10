@@ -12,7 +12,7 @@
  * prose too, as it did before the memory store existed.
  */
 
-import { existsSync, mkdirSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join, basename, dirname } from "node:path"
 import { SearchIndex, type SearchHit as ToolIndexHit } from "../lib/search-index"
@@ -24,7 +24,7 @@ import { getUserMessageText } from "../lib/parser"
 import { parseTranscript } from "../lib/read-session"
 import { openTranscript, readTranscriptText } from "../lib/transcriptFile"
 import { openMemoryStore, transcriptExists } from "../lib/memory-store"
-import { rebuildToolIndex, syncTranscripts, type SyncSummary } from "../lib/sync"
+import { syncTranscripts, type SyncSummary } from "../lib/sync"
 import { rrfScore } from "../lib/memory/fusion"
 import { clampSearchLimit, searchProse, type ProseSearchResult, type SearchMode } from "../lib/memory/search"
 import type { EmbeddingClient } from "../lib/memory/embeddings"
@@ -201,18 +201,15 @@ interface OpenedStores {
   /** Set when this search opened the index, so it may refresh it. */
   ownIndex: boolean
   ownMemory: boolean
-  indexWasMissing: boolean
   close(): void
 }
 
 function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryStore | null | undefined, warnings: string[]): OpenedStores {
   let index = searchIndex ?? null
   let memoryStore = memory ?? null
-  let indexWasMissing = false
   if (searchIndex === undefined) {
     try {
-      indexWasMissing = !existsSync(DEFAULT_DB_PATH)
-      if (indexWasMissing) mkdirSync(dirname(DEFAULT_DB_PATH), { recursive: true })
+      mkdirSync(dirname(DEFAULT_DB_PATH), { recursive: true })
       index = new SearchIndex(DEFAULT_DB_PATH)
     } catch { /* DB corrupt or locked: the raw scan stands in. */ }
   }
@@ -228,7 +225,6 @@ function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryS
     memoryStore,
     ownIndex: searchIndex === undefined && index !== null,
     ownMemory: memory === undefined && memoryStore !== null,
-    indexWasMissing,
     close() {
       if (this.ownIndex) index?.close()
       if (this.ownMemory) memoryStore?.close()
@@ -240,7 +236,6 @@ function refresh(stores: OpenedStores, sessionId: string | undefined): SyncSumma
   const index = stores.ownIndex ? stores.index : null
   const memory = stores.ownMemory ? stores.memoryStore : null
   try {
-    if (index && stores.indexWasMissing) return rebuildToolIndex(index, memory)
     if (!index && !memory) return null
     return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS, backOff: true, sessionId })
   } catch {

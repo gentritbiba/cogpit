@@ -113,13 +113,15 @@ export function syncTranscripts(options: SyncOptions): SyncSummary {
   const synced = options.memory?.syncedFiles()
   const stale = new Set(options.memory?.planSync(files.map((file) => file.source), synced).map((file) => file.path))
   const needsIndex = (file: ListedFile) => !!indexed && !((indexed.get(file.path) ?? -Infinity) >= file.mtimeMs)
-  const known = (file: ListedFile) => (synced ? synced.has(file.path) : !!indexed?.has(file.path))
+  const known = (file: ListedFile) => (!synced || synced.has(file.path)) && (!indexed || indexed.has(file.path))
   const own = (file: ListedFile) => !!options.sessionId && (file.sessionId === options.sessionId || file.parentSessionId === options.sessionId)
-  const due = (file: ListedFile) => {
-    const state = synced?.get(file.path)
-    return !options.backOff || !state || started - state.syncedAtMs >= Math.max(BACK_OFF_MIN_MS, BACK_OFF_FACTOR * (state.syncMs ?? 0))
-  }
   const expectedMs = (file: ListedFile) => synced?.get(file.path)?.syncMs ?? file.size / UNSYNCED_BYTES_PER_MS
+  // Without the memory store, the transcript mtime the tool index recorded stands in for the last sync time.
+  const lastSyncAt = (file: ListedFile) => (synced ? synced.get(file.path)?.syncedAtMs : indexed?.get(file.path))
+  const due = (file: ListedFile) => {
+    const last = lastSyncAt(file)
+    return !options.backOff || !known(file) || last === undefined || started - last >= Math.max(BACK_OFF_MIN_MS, BACK_OFF_FACTOR * expectedMs(file))
+  }
 
   const work = files.filter((file) => needsIndex(file) || stale.has(file.path)).sort((a, b) => b.mtimeMs - a.mtimeMs)
   const ordered = [
@@ -170,13 +172,13 @@ export function rebuildToolIndex(index: SearchIndex, memory: MemoryStore | null)
   const sources = new Map(files.map((file) => [file.path, file.source]))
   const stale = new Set(memory?.planSync([...sources.values()]).map((file) => file.path))
   const subagents = subagentTranscripts(files.map((file) => file.source))
-  index.buildFull((file, session) => {
+  index.buildFull((file, session, elapsedMs) => {
     summary.parsed++
     summary.toolIndexFiles++
     const source = sources.get(file.path)
     if (!memory || !source || !stale.has(file.path)) return
     try {
-      syncIntoMemory(memory, source, session, subagents(file.sessionId), summary)
+      syncIntoMemory(memory, source, session, subagents(file.sessionId), summary, { elapsedMs })
     } catch {
       summary.failed++
     }

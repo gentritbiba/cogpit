@@ -426,7 +426,8 @@ export class SearchIndex {
    * SQLite transaction with pre-prepared statements. This avoids the overhead
    * of 3000+ individual transactions (each forcing a disk sync).
    */
-  buildFull(onParsed?: (file: SessionFile, session: ReturnType<typeof parseSession>) => void): void {
+  /** `onParsed` gets each file's parse and the ms spent on it so far: reading, parsing and indexing. */
+  buildFull(onParsed?: (file: SessionFile, session: ReturnType<typeof parseSession>, elapsedMs: number) => void): void {
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
     this.db.close()
@@ -461,11 +462,12 @@ export class SearchIndex {
     const txn = this.db.transaction(() => {
       for (const file of files) {
         try {
+          const started = Date.now()
           const content = readTranscriptTextSync(file.path)
           const session = parseSession(content, { skipStats: true })
           this.insertSessionContent(insert, file.sessionId, file.path, session)
           insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId)
-          onParsed?.(file, session)
+          onParsed?.(file, session, Date.now() - started)
         } catch {
           // Skip files that fail to parse
         }

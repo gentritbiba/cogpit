@@ -8,7 +8,7 @@ installDirsMock()
 
 const { searchSessions } = await import("../../commands/search")
 const { indexStats, indexSync } = await import("../../commands/index-cmd")
-const { syncTranscripts } = await import("../../lib/sync")
+const { rebuildToolIndex, syncTranscripts } = await import("../../lib/sync")
 const { openMemoryStore } = await import("../../lib/memory-store")
 const { SearchIndex } = await import("../../lib/search-index")
 
@@ -292,6 +292,49 @@ describe("search-time sync", () => {
       const synced = memory.syncedFiles()
       expect([parent, subagent, other].map((path) => synced.get(path)?.syncedAtMs)).toEqual([T0 + 1_000, T0 + 1_000, T0])
     })
+  })
+
+  it("fills a missing tool index within the budget, counting its files as never indexed", () => {
+    writeAgedSession("one", "a", "b", "ls", 1)
+    writeAgedSession("two", "c", "d", "ls", 2)
+    withMemory((memory) => syncTranscripts({ index: null, memory }))
+    const index = new SearchIndex(join(tmpDir, "fresh-index.db"))
+    try {
+      withMemory((memory) => {
+        expect(syncTranscripts({ index, memory, backOff: true, budgetMs: -1 })).toMatchObject({ parsed: 0, pending: 2, unindexed: 2 })
+        expect(syncTranscripts({ index, memory, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 2, toolIndexFiles: 2, memoryFiles: 0, pending: 0 })
+      })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("backs off on the tool index alone when the memory store is unavailable", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 0)
+    const index = new SearchIndex(join(tmpDir, "tool-only.db"))
+    try {
+      syncTranscripts({ index, memory: null })
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 0, pending: 1, unindexed: 0 })
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600, now: () => Date.now() + 120_000 })).toMatchObject({ parsed: 1, pending: 0 })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("records the whole per-file time when a full rebuild feeds the memory store", () => {
+    const path = writeAgedSession("one", "a", "b", "ls", 1)
+    const index = new SearchIndex(join(tmpDir, "rebuilt.db"))
+    const buildFull = index.buildFull.bind(index)
+    index.buildFull = (onParsed) => buildFull((file, session, elapsedMs) => onParsed?.(file, session, elapsedMs + 5_000))
+    try {
+      withMemory((memory) => {
+        rebuildToolIndex(index, memory)
+        expect(memory.syncedFiles().get(path)?.syncMs).toBeGreaterThanOrEqual(5_000)
+      })
+    } finally {
+      index.close()
+    }
   })
 
   it("leaves index sync without a budget or back-off", async () => {
