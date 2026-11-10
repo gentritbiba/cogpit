@@ -158,6 +158,50 @@ describe("searchProse", () => {
     expect((await searchProse(store, "migration plan", { sessionIds: many })).hits.map((hit) => hit.sessionId)).toEqual(["visible"])
   })
 
+  describe("a subagent whose transcript was deleted after its parent reported it inline", () => {
+    const parent = sourceFile({ mtimeMs: 1_000 })
+    const child = sourceFile({ path: "/transcripts/session-1/subagents/agent-b2.jsonl", isSubagent: true, parentSessionId: "session-1", agentId: "b2" })
+    const reportText = "the deploy stalled on the migration lock"
+
+    function seedDeletedSubagent(store: MemoryStore): void {
+      store.syncSession(child, makeSession([{ assistant: reportText }]))
+      const report = {
+        agentId: "b2", agentName: null, subagentType: null, type: "assistant" as const, content: null, toolCalls: [], thinking: [], text: [reportText],
+        timestamp: "2026-11-01T10:00:00.000Z", tokenUsage: null, model: null, isBackground: false,
+      }
+      const parentSession = makeSession([{ user: "go", blocks: [{ kind: "sub_agent", messages: [report] }] }])
+      store.syncSession(parent, parentSession, { hasSubagentTranscript: (agentId) => agentId === "b2" })
+      store.syncSession({ ...parent, mtimeMs: 2_000 }, parentSession)
+    }
+    const fileExists = (path: string) => path !== child.path
+
+    it("keeps the live copy when folding duplicate text", async () => {
+      const store = open()
+      seedDeletedSubagent(store)
+      const result = await searchProse(store, "deploy stalled migration lock", { fileExists })
+      expect(result.hits).toEqual([expect.objectContaining({ sourceFile: parent.path, archived: false, duplicates: 1 })])
+      expect(result.keywordHits).toBe(2)
+    })
+
+    it("drops archived text before fusion, folding and the limit with liveOnly", async () => {
+      const store = open()
+      seedDeletedSubagent(store)
+      const checked: string[] = []
+      const result = await searchProse(store, "deploy stalled migration lock", {
+        liveOnly: true,
+        limit: 1,
+        fileExists: (path) => {
+          checked.push(path)
+          return fileExists(path)
+        },
+      })
+      expect(result.hits).toEqual([expect.objectContaining({ sourceFile: parent.path, archived: false, duplicates: 0 })])
+      expect(result.keywordHits).toBe(1)
+      expect(checked.filter((path) => path === child.path)).toHaveLength(1)
+      expect((await searchProse(store, "deploy stalled migration lock", { liveOnly: true })).keywordHits).toBe(2)
+    })
+  })
+
   it("returns nothing for a query without words and clamps the limit", async () => {
     const store = open()
     seed(store)

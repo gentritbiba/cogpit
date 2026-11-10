@@ -241,6 +241,22 @@ describe("searchProse with embeddings", () => {
     expect((await searchProse(store, "automobile", { embeddings: client, sessionIds: [] })).hits).toEqual([])
   })
 
+  it("keeps the live copy of shared text by meaning too, and drops archived vectors with liveOnly", async () => {
+    const store = open()
+    const turns = [{ user: "the car will not start" }]
+    store.syncSession(sourceFile({ path: "/t/gone.jsonl", sessionId: "gone" }), makeSession(turns))
+    store.syncSession(sourceFile({ path: "/t/live.jsonl", sessionId: "live" }), makeSession(turns))
+    const client = createEmbeddingClient(CONFIG, fakeEndpoint().fetch)
+    await embedPending(store, client)
+    const fileExists = (path: string) => path !== "/t/gone.jsonl"
+
+    const folded = await searchProse(store, "automobile", { embeddings: client, mode: "semantic", fileExists })
+    expect(folded.hits).toEqual([expect.objectContaining({ sessionId: "live", archived: false, duplicates: 1 })])
+    const live = await searchProse(store, "automobile", { embeddings: client, mode: "semantic", fileExists, liveOnly: true })
+    expect(live.hits).toEqual([expect.objectContaining({ sessionId: "live", duplicates: 0 })])
+    expect(live).toMatchObject({ semanticHits: 1, sessionsMatched: 1 })
+  })
+
   it("leaves out vectors below the score floor", async () => {
     const { store, endpoint } = await seeded()
     const result = await searchProse(store, "automobile food", { embeddings: createEmbeddingClient({ ...CONFIG, minScore: 0.9 }, endpoint.fetch) })

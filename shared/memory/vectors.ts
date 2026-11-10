@@ -7,7 +7,7 @@
  */
 import { withTx } from "./database"
 import { cosine, EmbeddingError, type EmbeddingClient, type QuantizedVector } from "./embeddings"
-import { filterSql, type ProseFilters } from "./keywordSearch"
+import { filterSql, type ChunkFilters } from "./keywordSearch"
 import { embeddingCounts, MISSING_VECTOR, type MemoryStore } from "./store"
 
 export interface EmbedPendingOptions {
@@ -112,7 +112,7 @@ export function vectorSearch(
   store: MemoryStore,
   query: QuantizedVector,
   fingerprint: string,
-  filters: ProseFilters,
+  filters: ChunkFilters,
   limit: number,
   minScore: number,
 ): { matches: VectorMatch[]; aboveFloor: number[] } {

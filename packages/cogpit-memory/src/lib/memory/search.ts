@@ -2,7 +2,7 @@
 import type { AgentKind } from "../types"
 import { DEFAULT_MIN_SCORE, type EmbeddingClient, type QuantizedVector } from "./embeddings"
 import { collapseDuplicates, rrfScore } from "./fusion"
-import { chunkRows, countTermMatches, ftsQuery, keywordCounts, keywordSearch, unmatchedCounts, type ChunkRow, type ProseFilters } from "./keywordSearch"
+import { chunkRows, countTermMatches, ftsQuery, keywordCounts, keywordSearch, unmatchedCounts, type ChunkFilters, type ChunkRow, type ProseFilters } from "./keywordSearch"
 import type { MemoryStore } from "./store"
 import type { ChunkKind, MemoryHit, SemanticStatus } from "./types"
 import { vectorSearch, type VectorMatch } from "./vectors"
@@ -13,8 +13,10 @@ export const SEARCH_MODES: readonly SearchMode[] = ["hybrid", "keyword", "semant
 export interface ProseSearchOptions extends ProseFilters {
   /** Hits returned, 1-200. Default 20. */
   limit?: number
-  /** True when the transcript at `path` exists; a hit whose file is gone is `archived`. */
+  /** True when the transcript at `path` exists; a hit whose file is gone is `archived`, and a live copy of the same text is kept over it. */
   fileExists?: (path: string) => boolean
+  /** With `fileExists`, leave out text whose transcript is gone before fusion, duplicate folding and the limit. */
+  liveOnly?: boolean
   /** Default hybrid: keywords and meaning, fused. */
   mode?: SearchMode
   /** Without a client, search is keyword-only and `semantic` says why. */
@@ -73,8 +75,10 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
   const client = mode === "keyword" ? null : options.embeddings ?? null
   const queryVector = client ? embedQuerySafely(client, query) : null
   const fts = ftsQuery(query)
+  const archived = archiveCheck(options.fileExists)
+  const filters: ChunkFilters = options.liveOnly && options.fileExists ? { ...options, excludeFileIds: archivedFileIds(store, archived) } : options
 
-  let rows = fts && mode !== "semantic" ? keywordSearch(store, fts, options, depth) : []
+  let rows = fts && mode !== "semantic" ? keywordSearch(store, fts, filters, depth) : []
   let semantic: SemanticStatus = mode === "keyword" ? { state: "off" } : { state: "unavailable", reason: "no embedding endpoint is configured" }
   let matches: VectorMatch[] = []
   let aboveFloor: number[] = []
@@ -82,7 +86,7 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
     const embedded = await queryVector
     if ("vector" in embedded) {
       semantic = { state: "ready" }
-      const found = vectorSearch(store, embedded.vector, client.fingerprint, options, depth, client.config.minScore ?? DEFAULT_MIN_SCORE)
+      const found = vectorSearch(store, embedded.vector, client.fingerprint, filters, depth, client.config.minScore ?? DEFAULT_MIN_SCORE)
       matches = found.matches
       aboveFloor = found.aboveFloor
     } else {
@@ -90,7 +94,7 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
     }
   }
   // Asked for meaning only and none is available: keywords still answer.
-  if (mode === "semantic" && semantic.state !== "ready" && fts) rows = keywordSearch(store, fts, options, depth)
+  if (mode === "semantic" && semantic.state !== "ready" && fts) rows = keywordSearch(store, fts, filters, depth)
 
   const candidates = new Map<number, Candidate>()
   rows.forEach((row, index) => candidates.set(row.id, { row, keyword: index + 1 }))
@@ -101,19 +105,18 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
   const missing = [...candidates].filter(([, candidate]) => !candidate.row).map(([id]) => id)
   for (const row of chunkRows(store, missing)) candidates.get(row.id)!.row = row
 
-  const archived = archiveCheck(options.fileExists)
   const terms = fts?.terms ?? []
   const fused = [...candidates.values()]
     .filter((candidate): candidate is Candidate & { row: ChunkRow } => !!candidate.row)
     .map((candidate) => toHit(candidate, terms, archived))
     .sort((a, b) => b.score - a.score || Math.min(a.ranks.keyword ?? Infinity, a.ranks.semantic ?? Infinity) - Math.min(b.ranks.keyword ?? Infinity, b.ranks.semantic ?? Infinity))
-  const hits = collapseDuplicates(fused, (hit) => hit.textHash).slice(0, limit)
+  const hits = collapseDuplicates(fused, (hit) => hit.textHash, (hit) => !hit.archived).slice(0, limit)
 
   const counts = !fts || rows.length < depth
     ? { hits: rows.length, sessions: new Set(rows.map((row) => row.session_id)).size }
-    : keywordCounts(store, fts, options)
+    : keywordCounts(store, fts, filters)
   const keywordsSearched = mode !== "semantic" || semantic.state !== "ready"
-  const semanticOnly = unmatchedCounts(store, aboveFloor, keywordsSearched ? fts : null, options)
+  const semanticOnly = unmatchedCounts(store, aboveFloor, keywordsSearched ? fts : null, filters)
   return { hits, keywordHits: counts.hits, semanticHits: semanticOnly.hits, sessionsMatched: counts.sessions + semanticOnly.sessions, semantic }
 }
 
@@ -142,6 +145,11 @@ export function chunkLocation(row: Pick<ChunkRow, "turn" | "kind" | "agent_id" |
   if (row.agent_id) return `agent/${row.agent_id}/turn/${row.turn}/${field}`
   if (row.inline_agent_id) return `agent/${row.inline_agent_id}/${field}`
   return `turn/${row.turn}/${field}`
+}
+
+function archivedFileIds(store: MemoryStore, isArchived: (path: string) => boolean): number[] {
+  const files = store.db.prepare("SELECT id, path FROM source_files").all() as Array<{ id: number; path: string }>
+  return files.filter((file) => isArchived(file.path)).map((file) => file.id)
 }
 
 function archiveCheck(fileExists: ((path: string) => boolean) | undefined): (path: string) => boolean {
