@@ -35,7 +35,8 @@ vi.mock("../../edition", async (original) => ({
   ),
 }))
 
-import { registerSessionSearchRoutes, type SessionSearchResponse } from "../../routes/session-search"
+import type { SessionSearchResponse } from "../../../shared/contracts/sessionSearch"
+import { registerSessionSearchRoutes } from "../../routes/session-search"
 import { shareRequestAllowed } from "../../share/allowlist"
 import { collectRoutes, createMockReqRes, getRouteHandler } from "../http-fixtures"
 

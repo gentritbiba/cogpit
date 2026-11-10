@@ -1,12 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { searchProse, type SearchMode } from "../../shared/memory/search"
-import type { ChunkKind, MatchKind, MemoryHit, SemanticStatus } from "../../shared/memory/types"
+import type { MemoryHit, SemanticStatus } from "../../shared/memory/types"
+import type { SessionSearchHit, SessionSearchResponse, SessionSearchResult } from "../../shared/contracts/sessionSearch"
 import { allStores, allTopLevelSessions, storeForPath } from "../agents"
 import { listedSession, listedSessionId } from "../agents/listedSession"
 import { allVisible, mayActHostWide, visibilityFor, type VisibilityCheck } from "../edition"
 import { sendJson, type UseFn } from "../http"
 import { memoryIndexer } from "../memory"
-import type { IndexingCounts } from "../memory/indexer"
 import { transcriptExists } from "../memory/store"
 import { sessionFileFor } from "../sessionCatalog"
 import { requestScope } from "./requestScope"
@@ -16,38 +16,6 @@ import { requestScope } from "./requestScope"
  * grouped by the session the UI opens, as far as the caller may see them.
  * The contract is frozen in the semantic-search plan (ROUTE-CONTRACT.md).
  */
-
-export interface SessionSearchHit {
-  chunkId: number
-  kind: ChunkKind
-  snippet: string
-  timestamp: string | null
-  match: MatchKind
-  score: number
-  automated: boolean
-  agentId: string | null
-  openTurnId: string | null
-  openTurn: number | null
-  text?: string
-}
-
-export interface SessionSearchResult {
-  sessionId: string
-  dirName: string | null
-  fileName: string | null
-  title: string | null
-  cwd: string
-  agentKind: string
-  archived: boolean
-  hits: SessionSearchHit[]
-}
-
-export interface SessionSearchResponse {
-  query: string
-  semantic: SemanticStatus
-  indexing: IndexingCounts
-  results: SessionSearchResult[]
-}
 
 interface SearchRequest {
   query: string

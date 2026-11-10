@@ -6,6 +6,7 @@
  * pass come sooner. Pending chunks are embedded after each pass when an
  * embedding endpoint is configured.
  */
+import type { SessionSearchIndexing } from "../../shared/contracts/sessionSearch"
 import type { EmbeddingClient } from "../../shared/memory/embeddings"
 import { reconcileStore } from "../../shared/memory/reconcile"
 import { MemoryStoreUnavailableError } from "../../shared/memory/schema"
@@ -47,11 +48,6 @@ export interface MemoryIndexerOptions {
   startDelayMs?: number
 }
 
-export interface IndexingCounts {
-  pendingFiles: number
-  pendingEmbeddings: number
-}
-
 export interface MemoryIndexer {
   start(): void
   /** A transcript was written: run the next pass sooner. */
@@ -60,7 +56,7 @@ export interface MemoryIndexer {
   /** The open store; null before the first pass opens it, after `stop`, or when the store cannot work here. */
   store(): MemoryStore | null
   embedder(): Embedder | null
-  counts(): IndexingCounts
+  counts(): SessionSearchIndexing
   /** Resolves once no pass is running; for tests and measurements. */
   settled(): Promise<void>
 }
