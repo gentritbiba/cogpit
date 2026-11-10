@@ -144,14 +144,16 @@ export async function searchSessions(
     let tools: { hits: ToolIndexHit[]; total: number; sessions: number } | null = null
     if (index) {
       try {
+        const unsynced = memoryStore ? proseNotInMemory(index, memoryStore) : null
         tools = toolIndexHits(index, query, {
           limit: limit * CANDIDATES_PER_HIT,
           sessionId: opts.sessionId,
           excludeSessionId: opts.excludeSessionId,
           maxAgeMs: toolMaxAgeMs,
           caseSensitive,
-          toolsOnly: !!memoryStore,
+          toolsOnly: unsynced?.size === 0,
         })
+        if (unsynced?.size) tools.hits = tools.hits.filter((hit) => isToolRow(hit.location) || unsynced.has(hit.filePath))
       } catch {
         tools = null
       }
@@ -226,6 +228,20 @@ function refresh(stores: OpenedStores): SyncSummary | null {
   }
 }
 
+/**
+ * Transcripts the tool index has and the memory store has not taken in yet,
+ * such as a backlog after upgrading: their prose still answers from the tool
+ * index until the memory store catches up.
+ */
+function proseNotInMemory(index: SearchIndex, memory: MemoryStore): Set<string> {
+  const synced = memory.syncedFiles()
+  return new Set([...index.indexedFiles().keys()].filter((path) => !synced.has(path)))
+}
+
+function isToolRow(location: string): boolean {
+  return location.includes("toolCall/")
+}
+
 function toolIndexHits(index: SearchIndex, query: string, options: Parameters<SearchIndex["search"]>[1] & { limit: number }) {
   const hits = index.search(query, options)
   if (hits.length < options.limit) return { hits, total: hits.length, sessions: new Set(hits.map((hit) => hit.sessionId)).size }
@@ -262,9 +278,9 @@ function toProseRanked(hit: MemoryHit): RankedHit {
 
 /** Where a tool row sits: `turn/<n>/…` in the file (a subagent's own when it is one), or inline `agent/<id>/…`. */
 function toolPlace(location: string, filePath: string): Pick<SearchHit, "turn" | "agent" | "kind"> {
-  const kind = location.endsWith("/input") ? "tool_input" : "tool_result"
+  const kind = !isToolRow(location) ? undefined : location.endsWith("/input") ? "tool_input" as const : "tool_result" as const
   const turn = /^turn\/(\d+)\//.exec(location)?.[1]
-  if (turn === undefined) return { kind }
+  if (turn === undefined) return kind ? { kind } : {}
   const agent = subagentIdForPath(filePath)
   return { kind, turn: Number(turn), ...(agent ? { agent } : {}) }
 }
@@ -329,7 +345,7 @@ async function fuse(
     returnedHits: ranked.length,
     // Exact while every match is a candidate; past that, sessions matched in both lists count twice.
     sessionsSearched: capped ? Math.max(candidateSessions, (prose?.sessionsMatched ?? 0) + (tools?.sessions ?? 0)) : candidateSessions,
-    results: [...grouped.values()],
+    results: [...grouped.values()].map(({ sessionId, cwd, title, hits }) => ({ sessionId, cwd, ...(title ? { title } : {}), hits })),
   }
 }
 

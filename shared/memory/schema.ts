@@ -28,6 +28,7 @@ const MIGRATIONS: readonly string[] = [
     mtime_ms REAL NOT NULL,
     size INTEGER NOT NULL,
     chunker_version INTEGER NOT NULL,
+    inline_agents TEXT NOT NULL,
     synced_at INTEGER NOT NULL
   );
   CREATE TABLE sessions (

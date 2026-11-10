@@ -5,7 +5,7 @@
  * newest first. A change feed can only make this run sooner.
  */
 import type { ParsedSession } from "../session/types"
-import type { MemoryStore, SyncResult } from "./store"
+import { subagentTranscripts, type MemoryStore, type SyncResult } from "./store"
 import type { SourceFile } from "./types"
 
 export interface ReconcileIo {
@@ -37,17 +37,7 @@ export interface ReconcileSummary {
   durationMs: number
 }
 
-/** Which subagents have a transcript of their own, from the same walk, keyed by parent session. */
-export function subagentTranscripts(files: readonly SourceFile[]): (sessionId: string) => (agentId: string) => boolean {
-  const bySession = new Map<string, Set<string>>()
-  for (const file of files) {
-    if (!file.isSubagent || !file.agentId) continue
-    let agents = bySession.get(file.sessionId)
-    if (!agents) bySession.set(file.sessionId, agents = new Set())
-    agents.add(file.agentId)
-  }
-  return (sessionId) => (agentId) => bySession.get(sessionId)?.has(agentId) ?? false
-}
+export { subagentTranscripts }
 
 export async function reconcileStore(
   store: MemoryStore,

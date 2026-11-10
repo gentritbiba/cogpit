@@ -15,6 +15,8 @@ export interface SyncedFile {
   mtimeMs: number
   size: number
   chunkerVersion: number
+  /** Subagents whose text came from this transcript's inline reports, having no transcript of their own then. */
+  inlineAgents: string[]
 }
 
 export interface SyncSessionOptions extends ChunkOptions {
@@ -28,6 +30,8 @@ export interface SyncResult {
   updated: number
   removed: number
   kept: number
+  /** Another writer already stored a newer state of this file; nothing was written. */
+  superseded: boolean
 }
 
 export interface MemoryStatus {
@@ -72,19 +76,33 @@ export class MemoryStore {
   }
 
   syncedFiles(): Map<string, SyncedFile> {
-    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version FROM source_files").all() as Array<{
+    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version, inline_agents FROM source_files").all() as Array<{
       path: string
       mtime_ms: number
       size: number
       chunker_version: number
+      inline_agents: string
     }>
-    return new Map(rows.map((row) => [row.path, { mtimeMs: row.mtime_ms, size: row.size, chunkerVersion: row.chunker_version }]))
+    return new Map(rows.map((row) => [row.path, {
+      mtimeMs: row.mtime_ms,
+      size: row.size,
+      chunkerVersion: row.chunker_version,
+      inlineAgents: row.inline_agents ? row.inline_agents.split(" ") : [],
+    }]))
   }
 
-  /** The files whose stored chunks are stale or missing, newest first. */
+  /**
+   * The files whose stored chunks are stale or missing, newest first. `files`
+   * is the whole walk: a parent whose inline subagent has since gained its own
+   * transcript is stale too, so that text is not indexed twice.
+   */
   planSync(files: readonly SourceFile[], synced = this.syncedFiles()): SourceFile[] {
+    const hasTranscript = subagentTranscripts(files)
     return files
-      .filter((file) => isStale(file, synced.get(file.path)))
+      .filter((file) => {
+        const state = synced.get(file.path)
+        return !state || isStale(file, state) || state.inlineAgents.some(hasTranscript(file.sessionId))
+      })
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
   }
 
@@ -93,9 +111,18 @@ export class MemoryStore {
     const chunks = chunkSession(session, options)
     const cwd = session.cwd || ""
     const now = options.now ?? Date.now()
-    const result: SyncResult = { added: 0, updated: 0, removed: 0, kept: 0 }
+    const inlineAgents = [...new Set(chunks.flatMap((chunk) => chunk.inlineAgentId ?? []))].sort()
+    const result: SyncResult = { added: 0, updated: 0, removed: 0, kept: 0, superseded: false }
     withTx(this.db, () => {
-      const fileId = this.upsertSourceFile(file, now)
+      // Two writers may parse the same file; the one holding an older state must not undo the newer one.
+      const current = firstRow<{ mtime_ms: number; size: number; chunker_version: number }>(
+        this.db.prepare("SELECT mtime_ms, size, chunker_version FROM source_files WHERE path = ?"), file.path)
+      if (current && (current.chunker_version > CHUNKER_VERSION || current.mtime_ms > file.mtimeMs
+        || (current.mtime_ms === file.mtimeMs && current.size > file.size))) {
+        result.superseded = true
+        return
+      }
+      const fileId = this.upsertSourceFile(file, inlineAgents, now)
       const stored = new Map<string, StoredChunk>()
       const rows = this.db.prepare(`SELECT id, turn, kind, block, part, text_hash, ${SIGNATURE_SQL} AS signature FROM chunks WHERE file_id = ?`).all(fileId) as StoredChunk[]
       for (const row of rows) stored.set(chunkKey(row), row)
@@ -161,17 +188,18 @@ export class MemoryStore {
     return status
   }
 
-  private upsertSourceFile(file: SourceFile, now: number): number {
+  private upsertSourceFile(file: SourceFile, inlineAgents: readonly string[], now: number): number {
     const row = firstRow<{ id: number }>(this.db.prepare(`
-      INSERT INTO source_files (path, session_id, instance_id, agent_kind, is_subagent, parent_session_id, agent_id, mtime_ms, size, chunker_version, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO source_files (path, session_id, instance_id, agent_kind, is_subagent, parent_session_id, agent_id, mtime_ms, size, chunker_version, inline_agents, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (path) DO UPDATE SET
         session_id = excluded.session_id, instance_id = excluded.instance_id, agent_kind = excluded.agent_kind,
         is_subagent = excluded.is_subagent, parent_session_id = excluded.parent_session_id, agent_id = excluded.agent_id,
-        mtime_ms = excluded.mtime_ms, size = excluded.size, chunker_version = excluded.chunker_version, synced_at = excluded.synced_at
+        mtime_ms = excluded.mtime_ms, size = excluded.size, chunker_version = excluded.chunker_version,
+        inline_agents = excluded.inline_agents, synced_at = excluded.synced_at
       RETURNING id`),
     file.path, file.sessionId, file.instanceId, file.agentKind, file.isSubagent ? 1 : 0, file.parentSessionId, file.agentId,
-    file.mtimeMs, file.size, CHUNKER_VERSION, now)
+    file.mtimeMs, file.size, CHUNKER_VERSION, inlineAgents.join(" "), now)
     if (!row) throw new Error(`Recording ${file.path} in the memory store returned no id`)
     return row.id
   }
@@ -198,8 +226,20 @@ export class MemoryStore {
   }
 }
 
+/** Which subagents have a transcript of their own, from the same walk, keyed by parent session. */
+export function subagentTranscripts(files: readonly SourceFile[]): (sessionId: string) => (agentId: string) => boolean {
+  const bySession = new Map<string, Set<string>>()
+  for (const file of files) {
+    if (!file.isSubagent || !file.agentId) continue
+    let agents = bySession.get(file.sessionId)
+    if (!agents) bySession.set(file.sessionId, agents = new Set())
+    agents.add(file.agentId)
+  }
+  return (sessionId) => (agentId) => bySession.get(sessionId)?.has(agentId) ?? false
+}
+
 function isStale(file: SourceFile, synced: SyncedFile | undefined): boolean {
-  return !synced || synced.mtimeMs !== file.mtimeMs || synced.size !== file.size || synced.chunkerVersion !== CHUNKER_VERSION
+  return !synced || synced.mtimeMs !== file.mtimeMs || synced.size !== file.size || synced.chunkerVersion < CHUNKER_VERSION
 }
 
 function chunkKey(chunk: Pick<Chunk, "turn" | "kind" | "block" | "part">): string {

@@ -10,6 +10,7 @@ const { searchSessions } = await import("../../commands/search")
 const { indexStats, indexSync } = await import("../../commands/index-cmd")
 const { syncTranscripts } = await import("../../lib/sync")
 const { openMemoryStore } = await import("../../lib/memory-store")
+const { SearchIndex } = await import("../../lib/search-index")
 
 let tmpDir: string
 let projectDir: string
@@ -115,6 +116,28 @@ describe("search with the memory store", () => {
     const response = await search("orphaned subagent finding")
     expect(response.results.map((result) => result.sessionId)).toEqual(["parent"])
     expect(response.results[0].hits[0]).toMatchObject({ location: "agent/xyz/turn/0/userMessage", agent: "xyz", turn: 0 })
+  })
+
+  it("keeps answering prose from the tool index for transcripts the memory store has not taken in yet", async () => {
+    writeAgedSession("backlog", "The flaky websocket reconnect", "Backoff fixed it.", "ls", 1)
+    writeAgedSession("synced", "Another websocket reconnect note", "Fine.", "ls", 1)
+    const index = new SearchIndex(join(tmpDir, "index.db"))
+    const memory = openMemoryStore()
+    try {
+      index.buildFull()
+      syncTranscripts({ index: null, memory })
+      memory.db.exec(`DELETE FROM chunks WHERE file_id = (SELECT id FROM source_files WHERE path LIKE '%backlog.jsonl')`)
+      memory.db.exec(`DELETE FROM source_files WHERE path LIKE '%backlog.jsonl'`)
+
+      const result = await searchSessions("websocket reconnect", {}, index, memory) as unknown as Response
+      expect(result.results.map((entry) => entry.sessionId).sort()).toEqual(["backlog", "synced"])
+      const synced = result.results.find((entry) => entry.sessionId === "synced")!
+      expect(synced.hits).toHaveLength(1)
+      expect(synced.hits[0]).toMatchObject({ kind: "user", match: "keyword" })
+    } finally {
+      index.close()
+      memory.close()
+    }
   })
 
   it("rejects a bad --max-age instead of ignoring it", async () => {
