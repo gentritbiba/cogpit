@@ -31,9 +31,13 @@ and `match`: `keyword`, `semantic` (same meaning, no shared words, with a
 `semantic: unavailable` with `semanticReason` means meaning search is off or
 failed; keyword results are still complete. `archived: true` means the
 transcript is gone: the hit's `text` is all that is left and `context` cannot
-open it. `automated: true` marks prompts other agents or Cogpit wrote. A
-`warnings` entry about transcripts not indexed yet means `cogpit-memory index
-sync` will finish the backlog.
+open it. `automated: true` marks prompts other agents or Cogpit wrote.
+`behind: N` means N transcripts that are still being written have turns newer
+than the index; search catches up on them every minute or so, so there is
+nothing to run. To read a session's latest turns, such as checking whether a
+message reached a child session, pass `--session <id>`: that session and its
+subagents are always brought up to date first. A `warnings` entry about
+transcripts not indexed yet means `cogpit-memory index sync` will add them.
 
 ## Read only the detail you need
 

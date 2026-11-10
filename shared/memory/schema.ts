@@ -88,6 +88,10 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (text_hash, fingerprint)
   ) WITHOUT ROWID;
   `,
+  // How long the last sync of a file took, so a search can skip one that is too slow for its budget.
+  `
+  ALTER TABLE source_files ADD COLUMN sync_ms INTEGER;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

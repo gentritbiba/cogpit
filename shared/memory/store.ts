@@ -17,12 +17,18 @@ export interface SyncedFile {
   chunkerVersion: number
   /** Subagents whose text came from this transcript's inline reports, having no transcript of their own then. */
   inlineAgents: string[]
+  /** When it was last synced (epoch ms). */
+  syncedAtMs: number
+  /** How long that sync took; null when unknown. */
+  syncMs: number | null
 }
 
 export interface SyncSessionOptions extends ChunkOptions {
   /** Session title to snapshot; the first typed prompt when absent. */
   title?: string | null
   now?: number
+  /** Time already spent on this file before the call (reading, parsing, other indexes); the recorded sync duration adds the call's own. */
+  elapsedMs?: number
 }
 
 export interface SyncResult {
@@ -78,18 +84,22 @@ export class MemoryStore {
   }
 
   syncedFiles(): Map<string, SyncedFile> {
-    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version, inline_agents FROM source_files").all() as Array<{
+    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version, inline_agents, synced_at, sync_ms FROM source_files").all() as Array<{
       path: string
       mtime_ms: number
       size: number
       chunker_version: number
       inline_agents: string
+      synced_at: number
+      sync_ms: number | null
     }>
     return new Map(rows.map((row) => [row.path, {
       mtimeMs: row.mtime_ms,
       size: row.size,
       chunkerVersion: row.chunker_version,
       inlineAgents: row.inline_agents ? row.inline_agents.split(" ") : [],
+      syncedAtMs: row.synced_at,
+      syncMs: row.sync_ms,
     }]))
   }
 
@@ -110,6 +120,7 @@ export class MemoryStore {
 
   /** Make the stored chunks of `file` match `session`, its fresh parse. */
   syncSession(file: SourceFile, session: ParsedSession, options: SyncSessionOptions = {}): SyncResult {
+    const started = Date.now()
     const chunks = chunkSession(session, options)
     const cwd = session.cwd || ""
     const now = options.now ?? Date.now()
@@ -159,6 +170,7 @@ export class MemoryStore {
         result.removed++
       }
       this.upsertSession(file, session, cwd, chunks, options.title)
+      this.db.prepare("UPDATE source_files SET sync_ms = ? WHERE id = ?").run((options.elapsedMs ?? 0) + Date.now() - started, fileId)
     })
     return result
   }

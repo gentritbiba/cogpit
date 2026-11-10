@@ -44,6 +44,16 @@ describe("MemoryStore schema", () => {
     expect((store.db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toBe("wal")
   })
 
+  it("upgrades a store written before sync durations were recorded", () => {
+    const path = tempDb()
+    const old = open(path)
+    old.syncSession(sourceFile(), makeSession([{ user: "kept across the upgrade" }]), { now: 7 })
+    old.db.exec("ALTER TABLE source_files DROP COLUMN sync_ms; PRAGMA user_version = 2")
+    old.close()
+    stores.pop()
+    expect(open(path).syncedFiles().get(sourceFile().path)).toMatchObject({ syncedAtMs: 7, syncMs: null })
+  })
+
   it("refuses a store written by a newer schema", () => {
     const path = tempDb()
     const db = new DatabaseSync(path)
@@ -66,9 +76,12 @@ describe("MemoryStore.syncSession", () => {
   it("stores chunks, a session snapshot and the file state", () => {
     const store = open()
     const file = sourceFile()
-    const result = store.syncSession(file, makeSession([{ user: "Set up the deploy", assistant: "Done with the release workflow." }]), { now: 5 })
+    const result = store.syncSession(file, makeSession([{ user: "Set up the deploy", assistant: "Done with the release workflow." }]), { now: 5, elapsedMs: 4_000 })
     expect(result).toEqual({ added: 2, updated: 0, removed: 0, kept: 0, superseded: false })
-    expect(store.syncedFiles().get(file.path)).toEqual({ mtimeMs: 1_000, size: 100, chunkerVersion: CHUNKER_VERSION, inlineAgents: [] })
+    const state = store.syncedFiles().get(file.path)
+    expect(state).toEqual({ mtimeMs: 1_000, size: 100, chunkerVersion: CHUNKER_VERSION, inlineAgents: [], syncedAtMs: 5, syncMs: expect.any(Number) })
+    expect(state!.syncMs).toBeGreaterThanOrEqual(4_000)
+    expect(state!.syncMs).toBeLessThan(5_000)
     expect(store.db.prepare("SELECT session_id, cwd, title, source_file FROM sessions").all()).toEqual([
       { session_id: "session-1", cwd: "/work/project", title: "Set up the deploy", source_file: file.path },
     ].map((row) => expect.objectContaining(row)))

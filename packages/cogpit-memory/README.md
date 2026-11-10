@@ -88,9 +88,14 @@ One ranked list, merged by reciprocal rank fusion from up to three lists:
 - **Tool input and output** come from the FTS5 tool index as exact-phrase hits
   within `--max-age` (default 5 days).
 
-Both stores are brought up to date before a search answers, newest transcripts
-first, within a two-second budget; one parse of a file feeds both. Run
-`cogpit-memory index sync` to finish a large backlog.
+Before a search answers it spends up to 600 ms bringing both stores up to date.
+One parse of a file feeds both. Transcripts never indexed go first, then ones
+that changed, each newest first. A file whose last sync took longer than the
+time left is skipped. A transcript still being written is re-read at most
+once per max(1 minute, 20 × its last sync). `--session <id>` brings that
+session and its subagents up to date first, outside the budget and the
+back-off. The response says how many transcripts are `behind`. Run
+`cogpit-memory index sync`, which has no budget, to finish a large backlog.
 
 ```bash
 cogpit-memory search "authentication"                        # Cross-session index, every agent
@@ -134,7 +139,8 @@ of hits, best first. Each hit has:
 | `duplicates` | Identical passages in other sessions (forks) folded into this one |
 
 The response also carries `semantic` (`ready`, `unavailable` or `off`) with
-`semanticReason`, and, when the stores are behind, `warnings`. Without an
+`semanticReason`; `behind`, the number of transcripts with turns newer than
+the stores; and `warnings` when transcripts were never indexed. Without an
 endpoint, or when it does not answer within its timeout, search answers with
 keyword results and says why; it never fails because of embeddings.
 

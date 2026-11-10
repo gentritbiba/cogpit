@@ -87,11 +87,13 @@ export interface SearchResponse {
   results: SessionSearchResult[]
   semantic?: SemanticStatus["state"]
   semanticReason?: string
+  /** Transcripts with newer content than the stores hold, left for a later sync; their latest turns may be missing. */
+  behind?: number
   warnings?: string[]
 }
 
-/** What a search spends bringing the stores up to date before it answers. */
-export const SEARCH_SYNC_BUDGET_MS = 2000
+/** What a search spends bringing the stores up to date before it answers; `--session` is synced outside it. */
+export const SEARCH_SYNC_BUDGET_MS = 600
 
 /** Each list contributes this many candidates per requested hit before fusion. */
 const CANDIDATES_PER_HIT = 3
@@ -139,8 +141,9 @@ export async function searchSessions(
   const opened = openStores(searchIndex, memory, warnings)
   try {
     const { index, memoryStore } = opened
-    const sync = refresh(opened)
-    if (sync?.pending) warnings.push(`${sync.pending} transcripts are not indexed yet; run \`cogpit-memory index sync\` to finish.`)
+    const sync = refresh(opened, opts.sessionId)
+    if (sync?.unindexed) warnings.push(`${sync.unindexed} transcripts are not indexed yet; run \`cogpit-memory index sync\` to include them.`)
+    const behind = sync ? sync.pending - sync.unindexed : 0
 
     const prose = memoryStore
       ? await searchProse(memoryStore, query, {
@@ -158,7 +161,7 @@ export async function searchSessions(
 
     // Tool calls are matched by phrase only, so a search by meaning leaves them out, unless meaning is unavailable.
     const wantTools = mode !== "semantic" || prose?.semantic.state !== "ready"
-    if (!wantTools) return withStatus(await fuse(query, limit, proseHits, [], prose, { total: 0, sessions: 0 }), prose, warnings)
+    if (!wantTools) return withStatus(await fuse(query, limit, proseHits, [], prose, { total: 0, sessions: 0 }), prose, { warnings, behind })
 
     let tools: { hits: ToolIndexHit[]; total: number; sessions: number } | null = null
     if (index) {
@@ -181,10 +184,10 @@ export async function searchSessions(
     const scanned = !tools || (opts.sessionId && tools.hits.length === 0 && proseHits.length === 0)
     if (scanned) {
       const raw = await rawScanSearch(query, opts.sessionId ?? null, toolMaxAgeMs, limit, caseSensitive, opts.excludeSessionId)
-      if (!memoryStore || proseHits.length === 0) return withStatus(raw, prose, warnings)
-      return withStatus(await fuse(query, limit, proseHits, rawToolHits(raw), prose, null), prose, warnings)
+      if (!memoryStore || proseHits.length === 0) return withStatus(raw, prose, { warnings, behind })
+      return withStatus(await fuse(query, limit, proseHits, rawToolHits(raw), prose, null), prose, { warnings, behind })
     }
-    return withStatus(await fuse(query, limit, proseHits, tools!.hits.map(toToolRanked), prose, tools), prose, warnings)
+    return withStatus(await fuse(query, limit, proseHits, tools!.hits.map(toToolRanked), prose, tools), prose, { warnings, behind })
   } finally {
     opened.close()
   }
@@ -233,13 +236,13 @@ function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryS
   }
 }
 
-function refresh(stores: OpenedStores): SyncSummary | null {
+function refresh(stores: OpenedStores, sessionId: string | undefined): SyncSummary | null {
   const index = stores.ownIndex ? stores.index : null
   const memory = stores.ownMemory ? stores.memoryStore : null
   try {
     if (index && stores.indexWasMissing) return rebuildToolIndex(index, memory)
     if (!index && !memory) return null
-    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS })
+    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS, backOff: true, sessionId })
   } catch {
     // A stale store still answers; the next search tries again.
     return null
@@ -372,13 +375,14 @@ function roundScore(score: number): number {
   return Math.round(score * 1e6) / 1e6
 }
 
-function withStatus(response: SearchResponse, prose: ProseSearchResult | null, warnings: string[]): SearchResponse {
+function withStatus(response: SearchResponse, prose: ProseSearchResult | null, notes: { warnings: string[]; behind: number }): SearchResponse {
   const semantic: SemanticStatus = prose?.semantic ?? { state: "unavailable", reason: "the memory store is unavailable" }
   return {
     ...response,
     semantic: semantic.state,
     ...(semantic.reason ? { semanticReason: semantic.reason } : {}),
-    ...(warnings.length > 0 ? { warnings } : {}),
+    ...(notes.behind > 0 ? { behind: notes.behind } : {}),
+    ...(notes.warnings.length > 0 ? { warnings: notes.warnings } : {}),
   }
 }
 
