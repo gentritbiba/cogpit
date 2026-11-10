@@ -86,7 +86,6 @@ async function visibleSessionIds(check: VisibilityCheck): Promise<string[] | und
 async function groupBySession(hits: readonly MemoryHit[], limit: number, showArchived: boolean): Promise<SessionSearchResult[]> {
   const bySession = new Map<string, MemoryHit[]>()
   for (const hit of hits) {
-    if (hit.archived && !showArchived) continue
     const group = bySession.get(hit.sessionId)
     if (group) {
       if (group.length < HITS_PER_SESSION) group.push(hit)
@@ -129,16 +128,19 @@ async function handleSessionSearch(req: IncomingMessage, res: ServerResponse): P
   if (check.nothing) return unsearched("no session is visible to you")
 
   const sessionIds = await visibleSessionIds(check)
+  // Archived text has no session left to check a narrower scope against, so only an admin's unscoped search shows it.
+  const showArchived = check.everything && mayActHostWide(req)
   const prose = await searchProse(store, request.query, {
     limit: Math.min(MAX_HITS, request.limit * HITS_PER_SESSION_ASKED),
     ...(sessionIds ? { sessionIds } : {}),
     mode: request.mode,
     embeddings: indexer?.embedder()?.client ?? null,
     fileExists: transcriptExists,
+    // Left out before ranking, so a hidden archived copy never folds away a live one.
+    liveOnly: !showArchived,
     ...(request.cwd ? { cwd: request.cwd } : {}),
   })
-  // Archived text has no session left to check a narrower scope against, so only an admin's unscoped search shows it.
-  answer(prose.semantic, await groupBySession(prose.hits, request.limit, check.everything && mayActHostWide(req)))
+  answer(prose.semantic, await groupBySession(prose.hits, request.limit, showArchived))
 }
 
 export function registerSessionSearchRoutes(use: UseFn): void {

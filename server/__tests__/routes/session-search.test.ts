@@ -187,6 +187,17 @@ describe("GET /api/session-search", () => {
     expect(alpha).toEqual([])
   })
 
+  it("keeps the live copy when a deleted sub-agent's archived text matches its parent's", async () => {
+    store.syncSession(ALPHA, makeSession([{ user: "fix the websocket reconnect", assistant: "Found a websocket handshake race.", id: "u-1" }]), { title: "Reconnect" })
+    mocks.existing.delete(ALPHA_AGENT.path)
+    asMember()
+
+    const [alpha] = (await search("q=handshake")).results
+    expect(alpha.sessionId).toBe("alpha")
+    expect(alpha.hits).toEqual([expect.objectContaining({ agentId: null, openTurn: 0, snippet: expect.stringContaining("handshake") })])
+    expect(alpha.hits[0]).not.toHaveProperty("text")
+  })
+
   it("answers with no results while the store is missing or empty, and says why semantic search is off", async () => {
     mocks.indexer = null
     expect(await search("q=websocket")).toEqual({
