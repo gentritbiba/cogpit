@@ -43,7 +43,8 @@ export function cogpitAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string)
     ...base,
     COGPIT_SESSION_ID: cogpitSessionId,
     COGPIT_ORCHESTRATION_ROOT: base.COGPIT_ORCHESTRATION_ROOT || getDataRoot(),
-    [MEMORY_DIR_ENV]: memoryDir(base),
+    // A curated base env leaves the override out; the server's own then applies.
+    [MEMORY_DIR_ENV]: memoryDir(base[MEMORY_DIR_ENV] ? base : process.env),
     ...(port !== null ? { COGPIT_PORT: String(port) } : {}),
   }
   if (!agentBinInstalled()) return env
