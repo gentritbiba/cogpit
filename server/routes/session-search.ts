@@ -119,7 +119,8 @@ async function groupVisible(hits: readonly MemoryHit[], limit: number, check: Vi
     const [best] = group
     const filePath = await sessionTranscript(best)
     const live = filePath !== null && transcriptExists(filePath)
-    if (live ? await check(sessionId, lineageFromMeta({ sessionId, parentSessionId: null }, filePath)) === "hidden" : !admin) continue
+    if (!live && !admin) continue
+    if (await check(sessionId, live ? lineageFromMeta({ sessionId, parentSessionId: null }, filePath) : undefined) === "hidden") continue
     const address = live ? await storeForPath(filePath)?.sessionAddress(filePath).catch(() => null) : null
     results.push({
       sessionId,

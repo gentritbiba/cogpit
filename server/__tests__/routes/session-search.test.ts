@@ -127,6 +127,12 @@ describe("GET /api/session-search", () => {
     expect(gone.hits[0].text).toBe("the old websocket server")
   })
 
+  it("keeps an archived session out of an admin's answer when it is outside the scope asked for", async () => {
+    mocks.hidden = new Set(["gone"])
+    const body = await search("q=websocket&scope=mine")
+    expect(body.results.map((result) => result.sessionId).sort()).toEqual(["alpha", "beta"])
+  })
+
   it("keeps archived sessions and sessions the caller may not see out of a member's answer", async () => {
     mocks.admin = false
     mocks.hidden = new Set(["beta"])

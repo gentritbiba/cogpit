@@ -17,7 +17,7 @@ export interface Embedder {
   /** Embeds queries too, for a search that wants meaning. */
   readonly client: EmbeddingClient
   /** Embed what is pending. Never throws for a down endpoint: it answers with `error`. */
-  embedPending(store: MemoryStore, signal: AbortSignal): Promise<{ remaining: number; error?: string }>
+  embedPending(store: MemoryStore, signal: AbortSignal): Promise<{ embedded: number; remaining: number; error?: string }>
 }
 
 export interface EmbeddingConfigFile {
@@ -105,6 +105,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
   let lastPassEnd = 0
 
   const resyncAt = new Map<string, number>()
+  /** When the stale transcripts the last pass held back may be read. */
+  let heldBackUntil = Infinity
   const failures = new Map<string, number>()
   /** When each heavy transcript was last read. */
   const heavyReadAt = new Map<string, number>()
@@ -148,7 +150,7 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     let next = now + backstopMs
     if (rerun) next = Math.min(next, lastPassEnd + hintDelay())
     rerun = false
-    for (const at of resyncAt.values()) if (at > now) next = Math.min(next, at)
+    next = Math.min(next, heldBackUntil)
     if (embedMoreSoon) next = Math.min(next, now + EMBED_CONTINUE_MS)
     if (outage) next = Math.min(next, outage.retryAt)
     for (const [path, at] of resyncAt) if (at < now - MAX_RESYNC_MS) resyncAt.delete(path)
@@ -176,11 +178,17 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
    */
   async function parseCooperatively(file: SourceFile): Promise<ParsedSession | null> {
     const now = Date.now()
-    if ((resyncAt.get(file.path) ?? 0) > now) return null
+    const holdBack = (until: number) => {
+      heldBackUntil = Math.min(heldBackUntil, until)
+      return null
+    }
+    const allowedAt = resyncAt.get(file.path) ?? 0
+    if (allowedAt > now) return holdBack(allowedAt)
     const heavyAt = heavyReadAt.get(file.path)
     if (heavyAt !== undefined && now - file.mtimeMs < QUIET_MS && now - heavyAt < MAX_HEAVY_DEFER_MS) {
-      resyncAt.set(file.path, Math.min(file.mtimeMs + QUIET_MS, heavyAt + MAX_HEAVY_DEFER_MS))
-      return null
+      const quietAt = Math.min(file.mtimeMs + QUIET_MS, heavyAt + MAX_HEAVY_DEFER_MS)
+      resyncAt.set(file.path, quietAt)
+      return holdBack(quietAt)
     }
     const started = Date.now()
     let failed = false
@@ -205,6 +213,7 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     const memory = openStore()
     if (!memory) return
     const passStarted = Date.now()
+    heldBackUntil = Infinity
     const files = await options.listFiles()
     const titles = new Map<string, string | null>()
     await reconcileStore(memory, files, {
@@ -250,7 +259,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
       return
     }
     outage = null
-    embedMoreSoon = result.remaining > 0 && !stopped
+    // Texts the endpoint refuses stay pending; only a run that got somewhere hurries the next.
+    embedMoreSoon = result.remaining > 0 && result.embedded > 0 && !stopped
   }
 
   return {

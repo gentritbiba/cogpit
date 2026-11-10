@@ -242,7 +242,7 @@ describe("memory indexer", () => {
 })
 
 describe("memory indexer embeddings", () => {
-  function embedderWith(results: Array<{ remaining: number; error?: string }>): Embedder & { calls: number } {
+  function embedderWith(results: Array<{ embedded: number; remaining: number; error?: string }>): Embedder & { calls: number } {
     const embedder = {
       client: createEmbeddingClient({ url: "http://embed.test/v1/embeddings", model: "fake", dimensions: FAKE_DIMENSIONS }, fakeEndpoint().fetch),
       calls: 0,
@@ -258,7 +258,7 @@ describe("memory indexer embeddings", () => {
   it("embeds after a pass once a config file appears, and re-reads it when it changes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
     let config = { text: null as string | null, stamp: "" }
-    const embedder = embedderWith([{ remaining: 0 }])
+    const embedder = embedderWith([{ embedded: 4, remaining: 0 }])
     const createEmbedder = vi.fn((text: string | null) => (text ? embedder : null))
     const h = harness({ readEmbeddingConfig: async () => config, createEmbedder, backstopMs: 1_000 })
     await firstPass(h)
@@ -277,8 +277,8 @@ describe("memory indexer embeddings", () => {
 
   it("retries a down endpoint with back-off and says so once per outage", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-    const down = { remaining: 7, error: "connect ECONNREFUSED 127.0.0.1:8790" }
-    const embedder = embedderWith([down, down, down, { remaining: 0 }, down])
+    const down = { embedded: 0, remaining: 7, error: "connect ECONNREFUSED 127.0.0.1:8790" }
+    const embedder = embedderWith([down, down, down, { embedded: 7, remaining: 0 }, down])
     const h = harness({ readEmbeddingConfig: async () => ({ text: "{}", stamp: "1" }), createEmbedder: () => embedder, backstopMs: 600_000 })
     await firstPass(h)
     expect(embedder.calls).toBe(1)
@@ -302,7 +302,7 @@ describe("memory indexer embeddings", () => {
 
   it("keeps embedding soon while a pass leaves work and the endpoint answers", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
-    const embedder = embedderWith([{ remaining: 50 }, { remaining: 0 }])
+    const embedder = embedderWith([{ embedded: 32, remaining: 50 }, { embedded: 50, remaining: 0 }])
     const h = harness({ readEmbeddingConfig: async () => ({ text: "{}", stamp: "1" }), createEmbedder: () => embedder, backstopMs: 600_000 })
     await firstPass(h)
     await vi.advanceTimersByTimeAsync(1_000)
@@ -345,6 +345,19 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
     expect(h.indexer.counts().pendingEmbeddings).toBe(4)
     expect(h.warn).toHaveBeenCalledTimes(1)
     expect(String(h.warn.mock.calls[0][0])).toContain("unavailable")
+  })
+
+  it("leaves texts the endpoint refuses for the backstop pass instead of resending them every second", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const endpoint = fakeEndpoint(() => 400)
+    const h = harness({ readEmbeddingConfig: async () => ({ text: EMBEDDINGS_CONFIG, stamp: "1" }), createEmbedder: (text) => embedderFor(text, endpoint.fetch, {}), backstopMs: 60_000 })
+    await firstPass(h)
+    const firstPassRequests = endpoint.requests.length
+    expect(h.indexer.counts().pendingEmbeddings).toBe(4)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(endpoint.requests.length).toBe(firstPassRequests)
+    expect(h.warn).not.toHaveBeenCalled()
   })
 
   it("says once that config.json is not usable, and indexes text without embeddings", async () => {
