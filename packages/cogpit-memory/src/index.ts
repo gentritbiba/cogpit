@@ -21,7 +21,7 @@ export { DEFAULT_DB_PATH, dirs } from "./lib/dirs"
 export { searchSessions, type SearchOptions, type SearchResponse } from "./commands/search"
 export { getSessionOverview, getTurnDetail, getAgentOverview, getAgentTurnDetail } from "./commands/context"
 export { listSessions, currentSession, type SessionSummary, type SessionsOptions } from "./commands/sessions"
-export { indexStats, indexRebuild } from "./commands/index-cmd"
+export { indexStats, indexRebuild, indexSync } from "./commands/index-cmd"
 
 // Types
 export type { ParsedSession, Turn, ToolCall, SubAgentMessage, SessionStats } from "./lib/types"

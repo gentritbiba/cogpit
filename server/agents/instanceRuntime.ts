@@ -5,6 +5,8 @@ import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { browserHome } from "../browser/paths"
+import { memoryDir } from "../memory/paths"
+import { MEMORY_DIR_ENV } from "../../shared/memory/paths"
 import { serverPort } from "../lib/portFile"
 import { noteBrowserProfiles } from "../browser/owners"
 import { descriptorFor } from "../../shared/session/agent-descriptors"
@@ -28,6 +30,8 @@ export function providerInstanceEnvironment(instance: ProviderInstance, dataRoot
   if (descriptor.cli.homeEnvVar) env[descriptor.cli.homeEnvVar] = instance.homeDir
   if (descriptor.cli.bundledBySdk) env.CLAUDE_CONFIG_DIR = instance.homeDir
   env.COGPIT_BROWSER_HOME = browserHome()
+  // The worker's HOME is its own, so it is told where the shared memory store is.
+  env[MEMORY_DIR_ENV] = memoryDir()
   const port = serverPort()
   if (port !== null) env.COGPIT_PORT = String(port)
   if (instance.executable) env.COGPIT_PROVIDER_EXECUTABLE = instance.executable

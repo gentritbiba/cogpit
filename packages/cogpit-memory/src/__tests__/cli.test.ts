@@ -76,4 +76,21 @@ describe("CLI arg parsing", () => {
     const cmd = parseArgs(["search", "auth", "--case-sensitive"])
     expect(cmd.args.caseSensitive).toBe(true)
   })
+
+  it("parses index sync", () => {
+    expect(parseArgs(["index", "sync"])).toEqual({ command: "index", args: { subcommand: "sync" } })
+    expect(parseArgs(["index"]).args.subcommand).toBe("stats")
+  })
+
+  it("rejects bad flags and values instead of ignoring them", () => {
+    expect(parseArgs(["search", "auth", "--mode", "semantic"]).error).toBe("Unknown option for search: --mode")
+    expect(parseArgs(["search", "auth", "--limit", "ten"]).error).toContain('Invalid --limit "ten"')
+    expect(parseArgs(["search", "auth", "--limit", "0"]).error).toContain("Invalid --limit")
+    expect(parseArgs(["search", "auth", "--max-age", "5 days"]).error).toContain('Invalid --max-age "5 days"')
+    expect(parseArgs(["search", "auth", "--session"]).error).toBe("--session needs a value")
+    expect(parseArgs(["sessions", "--max-age", "1w"]).error).toContain("Invalid --max-age")
+    expect(parseArgs(["context", "abc", "--turn", "-1"]).error).toContain("Invalid --turn")
+    expect(parseArgs(["index", "rebuld"]).error).toContain("Unknown index command: rebuld")
+    expect(parseArgs(["context", "abc", "--turn", "0"]).error).toBeUndefined()
+  })
 })

@@ -72,12 +72,22 @@ Copilot CLI keeps nested agent events in the root `events.jsonl`, so L1 and L2
 include that activity inline. L3 needs a separate sub-agent transcript file and
 is not available for Copilot sessions.
 
-### `search` — Full-text search with FTS5
+### `search` — Ranked search over prose and tool calls
 
-Cross-session search indexes Claude Code, Codex, and Copilot CLI history. With
-`--session`, all three are supported too,
-including user and assistant messages, thinking, tool I/O, inline sub-agent
-content, and compaction summaries when the provider records them.
+One ranked list from two stores, merged by reciprocal rank fusion:
+
+- **Prose** — user prompts, assistant replies, thinking, compaction summaries,
+  recaps and plans — lives in the durable memory store and is ranked by BM25:
+  the query's words are ORed, common words are dropped, and words are stemmed,
+  so a question finds the passage that shares most of its rarer words. Quote a
+  part of the query to keep it an exact phrase. Prose is searched across **all
+  time** unless `--max-age` is given.
+- **Tool input and output** come from the FTS5 tool index as exact-phrase hits
+  within `--max-age` (default 5 days).
+
+Both stores are brought up to date before a search answers, newest transcripts
+first, within a two-second budget; one parse of a file feeds both. Run
+`cogpit-memory index sync` to finish a large backlog.
 
 ```bash
 cogpit-memory search "authentication"                        # Cross-session index, every agent
@@ -92,21 +102,41 @@ cogpit-memory search "bug" --session-limit 20 --hits-per-session 2  # Compact re
 |------|---------|-------------|
 | `--session` | all | Scope to single session |
 | `--exclude-session` | none | Exclude one session and its subagents |
-| `--max-age` | `5d` | Time window — any duration (`5d`, `30d`, `365d`) |
-| `--limit` | `20` | Max total hits returned |
+| `--max-age` | all time for prose, `5d` for tool calls | Time window — `<number>d`, `h` or `m` |
+| `--limit` | `20` | Max total hits returned (1–200) |
 | `--session-limit` | all | Cap unique sessions in results |
 | `--hits-per-session` | all | Max hits kept per session |
 | `--case-sensitive` | `false` | Case sensitivity |
 
-Use `--exclude-session <current-session-id>` when recalling earlier work to omit your own search commands and results. Missing transcript files are removed from the index before searching. If a transcript is deleted between search and drill-down, `context` returns a JSON error and exits nonzero.
+An unknown flag or a bad value (`--limit ten`, `--max-age 5days`) is an error, not ignored.
 
-Each result includes the `cwd` (working directory where the session ran) and an array of hits. Each hit includes a `location` string (e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/toolCall/tc1/result`) that maps directly to L2/L3 drill-down commands.
+Use `--exclude-session <current-session-id>` when recalling earlier work to omit your own search commands and results.
 
-### `index` — Manage the FTS5 search index
+Each result includes the session's `cwd`, its `title` when known, and an array
+of hits, best first. Each hit has:
+
+| Field | Meaning |
+|-------|---------|
+| `location` | e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/turn/0/userMessage`, `agent/a7f3bc2/toolCall/tc1/result` |
+| `turn`, `agent` | Pass to `context <id> --turn N` or `--agent ID [--turn N]` |
+| `kind` | `user`, `assistant`, `thinking`, `compaction`, `recap`, `plan`, `agent_message`, `tool_input`, `tool_result` |
+| `match` | `keyword` (embeddings arrive separately; until then `semantic` is `unavailable`) |
+| `score` | Fused rank score; higher is better |
+| `matchCount` | Query-word occurrences in the passage |
+| `timestamp` | When the passage was written (prose) |
+| `archived`, `text` | The transcript is gone; `text` is the stored passage, and `context` cannot open it |
+| `automated` | Written on someone's behalf: crew chat, task wake-ups, other agents |
+| `duplicates` | Identical passages in other sessions (forks) folded into this one |
+
+The response also carries `semantic` / `semanticReason` and, when the stores
+are behind, `warnings`.
+
+### `index` — Manage the stores
 
 ```bash
-cogpit-memory index stats     # Show index stats (session count, DB size, staleness)
-cogpit-memory index rebuild   # Rebuild from scratch
+cogpit-memory index stats     # Tool index stats plus memory store counts
+cogpit-memory index sync      # Bring both stores fully up to date (progress on stderr)
+cogpit-memory index rebuild   # Rebuild the tool index from scratch; never touches the memory store
 ```
 
 ## Performance
@@ -141,17 +171,26 @@ Copilot CLI history from `~/.copilot/session-state/`. The shared parser
 normalizes each provider into the same conversation structure for layered
 drill-down.
 
-Cross-session search builds its FTS5 index from every agent's history root, then
-stores it at `~/.claude/cogpit-memory/search-index.db`. It uses SQLite's
-`unicode61` tokenizer, so a query matches whole tokens: searching for `"auth"`
-finds `"auth"`, not `"authentication"`.
+Tool input and output are indexed in an FTS5 table at
+`~/.claude/cogpit-memory/search-index.db` with SQLite's `unicode61` tokenizer, so
+a query matches whole tokens: searching for `"auth"` finds `"auth"`, not
+`"authentication"`. Its rows are dropped when a transcript disappears.
+
+Prose is kept in the **memory store**, `~/.cogpit/memory/memory.db` (or
+`$COGPIT_MEMORY_DIR/memory.db`), shared with the Cogpit app and created
+owner-only. It holds each prose block as chunks of up to 2,000 characters with
+their session, turn, timestamp, account instance and a title snapshot. Chunks
+are **never removed because a transcript was deleted**: they stay searchable and
+are reported as `archived`. While a transcript exists, a re-parse replaces what
+changed. Inside a Cogpit provider worker, search covers only that account.
 
 ## Development
 
 The npm package requires Node.js 20 or newer. Development requires [Bun](https://bun.sh) because the source uses `bun:sqlite`; the npm build substitutes `better-sqlite3` through an esbuild alias.
 
-The session parser under `src/lib/` is generated from Cogpit's canonical
-`shared/session/` implementation. Edit the shared copy, then run
+The session parser under `src/lib/` and the memory store under
+`src/lib/memory/` are generated from Cogpit's canonical `shared/session/` and
+`shared/memory/` implementations. Edit the shared copy, then run
 `bun run sync-cogpit-memory` from the Cogpit repository root. CI runs
 `bun run check:cogpit-memory-sync` and rejects drift.
 
