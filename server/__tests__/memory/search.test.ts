@@ -138,6 +138,26 @@ describe("searchProse", () => {
     expect(result.keywordHits).toBe(2)
   })
 
+  it("keeps only the given sessions before collapsing duplicates and cutting to the limit", async () => {
+    const store = open()
+    const turns = [{ user: "the migration plan for the store" }]
+    store.syncSession(sourceFile({ path: "/t/hidden.jsonl", sessionId: "hidden" }), makeSession([
+      { user: "migration plan, the store migration plan, and the plan for the migration" },
+    ]))
+    store.syncSession(sourceFile({ path: "/t/hidden-fork.jsonl", sessionId: "hidden-fork" }), makeSession(turns))
+    store.syncSession(sourceFile({ path: "/t/visible.jsonl", sessionId: "visible" }), makeSession(turns))
+
+    const visible = await searchProse(store, "migration plan", { sessionIds: ["visible"], limit: 1 })
+    expect(visible.hits).toEqual([expect.objectContaining({ sessionId: "visible", duplicates: 0 })])
+    expect(visible).toMatchObject({ keywordHits: 1, sessionsMatched: 1 })
+
+    const none = await searchProse(store, "migration plan", { sessionIds: [] })
+    expect(none).toMatchObject({ hits: [], keywordHits: 0, sessionsMatched: 0 })
+
+    const many = Array.from({ length: 40_000 }, (_, i) => `other-${i}`).concat("visible")
+    expect((await searchProse(store, "migration plan", { sessionIds: many })).hits.map((hit) => hit.sessionId)).toEqual(["visible"])
+  })
+
   it("returns nothing for a query without words and clamps the limit", async () => {
     const store = open()
     seed(store)

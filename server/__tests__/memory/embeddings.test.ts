@@ -226,6 +226,21 @@ describe("searchProse with embeddings", () => {
     expect(result.semanticHits).toBe(result.hits.filter((hit) => hit.match === "semantic").length)
   })
 
+  it("searches vectors only in the given sessions, so a hidden fork cannot hide the visible copy", async () => {
+    const store = open()
+    const turns = [{ user: "the car will not start" }]
+    store.syncSession(sourceFile({ path: "/t/hidden.jsonl", sessionId: "hidden" }), makeSession([{ user: "car engine vehicle automobile" }]))
+    store.syncSession(sourceFile({ path: "/t/hidden-fork.jsonl", sessionId: "hidden-fork" }), makeSession(turns))
+    store.syncSession(sourceFile({ path: "/t/visible.jsonl", sessionId: "visible" }), makeSession(turns))
+    const client = createEmbeddingClient(CONFIG, fakeEndpoint().fetch)
+    await embedPending(store, client)
+
+    const result = await searchProse(store, "automobile", { embeddings: client, mode: "semantic", sessionIds: ["visible"], limit: 1 })
+    expect(result.hits).toEqual([expect.objectContaining({ sessionId: "visible", match: "semantic", duplicates: 0 })])
+    expect(result).toMatchObject({ semanticHits: 1, sessionsMatched: 1 })
+    expect((await searchProse(store, "automobile", { embeddings: client, sessionIds: [] })).hits).toEqual([])
+  })
+
   it("leaves out vectors below the score floor", async () => {
     const { store, endpoint } = await seeded()
     const result = await searchProse(store, "automobile food", { embeddings: createEmbeddingClient({ ...CONFIG, minScore: 0.9 }, endpoint.fetch) })

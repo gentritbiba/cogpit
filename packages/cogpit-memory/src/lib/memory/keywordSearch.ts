@@ -19,6 +19,8 @@ export interface ProseFilters {
   sinceMs?: number
   /** Include prompts Cogpit or other agents wrote on someone's behalf. Default true. */
   includeAutomated?: boolean
+  /** Only these sessions, applied before fusion, duplicate collapsing and the limit. Empty means nothing matches. */
+  sessionIds?: readonly string[]
 }
 
 export interface FtsQuery {
@@ -96,6 +98,8 @@ export function filterSql(filters: ProseFilters): { sql: string; params: SqlValu
   if (filters.cwd) add("c.cwd = ?", filters.cwd)
   if (filters.sinceMs !== undefined) add("c.ts_ms >= ?", filters.sinceMs)
   if (filters.includeAutomated === false) conditions.push("c.automated = 0")
+  // One JSON parameter, so thousands of ids stay within every driver's bound-variable limit.
+  if (filters.sessionIds) add("c.session_id IN (SELECT value FROM json_each(?))", JSON.stringify(filters.sessionIds))
   return { sql: conditions.map((condition) => ` AND ${condition}`).join(""), params }
 }
 
