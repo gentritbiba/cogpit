@@ -66,6 +66,20 @@ describe("useRowWindow", () => {
     expect(shown(container)[0]).toBe(100 - 12)
   })
 
+  it("settles when rows differ in height instead of re-measuring forever", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.tagName === "LI" ? (Number(this.textContent) % 2 ? ROW + 4 : ROW) : 0
+    })
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.slot === "scroll-area-viewport" ? VIEW : 0 })
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { top: this.tagName === "UL" ? -10_040 : 0 } as DOMRect
+    })
+    const { container } = render(<List count={600} />)
+    const rows = shown(container)
+    expect(rows[0]).toBeLessThanOrEqual(Math.floor(10_040 / (ROW + 4)))
+    expect(rows.at(-1)).toBeGreaterThanOrEqual(Math.ceil((10_040 + VIEW) / (ROW + 4)))
+  })
+
   it("renders everything when nothing can be measured", () => {
     const { container } = render(<List count={300} />)
     expect(shown(container)).toHaveLength(300)
