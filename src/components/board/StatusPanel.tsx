@@ -11,13 +11,13 @@ import { revealSessionById } from "@/lib/revealSession"
 import { cn } from "@/lib/utils"
 import type { WorkspacePanelProps } from "@/plugin-api"
 import type { ListedBoard } from "../../../shared/contracts/board"
+import { BoardItemText } from "./BoardItemText"
 import { filledSections, needsYouCount, needsYouLabel, TONE_DOT, TONE_TEXT } from "./boardView"
 import { useStatusPanel } from "./StatusPanelContext"
 
 type Scope = "crew" | "all"
 
 const CLOCK_TICK_MS = 30_000
-const LINK = /(https?:\/\/[^\s)]+)/g
 
 /**
  * What each agent says about its own work, read without opening its
@@ -182,7 +182,7 @@ function StatusCard({ board, name, open, focused, onToggle }: {
                       aria-hidden="true"
                       className={cn("mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/50", section.tone && TONE_DOT[section.tone])}
                     />
-                    <span className="min-w-0 break-words">{linkify(item)}</span>
+                    <span className="min-w-0 break-words"><BoardItemText text={item} /></span>
                   </li>
                 ))}
               </ul>
@@ -211,12 +211,6 @@ function Progress({ done, total }: { done: number; total: number }) {
       {done}/{total}{done < total && ` · ${total - done} left`}
     </span>
   )
-}
-
-function linkify(text: string) {
-  return text.split(LINK).map((part, index) => (index % 2 === 1
-    ? <a key={index} href={part} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">{part}</a>
-    : part))
 }
 
 /** Re-renders every 30 seconds so "updated 3m ago" stays true. */

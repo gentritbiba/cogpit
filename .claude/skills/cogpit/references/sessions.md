@@ -138,6 +138,8 @@ cogpit-session board get "$CHILD"
 - Always keep a `Next` section: what is left, in order, or "Nothing left" when
   done. `board set` answers with a `hint` when the board does not say it.
 - Up to 6 sections of 12 items, 160 characters each; links stay clickable.
+- Lead an item with a short subject and a colon (`GL-180: nav fix in review`);
+  the subject shows in bold, which makes a long list easy to scan.
 - Read a child's board before messaging it to ask how it is going.
 
 ## Orchestrator checklist
