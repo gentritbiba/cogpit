@@ -6,6 +6,7 @@ import { descriptorFor, isSessionUuid } from "../../shared/session/agent-descrip
 import { isWithinDir } from "../pathSafety"
 import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
 import { readCopilotSessionIdentity, readCopilotSessionMeta } from "./copilotMetadata"
+import { ownTranscripts } from "./transcriptInventory"
 import { addressFromTranscript, projectSessionFilesFromCatalog } from "./transcriptProjects"
 import {
   catalogListings,
@@ -81,6 +82,8 @@ export function createCopilotStore(homeDir = process.env.COPILOT_HOME || join(ho
     },
 
     listSessionFiles: async () => (await walkStore(catalogSource, SESSIONS_DIR)).files,
+    // Sub-agents are events inside the parent transcript, never files of their own.
+    listTranscripts: async () => ownTranscripts(descriptor, (await walkStore(catalogSource, SESSIONS_DIR)).files),
 
     async resolveSessionFile(_dirName: string, fileName: string): Promise<string | null> {
       // Only the exact `<uuid>/events.jsonl` shape addresses a Copilot session;

@@ -8,6 +8,7 @@ import { readCodexSessionIdentity, readCodexSessionMeta } from "./codexMetadata"
 import { transcriptRootWithin, resolveCanonicalFileWithinRoot, statContainedFile } from "./containment"
 import { isCompressedTranscript, isListableTranscript, uncompressedTranscriptName } from "./transcriptFile"
 import { HEAD_BYTES } from "./transcriptHead"
+import { ownTranscripts } from "./transcriptInventory"
 import { addressFromTranscript, projectSessionFilesFromCatalog } from "./transcriptProjects"
 import {
   catalogListings,
@@ -107,6 +108,8 @@ export function createCodexStore(homeDir = process.env.CODEX_HOME || join(homedi
     },
 
     listSessionFiles: walk,
+    // A sub-agent's rollout is a session of its own, so the walk already holds it.
+    listTranscripts: async () => ownTranscripts(descriptor, await walk()),
 
     async resolveSessionFile(_dirName: string, fileName: string): Promise<string | null> {
       // The UI addresses a rollout two ways the dated tree does not: a parent's

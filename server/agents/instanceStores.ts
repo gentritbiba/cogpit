@@ -19,6 +19,7 @@ export function createInstanceStore(instance: ProviderInstance): AgentStore {
   return {
     ...store, instanceId: instance.id, descriptor: { ...descriptorFor(instance.agent), sessionFile: { ...store.descriptor.sessionFile, sessionId: (file) => { const id = store.descriptor.sessionFile.sessionId(file); return id ? qualify(id) : null } } },
     async listSessionFiles() { return (await store.listSessionFiles()).map((file) => ({ ...file, dirName: file.dirName ? dir(file.dirName) : null })) },
+    async listTranscripts() { return (await store.listTranscripts()).map((file) => ({ ...file, sessionId: qualify(file.sessionId), parentSessionId: file.parentSessionId ? qualify(file.parentSessionId) : null })) },
     async listedSessionFiles() { return (await store.listedSessionFiles()).map((file) => ({ ...file, dirName: file.dirName ? dir(file.dirName) : null })) },
     knownSessionFile: (id) => { const parts = splitInstanceSessionId(id); return parts.instanceId === instance.id ? store.knownSessionFile(parts.nativeId) : null },
     resolveSessionFile: (name, file) => store.resolveSessionFile(splitInstanceDirName(name).nativeDirName, file),

@@ -1,0 +1,288 @@
+/**
+ * Keeps the memory store current from inside the server. Reconcile is the
+ * correctness path: on start and on a backstop timer every transcript of every
+ * store is compared with the store and the difference is synced, one file at a
+ * time with a yield between files. A written transcript only makes the next
+ * pass come sooner. Pending chunks are embedded after each pass when an
+ * embedding endpoint is configured.
+ */
+import type { EmbeddingClient } from "../../shared/memory/embeddings"
+import { reconcileStore } from "../../shared/memory/reconcile"
+import { MemoryStoreUnavailableError } from "../../shared/memory/schema"
+import type { MemoryStore } from "../../shared/memory/store"
+import type { SourceFile } from "../../shared/memory/types"
+import type { ParsedSession } from "../../shared/session/types"
+
+export interface Embedder {
+  /** Embeds queries too, for a search that wants meaning. */
+  readonly client: EmbeddingClient
+  /** Embed what is pending. Never throws for a down endpoint: it answers with `error`. */
+  embedPending(store: MemoryStore, signal: AbortSignal): Promise<{ remaining: number; error?: string }>
+}
+
+export interface EmbeddingConfigFile {
+  /** The file's text, null when there is none. */
+  text: string | null
+  /** Changes whenever the file does. */
+  stamp: string
+}
+
+export interface MemoryIndexerOptions {
+  /** Throws `MemoryStoreUnavailableError` when the store cannot work here. */
+  openStore(): MemoryStore
+  listFiles(): Promise<SourceFile[]>
+  /** The transcript parsed with `skipStats`; null when it is gone. */
+  parse(file: SourceFile): Promise<ParsedSession | null>
+  /** The title the session list shows for a session's own transcript, null when it has none of its own. */
+  title(file: SourceFile): Promise<string | null>
+  readEmbeddingConfig(): Promise<EmbeddingConfigFile>
+  /** The embedder a config file describes; null when it configures none. */
+  createEmbedder(configText: string | null): Embedder | null
+  warn?(message: string): void
+  /** How long between passes when nothing hints at a change. */
+  backstopMs?: number
+  /** Awaited between files; a yield to the event loop by default. */
+  pause?(): Promise<void>
+  /** How long after `start` the first pass runs, so it never competes with the server starting up. */
+  startDelayMs?: number
+}
+
+export interface IndexingCounts {
+  pendingFiles: number
+  pendingEmbeddings: number
+}
+
+export interface MemoryIndexer {
+  start(): void
+  /** A transcript was written: run the next pass sooner. */
+  hint(): void
+  stop(): Promise<void>
+  /** The open store; null before the first pass opens it, after `stop`, or when the store cannot work here. */
+  store(): MemoryStore | null
+  embedder(): Embedder | null
+  counts(): IndexingCounts
+  /** Resolves once no pass is running; for tests and measurements. */
+  settled(): Promise<void>
+}
+
+const BACKSTOP_MS = 5 * 60_000
+const START_DELAY_MS = 15_000
+/** A pass costs at most a tenth of the time, and a written transcript is re-read at most this often. */
+const COST_FACTOR = 10
+const MIN_HINT_DELAY_MS = 2_000
+const MIN_RESYNC_MS = 5_000
+const MAX_RESYNC_MS = 60 * 60_000
+/**
+ * Reading a transcript this slow blocks the event loop for about that long
+ * (a 240 MB one takes about a second), so while it is being written it waits
+ * until it has been quiet this long, and never longer than the cap.
+ */
+const HEAVY_READ_MS = 250
+const QUIET_MS = 60_000
+const MAX_HEAVY_DEFER_MS = 10 * 60_000
+/** A down embedding endpoint is retried after this, doubling up to the cap. */
+const EMBED_RETRY_MS = 30_000
+const MAX_EMBED_RETRY_MS = 30 * 60_000
+/** When an embedding pass stopped with work left and no error, the next one starts this soon. */
+const EMBED_CONTINUE_MS = 1_000
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexer {
+  const backstopMs = options.backstopMs ?? BACKSTOP_MS
+  const warn = options.warn ?? ((message: string) => console.warn(message))
+  const controller = new AbortController()
+
+  let store: MemoryStore | null = null
+  let unavailable = false
+  let started = false
+  let stopped = false
+  let running: Promise<void> | null = null
+  let rerun = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let timerAt = Infinity
+  let lastPassMs = 0
+  let lastPassEnd = 0
+
+  const resyncAt = new Map<string, number>()
+  const failures = new Map<string, number>()
+  /** When each heavy transcript was last read. */
+  const heavyReadAt = new Map<string, number>()
+  let pendingFiles = 0
+
+  let embedder: Embedder | null = null
+  let configStamp: string | null = null
+  let pendingEmbeddings = 0
+  let outage: { failures: number; retryAt: number } | null = null
+  let embedMoreSoon = false
+
+  function scheduleAt(at: number): void {
+    if (stopped || at >= timerAt) return
+    if (timer) clearTimeout(timer)
+    timerAt = at
+    timer = setTimeout(() => {
+      timer = null
+      timerAt = Infinity
+      runPass()
+    }, Math.max(0, at - Date.now()))
+    timer.unref?.()
+  }
+
+  function runPass(): void {
+    if (stopped) return
+    if (running) {
+      rerun = true
+      return
+    }
+    running = pass()
+      .catch((error: unknown) => warn(`[memory] indexing pass failed: ${String(error)}`))
+      .finally(() => {
+        running = null
+        afterPass()
+      })
+  }
+
+  function afterPass(): void {
+    if (stopped || unavailable) return
+    const now = Date.now()
+    let next = now + backstopMs
+    if (rerun) next = Math.min(next, lastPassEnd + hintDelay())
+    rerun = false
+    for (const at of resyncAt.values()) if (at > now) next = Math.min(next, at)
+    if (embedMoreSoon) next = Math.min(next, now + EMBED_CONTINUE_MS)
+    if (outage) next = Math.min(next, outage.retryAt)
+    for (const [path, at] of resyncAt) if (at < now - MAX_RESYNC_MS) resyncAt.delete(path)
+    scheduleAt(next)
+  }
+
+  function hintDelay(): number {
+    return Math.max(MIN_HINT_DELAY_MS, lastPassMs * COST_FACTOR)
+  }
+
+  function openStore(): MemoryStore | null {
+    if (store || unavailable) return store
+    try {
+      store = options.openStore()
+    } catch (error) {
+      unavailable = true
+      if (!(error instanceof MemoryStoreUnavailableError)) warn(`[memory] session search is off: ${String(error)}`)
+    }
+    return store
+  }
+
+  /**
+   * A transcript that is being written is re-read at most a tenth of the time,
+   * a heavy one only once it is quiet, and a failing one less often each time.
+   */
+  async function parseCooperatively(file: SourceFile): Promise<ParsedSession | null> {
+    const now = Date.now()
+    if ((resyncAt.get(file.path) ?? 0) > now) return null
+    const heavyAt = heavyReadAt.get(file.path)
+    if (heavyAt !== undefined && now - file.mtimeMs < QUIET_MS && now - heavyAt < MAX_HEAVY_DEFER_MS) {
+      resyncAt.set(file.path, Math.min(file.mtimeMs + QUIET_MS, heavyAt + MAX_HEAVY_DEFER_MS))
+      return null
+    }
+    const started = Date.now()
+    let failed = false
+    try {
+      return await options.parse(file)
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      const failureCount = failed ? (failures.get(file.path) ?? 0) + 1 : 0
+      if (failed) failures.set(file.path, failureCount)
+      else failures.delete(file.path)
+      const finished = Date.now()
+      if (finished - started >= HEAVY_READ_MS) heavyReadAt.set(file.path, finished)
+      else heavyReadAt.delete(file.path)
+      const cost = Math.max(MIN_RESYNC_MS, (finished - started) * COST_FACTOR) * 2 ** failureCount
+      resyncAt.set(file.path, finished + Math.min(MAX_RESYNC_MS, cost))
+    }
+  }
+
+  async function pass(): Promise<void> {
+    const memory = openStore()
+    if (!memory) return
+    const passStarted = Date.now()
+    const files = await options.listFiles()
+    const titles = new Map<string, string | null>()
+    await reconcileStore(memory, files, {
+      parse: async (file) => {
+        const session = await parseCooperatively(file)
+        if (session && !file.isSubagent) titles.set(file.path, await options.title(file).catch(() => null))
+        return session
+      },
+      title: (file) => titles.get(file.path),
+      pause: options.pause ?? yieldToEventLoop,
+    }, { signal: controller.signal })
+    if (stopped) return
+    pendingFiles = memory.planSync(files).length
+    lastPassMs = Date.now() - passStarted
+    lastPassEnd = Date.now()
+    await embed(memory)
+  }
+
+  async function embed(memory: MemoryStore): Promise<void> {
+    embedMoreSoon = false
+    const config = await options.readEmbeddingConfig()
+    if (config.stamp !== configStamp) {
+      configStamp = config.stamp
+      outage = null
+      try {
+        embedder = options.createEmbedder(config.text)
+      } catch (error) {
+        embedder = null
+        warn(`[memory] the embedding configuration is not usable: ${String(error)}`)
+      }
+    }
+    if (!embedder) {
+      pendingEmbeddings = 0
+      return
+    }
+    if (outage && Date.now() < outage.retryAt) return
+    const result = await embedder.embedPending(memory, controller.signal)
+    pendingEmbeddings = result.remaining
+    if (result.error) {
+      if (!outage) warn(`[memory] the embedding endpoint is unavailable (${result.error}); retrying with back-off`)
+      const failureCount = (outage?.failures ?? 0) + 1
+      outage = { failures: failureCount, retryAt: Date.now() + Math.min(MAX_EMBED_RETRY_MS, EMBED_RETRY_MS * 2 ** (failureCount - 1)) }
+      return
+    }
+    outage = null
+    embedMoreSoon = result.remaining > 0 && !stopped
+  }
+
+  return {
+    start() {
+      if (started || stopped) return
+      started = true
+      scheduleAt(Date.now() + (options.startDelayMs ?? START_DELAY_MS))
+    },
+    hint() {
+      if (stopped || unavailable) return
+      if (running) {
+        rerun = true
+        return
+      }
+      // Before the first pass the start timer is already due.
+      if (lastPassEnd) scheduleAt(Math.max(Date.now(), lastPassEnd + hintDelay()))
+    },
+    async stop() {
+      if (stopped) return
+      stopped = true
+      controller.abort()
+      if (timer) clearTimeout(timer)
+      timer = null
+      await running
+      store?.close()
+      store = null
+    },
+    store: () => store,
+    embedder: () => embedder,
+    counts: () => ({ pendingFiles, pendingEmbeddings }),
+    async settled() {
+      while (running) await running
+    },
+  }
+}
