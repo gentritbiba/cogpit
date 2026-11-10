@@ -151,9 +151,8 @@ export async function searchSessions(
           excludeSessionId: opts.excludeSessionId,
           maxAgeMs: toolMaxAgeMs,
           caseSensitive,
-          toolsOnly: unsynced?.size === 0,
+          proseFrom: unsynced ?? undefined,
         })
-        if (unsynced?.size) tools.hits = tools.hits.filter((hit) => isToolRow(hit.location) || unsynced.has(hit.filePath))
       } catch {
         tools = null
       }

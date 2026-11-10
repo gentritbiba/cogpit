@@ -297,8 +297,11 @@ export class SearchIndex {
       excludeSessionId?: string
       maxAgeMs?: number
       caseSensitive?: boolean
-      /** Only tool input and output rows; prose is searched in the memory store. */
-      toolsOnly?: boolean
+      /**
+       * Tool rows, plus prose only from these transcripts; the memory store
+       * answers for the rest. Absent: every row.
+       */
+      proseFrom?: ReadonlySet<string>
     }
   ): SearchHit[] {
     this.pruneMissingFiles()
@@ -332,7 +335,7 @@ export class SearchIndex {
       params.push(sessionId)
     }
 
-    if (opts?.toolsOnly) conditions.push(TOOL_ROWS)
+    if (opts?.proseFrom) conditions.push(this.rowsFrom(opts.proseFrom))
 
     if (opts?.excludeSessionId) {
       conditions.push("sc.session_id != ?")
@@ -378,7 +381,7 @@ export class SearchIndex {
       sessionId?: string
       excludeSessionId?: string
       maxAgeMs?: number
-      toolsOnly?: boolean
+      proseFrom?: ReadonlySet<string>
     }
   ): { totalHits: number; sessionsSearched: number } {
     const ftsQuery = `"${query.replace(/"/g, '""')}"`
@@ -403,7 +406,7 @@ export class SearchIndex {
       params.push(opts.sessionId)
     }
 
-    if (opts?.toolsOnly) conditions.push(TOOL_ROWS)
+    if (opts?.proseFrom) conditions.push(this.rowsFrom(opts.proseFrom))
 
     if (opts?.excludeSessionId) {
       conditions.push("sc.session_id != ?")
@@ -525,6 +528,16 @@ export class SearchIndex {
     if (batch.length > 0) {
       this._lastUpdate = new Date().toISOString()
     }
+  }
+
+  /** A condition keeping tool rows, and prose rows only from `paths` (held in a connection-local table). */
+  private rowsFrom(paths: ReadonlySet<string>): string {
+    if (paths.size === 0) return TOOL_ROWS
+    this.db.exec("CREATE TEMP TABLE IF NOT EXISTS prose_sources (path TEXT PRIMARY KEY)")
+    this.db.exec("DELETE FROM temp.prose_sources")
+    const insert = this.db.prepare("INSERT OR IGNORE INTO temp.prose_sources (path) VALUES (?)")
+    for (const path of paths) insert.run(path)
+    return `(${TOOL_ROWS} OR sc.source_file IN (SELECT path FROM temp.prose_sources))`
   }
 
   /** Indexed transcripts and the mtime each was indexed at. */

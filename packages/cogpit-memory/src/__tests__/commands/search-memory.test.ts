@@ -119,21 +119,22 @@ describe("search with the memory store", () => {
   })
 
   it("keeps answering prose from the tool index for transcripts the memory store has not taken in yet", async () => {
-    writeAgedSession("backlog", "The flaky websocket reconnect", "Backoff fixed it.", "ls", 1)
-    writeAgedSession("synced", "Another websocket reconnect note", "Fine.", "ls", 1)
+    const backlog = writeAgedSession("backlog", "The flaky websocket reconnect", "Backoff fixed it.", "ls", 1)
+    const synced = Array.from({ length: 7 }, (_, n) => writeAgedSession(`synced-${n}`, `websocket reconnect note ${n}`, "Fine.", "ls", 1))
     const index = new SearchIndex(join(tmpDir, "index.db"))
     const memory = openMemoryStore()
     try {
-      index.buildFull()
+      // The backlog's rows are the oldest, so newer synced prose would fill the candidate window first.
+      for (const path of [backlog, ...synced]) index.indexFile(path)
       syncTranscripts({ index: null, memory })
       memory.db.exec(`DELETE FROM chunks WHERE file_id = (SELECT id FROM source_files WHERE path LIKE '%backlog.jsonl')`)
       memory.db.exec(`DELETE FROM source_files WHERE path LIKE '%backlog.jsonl'`)
 
-      const result = await searchSessions("websocket reconnect", {}, index, memory) as unknown as Response
-      expect(result.results.map((entry) => entry.sessionId).sort()).toEqual(["backlog", "synced"])
-      const synced = result.results.find((entry) => entry.sessionId === "synced")!
-      expect(synced.hits).toHaveLength(1)
-      expect(synced.hits[0]).toMatchObject({ kind: "user", match: "keyword" })
+      const result = await searchSessions("websocket reconnect", { limit: 2 }, index, memory) as unknown as Response
+      expect(result.results.map((entry) => entry.sessionId)).toContain("backlog")
+      const proseHits = result.results.flatMap((entry) => entry.hits)
+      expect(proseHits.filter((hit) => hit.kind === "user")).toHaveLength(1)
+      expect(result.totalHits).toBe(8)
     } finally {
       index.close()
       memory.close()
