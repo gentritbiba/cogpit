@@ -841,8 +841,9 @@ export default function App() {
     sessionSource: state.sessionSource,
     loadSession: handlers.handleLoadSessionScrollAware,
     onNavigate: useCallback(() => {
+      if (state.mainView === "mission") dispatch({ type: "CLOSE_MISSION" })
       if (isMobile) dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-    }, [isMobile, dispatch]),
+    }, [state.mainView, isMobile, dispatch]),
     jumpToTurn: useCallback((turnKey: string) => (
       chatScroll.current?.controller.scrollToTurn(turnKey, { align: "start" }) ?? Promise.resolve(false)
     ), []),
