@@ -236,8 +236,9 @@ export class SearchIndex {
     const insert = this.db.prepare(
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
+    // `source_file = ?` alone scans every row; the FTS phrase on the file's last two path segments finds its rows through the index.
     const deleteContent = this.db.prepare(
-      "DELETE FROM search_content WHERE source_file = ?"
+      "DELETE FROM search_content WHERE rowid IN (SELECT rowid FROM search_content WHERE search_content MATCH ? AND source_file = ?)"
     )
     const deleteFile = this.db.prepare(
       "DELETE FROM indexed_files WHERE file_path = ?"
@@ -247,7 +248,7 @@ export class SearchIndex {
     )
 
     const txn = this.db.transaction(() => {
-      deleteContent.run(filePath)
+      deleteContent.run(`source_file : "${filePath.split(/[\\/]/).slice(-2).join("/").replace(/"/g, '""')}"`, filePath)
       deleteFile.run(filePath)
       this.insertSessionContent(insert, resolvedSessionId, filePath, session)
       insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId, Date.now())

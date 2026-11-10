@@ -270,10 +270,10 @@ describe("search-time sync", () => {
     writeAgedSession("big", "x".repeat(1_500_000), "y", "ls", 2)
     withMemory((memory) => {
       memory.db.prepare("UPDATE source_files SET sync_ms = 500").run()
-      // A fixed clock leaves the whole budget: the known file is expected to take 500 ms, the new one about 15 ms for its 1.5 MB.
+      // A fixed clock leaves the whole budget: the known file is expected to take 500 ms, the new one about 150 ms for its 1.5 MB.
       const sync = (budgetMs: number) => syncTranscripts({ index: null, memory, budgetMs, now: () => T0 + 600_000 })
-      expect(sync(10)).toMatchObject({ parsed: 0, pending: 2, unindexed: 1 })
-      expect(sync(100)).toMatchObject({ parsed: 1, pending: 1, unindexed: 0 })
+      expect(sync(100)).toMatchObject({ parsed: 0, pending: 2, unindexed: 1 })
+      expect(sync(200)).toMatchObject({ parsed: 1, pending: 1, unindexed: 0 })
       memory.db.prepare("UPDATE source_files SET sync_ms = 500").run()
       expect(sync(600)).toMatchObject({ parsed: 1, pending: 0 })
     })

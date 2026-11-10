@@ -101,6 +101,35 @@ describe("SearchIndex", () => {
     index.close()
   })
 
+  it("replaces only the re-indexed file's rows, even when another transcript shares its name", () => {
+    const index = new SearchIndex(dbPath)
+    const write = (path: string, text: string) => {
+      mkdirSync(join(path, ".."), { recursive: true })
+      writeFileSync(path, JSON.stringify({ type: "user", message: { role: "user", content: text } }))
+    }
+    const one = join(tmpDir, "copilot", "s1", "events.jsonl")
+    const two = join(tmpDir, "copilot", "s2", "events.jsonl")
+    const parent = join(tmpDir, "projects", "-p", "a1.jsonl")
+    const child = join(tmpDir, "projects", "-p", "a1", "subagents", "agent-b.jsonl")
+    write(one, "alpha first")
+    write(two, "alpha second")
+    write(parent, "alpha parent")
+    write(child, "alpha child")
+    for (const [path, id] of [[one, "s1"], [two, "s2"], [parent, "a1"], [child, "a1"]] as const) index.indexFile(path, id, 1)
+    write(one, "beta replaced")
+    write(parent, "beta parent")
+    index.indexFile(one, "s1", 2)
+    index.indexFile(parent, "a1", 2)
+    const rows = index["db"].prepare("SELECT source_file, content FROM search_content ORDER BY source_file").all() as Array<{ source_file: string; content: string }>
+    expect(rows.map((row) => [row.source_file, row.content])).toEqual([
+      [two, "alpha second"],
+      [one, "beta replaced"],
+      [child, "alpha child"],
+      [parent, "beta parent"],
+    ].sort((a, b) => a[0]!.localeCompare(b[0]!)))
+    index.close()
+  })
+
   it("returns structured stats", () => {
     const index = new SearchIndex(dbPath)
     const stats = index.getStats()

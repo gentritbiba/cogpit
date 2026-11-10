@@ -55,7 +55,7 @@ type ListedFile = SessionFile & { source: SourceFile }
 export const BACK_OFF_MIN_MS = 60_000
 export const BACK_OFF_FACTOR = 20
 /** Assumed read, parse and write speed of a file never synced, in bytes per ms. */
-const UNSYNCED_BYTES_PER_MS = 100_000
+const UNSYNCED_BYTES_PER_MS = 10_000
 
 export function emptySyncSummary(): SyncSummary {
   return {
