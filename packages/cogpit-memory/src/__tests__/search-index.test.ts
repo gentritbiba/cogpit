@@ -111,21 +111,26 @@ describe("SearchIndex", () => {
     const two = join(tmpDir, "copilot", "s2", "events.jsonl")
     const parent = join(tmpDir, "projects", "-p", "a1.jsonl")
     const child = join(tmpDir, "projects", "-p", "a1", "subagents", "agent-b.jsonl")
+    const tokenless = join(tmpDir, "---", "...")
     write(one, "alpha first")
     write(two, "alpha second")
     write(parent, "alpha parent")
     write(child, "alpha child")
-    for (const [path, id] of [[one, "s1"], [two, "s2"], [parent, "a1"], [child, "a1"]] as const) index.indexFile(path, id, 1)
+    write(tokenless, "alpha odd")
+    for (const [path, id] of [[one, "s1"], [two, "s2"], [parent, "a1"], [child, "a1"], [tokenless, "odd"]] as const) index.indexFile(path, id, 1)
     write(one, "beta replaced")
     write(parent, "beta parent")
+    write(tokenless, "beta odd")
     index.indexFile(one, "s1", 2)
     index.indexFile(parent, "a1", 2)
+    index.indexFile(tokenless, "odd", 2)
     const rows = index["db"].prepare("SELECT source_file, content FROM search_content ORDER BY source_file").all() as Array<{ source_file: string; content: string }>
     expect(rows.map((row) => [row.source_file, row.content])).toEqual([
       [two, "alpha second"],
       [one, "beta replaced"],
       [child, "alpha child"],
       [parent, "beta parent"],
+      [tokenless, "beta odd"],
     ].sort((a, b) => a[0]!.localeCompare(b[0]!)))
     index.close()
   })
