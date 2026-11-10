@@ -41,6 +41,8 @@ afterAll(() => {
 })
 
 type Response = {
+  totalHits: number
+  returnedHits: number
   semantic: string
   semanticReason?: string
   results: Array<{ sessionId: string; hits: Array<Record<string, unknown>> }>
@@ -92,6 +94,8 @@ describe("search and index with an embedding endpoint", () => {
     expect(response.results.map((result) => result.sessionId)).toEqual(["cars"])
     expect(response.results[0]!.hits[0]).toMatchObject({ match: "semantic", matchCount: 0 })
     expect(response.results[0]!.hits[0]!.similarity).toBeGreaterThan(0.5)
+    expect(response.totalHits).toBe(response.returnedHits)
+    expect(response.totalHits).toBeGreaterThan(0)
 
     const hybrid = await searchSessions("pizza", {}) as unknown as Response
     expect(hybrid.results[0]!.hits[0]).toMatchObject({ match: "both" })

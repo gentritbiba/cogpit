@@ -354,7 +354,7 @@ async function fuse(
     result.hits.push({ ...entry.hit, ...(entry.hit.score !== undefined ? { score: roundScore(entry.hit.score) } : {}) })
   }
 
-  const proseTotal = prose?.keywordHits ?? 0
+  const proseTotal = prose ? prose.keywordHits + prose.semanticHits : 0
   const toolTotal = tools?.total ?? toolHits.length
   const candidateSessions = new Set([...proseHits.map((hit) => hit.sessionId), ...toolHits.map((hit) => hit.sessionId)]).size
   const capped = proseTotal > proseHits.length || toolTotal > toolHits.length

@@ -8,6 +8,7 @@ import {
   parseEmbeddingConfig,
   quantize,
   type EmbeddingConfig,
+  type FetchLike,
 } from "../../../shared/memory/embeddings"
 import { searchProse } from "../../../shared/memory/search"
 import type { MemoryStore } from "../../../shared/memory/store"
@@ -64,9 +65,11 @@ describe("quantize", () => {
     expect(cosine(a, b.values, b.norm)).toBeCloseTo(exact, 2)
   })
 
-  it("refuses a vector shorter than the configured dimensions, and scores a zero vector 0", () => {
+  it("refuses a vector too short, a zero vector, or a component that is not a number", () => {
     expect(() => quantize([1, 2], 4)).toThrow("returned 2 dimensions")
-    expect(cosine(quantize([0, 0], 2), new Int8Array([1, 1]), Math.SQRT2)).toBe(0)
+    expect(() => quantize([0, 0], 2)).toThrow("zero vector")
+    expect(() => quantize(["0.5", 1], 2)).toThrow("not a number")
+    expect(() => quantize([Number.NaN, 1], 2)).toThrow("not a number")
   })
 })
 
@@ -91,6 +94,12 @@ describe("createEmbeddingClient", () => {
     const refusing = fakeEndpoint(() => 400)
     await expect(createEmbeddingClient(CONFIG, refusing.fetch).embedDocuments(["car"])).rejects.toThrow("answered 400")
     expect(refusing.requests).toHaveLength(1)
+  })
+
+  it("never puts the key into an error, even when the endpoint echoes it", async () => {
+    const echoing: FetchLike = async (_, init) => ({ ok: false, status: 401, json: async () => ({}), text: async () => `bad key: ${init.headers.authorization}` })
+    await expect(createEmbeddingClient({ ...CONFIG, apiKey: "sk-secret" }, echoing).embedQuery("car"))
+      .rejects.toThrow(/^the embedding endpoint answered 401: bad key: Bearer \[redacted\]$/)
   })
 
   it("gives up on a query after its timeout", async () => {
@@ -135,6 +144,29 @@ describe("embedPending", () => {
     seed(store)
     const picky = fakeEndpoint((input) => (input.some((text) => text.includes("Pizza")) ? 400 : undefined))
     expect(await embedPending(store, createEmbeddingClient(CONFIG, picky.fetch), { batchSize: 10 })).toMatchObject({ embedded: 3, failed: 1, remaining: 1 })
+  })
+
+  it("stops, rather than counting refusals, when the endpoint goes down while it sorts out a refused batch", async () => {
+    const store = open()
+    seed(store)
+    const failing = fakeEndpoint((_, attempt) => (attempt === 1 ? 400 : attempt === 2 ? undefined : 503))
+    const result = await embedPending(store, createEmbeddingClient(CONFIG, failing.fetch), { batchSize: 10 })
+    expect(result).toMatchObject({ embedded: 1, failed: 0, remaining: 4, error: expect.stringContaining("503") })
+    expect(failing.requests).toHaveLength(5)
+  })
+
+  it("keeps texts pending when the endpoint answers with a vector it cannot use", async () => {
+    for (const component of ["0.5", 0]) {
+      const store = open()
+      seed(store)
+      const broken: FetchLike = async (_, init) => {
+        const { input } = JSON.parse(init.body) as { input: string[] }
+        const data = input.map((_, index) => ({ index, embedding: new Array(FAKE_DIMENSIONS).fill(component) }))
+        return { ok: true, status: 200, json: async () => ({ data }), text: async () => "" }
+      }
+      expect(await embedPending(store, createEmbeddingClient(CONFIG, broken))).toMatchObject({ embedded: 0, failed: 4, remaining: 5 })
+      expect(store.db.prepare("SELECT COUNT(*) AS n FROM vectors").get()).toEqual(expect.objectContaining({ n: 0 }))
+    }
   })
 
   it("treats another model or size as pending and drops its vectors once current", async () => {
@@ -182,7 +214,7 @@ describe("searchProse with embeddings", () => {
     expect(car).toMatchObject({ match: "semantic", matchCount: 0, snippet: "the car will not start" })
     expect(car.similarity).toBeGreaterThan(0.9)
     expect(result.hits.map((hit) => hit.ranks.semantic)).toEqual([1, 2])
-    expect(result.keywordHits).toBe(0)
+    expect(result).toMatchObject({ keywordHits: 0, semanticHits: 2, sessionsMatched: 1 })
   })
 
   it("fuses keyword and meaning, ranking a passage found both ways first", async () => {
@@ -190,6 +222,8 @@ describe("searchProse with embeddings", () => {
     const result = await searchProse(store, "release automobile", { embeddings: createEmbeddingClient(CONFIG, endpoint.fetch) })
     expect(result.hits[0]).toMatchObject({ text: "The release goes out through the pipeline.", match: "both", matchCount: 1 })
     expect(result.hits[0]!.score).toBeGreaterThan(result.hits[1]!.score)
+    expect(result.keywordHits).toBe(1)
+    expect(result.semanticHits).toBe(result.hits.filter((hit) => hit.match === "semantic").length)
   })
 
   it("leaves out vectors below the score floor", async () => {

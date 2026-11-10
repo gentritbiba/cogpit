@@ -60,7 +60,9 @@ export async function embedPending(store: MemoryStore, client: EmbeddingClient, 
     WHERE c.text_hash > ? AND ${MISSING_VECTOR} GROUP BY c.text_hash ORDER BY c.text_hash LIMIT ?`)
   let cursor = ""
 
-  for (;;) {
+  // Only a refusal of particular texts is worth stepping past; anything else (the endpoint is down, the run was cancelled) ends the run.
+  const refused = (error: unknown) => error instanceof EmbeddingError && !error.retryable && !options.signal?.aborted
+  run: for (;;) {
     if (options.signal?.aborted || (options.budgetMs !== undefined && Date.now() - started > options.budgetMs)) break
     const batch = next.all(cursor, fingerprint, batchSize) as Array<{ hash: string; text: string }>
     if (batch.length === 0) break
@@ -69,16 +71,20 @@ export async function embedPending(store: MemoryStore, client: EmbeddingClient, 
       storeVectors(store, fingerprint, batch.map((row) => row.hash), await client.embedDocuments(batch.map((row) => row.text), options.signal))
       result.embedded += batch.length
     } catch (error) {
-      if (!(error instanceof EmbeddingError) || error.retryable) {
+      if (!refused(error)) {
         result.error = error instanceof Error ? error.message : String(error)
         break
       }
-      // The endpoint refused the batch: find the texts it refuses, keep the rest.
+      // Find the texts it refuses and keep the rest.
       for (const row of batch) {
         try {
           storeVectors(store, fingerprint, [row.hash], await client.embedDocuments([row.text], options.signal))
           result.embedded++
-        } catch {
+        } catch (itemError) {
+          if (!refused(itemError)) {
+            result.error = itemError instanceof Error ? itemError.message : String(itemError)
+            break run
+          }
           result.failed++
         }
       }
@@ -101,7 +107,7 @@ export interface VectorMatch {
   similarity: number
 }
 
-/** The `limit` chunks most similar to `query` at or above `minScore`, best first. */
+/** The `limit` chunks most similar to `query` at or above `minScore`, best first, and the ids of every chunk that reached it. */
 export function vectorSearch(
   store: MemoryStore,
   query: QuantizedVector,
@@ -109,7 +115,7 @@ export function vectorSearch(
   filters: ProseFilters,
   limit: number,
   minScore: number,
-): VectorMatch[] {
+): { matches: VectorMatch[]; aboveFloor: number[] } {
   const where = filterSql(filters)
   const rows = store.db.prepare(`SELECT c.id AS id, v.vector AS vector, v.norm AS norm FROM chunks c
     JOIN vectors v ON v.text_hash = c.text_hash AND v.fingerprint = ?
@@ -119,7 +125,6 @@ export function vectorSearch(
     const similarity = cosine(query, new Int8Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength), row.norm)
     if (similarity >= minScore) matches.push({ chunkId: row.id, similarity })
   }
-  return matches.sort((a, b) => b.similarity - a.similarity).slice(0, limit)
+  const aboveFloor = matches.map((match) => match.chunkId)
+  return { matches: matches.sort((a, b) => b.similarity - a.similarity).slice(0, limit), aboveFloor }
 }
-
-

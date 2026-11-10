@@ -135,3 +135,26 @@ export function keywordCounts(store: MemoryStore, query: FtsQuery, filters: Pros
     WHERE chunks_fts MATCH ?${where.sql}`), query.match, ...where.params)
   return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
 }
+
+/**
+ * Of the chunks `ids`, those `query` does not match (all of them without a
+ * query), and how many of their sessions have no keyword match at all.
+ */
+export function unmatchedCounts(store: MemoryStore, ids: readonly number[], query: FtsQuery | null, filters: ProseFilters): { hits: number; sessions: number } {
+  if (ids.length === 0) return { hits: 0, sessions: 0 }
+  const json = JSON.stringify(ids)
+  if (!query) {
+    const row = firstRow<{ hits: number; sessions: number }>(store.db.prepare(`
+      SELECT COUNT(*) AS hits, COUNT(DISTINCT session_id) AS sessions FROM chunks WHERE id IN (SELECT value FROM json_each(?))`), json)
+    return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
+  }
+  const where = filterSql(filters)
+  const row = firstRow<{ hits: number; sessions: number }>(store.db.prepare(`
+    SELECT COUNT(*) AS hits, COUNT(DISTINCT CASE WHEN o.session_id NOT IN (
+      SELECT c.session_id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid WHERE chunks_fts MATCH ?${where.sql}
+    ) THEN o.session_id END) AS sessions
+    FROM chunks o
+    WHERE o.id IN (SELECT value FROM json_each(?)) AND o.id NOT IN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?)`),
+  query.match, ...where.params, json, query.match)
+  return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
+}

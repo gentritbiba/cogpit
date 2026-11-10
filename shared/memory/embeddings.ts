@@ -128,18 +128,21 @@ export class EmbeddingError extends Error {
  * Cut to `dimensions`, normalise, and scale so the largest component is 127.
  * The scale cancels out of the cosine, so it is not stored.
  */
-export function quantize(raw: readonly number[], dimensions: number): QuantizedVector {
+export function quantize(raw: readonly unknown[], dimensions: number): QuantizedVector {
   if (raw.length < dimensions) throw new EmbeddingError(`the endpoint returned ${raw.length} dimensions; the configuration keeps ${dimensions}`, false)
   let max = 0
-  for (let i = 0; i < dimensions; i++) max = Math.max(max, Math.abs(raw[i]!))
+  for (let i = 0; i < dimensions; i++) {
+    const component = raw[i]
+    if (typeof component !== "number" || !Number.isFinite(component)) throw new EmbeddingError("the endpoint returned a vector with a component that is not a number", false)
+    max = Math.max(max, Math.abs(component))
+  }
+  if (max === 0) throw new EmbeddingError("the endpoint returned a zero vector", false)
   const values = new Int8Array(dimensions)
   let squares = 0
-  if (max > 0) {
-    for (let i = 0; i < dimensions; i++) {
-      const value = Math.round((raw[i]! / max) * 127)
-      values[i] = value
-      squares += value * value
-    }
+  for (let i = 0; i < dimensions; i++) {
+    const value = Math.round(((raw[i] as number) / max) * 127)
+    values[i] = value
+    squares += value * value
   }
   return { values, norm: Math.sqrt(squares) }
 }
@@ -170,8 +173,12 @@ function timeoutSignal(ms: number, outer?: AbortSignal): { signal: AbortSignal; 
 export function createEmbeddingClient(config: EmbeddingConfig, fetch: FetchLike): EmbeddingClient {
   const headers: Record<string, string> = { "content-type": "application/json" }
   if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`
+  // An endpoint may echo the key in an error body; messages are printed, so the key never reaches one.
+  const redact = (error: EmbeddingError) => !config.apiKey || !error.message.includes(config.apiKey)
+    ? error
+    : new EmbeddingError(error.message.split(config.apiKey).join("[redacted]"), error.retryable)
 
-  async function request(input: string[], timeoutMs: number, attempts: number, signal?: AbortSignal): Promise<number[][]> {
+  async function request(input: string[], timeoutMs: number, attempts: number, signal?: AbortSignal): Promise<unknown[][]> {
     let lastError: EmbeddingError = new EmbeddingError("no attempt was made", true)
     for (let attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) await delay(RETRY_DELAY_MS * 3 ** (attempt - 1), signal)
@@ -194,7 +201,7 @@ export function createEmbeddingClient(config: EmbeddingConfig, fetch: FetchLike)
       }
       if (!lastError.retryable) break
     }
-    throw lastError
+    throw redact(lastError)
   }
 
   return {
@@ -211,18 +218,18 @@ export function createEmbeddingClient(config: EmbeddingConfig, fetch: FetchLike)
   }
 }
 
-function parseEmbeddings(body: unknown, expected: number): number[][] {
+function parseEmbeddings(body: unknown, expected: number): unknown[][] {
   const data = (body as { data?: unknown } | null)?.data
   if (!Array.isArray(data) || data.length !== expected) {
     throw new EmbeddingError(`the embedding endpoint returned ${Array.isArray(data) ? data.length : "no"} vectors for ${expected} inputs`, false)
   }
-  const vectors: number[][] = new Array(expected)
+  const vectors: unknown[][] = new Array(expected)
   data.forEach((item: { index?: unknown; embedding?: unknown }, position) => {
     const index = typeof item?.index === "number" ? item.index : position
     if (!Array.isArray(item?.embedding) || index < 0 || index >= expected || vectors[index]) {
       throw new EmbeddingError("the embedding endpoint returned a malformed vector list", false)
     }
-    vectors[index] = item.embedding as number[]
+    vectors[index] = item.embedding
   })
   return vectors
 }

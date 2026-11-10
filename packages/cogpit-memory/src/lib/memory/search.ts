@@ -2,7 +2,7 @@
 import type { AgentKind } from "../types"
 import { DEFAULT_MIN_SCORE, type EmbeddingClient, type QuantizedVector } from "./embeddings"
 import { collapseDuplicates, rrfScore } from "./fusion"
-import { chunkRows, countTermMatches, ftsQuery, keywordCounts, keywordSearch, type ChunkRow, type ProseFilters } from "./keywordSearch"
+import { chunkRows, countTermMatches, ftsQuery, keywordCounts, keywordSearch, unmatchedCounts, type ChunkRow, type ProseFilters } from "./keywordSearch"
 import type { MemoryStore } from "./store"
 import type { ChunkKind, MemoryHit, SemanticStatus } from "./types"
 import { vectorSearch, type VectorMatch } from "./vectors"
@@ -26,7 +26,9 @@ export interface ProseSearchResult {
   hits: MemoryHit[]
   /** Chunks matching the keywords, before the limit. */
   keywordHits: number
-  /** Sessions with at least one keyword match. */
+  /** Chunks reaching `minScore` that the keywords do not match. */
+  semanticHits: number
+  /** Sessions with at least one keyword or semantic match. */
   sessionsMatched: number
   semantic: SemanticStatus
 }
@@ -75,11 +77,14 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
   let rows = fts && mode !== "semantic" ? keywordSearch(store, fts, options, depth) : []
   let semantic: SemanticStatus = mode === "keyword" ? { state: "off" } : { state: "unavailable", reason: "no embedding endpoint is configured" }
   let matches: VectorMatch[] = []
+  let aboveFloor: number[] = []
   if (client && queryVector) {
     const embedded = await queryVector
     if ("vector" in embedded) {
       semantic = { state: "ready" }
-      matches = vectorSearch(store, embedded.vector, client.fingerprint, options, depth, client.config.minScore ?? DEFAULT_MIN_SCORE)
+      const found = vectorSearch(store, embedded.vector, client.fingerprint, options, depth, client.config.minScore ?? DEFAULT_MIN_SCORE)
+      matches = found.matches
+      aboveFloor = found.aboveFloor
     } else {
       semantic = { state: "unavailable", reason: embedded.error }
     }
@@ -107,9 +112,9 @@ export async function searchProse(store: MemoryStore, query: string, options: Pr
   const counts = !fts || rows.length < depth
     ? { hits: rows.length, sessions: new Set(rows.map((row) => row.session_id)).size }
     : keywordCounts(store, fts, options)
-  const keywordSessions = new Set(rows.map((row) => row.session_id))
-  const semanticOnlySessions = new Set(fused.filter((hit) => !keywordSessions.has(hit.sessionId)).map((hit) => hit.sessionId))
-  return { hits, keywordHits: counts.hits, sessionsMatched: counts.sessions + semanticOnlySessions.size, semantic }
+  const keywordsSearched = mode !== "semantic" || semantic.state !== "ready"
+  const semanticOnly = unmatchedCounts(store, aboveFloor, keywordsSearched ? fts : null, options)
+  return { hits, keywordHits: counts.hits, semanticHits: semanticOnly.hits, sessionsMatched: counts.sessions + semanticOnly.sessions, semantic }
 }
 
 async function embedQuerySafely(client: EmbeddingClient, query: string): Promise<{ vector: QuantizedVector } | { error: string }> {
