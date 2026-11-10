@@ -83,7 +83,8 @@ describe("CLI arg parsing", () => {
   })
 
   it("rejects bad flags and values instead of ignoring them", () => {
-    expect(parseArgs(["search", "auth", "--mode", "semantic"]).error).toBe("Unknown option for search: --mode")
+    expect(parseArgs(["search", "auth", "--fuzzy"]).error).toBe("Unknown option for search: --fuzzy")
+    expect(parseArgs(["search", "auth", "--mode", "vibes"]).error).toContain("Invalid --mode \"vibes\"")
     expect(parseArgs(["search", "auth", "--limit", "ten"]).error).toContain('Invalid --limit "ten"')
     expect(parseArgs(["search", "auth", "--limit", "0"]).error).toContain("Invalid --limit")
     expect(parseArgs(["search", "auth", "--max-age", "5 days"]).error).toContain('Invalid --max-age "5 days"')

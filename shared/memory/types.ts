@@ -75,6 +75,8 @@ export interface MemoryHit {
   score: number
   /** 1-based rank in each list the hit appeared in. */
   ranks: { keyword?: number; semantic?: number }
+  /** Cosine similarity to the query, when the hit came from the vector list. */
+  similarity?: number
   /** The transcript is gone (`stat` says ENOENT); the stored text is all that is left. */
   archived: boolean
   /** Other chunks with identical text (forked sessions) folded into this hit. */

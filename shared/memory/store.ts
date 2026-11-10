@@ -48,6 +48,8 @@ export interface MemoryStatus {
   lastSyncAt: string | null
   /** Source files whose transcript is gone; only when the caller can stat files. */
   archivedFiles?: number
+  /** Vector coverage for one model@dimensions; only when a fingerprint is passed. */
+  embeddings?: EmbeddingCounts
 }
 
 interface StoredChunk {
@@ -161,7 +163,7 @@ export class MemoryStore {
     return result
   }
 
-  status(options: { fileExists?: (path: string) => boolean } = {}): MemoryStatus {
+  status(options: { fileExists?: (path: string) => boolean; fingerprint?: string } = {}): MemoryStatus {
     const count = (sql: string) => firstRow<{ n: number | null }>(this.db.prepare(sql))?.n ?? 0
     const kinds = this.db.prepare("SELECT kind, COUNT(*) AS n FROM chunks GROUP BY kind").all() as Array<{ kind: ChunkKind; n: number }>
     const range = firstRow<{ oldest: string | null; newest: string | null }>(
@@ -185,6 +187,7 @@ export class MemoryStore {
       const paths = this.db.prepare("SELECT path FROM source_files").all() as Array<{ path: string }>
       status.archivedFiles = paths.filter(({ path }) => !options.fileExists!(path)).length
     }
+    if (options.fingerprint) status.embeddings = embeddingCounts(this, options.fingerprint)
     return status
   }
 
@@ -224,6 +227,22 @@ export class MemoryStore {
         first_at = COALESCE(excluded.first_at, sessions.first_at), last_at = COALESCE(excluded.last_at, sessions.last_at)`)
       .run(...values, given, firstPromptTitle(chunks), file.path, timestamps[0] ?? null, timestamps.at(-1) ?? null, given)
   }
+}
+
+export interface EmbeddingCounts {
+  fingerprint: string
+  /** Chunks with a vector for this fingerprint. */
+  embedded: number
+  pending: number
+}
+
+/** True for a chunk `c` without a vector for the fingerprint bound to its `?`. */
+export const MISSING_VECTOR = "NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash AND v.fingerprint = ?)"
+
+export function embeddingCounts(store: MemoryStore, fingerprint: string): EmbeddingCounts {
+  const total = firstRow<{ n: number }>(store.db.prepare("SELECT COUNT(*) AS n FROM chunks"))?.n ?? 0
+  const pending = firstRow<{ n: number }>(store.db.prepare(`SELECT COUNT(*) AS n FROM chunks c WHERE ${MISSING_VECTOR}`), fingerprint)?.n ?? 0
+  return { fingerprint, embedded: total - pending, pending }
 }
 
 /** Which subagents have a transcript of their own, from the same walk, keyed by parent session. */

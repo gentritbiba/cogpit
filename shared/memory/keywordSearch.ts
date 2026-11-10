@@ -83,7 +83,7 @@ export function countTermMatches(text: string, terms: readonly string[]): number
   return count
 }
 
-function filterSql(filters: ProseFilters): { sql: string; params: SqlValue[] } {
+export function filterSql(filters: ProseFilters): { sql: string; params: SqlValue[] } {
   const conditions: string[] = []
   const params: SqlValue[] = []
   const add = (condition: string, value: SqlValue) => {
@@ -114,6 +114,17 @@ export function keywordSearch(store: MemoryStore, query: FtsQuery, filters: Pros
     WHERE chunks_fts MATCH ?${where.sql}
     ORDER BY chunks_fts.rank
     LIMIT ?`).all(query.match, ...where.params, limit) as ChunkRow[]
+}
+
+/** Chunk rows by id, in no particular order; `snippet` is left empty for the caller. */
+export function chunkRows(store: MemoryStore, ids: readonly number[]): ChunkRow[] {
+  if (ids.length === 0) return []
+  return store.db.prepare(`
+    SELECT ${CHUNK_SELECT}, '' AS snippet
+    FROM chunks c
+    JOIN source_files f ON f.id = c.file_id
+    LEFT JOIN sessions s ON s.session_id = c.session_id
+    WHERE c.id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as ChunkRow[]
 }
 
 export function keywordCounts(store: MemoryStore, query: FtsQuery, filters: ProseFilters): { hits: number; sessions: number } {

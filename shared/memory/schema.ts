@@ -78,6 +78,16 @@ const MIGRATIONS: readonly string[] = [
     INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
   END;
   `,
+  // Vectors are keyed by text, so identical chunks share one, and by model@dimensions, so a model change makes them pending.
+  `
+  CREATE TABLE vectors (
+    text_hash TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    norm REAL NOT NULL,
+    PRIMARY KEY (text_hash, fingerprint)
+  ) WITHOUT ROWID;
+  `,
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS.length

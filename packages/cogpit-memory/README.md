@@ -74,7 +74,7 @@ is not available for Copilot sessions.
 
 ### `search` — Ranked search over prose and tool calls
 
-One ranked list from two stores, merged by reciprocal rank fusion:
+One ranked list, merged by reciprocal rank fusion from up to three lists:
 
 - **Prose** — user prompts, assistant replies, thinking, compaction summaries,
   recaps and plans — lives in the durable memory store and is ranked by BM25:
@@ -82,6 +82,9 @@ One ranked list from two stores, merged by reciprocal rank fusion:
   so a question finds the passage that shares most of its rarer words. Quote a
   part of the query to keep it an exact phrase. Prose is searched across **all
   time** unless `--max-age` is given.
+- **Meaning** — when an embedding endpoint is configured (see `index config`),
+  prose passages similar to the query by meaning, above a similarity floor,
+  even when they share no word with it.
 - **Tool input and output** come from the FTS5 tool index as exact-phrase hits
   within `--max-age` (default 5 days).
 
@@ -107,6 +110,7 @@ cogpit-memory search "bug" --session-limit 20 --hits-per-session 2  # Compact re
 | `--session-limit` | all | Cap unique sessions in results |
 | `--hits-per-session` | all | Max hits kept per session |
 | `--case-sensitive` | `false` | Case sensitivity |
+| `--mode` | `hybrid` | `hybrid`, `keyword` (no embeddings) or `semantic` (meaning only, no tool calls) |
 
 An unknown flag or a bad value (`--limit ten`, `--max-age 5days`) is an error, not ignored.
 
@@ -120,7 +124,8 @@ of hits, best first. Each hit has:
 | `location` | e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/turn/0/userMessage`, `agent/a7f3bc2/toolCall/tc1/result` |
 | `turn`, `agent` | Pass to `context <id> --turn N` or `--agent ID [--turn N]` |
 | `kind` | `user`, `assistant`, `thinking`, `compaction`, `recap`, `plan`, `agent_message`, `tool_input`, `tool_result` |
-| `match` | `keyword` (embeddings arrive separately; until then `semantic` is `unavailable`) |
+| `match` | `keyword`, `semantic` (matched by meaning only) or `both` |
+| `similarity` | Cosine similarity to the query, for hits found by meaning |
 | `score` | Fused rank score; higher is better |
 | `matchCount` | Query-word occurrences in the passage |
 | `timestamp` | When the passage was written (prose) |
@@ -128,16 +133,51 @@ of hits, best first. Each hit has:
 | `automated` | Written on someone's behalf: crew chat, task wake-ups, other agents |
 | `duplicates` | Identical passages in other sessions (forks) folded into this one |
 
-The response also carries `semantic` / `semanticReason` and, when the stores
-are behind, `warnings`.
+The response also carries `semantic` (`ready`, `unavailable` or `off`) with
+`semanticReason`, and, when the stores are behind, `warnings`. Without an
+endpoint, or when it does not answer within its timeout, search answers with
+keyword results and says why; it never fails because of embeddings.
 
 ### `index` — Manage the stores
 
 ```bash
 cogpit-memory index stats     # Tool index stats plus memory store counts
-cogpit-memory index sync      # Bring both stores fully up to date (progress on stderr)
+cogpit-memory index sync      # Bring both stores up to date, then embed pending passages (progress on stderr)
+cogpit-memory index config    # Show the embedding endpoint; with flags, change it
 cogpit-memory index rebuild   # Rebuild the tool index from scratch; never touches the memory store
 ```
+
+### Embeddings
+
+Any OpenAI-compatible `/v1/embeddings` endpoint works; nothing is bundled.
+The configuration lives in `<memory dir>/config.json`, shared with the
+Cogpit app, and is written owner-only:
+
+```bash
+cogpit-memory index config --url http://127.0.0.1:8790/v1/embeddings \
+  --model Qwen3-Embedding-0.6B --dimensions 256 \
+  --query-prefix $'Instruct: Given a question about earlier work, retrieve the conversation passages that answer it\nQuery: '
+cogpit-memory index sync      # embeds every passage without a vector
+cogpit-memory index config --off
+```
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `url`, `model` | — | Endpoint and model name |
+| `apiKey` | none | Sent as a bearer token |
+| `dimensions` | `256` | Leading dimensions kept per vector (Matryoshka models) |
+| `queryPrefix` | none | Prepended to queries only, for instruction-tuned models |
+| `minScore` | `0.5` | Similarity a hit by meaning must reach |
+| `timeoutMs` | `1500` | How long a search waits for its query embedding |
+
+Vectors are normalised, stored as int8 and compared by brute force in process.
+Identical passages share one vector. A vector made by another model or size
+counts as pending until `index sync` re-embeds it; text is never re-read from
+transcripts for that, so archived passages are re-embedded too.
+`COGPIT_EMBED_URL`, `COGPIT_EMBED_MODEL`, `COGPIT_EMBED_API_KEY`,
+`COGPIT_EMBED_DIMENSIONS`, `COGPIT_EMBED_QUERY_PREFIX`,
+`COGPIT_EMBED_MIN_SCORE` and `COGPIT_EMBED_TIMEOUT_MS` override the file for
+tests and one-off runs.
 
 ## Performance
 

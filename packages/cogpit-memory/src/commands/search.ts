@@ -26,7 +26,9 @@ import { openTranscript, readTranscriptText } from "../lib/transcriptFile"
 import { openMemoryStore, transcriptExists } from "../lib/memory-store"
 import { rebuildToolIndex, syncTranscripts, type SyncSummary } from "../lib/sync"
 import { rrfScore } from "../lib/memory/fusion"
-import { clampSearchLimit, searchProse, type ProseSearchResult } from "../lib/memory/search"
+import { clampSearchLimit, searchProse, type ProseSearchResult, type SearchMode } from "../lib/memory/search"
+import type { EmbeddingClient } from "../lib/memory/embeddings"
+import { loadEmbeddings } from "../lib/embedding-config"
 import type { MemoryStore } from "../lib/memory/store"
 import type { ChunkKind, MatchKind, MemoryHit, SemanticStatus } from "../lib/memory/types"
 import type { ParsedSession } from "../lib/types"
@@ -39,6 +41,8 @@ export interface SearchOptions {
   maxAge?: string
   limit?: number
   caseSensitive?: boolean
+  /** Default hybrid. `semantic` skips keyword prose and tool calls; `keyword` skips embeddings. */
+  mode?: SearchMode
 }
 
 export interface SearchHit {
@@ -64,6 +68,8 @@ export interface SearchHit {
   automated?: true
   /** Identical passages in other sessions (forks) folded into this hit. */
   duplicates?: number
+  /** Cosine similarity to the question, for hits found by meaning. */
+  similarity?: number
 }
 
 export interface SessionSearchResult {
@@ -111,6 +117,7 @@ export async function searchSessions(
   opts: SearchOptions,
   searchIndex?: SearchIndex | null,
   memory?: MemoryStore | null,
+  embeddings?: EmbeddingClient | null,
 ): Promise<SearchResponse | { error: string }> {
   if (!query || query.length < 2) {
     return { error: "Query must be at least 2 characters" }
@@ -121,7 +128,13 @@ export async function searchSessions(
   const limit = clampSearchLimit(opts.limit)
   const caseSensitive = opts.caseSensitive ?? false
   const toolMaxAgeMs = maxAge ?? parseMaxAge("5d")!
+  const mode = opts.mode ?? "hybrid"
   const warnings: string[] = []
+  if (embeddings === undefined && mode !== "keyword") {
+    const loaded = loadEmbeddings()
+    if (loaded.error) warnings.push(loaded.error)
+    embeddings = loaded.client
+  }
 
   const opened = openStores(searchIndex, memory, warnings)
   try {
@@ -137,9 +150,15 @@ export async function searchSessions(
         instanceId: workerInstanceId() ?? undefined,
         sinceMs: maxAge === undefined ? undefined : Date.now() - maxAge,
         fileExists: transcriptExists,
+        mode,
+        embeddings,
       })
       : null
     const proseHits = (prose?.hits ?? []).filter((hit) => !caseSensitive || hit.text.includes(query))
+
+    // Tool calls are matched by phrase only, so a search by meaning leaves them out, unless meaning is unavailable.
+    const wantTools = mode !== "semantic" || prose?.semantic.state !== "ready"
+    if (!wantTools) return withStatus(await fuse(query, limit, proseHits, [], prose, { total: 0, sessions: 0 }), prose, warnings)
 
     let tools: { hits: ToolIndexHit[]; total: number; sessions: number } | null = null
     if (index) {
@@ -271,6 +290,7 @@ function toProseRanked(hit: MemoryHit): RankedHit {
       ...(hit.archived ? { archived: true as const, text: hit.text } : {}),
       ...(hit.automated ? { automated: true as const } : {}),
       ...(hit.duplicates ? { duplicates: hit.duplicates } : {}),
+      ...(hit.similarity !== undefined ? { similarity: Math.round(hit.similarity * 1000) / 1000 } : {}),
     },
   }
 }
