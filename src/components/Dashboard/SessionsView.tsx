@@ -1,6 +1,7 @@
 import { ConversationSearchResults } from "@/components/session-search/ConversationSearchResults"
 import { handleSearchKeyDown } from "@/components/session-search/searchKeyboard"
-import type { OpenSearchQuote, SessionSearchResponse } from "@/components/session-search/types"
+import type { OpenSearchQuote } from "@/components/session-search/types"
+import type { SessionSearchResponse } from "../../../shared/contracts/sessionSearch"
 import { Fragment, type ReactNode } from "react"
 import { MessageSquare, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"

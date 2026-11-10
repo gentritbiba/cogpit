@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { listUrl, type ListFilter } from "@/lib/sessionListFilter"
 import { onListsStale } from "@/lib/sessionAccess"
-import type { SessionSearchResponse } from "@/components/session-search/types"
+import type { SessionSearchResponse } from "../../shared/contracts/sessionSearch"
 
 export function useSessionContentSearch(query: string, filter: ListFilter, cwd?: string) {
   const trimmed = query.trim()

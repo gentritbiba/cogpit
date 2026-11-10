@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ConversationSearchResults } from "../ConversationSearchResults"
-import type { SessionSearchHit, SessionSearchResponse } from "../types"
+import type { SessionSearchHit, SessionSearchResponse } from "../../../../shared/contracts/sessionSearch"
 
 const hit: SessionSearchHit = { chunkId: 1, kind: "user", snippet: "Remember the release decision", timestamp: "2026-11-10T10:00:00Z", match: "keyword", score: 1, automated: false, agentId: null, openTurnId: "t2", openTurn: 2 }
 const response: SessionSearchResponse = { query: "release", semantic: { state: "ready" }, indexing: { pendingFiles: 0, pendingEmbeddings: 0 }, results: [{ sessionId: "s1", dirName: "-work-app", fileName: "s1.jsonl", title: "Release planning", cwd: "/work/app", agentKind: "", archived: false, hits: [hit] }] }

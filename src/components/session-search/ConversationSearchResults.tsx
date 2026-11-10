@@ -3,7 +3,8 @@ import { Archive, Sparkles } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatRelativeTime, projectName } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { OpenSearchQuote, SessionSearchHit, SessionSearchResponse, SessionSearchResult } from "./types"
+import type { OpenSearchQuote } from "./types"
+import type { SessionSearchHit, SessionSearchResponse, SessionSearchResult } from "../../../shared/contracts/sessionSearch"
 
 interface Props {
   response: SessionSearchResponse | null
