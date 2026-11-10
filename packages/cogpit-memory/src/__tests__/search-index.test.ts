@@ -26,6 +26,21 @@ describe("SearchIndex", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  it("adds the index time column to an index an older version wrote", async () => {
+    const { Database } = await import("bun:sqlite")
+    const old = new Database(dbPath)
+    old.exec("CREATE TABLE indexed_files (file_path TEXT PRIMARY KEY, mtime_ms REAL NOT NULL, session_id TEXT NOT NULL, is_subagent INTEGER NOT NULL DEFAULT 0, parent_session_id TEXT)")
+    old.exec("INSERT INTO indexed_files VALUES ('/t/a.jsonl', 5, 'a', 0, NULL)")
+    old.close()
+    const index = new SearchIndex(dbPath)
+    try {
+      expect(index.indexedFiles()).toEqual(new Map([["/t/a.jsonl", 5]]))
+      expect(index.indexedAt()).toEqual(new Map())
+    } finally {
+      index.close()
+    }
+  })
+
   it("removes deleted transcripts before applying the search limit", () => {
     const index = new SearchIndex(dbPath)
     const live = join(tmpDir, "live.jsonl")

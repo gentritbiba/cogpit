@@ -116,8 +116,8 @@ export function syncTranscripts(options: SyncOptions): SyncSummary {
   const known = (file: ListedFile) => (!synced || synced.has(file.path)) && (!indexed || indexed.has(file.path))
   const own = (file: ListedFile) => !!options.sessionId && (file.sessionId === options.sessionId || file.parentSessionId === options.sessionId)
   const expectedMs = (file: ListedFile) => synced?.get(file.path)?.syncMs ?? file.size / UNSYNCED_BYTES_PER_MS
-  // Without the memory store, the transcript mtime the tool index recorded stands in for the last sync time.
-  const lastSyncAt = (file: ListedFile) => (synced ? synced.get(file.path)?.syncedAtMs : indexed?.get(file.path))
+  const indexedAt = !synced && options.backOff ? options.index?.indexedAt() : undefined
+  const lastSyncAt = (file: ListedFile) => (synced ? synced.get(file.path)?.syncedAtMs : indexedAt?.get(file.path))
   const due = (file: ListedFile) => {
     const last = lastSyncAt(file)
     return !options.backOff || !known(file) || last === undefined || started - last >= Math.max(BACK_OFF_MIN_MS, BACK_OFF_FACTOR * expectedMs(file))

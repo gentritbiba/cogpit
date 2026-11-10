@@ -217,10 +217,12 @@ describe("search-time sync", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  /** A session keeps writing: one more line and a newer mtime. */
+  let grown = 0
+
+  /** A session keeps writing: one more line and a newer mtime, even within the same millisecond. */
   function grow(path: string): void {
     appendFileSync(path, `\n${JSON.stringify({ type: "user", uuid: `more-${Math.random()}`, timestamp: new Date().toISOString(), message: { role: "user", content: "more" } })}`)
-    const at = new Date()
+    const at = new Date(Date.now() + ++grown)
     utimesSync(path, at, at)
   }
 
@@ -309,14 +311,30 @@ describe("search-time sync", () => {
     }
   })
 
-  it("backs off on the tool index alone when the memory store is unavailable", () => {
-    const path = writeAgedSession("busy", "a", "b", "ls", 0)
+  it("backs off on the tool index alone, from when it indexed a file, when the memory store is unavailable", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 1)
     const index = new SearchIndex(join(tmpDir, "tool-only.db"))
     try {
       syncTranscripts({ index, memory: null })
       grow(path)
       expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 0, pending: 1, unindexed: 0 })
       expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600, now: () => Date.now() + 120_000 })).toMatchObject({ parsed: 1, pending: 0 })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("treats a file an older tool index recorded without an index time as due once", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 1)
+    const dbPath = join(tmpDir, "old-index.db")
+    const index = new SearchIndex(dbPath)
+    try {
+      syncTranscripts({ index, memory: null })
+      index["db"].exec("UPDATE indexed_files SET indexed_at = NULL")
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 1 })
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 0, pending: 1 })
     } finally {
       index.close()
     }

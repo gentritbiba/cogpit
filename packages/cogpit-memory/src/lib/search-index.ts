@@ -77,8 +77,11 @@ export class SearchIndex {
       mtime_ms REAL NOT NULL,
       session_id TEXT NOT NULL,
       is_subagent INTEGER NOT NULL DEFAULT 0,
-      parent_session_id TEXT
+      parent_session_id TEXT,
+      indexed_at REAL
     )`)
+    const columns = this.db.prepare("PRAGMA table_info(indexed_files)").all() as Array<{ name: string }>
+    if (!columns.some((column) => column.name === "indexed_at")) this.db.exec("ALTER TABLE indexed_files ADD COLUMN indexed_at REAL")
 
     // Check if FTS table exists before creating (FTS5 doesn't support IF NOT EXISTS)
     const ftsExists = this.db.prepare(
@@ -240,14 +243,14 @@ export class SearchIndex {
       "DELETE FROM indexed_files WHERE file_path = ?"
     )
     const insertFile = this.db.prepare(
-      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id, indexed_at) VALUES (?, ?, ?, ?, ?, ?)"
     )
 
     const txn = this.db.transaction(() => {
       deleteContent.run(filePath)
       deleteFile.run(filePath)
       this.insertSessionContent(insert, resolvedSessionId, filePath, session)
-      insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId)
+      insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId, Date.now())
     })
 
     txn()
@@ -456,7 +459,7 @@ export class SearchIndex {
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
     const insertFile = this.db.prepare(
-      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id, indexed_at) VALUES (?, ?, ?, ?, ?, ?)"
     )
 
     const txn = this.db.transaction(() => {
@@ -466,7 +469,7 @@ export class SearchIndex {
           const content = readTranscriptTextSync(file.path)
           const session = parseSession(content, { skipStats: true })
           this.insertSessionContent(insert, file.sessionId, file.path, session)
-          insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId)
+          insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId, Date.now())
           onParsed?.(file, session, Date.now() - started)
         } catch {
           // Skip files that fail to parse
@@ -546,6 +549,12 @@ export class SearchIndex {
   indexedFiles(): Map<string, number> {
     const rows = this.db.prepare("SELECT file_path, mtime_ms FROM indexed_files").all() as Array<{ file_path: string; mtime_ms: number }>
     return new Map(rows.map((row) => [row.file_path, row.mtime_ms]))
+  }
+
+  /** When each transcript was last indexed (epoch ms); rows an older version wrote are left out. */
+  indexedAt(): Map<string, number> {
+    const rows = this.db.prepare("SELECT file_path, indexed_at FROM indexed_files WHERE indexed_at IS NOT NULL").all() as Array<{ file_path: string; indexed_at: number }>
+    return new Map(rows.map((row) => [row.file_path, row.indexed_at]))
   }
 
   /** Every transcript from every agent, tagged with the session it belongs to. */
