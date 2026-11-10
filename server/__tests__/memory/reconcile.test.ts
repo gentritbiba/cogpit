@@ -23,6 +23,14 @@ const inline = (agentId: string, text: string): SubAgentMessage => ({
 })
 
 describe("reconcileStore", () => {
+  it("records how long each file took, its parse included", async () => {
+    const store = open()
+    const file = sourceFile()
+    const parse = () => new Promise<ReturnType<typeof makeSession>>((resolve) => setTimeout(() => resolve(makeSession([{ user: "slow parse" }])), 40))
+    await reconcileStore(store, [file], { parse })
+    expect(store.syncedFiles().get(file.path)?.syncMs).toBeGreaterThanOrEqual(35)
+  })
+
   it("syncs stale files newest first, pausing between them, and skips unchanged ones next time", async () => {
     const store = open()
     const files = [sourceFile({ path: "/t/old.jsonl", mtimeMs: 1 }), sourceFile({ path: "/t/new.jsonl", mtimeMs: 2, sessionId: "session-2" })]

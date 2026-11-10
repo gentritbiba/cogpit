@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { installDirsMock, mockDbPath, mockDirs, writeSession } from "../fixtures"
@@ -8,7 +8,7 @@ installDirsMock()
 
 const { searchSessions } = await import("../../commands/search")
 const { indexStats, indexSync } = await import("../../commands/index-cmd")
-const { syncTranscripts } = await import("../../lib/sync")
+const { rebuildToolIndex, syncTranscripts } = await import("../../lib/sync")
 const { openMemoryStore } = await import("../../lib/memory-store")
 const { SearchIndex } = await import("../../lib/search-index")
 
@@ -195,5 +195,185 @@ describe("index sync", () => {
     } finally {
       memory.close()
     }
+  })
+})
+
+describe("search-time sync", () => {
+  const T0 = Date.parse("2026-11-10T12:00:00.000Z")
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "cogpit-search-sync-"))
+    mockDirs.PROJECTS_DIR = join(tmpDir, "projects")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot")
+    mockDirs.ACP_PROJECTS_DIR = join(tmpDir, "acp")
+    mockDbPath.value = join(tmpDir, "index", "search-index.db")
+    process.env.COGPIT_MEMORY_DIR = join(tmpDir, "memory")
+    projectDir = join(mockDirs.PROJECTS_DIR, "-work-aged")
+    mkdirSync(projectDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  let grown = 0
+
+  /** A session keeps writing: one more line and a newer mtime, even within the same millisecond. */
+  function grow(path: string): void {
+    appendFileSync(path, `\n${JSON.stringify({ type: "user", uuid: `more-${Math.random()}`, timestamp: new Date().toISOString(), message: { role: "user", content: "more" } })}`)
+    const at = new Date(Date.now() + ++grown)
+    utimesSync(path, at, at)
+  }
+
+  function withMemory<T>(run: (memory: ReturnType<typeof openMemoryStore>) => T): T {
+    const memory = openMemoryStore()
+    try {
+      return run(memory)
+    } finally {
+      memory.close()
+    }
+  }
+
+  it("syncs transcripts it has never seen before ones that changed since, each newest first", () => {
+    const known = writeAgedSession("known", "a", "b", "ls", 3)
+    withMemory((memory) => syncTranscripts({ index: null, memory, now: () => T0 }))
+    grow(known)
+    writeAgedSession("fresh-old", "c", "d", "ls", 2)
+    writeAgedSession("fresh-new", "e", "f", "ls", 1)
+    let tick = T0 + 120_000
+    withMemory((memory) => {
+      expect(syncTranscripts({ index: null, memory, backOff: true, budgetMs: 600, now: () => tick++ })).toMatchObject({ parsed: 3, pending: 0 })
+      const order = [...memory.syncedFiles()].sort((a, b) => a[1].syncedAtMs - b[1].syncedAtMs).map(([path]) => path.split("/").pop())
+      expect(order).toEqual(["fresh-new.jsonl", "fresh-old.jsonl", "known.jsonl"])
+    })
+  })
+
+  it("re-syncs a transcript that keeps changing at most once per max(1 min, 20 × its last sync)", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 0)
+    withMemory((memory) => syncTranscripts({ index: null, memory, now: () => T0 }))
+    grow(path)
+    withMemory((memory) => {
+      const at = (offset: number) => syncTranscripts({ index: null, memory, backOff: true, now: () => T0 + offset })
+      expect(at(59_000)).toMatchObject({ parsed: 0, pending: 1, unindexed: 0 })
+      memory.db.prepare("UPDATE source_files SET sync_ms = 10000").run()
+      expect(at(150_000)).toMatchObject({ parsed: 0, pending: 1 })
+      expect(at(200_000)).toMatchObject({ parsed: 1, pending: 0 })
+      expect(memory.syncedFiles().get(path)?.syncedAtMs).toBe(T0 + 200_000)
+    })
+  })
+
+  it("does not start a file expected to take longer than the time left", () => {
+    const slow = writeAgedSession("slow", "a", "b", "ls", 1)
+    withMemory((memory) => syncTranscripts({ index: null, memory, now: () => T0 }))
+    grow(slow)
+    writeAgedSession("big", "x".repeat(1_500_000), "y", "ls", 2)
+    withMemory((memory) => {
+      memory.db.prepare("UPDATE source_files SET sync_ms = 500").run()
+      // A fixed clock leaves the whole budget: the known file is expected to take 500 ms, the new one about 150 ms for its 1.5 MB.
+      const sync = (budgetMs: number) => syncTranscripts({ index: null, memory, budgetMs, now: () => T0 + 600_000 })
+      expect(sync(100)).toMatchObject({ parsed: 0, pending: 2, unindexed: 1 })
+      expect(sync(200)).toMatchObject({ parsed: 1, pending: 1, unindexed: 0 })
+      memory.db.prepare("UPDATE source_files SET sync_ms = 500").run()
+      expect(sync(600)).toMatchObject({ parsed: 1, pending: 0 })
+    })
+  })
+
+  it("syncs the asked-for session and its subagents whatever the budget and back-off", () => {
+    const parent = writeAgedSession("own", "a", "b", "ls", 0)
+    const subagentDir = join(projectDir, "own", "subagents")
+    mkdirSync(subagentDir, { recursive: true })
+    const subagent = join(subagentDir, "agent-b1.jsonl")
+    writeFileSync(subagent, JSON.stringify({ type: "user", uuid: "s1", timestamp: new Date().toISOString(), sessionId: "own", cwd: "/work/aged", message: { role: "user", content: "child task" } }))
+    const other = writeAgedSession("other", "c", "d", "ls", 0)
+    withMemory((memory) => syncTranscripts({ index: null, memory, now: () => T0 }))
+    for (const path of [parent, subagent, other]) grow(path)
+    withMemory((memory) => {
+      expect(syncTranscripts({ index: null, memory, backOff: true, budgetMs: -1, sessionId: "own", now: () => T0 + 1_000 }))
+        .toMatchObject({ parsed: 2, pending: 1, unindexed: 0 })
+      const synced = memory.syncedFiles()
+      expect([parent, subagent, other].map((path) => synced.get(path)?.syncedAtMs)).toEqual([T0 + 1_000, T0 + 1_000, T0])
+    })
+  })
+
+  it("fills a missing tool index within the budget, counting its files as never indexed", () => {
+    writeAgedSession("one", "a", "b", "ls", 1)
+    writeAgedSession("two", "c", "d", "ls", 2)
+    withMemory((memory) => syncTranscripts({ index: null, memory }))
+    const index = new SearchIndex(join(tmpDir, "fresh-index.db"))
+    try {
+      withMemory((memory) => {
+        expect(syncTranscripts({ index, memory, backOff: true, budgetMs: -1 })).toMatchObject({ parsed: 0, pending: 2, unindexed: 2 })
+        expect(syncTranscripts({ index, memory, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 2, toolIndexFiles: 2, memoryFiles: 0, pending: 0 })
+      })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("backs off on the tool index alone, from when it indexed a file, when the memory store is unavailable", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 1)
+    const index = new SearchIndex(join(tmpDir, "tool-only.db"))
+    try {
+      syncTranscripts({ index, memory: null })
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 0, pending: 1, unindexed: 0 })
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600, now: () => Date.now() + 120_000 })).toMatchObject({ parsed: 1, pending: 0 })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("treats a file an older tool index recorded without an index time as due once", () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 1)
+    const dbPath = join(tmpDir, "old-index.db")
+    const index = new SearchIndex(dbPath)
+    try {
+      syncTranscripts({ index, memory: null })
+      index["db"].exec("UPDATE indexed_files SET indexed_at = NULL")
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 1 })
+      grow(path)
+      expect(syncTranscripts({ index, memory: null, backOff: true, budgetMs: 600 })).toMatchObject({ parsed: 0, pending: 1 })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("records the whole per-file time when a full rebuild feeds the memory store", () => {
+    const path = writeAgedSession("one", "a", "b", "ls", 1)
+    const index = new SearchIndex(join(tmpDir, "rebuilt.db"))
+    const buildFull = index.buildFull.bind(index)
+    index.buildFull = (onParsed) => buildFull((file, session, elapsedMs) => onParsed?.(file, session, elapsedMs + 5_000))
+    try {
+      withMemory((memory) => {
+        rebuildToolIndex(index, memory)
+        expect(memory.syncedFiles().get(path)?.syncMs).toBeGreaterThanOrEqual(5_000)
+      })
+    } finally {
+      index.close()
+    }
+  })
+
+  it("leaves index sync without a budget or back-off", async () => {
+    const path = writeAgedSession("busy", "a", "b", "ls", 0)
+    await indexSync({ dbPath: mockDbPath.value })
+    grow(path)
+    expect(await indexSync({ dbPath: mockDbPath.value })).toMatchObject({ sync: { parsed: 1, memoryFiles: 1, pending: 0 } })
+  })
+
+  it("says a transcript is behind without a warning, and warns only about ones never indexed", async () => {
+    const path = writeAgedSession("busy", "deploy stalled on the lock", "b", "ls", 0)
+    // Without the tool index, so the search syncs the memory store the way it does once an index exists.
+    const proseSearch = async () => await searchSessions("deploy stalled", {}, null) as unknown as Response & { behind?: number }
+    expect((await proseSearch()).behind).toBeUndefined()
+    grow(path)
+    const result = await proseSearch()
+    expect(result.behind).toBe(1)
+    expect(result.warnings).toBeUndefined()
+    expect(result.results.map((entry) => entry.sessionId)).toEqual(["busy"])
+
+    writeAgedSession("new", "e", "f", "ls", 1)
+    withMemory((memory) => expect(syncTranscripts({ index: null, memory, backOff: true, budgetMs: -1 })).toMatchObject({ pending: 2, unindexed: 1 }))
   })
 })
