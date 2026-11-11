@@ -270,6 +270,31 @@ async fn shutdown_ends_every_session() {
     client.frame("exit", "long").await;
 }
 
+/// Resizes a running terminal; the program inside reads the new size back.
+#[tokio::test(flavor = "multi_thread")]
+async fn resizes_a_running_terminal() {
+    let (addr, _state) = start().await;
+    let mut client = Client::connect(addr).await;
+    client.send(shell("sz")).await;
+    client.frame("spawned", "sz").await;
+    client
+        .send(json!({ "type": "resize", "id": "sz", "cols": 101, "rows": 31 }))
+        .await;
+    let (query, answer) = if cfg!(windows) {
+        (
+            "powershell -NoProfile -Command \"'{0}x{1}' -f [Console]::WindowWidth,[Console]::WindowHeight\"\r\n",
+            "101x31",
+        )
+    } else {
+        ("stty size\n", "31 101")
+    };
+    client
+        .send(json!({ "type": "input", "id": "sz", "data": query }))
+        .await;
+    client.output_until("sz", answer).await;
+    client.send(json!({ "type": "kill", "id": "sz" })).await;
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -292,22 +317,6 @@ mod unix {
         assert!(!output.contains('\u{FFFD}'));
         assert_eq!(output.matches('€').count(), 10_000);
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn resizes_the_terminal() {
-        let (addr, _state) = start().await;
-        let mut client = Client::connect(addr).await;
-        client.send(shell("sz")).await;
-        client.frame("spawned", "sz").await;
-        client
-            .send(json!({ "type": "resize", "id": "sz", "cols": 101, "rows": 31 }))
-            .await;
-        client
-            .send(json!({ "type": "input", "id": "sz", "data": "stty size\n" }))
-            .await;
-        client.output_until("sz", "31 101").await;
-        client.send(json!({ "type": "kill", "id": "sz" })).await;
     }
 
     /// The shell leads its own session with the PTY as its controlling

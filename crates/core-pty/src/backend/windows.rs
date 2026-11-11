@@ -9,6 +9,7 @@
 //! it when its last handle closes. A kill terminates the job, which ends the
 //! whole tree the way `taskkill /T /F` did, and nothing outlives the core.
 #![allow(unsafe_code)]
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString, c_void};
@@ -43,11 +44,56 @@ use super::{Process, SpawnSpec, Spawned};
 /// The exit code a killed tree reports, as `taskkill /F` gave it.
 const KILLED_EXIT_CODE: u32 = 1;
 
-struct PseudoConsole(HPCON);
+/// A pseudo-console and, until a reader takes it, the read end of its output.
+///
+/// `ClosePseudoConsole` can block until the console host has written its last
+/// output, so it must never run while that output is neither read nor
+/// discarded. Dropping this closes the read end first when nobody took it, so
+/// the host's writes fail instead of blocking; a reader that took it drains it
+/// until the end of the stream on its own thread.
+struct PseudoConsole {
+    handle: HPCON,
+    output: Option<OwnedHandle>,
+}
+
+impl PseudoConsole {
+    fn new(cols: u16, rows: u16) -> io::Result<(Self, OwnedHandle)> {
+        let (input_read, input_write) = pipe()?;
+        let (output_read, output_write) = pipe()?;
+        let mut handle: HPCON = 0;
+        // SAFETY: both pipe ends are open handles this function owns, and
+        // `handle` is a valid place for the new console's handle.
+        check(unsafe {
+            CreatePseudoConsole(
+                coord(cols, rows),
+                raw(&input_read),
+                raw(&output_write),
+                0,
+                &mut handle,
+            )
+        })?;
+        // The console host holds its own duplicates of the ends it uses, so
+        // `input_read` and `output_write` close here.
+        let console = Self {
+            handle,
+            output: Some(output_read),
+        };
+        Ok((console, input_write))
+    }
+
+    fn take_output(&mut self) -> OwnedHandle {
+        self.output
+            .take()
+            .expect("the output is taken once, right after spawning")
+    }
+}
 
 impl Drop for PseudoConsole {
     fn drop(&mut self) {
-        unsafe { ClosePseudoConsole(self.0) };
+        drop(self.output.take());
+        // SAFETY: `handle` came from a successful CreatePseudoConsole and is
+        // closed only here, once.
+        unsafe { ClosePseudoConsole(self.handle) };
     }
 }
 
@@ -59,36 +105,23 @@ struct WindowsProcess {
 impl Process for WindowsProcess {
     fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
         let console = self.console.lock().unwrap_or_else(|e| e.into_inner());
-        match console.as_ref() {
-            Some(console) => check(unsafe { ResizePseudoConsole(console.0, coord(cols, rows)) }),
-            None => Ok(()),
-        }
+        let Some(console) = console.as_ref() else {
+            return Ok(());
+        };
+        // SAFETY: the lock keeps the console open for the whole call.
+        check(unsafe { ResizePseudoConsole(console.handle, coord(cols, rows)) })
     }
 
     fn kill(&self) {
+        // SAFETY: `job` is an open job handle owned by `self`.
         unsafe { TerminateJobObject(raw(&self.job), KILLED_EXIT_CODE) };
     }
 }
 
 pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
-    let (input_read, input_write) = pipe()?;
-    let (output_read, output_write) = pipe()?;
-    let mut handle: HPCON = 0;
-    check(unsafe {
-        CreatePseudoConsole(
-            coord(spec.cols, spec.rows),
-            raw(&input_read),
-            raw(&output_write),
-            0,
-            &mut handle,
-        )
-    })?;
-    let console = PseudoConsole(handle);
-    // The console host holds its own duplicates of these ends.
-    drop(input_read);
-    drop(output_write);
-
-    let mut attributes = AttributeList::with_pseudo_console(console.0)?;
+    let (mut console, input) = PseudoConsole::new(spec.cols, spec.rows)?;
+    let mut attributes = AttributeList::with_pseudo_console(console.handle)?;
+    // SAFETY: STARTUPINFOEXW is plain data; all zeroes is its empty value.
     let mut startup: STARTUPINFOEXW = unsafe { mem::zeroed() };
     startup.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as u32;
     // Otherwise a child inherits whatever this process's stdio is redirected
@@ -99,7 +132,12 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     let mut line = wide(OsStr::new(&command_line(&spec.command, &spec.args)));
     let environment = environment_block(&spec.env);
     let cwd = wide(spec.cwd.as_os_str());
+    // SAFETY: PROCESS_INFORMATION is plain data; all zeroes is its empty value.
     let mut info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
+    // SAFETY: `line`, `environment` and `cwd` are NUL-terminated buffers that
+    // outlive the call (`line` is writable, as CreateProcessW requires), and
+    // `startup` points at an initialized attribute list that `attributes`
+    // keeps alive until after the call.
     let created = unsafe {
         CreateProcessW(
             ptr::null(),
@@ -118,32 +156,37 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
         return Err(io::Error::last_os_error());
     }
     drop(attributes);
-    let process = unsafe { owned(info.hProcess) };
-    let thread = unsafe { owned(info.hThread) };
+    // SAFETY: CreateProcessW succeeded, so both handles are open and ours.
+    let (process, thread) = unsafe { (owned(info.hProcess), owned(info.hThread)) };
 
     let job = match job_holding(&process) {
         Ok(job) => job,
         Err(error) => {
+            // SAFETY: `process` is open; the child is suspended and in no job.
             unsafe { TerminateProcess(raw(&process), KILLED_EXIT_CODE) };
             return Err(error);
         }
     };
+    // SAFETY: `thread` is the open handle of the child's suspended main thread.
     if unsafe { ResumeThread(raw(&thread)) } == u32::MAX {
         let error = io::Error::last_os_error();
+        // SAFETY: `job` is open and holds the child.
         unsafe { TerminateJobObject(raw(&job), KILLED_EXIT_CODE) };
         return Err(error);
     }
     drop(thread);
 
+    let output = console.take_output();
     let console = Arc::new(Mutex::new(Some(console)));
     let closer = Arc::clone(&console);
     Ok(Spawned {
         process: Arc::new(WindowsProcess { console, job }),
-        input: Box::new(File::from(input_write)),
-        output: Box::new(File::from(output_read)),
+        input: Box::new(File::from(input)),
+        output: Box::new(File::from(output)),
         wait: Box::new(move || {
             let code = wait_for_exit(&process);
-            // ConPTY holds the output pipe open until the console closes.
+            // ConPTY holds the output pipe open until the console closes. The
+            // registry's reader owns `output` and drains it meanwhile.
             let console = closer.lock().unwrap_or_else(|e| e.into_inner()).take();
             drop(console);
             code
@@ -153,6 +196,8 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
 
 fn wait_for_exit(process: &OwnedHandle) -> i64 {
     let mut code = KILLED_EXIT_CODE;
+    // SAFETY: `process` is an open process handle and `code` a valid place
+    // for its exit code.
     unsafe {
         if WaitForSingleObject(raw(process), INFINITE) == WAIT_OBJECT_0 {
             GetExitCodeProcess(raw(process), &mut code);
@@ -162,13 +207,17 @@ fn wait_for_exit(process: &OwnedHandle) -> i64 {
 }
 
 fn job_holding(process: &OwnedHandle) -> io::Result<OwnedHandle> {
+    // SAFETY: null attributes and name ask for a default, unnamed job.
     let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
     if handle.is_null() {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: CreateJobObjectW returned an open handle that nothing else owns.
     let job = unsafe { owned(handle) };
+    // SAFETY: the limits struct is plain data; all zeroes means no limits.
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    // SAFETY: `limits` is the struct this information class names, with its size.
     let set = unsafe {
         SetInformationJobObject(
             raw(&job),
@@ -177,6 +226,7 @@ fn job_holding(process: &OwnedHandle) -> io::Result<OwnedHandle> {
             mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         )
     };
+    // SAFETY: `job` and `process` are open handles.
     if set == 0 || unsafe { AssignProcessToJobObject(raw(&job), raw(process)) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -191,15 +241,21 @@ struct AttributeList {
 impl AttributeList {
     fn with_pseudo_console(console: HPCON) -> io::Result<Self> {
         let mut size = 0;
-        // Fails by design: it only reports the size the list needs.
+        // SAFETY: a null list with a count asks only for the size; this call
+        // fails by design.
         unsafe { InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut size) };
         let mut list = Self {
             buffer: vec![0; size.div_ceil(mem::size_of::<usize>())],
         };
+        // SAFETY: `buffer` holds at least `size` bytes, aligned for the list.
         if unsafe { InitializeProcThreadAttributeList(list.as_mut_ptr(), 1, 0, &mut size) } == 0 {
+            // Not initialized, so there is nothing for Drop to delete.
             list.buffer.clear();
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: the list is initialized with room for one attribute; the
+        // pseudo-console attribute takes the HPCON value itself, which the
+        // caller keeps open for as long as the list is used.
         let updated = unsafe {
             UpdateProcThreadAttribute(
                 list.as_mut_ptr(),
@@ -225,6 +281,7 @@ impl AttributeList {
 impl Drop for AttributeList {
     fn drop(&mut self) {
         if !self.buffer.is_empty() {
+            // SAFETY: a non-empty buffer holds an initialized list, deleted once.
             unsafe { DeleteProcThreadAttributeList(self.as_mut_ptr()) };
         }
     }
@@ -233,15 +290,18 @@ impl Drop for AttributeList {
 fn pipe() -> io::Result<(OwnedHandle, OwnedHandle)> {
     let mut read: HANDLE = ptr::null_mut();
     let mut write: HANDLE = ptr::null_mut();
+    // SAFETY: `read` and `write` are valid places for the two new handles.
     if unsafe { CreatePipe(&mut read, &mut write, ptr::null(), 0) } == 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: CreatePipe succeeded, so both are open handles nothing else owns.
     Ok(unsafe { (owned(read), owned(write)) })
 }
 
 /// # Safety
 /// `handle` must be open and owned by nothing else.
 unsafe fn owned(handle: HANDLE) -> OwnedHandle {
+    // SAFETY: guaranteed by the caller.
     unsafe { OwnedHandle::from_raw_handle(handle as RawHandle) }
 }
 
