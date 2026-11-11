@@ -42,6 +42,25 @@ jobs:
         working-directory: packages/cogpit-memory
         run: bun install --frozen-lockfile
 
+      # rust-toolchain.toml pins the version and components.
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Lint Rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --locked
+
+      # The server spawns it; every suite that boots a composition needs it.
+      - name: Build Rust core
+        run: bun run build:core
+
       - name: Check dependency advisories
         run: bun run check:audit
 
@@ -146,6 +165,19 @@ jobs:
       - name: Install cogpit-memory dependencies
         working-directory: packages/cogpit-memory
         run: bun install --frozen-lockfile
+
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build Rust core
+        run: bun run build:core
+
+      # The core's stdin-close exit and spawn are what can differ on Windows.
+      - name: Test Rust
+        if: ${{ matrix.shard == 1 }}
+        run: cargo test --locked
 
       - name: Type-check production code
         run: bun run typecheck

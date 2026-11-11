@@ -2,6 +2,8 @@
 
 Cogpit uses Bun for development. Use Bun 1.3.14 to match CI. The npm launcher is a separate package with its own Node.js runtime requirements.
 
+The server also needs its Rust core, `cogpit-core`. Install Rust with [rustup](https://rustup.rs); `rust-toolchain.toml` selects the version. `bun run dev`, `electron:dev`, `test` and `serve` build the core first with `bun run build:core`, and cargo makes repeat builds quick. See [the Rust core design](architecture/rust-core.md).
+
 ## Run locally
 
 ```bash
@@ -56,6 +58,10 @@ bun run lint
 bun run typecheck
 bun run check:agents
 bun run test
+
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 
 cd packages/cogpit-memory
 bun test
