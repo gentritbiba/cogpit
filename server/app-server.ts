@@ -2,9 +2,6 @@ import { worktreeStartups } from "./sessionStartup/readiness"
 import express from "express"
 import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
-import { WebSocketServer } from "ws"
-import type { IncomingMessage } from "node:http"
-import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
 import { closeCommandDispatcher } from "./lib/durableSend"
@@ -31,20 +28,17 @@ import { initializeAppPlugins } from "./plugins/startup"
 import { captureLegacyPluginHost, type LegacyHostClassification } from "./plugins/legacyHost"
 import { disposeHubPluginRelay } from "./hub/pluginRelay"
 import { refreshDirs } from "./sessionPaths"
-import { rejectWebsocketUpgrade } from "./security"
 import { describeEditionSuppression, editionAuthz, editionModule, loadEdition } from "./edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
-import { handleHubUpgrade } from "./hub/proxy"
 import { allRuntimes, isSessionActive } from "./agents/runtimes"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
 import { resumeLocalCrewChat } from "./lib/crewChat"
 import { startTriggerScheduler, triggerExecutionsSettled } from "./lib/triggers/runner"
-import { PtySessionManager } from "./pty-server"
-import { PtyAuthorizationController } from "./pty-authorization"
-import { BrowserViewerManager } from "./browser/viewerSocket"
+import { attachSocketTransports, type UpgradeHandler } from "./socketTransports"
+import { startCore } from "./core"
 import type { HubMode } from "./routes/hello"
 
 /** How long shutdown still waits on its other steps once one has failed. */
@@ -86,6 +80,8 @@ export interface AppServerEnvironment {
   viteDevUrl?: string
   legacyPluginHost?: LegacyHostClassification
   legacyClickUpPath?: string
+  /** The packaged cogpit-core binary; `COGPIT_CORE_BIN` overrides it. */
+  coreBin?: string
 }
 
 /**
@@ -123,6 +119,13 @@ export async function createServerComposition(
   await initDeviceRegistry(userDataDir)
   refreshDirs()
   const pluginManager = await initializeAppPlugins(userDataDir, { legacyHost, legacyClickUpPath: environment.legacyClickUpPath })
+  let core: Awaited<ReturnType<typeof startCore>>
+  try {
+    core = await startCore({ coreBin: environment.coreBin, dataDir: userDataDir })
+  } catch (error) {
+    await pluginManager.close()
+    throw error
+  }
 
   const app = express()
   const httpServer = createServer(app)
@@ -184,99 +187,62 @@ export async function createServerComposition(
     })
   }
 
-  const wss = new WebSocketServer({ noServer: true })
-  const ptyManager = new PtySessionManager(wss)
-  const browserWss = new WebSocketServer({ noServer: true })
-  const browserManager = new BrowserViewerManager()
   const browserSupport = initBrowserSupport(isSessionActive)
   installSessionCli()
   resumeLocalDelegations()
   resumeLocalCrewChat()
   startTriggerScheduler()
-  const ptyAuthorization = new PtyAuthorizationController()
-  const upgradedSockets = new Set<Duplex>()
 
-  httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    upgradedSockets.add(socket)
-    socket.once("close", () => upgradedSockets.delete(socket))
-
-    const url = new URL(req.url || "/", "http://localhost")
-    if (handleHubUpgrade(req, socket, head)) {
-      // Hub transport upgrades bypass the local WebSocketServers and splice raw
-      // sockets, so track the caller's outer sign-in session here as well.
-      if (!socket.destroyed && /^\/hub\/[^/]+\/(__pty|__browser)$/.test(url.pathname)) {
-        ptyAuthorization.trackHubUpgrade(req, url, socket)
-      }
+  // Dev mode: forward Vite's HMR WebSocket. Otherwise nothing else upgrades.
+  const viteUpgrade: UpgradeHandler = (req, socket) => {
+    if (!viteUrl) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
       return
     }
-    if (url.pathname === "/__pty" || url.pathname === "/__browser") {
-      if (rejectWebsocketUpgrade(req, url, socket)) return
-      const transport = url.pathname === "/__pty" ? wss : browserWss
-      transport.handleUpgrade(req, socket, head, (ws) => transport.emit("connection", ws, req))
-      return
-    }
-    // Dev mode: forward Vite's HMR WebSocket.
-    if (viteUrl) {
-      const proxyReq = httpRequest(
-        {
-          hostname: viteUrl.hostname,
-          port: viteUrl.port,
-          path: req.url,
-          method: req.method,
-          headers: req.headers,
-        },
-        (proxyRes) => {
-          if (!proxyRes.headers.upgrade) {
-            socket.destroy()
-          }
-        },
+    const proxyReq = httpRequest(
+      {
+        hostname: viteUrl.hostname,
+        port: viteUrl.port,
+        path: req.url,
+        method: req.method,
+        headers: req.headers,
+      },
+      (proxyRes) => {
+        if (!proxyRes.headers.upgrade) {
+          socket.destroy()
+        }
+      },
+    )
+    proxyReq.on("upgrade", (_proxyRes, proxySocket, proxyHead) => {
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        + Object.entries(_proxyRes.headers)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join("\r\n")
+        + "\r\n\r\n",
       )
-      proxyReq.on("upgrade", (_proxyRes, proxySocket, proxyHead) => {
-        socket.write(
-          "HTTP/1.1 101 Switching Protocols\r\n"
-          + Object.entries(_proxyRes.headers)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join("\r\n")
-          + "\r\n\r\n",
-        )
-        if (proxyHead.length) socket.write(proxyHead)
-        proxySocket.pipe(socket)
-        socket.pipe(proxySocket)
-      })
-      proxyReq.on("error", () => socket.destroy())
-      proxyReq.end()
-      return
-    }
-
-    socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
-  })
-
-  wss.on("connection", (ws, req) => ptyAuthorization.handleConnection(ws, req, ptyManager))
-  browserWss.on("connection", (ws, req) => {
-    ptyAuthorization.handleConnection(ws, req, browserManager.socketFor(req))
-  })
+      if (proxyHead.length) socket.write(proxyHead)
+      proxySocket.pipe(socket)
+      socket.pipe(proxySocket)
+    })
+    proxyReq.on("error", () => socket.destroy())
+    proxyReq.end()
+  }
+  const transports = attachSocketTransports(httpServer, { fallback: viteUpgrade })
 
   let cleanupPromise: Promise<void> | null = null
   const cleanupRuntime = (): Promise<void> => {
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
-      ptyManager.cleanup()
-      browserManager.cleanup()
-      ptyAuthorization.cleanup()
-      for (const client of wss.clients) client.terminate()
-      for (const client of browserWss.clients) client.terminate()
-      for (const socket of upgradedSockets) socket.destroy()
-      upgradedSockets.clear()
-
       await settleThenFlushEdition([
+        transports.close(),
         pluginManager.close(),
         disposeHubPluginRelay(),
-        new Promise<void>((resolve) => wss.close(() => resolve())),
-        new Promise<void>((resolve) => browserWss.close(() => resolve())),
         cleanupProcesses(),
         worktreeStartups.close(),
         browserSupport.shutdown(),
         ...allRuntimes().map((runtime) => runtime.shutdown()),
+        core.release(),
       ])
     })()
     return cleanupPromise

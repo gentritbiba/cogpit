@@ -4,6 +4,7 @@ import { getConfiguredEditionValue, getDataRoot, loadConfig, getConfig } from ".
 import { authMiddleware, devSecurityHeaders, bodySizeLimit } from "./helpers"
 import { apiNotFound, requestTargetPath } from "./http"
 import { cleanupProcesses } from "./processRegistry"
+import { startCore } from "./core"
 import { refreshDirs } from "./sessionPaths"
 import { describeEditionSuppression, editionAuthz, loadEdition } from "./edition"
 import { initDeviceRegistry } from "./hub/registry"
@@ -59,8 +60,9 @@ export function sessionApiPlugin(): Plugin {
       const suppression = describeEditionSuppression(process.env, configEdition, "dev")
       if (suppression) console.warn(suppression)
       const pluginManager = await initializeAppPlugins(dataDir, { legacyHost, legacyClickUpPath: CLICKUP_CONFIG_FILE })
+      const core = await startCore({ dataDir })
       server.httpServer?.on("close", () => {
-        void Promise.all([pluginManager.close(), disposeHubPluginRelay(), flushSessionCatalog()])
+        void Promise.all([pluginManager.close(), disposeHubPluginRelay(), flushSessionCatalog(), core.release()])
       })
 
       // Security middleware (before all routes)

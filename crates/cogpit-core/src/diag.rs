@@ -1,19 +1,22 @@
 //! Transport self-test endpoints. The TS forwarder and WebSocket relay are
 //! tested against these on the real binary, so they stay in every build.
 
-use axum::Router;
 use axum::body::Body;
 use axum::extract::Request;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::http::StatusCode;
 use axum::http::{HeaderName, HeaderValue};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
+use axum::{Json, Router};
 use core_protocol::PRINCIPAL_HEADER;
+use serde_json::json;
 
 pub fn router() -> Router {
     Router::new()
         .route("/v1/diag/echo", any(echo))
         .route("/v1/diag/echo/{*rest}", any(echo))
+        .route("/v1/diag/drain", any(drain))
         .route("/v1/diag/ws", get(ws_echo))
 }
 
@@ -51,6 +54,15 @@ async fn echo(request: Request) -> Response {
         headers.insert("content-type", content_type.clone());
     }
     response
+}
+
+/// Reads the whole body before answering, like an upload route, and reports
+/// its length.
+async fn drain(body: Body) -> Response {
+    match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => Json(json!({ "bytes": bytes.len() })).into_response(),
+        Err(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
 }
 
 /// Echoes every frame. A text frame `close:<code>:<reason>` closes the socket

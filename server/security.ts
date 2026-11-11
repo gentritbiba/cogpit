@@ -879,9 +879,15 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
       const wrapped = (chunk: Buffer | string) => {
         size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length
         if (size > MAX_REQUEST_BODY_BYTES) {
-          res.statusCode = 413
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Request body too large" }))
+          // A handler that streams its answer (a core forward) may have
+          // started it already; then the only refusal left is cutting it.
+          if (res.headersSent) {
+            res.destroy()
+          } else {
+            res.statusCode = 413
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Request body too large" }))
+          }
           req.destroy()
           return
         }
