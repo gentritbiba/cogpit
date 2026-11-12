@@ -168,6 +168,27 @@ struct SaveResponse {
     size: u64,
 }
 
+async fn write_project_file(
+    cwd: &str,
+    path: &str,
+    content: &str,
+    expected_mtime_ms: f64,
+) -> Result<SaveResponse, Failure> {
+    let file = resolve_project_file(cwd, path).await?;
+    if mtime_ms(&file.info) != expected_mtime_ms {
+        return Err(Failure(409, CONFLICT));
+    }
+    write_atomically(&file, content, expected_mtime_ms).await?;
+    let saved = tokio::fs::metadata(&file.absolute_path)
+        .await
+        .map_err(|_| UNEXPECTED)?;
+    Ok(SaveResponse {
+        ok: true,
+        mtime_ms: JsNumber(mtime_ms(&saved)),
+        size: saved.len(),
+    })
+}
+
 pub async fn save(body: Body) -> Response {
     let result = async {
         let bytes = to_bytes(body, MAX_REQUEST_BODY_BYTES)
@@ -195,20 +216,15 @@ pub async fn save(body: Body) -> Response {
         if content.len() as u64 > MAX_FILE_BYTES {
             return Err(Failure(413, "File is larger than 2 MB"));
         }
-
-        let file = resolve_project_file(cwd, path).await?;
-        if mtime_ms(&file.info) != expected_mtime_ms {
-            return Err(Failure(409, CONFLICT));
-        }
-        write_atomically(&file, content, expected_mtime_ms).await?;
-        let saved = tokio::fs::metadata(&file.absolute_path)
-            .await
-            .map_err(|_| UNEXPECTED)?;
-        Ok(SaveResponse {
-            ok: true,
-            mtime_ms: JsNumber(mtime_ms(&saved)),
-            size: saved.len(),
-        })
+        // A client that goes away drops this handler; the save it asked for
+        // runs to the end on its own task, so the temporary file is always
+        // renamed or removed.
+        let (cwd, path, content) = (cwd.clone(), path.clone(), content.clone());
+        tokio::spawn(
+            async move { write_project_file(&cwd, &path, &content, expected_mtime_ms).await },
+        )
+        .await
+        .unwrap_or(Err(UNEXPECTED))
     }
     .await;
     match result {

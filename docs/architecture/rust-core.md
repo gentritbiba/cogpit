@@ -109,11 +109,17 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 | --- | --- | --- |
 | `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. |
 
-Known differences from the TS routes, both unreachable from the app: a
-`project-file` save whose JSON has a number that overflows to Infinity or an
-escaped lone surrogate gets 500 instead of 400, and file listings always sort
-with the root collation (what Bun's `localeCompare` uses), where Node followed
-`LANG`.
+Known differences from the TS routes:
+
+- File listings always sort with the root collation, which is what Bun's
+  `localeCompare` uses. Where the TS server ran on Node (Electron's utility
+  process), the order followed the system language, so a desktop user with a
+  tailored locale (Swedish, Danish, Czech, …) can see a different order.
+- A `project-file` save body that `JSON.parse` accepts but serde_json does not
+  gets 500 "Unable to access project file": a number that overflows to
+  Infinity (TS answered 400), an escaped lone surrogate or invalid UTF-8 bytes
+  (TS saved them as U+FFFD), JSON nested deeper than 128 levels (TS answered
+  400). The app's editor never sends these.
 
 ## Not ported in stage A
 

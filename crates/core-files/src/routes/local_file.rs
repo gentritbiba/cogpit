@@ -14,6 +14,8 @@ use crate::http::error;
 use crate::media::{image_type, video_type};
 use crate::paths::native;
 
+/// Read size per streamed chunk, as Node read streams use.
+const STREAM_CHUNK: usize = 64 * 1024;
 const MAX_IMAGE_SIZE: u64 = 50 * 1024 * 1024;
 /// Videos are served in ranges, so only a sanity ceiling applies.
 const MAX_VIDEO_SIZE: u64 = 1024 * 1024 * 1024;
@@ -109,7 +111,7 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
         return error(404, "File not found");
     }
 
-    let body = Body::from_stream(ReaderStream::new(file.take(length)));
+    let body = Body::from_stream(ReaderStream::with_capacity(file.take(length), STREAM_CHUNK));
     let mut response = (status, body).into_response();
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));

@@ -1175,3 +1175,52 @@ async fn json_and_text_over_a_kilobyte_are_gzipped_like_the_typescript_server() 
     assert_eq!(media.header("content-encoding"), None);
     assert_eq!(media.body.len(), 4096);
 }
+
+#[tokio::test]
+async fn a_save_abandoned_by_its_client_finishes_or_never_starts_and_leaves_no_temp_file() {
+    use std::future::Future;
+    use std::task::Poll;
+    let root = project();
+    let path = root.path().join("src/app.ts");
+    let app = app();
+
+    // Drop the response future after each possible number of polls: that is
+    // what hyper does when the client goes away mid-request.
+    for polls in 1..40u64 {
+        let before = std::fs::read_to_string(&path).unwrap();
+        let mtime = read_file(&app, root.path(), "src/app.ts").await.json()["mtimeMs"].clone();
+        let content = format!("after {polls} polls\n");
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri("/project-file")
+            .header("content-type", "application/json")
+            .body(Body::from(save_body(
+                root.path(),
+                "src/app.ts",
+                &content,
+                &mtime,
+            )))
+            .unwrap();
+        let mut save = Box::pin(app.clone().oneshot(request));
+        for _ in 0..polls {
+            let step = std::future::poll_fn(|cx| Poll::Ready(save.as_mut().poll(cx))).await;
+            if step.is_ready() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+        }
+        drop(save);
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        let leftovers: Vec<_> = std::fs::read_dir(root.path().join("src"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".cogpit-save"))
+            .collect();
+        assert!(leftovers.is_empty(), "{polls} polls left {leftovers:?}");
+        let now = std::fs::read_to_string(&path).unwrap();
+        assert!(now == before || now == content, "{polls} polls: {now:?}");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
