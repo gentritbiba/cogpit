@@ -112,9 +112,10 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 Known differences from the TS routes:
 
 - File listings always sort with the root collation, which is what Bun's
-  `localeCompare` uses. Where the TS server ran on Node (Electron's utility
-  process), the order followed the system language, so a desktop user with a
-  tailored locale (Swedish, Danish, Czech, …) can see a different order.
+  `localeCompare` uses; every shell runs the TS server on Bun. The old
+  Electron shell ran it on Node, whose order followed the system language, so
+  a user upgrading from it with a tailored locale (Swedish, Danish, Czech, …)
+  can see a different order.
 - A `project-file` save body that `JSON.parse` accepts but serde_json does not
   gets 500 "Unable to access project file", where TS answered 400 or saved
   the file: a number that overflows to Infinity, an escaped lone surrogate or
