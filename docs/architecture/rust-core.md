@@ -103,6 +103,25 @@ Mount it with one line in `crates/cogpit-core/src/routes/mod.rs`, under
 `/v1/<area>`. On the TS side, keep the route's id in `server/api-routes.ts`,
 replace its handler with `forwardToCore`, and delete the TS implementation.
 
+## Ported routes
+
+| Route ids | Core crate, mount | Notes |
+| --- | --- | --- |
+| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. |
+
+Known differences from the TS routes:
+
+- File listings always sort with the root collation, which is what Bun's
+  `localeCompare` uses; every shell runs the TS server on Bun. The old
+  Electron shell ran it on Node, whose order followed the system language, so
+  a user upgrading from it with a tailored locale (Swedish, Danish, Czech, …)
+  can see a different order.
+- A `project-file` save body that `JSON.parse` accepts but serde_json does not
+  gets 500 "Unable to access project file", where TS answered 400 or saved
+  the file: a number that overflows to Infinity, an escaped lone surrogate or
+  invalid UTF-8 bytes (TS saved them as U+FFFD), JSON nested deeper than 128
+  levels. The app's editor never sends these.
+
 ## Not ported in stage A
 
 | What | Why |

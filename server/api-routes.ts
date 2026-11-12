@@ -19,21 +19,25 @@ import { registerConfigRoutes } from "./routes/config"
 import { registerDeviceRoutes } from "./routes/devices"
 import { registerEditionRoutes } from "./routes/edition"
 import { registerEditorRoutes } from "./routes/editor"
-import { registerFileContentRoutes } from "./routes/file-content"
+import {
+  registerFileContentRoutes,
+  registerGitDiffRoutes,
+  registerGitStatusRoutes,
+  registerLocalFileRoutes,
+  registerProjectFileContentRoutes,
+  registerProjectFileRoutes,
+} from "./routes/core-files"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerToolResultRoutes } from "./routes/tool-result"
 import { registerAutomationRoutes } from "./routes/automations"
 import { registerFileRoutes } from "./routes/files"
 import { registerFolderRoutes } from "./routes/folders"
-import { registerGitDiffRoutes } from "./routes/git-diff"
-import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerGitHubRoutes } from "./routes/github"
 import { registerVercelDeploymentRoutes } from "./routes/vercel-deployments"
 import { registerVoiceRoutes } from "./routes/voice"
 import { registerClickUpRoutes } from "./routes/clickup"
 import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
-import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerMissionControlRoutes } from "./routes/mission-control"
 import { registerModelRoutes } from "./routes/models"
@@ -41,8 +45,6 @@ import { registerNotificationRoutes } from "./routes/notifications"
 import { registerPerformanceRoutes } from "./routes/performance"
 import { registerPermissionRoutes } from "./routes/permissions"
 import { registerPortRoutes } from "./routes/ports"
-import { registerProjectFileContentRoutes } from "./routes/project-file"
-import { registerProjectFileRoutes } from "./routes/project-files"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerAgentExecutableRoutes } from "./routes/agent-executable"
