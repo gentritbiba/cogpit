@@ -51,7 +51,7 @@ export function UpdateBanner() {
             disabled={restarting}
             onClick={() => {
               setRestarting(true)
-              void window.cogpitDesktop?.updater.install()
+              void window.cogpitDesktop?.updater?.install()
             }}
           >
             <RotateCw data-icon="inline-start" />
@@ -103,7 +103,7 @@ export function UpdateBanner() {
           size="xs"
           onClick={() => {
             dismiss()
-            window.cogpitDesktop?.updater.dismissVersion(update.version)
+            window.cogpitDesktop?.updater?.dismissVersion(update.version)
           }}
           className="whitespace-nowrap text-muted-foreground"
         >

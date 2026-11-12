@@ -6,21 +6,14 @@ on:
       - "v*"
   # Dry-run the release pipeline (quality + all platform builds, timings and
   # artifacts included) without publishing — publish/AUR only run on a v* tag
-  # push. Dispatched on a v* tag it builds what the release would; on a branch
-  # it builds the public edition, because the edition package's deploy key is in
-  # the `release` environment, which admits only v* tags.
+  # push. Dispatch it on a v* tag: the jobs that build with the edition package
+  # read its deploy key from the `release` environment, which admits only v* tags.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  # Installs up to 3.6.x run the Electron app, whose updater reads
-  # latest-mac.yml / latest-linux.yml / latest.yml. While this is "1" a release
-  # also publishes those, pointing at this app, and the macOS bundle carries the
-  # placeholder file that updater insists on (docs/desktop.md, "Moving Electron
-  # installs"). Delete this line once those installs have moved.
-  COGPIT_ELECTRON_BRIDGE: "1"
   ARCHLINUX_IMAGE: archlinux:base@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433 # base-20260712.0.555161
 
 jobs:
@@ -30,8 +23,6 @@ jobs:
   # quality.yml checks the public build; this checks the release build, which
   # carries the edition package, and that a build without it leaks none of it.
   team-quality:
-    # A branch dry-run has no access to the edition package.
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -103,116 +94,54 @@ jobs:
       - name: Check the public build carries none of the edition package
         run: bun editions/team/tools/check-public-bundle.ts "$RUNNER_TEMP/public-dist"
 
-  # cogpit-core for every platform Cogpit ships on. The desktop apps bundle
-  # theirs; the npm launcher carries all five. Linux builds are static (musl),
-  # so one binary runs on any distro, however old its glibc.
-  core:
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: darwin-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-          - platform: darwin-x64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-          - platform: linux-x64
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - platform: linux-arm64
-            os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - platform: win32-x64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-
-    name: core (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      # rust-toolchain.toml pins the version.
-      - name: Install the Rust toolchain
-        shell: bash
-        run: rustup toolchain install && rustup target add "${{ matrix.target }}"
-
-      - name: Install the musl toolchain
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: release-${{ matrix.target }}
-
-      - name: Build cogpit-core
-        shell: bash
-        run: cargo build --locked --release -p cogpit-core --target "${{ matrix.target }}"
-
-      - name: Require a static Linux binary
-        if: runner.os == 'Linux'
-        run: |
-          file "target/${{ matrix.target }}/release/cogpit-core"
-          file "target/${{ matrix.target }}/release/cogpit-core" | grep -Eq 'static(ally|-pie) linked'
-
-      # core-dist/<platform>/cogpit-core, the layout packages/cogpit-cli ships.
-      - name: Stage the binary
-        shell: bash
-        run: |
-          mkdir -p "core-dist/${{ matrix.platform }}"
-          cp "target/${{ matrix.target }}/release/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}" "core-dist/${{ matrix.platform }}/"
-
-      - name: Upload the binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: core-${{ matrix.platform }}
-          path: core-dist
-          if-no-files-found: error
-
-  desktop:
+  build:
     # Intentionally NOT gated on quality: builds and quality run in parallel
     # (saves the full quality duration off the release critical path).
     # `publish` requires BOTH, so no artifact ships without a green quality run.
-    needs: [core]
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          # One app per architecture on macOS, each built on its own hardware.
-          - name: macOS arm64
-            os: macos-latest
-            core: darwin-arm64
-            bundles: app,dmg
-          - name: macOS x64
-            os: macos-15-intel
-            core: darwin-x64
-            bundles: app,dmg
-          # The oldest Ubuntu runner: the app and its AppImage need no newer glibc than 22.04's.
-          # The deb is only the input of the pacman package.
-          - name: Linux
-            os: ubuntu-22.04
-            core: linux-x64
-            bundles: appimage,deb
-          - name: Windows
-            os: windows-latest
-            core: win32-x64
-            bundles: nsis
+          # `bun run <script> -- <args>` appends to the END of the whole script
+          # string, so the target flags used to land on a trailing command
+          # instead of electron-builder. Invoke electron-builder directly.
+          # Each pattern also carries the update manifest (latest*.yml) and the
+          # files the in-app updater downloads: the mac zips, the Windows
+          # blockmap for differential downloads.
+          - os: macos-latest
+            name: macOS
+            cmd: bun run electron:build && bunx electron-builder --mac --arm64 --x64 --publish never
+            pattern: |
+              release/*.dmg
+              release/*-mac.zip
+              release/latest-mac.yml
+          - os: ubuntu-latest
+            name: Linux (AppImage)
+            cmd: bun run electron:build && bunx electron-builder --linux AppImage --x64 --publish never
+            manifest: latest-linux-appimage.yml
+            pattern: |
+              release/*.AppImage
+              release/latest-linux-appimage.yml
+          - os: ubuntu-latest
+            name: Linux (pacman)
+            cmd: bun run electron:build && bunx electron-builder --linux pacman --x64 --publish never
+            manifest: latest-linux-pacman.yml
+            pattern: |
+              release/*.pacman
+              release/latest-linux-pacman.yml
+          - os: windows-latest
+            name: Windows
+            cmd: bun run electron:build && bunx electron-builder --win nsis --x64 --publish never
+            pattern: |
+              release/*-setup.exe
+              release/*-setup.exe.blockmap
+              release/latest.yml
 
-    name: desktop (${{ matrix.name }})
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    # The edition package's deploy key and the update signing key live in the
-    # `release` environment, which admits only v* tags. A dry-run on a branch
-    # builds the public edition and signs with a throwaway key.
-    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
+    environment: release
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -220,7 +149,6 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/team-checkout
-        if: startsWith(github.ref, 'refs/tags/v')
         with:
           ssh-key: ${{ secrets.COGPIT_TEAM_DEPLOY_KEY }}
 
@@ -232,148 +160,52 @@ jobs:
         with:
           node-version: "22.16"
 
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev patchelf file libarchive-tools
-
-      - name: Install the Rust toolchain
-        run: rustup toolchain install
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Electron + electron-builder binary downloads (~100MB per run otherwise)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          key: release
-          workspaces: desktop -> target
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: electron-${{ runner.os }}-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Download cogpit-core
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: core-${{ matrix.core }}
-          path: core-dist
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
-      # The desktop updater only installs files signed with the key whose
-      # public half is in desktop/tauri.conf.json. A release without it would
-      # strand every install, so a tag build refuses to go on. A dry-run signs
-      # with a key made here and thrown away.
-      - name: Check the update signing key
-        shell: bash
-        env:
-          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -n "$SIGNING_KEY" ]; then exit 0; fi
-          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
-            echo "The release environment has no TAURI_SIGNING_PRIVATE_KEY secret." >&2
-            exit 1
-          fi
-          bunx tauri signer generate --ci -p dry-run -w "$RUNNER_TEMP/dry-run.key" > /dev/null
-          echo "DRY_RUN_SIGNING_KEY=$(cat "$RUNNER_TEMP/dry-run.key")" >> "$GITHUB_ENV"
-
-      - name: Build the desktop app (${{ matrix.name }})
+      - name: Build and package (${{ matrix.name }})
         # windows-latest defaults to pwsh; Git Bash keeps the command shape
         # identical across every runner.
         shell: bash
         env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           # Fail closed: a release never ships without the edition UI.
-          COGPIT_EXPECT_EDITION_UI: ${{ startsWith(github.ref, 'refs/tags/v') && 'present' || 'absent' }}
-          COGPIT_CORE_PREBUILT: core-dist/${{ matrix.core }}/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && 'dry-run' || secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Ad-hoc signed unless the owner adds a Developer ID (docs/desktop.md).
-          APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          set -euo pipefail
-          if [ -n "$APPLE_IDENTITY" ]; then export APPLE_SIGNING_IDENTITY="$APPLE_IDENTITY"; fi
-          bun run desktop:build --bundles "${{ matrix.bundles }}"
+          COGPIT_EXPECT_EDITION_UI: present
+        run: ${{ matrix.cmd }}
 
-      - name: Collect the release files
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && 'dry-run' || secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bun scripts/release-artifacts.ts collect release
-
-      # The package is put together by scripts/lib/pacmanPackage.ts, not by
-      # makepkg, so pacman itself has the last word: it must install over the
-      # unowned /usr/bin/cogpit link that packages up to 3.6.x left behind,
-      # verify clean, and find every library the app links against.
-      - name: Install the pacman package on Arch Linux
-        if: runner.os == 'Linux'
-        run: |
-          # Only the package: pacman would read the updater's .sig beside it as a PGP signature.
-          package=$(ls "$PWD"/release/cogpit-*.pacman)
-          docker run --rm -v "$package:/cogpit.pacman:ro" "$ARCHLINUX_IMAGE" bash -euc '
-            ln -s /opt/Cogpit/cogpit /usr/bin/cogpit
-            pacman -Syu --noconfirm > /dev/null
-            pacman -U --noconfirm /cogpit.pacman
-            test "$(readlink -f /usr/bin/cogpit)" = /opt/Cogpit/cogpit
-            pacman -Qkk cogpit
-            if ldd /opt/Cogpit/cogpit | grep "not found"; then exit 1; fi
-            pacman -R --noconfirm cogpit
-            test ! -e /usr/bin/cogpit && test ! -L /usr/bin/cogpit
-          '
+      # Both Linux jobs write latest-linux.yml; publish merges the two.
+      - name: Name the Linux update manifest
+        if: matrix.manifest
+        run: mv release/latest-linux.yml "release/${{ matrix.manifest }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.name }}
-          path: release
-          if-no-files-found: error
-
-  # Every platform's files in one place, with the update manifests written
-  # over them. Runs on dry-runs too, so a broken release shows before a tag.
-  assemble:
-    needs: [desktop]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: release-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Require the tag to match the built version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: test "${GITHUB_REF_NAME#v}" = "$(jq -r .version package.json)"
-
-      # On a tag every update file must carry the signature of the key
-      # installed apps trust; a dry-run's throwaway key cannot pass that.
-      - name: Write the update manifests and verify the release
-        run: bun scripts/release-artifacts.ts manifests artifacts ${{ startsWith(github.ref, 'refs/tags/v') && '--verify' || '' }}
-
-      - name: Show the update manifests
-        run: cat artifacts/latest*
-
-      - name: Upload the release
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: published-release
-          path: artifacts
+          path: ${{ matrix.pattern }}
           if-no-files-found: error
 
   publish:
-    needs: [quality, team-quality, assemble]
-    # Skipped on workflow_dispatch dry-runs; update-aur chains off publish and
-    # skips with it.
+    needs: [quality, team-quality, build]
+    # Skipped on workflow_dispatch dry-runs, which run on a tag too; update-aur
+    # chains off publish and skips with it.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -382,11 +214,73 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: published-release
           path: artifacts
+          merge-multiple: true
 
       - name: List artifacts
-        run: find artifacts -type f
+        run: find artifacts -type f | head -20
+
+      # electron-updater on Linux reads one latest-linux.yml for both the
+      # AppImage and the pacman package and picks its file by extension.
+      # The AppImage goes last so the legacy top-level path describes it.
+      - name: Merge the Linux update manifests
+        shell: bash
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          if [ "$(yq -N '.version' latest-linux-pacman.yml latest-linux-appimage.yml | sort -u | wc -l)" -ne 1 ]; then
+            echo "The Linux update manifests disagree on the version" >&2
+            exit 1
+          fi
+          yq eval-all '. as $m ireduce ({}; . *+ $m)' latest-linux-pacman.yml latest-linux-appimage.yml > latest-linux.yml
+          rm latest-linux-pacman.yml latest-linux-appimage.yml
+          cat latest-linux.yml
+
+      - name: Verify release artifact manifest
+        shell: bash
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          for pattern in "*.dmg" "*.AppImage" "*.pacman" "*-setup.exe" latest-mac.yml latest-linux.yml latest.yml; do
+            if ! find . -maxdepth 1 -type f -name "$pattern" -print -quit | grep -q .; then
+              echo "Missing required release artifact: $pattern" >&2
+              exit 1
+            fi
+          done
+
+          if find . -maxdepth 1 -type f \
+            ! -name "*.dmg" \
+            ! -name "*-mac.zip" \
+            ! -name "*.AppImage" \
+            ! -name "*.pacman" \
+            ! -name "*-setup.exe" \
+            ! -name "*-setup.exe.blockmap" \
+            ! -name "latest*.yml" \
+            -print -quit | grep -q .; then
+            echo "Release artifact manifest contains an unexpected file type" >&2
+            find . -maxdepth 1 -type f -print >&2
+            exit 1
+          fi
+
+          # Every installed build must find its own update file in a manifest,
+          # and every file a manifest lists must ship with the release.
+          expect() {
+            if [ "$(yq "[.files[].url | select(test(\"$2\"))] | length" "$1")" -ne 1 ]; then
+              echo "$1 does not list exactly one file matching $2" >&2
+              exit 1
+            fi
+          }
+          expect latest-mac.yml '-arm64-mac\.zip$'
+          expect latest-mac.yml '\.[0-9]+-mac\.zip$'
+          expect latest-linux.yml '\.AppImage$'
+          expect latest-linux.yml '\.pacman$'
+          expect latest.yml '-setup\.exe$'
+          for file in $(yq -N '.files[].url' latest-mac.yml latest-linux.yml latest.yml); do
+            if [ ! -f "$file" ]; then
+              echo "An update manifest lists $file, which is not in the release" >&2
+              exit 1
+            fi
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -399,7 +293,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-npm:
-    needs: [quality, team-quality, core, assemble]
+    needs: [quality, team-quality, build]
     # Same gate as `publish`: dry-runs build but never ship.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -430,15 +324,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # core-dist/<platform>-<arch>/cogpit-core for every target; the package
-      # build copies them into dist/core/ (COGPIT_CORE_DIST).
-      - name: Download cogpit-core for every platform
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: core-*
-          path: core-dist
-          merge-multiple: true
-
       # The tag is the single source of truth for the shipped version, exactly
       # as it is for the two AUR packages. --allow-same-version keeps this a
       # no-op when package.json was already bumped in the release commit.
@@ -447,15 +332,13 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       # `prepublishOnly` runs the unit tests, builds dist/, and verifies the
-      # package contract against the stamped version before anything uploads:
-      # every platform's core is in the package and the server starts on this one's.
+      # package contract against the stamped version before anything uploads.
       - name: Publish cogpit to npm
         working-directory: packages/cogpit-cli
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           COGPIT_EXPECT_EDITION_UI: present
-          COGPIT_CORE_DIST: ${{ github.workspace }}/core-dist
 
       # cogpit-memory's own prepublishOnly build needs this package's deps
       # (esbuild, tsc); the root install does not provide them.
@@ -479,7 +362,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   update-aur:
-    needs: [quality, team-quality, publish]
+    needs: [quality, team-quality, build, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -491,7 +374,7 @@ jobs:
             repo: cogpit.git
             template: aur/PKGBUILD.template
             needsChecksum: true
-            extraFile: cogpit.install
+            extraFile: ''
           - name: cogpit-server
             repo: cogpit-server.git
             template: aur/PKGBUILD-server.template

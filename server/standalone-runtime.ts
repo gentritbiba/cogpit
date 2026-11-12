@@ -36,8 +36,6 @@ export interface StartStandaloneServerOptions {
   env?: NodeJS.ProcessEnv
   publishPort?: boolean
   legacyClickUpPath?: string
-  /** The cogpit-core binary a package ships; a checkout finds its own build without it. */
-  coreBin?: string
 }
 
 export interface RunningStandaloneServer {
@@ -84,7 +82,6 @@ export async function startStandaloneServer({
   env = process.env,
   publishPort = false,
   legacyClickUpPath,
-  coreBin,
 }: StartStandaloneServerOptions): Promise<RunningStandaloneServer> {
   detachFromParentCogpit()
   // First, before this start writes anything of its own.
@@ -135,7 +132,6 @@ export async function startStandaloneServer({
     legacyPluginHost,
     legacyClickUpPath,
     viteDevUrl: process.env.COGPIT_RENDERER_DEV_URL,
-    coreBin,
   })
   startSessionCatalogAfterFirstResponse(composition.httpServer)
   let boundPort: number

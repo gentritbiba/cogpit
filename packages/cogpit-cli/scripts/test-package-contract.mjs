@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { build } from "esbuild"
@@ -56,17 +56,6 @@ for (const [, src] of pageScripts) {
   assert.ok(files.some((file) => file.path === `dist/web/${src.replace(/^\//, "")}`), `Missing startup asset: ${src}`)
 }
 assert.ok(files.some((file) => file.path.startsWith("dist/web/assets/")))
-// The Rust core ships prebuilt: this platform's always, every target's in a release.
-const corePath = (platform) => `dist/core/${platform}/cogpit-core${platform.startsWith("win32") ? ".exe" : ""}`
-const coreTargets = process.env.COGPIT_CORE_DIST
-  ? ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"]
-  : [`${process.platform}-${process.arch}`]
-for (const platform of coreTargets) {
-  const core = files.find((file) => file.path === corePath(platform))
-  assert.ok(core, `Missing the Rust core for ${platform}`)
-  if (process.platform !== "win32") assert.equal(core.mode, 0o755)
-}
-assert.ok(existsSync(corePath(`${process.platform}-${process.arch}`)))
 assert.ok(files.some((file) => file.path === "LICENSE"))
 assert.equal(files.find((file) => file.path === "dist/cli.js")?.mode, 0o755)
 assert.equal(files.some((file) => file.path.includes("src/")), false)
@@ -76,11 +65,7 @@ const dataDir = mkdtempSync(join(tmpdir(), "cogpit-npx-contract-"))
 const child = spawn(
   process.execPath,
   ["dist/cli.js", "--no-open", "--data-dir", dataDir],
-  {
-    stdio: ["ignore", "pipe", "pipe"],
-    // No checkout build to fall back on: the server has to start on the core the package ships.
-    env: { ...process.env, COGPIT_CORE_BIN: "", CARGO_TARGET_DIR: join(dataDir, "no-target") },
-  },
+  { stdio: ["ignore", "pipe", "pipe"] },
 )
 
 let stdout = ""

@@ -20,7 +20,8 @@ declare global {
     performance: {
       getSnapshot: () => Promise<DesktopPerformanceSnapshot>
     }
-    updater: DesktopUpdater
+    /** Absent until the desktop app has an updater. */
+    updater?: DesktopUpdater
   }
 
   interface Window {

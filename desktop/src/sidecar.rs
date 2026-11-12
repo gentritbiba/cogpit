@@ -134,30 +134,14 @@ impl Sidecar {
     }
 
     /// Ask the server to save what it needs and exit, then make sure it has.
-    ///
-    /// On Windows the server and everything it started share a job. A server
-    /// that exits in time is let out of it, so what it left running (an editor
-    /// opened from a terminal, a dev server an agent started) outlives the app,
-    /// as it does on macOS and Linux. `end_leftovers` ends those too: an update
-    /// is about to replace the files they may hold open. A server that does not
-    /// exit in time is killed, and the job takes everything with it.
-    pub fn shut_down(&self, end_leftovers: bool) {
+    /// On Windows the job object also takes every process the server started.
+    pub fn shut_down(&self) {
         self.send(&ShellMessage::Shutdown);
         self.stdin.lock().unwrap().take();
         let deadline = Instant::now() + SHUTDOWN_GRACE;
         while Instant::now() < deadline {
             if self.exited() {
-                #[cfg(windows)]
-                {
-                    if end_leftovers {
-                        self.job.terminate();
-                    } else {
-                        self.job.release();
-                    }
-                }
-                #[cfg(not(windows))]
-                let _ = end_leftovers;
-                return;
+                break;
             }
             thread::sleep(Duration::from_millis(50));
         }
@@ -215,10 +199,9 @@ mod windows_job {
         SetInformationJobObject, TerminateJobObject,
     };
 
-    /// Windows has no process groups, so killing the server alone would orphan
+    /// Windows has no process groups, so ending the server alone would orphan
     /// every agent, git and terminal process it started. Everything in the job
-    /// dies when the job is terminated, or when the shell goes away without
-    /// having released it.
+    /// dies with it, and with the shell should the shell itself be killed.
     pub struct Job(HANDLE);
 
     // SAFETY: a job handle may be used from any thread.
@@ -228,41 +211,29 @@ mod windows_job {
 
     impl Job {
         pub fn containing(child: &Child) -> io::Result<Self> {
-            // SAFETY: plain kernel calls on a handle this function owns.
+            // SAFETY: plain kernel calls on a handle this function owns, with a
+            // zeroed, correctly sized limits structure.
             unsafe {
                 let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if job.is_null() {
                     return Err(io::Error::last_os_error());
                 }
                 let job = Job(job);
-                if !job.kill_on_close(true)
+                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let configured = SetInformationJobObject(
+                    job.0,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const limits).cast(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                if configured == 0
                     || AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) == 0
                 {
                     return Err(io::Error::last_os_error());
                 }
                 Ok(job)
             }
-        }
-
-        fn kill_on_close(&self, kill: bool) -> bool {
-            // SAFETY: a valid handle and a zeroed, correctly sized limits structure.
-            unsafe {
-                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                if kill {
-                    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                }
-                SetInformationJobObject(
-                    self.0,
-                    JobObjectExtendedLimitInformation,
-                    (&raw const limits).cast(),
-                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                ) != 0
-            }
-        }
-
-        /// Let the processes still in the job outlive it.
-        pub fn release(&self) {
-            self.kill_on_close(false);
         }
 
         pub fn terminate(&self) {
@@ -280,64 +251,5 @@ mod windows_job {
                 CloseHandle(self.0);
             }
         }
-    }
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Child, Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    use super::windows_job::Job;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    /// Something that stays alive for a while, as a process the server left running would.
-    fn long_lived() -> Child {
-        Command::new("ping")
-            .args(["-n", "60", "127.0.0.1"])
-            .stdout(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .expect("start ping")
-    }
-
-    fn exits_within(child: &mut Child, limit: Duration) -> bool {
-        let deadline = Instant::now() + limit;
-        while Instant::now() < deadline {
-            if child.try_wait().expect("poll the child").is_some() {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        false
-    }
-
-    #[test]
-    fn closing_the_job_ends_what_is_in_it() {
-        let mut child = long_lived();
-        drop(Job::containing(&child).expect("create the job"));
-        assert!(exits_within(&mut child, Duration::from_secs(5)));
-    }
-
-    #[test]
-    fn a_released_job_leaves_its_processes_running() {
-        let mut child = long_lived();
-        let job = Job::containing(&child).expect("create the job");
-        job.release();
-        drop(job);
-        assert!(!exits_within(&mut child, Duration::from_secs(1)));
-        child.kill().expect("end ping");
-        child.wait().expect("reap ping");
-    }
-
-    #[test]
-    fn terminating_the_job_ends_what_is_in_it() {
-        let mut child = long_lived();
-        let job = Job::containing(&child).expect("create the job");
-        job.terminate();
-        assert!(exits_within(&mut child, Duration::from_secs(5)));
     }
 }

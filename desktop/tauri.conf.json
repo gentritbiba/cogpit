@@ -12,12 +12,6 @@
       "csp": null
     }
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2NkQxRENCQUNBMTI0RUIKUldUckpLR3N5eDF0cGloZW9wTXJQclNnT3JiVTlrS2VMUWhMcGVZM2w0Y0I3QS9qNGNheGM0ZHIK",
-      "endpoints": ["https://github.com/gentritbiba/cogpit/releases/latest/download/latest.json"]
-    }
-  },
   "bundle": {
     "active": true,
     "targets": "all",
