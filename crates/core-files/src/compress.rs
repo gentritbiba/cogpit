@@ -61,8 +61,8 @@ fn compressible(response: &Response) -> bool {
         })
 }
 
-/// zlib's default level 6, as Node's `zlib.gzip` uses: zlib-rs writes the
-/// same bytes as zlib, at the same speed.
+/// zlib's default level 6, as `zlib.gzip` uses: on the TS server's runtime
+/// (Bun) zlib-rs writes the same bytes, at the same speed.
 fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 2), Compression::default());
     encoder.write_all(bytes).ok()?;
