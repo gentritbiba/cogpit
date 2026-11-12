@@ -15,7 +15,7 @@ import { callRendererHook } from "./rendererHooks.ts"
 import { startupFailureMessage, waitForServerReady } from "./serverStartup.ts"
 import { loginShellPath } from "./shellPath.ts"
 import { openStartupLog, type StartupLog } from "./startupLog.ts"
-import { packagedCoreBinary } from "./packagedCore.ts"
+import { bundledCoreBinary } from "./bundledCore.ts"
 
 // Windows routes toasts through this ID; it must match the electron-builder
 // appId or notifications are silently dropped.
@@ -174,7 +174,7 @@ function startServerWorker(userDataDir: string, isDev: boolean, log: StartupLog)
 
   const ready = waitForServerReady(worker)
   // An unpackaged run (electron:dev, electron:preview) uses the checkout's own core build.
-  const coreBin = app.isPackaged ? packagedCoreBinary(process.resourcesPath) : undefined
+  const coreBin = app.isPackaged ? bundledCoreBinary(process.resourcesPath) : undefined
   worker.postMessage({ staticDir: STATIC_DIR, userDataDir, isDev, coreBin })
   return ready
 }

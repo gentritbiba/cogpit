@@ -4,8 +4,8 @@
 
 Any code change MUST account for its impact on existing tests. Before considering a change complete:
 
-1. Run **both** suites and ensure all tests pass — the repo has two, and neither
-   command runs the other's tests:
+1. Run **every** suite and ensure all tests pass — the repo has three, and none
+   of the commands runs another's tests:
    - `bun run test` — Vitest, covering `src/`, `server/`, `electron/` and,
      when its submodule is checked out, the edition package in
      `editions/team/`. Test files follow the pattern `src/**/__tests__/*.test.ts`,
@@ -98,11 +98,38 @@ canonical ordered registry.
 
 ## Rust Core
 
-`cogpit-core` (`crates/`) is a loopback sidecar the TS server supervises
-(`server/core/`). TS stays the front door: a route ported to Rust keeps its id
+`cogpit-core` (`crates/`, mapped in `crates/README.md`) is a loopback sidecar
+the TS server supervises (`server/core/`); it runs the terminals and the file
+and git routes. TS stays the front door: a route ported to Rust keeps its id
 in `server/api-routes.ts`, its handler becomes `forwardToCore`, and its TS
 implementation is deleted in the same change. Feature crates mount in
-`crates/cogpit-core/src/routes/mod.rs`. See `docs/architecture/rust-core.md`.
+`crates/cogpit-core/src/routes/mod.rs`. Packaged apps pass their bundled
+binary to the server as `coreBin`, never through `COGPIT_CORE_BIN`, which
+every agent and terminal would inherit. See `docs/architecture/rust-core.md`.
+
+## Desktop App
+
+`electron/` is the desktop app on macOS, Linux and Windows. The main process
+(`electron/main.ts`) runs the server in a utility process
+(`electron/server-worker.ts`, Node) and loads the renderer from it; the
+renderer reaches the main process only through `electron/preload.ts`
+(`window.electronUpdater`, `window.electronPerformance`). electron-builder
+(`electron-builder.yml`) puts `cogpit-core` in `resources/bin/` from
+`core-dist/<platform>-<arch>/`, and `build/requireCore.mjs` refuses a package
+without it. Updates: electron-updater on Windows and Linux, Cogpit's own
+bundle swap on macOS (`electron/macBundleUpdate.ts`), both reading the
+release's `latest*.yml`. `bun run electron:dev` runs it from source;
+`bun run electron:update` builds this checkout and installs it over
+`/Applications/Cogpit.app` (macOS). `docs/development.md` has the details.
+
+## Releases
+
+A `v*` tag runs `.github/workflows/release.yml`: `cogpit-core` for five
+targets (`core`), the desktop app per platform with its core (`build`), the
+merged and checked update manifests (`assemble`), then the GitHub release, npm
+and AUR. `workflow_dispatch` on a branch dry-runs everything up to
+`assemble` with the public edition and publishes nothing. The tag must equal
+`package.json`'s version.
 
 ## App Icon
 
@@ -143,6 +170,11 @@ so anything landed there is lost on the next sync. The push needs the
 running its tests, package-contract build and `npm publish`. The release commit
 does not need to keep `packages/cogpit-cli/package.json` synchronized with the
 app version. The tag is the source of truth for the published launcher.
+
+The package carries a prebuilt `cogpit-core` per platform in
+`dist/core/<platform>-<arch>/` and starts the server on the one for the
+computer it runs on. `build-npm.mjs` copies them from `COGPIT_CORE_DIST` (the
+release's `core` job artifacts) or, without it, this checkout's own build.
 
 ## External Session API
 

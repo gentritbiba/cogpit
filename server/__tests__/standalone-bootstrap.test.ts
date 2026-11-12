@@ -9,6 +9,7 @@ import {
   firstNonInternalIPv4,
   resolveAdvertisedHost,
   buildBootBanner,
+  resolveCoreBinArgument,
   resolveDeviceName,
 } from "../lib/standalone-bootstrap"
 
@@ -181,5 +182,20 @@ describe("resolveDeviceName", () => {
   it("falls back to the hostname when unset or blank", () => {
     expect(resolveDeviceName({}, "fallback-host")).toBe("fallback-host")
     expect(resolveDeviceName({ COGPIT_DEVICE_NAME: "  " }, "fallback-host")).toBe("fallback-host")
+  })
+})
+
+describe("resolveCoreBinArgument", () => {
+  it("takes the path after --core-bin", () => {
+    expect(resolveCoreBinArgument(["--core-bin", "/opt/cogpit-server/bin/cogpit-core"])).toBe("/opt/cogpit-server/bin/cogpit-core")
+  })
+
+  it("leaves a run without the flag to the checkout's own build", () => {
+    expect(resolveCoreBinArgument([])).toBeUndefined()
+  })
+
+  it("refuses the flag without a path", () => {
+    expect(() => resolveCoreBinArgument(["--core-bin"])).toThrow("--core-bin needs")
+    expect(() => resolveCoreBinArgument(["--core-bin", "--other"])).toThrow("--core-bin needs")
   })
 })

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve, sep } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
-import { packagedCoreBinary } from "../../electron/packagedCore.ts"
+import { bundledCoreBinary } from "../../electron/bundledCore.ts"
 
 export interface LocalUpdateJob {
   format: 1
@@ -77,7 +77,7 @@ export function validateApp(appPath: string): string {
 export function validateUpdate(appPath: string): string {
   const version = validateApp(appPath)
   try {
-    accessSync(packagedCoreBinary(join(appPath, "Contents/Resources")), constants.X_OK)
+    accessSync(bundledCoreBinary(join(appPath, "Contents/Resources")), constants.X_OK)
   } catch {
     throw new Error(`Refusing to install a Cogpit bundle without an executable cogpit-core: ${appPath}`)
   }

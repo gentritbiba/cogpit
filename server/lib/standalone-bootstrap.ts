@@ -136,3 +136,16 @@ export function resolveDeviceName(env: NodeJS.ProcessEnv, hostname: string): str
   const name = env.COGPIT_DEVICE_NAME
   return name && name.trim().length > 0 ? name.trim() : hostname
 }
+
+/**
+ * `--core-bin <path>`: the cogpit-core a package installed next to the server
+ * (the AUR unit passes it). A flag rather than COGPIT_CORE_BIN, which every
+ * agent and terminal would inherit. A checkout finds its own build without it.
+ */
+export function resolveCoreBinArgument(argv: readonly string[]): string | undefined {
+  const index = argv.indexOf("--core-bin")
+  if (index === -1) return undefined
+  const path = argv[index + 1]
+  if (!path || path.startsWith("--")) throw new Error("--core-bin needs the path of a cogpit-core binary")
+  return path
+}

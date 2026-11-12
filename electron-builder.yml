@@ -12,11 +12,9 @@ directories:
   buildResources: build
 
 asar: true
-# cogpit-core, the Rust half of the server (docs/architecture/rust-core.md), runs
-# as its own process, so it ships as a plain file in resources/bin/, outside the
-# asar. Builds stage it with `bun run build:core --release --stage` (CI downloads
-# the release's per-target builds instead). extraResources only warns about a
-# missing source, so afterPack refuses to package an app without it.
+# cogpit-core (docs/architecture/rust-core.md) runs as its own process, so it
+# ships outside the asar. extraResources only warns about a missing source;
+# afterPack refuses to package an app without it.
 extraResources:
   - from: core-dist/${platform}-${arch}
     to: bin
@@ -43,16 +41,12 @@ extraMetadata:
   main: out/main/main.js
 
 mac:
+  # No arch here: a local build packages this machine's arch, the one whose core
+  # `build:core --stage` built. The release passes --arm64 --x64.
   target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
+    - dmg
     # In-app updates download the zip; the dmg is for first installs.
-    - target: zip
-      arch:
-        - x64
-        - arm64
+    - zip
   category: public.app-category.developer-tools
   extendInfo:
     NSMicrophoneUsageDescription: Cogpit records from the microphone only while you dictate a message.

@@ -33,6 +33,8 @@ bun run serve
 bun run electron:package
 ```
 
+Desktop packages carry a release build of `cogpit-core` in `resources/bin/`. The packaging commands build it and stage it in `core-dist/<platform>-<arch>/` first (`bun run build:core --release --stage`); electron-builder refuses to package an app without it.
+
 `bun run electron:package:signed` uses a local Developer ID and builds the host targets. It requires a paid Apple Developer account and signing credentials. The [release workflow](../.github/workflows/release.yml) builds the distribution artifacts for each supported platform.
 
 ### Update your installed Mac app
