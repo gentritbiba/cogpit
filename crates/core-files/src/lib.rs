@@ -3,6 +3,7 @@
 //! status/diff. The TypeScript server authorizes each request and forwards it
 //! here; this crate does no auth of its own.
 
+mod compress;
 mod fsx;
 mod git;
 mod http;
@@ -38,4 +39,5 @@ pub fn router(state: FilesState) -> Router {
         .route("/git-status", get(git_status::handler))
         .route("/git-diff", get(git_diff::handler))
         .with_state(state.listing)
+        .layer(axum::middleware::from_fn(compress::layer))
 }

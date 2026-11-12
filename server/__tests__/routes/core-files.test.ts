@@ -182,6 +182,23 @@ describe("file-content through core", () => {
   })
 })
 
+describe("compression through core", () => {
+  it("gzips JSON and text over a kilobyte, as compressionMiddleware did", async () => {
+    const directory = await temporaryDirectory("cogpit-core-files-gzip-")
+    const notes = join(directory, "notes.txt")
+    await writeFile(notes, "line of text\n".repeat(200))
+
+    const compressed = await fetch(url("/api/file-content", { path: notes }), { headers: { "accept-encoding": "gzip" } })
+    expect(compressed.headers.get("content-encoding")).toBe("gzip")
+    expect(compressed.headers.get("vary")).toBe("Accept-Encoding")
+    expect(await compressed.text()).toBe("line of text\n".repeat(200))
+
+    const plain = await fetch(url("/api/file-content", { path: notes }), { headers: { "accept-encoding": "identity" } })
+    expect(plain.headers.get("content-encoding")).toBeNull()
+    expect(plain.headers.get("content-length")).toBe("2600")
+  })
+})
+
 describe("project-files through core", () => {
   it("lists git-aware files, counts every match and caches until refresh", async () => {
     const root = await repository()

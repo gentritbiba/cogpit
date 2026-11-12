@@ -1113,3 +1113,65 @@ async fn project_file_save_accepts_the_exact_mtime_it_was_given() {
 
     assert_eq!(save.status, StatusCode::OK, "{} after {text}", save.text());
 }
+
+// ── compression ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn json_and_text_over_a_kilobyte_are_gzipped_like_the_typescript_server() {
+    use std::io::Read;
+    let dir = TempDir::new().unwrap();
+    let big = dir.path().join("big.txt");
+    let small = dir.path().join("small.txt");
+    write(&big, "line of text\n".repeat(200));
+    write(&small, "tiny");
+    let app = app();
+    let request = |path: &Path, encoding: &str| {
+        Request::get(format!(
+            "/file-content?{}",
+            query(&[("path", path_str(path))])
+        ))
+        .header("accept-encoding", encoding)
+        .body(Body::empty())
+        .unwrap()
+    };
+
+    let compressed = send(&app, request(&big, "gzip, br")).await;
+    assert_eq!(compressed.header("content-encoding"), Some("gzip"));
+    assert_eq!(compressed.header("vary"), Some("Accept-Encoding"));
+    assert_eq!(
+        compressed.header("content-type"),
+        Some("text/plain; charset=utf-8")
+    );
+    assert_eq!(
+        compressed.header("content-length"),
+        Some(compressed.body.len().to_string().as_str())
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(&compressed.body[..])
+        .read_to_string(&mut text)
+        .unwrap();
+    assert_eq!(text, "line of text\n".repeat(200));
+
+    let tiny = send(&app, request(&small, "gzip")).await;
+    assert_eq!(
+        (tiny.header("content-encoding"), tiny.text()),
+        (None, "tiny".to_owned())
+    );
+    let refused = send(&app, request(&big, "gzip;q=0")).await;
+    assert_eq!(refused.header("content-encoding"), None);
+    assert_eq!(refused.body.len(), 2600);
+
+    let video = dir.path().join("clip.mp4");
+    write(&video, vec![b'a'; 4096]);
+    let media_request = Request::get(format!(
+        "/local-file?{}",
+        query(&[("path", path_str(&video))])
+    ))
+    .header("accept-encoding", "gzip")
+    .body(Body::empty())
+    .unwrap();
+    let media = send(&app, media_request).await;
+    assert_eq!(media.header("content-type"), Some("video/mp4"));
+    assert_eq!(media.header("content-encoding"), None);
+    assert_eq!(media.body.len(), 4096);
+}
