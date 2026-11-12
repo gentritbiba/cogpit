@@ -48,6 +48,8 @@ Electron composition -> server public composition API
 | HTTP middleware types and JSON responses | `server/http.ts` | `server/helpers.ts` re-exports legacy imports. |
 | API route order | `server/api-routes.ts` | Vite, Electron, and standalone pass environment context to the same manifest. |
 | Server composition | `server/app-server.ts` | `createServerComposition` is called directly by `electron/server-worker.ts` and `server/standalone-runtime.ts`. |
+| WebSocket upgrades | `server/socketTransports.ts` | `attachSocketTransports` is the one upgrade handler; the composition and the Vite plugin install it and add only their fallback. |
+| Rust core sidecar | `crates/` (`cogpit-core`, `core-protocol`), `server/core/` | TS stays the front door and forwards ported routes with `forwardToCore` / `relayToCore`; core owns no auth. One supervisor per process, leased by every composition. See [rust-core.md](rust-core.md). |
 | Process/session infrastructure | `server/processRegistry.ts`, `server/sessionPaths.ts`, `server/pathSafety.ts` | `server/helpers.ts` is a re-export seam and nothing else: it holds no logic, and exists so `vi.mock("../helpers")` can replace node builtins for the handlers under test alone. |
 | Atomic JSON persistence | `server/atomicJsonFile.ts` | Registry/config writers serialize mutations through their owning service; callers never perform parallel read-modify-write cycles. |
 | Undo/redo contracts and mutation | `shared/contracts/undo.ts`, `server/routes/undo/` | The route coordinates one optimistic, rollback-capable transaction; clients carry compact operations rather than archived transcripts. |

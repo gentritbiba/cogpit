@@ -20,6 +20,11 @@ Any code change MUST account for its impact on existing tests. Before considerin
      `bun:test` suite, under `packages/cogpit-memory/src/**/__tests__/`. It has
      a separate CI step. `bun run test` at the root does **not** include it, so
      a change to `packages/cogpit-memory/` is unverified until you run this too.
+   - The Rust workspace (`crates/`): `cargo fmt --all --check`,
+     `cargo clippy --all-targets -- -D warnings` and `cargo test`. `bun run
+     test` builds the `cogpit-core` binary first (`bun run build:core`),
+     because every composition the suite boots spawns it; that needs the Rust
+     toolchain from https://rustup.rs (`rust-toolchain.toml` pins it).
 2. If you changed behavior in a hook or module, check for a corresponding test file in `__tests__/` and update affected tests to match the new behavior
 3. If you added new behavior, add test coverage for it
 4. Never leave tests broken — fixing tests is part of the change, not a separate task
@@ -90,6 +95,14 @@ the renderer's UI slots instead.
 Define the route module under `server/routes/` and register it once in
 `server/api-routes.ts`. Vite, Electron, and standalone composition consume that
 canonical ordered registry.
+
+## Rust Core
+
+`cogpit-core` (`crates/`) is a loopback sidecar the TS server supervises
+(`server/core/`). TS stays the front door: a route ported to Rust keeps its id
+in `server/api-routes.ts`, its handler becomes `forwardToCore`, and its TS
+implementation is deleted in the same change. Feature crates mount in
+`crates/cogpit-core/src/routes/mod.rs`. See `docs/architecture/rust-core.md`.
 
 ## App Icon
 

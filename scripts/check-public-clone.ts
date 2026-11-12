@@ -6,7 +6,7 @@
  *
  * Checks HEAD out into a temporary worktree, which leaves the editions/team
  * submodule empty, installs dependencies there, and runs lint, the checks,
- * both typechecks, the suite and both builds. Neither build may emit the
+ * both typechecks, the Rust core build, the suite and both builds. Neither build may emit the
  * edition UI chunk. When this checkout has the package, its own
  * check-public-bundle tool then reads both builds for text only the package
  * uses. Uncommitted changes are not checked; commit them first.
@@ -23,6 +23,10 @@ const vitestArgs = process.argv.slice(2)
 const publicEnv: Record<string, string | undefined> = { ...process.env }
 delete publicEnv.COGPIT_WITHOUT_TEAM
 delete publicEnv.COGPIT_EXPECT_EDITION_UI
+delete publicEnv.COGPIT_CORE_BIN
+// Every run checks out a fresh worktree; sharing this checkout's Cargo target
+// directory spares each one a full Rust build.
+publicEnv.CARGO_TARGET_DIR ||= join(root, "target")
 
 class StepFailed extends Error {}
 
@@ -46,7 +50,7 @@ try {
   }
   run("Install dependencies", ["bun", "install", "--frozen-lockfile"], checkout)
   run("Install cogpit-memory dependencies", ["bun", "install", "--frozen-lockfile"], join(checkout, "packages/cogpit-memory"))
-  for (const script of ["lint", "check:architecture", "check:agents", "typecheck", "typecheck:tests"]) {
+  for (const script of ["lint", "check:architecture", "check:agents", "typecheck", "typecheck:tests", "build:core"]) {
     run(script, ["bun", "run", script], checkout)
   }
   run("test", ["bun", "run", "test", ...vitestArgs], checkout)

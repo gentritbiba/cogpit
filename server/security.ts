@@ -862,7 +862,9 @@ export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, ne
 // ── Body size limit ─────────────────────────────────────────────────
 
 export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
-  if (req.method !== "POST" && req.method !== "PUT" && req.method !== "PATCH") return next()
+  // Any method may carry a body, and a core forward passes every one through.
+  const hasBody = req.headers["transfer-encoding"] !== undefined || Number(req.headers["content-length"] ?? 0) > 0
+  if (!hasBody) return next()
 
   let size = 0
   const contentLength = parseInt(req.headers["content-length"] || "", 10)
@@ -879,9 +881,15 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
       const wrapped = (chunk: Buffer | string) => {
         size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length
         if (size > MAX_REQUEST_BODY_BYTES) {
-          res.statusCode = 413
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Request body too large" }))
+          // A handler that streams its answer (a core forward) may have
+          // started it already; then the only refusal left is cutting it.
+          if (res.headersSent) {
+            res.destroy()
+          } else {
+            res.statusCode = 413
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Request body too large" }))
+          }
           req.destroy()
           return
         }

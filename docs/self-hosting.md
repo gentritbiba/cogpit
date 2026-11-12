@@ -17,7 +17,7 @@ it has no models of its own.
   [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
   [Codex](https://github.com/openai/codex), or
   [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli).
-- [Bun](https://bun.sh) if you are running from source.
+- [Bun](https://bun.sh) and the [Rust toolchain](https://rustup.rs) if you are running from source.
 - No API keys. Cogpit uses whatever login those CLIs already have.
 
 The agents run on the box running Cogpit. Nothing is sent to a server of mine, because there
@@ -44,6 +44,7 @@ git clone https://github.com/gentritbiba/cogpit.git
 cd cogpit
 bun install
 bun run build
+bun run build:core --release
 
 # Loopback only. Safe default, not reachable from the network.
 bun server/standalone.ts

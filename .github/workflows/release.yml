@@ -54,6 +54,11 @@ jobs:
         working-directory: packages/cogpit-memory
         run: bun install --frozen-lockfile
 
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
       - name: Lint
         run: bun run lint
 
@@ -68,6 +73,9 @@ jobs:
 
       - name: Type-check tests
         run: bun run typecheck:tests
+
+      - name: Build Rust core
+        run: bun run build:core
 
       - name: Test with the edition package
         run: bun run test

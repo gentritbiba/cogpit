@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync } from "node:fs"
 import { createServer, type Server } from "node:http"
+import { connect } from "node:net"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -88,6 +89,22 @@ async function mountPlugin(): Promise<number> {
 }
 
 describe("Vite PTY plugin authorization lifecycle", () => {
+  it("drops an upgrade whose target is not a URL and keeps serving", async () => {
+    const port = await mountPlugin()
+    const reply = await new Promise<string>((resolve) => {
+      const socket = connect(port, "127.0.0.1", () => {
+        socket.write("GET // HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
+          + "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+      })
+      let data = ""
+      socket.on("data", (chunk) => { data += chunk.toString() })
+      socket.on("close", () => resolve(data))
+      socket.on("error", () => resolve(data))
+    })
+    expect(reply).toBe("")
+    expect(server!.listening).toBe(true)
+  })
+
   it("installs browser support, so the dev shell matches the packaged one", async () => {
     await mountPlugin()
 

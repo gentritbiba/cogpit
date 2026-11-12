@@ -35,3 +35,6 @@ qa-notes.md
 
 /plugin-host-classification/
 /install-state.json
+
+# Rust core build output
+/target

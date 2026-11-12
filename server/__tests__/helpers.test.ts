@@ -464,18 +464,20 @@ describe("browser session cookies", () => {
 // ── bodySizeLimit ────────────────────────────────────────────────────────
 
 describe("bodySizeLimit", () => {
-  function mockReq(method: string, contentLength?: number): IncomingMessage {
+  function mockReq(method: string, contentLength?: number | "chunked"): IncomingMessage {
     const req = new EventEmitter() as IncomingMessage & { method: string; headers: Record<string, string>; destroy: () => void }
     req.method = method
     req.headers = {}
-    if (contentLength !== undefined) {
+    if (contentLength === "chunked") {
+      req.headers["transfer-encoding"] = "chunked"
+    } else if (contentLength !== undefined) {
       req.headers["content-length"] = String(contentLength)
     }
     req.destroy = vi.fn()
     return req as IncomingMessage
   }
 
-  it("passes through GET requests without checking body", () => {
+  it("passes through requests without a body", () => {
     const req = mockReq("GET")
     const { res } = mockRes()
     const next = vi.fn()
@@ -484,13 +486,14 @@ describe("bodySizeLimit", () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
-  it("passes through DELETE requests without checking body", () => {
-    const req = mockReq("DELETE")
-    const { res } = mockRes()
+  it("rejects a DELETE body exceeding 5MB, since any method may carry one", () => {
+    const req = mockReq("DELETE", 6 * 1024 * 1024)
+    const mock = mockRes()
     const next = vi.fn()
 
-    bodySizeLimit(req, res, next)
-    expect(next).toHaveBeenCalledOnce()
+    bodySizeLimit(req, mock.res, next)
+    expect(next).not.toHaveBeenCalled()
+    expect(mock.statusCode).toBe(413)
   })
 
   it("rejects POST with content-length exceeding 5MB", () => {
@@ -533,7 +536,7 @@ describe("bodySizeLimit", () => {
   })
 
   it("destroys request if streaming data exceeds 5MB", () => {
-    const req = mockReq("POST")
+    const req = mockReq("POST", "chunked")
     const mock = mockRes()
     const next = vi.fn()
 

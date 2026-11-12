@@ -1,19 +1,13 @@
 import type { Plugin, ViteDevServer } from "vite"
-import { WebSocketServer } from "ws"
-import type { IncomingMessage } from "node:http"
-import type { Duplex } from "node:stream"
-import { rejectWebsocketUpgrade } from "./security"
-import { handleHubUpgrade } from "./hub/proxy"
-import { PtySessionManager } from "./pty-server"
-import { PtyAuthorizationController } from "./pty-authorization"
-import { BrowserViewerManager } from "./browser/viewerSocket"
 import { initBrowserSupport } from "./browser"
 import { installSessionCli } from "./sessionCli/install"
 import { getDataRoot } from "./config"
+import { startCore } from "./core"
 import { beginServerStart } from "./lib/installState"
 import { resumeLocalDelegations } from "./lib/delegationAuthority"
 import { resumeLocalCrewChat } from "./lib/crewChat"
 import { isSessionActive } from "./agents/runtimes"
+import { attachSocketTransports } from "./socketTransports"
 
 export function ptyPlugin(): Plugin {
   return {
@@ -22,50 +16,16 @@ export function ptyPlugin(): Plugin {
       // Vite starts the API plugin first, but whichever runs first looks for an
       // earlier Cogpit before the session CLI and browser support write ~/.cogpit.
       await beginServerStart(getDataRoot())
-      const wss = new WebSocketServer({ noServer: true })
-      const manager = new PtySessionManager(wss)
-      const browserWss = new WebSocketServer({ noServer: true })
-      const browserManager = new BrowserViewerManager()
+      const core = await startCore({ dataDir: getDataRoot() })
       const browserSupport = initBrowserSupport(isSessionActive)
       installSessionCli()
       resumeLocalDelegations()
       resumeLocalCrewChat()
-      const authorization = new PtyAuthorizationController()
+      // Vite's own listener answers its HMR upgrades, so there is no fallback.
+      const transports = attachSocketTransports(server.httpServer!)
 
-      server.httpServer!.on(
-        "upgrade",
-        (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-          const url = new URL(req.url || "/", "http://localhost")
-          if (handleHubUpgrade(req, socket, head)) {
-            if (/^\/hub\/[^/]+\/(__pty|__browser)$/.test(url.pathname)) {
-              authorization.trackHubUpgrade(req, url, socket)
-            }
-            return
-          }
-          if (url.pathname !== "/__pty" && url.pathname !== "/__browser") return
-
-          if (rejectWebsocketUpgrade(req, url, socket)) return
-
-          const transport = url.pathname === "/__pty" ? wss : browserWss
-          transport.handleUpgrade(req, socket, head, (ws) => {
-            transport.emit("connection", ws, req)
-          })
-        }
-      )
-
-      wss.on("connection", (ws, req) => authorization.handleConnection(ws, req, manager))
-      browserWss.on("connection", (ws, req) => {
-        authorization.handleConnection(ws, req, browserManager.socketFor(req))
-      })
-
-      // Cleanup on server close
       server.httpServer!.on("close", () => {
-        authorization.cleanup()
-        manager.cleanup()
-        browserManager.cleanup()
-        for (const client of browserWss.clients) client.terminate()
-        browserWss.close()
-        void browserSupport.shutdown()
+        void Promise.all([transports.close(), browserSupport.shutdown(), core.release()])
       })
     },
   }
