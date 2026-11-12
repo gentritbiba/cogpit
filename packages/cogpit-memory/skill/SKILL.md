@@ -18,8 +18,19 @@ cogpit-memory search "why we changed authentication"
 cogpit-memory search "session orchestrator" --session "$ID"
 ```
 
-Use the complete session ID returned by discovery or search. Indexing runs
-incrementally on search; `cogpit-memory index rebuild` refreshes it explicitly.
+Use the complete session ID returned by discovery or search.
+
+Search returns one ranked list. Prose (prompts, replies, thinking, summaries)
+is ranked by its shared rarer words, so a question like the one above works;
+quote words that must appear together. Prose covers all time unless you pass
+`--max-age`; tool input and output are exact-phrase hits within `--max-age`
+(default 5d). Each hit has `turn` and `agent` for `context`, `kind`, `match`
+(`keyword`), `score` and `timestamp`. `semantic: unavailable` means no
+embedding model is set up; keyword results are still complete. `archived:
+true` means the transcript is gone: the hit's `text` is all that is left and
+`context` cannot open it. `automated: true` marks prompts other agents or
+Cogpit wrote. A `warnings` entry about transcripts not indexed yet means
+`cogpit-memory index sync` will finish the backlog.
 
 ## Read only the detail you need
 

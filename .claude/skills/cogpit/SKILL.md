@@ -35,9 +35,9 @@ Read only the guide your task needs:
 | Show progress, decisions or a checklist as interface blocks | [Structured replies](references/structure.md) |
 
 Inside Cogpit, `~/.cogpit/bin` is first on PATH (`cogpit-session` and the
-`agent-browser` shim), and `COGPIT_SESSION_ID`, `COGPIT_PORT` and
-`COGPIT_ORCHESTRATION_ROOT` are set. Keep them: they link the sessions you start
-to yours and send commands to this server.
+`agent-browser` shim), and `COGPIT_SESSION_ID`, `COGPIT_PORT`,
+`COGPIT_ORCHESTRATION_ROOT` and `COGPIT_MEMORY_DIR` are set. Keep them: they link
+the sessions you start to yours and reach this server and its memory store.
 
 ## Show media
 

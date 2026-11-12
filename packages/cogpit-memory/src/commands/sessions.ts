@@ -5,7 +5,7 @@
 
 import { join, sep } from "node:path"
 import { descriptorFor, type AgentKind } from "../lib/agent-descriptors"
-import { parseMaxAge } from "../lib/response"
+import { MAX_AGE_HELP, parseMaxAge } from "../lib/response"
 import { getSessionMeta, getSessionStatus } from "../lib/metadata"
 import { listAllSessionFiles, storeFor, storeForPath, type SessionFile } from "../lib/stores"
 
@@ -67,6 +67,7 @@ function toSessionSummary(file: SessionFile, meta: SessionMeta, status: string):
 export async function listSessions(opts: SessionsOptions = {}): Promise<SessionSummary[]> {
   const limit = Math.min(Math.max(1, opts.limit ?? 20), 100)
   const maxAgeMs = parseMaxAge(opts.maxAge ?? "7d")
+  if (maxAgeMs === null) throw new Error(`Invalid maxAge "${opts.maxAge}": ${MAX_AGE_HELP}`)
   const cutoff = Date.now() - maxAgeMs
 
   const allFiles = listAllSessionFiles(cutoff)

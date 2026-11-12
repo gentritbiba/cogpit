@@ -25,6 +25,7 @@ describe("index command", () => {
     mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
     mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
     mockDbPath.value = join(mockDirs.PROJECTS_DIR, "..", "cogpit-memory", "search-index.db")
+    process.env.COGPIT_MEMORY_DIR = join(tmpDir, "memory")
   })
 
   afterEach(() => {

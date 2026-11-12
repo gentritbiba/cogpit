@@ -34,13 +34,16 @@ import { isListableTranscript, uncompressedTranscriptName } from "./transcriptFi
 export interface SessionFile {
   path: string
   mtimeMs: number
+  size: number
   sessionId: string
   isSubagent: boolean
   parentSessionId: string | null
+  /** The subagent a sub-agent transcript belongs to; null for a session's own transcript. */
+  agentId: string | null
 }
 
 /** Where a transcript belongs, without reading it. */
-export type SessionFileIdentity = Omit<SessionFile, "path" | "mtimeMs">
+export type SessionFileIdentity = Omit<SessionFile, "path" | "mtimeMs" | "size">
 
 export interface AgentSessionStore {
   readonly kind: AgentKind
@@ -69,9 +72,10 @@ const MAX_WALK_DEPTH = 4
 
 const SUBAGENTS_DIR = "subagents"
 
-function mtimeOf(filePath: string): number | null {
+function statOf(filePath: string): { mtimeMs: number; size: number } | null {
   try {
-    return statSync(filePath).mtimeMs
+    const { mtimeMs, size } = statSync(filePath)
+    return { mtimeMs, size }
   } catch {
     return null
   }
@@ -120,7 +124,7 @@ function claudeIdentify(filePath: string, root: string): SessionFileIdentity {
     // `<project>/<sessionId>/subagents/agent-<id>.jsonl`: the directory above
     // the marker names the parent session.
     const parentSessionId = segments[subagentAt - 1]
-    return { sessionId: parentSessionId, isSubagent: true, parentSessionId }
+    return { sessionId: parentSessionId, isSubagent: true, parentSessionId, agentId: subagentIdOf(segments[segments.length - 1] ?? "") }
   }
   const fileName = segments[segments.length - 1] ?? ""
   return {
@@ -128,7 +132,13 @@ function claudeIdentify(filePath: string, root: string): SessionFileIdentity {
       ?? fileName.replace(/\.jsonl$/, ""),
     isSubagent: false,
     parentSessionId: null,
+    agentId: null,
   }
+}
+
+/** `agent-<id>.jsonl` -> `<id>`. */
+function subagentIdOf(fileName: string): string | null {
+  return /^agent-(.+)\.jsonl$/.exec(fileName)?.[1] ?? null
 }
 
 /** `<parent>.jsonl` -> `<parent>/subagents`, recursively. */
@@ -148,14 +158,15 @@ function walkClaudeSubagents(
   for (const entry of readDirSafe(dir)) {
     if (!entry.name.startsWith("agent-") || !entry.name.endsWith(".jsonl")) continue
     const filePath = join(dir, entry.name)
-    const mtimeMs = mtimeOf(filePath)
-    if (mtimeMs !== null && mtimeMs >= cutoffMs) {
+    const stat = statOf(filePath)
+    if (stat !== null && stat.mtimeMs >= cutoffMs) {
       out.push({
         path: filePath,
-        mtimeMs,
+        ...stat,
         sessionId: parentSessionId,
         isSubagent: true,
         parentSessionId,
+        agentId: subagentIdOf(entry.name),
       })
     }
     walkClaudeSubagents(filePath, parentSessionId, cutoffMs, depth + 1, out)
@@ -170,10 +181,10 @@ function walkClaude(root: string, cutoffMs: number): SessionFile[] {
     for (const entry of readDirSafe(projectDir)) {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
       const filePath = join(projectDir, entry.name)
-      const mtimeMs = mtimeOf(filePath)
+      const stat = statOf(filePath)
       const { sessionId } = claudeIdentify(filePath, root)
-      if (mtimeMs !== null && mtimeMs >= cutoffMs) {
-        found.push({ path: filePath, mtimeMs, sessionId, isSubagent: false, parentSessionId: null })
+      if (stat !== null && stat.mtimeMs >= cutoffMs) {
+        found.push({ path: filePath, ...stat, sessionId, isSubagent: false, parentSessionId: null, agentId: null })
       }
       // Sub-agent transcripts are listed even when the parent aged out: they
       // carry their own content and their own mtime.
@@ -197,14 +208,15 @@ function walkCodex(root: string, cutoffMs: number, dir = root, depth = 0): Sessi
       continue
     }
     if (!isListableTranscript(entry.name, names)) continue
-    const mtimeMs = mtimeOf(filePath)
-    if (mtimeMs === null || mtimeMs < cutoffMs) continue
+    const stat = statOf(filePath)
+    if (stat === null || stat.mtimeMs < cutoffMs) continue
     found.push({
       path: filePath,
-      mtimeMs,
+      ...stat,
       sessionId: descriptorFor("codex").sessionFile.sessionId(entry.name) ?? "",
       isSubagent: false,
       parentSessionId: null,
+      agentId: null,
     })
   }
   return found
@@ -221,14 +233,15 @@ function walkCopilot(root: string, cutoffMs: number): SessionFile[] {
   for (const entry of readDirSafe(root)) {
     if (!entry.isDirectory()) continue
     const filePath = copilotTranscript(root, entry.name)
-    const mtimeMs = mtimeOf(filePath)
-    if (mtimeMs === null || mtimeMs < cutoffMs) continue
+    const stat = statOf(filePath)
+    if (stat === null || stat.mtimeMs < cutoffMs) continue
     found.push({
       path: filePath,
-      mtimeMs,
+      ...stat,
       sessionId: entry.name,
       isSubagent: false,
       parentSessionId: null,
+      agentId: null,
     })
   }
   return found
@@ -253,7 +266,7 @@ const WALKERS: Record<AgentKind, Walker> = {
       for (const project of readDirSafe(root)) {
         if (!project.isDirectory() || NON_PROJECT_DIRS.has(project.name)) continue
         const candidate = join(root, project.name, fileName)
-        if (mtimeOf(candidate) !== null) return candidate
+        if (statOf(candidate) !== null) return candidate
       }
       return null
     },
@@ -266,6 +279,7 @@ const WALKERS: Record<AgentKind, Walker> = {
       sessionId: descriptorFor("codex").sessionFile.sessionId(filePath) ?? "",
       isSubagent: false,
       parentSessionId: null,
+      agentId: null,
     }),
     // A rollout's date nesting cannot be rebuilt from the id, so the tree is
     // walked; every rollout carries the id in its file name.
@@ -298,10 +312,11 @@ const WALKERS: Record<AgentKind, Walker> = {
       sessionId: segmentsUnder(root, filePath)[0] ?? "",
       isSubagent: false,
       parentSessionId: null,
+      agentId: null,
     }),
     find(root, sessionId) {
       const candidate = copilotTranscript(root, sessionId)
-      return mtimeOf(candidate) === null ? null : candidate
+      return statOf(candidate) === null ? null : candidate
     },
   },
   acp: {
@@ -348,9 +363,21 @@ export function defaultStore(): AgentSessionStore {
   return storeFor(descriptorForDirName(null).kind)
 }
 
+/** In a provider worker, the account instance it runs as; it reads only that account's history. */
+export function workerInstanceId(): string | null {
+  const instanceId = process.env.COGPIT_AGENT_INSTANCE_ID
+  return instanceId && AGENT_KINDS.includes(process.env.COGPIT_WORKER_AGENT as AgentKind) ? instanceId : null
+}
+
+/** The subagent a transcript path belongs to, or null for a session's own transcript. */
+export function subagentIdForPath(filePath: string): string | null {
+  const segments = filePath.split(/[\\/]/)
+  return segments.at(-2) === SUBAGENTS_DIR ? subagentIdOf(segments.at(-1) ?? "") : null
+}
+
 /** Every store, in registry order. */
 export function allStores(): readonly AgentSessionStore[] {
-  if (process.env.COGPIT_AGENT_INSTANCE_ID && AGENT_KINDS.includes(process.env.COGPIT_WORKER_AGENT as AgentKind)) return [STORES[process.env.COGPIT_WORKER_AGENT as AgentKind]]
+  if (workerInstanceId()) return [STORES[process.env.COGPIT_WORKER_AGENT as AgentKind]]
   const stores = AGENT_KINDS.map((kind) => STORES[kind])
   const root = process.env.COGPIT_ORCHESTRATION_ROOT
   if (!root) return stores

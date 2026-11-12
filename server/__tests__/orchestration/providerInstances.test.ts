@@ -35,6 +35,12 @@ describe("provider instance environment", () => {
     setServerPort(5200)
     expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_PORT).toBe("5200")
   })
+
+  it("tells the worker where the shared memory store is, since its HOME is its own", async () => {
+    const { configuration } = await instance("Memory")
+    vi.stubEnv("COGPIT_MEMORY_DIR", "/data/memory")
+    expect(providerInstanceEnvironment(configuration, process.env.COGPIT_ORCHESTRATION_ROOT!).COGPIT_MEMORY_DIR).toBe("/data/memory")
+  })
 })
 
 describe("provider instances and ACP", () => {

@@ -40,6 +40,9 @@ type FileDescriptor = SessionFile
  */
 const MAX_CONTENT_LEN = 4096
 
+/** Rows holding tool input or output, as opposed to prose. */
+const TOOL_ROWS = "sc.location GLOB '*toolCall/*'"
+
 function truncContent(text: string): string {
   return text.length > MAX_CONTENT_LEN ? text.slice(0, MAX_CONTENT_LEN) : text
 }
@@ -206,18 +209,26 @@ export class SearchIndex {
     mtimeMs?: number,
     opts?: { isSubagent?: boolean; parentSessionId?: string | null }
   ): void {
-    // Without an explicit id, ask the store that owns the path — Copilot's file
-    // is literally `events.jsonl`, so its name is not its session.
-    const resolvedSessionId = sessionId ?? identifyTranscript(filePath).sessionId
-    if (mtimeMs == null) {
-      mtimeMs = statSync(filePath).mtimeMs
-    }
-
     const content = readTranscriptTextSync(filePath)
-    const session = parseSession(content, { skipStats: true })
+    this.indexParsed({
+      path: filePath,
+      // Without an explicit id, ask the store that owns the path — Copilot's file
+      // is literally `events.jsonl`, so its name is not its session.
+      sessionId: sessionId ?? identifyTranscript(filePath).sessionId,
+      mtimeMs: mtimeMs ?? statSync(filePath).mtimeMs,
+      isSubagent: opts?.isSubagent ?? false,
+      parentSessionId: opts?.parentSessionId ?? null,
+    }, parseSession(content, { skipStats: true }))
+  }
 
-    const isSubagent = opts?.isSubagent ? 1 : 0
-    const parentSessionId = opts?.parentSessionId ?? null
+  /** Index a transcript someone else already parsed, so one parse can feed several stores. */
+  indexParsed(
+    file: Pick<SessionFile, "path" | "sessionId" | "mtimeMs" | "isSubagent" | "parentSessionId">,
+    session: ReturnType<typeof parseSession>,
+  ): void {
+    const { path: filePath, sessionId: resolvedSessionId, mtimeMs } = file
+    const isSubagent = file.isSubagent ? 1 : 0
+    const parentSessionId = file.parentSessionId
 
     const insert = this.db.prepare(
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
@@ -286,6 +297,11 @@ export class SearchIndex {
       excludeSessionId?: string
       maxAgeMs?: number
       caseSensitive?: boolean
+      /**
+       * Tool rows, plus prose only from these transcripts; the memory store
+       * answers for the rest. Absent: every row.
+       */
+      proseFrom?: ReadonlySet<string>
     }
   ): SearchHit[] {
     this.pruneMissingFiles()
@@ -318,6 +334,8 @@ export class SearchIndex {
       conditions.push("sc.session_id = ?")
       params.push(sessionId)
     }
+
+    if (opts?.proseFrom) conditions.push(this.rowsFrom(opts.proseFrom))
 
     if (opts?.excludeSessionId) {
       conditions.push("sc.session_id != ?")
@@ -363,6 +381,7 @@ export class SearchIndex {
       sessionId?: string
       excludeSessionId?: string
       maxAgeMs?: number
+      proseFrom?: ReadonlySet<string>
     }
   ): { totalHits: number; sessionsSearched: number } {
     const ftsQuery = `"${query.replace(/"/g, '""')}"`
@@ -387,6 +406,8 @@ export class SearchIndex {
       params.push(opts.sessionId)
     }
 
+    if (opts?.proseFrom) conditions.push(this.rowsFrom(opts.proseFrom))
+
     if (opts?.excludeSessionId) {
       conditions.push("sc.session_id != ?")
       params.push(opts.excludeSessionId)
@@ -405,7 +426,7 @@ export class SearchIndex {
    * SQLite transaction with pre-prepared statements. This avoids the overhead
    * of 3000+ individual transactions (each forcing a disk sync).
    */
-  buildFull(): void {
+  buildFull(onParsed?: (file: SessionFile, session: ReturnType<typeof parseSession>) => void): void {
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
     this.db.close()
@@ -444,6 +465,7 @@ export class SearchIndex {
           const session = parseSession(content, { skipStats: true })
           this.insertSessionContent(insert, file.sessionId, file.path, session)
           insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId)
+          onParsed?.(file, session)
         } catch {
           // Skip files that fail to parse
         }
@@ -506,6 +528,22 @@ export class SearchIndex {
     if (batch.length > 0) {
       this._lastUpdate = new Date().toISOString()
     }
+  }
+
+  /** A condition keeping tool rows, and prose rows only from `paths` (held in a connection-local table). */
+  private rowsFrom(paths: ReadonlySet<string>): string {
+    if (paths.size === 0) return TOOL_ROWS
+    this.db.exec("CREATE TEMP TABLE IF NOT EXISTS prose_sources (path TEXT PRIMARY KEY)")
+    this.db.exec("DELETE FROM temp.prose_sources")
+    const insert = this.db.prepare("INSERT OR IGNORE INTO temp.prose_sources (path) VALUES (?)")
+    for (const path of paths) insert.run(path)
+    return `(${TOOL_ROWS} OR sc.source_file IN (SELECT path FROM temp.prose_sources))`
+  }
+
+  /** Indexed transcripts and the mtime each was indexed at. */
+  indexedFiles(): Map<string, number> {
+    const rows = this.db.prepare("SELECT file_path, mtime_ms FROM indexed_files").all() as Array<{ file_path: string; mtime_ms: number }>
+    return new Map(rows.map((row) => [row.file_path, row.mtime_ms]))
   }
 
   /** Every transcript from every agent, tagged with the session it belongs to. */
