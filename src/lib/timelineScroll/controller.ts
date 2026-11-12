@@ -435,8 +435,9 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
   private layoutPass(fromCommit: boolean): void {
     const scroller = this.scroller
     if (!scroller || !this.input) return
-    const newPlan = this.appliedPlanVersion !== this.planVersion
-    this.appliedPlanVersion = this.planVersion
+    // Only a commit has the plan's rows in the DOM; a pass before React renders them must leave the flag for it.
+    const newPlan = fromCommit && this.appliedPlanVersion !== this.planVersion
+    if (fromCommit) this.appliedPlanVersion = this.planVersion
 
     if (this.placement === "top") {
       this.measureRows()
@@ -568,7 +569,7 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     })
   }
 
-  /** While following, nothing on screen depends on the pad, so it goes straight to its target instead of waiting for idle. */
+  /** While following, the pad goes to its target at once instead of at idle; pinned to the bottom, only a tail shorter than the view moves with it. */
   private settleTopPad(): void {
     const shift = this.topPadTarget() - this.topPad
     if (Math.abs(shift) < 1) return
