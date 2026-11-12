@@ -116,10 +116,10 @@ Known differences from the TS routes:
   process), the order followed the system language, so a desktop user with a
   tailored locale (Swedish, Danish, Czech, …) can see a different order.
 - A `project-file` save body that `JSON.parse` accepts but serde_json does not
-  gets 500 "Unable to access project file": a number that overflows to
-  Infinity (TS answered 400), an escaped lone surrogate or invalid UTF-8 bytes
-  (TS saved them as U+FFFD), JSON nested deeper than 128 levels (TS answered
-  400). The app's editor never sends these.
+  gets 500 "Unable to access project file", where TS answered 400 or saved
+  the file: a number that overflows to Infinity, an escaped lone surrogate or
+  invalid UTF-8 bytes (TS saved them as U+FFFD), JSON nested deeper than 128
+  levels. The app's editor never sends these.
 
 ## Not ported in stage A
 

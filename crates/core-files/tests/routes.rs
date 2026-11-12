@@ -1210,15 +1210,26 @@ async fn a_save_abandoned_by_its_client_finishes_or_never_starts_and_leaves_no_t
             tokio::time::sleep(std::time::Duration::from_millis(3)).await;
         }
         drop(save);
-        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-        let leftovers: Vec<_> = std::fs::read_dir(root.path().join("src"))
-            .unwrap()
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.ends_with(".cogpit-save"))
-            .collect();
-        assert!(leftovers.is_empty(), "{polls} polls left {leftovers:?}");
+        // The detached save may still be finishing; a leaked file never goes away.
+        let leftovers = || -> Vec<String> {
+            std::fs::read_dir(root.path().join("src"))
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.ends_with(".cogpit-save"))
+                .collect()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !leftovers().is_empty() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            leftovers().is_empty(),
+            "{polls} polls left {:?}",
+            leftovers()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let now = std::fs::read_to_string(&path).unwrap();
         assert!(now == before || now == content, "{polls} polls: {now:?}");
         std::thread::sleep(std::time::Duration::from_millis(2));
