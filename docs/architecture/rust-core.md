@@ -74,7 +74,8 @@ Forwarded requests wait up to ten seconds for a restart, then answer 503.
   `req.url`, so the query comes from `req.originalUrl`. Bodies stream both
   ways, keeping the body's framing (a chunked body stays chunked on any
   method; a request without one sends none). Hop-by-hop headers, cookies, `authorization` and any client-sent core
-  headers are dropped; the secret and principal are added.
+  headers are dropped; the secret and principal are added. Requests reuse
+  kept-alive connections to core, and core sets `TCP_NODELAY` on each.
 - `bodySizeLimit` applies to every request that carries a body, whatever the
   method, and counts the body as it is piped to core. A declared length
   over the limit is refused before forwarding. A chunked body that grows past
@@ -116,7 +117,7 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 
 | Route ids | Core crate, mount | Notes |
 | --- | --- | --- |
-| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. |
+| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. On macOS, when `git` on PATH is the Xcode shim `/usr/bin/git` (about 6 ms per run spent finding the developer directory), core asks `xcrun --find git` once and runs that git directly. Each request does its filesystem work in one trip to the blocking pool; media ranges up to 1 MiB are read whole, longer ones stream. JSON and text over 1 KiB gzip in core (zlib-rs, level 6, the same bytes Bun's `zlib.gzip` writes), since TS pipes forwarded responses through untouched. |
 | `/__pty` (WebSocket) | `crates/core-pty`, `/v1/pty/ws` | `/__pty` still ends at TS. `server/pty-socket.ts` relays each connection with `relayToCore`, checks `PtyAuthorizationController`'s authorizer on every frame both ways (plus a 5 s recheck, closing with 1008), and turns a `spawn` naming an agent's sign-in into a plain `command`/`args`/`env` spawn built by `agentSignInLaunch`. |
 
 Known differences from the TS routes:

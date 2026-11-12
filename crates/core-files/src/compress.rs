@@ -14,6 +14,10 @@ use flate2::write::GzEncoder;
 
 /// Bodies smaller than this aren't worth the gzip overhead.
 const MIN_COMPRESS_BYTES: usize = 1024;
+/// Bodies up to this size compress in about 0.1 ms or less (5 KB of source
+/// text: 35 µs), near what a trip to the blocking pool costs; larger ones
+/// move off the async workers.
+const INLINE_COMPRESS_BYTES: usize = 16 * 1024;
 
 /// Whether `Accept-Encoding` lists gzip without `q=0`.
 pub fn accepts_gzip(headers: &HeaderMap) -> bool {
@@ -57,8 +61,10 @@ fn compressible(response: &Response) -> bool {
         })
 }
 
+/// zlib's default level 6, as `zlib.gzip` uses: on the TS server's runtime
+/// (Bun) zlib-rs writes the same bytes, at the same speed.
 fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 2), Compression::default());
     encoder.write_all(bytes).ok()?;
     encoder.finish().ok()
 }
@@ -76,8 +82,16 @@ pub async fn layer(request: Request, next: Next) -> Response {
     if bytes.len() < MIN_COMPRESS_BYTES {
         return Response::from_parts(parts, Body::from(bytes));
     }
-    let source = bytes.clone();
-    let Ok(Some(compressed)) = tokio::task::spawn_blocking(move || gzip(&source)).await else {
+    let compressed = if bytes.len() <= INLINE_COMPRESS_BYTES {
+        gzip(&bytes)
+    } else {
+        let source = bytes.clone();
+        tokio::task::spawn_blocking(move || gzip(&source))
+            .await
+            .ok()
+            .flatten()
+    };
+    let Some(compressed) = compressed else {
         return Response::from_parts(parts, Body::from(bytes));
     };
     let headers = &mut parts.headers;

@@ -2,6 +2,7 @@
 //! it atomically, refusing when the file changed on disk since it was read.
 
 use std::fs::Metadata;
+use std::io::Write;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{StatusCode, Uri};
@@ -9,7 +10,7 @@ use axum::response::Response;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::fsx::{mtime_ms, realpath};
+use crate::fsx::{blocking, mtime_ms, realpath};
 use crate::http::{Failure, JsNumber, json, query_param};
 use crate::paths::native;
 
@@ -25,7 +26,8 @@ struct ProjectFile {
     info: Metadata,
 }
 
-async fn resolve_project_file(cwd: &str, file_path: &str) -> Result<ProjectFile, Failure> {
+/// Blocks.
+fn resolve_project_file(cwd: &str, file_path: &str) -> Result<ProjectFile, Failure> {
     if !native::is_absolute(cwd) {
         return Err(Failure(400, "cwd must be an absolute path"));
     }
@@ -33,23 +35,18 @@ async fn resolve_project_file(cwd: &str, file_path: &str) -> Result<ProjectFile,
         return Err(Failure(400, "path must be a relative project file"));
     }
     let root = realpath(&native::resolve(&[cwd]))
-        .await
         .map_err(|_| Failure(404, "Project directory not found"))?;
 
     let candidate = native::resolve(&[&root, file_path]);
     if !native::is_within_dir(&root, &candidate) {
         return Err(Failure(403, "File is outside the project"));
     }
-    let absolute_path = realpath(&candidate)
-        .await
-        .map_err(|_| Failure(404, "File not found"))?;
+    let absolute_path = realpath(&candidate).map_err(|_| Failure(404, "File not found"))?;
     if !native::is_within_dir(&root, &absolute_path) {
         return Err(Failure(403, "File is outside the project"));
     }
 
-    let info = tokio::fs::metadata(&absolute_path)
-        .await
-        .map_err(|_| UNEXPECTED)?;
+    let info = std::fs::metadata(&absolute_path).map_err(|_| UNEXPECTED)?;
     if !info.is_file() {
         return Err(Failure(400, "Path must point to a file"));
     }
@@ -87,26 +84,25 @@ struct ReadResponse {
 pub async fn read(uri: Uri) -> Response {
     let cwd = query_param(uri.query(), "cwd").unwrap_or_default();
     let path = query_param(uri.query(), "path").unwrap_or_default();
-    let result = async {
-        let file = resolve_project_file(&cwd, &path).await?;
-        let bytes = tokio::fs::read(&file.absolute_path)
-            .await
-            .map_err(|_| UNEXPECTED)?;
+    let result = blocking(move || {
+        let file = resolve_project_file(&cwd, &path)?;
+        let bytes = std::fs::read(&file.absolute_path).map_err(|_| UNEXPECTED)?;
         Ok::<_, Failure>(ReadResponse {
             content: decode_text_file(bytes)?,
             mtime_ms: JsNumber(mtime_ms(&file.info)),
             size: file.info.len(),
         })
-    }
-    .await;
+    })
+    .await
+    .unwrap_or(Err(UNEXPECTED));
     match result {
         Ok(body) => json(StatusCode::OK, &body),
         Err(failure) => failure.respond(),
     }
 }
 
-async fn current_mtime(path: &str) -> Result<f64, Failure> {
-    let info = tokio::fs::metadata(path).await.map_err(|_| UNEXPECTED)?;
+fn current_mtime(path: &str) -> Result<f64, Failure> {
+    let info = std::fs::metadata(path).map_err(|_| UNEXPECTED)?;
     Ok(mtime_ms(&info))
 }
 
@@ -118,45 +114,38 @@ fn temporary_path(absolute_path: &str) -> String {
     ])
 }
 
-async fn write_temporary(path: &str, content: &str, info: &Metadata) -> std::io::Result<()> {
-    let mut options = tokio::fs::OpenOptions::new();
+fn write_temporary(path: &str, content: &str, info: &Metadata) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         options.mode(info.permissions().mode() & 0o7777);
     }
     #[cfg(not(unix))]
     let _ = info;
-    let mut file = options.open(path).await?;
-    tokio::io::AsyncWriteExt::write_all(&mut file, content.as_bytes()).await?;
-    tokio::io::AsyncWriteExt::flush(&mut file).await
+    options.open(path)?.write_all(content.as_bytes())
 }
 
 /// Write beside the file and rename over it, re-checking the mtime before
 /// both steps. The temporary file never outlives the call.
-async fn write_atomically(
+fn write_atomically(
     file: &ProjectFile,
     content: &str,
     expected_mtime_ms: f64,
 ) -> Result<(), Failure> {
-    if current_mtime(&file.absolute_path).await? != expected_mtime_ms {
+    if current_mtime(&file.absolute_path)? != expected_mtime_ms {
         return Err(Failure(409, CONFLICT));
     }
     let temporary = temporary_path(&file.absolute_path);
-    let result = async {
-        write_temporary(&temporary, content, &file.info)
-            .await
-            .map_err(|_| UNEXPECTED)?;
-        if current_mtime(&file.absolute_path).await? != expected_mtime_ms {
+    let result = (|| {
+        write_temporary(&temporary, content, &file.info).map_err(|_| UNEXPECTED)?;
+        if current_mtime(&file.absolute_path)? != expected_mtime_ms {
             return Err(Failure(409, CONFLICT));
         }
-        tokio::fs::rename(&temporary, &file.absolute_path)
-            .await
-            .map_err(|_| UNEXPECTED)
-    }
-    .await;
-    let _ = tokio::fs::remove_file(&temporary).await;
+        std::fs::rename(&temporary, &file.absolute_path).map_err(|_| UNEXPECTED)
+    })();
+    let _ = std::fs::remove_file(&temporary);
     result
 }
 
@@ -168,20 +157,19 @@ struct SaveResponse {
     size: u64,
 }
 
-async fn write_project_file(
+/// Blocks.
+fn write_project_file(
     cwd: &str,
     path: &str,
     content: &str,
     expected_mtime_ms: f64,
 ) -> Result<SaveResponse, Failure> {
-    let file = resolve_project_file(cwd, path).await?;
+    let file = resolve_project_file(cwd, path)?;
     if mtime_ms(&file.info) != expected_mtime_ms {
         return Err(Failure(409, CONFLICT));
     }
-    write_atomically(&file, content, expected_mtime_ms).await?;
-    let saved = tokio::fs::metadata(&file.absolute_path)
-        .await
-        .map_err(|_| UNEXPECTED)?;
+    write_atomically(&file, content, expected_mtime_ms)?;
+    let saved = std::fs::metadata(&file.absolute_path).map_err(|_| UNEXPECTED)?;
     Ok(SaveResponse {
         ok: true,
         mtime_ms: JsNumber(mtime_ms(&saved)),
@@ -216,15 +204,13 @@ pub async fn save(body: Body) -> Response {
         if content.len() as u64 > MAX_FILE_BYTES {
             return Err(Failure(413, "File is larger than 2 MB"));
         }
-        // A client that goes away drops this handler; the save it asked for
-        // runs to the end on its own task, so the temporary file is always
-        // renamed or removed.
+        // A client that goes away drops this handler, but not blocking work
+        // once it is queued: the save runs to the end, so the temporary file
+        // is always renamed or removed.
         let (cwd, path, content) = (cwd.clone(), path.clone(), content.clone());
-        tokio::spawn(
-            async move { write_project_file(&cwd, &path, &content, expected_mtime_ms).await },
-        )
-        .await
-        .unwrap_or(Err(UNEXPECTED))
+        blocking(move || write_project_file(&cwd, &path, &content, expected_mtime_ms))
+            .await
+            .unwrap_or(Err(UNEXPECTED))
     }
     .await;
     match result {

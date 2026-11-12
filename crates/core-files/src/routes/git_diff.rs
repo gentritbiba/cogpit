@@ -5,7 +5,7 @@ use axum::http::{StatusCode, Uri};
 use axum::response::Response;
 use serde::Serialize;
 
-use crate::fsx::{lossy, realpath};
+use crate::fsx::{blocking, lossy, realpath};
 use crate::git::{resolve_git_project, run_git};
 use crate::http::{error, json, query_param};
 use crate::paths::native;
@@ -60,11 +60,16 @@ async fn read_committed_blob(root: &str, repo_path: &str) -> Option<Vec<u8>> {
 /// The working-tree file, resolved through symlinks so a link inside the
 /// repository cannot serve a file outside it.
 async fn read_working_file(root: &str, absolute_path: &str) -> Option<Vec<u8>> {
-    let real = realpath(absolute_path).await.ok()?;
-    if !native::is_within_dir(root, &real) {
-        return None;
-    }
-    tokio::fs::read(&real).await.ok()
+    let (root, absolute_path) = (root.to_owned(), absolute_path.to_owned());
+    blocking(move || {
+        let real = realpath(&absolute_path).ok()?;
+        if !native::is_within_dir(&root, &real) {
+            return None;
+        }
+        std::fs::read(&real).ok()
+    })
+    .await
+    .flatten()
 }
 
 #[derive(Serialize)]

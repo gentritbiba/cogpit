@@ -1,21 +1,25 @@
 //! `GET local-file?path=`: images and videos for the timeline, with byte
 //! ranges so a video element can seek.
 
-use std::io::SeekFrom;
+use std::io::{Read, Seek, SeekFrom};
 
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
 
 use super::readable::{requested_path, validate_readable_file};
-use crate::http::error;
+use crate::fsx::blocking;
+use crate::http::{Failure, error};
 use crate::media::{image_type, video_type};
 use crate::paths::native;
 
 /// Read size per streamed chunk, as Node read streams use.
 const STREAM_CHUNK: usize = 64 * 1024;
+/// Images and seeks up to this size are read in one go rather than streamed
+/// chunk by chunk, each chunk a trip to the blocking pool.
+const WHOLE_READ_BYTES: u64 = 1024 * 1024;
 const MAX_IMAGE_SIZE: u64 = 50 * 1024 * 1024;
 /// Videos are served in ranges, so only a sanity ceiling applies.
 const MAX_VIDEO_SIZE: u64 = 1024 * 1024 * 1024;
@@ -71,6 +75,54 @@ pub fn parse_range(header: Option<&str>, size: u64) -> ByteRange {
     ByteRange::Part { start, end }
 }
 
+enum Opened {
+    Unsatisfiable {
+        size: u64,
+    },
+    Serve {
+        size: u64,
+        range: ByteRange,
+        length: u64,
+        body: Body,
+    },
+}
+
+const READ_FAILED: Failure = Failure(500, "Failed to read file");
+
+/// Check the file, open it at the range and read it, or set up the stream
+/// for a long range. Blocks.
+fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<Opened, Failure> {
+    let size = validate_readable_file(path, max_size)?;
+    let range = parse_range(range_header, size);
+    let (start, length) = match range {
+        ByteRange::Unsatisfiable => return Ok(Opened::Unsatisfiable { size }),
+        ByteRange::Part { start, end } => (start, end - start + 1),
+        ByteRange::Whole => (0, size),
+    };
+
+    let not_found = |_| Failure(404, "File not found");
+    let mut file = std::fs::File::open(path).map_err(not_found)?;
+    if start > 0 {
+        file.seek(SeekFrom::Start(start)).map_err(not_found)?;
+    }
+    let body = if length <= WHOLE_READ_BYTES {
+        let mut bytes = vec![0; usize::try_from(length).unwrap_or_default()];
+        // A file that shrank since it was measured fails here rather than
+        // answering with fewer bytes than its Content-Length.
+        file.read_exact(&mut bytes).map_err(|_| READ_FAILED)?;
+        Body::from(bytes)
+    } else {
+        let file = tokio::fs::File::from_std(file).take(length);
+        Body::from_stream(ReaderStream::with_capacity(file, STREAM_CHUNK))
+    };
+    Ok(Opened::Serve {
+        size,
+        range,
+        length,
+        body,
+    })
+}
+
 pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
     let path = match requested_path(uri.query()) {
         Ok(path) => path,
@@ -83,35 +135,34 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
         (None, Some(video)) => (video, MAX_VIDEO_SIZE),
         (None, None) => return error(403, "Only image and video files are allowed"),
     };
-    let size = match validate_readable_file(&path, max_size).await {
-        Ok(size) => size,
+    let range_header = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let opened = blocking(move || open_range(&path, max_size, range_header.as_deref()))
+        .await
+        .unwrap_or(Err(READ_FAILED));
+    let (size, range, length, body) = match opened {
+        Ok(Opened::Serve {
+            size,
+            range,
+            length,
+            body,
+        }) => (size, range, length, body),
+        Ok(Opened::Unsatisfiable { size }) => {
+            let mut response = error(416, "Range not satisfiable");
+            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{size}")) {
+                response.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            return response;
+        }
         Err(failure) => return failure.respond(),
     };
 
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|value| value.to_str().ok());
-    let range = parse_range(range_header, size);
-    if range == ByteRange::Unsatisfiable {
-        let mut response = error(416, "Range not satisfiable");
-        if let Ok(value) = HeaderValue::from_str(&format!("bytes */{size}")) {
-            response.headers_mut().insert(header::CONTENT_RANGE, value);
-        }
-        return response;
-    }
-
-    let Ok(mut file) = tokio::fs::File::open(&path).await else {
-        return error(404, "File not found");
+    let status = match range {
+        ByteRange::Part { .. } => StatusCode::PARTIAL_CONTENT,
+        _ => StatusCode::OK,
     };
-    let (status, start, length) = match range {
-        ByteRange::Part { start, end } => (StatusCode::PARTIAL_CONTENT, start, end - start + 1),
-        _ => (StatusCode::OK, 0, size),
-    };
-    if start > 0 && file.seek(SeekFrom::Start(start)).await.is_err() {
-        return error(404, "File not found");
-    }
-
-    let body = Body::from_stream(ReaderStream::with_capacity(file.take(length), STREAM_CHUNK));
     let mut response = (status, body).into_response();
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));

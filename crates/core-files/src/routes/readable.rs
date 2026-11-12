@@ -15,9 +15,9 @@ pub fn requested_path(query: Option<&str>) -> Result<String, Failure> {
     Ok(path)
 }
 
-/// The file's size when it is a regular file within `max_size`.
-pub async fn validate_readable_file(path: &str, max_size: u64) -> Result<u64, Failure> {
-    match tokio::fs::metadata(path).await {
+/// The file's size when it is a regular file within `max_size`. Blocks.
+pub fn validate_readable_file(path: &str, max_size: u64) -> Result<u64, Failure> {
+    match std::fs::metadata(path) {
         Ok(info) if !info.is_file() => Err(Failure(404, "Not a file")),
         Ok(info) if info.len() > max_size => Err(Failure(413, "File too large")),
         Ok(info) => Ok(info.len()),
