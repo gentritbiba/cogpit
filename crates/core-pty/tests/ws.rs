@@ -274,7 +274,10 @@ async fn gives_a_spawn_without_an_id_a_fresh_one() {
     let mut spawn = shell("");
     spawn.as_object_mut().unwrap().remove("id");
     client.send(spawn).await;
-    let spawned = client.until(|f| f["type"] == "spawned").await;
+    let spawned = client
+        .until(|f| f["type"] == "spawned" || f["type"] == "error")
+        .await;
+    assert_eq!(spawned["type"], "spawned", "{spawned}");
     let id = spawned["id"].as_str().unwrap().to_owned();
     assert_eq!(id.len(), 36);
     client.send(json!({ "type": "kill", "id": id })).await;
