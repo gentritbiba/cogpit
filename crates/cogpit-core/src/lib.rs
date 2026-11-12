@@ -61,6 +61,18 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+/// Ctrl+C in a terminal reaches the whole foreground process group. The parent
+/// decides when core stops (by closing stdin), so core swallows it. The handler
+/// is installed before the handshake, so a ready core is already immune.
+fn ignore_ctrl_c() -> io::Result<()> {
+    #[cfg(unix)]
+    let mut interrupts = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    #[cfg(windows)]
+    let mut interrupts = tokio::signal::windows::ctrl_c()?;
+    tokio::spawn(async move { while interrupts.recv().await.is_some() {} });
+    Ok(())
+}
+
 /// Read the boot line, listen, print the handshake, and serve until stdin closes.
 pub async fn run() -> io::Result<()> {
     let mut stdin = BufReader::new(tokio::io::stdin());
@@ -74,6 +86,7 @@ pub async fn run() -> io::Result<()> {
         return Err(invalid("the boot message has an empty secret"));
     }
 
+    ignore_ctrl_c()?;
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
     let handshake = Handshake {
@@ -87,10 +100,6 @@ pub async fn run() -> io::Result<()> {
         .await?;
     stdout.flush().await?;
     tracing::info!(port, "cogpit-core listening");
-
-    // Ctrl+C in a terminal reaches the whole foreground process group. The
-    // parent decides when core stops (by closing stdin), so core ignores it.
-    tokio::spawn(async { while tokio::signal::ctrl_c().await.is_ok() {} });
 
     let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
