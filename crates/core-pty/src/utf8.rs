@@ -13,43 +13,46 @@ pub struct StreamDecoder {
 }
 
 impl StreamDecoder {
-    pub fn decode(&mut self, chunk: &[u8]) -> String {
-        let mut bytes = std::mem::take(&mut self.pending);
-        bytes.extend_from_slice(chunk);
-        let mut out = String::with_capacity(bytes.len());
-        let mut rest = bytes.as_slice();
-        loop {
-            match std::str::from_utf8(rest) {
-                Ok(valid) => {
-                    out.push_str(valid);
-                    break;
-                }
-                Err(error) => {
-                    let (valid, after) = rest.split_at(error.valid_up_to());
-                    out.push_str(std::str::from_utf8(valid).unwrap_or_default());
-                    match error.error_len() {
-                        Some(invalid) => {
-                            out.push_str(REPLACEMENT);
-                            rest = &after[invalid..];
-                        }
-                        None => {
-                            self.pending = after.to_vec();
-                            break;
-                        }
-                    }
-                }
-            }
+    /// Appends `chunk`'s complete characters to `out`.
+    pub fn decode(&mut self, chunk: &[u8], out: &mut String) {
+        if self.pending.is_empty() {
+            self.pending = decode_into(chunk, out).to_vec();
+        } else {
+            let mut bytes = std::mem::take(&mut self.pending);
+            bytes.extend_from_slice(chunk);
+            self.pending = decode_into(&bytes, out).to_vec();
         }
-        out
     }
 
     /// The stream ended: a character it cut short is replaced.
-    pub fn finish(&mut self) -> String {
-        if self.pending.is_empty() {
-            String::new()
-        } else {
+    pub fn finish(&mut self, out: &mut String) {
+        if !self.pending.is_empty() {
             self.pending.clear();
-            REPLACEMENT.to_owned()
+            out.push_str(REPLACEMENT);
+        }
+    }
+}
+
+/// Appends `bytes` to `out` and returns the incomplete character it ends
+/// with, if any.
+fn decode_into<'a>(mut bytes: &'a [u8], out: &mut String) -> &'a [u8] {
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(valid) => {
+                out.push_str(valid);
+                return &[];
+            }
+            Err(error) => {
+                let (valid, after) = bytes.split_at(error.valid_up_to());
+                out.push_str(std::str::from_utf8(valid).unwrap_or_default());
+                match error.error_len() {
+                    Some(invalid) => {
+                        out.push_str(REPLACEMENT);
+                        bytes = &after[invalid..];
+                    }
+                    None => return after,
+                }
+            }
         }
     }
 }
@@ -60,8 +63,23 @@ mod tests {
 
     fn decode_in_chunks(bytes: &[u8], size: usize) -> String {
         let mut decoder = StreamDecoder::default();
-        let mut out: String = bytes.chunks(size).map(|c| decoder.decode(c)).collect();
-        out.push_str(&decoder.finish());
+        let mut out = String::new();
+        for chunk in bytes.chunks(size) {
+            decoder.decode(chunk, &mut out);
+        }
+        decoder.finish(&mut out);
+        out
+    }
+
+    fn decode(decoder: &mut StreamDecoder, chunk: &[u8]) -> String {
+        let mut out = String::new();
+        decoder.decode(chunk, &mut out);
+        out
+    }
+
+    fn finish(decoder: &mut StreamDecoder) -> String {
+        let mut out = String::new();
+        decoder.finish(&mut out);
         out
     }
 
@@ -81,28 +99,28 @@ mod tests {
     fn holds_an_incomplete_character_until_the_next_read() {
         let mut decoder = StreamDecoder::default();
         let emoji = "🎉".as_bytes();
-        assert_eq!(decoder.decode(&emoji[..1]), "");
-        assert_eq!(decoder.decode(&emoji[1..3]), "");
-        assert_eq!(decoder.decode(&emoji[3..]), "🎉");
+        assert_eq!(decode(&mut decoder, &emoji[..1]), "");
+        assert_eq!(decode(&mut decoder, &emoji[1..3]), "");
+        assert_eq!(decode(&mut decoder, &emoji[3..]), "🎉");
     }
 
     #[test]
     fn replaces_invalid_bytes_like_text_decoder() {
         let mut decoder = StreamDecoder::default();
-        assert_eq!(decoder.decode(b"a\xffb"), "a\u{FFFD}b");
+        assert_eq!(decode(&mut decoder, b"a\xffb"), "a\u{FFFD}b");
         // A lead byte followed by a non-continuation byte is one maximal subpart.
-        assert_eq!(decoder.decode(b"\xe2\x82x"), "\u{FFFD}x");
-        assert_eq!(decoder.decode(b"\xc0\xaf"), "\u{FFFD}\u{FFFD}");
+        assert_eq!(decode(&mut decoder, b"\xe2\x82x"), "\u{FFFD}x");
+        assert_eq!(decode(&mut decoder, b"\xc0\xaf"), "\u{FFFD}\u{FFFD}");
     }
 
     #[test]
     fn replaces_a_character_cut_off_by_the_end_of_the_stream() {
         let mut decoder = StreamDecoder::default();
         assert_eq!(
-            decoder.decode("ok€".as_bytes().split_last().unwrap().1),
+            decode(&mut decoder, "ok€".as_bytes().split_last().unwrap().1),
             "ok"
         );
-        assert_eq!(decoder.finish(), "\u{FFFD}");
-        assert_eq!(decoder.finish(), "");
+        assert_eq!(finish(&mut decoder), "\u{FFFD}");
+        assert_eq!(finish(&mut decoder), "");
     }
 }

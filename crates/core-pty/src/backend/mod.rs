@@ -1,7 +1,7 @@
 //! Starting a process on a pseudo-terminal: `portable-pty` on Unix, ConPTY
 //! driven directly on Windows (see `windows.rs` for why).
 
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,9 +12,9 @@ mod unix;
 mod windows;
 
 #[cfg(unix)]
-pub use unix::spawn;
+pub use unix::{Input, Output, spawn};
 #[cfg(windows)]
-pub use windows::spawn;
+pub use windows::{Input, Output, spawn};
 
 /// What follows the program on its command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,8 +46,8 @@ pub trait Process: Send + Sync {
 
 pub struct Spawned {
     pub process: Arc<dyn Process>,
-    pub input: Box<dyn Write + Send>,
-    pub output: Box<dyn Read + Send>,
+    pub input: Input,
+    pub output: Output,
     /// Blocks until the process exits and returns its exit code.
     pub wait: Box<dyn FnOnce() -> i64 + Send>,
 }

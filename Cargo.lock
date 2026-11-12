@@ -175,6 +175,7 @@ name = "core-pty"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "filedescriptor",
  "futures-util",
  "indexmap",
  "portable-pty",

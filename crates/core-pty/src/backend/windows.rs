@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString, c_void};
 use std::fs::File;
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::os::windows::process::CommandExt;
@@ -28,6 +28,9 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{mem, ptr};
+
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 
 use windows_sys::Win32::Foundation::{HANDLE, S_OK, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Console::{
@@ -242,18 +245,91 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
             console,
             job,
         }),
-        input: Box::new(File::from(input)),
-        output: Box::new(File::from(output)),
+        input: Input(File::from(input)),
+        output: Output(File::from(output)),
         wait: Box::new(move || {
             let code = wait_for_exit(&process);
             release(&exited_job);
-            // ConPTY holds the output pipe open until the console closes. The
-            // registry's reader owns `output` and drains it meanwhile.
+            // ConPTY holds the output pipe open until the console closes.
+            // `Output`'s reader thread drains it meanwhile.
             let console = closer.lock().unwrap_or_else(|e| e.into_inner()).take();
             drop(console);
             code
         }),
     })
+}
+
+/// The pseudo-console's input pipe, written on a thread of its own: a write
+/// blocks while the console is full.
+pub struct Input(File);
+
+impl Input {
+    pub fn start(self, _runtime: &Handle) -> mpsc::UnboundedSender<Vec<u8>> {
+        let (sender, mut received) = mpsc::unbounded_channel::<Vec<u8>>();
+        let mut pipe = self.0;
+        std::thread::spawn(move || {
+            while let Some(data) = received.blocking_recv() {
+                if pipe.write_all(&data).and_then(|()| pipe.flush()).is_err() {
+                    break;
+                }
+            }
+        });
+        sender
+    }
+}
+
+/// The pseudo-console's output pipe. Pipes have no readiness to wait on, so
+/// a thread reads it and hands each chunk to the runtime reading terminals.
+pub struct Output(File);
+
+impl Output {
+    pub fn reader(self) -> io::Result<OutputReader> {
+        let (chunks, received) = mpsc::channel(16);
+        let mut pipe = self.0;
+        std::thread::spawn(move || {
+            let mut buffer = vec![0; 16 * 1024];
+            loop {
+                let chunk = match pipe.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(read) => Ok(buffer[..read].to_vec()),
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(err) => Err(err),
+                };
+                let failed = chunk.is_err();
+                if chunks.blocking_send(chunk).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Ok(OutputReader {
+            chunks: received,
+            chunk: Vec::new(),
+            taken: 0,
+        })
+    }
+}
+
+pub struct OutputReader {
+    chunks: mpsc::Receiver<io::Result<Vec<u8>>>,
+    chunk: Vec<u8>,
+    taken: usize,
+}
+
+impl OutputReader {
+    /// Reads what the pipe had; 0 at its end. Cancel-safe.
+    pub async fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.taken == self.chunk.len() {
+            match self.chunks.recv().await {
+                Some(chunk) => self.chunk = chunk?,
+                None => return Ok(0),
+            }
+            self.taken = 0;
+        }
+        let read = buffer.len().min(self.chunk.len() - self.taken);
+        buffer[..read].copy_from_slice(&self.chunk[self.taken..self.taken + read]);
+        self.taken += read;
+        Ok(read)
+    }
 }
 
 fn wait_for_exit(process: &OwnedHandle) -> i64 {

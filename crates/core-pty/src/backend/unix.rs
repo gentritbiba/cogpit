@@ -1,11 +1,20 @@
 //! `portable-pty` starts the child as a session leader with the PTY as its
 //! controlling terminal (`setsid` + `TIOCSCTTY`), so job control and Ctrl-C
 //! reach the foreground command.
+//!
+//! The terminal is non-blocking: the registry reads and writes every
+//! terminal on one thread.
 
 use std::io;
+use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Mutex};
 
+use filedescriptor::FileDescriptor;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::unix::pipe;
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 
 use super::{Args, Process, SpawnSpec, Spawned};
 
@@ -37,10 +46,17 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+/// macOS's `openpty` fails now and then (`-6`) when two threads call it at
+/// once, as two terminals opened together do.
+static OPENING: Mutex<()> = Mutex::new(());
+
 pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
-    let pair = native_pty_system()
-        .openpty(size(spec.cols, spec.rows))
-        .map_err(io::Error::other)?;
+    let pair = {
+        let _opening = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+        native_pty_system()
+            .openpty(size(spec.cols, spec.rows))
+            .map_err(io::Error::other)?
+    };
     let mut command = CommandBuilder::new(&spec.command);
     match spec.args {
         Args::List(args) => command.args(args),
@@ -56,8 +72,14 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
         .map_err(io::Error::other)?;
     // Only the child may hold the terminal side, or the master never sees EOF.
     drop(pair.slave);
-    let output = pair.master.try_clone_reader().map_err(io::Error::other)?;
-    let input = pair.master.take_writer().map_err(io::Error::other)?;
+    let master = pair
+        .master
+        .as_raw_fd()
+        .ok_or_else(|| io::Error::other("the terminal has no file descriptor"))?;
+    let mut terminal = FileDescriptor::dup(&master).map_err(io::Error::other)?;
+    terminal.set_non_blocking(true).map_err(io::Error::other)?;
+    let input = Input(terminal.as_fd().try_clone_to_owned()?);
+    let output = Output(terminal.as_fd().try_clone_to_owned()?);
     let process = UnixProcess {
         killer: Mutex::new(child.clone_killer()),
         master: Mutex::new(pair.master),
@@ -72,4 +94,53 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
                 .map_or(1, |status| i64::from(status.exit_code()))
         }),
     })
+}
+
+/// The terminal's input.
+pub struct Input(OwnedFd);
+
+impl Input {
+    /// Writes what the returned channel receives, in order, on `runtime`,
+    /// waiting while the terminal is full, until the channel or the terminal
+    /// closes.
+    pub fn start(self, runtime: &Handle) -> mpsc::UnboundedSender<Vec<u8>> {
+        let (sender, mut received) = mpsc::unbounded_channel::<Vec<u8>>();
+        runtime.spawn(async move {
+            // Tokio's pipe writer takes any non-blocking descriptor; it only
+            // writes and waits for room, which a terminal supports the same way.
+            let mut terminal = match pipe::Sender::from_owned_fd_unchecked(self.0) {
+                Ok(terminal) => terminal,
+                Err(err) => {
+                    tracing::warn!(%err, "terminal input cannot be written");
+                    return;
+                }
+            };
+            while let Some(data) = received.recv().await {
+                if terminal.write_all(&data).await.is_err() {
+                    break;
+                }
+            }
+        });
+        sender
+    }
+}
+
+/// The terminal's output.
+pub struct Output(OwnedFd);
+
+impl Output {
+    /// Registers the output with the calling runtime's reactor. Like
+    /// [`Input`], it goes through Tokio's pipe reader.
+    pub fn reader(self) -> io::Result<OutputReader> {
+        pipe::Receiver::from_owned_fd_unchecked(self.0).map(OutputReader)
+    }
+}
+
+pub struct OutputReader(pipe::Receiver);
+
+impl OutputReader {
+    /// Reads what the terminal has; 0 at its end. Cancel-safe.
+    pub async fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buffer).await
+    }
 }

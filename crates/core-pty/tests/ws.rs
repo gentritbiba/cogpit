@@ -71,8 +71,14 @@ impl Client {
         }
     }
 
+    /// The next `kind` frame for `id`. An error for `id` fails the test at
+    /// once instead of after the timeout.
     async fn frame(&mut self, kind: &str, id: &str) -> Value {
-        self.until(|f| f["type"] == kind && f["id"] == id).await
+        let frame = self
+            .until(|f| (f["type"] == kind || f["type"] == "error") && f["id"] == id)
+            .await;
+        assert_eq!(frame["type"], kind, "{frame}");
+        frame
     }
 
     /// Collects a session's output until it contains `needle`.
@@ -268,7 +274,10 @@ async fn gives_a_spawn_without_an_id_a_fresh_one() {
     let mut spawn = shell("");
     spawn.as_object_mut().unwrap().remove("id");
     client.send(spawn).await;
-    let spawned = client.until(|f| f["type"] == "spawned").await;
+    let spawned = client
+        .until(|f| f["type"] == "spawned" || f["type"] == "error")
+        .await;
+    assert_eq!(spawned["type"], "spawned", "{spawned}");
     let id = spawned["id"].as_str().unwrap().to_owned();
     assert_eq!(id.len(), 36);
     client.send(json!({ "type": "kill", "id": id })).await;
@@ -380,6 +389,70 @@ mod unix {
             .await;
         client.output_until("jc", "42").await;
         client.send(json!({ "type": "kill", "id": "jc" })).await;
+    }
+
+    /// A flood of output arrives whole and in order, in batches: a frame per
+    /// read would average at most 1 KiB on macOS and 4 KiB on Linux.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batches_a_flood_of_output_in_order() {
+        let addr = start().await;
+        let mut client = Client::connect(addr).await;
+        client
+            .send(
+                json!({ "type": "spawn", "id": "flood", "command": "/bin/sh",
+                          "args": ["-c", "seq 1 200000 | cat; printf END"] }),
+            )
+            .await;
+        let mut output = String::new();
+        let mut frames = 0;
+        while !output.ends_with("END") {
+            output.push_str(
+                client.frame("output", "flood").await["data"]
+                    .as_str()
+                    .unwrap(),
+            );
+            frames += 1;
+        }
+        // macOS's tty sometimes repeats a `\r` when its output queue fills
+        // mid-newline, so line endings are compared without them.
+        let expected: String = (1..=200_000).map(|n| format!("{n}\n")).collect();
+        assert!(
+            output.replace('\r', "") == expected + "END",
+            "output out of order or incomplete"
+        );
+        assert!(
+            frames * 16 * 1024 < output.len(),
+            "{frames} frames for {} bytes",
+            output.len()
+        );
+    }
+
+    /// Input larger than the terminal holds is written whole and in order: the
+    /// writer waits for room instead of failing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writes_input_larger_than_the_terminal_holds() {
+        let addr = start().await;
+        let dir = std::env::temp_dir().join(format!("cogpit-pty-paste-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("pasted.txt");
+        let mut client = Client::connect(addr).await;
+        client
+            .send(json!({ "type": "spawn", "id": "paste", "command": "/bin/sh",
+                          "args": ["-c", format!("stty raw -echo; printf READY; head -c 300000 > '{}'; printf END", file.display())] }))
+            .await;
+        client.output_until("paste", "READY").await;
+        let pasted: String = (0..300_000u32)
+            .map(|i| char::from(b'a' + u8::try_from(i % 26).unwrap()))
+            .collect();
+        for chunk in pasted.as_bytes().chunks(10_000) {
+            client
+                .send(json!({ "type": "input", "id": "paste",
+                              "data": std::str::from_utf8(chunk).unwrap() }))
+                .await;
+        }
+        client.output_until("paste", "END").await;
+        assert!(std::fs::read_to_string(&file).unwrap() == pasted);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

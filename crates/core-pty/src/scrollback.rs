@@ -26,29 +26,37 @@ impl Scrollback {
 
     /// Keeps the last 40 000 units, then drops the partial line they start with.
     fn trim(&mut self) {
-        let mut drop_units = self.units - KEEP_UNITS;
-        let mut start = 0;
-        for (index, ch) in self.text.char_indices() {
-            if drop_units == 0 {
-                start = index;
-                break;
+        let drop_units = self.units - KEEP_UNITS;
+        let start = if self.text.as_bytes()[..drop_units.min(self.text.len())].is_ascii() {
+            drop_units
+        } else {
+            let mut drop_units = drop_units;
+            let mut start = 0;
+            for (index, ch) in self.text.char_indices() {
+                if drop_units == 0 {
+                    start = index;
+                    break;
+                }
+                // A surrogate pair straddling the cut goes whole.
+                drop_units = drop_units.saturating_sub(ch.len_utf16());
+                start = index + ch.len_utf8();
             }
-            // A surrogate pair straddling the cut goes whole.
-            drop_units = drop_units.saturating_sub(ch.len_utf16());
-            start = index + ch.len_utf8();
-        }
-        let kept = &self.text[start..];
-        let kept = match kept.find('\n') {
-            Some(newline) if newline > 0 => &kept[newline + 1..],
-            _ => kept,
+            start
         };
-        self.text = kept.to_owned();
-        self.units = utf16_len(&self.text);
+        let start = match self.text[start..].find('\n') {
+            Some(newline) if newline > 0 => start + newline + 1,
+            _ => start,
+        };
+        self.units -= utf16_len(&self.text[..start]);
+        self.text.drain(..start);
     }
 }
 
+/// Every byte that starts a character is one unit; a four-byte character is two.
 fn utf16_len(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
+    text.bytes()
+        .map(|byte| usize::from(byte & 0xC0 != 0x80) + usize::from(byte >= 0xF0))
+        .sum()
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ async fn serve(registry: Arc<Registry>, mut socket: WebSocket) {
                 Some(Ok(Message::Close(_)) | Err(_)) | None => break,
             },
             Some(frame) = frames.recv() => {
-                if socket.send(Message::Text(frame)).await.is_err() {
+                if socket.send(Message::Text(frame.text())).await.is_err() {
                     break;
                 }
             }

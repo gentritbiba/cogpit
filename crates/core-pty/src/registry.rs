@@ -3,31 +3,43 @@
 //! Locks are taken in one order only: the session map, then a session, then
 //! the client list.
 
-use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::ws::Utf8Bytes;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
+use tokio::runtime::Handle;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
-use crate::backend::{self, Args, Process, SpawnSpec};
-use crate::protocol::{Outbound, SessionInfo, Status};
+use crate::backend::{self, Args, Output, Process, SpawnSpec};
+use crate::protocol::{Frame, Outbound, SessionInfo, Status};
 use crate::scrollback::Scrollback;
 use crate::utf8::StreamDecoder;
 
 pub type ClientId = u64;
-pub type Outbox = mpsc::UnboundedSender<Utf8Bytes>;
+pub type Outbox = mpsc::UnboundedSender<Frame>;
 
 /// How long an exit waits for the last output. Output ends when every holder
 /// of the terminal closes it, which a background job can put off indefinitely.
 const OUTPUT_DRAIN: Duration = Duration::from_millis(500);
 const READ_BUFFER: usize = 16 * 1024;
+
+/// A frame per read would cost a wakeup and a socket write on every hop for
+/// each read: about 1 KiB on macOS, often under 100 bytes on Linux. So output
+/// goes out as it is read only while a terminal is quiet, which keeps a
+/// keystroke's echo or a redraw instant. Once a terminal has sent
+/// [`QUIET_BYTES`] or [`QUIET_FRAMES`] within [`BATCH_AGE`], its output is
+/// batched: a batch is sent when it reaches [`BATCH_BYTES`] or [`BATCH_AGE`]
+/// after it began (within 4 ms: the timer counts whole milliseconds).
+const BATCH_BYTES: usize = 64 * 1024;
+const BATCH_AGE: Duration = Duration::from_millis(3);
+const QUIET_BYTES: usize = 4 * 1024;
+const QUIET_FRAMES: usize = 8;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -46,11 +58,13 @@ struct SessionState {
     status: Status,
     exit_code: Option<i64>,
     scrollback: Scrollback,
+    /// Output read but not sent yet.
+    batch: String,
     clients: HashMap<ClientId, Outbox>,
     /// Dropped at exit, which releases the terminal and, on Windows, ends
     /// whatever the process left running.
     process: Option<Arc<dyn Process>>,
-    input: Option<std_mpsc::Sender<Vec<u8>>>,
+    input: Option<mpsc::UnboundedSender<Vec<u8>>>,
 }
 
 impl Session {
@@ -189,7 +203,6 @@ impl Registry {
             Err(err) => return error(&format!("Failed to spawn PTY: {err}")),
         };
 
-        let (input_tx, input_rx) = std_mpsc::channel();
         let session = Arc::new(Session {
             id: id.clone(),
             created_at: now_ms(),
@@ -200,9 +213,10 @@ impl Registry {
                 status: Status::Running,
                 exit_code: None,
                 scrollback: Scrollback::default(),
+                batch: String::new(),
                 clients: HashMap::from([(client, outbox.clone())]),
                 process: Some(Arc::clone(&spawned.process)),
-                input: Some(input_tx),
+                input: Some(spawned.input.start(terminal_runtime())),
             }),
         });
         {
@@ -227,49 +241,19 @@ impl Registry {
             );
         }
         self.broadcast_sessions();
-        self.run(
-            session,
-            spawned.input,
-            input_rx,
-            spawned.output,
-            spawned.wait,
-        );
+        self.run(session, spawned.output, spawned.wait);
     }
 
-    /// One thread each for input, output and the exit wait: all three block.
+    /// The output is read on the terminal thread; the exit wait blocks, so it
+    /// gets a thread of its own.
     fn run(
         self: &Arc<Self>,
         session: Arc<Session>,
-        mut input: Box<dyn Write + Send>,
-        input_rx: std_mpsc::Receiver<Vec<u8>>,
-        mut output: Box<dyn Read + Send>,
+        output: Output,
         wait: Box<dyn FnOnce() -> i64 + Send>,
     ) {
-        std::thread::spawn(move || {
-            for data in input_rx {
-                if input.write_all(&data).and_then(|()| input.flush()).is_err() {
-                    break;
-                }
-            }
-        });
-
         let (drained_tx, drained_rx) = std_mpsc::channel::<()>();
-        let reader_session = Arc::clone(&session);
-        std::thread::spawn(move || {
-            let mut decoder = StreamDecoder::default();
-            let mut buffer = vec![0; READ_BUFFER];
-            loop {
-                match output.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => output_to(&reader_session, &decoder.decode(&buffer[..read])),
-                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
-                    // EIO on Linux and a broken pipe on Windows mean the end.
-                    Err(_) => break,
-                }
-            }
-            output_to(&reader_session, &decoder.finish());
-            drop(drained_tx);
-        });
+        terminal_runtime().spawn(send_output(Arc::clone(&session), output, drained_tx));
 
         let registry = Arc::clone(self);
         std::thread::spawn(move || {
@@ -282,15 +266,18 @@ impl Registry {
     fn exited(&self, session: &Session, code: i64) {
         {
             let mut state = lock(&session.state);
+            send_batch(session, &mut state);
             state.status = Status::Exited;
             state.exit_code = Some(code);
             state.process = None;
             state.input = None;
-            let frame = Outbound::Exit {
-                id: &session.id,
-                code: Some(code),
-            }
-            .frame();
+            let frame = Frame::Text(
+                Outbound::Exit {
+                    id: &session.id,
+                    code: Some(code),
+                }
+                .frame(),
+            );
             for outbox in state.clients.values() {
                 let _ = outbox.send(frame.clone());
             }
@@ -400,36 +387,137 @@ impl Registry {
     fn broadcast_sessions(&self) {
         let sessions = lock(&self.sessions);
         let infos: Vec<SessionInfo> = sessions.values().map(|session| session.info()).collect();
-        let frame = Outbound::Sessions { sessions: &infos }.frame();
+        let frame = Frame::Text(Outbound::Sessions { sessions: &infos }.frame());
         for outbox in lock(&self.clients).values() {
             let _ = outbox.send(frame.clone());
         }
     }
 }
 
-/// Output after the exit was reported belongs to whatever the process left
-/// running on its terminal; the session has ended, so it is dropped.
-fn output_to(session: &Session, data: &str) {
-    if data.is_empty() {
-        return;
+/// Sends the batch to every client and adds it to the scrollback, together,
+/// so a client attaching in between sees each part exactly once. Output after
+/// the exit was reported belongs to whatever the process left running on its
+/// terminal; the session has ended, so it is dropped.
+fn send_batch(session: &Session, state: &mut SessionState) -> usize {
+    let sent = state.batch.len();
+    if sent == 0 {
+        return 0;
     }
-    let mut state = lock(&session.state);
-    if state.status == Status::Exited {
-        return;
+    if state.status == Status::Running {
+        state.scrollback.push(&state.batch);
     }
-    state.scrollback.push(data);
-    let frame = Outbound::Output {
-        id: &session.id,
-        data,
+    if state.status == Status::Running && !state.clients.is_empty() {
+        let frame = Frame::output(session.id.clone(), state.batch.clone());
+        for outbox in state.clients.values() {
+            let _ = outbox.send(frame.clone());
+        }
     }
-    .frame();
-    for outbox in state.clients.values() {
-        let _ = outbox.send(frame.clone());
+    state.batch.clear();
+    sent
+}
+
+/// What a terminal sent in the last [`BATCH_AGE`].
+#[derive(Default)]
+struct RecentSends(VecDeque<(Instant, usize)>);
+
+impl RecentSends {
+    fn record(&mut self, bytes: usize) {
+        if bytes > 0 {
+            self.0.push_back((Instant::now(), bytes));
+        }
+    }
+
+    fn quiet(&mut self, now: Instant) -> bool {
+        while self
+            .0
+            .front()
+            .is_some_and(|&(at, _)| now.duration_since(at) >= BATCH_AGE)
+        {
+            self.0.pop_front();
+        }
+        self.0.len() < QUIET_FRAMES
+            && self.0.iter().map(|&(_, bytes)| bytes).sum::<usize>() < QUIET_BYTES
     }
 }
 
+/// One thread reads and writes every terminal. Readers on threads of their
+/// own contend in the kernel: on macOS, eight terminals printing at once cost
+/// five times the CPU that one thread reading all eight does. Writing there
+/// too means a keystroke's echo is read without waking another thread.
+fn terminal_runtime() -> &'static Handle {
+    static RUNTIME: OnceLock<Handle> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("the terminal runtime starts");
+        let handle = runtime.handle().clone();
+        std::thread::Builder::new()
+            .name("pty-io".into())
+            .spawn(move || runtime.block_on(std::future::pending::<()>()))
+            .expect("the terminal thread starts");
+        handle
+    })
+}
+
+/// Reads a terminal until its end, sending the output in batches. Dropping
+/// `drained` tells the exit wait that all of it was sent.
+async fn send_output(session: Arc<Session>, output: Output, drained: std_mpsc::Sender<()>) {
+    let mut reader = match output.reader() {
+        Ok(reader) => reader,
+        Err(err) => {
+            tracing::warn!(id = %session.id, %err, "terminal output cannot be read");
+            return;
+        }
+    };
+    let mut decoder = StreamDecoder::default();
+    let mut buffer = vec![0; READ_BUFFER];
+    let batch_due = tokio::time::sleep(BATCH_AGE);
+    tokio::pin!(batch_due);
+    let mut batching = false;
+    let mut recent = RecentSends::default();
+    loop {
+        let read = tokio::select! {
+            biased;
+            read = reader.read(&mut buffer) => read,
+            () = &mut batch_due, if batching => {
+                batching = false;
+                recent.record(send_batch(&session, &mut lock(&session.state)));
+                continue;
+            }
+        };
+        let read = match read {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            // EIO on Linux and a broken pipe on Windows mean the end.
+            Err(_) => break,
+        };
+        let now = Instant::now();
+        let mut state = lock(&session.state);
+        decoder.decode(&buffer[..read], &mut state.batch);
+        if batching {
+            if state.batch.len() >= BATCH_BYTES {
+                batching = false;
+                recent.record(send_batch(&session, &mut state));
+            }
+        } else if recent.quiet(now) {
+            recent.record(send_batch(&session, &mut state));
+        } else {
+            batching = true;
+            batch_due.as_mut().reset(now + BATCH_AGE);
+        }
+    }
+    let mut state = lock(&session.state);
+    decoder.finish(&mut state.batch);
+    send_batch(&session, &mut state);
+    drop(state);
+    drop(drained);
+}
+
 fn send(outbox: &Outbox, message: &Outbound<'_>) {
-    let _ = outbox.send(message.frame());
+    let _ = outbox.send(Frame::Text(message.frame()));
 }
 
 fn non_empty(message: &Map<String, Value>, key: &str) -> Option<String> {

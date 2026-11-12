@@ -140,8 +140,19 @@ stopping the core (stdin closed), ends each running shell the way the TS server
 did: SIGHUP on Unix, `taskkill /T /F` on Windows, which ends the shell's tree by
 parent and spares a program whose launcher already exited (an editor opened
 with `code .`). A job object holds each Windows terminal's processes only as
-the backstop for a core that dies without stopping them. The Windows module
-(`backend/windows.rs`) is the workspace's one exception to
+the backstop for a core that dies without stopping them.
+
+One thread (`pty-io`) reads and writes every terminal, non-blocking. A blocking
+reader thread per terminal contends in the kernel on macOS: eight terminals
+printing at once cost five times the CPU of one thread reading all eight.
+Output goes to clients as it is read while a terminal is quiet, so an echo or
+a redraw is never held back. Once a terminal has sent 4 KiB or 8 frames within
+3 ms, its output is batched, each batch sent at 64 KiB or 3 ms after it began.
+Each frame is serialized once, on the connection that sends it first. Windows
+pipes have no readiness to wait on, so there a thread per terminal reads the
+output and hands it to `pty-io`, and another writes the input.
+
+The Windows module (`backend/windows.rs`) is the workspace's one exception to
 `unsafe_code = "forbid"`; every unsafe block states its invariant, and a test
 keeps unsafe code out of every other file.
 
