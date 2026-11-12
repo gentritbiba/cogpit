@@ -554,6 +554,24 @@ describe("TimelineList with the scroll engine", () => {
     expect(viewportTopOf(anchor)).toBe(before)
   })
 
+  // RC-O3: the pad grew by the measured history reserve at idle, 150 ms after an open had settled.
+  it("opens at the bottom with the top pad already at its target, leaving idle nothing to move", () => {
+    vi.useFakeTimers()
+    blockSize = 150
+    const { controller } = mount({ turns: makeTurns(ids(0, 200)), hasMore: true, sessionKey: "open-settled" })
+    // The browser reports the open's own scroll, which arms the idle timer.
+    act(() => { scroller!.dispatchEvent(new Event("scroll")) })
+    // The app hands the transcript's bytes over in an effect after the open's commit.
+    act(() => controller.setHistoryBytes({ remaining: 4_000_000, loaded: 400_000 }))
+    flushScroll()
+    expect(scrollTop()).toBe(maxScroll())
+    const height = heightOf(scroller!)
+    act(() => { vi.advanceTimersByTime(200) })
+    flushScroll()
+    expect(heightOf(scroller!)).toBe(height)
+    expect(scrollTop()).toBe(maxScroll())
+  })
+
   it("stops its idle timer once the reader settles", () => {
     vi.useFakeTimers()
     mount({ turns: makeTurns(ids(0, 200)) })

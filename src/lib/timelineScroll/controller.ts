@@ -368,8 +368,11 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
     this.topOnNextSession = true
   }
 
+  /** The bytes size the history reserve, so a change runs a layout pass. */
   setHistoryBytes(history: HistoryBytes): void {
+    if (history.remaining === this.history.remaining && history.loaded === this.history.loaded) return
     this.history = history
+    if (this.scroller && this.input) this.layoutPass(false)
   }
 
   /** Called from the list's layout effect after every commit. */
@@ -439,8 +442,8 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       this.measureRows()
       this.placeTop()
     } else if (this.follow.following) {
-      if (newPlan) this.placeFirstRow()
       this.measureRows()
+      this.settleTopPad()
       this.pinToBottom()
     } else {
       const navigating = this.navigation !== null
@@ -563,6 +566,15 @@ export class TimelineScrollController implements TimelineHandle, BlockWindowHost
       loadedHeight: sumHeights(this.heights, 0, this.heights.length),
       late: this.historyLate,
     })
+  }
+
+  /** While following, nothing on screen depends on the pad, so it goes straight to its target instead of waiting for idle. */
+  private settleTopPad(): void {
+    const shift = this.topPadTarget() - this.topPad
+    if (Math.abs(shift) < 1) return
+    this.writeTopPad(this.topPad + shift)
+    // Every rendered row sits below the pad.
+    for (const [index, top] of this.renderedTops) this.renderedTops.set(index, top + shift)
   }
 
   private pinToBottom(): void {
