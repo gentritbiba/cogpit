@@ -300,34 +300,45 @@ fn install_with_pacman(package: &Path) -> Result<(), String> {
     })
 }
 
+/// Waits for a process to end, then runs a command in its place.
+#[cfg(unix)]
+const WAIT_THEN_RUN: &str = r#"pid=$1; shift; i=0
+while kill -0 "$pid" 2>/dev/null; do i=$((i + 1)); [ "$i" -gt 300 ] && exit 1; sleep 0.2; done
+exec "$@""#;
+
+/// A detached shell that runs `launch` once process `pid` has exited.
+#[cfg(unix)]
+fn run_after_exit(pid: u32, launch: &[std::ffi::OsString]) -> std::process::Command {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let mut waiter = Command::new("/bin/sh");
+    waiter
+        .args(["-c", WAIT_THEN_RUN, "cogpit-relaunch"])
+        .arg(pid.to_string())
+        .args(launch)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0);
+    waiter
+}
+
 /// Start the installed version once this process is gone; the single-instance
 /// lock would turn away a copy started any sooner. Windows needs none of this:
 /// its installer restarts the app.
 fn relaunch_after_exit() {
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
-        use std::process::{Command, Stdio};
-        const WAIT_THEN_RUN: &str = r#"pid=$1; shift; i=0
-while kill -0 "$pid" 2>/dev/null; do i=$((i + 1)); [ "$i" -gt 300 ] && exit 1; sleep 0.2; done
-exec "$@""#;
         let Ok(executable) = env::current_exe() else {
             return;
         };
-        let mut waiter = Command::new("/bin/sh");
-        waiter.args(["-c", WAIT_THEN_RUN, "cogpit-relaunch"]);
-        waiter.arg(std::process::id().to_string());
-        match app_bundle(&executable) {
-            Some(bundle) if cfg!(target_os = "macos") => waiter.arg("/usr/bin/open").arg(bundle),
-            _ => waiter.arg(env::var_os("APPIMAGE").unwrap_or(executable.into_os_string())),
+        let launch = match app_bundle(&executable) {
+            Some(bundle) if cfg!(target_os = "macos") => {
+                vec!["/usr/bin/open".into(), bundle.into_os_string()]
+            }
+            _ => vec![env::var_os("APPIMAGE").unwrap_or(executable.into_os_string())],
         };
-        let spawned = waiter
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn();
-        if let Err(error) = spawned {
+        if let Err(error) = run_after_exit(std::process::id(), &launch).spawn() {
             eprintln!("[updater] Cogpit could not arrange its restart: {error}");
         }
     }
@@ -580,6 +591,26 @@ mod tests {
             None
         );
         assert_eq!(bundle("/repo/desktop/target/release/Cogpit"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restarts_only_after_the_old_process_has_gone() {
+        use std::process::Command;
+        let marker = env::temp_dir().join(format!("cogpit-relaunch-test-{}", std::process::id()));
+        let _ = fs::remove_file(&marker);
+        let mut old = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let launch = ["/usr/bin/touch".into(), marker.clone().into_os_string()];
+        let mut waiter = run_after_exit(old.id(), &launch).spawn().unwrap();
+
+        thread::sleep(Duration::from_millis(600));
+        assert!(!marker.exists(), "started while the old process was alive");
+
+        old.kill().unwrap();
+        old.wait().unwrap();
+        assert!(waiter.wait().unwrap().success());
+        assert!(marker.exists());
+        fs::remove_file(marker).unwrap();
     }
 
     #[test]
