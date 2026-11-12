@@ -162,7 +162,7 @@ fn main() {
                 let shell = app.state::<Shell>();
                 shell.quitting.store(true, Ordering::SeqCst);
                 shell_path::abandon();
-                stop_server(app);
+                stop_server(app, updater::installs_on_exit(app));
                 updater::install_on_exit(app);
             }
             _ => {}
@@ -170,10 +170,11 @@ fn main() {
 }
 
 /// Ask the server to finish and wait for it; a no-op once it is gone.
-pub fn stop_server(app: &AppHandle) {
+/// `for_update` also ends what the server left running (see [`Sidecar::shut_down`]).
+pub fn stop_server(app: &AppHandle, for_update: bool) {
     let server = app.state::<Shell>().server.lock().unwrap().take();
     if let Some(server) = server {
-        server.shut_down();
+        server.shut_down(for_update);
     }
 }
 

@@ -134,18 +134,29 @@ impl Sidecar {
     }
 
     /// Ask the server to save what it needs and exit, then make sure it has.
-    /// A server that exits in time has stopped what it meant to stop, so on
-    /// Windows what it left running on purpose (an editor opened from a
-    /// terminal) is let out of the job. One that does not is killed, and on
-    /// Windows the job takes every process it started with it.
-    pub fn shut_down(&self) {
+    ///
+    /// On Windows the server and everything it started share a job. A server
+    /// that exits in time is let out of it, so what it left running (an editor
+    /// opened from a terminal, a dev server an agent started) outlives the app,
+    /// as it does on macOS and Linux. `end_leftovers` ends those too: an update
+    /// is about to replace the files they may hold open. A server that does not
+    /// exit in time is killed, and the job takes everything with it.
+    pub fn shut_down(&self, end_leftovers: bool) {
         self.send(&ShellMessage::Shutdown);
         self.stdin.lock().unwrap().take();
         let deadline = Instant::now() + SHUTDOWN_GRACE;
         while Instant::now() < deadline {
             if self.exited() {
                 #[cfg(windows)]
-                self.job.release();
+                {
+                    if end_leftovers {
+                        self.job.terminate();
+                    } else {
+                        self.job.release();
+                    }
+                }
+                #[cfg(not(windows))]
+                let _ = end_leftovers;
                 return;
             }
             thread::sleep(Duration::from_millis(50));
@@ -204,9 +215,10 @@ mod windows_job {
         SetInformationJobObject, TerminateJobObject,
     };
 
-    /// Windows has no process groups, so ending the server alone would orphan
+    /// Windows has no process groups, so killing the server alone would orphan
     /// every agent, git and terminal process it started. Everything in the job
-    /// dies with it, and with the shell should the shell itself be killed.
+    /// dies when the job is terminated, or when the shell goes away without
+    /// having released it.
     pub struct Job(HANDLE);
 
     // SAFETY: a job handle may be used from any thread.

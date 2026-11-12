@@ -271,6 +271,15 @@ pub fn update_install(app: AppHandle) {
     }
 }
 
+/// Whether quitting now installs a downloaded update.
+pub fn installs_on_exit(app: &AppHandle) -> bool {
+    let updates = app.state::<Updates>();
+    let staged = updates.staged.lock().unwrap();
+    staged
+        .as_ref()
+        .is_some_and(|staged| staged.installer == Installer::Plugin)
+}
+
 /// The app is quitting with an update downloaded: install it for the next
 /// start. Not the pacman package, whose password prompt would appear unasked.
 pub fn install_on_exit(app: &AppHandle) {
@@ -439,7 +448,7 @@ async fn check(app: &AppHandle, installer: Installer) -> Result<(), String> {
     // The Windows installer starts while the app is still up, and the plugin then
     // exits the process without the shell's own teardown.
     let quitting = app.clone();
-    builder = builder.on_before_exit(move || crate::stop_server(&quitting));
+    builder = builder.on_before_exit(move || crate::stop_server(&quitting, true));
 
     let updater = builder.build().map_err(|error| error.to_string())?;
     let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
