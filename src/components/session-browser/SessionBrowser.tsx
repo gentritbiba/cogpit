@@ -6,6 +6,7 @@ import type { SessionBrowserProps } from "./types"
 export const SessionBrowser = memo(function SessionBrowser({
   activeSessionKey,
   onSelectSession,
+  onOpenQuoteSource,
   onNewSession,
   onNewFolder,
   defaultAgentKind,
@@ -30,6 +31,7 @@ export const SessionBrowser = memo(function SessionBrowser({
       <LiveSessions
         activeSessionKey={activeSessionKey}
         onSelectSession={onSelectSession}
+        onOpenQuoteSource={onOpenQuoteSource}
         onDuplicateSession={onDuplicateSession}
         onDeleteSession={onDeleteSession}
         onNewSession={onNewSession}

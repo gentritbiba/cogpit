@@ -15,8 +15,29 @@ cogpit-memory search "why we changed authentication"
 cogpit-memory search "session orchestrator" --session "$ID"
 ```
 
-Use the complete session ID returned by discovery or search. Indexing runs
-incrementally on search; `cogpit-memory index rebuild` refreshes it explicitly.
+Use the complete session ID returned by discovery or search.
+
+Search returns one ranked list. Prose (prompts, replies, thinking, summaries)
+is matched by its rarer words and, when an embedding model is set up, by
+meaning, so ask a question in your own words ("why did the deploy stall") when
+you do not know the original wording; use exact names or quoted phrases when
+you do. Prose covers all time unless you pass `--max-age`; tool input and
+output are exact-phrase hits within `--max-age` (default 5d). `--mode keyword`
+or `--mode semantic` uses one side only.
+
+Each hit has `turn` and `agent` for `context`, `kind`, `score`, `timestamp`
+and `match`: `keyword`, `semantic` (same meaning, no shared words, with a
+`similarity`; check it with `context` before relying on it) or `both`.
+`semantic: unavailable` with `semanticReason` means meaning search is off or
+failed; keyword results are still complete. `archived: true` means the
+transcript is gone: the hit's `text` is all that is left and `context` cannot
+open it. `automated: true` marks prompts other agents or Cogpit wrote.
+`behind: N` means N transcripts that are still being written have turns newer
+than the index; search catches up on them every minute or so, so there is
+nothing to run. To read a session's latest turns, such as checking whether a
+message reached a child session, pass `--session <id>`: that session and its
+subagents are always brought up to date first. A `warnings` entry about
+transcripts not indexed yet means `cogpit-memory index sync` will add them.
 
 ## Read only the detail you need
 

@@ -105,6 +105,19 @@ export interface SubagentFileInfo {
   modifiedAt: number
 }
 
+/** A transcript with the session it belongs to, for an index that covers every file. */
+export interface TranscriptFileInfo {
+  filePath: string
+  mtimeMs: number
+  size: number
+  /** The session the file is filed under: a sub-agent's transcript names its parent. */
+  sessionId: string
+  isSubagent: boolean
+  parentSessionId: string | null
+  /** The sub-agent whose transcript this is; null for a session's own. */
+  agentId: string | null
+}
+
 /** The `{dirName, fileName}` pair the UI addresses a transcript by. */
 export interface SessionAddress {
   dirName: string
@@ -133,6 +146,11 @@ export interface AgentStore {
    * Always a fresh walk, for a caller that must see a file written just now.
    */
   listSessionFiles(): Promise<SessionFileInfo[]>
+  /**
+   * Every transcript under the root, sub-agents' own files included, each with
+   * the session it is filed under. Always a fresh walk.
+   */
+  listTranscripts(): Promise<TranscriptFileInfo[]>
   /** The same transcripts from the session catalog, a fresh walk only while it is not running. */
   listedSessionFiles(): Promise<SessionFileInfo[]>
   /** The transcript the running session catalog knows for `sessionId`, without touching the disk. */

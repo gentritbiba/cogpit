@@ -58,6 +58,7 @@ import { registerSessionOrchestrationRoutes } from "./routes/session-orchestrati
 import { registerCrewChatRoutes } from "./routes/crew-chat"
 import { registerSessionBoardRoutes } from "./routes/session-boards"
 import { registerSessionStatusRoutes } from "./routes/session-status"
+import { registerSessionSearchRoutes } from "./routes/session-search"
 import { registerShareGuestRoutes } from "./routes/share-guest"
 import { registerShareRoutes } from "./routes/shares"
 import { registerSlackRoutes } from "./routes/slack"
@@ -134,6 +135,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("session-status", registerSessionStatusRoutes),
+  apiRoute("session-search", registerSessionSearchRoutes),
   apiRoute("session-orchestration", registerSessionOrchestrationRoutes),
   apiRoute("crew-chat", registerCrewChatRoutes),
   apiRoute("session-boards", registerSessionBoardRoutes),

@@ -64,7 +64,7 @@ export function PrimarySessionBrowser({
   mobile = false,
   header,
 }: PrimarySessionBrowserProps) {
-  const { sessionSource } = useSessionControls()
+  const { sessionSource, actions } = useSessionControls()
   const { config } = useAppContext()
   const activeSessionKey = sessionSource
     ? `${sessionSource.dirName}/${sessionSource.fileName}`
@@ -74,6 +74,7 @@ export function PrimarySessionBrowser({
     <SessionBrowser
       activeSessionKey={activeSessionKey}
       onSelectSession={navigation.actions.handleDashboardSelect}
+      onOpenQuoteSource={actions.handleOpenQuoteSource}
       onNewSession={navigation.onStartNewSession}
       onNewFolder={navigation.onStartNewFolder}
       defaultAgentKind={config.defaultAgentKind}
@@ -92,9 +93,11 @@ export function PrimarySessionBrowser({
 /** Canonical empty/home dashboard shared by desktop and mobile shells. */
 export function ProjectDashboard({ navigation }: { navigation: ShellNavigation }) {
   const { state } = useAppContext()
+  const { actions } = useSessionControls()
   return (
     <Dashboard
       onSelectSession={navigation.actions.handleDashboardSelect}
+      onOpenQuoteSource={actions.handleOpenQuoteSource}
       onNewSession={navigation.onStartNewSession}
       creatingSession={navigation.creatingSession}
       selectedProjectDirName={state.dashboardProject}

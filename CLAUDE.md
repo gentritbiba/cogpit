@@ -29,11 +29,12 @@ Any code change MUST account for its impact on existing tests. Before considerin
 3. If you added new behavior, add test coverage for it
 4. Never leave tests broken — fixing tests is part of the change, not a separate task
 
-`packages/cogpit-memory`'s three sqlite-backed files — `search-index.test.ts`,
-`commands/search.test.ts` and `commands/index-cmd.test.ts` — report every test
+`packages/cogpit-memory`'s five sqlite-backed files — `search-index.test.ts`,
+`commands/search.test.ts`, `commands/search-memory.test.ts`,
+`commands/search-embeddings.test.ts` and `commands/index-cmd.test.ts` — report every test
 passing and then segfault in `bun:sqlite` at teardown on Bun 1.4.0-canary.1.
 That crash predates any current work and takes down a whole-package `bun test`
-run, so run those three files individually to read their results.
+run, so run those five files individually to read their results.
 
 ## Agent Layer
 

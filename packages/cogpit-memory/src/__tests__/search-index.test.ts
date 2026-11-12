@@ -26,6 +26,21 @@ describe("SearchIndex", () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  it("adds the index time column to an index an older version wrote", async () => {
+    const { Database } = await import("bun:sqlite")
+    const old = new Database(dbPath)
+    old.exec("CREATE TABLE indexed_files (file_path TEXT PRIMARY KEY, mtime_ms REAL NOT NULL, session_id TEXT NOT NULL, is_subagent INTEGER NOT NULL DEFAULT 0, parent_session_id TEXT)")
+    old.exec("INSERT INTO indexed_files VALUES ('/t/a.jsonl', 5, 'a', 0, NULL)")
+    old.close()
+    const index = new SearchIndex(dbPath)
+    try {
+      expect(index.indexedFiles()).toEqual(new Map([["/t/a.jsonl", 5]]))
+      expect(index.indexedAt()).toEqual(new Map())
+    } finally {
+      index.close()
+    }
+  })
+
   it("removes deleted transcripts before applying the search limit", () => {
     const index = new SearchIndex(dbPath)
     const live = join(tmpDir, "live.jsonl")
@@ -83,6 +98,40 @@ describe("SearchIndex", () => {
     const hits = index.search("authentication")
     expect(hits.length).toBeGreaterThan(0)
     expect(hits[0].sessionId).toBe("test-session")
+    index.close()
+  })
+
+  it("replaces only the re-indexed file's rows, even when another transcript shares its name", () => {
+    const index = new SearchIndex(dbPath)
+    const write = (path: string, text: string) => {
+      mkdirSync(join(path, ".."), { recursive: true })
+      writeFileSync(path, JSON.stringify({ type: "user", message: { role: "user", content: text } }))
+    }
+    const one = join(tmpDir, "copilot", "s1", "events.jsonl")
+    const two = join(tmpDir, "copilot", "s2", "events.jsonl")
+    const parent = join(tmpDir, "projects", "-p", "a1.jsonl")
+    const child = join(tmpDir, "projects", "-p", "a1", "subagents", "agent-b.jsonl")
+    const tokenless = join(tmpDir, "---", "...")
+    write(one, "alpha first")
+    write(two, "alpha second")
+    write(parent, "alpha parent")
+    write(child, "alpha child")
+    write(tokenless, "alpha odd")
+    for (const [path, id] of [[one, "s1"], [two, "s2"], [parent, "a1"], [child, "a1"], [tokenless, "odd"]] as const) index.indexFile(path, id, 1)
+    write(one, "beta replaced")
+    write(parent, "beta parent")
+    write(tokenless, "beta odd")
+    index.indexFile(one, "s1", 2)
+    index.indexFile(parent, "a1", 2)
+    index.indexFile(tokenless, "odd", 2)
+    const rows = index["db"].prepare("SELECT source_file, content FROM search_content ORDER BY source_file").all() as Array<{ source_file: string; content: string }>
+    expect(rows.map((row) => [row.source_file, row.content])).toEqual([
+      [two, "alpha second"],
+      [one, "beta replaced"],
+      [child, "alpha child"],
+      [parent, "beta parent"],
+      [tokenless, "beta odd"],
+    ].sort((a, b) => a[0]!.localeCompare(b[0]!)))
     index.close()
   })
 

@@ -24,6 +24,7 @@ import {
 } from "../../agents/copilotTransport"
 import { binDir, NO_COGPIT_SESSION, shimPath } from "../../browser/paths"
 import { getDataRoot } from "../../config"
+import { memoryDir } from "../../memory/paths"
 
 class FakeCopilotProcess extends EventEmitter implements CopilotRuntimeProcess {
   readonly stdin = new PassThrough()
@@ -188,6 +189,7 @@ describe("CopilotRuntime", () => {
           PATH: `${binDir()}${delimiter}/bin`,
           COGPIT_SESSION_ID: NO_COGPIT_SESSION,
           COGPIT_ORCHESTRATION_ROOT: getDataRoot(),
+          COGPIT_MEMORY_DIR: memoryDir(),
         },
         stdio: ["pipe", "pipe", "pipe"],
       },

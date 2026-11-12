@@ -107,6 +107,7 @@ describe("agent session stores", () => {
       sessionId: parentId,
       isSubagent: true,
       parentSessionId: parentId,
+      agentId: "7",
     })
   })
 

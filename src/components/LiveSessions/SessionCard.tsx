@@ -185,6 +185,7 @@ export const SessionCard = memo(function SessionCard({
             <button
               type="button"
               data-live-session
+              data-session-search-item
               onClick={() => onSelectSession(s.dirName, s.fileName)}
               onMouseEnter={onHoverStart}
               onMouseLeave={onHoverEnd}

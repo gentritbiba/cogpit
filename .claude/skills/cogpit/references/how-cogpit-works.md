@@ -37,6 +37,11 @@
 - Panels beside the chat show the files you changed per turn, git worktrees,
   terminals and project scripts, the [Browser panel](browser.md), and
   integrations such as GitHub pull requests, ClickUp, Vercel and Cloudflare.
+- The sidebar and a project’s dashboard search filter session names immediately.
+  With at least two characters, **In conversations** also finds stored conversation
+  text. Select a snippet to open its turn; archived text opens read-only. Meaning
+  matches have a small marker. Without embeddings, keyword matches still work.
+  Older devices may show only the session list.
 - Sessions you start with `cogpit-session` are linked to yours and appear as
   your crew.
 
