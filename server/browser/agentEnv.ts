@@ -17,6 +17,8 @@ import { noteBrowserProfiles } from "./owners"
 import { binDir, shimPath } from "./paths"
 import { instanceSessionId } from "../../shared/session/instances"
 import { getDataRoot } from "../config"
+import { memoryDir } from "../memory/paths"
+import { MEMORY_DIR_ENV } from "../../shared/memory/paths"
 
 /** True once `~/.cogpit/bin` exists: it holds the session CLI and, when installed, the shim. */
 export function agentBinInstalled(): boolean {
@@ -41,6 +43,8 @@ export function cogpitAgentEnv(base: NodeJS.ProcessEnv, cogpitSessionId: string)
     ...base,
     COGPIT_SESSION_ID: cogpitSessionId,
     COGPIT_ORCHESTRATION_ROOT: base.COGPIT_ORCHESTRATION_ROOT || getDataRoot(),
+    // A curated base env leaves the override out; the server's own then applies.
+    [MEMORY_DIR_ENV]: memoryDir(base[MEMORY_DIR_ENV] ? base : process.env),
     ...(port !== null ? { COGPIT_PORT: String(port) } : {}),
   }
   if (!agentBinInstalled()) return env

@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events"
 import { splitInstanceSessionId } from "../../shared/session/instances"
 import { SESSION_LOOKUP_ORDER, allStores, storeFor } from "../agents"
 import { isSinglePathSegment } from "../agents/containment"
+import { startMemoryIndexer, stopMemoryIndexer } from "../memory"
 import { flushFacts, startFactPersistence } from "./facts"
 import { startRowRechecks } from "./rows"
 import { enableSessionCatalogs } from "./storeCatalog"
@@ -52,6 +53,7 @@ export function startSessionCatalog(): void {
   enableSessionCatalogs()
   startRowRechecks()
   void startFactPersistence()
+  startMemoryIndexer()
 }
 
 /** Server shells start the catalog once the first response is out, so it never delays that one. */
@@ -68,7 +70,10 @@ export function startSessionCatalogAfterFirstResponse(server: EventEmitter): voi
   })
 }
 
-/** Save what the catalog learned since its last save; for a server shutting down. */
-export function flushSessionCatalog(): Promise<void> {
-  return flushFacts().catch((error: unknown) => console.warn("[sessionCatalog] could not save the catalog:", error))
+/** Save what the catalog learned since its last save and stop indexing session text; for a server shutting down. */
+export async function flushSessionCatalog(): Promise<void> {
+  await Promise.all([
+    flushFacts().catch((error: unknown) => console.warn("[sessionCatalog] could not save the catalog:", error)),
+    stopMemoryIndexer().catch((error: unknown) => console.warn("[memory] could not stop indexing:", error)),
+  ])
 }

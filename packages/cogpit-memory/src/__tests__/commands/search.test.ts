@@ -142,6 +142,7 @@ describe("search command", () => {
     mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
     mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
     mockDbPath.value = join(mockDirs.PROJECTS_DIR, "..", "nonexistent-search-index.db")
+    process.env.COGPIT_MEMORY_DIR = join(tmpDir, "memory")
   })
 
   afterEach(() => {
@@ -242,7 +243,7 @@ describe("search command", () => {
         "explain the rollout format",
       )
 
-      const result = await searchSessions("rollout format", { maxAge: "3650d" }, null)
+      const result = await searchSessions("rollout format", { maxAge: "3650d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(1)
@@ -270,7 +271,7 @@ describe("search command", () => {
         toolInput: { file_path: "/src/authentication.ts" },
       })
 
-      const result = await searchSessions("authentication.ts", { maxAge: "1d" }, null)
+      const result = await searchSessions("authentication.ts", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ location: string; toolName?: string }> }> }
       expect(resp.results.length).toBe(1)
@@ -329,7 +330,7 @@ describe("search command", () => {
         userMessage: "Global Copilot discovery needle",
       })
 
-      const result = await searchSessions("discovery needle", { maxAge: "1d" }, null)
+      const result = await searchSessions("discovery needle", { maxAge: "1d" }, null, null)
       const response = result as { results: Array<{ sessionId: string; cwd: string }> }
       expect(response.results).toEqual([
         expect.objectContaining({ sessionId, cwd: "/workspace/copilot" }),
@@ -396,7 +397,7 @@ describe("search command", () => {
       const longMessage = "A".repeat(200) + " NEEDLE " + "B".repeat(200)
       writeSession(projDir, "s1.jsonl", { userMessage: longMessage })
 
-      const result = await searchSessions("NEEDLE", { maxAge: "1d" }, null)
+      const result = await searchSessions("NEEDLE", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ snippet: string }> }> }
       expect(resp.results.length).toBe(1)
@@ -414,7 +415,7 @@ describe("search command", () => {
         userMessage: "alpha beta alpha gamma alpha",
       })
 
-      const result = await searchSessions("alpha", { maxAge: "1d" }, null)
+      const result = await searchSessions("alpha", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ matchCount: number }> }> }
       expect(resp.results.length).toBe(1)
@@ -565,7 +566,7 @@ describe("search command", () => {
       writeSession(projDir, "fallback.jsonl", { userMessage: "raw-scan-fallback-keyword" })
 
       // Explicitly pass null — should use raw scan
-      const result = await searchSessions("raw-scan-fallback-keyword", { maxAge: "1d" }, null)
+      const result = await searchSessions("raw-scan-fallback-keyword", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(1)
@@ -593,7 +594,7 @@ describe("search command", () => {
         userMessage: "subagent-keyword used deeper in the agent",
       })
 
-      const result = await searchSessions("subagent-keyword", { maxAge: "1d" }, null)
+      const result = await searchSessions("subagent-keyword", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ location: string }> }> }
       // The parent session should match, plus subagent hits should be included
@@ -617,7 +618,7 @@ describe("search command", () => {
       })
 
       // Raw-scan pre-filters on the parent file, so this should not match
-      const result = await searchSessions("orphaned-subagent-term", { maxAge: "1d" }, null)
+      const result = await searchSessions("orphaned-subagent-term", { maxAge: "1d" }, null, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: unknown[] }
       expect(resp.results.length).toBe(0)

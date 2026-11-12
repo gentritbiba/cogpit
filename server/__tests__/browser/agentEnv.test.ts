@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { browserShimInstalled, cogpitAgentEnv } from "../../browser/agentEnv"
@@ -37,6 +37,15 @@ describe("cogpitAgentEnv", () => {
     expect(env.PATH).toBe(`${binDir()}${delimiter}/usr/bin`)
     expect(env.COGPIT_SESSION_ID).toBe("session-1")
     expect(env.FOO).toBe("bar")
+  })
+
+  it("points the agent at the server's memory store, keeping one it was already given", () => {
+    vi.stubEnv("COGPIT_MEMORY_DIR", "/server/memory")
+    expect(cogpitAgentEnv({ HOME: "/elsewhere" }, "session-1").COGPIT_MEMORY_DIR).toBe("/server/memory")
+    expect(cogpitAgentEnv({ COGPIT_MEMORY_DIR: "/data/memory" }, "session-1").COGPIT_MEMORY_DIR).toBe("/data/memory")
+    vi.stubEnv("COGPIT_MEMORY_DIR", "")
+    expect(cogpitAgentEnv({ HOME: "/elsewhere" }, "session-1").COGPIT_MEMORY_DIR).toBe(join(homedir(), ".cogpit", "memory"))
+    vi.unstubAllEnvs()
   })
 
   it("does not prepend twice when the shim directory already leads PATH", () => {

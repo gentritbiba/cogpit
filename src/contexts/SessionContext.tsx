@@ -102,7 +102,7 @@ export interface SessionContextValue {
     /** Add typed context to the open composer; returns why it could not be added, or null. */
     handleAddComposerContext?: (item: ComposerContextItem, attachments?: ComposerAttachment[]) => string | null
     /** Jump to a quoted reply's source; false when it can no longer be found. */
-    handleOpenQuoteSource?: (source: QuoteSource, text: string) => Promise<boolean>
+    handleOpenQuoteSource?: (source: QuoteSource, text: string, turn?: number | null) => Promise<boolean>
   }
 }
 

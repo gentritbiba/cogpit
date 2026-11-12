@@ -6,7 +6,7 @@ import { DesktopWorkspace } from "../DesktopWorkspace"
 import type { DesktopAppShellProps } from "../desktopTypes"
 import type { ParsedSession } from "../../../../shared/session/types"
 import type { useAppContext } from "@/contexts/AppContext"
-import type { useSessionContext } from "@/contexts/SessionContext"
+import type { SessionControls } from "@/contexts/SessionContext"
 import type { EditionMainView } from "@/edition/contract"
 import { __installEditionUiForTest, __resetEditionUiForTest } from "@/edition/registry"
 import type { MainView } from "@/hooks/useSessionState"
@@ -154,7 +154,13 @@ function setContexts({
       watchOffset: 0, loadId: 1,
     } : null,
     isSubAgentView: false,
-  } as ReturnType<typeof useSessionContext>)
+    actions: {
+      handleOpenQuoteSource: vi.fn(async () => true),
+      handleStopSession: vi.fn(async () => {}),
+      handleToggleExpandAll: vi.fn(),
+      handleLoadSession: vi.fn(),
+    },
+  } satisfies Partial<SessionControls>)
 }
 
 function makeProps(
