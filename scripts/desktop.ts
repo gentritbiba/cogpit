@@ -5,10 +5,10 @@
  *   bun run desktop:build   the renderer, the bundled server and the app bundle
  *   bun scripts/desktop.ts stage   only the renderer and the bundled server
  *
- * A built app runs the API server as a sidecar on the Bun runtime it ships
- * (`desktop/binaries/`), from the bundle staged in `desktop/resources/`
- * (`desktop/tauri.bundle.json`). A dev build runs `server/desktop.ts` from
- * source on the developer's own Bun.
+ * A built app runs the API server as a sidecar on the Bun runtime it ships,
+ * next to the Rust core (`desktop/binaries/`), from the bundle staged in
+ * `desktop/resources/` (`desktop/tauri.bundle.json`). A dev build runs
+ * `server/desktop.ts` from source on the developer's own Bun.
  */
 import { spawn, spawnSync } from "node:child_process"
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -20,6 +20,7 @@ const desktop = join(root, "desktop")
 const resources = join(desktop, "resources")
 /** The renderer dev server `desktop:dev` starts; the server proxies everything that is not an API to it. */
 const RENDERER_DEV_URL = "http://localhost:5174"
+const EXE = process.platform === "win32" ? ".exe" : ""
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): void {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit", env })
@@ -32,14 +33,21 @@ function rustTarget(): string {
   return host
 }
 
-/** Tauri looks external binaries up by target triple. */
-function stageRuntime(): void {
+/** Ship a binary next to the app executable; Tauri looks external binaries up by target triple. */
+function stageBinary(name: string, source: string): void {
   const directory = join(desktop, "binaries")
   mkdirSync(directory, { recursive: true })
-  const extension = process.platform === "win32" ? ".exe" : ""
-  const target = join(directory, `cogpit-bun-${rustTarget()}${extension}`)
-  cpSync(process.execPath, target)
+  const target = join(directory, `${name}-${rustTarget()}${EXE}`)
+  cpSync(source, target)
   chmodSync(target, 0o755)
+}
+
+/** The Bun runtime the server runs on, and the Rust core the server supervises. */
+function stageBinaries(): void {
+  stageBinary("cogpit-bun", process.execPath)
+  run("bun", ["run", "build:core", "--release"])
+  const targetDir = process.env.CARGO_TARGET_DIR?.trim() || join(root, "target")
+  stageBinary("cogpit-core", join(targetDir, "release", `cogpit-core${EXE}`))
 }
 
 /** Where node-pty looks for its native addon, in its own order (lib/utils.js). */
@@ -90,12 +98,13 @@ async function stage(): Promise<void> {
 
 async function build(): Promise<void> {
   await stage()
-  stageRuntime()
+  stageBinaries()
   run("bunx", ["tauri", "build", "--config", join(desktop, "tauri.bundle.json"), ...process.argv.slice(3)])
 }
 
 function dev(): void {
   run("bun", ["run", "build:generated"])
+  run("bun", ["run", "build:core"])
   const env = { ...process.env, COGPIT_RENDERER_DEV_URL: RENDERER_DEV_URL }
   const port = new URL(RENDERER_DEV_URL).port
   const vite = spawn("bunx", ["vite", "--mode", "renderer", "--port", port, "--strictPort"], { cwd: root, stdio: "inherit", env })

@@ -173,9 +173,12 @@ jobs:
       - name: Install the Rust toolchain
         run: rustup toolchain install
 
+      # desktop:build also builds the release core in the root workspace.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: desktop
+          workspaces: |
+            . -> target
+            desktop -> target
 
       - name: Install application dependencies
         working-directory: .

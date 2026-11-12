@@ -26,7 +26,8 @@ pub struct Launch {
     pub data_dir: PathBuf,
     /// The login shell's PATH, which agents need to find their CLIs.
     pub path: Option<String>,
-    /// The Rust core sidecar the server supervises, when this build ships one.
+    /// The Rust core the server supervises, as this build ships it; a dev
+    /// build leaves it out and the server finds the checkout's own build.
     pub core_bin: Option<PathBuf>,
 }
 
@@ -62,8 +63,11 @@ impl Sidecar {
         if let Some(path) = &launch.path {
             command.env("PATH", path);
         }
+        // An argument, not COGPIT_CORE_BIN: every process the server starts
+        // inherits its environment, and a Cogpit run from source in one of its
+        // terminals would take this binary over its own build.
         if let Some(core_bin) = &launch.core_bin {
-            command.env("COGPIT_CORE_BIN", core_bin);
+            command.arg("--core-bin").arg(core_bin);
         }
         #[cfg(windows)]
         {

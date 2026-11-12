@@ -226,20 +226,22 @@ fn fail_startup(app: &AppHandle, reason: &str, log: Option<&std::path::Path>) {
     app.exit(1);
 }
 
-/// Where the server, its runtime and the renderer are. A development build
-/// runs the server from source on the developer's own Bun, with the renderer
-/// from `bun run desktop:dev`'s Vite or from `dist/`.
+/// Where the server, its runtime, the renderer and the Rust core are. A
+/// development build runs the server from source on the developer's own Bun,
+/// with the renderer from `bun run desktop:dev`'s Vite or from `dist/`, and the
+/// core the checkout built (`bun run build:core`).
 fn launch(app: &AppHandle, path: Option<String>) -> Result<Launch, String> {
     let executable_dir = env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from))
         .ok_or("The app cannot find its own folder.")?;
-    let (runtime, script, static_dir) = if cfg!(debug_assertions) {
+    let (runtime, script, static_dir, core_bin) = if cfg!(debug_assertions) {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         (
             PathBuf::from("bun"),
             repo.join("server/desktop.ts"),
             repo.join("dist"),
+            None,
         )
     } else {
         let resources = app
@@ -250,16 +252,16 @@ fn launch(app: &AppHandle, path: Option<String>) -> Result<Launch, String> {
             executable_dir.join(format!("cogpit-bun{}", env::consts::EXE_SUFFIX)),
             resources.join("server/desktop.js"),
             resources.join("web"),
+            Some(executable_dir.join(format!("cogpit-core{}", env::consts::EXE_SUFFIX))),
         )
     };
-    let core = executable_dir.join(format!("cogpit-core{}", env::consts::EXE_SUFFIX));
     Ok(Launch {
         runtime,
         script,
         static_dir,
         data_dir: data_dir(app)?,
         path,
-        core_bin: core.is_file().then_some(core),
+        core_bin,
     })
 }
 

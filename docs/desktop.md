@@ -37,8 +37,13 @@ GUI apps do not inherit the login shell's `PATH` on macOS and Linux, so the
 shell asks the user's login shell for it (three seconds at most, killing
 whatever its startup files left running) and starts the server with it.
 
-When a `cogpit-core` binary sits next to the shell's executable, the shell
-passes its path to the server as `COGPIT_CORE_BIN`.
+A built app ships the Rust core (`cogpit-core`) next to its executable and
+passes it to the server as `--core-bin` (the composition's `coreBin`). It is an
+argument rather than `COGPIT_CORE_BIN` because everything the server starts
+inherits its environment: a Cogpit run from source in one of the app's
+terminals would otherwise use the app's core instead of its own build. A dev
+build passes nothing, and the server finds the checkout's build
+(`bun run build:core`, which `desktop:dev` runs).
 
 ## The renderer bridge
 

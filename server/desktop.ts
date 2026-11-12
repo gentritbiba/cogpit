@@ -2,7 +2,10 @@
  * Server entry for the desktop app. The shell (`desktop/`) runs this as a
  * sidecar process and talks to it over stdin/stdout (`shared/desktopProtocol.ts`).
  *
- *   desktop.js --static-dir <renderer build> --data-dir <user data>
+ *   desktop.js --static-dir <renderer build> --data-dir <user data> [--core-bin <cogpit-core>]
+ *
+ * A built app passes the core binary it ships; without one the server finds
+ * the checkout's own build (`server/core/binary.ts`).
  *
  * `COGPIT_RENDERER_DEV_URL` (set by `bun run desktop:dev`) serves the renderer
  * from Vite instead of the build.
@@ -32,6 +35,7 @@ const { values: args } = parseArgs({
   options: {
     "static-dir": { type: "string" },
     "data-dir": { type: "string" },
+    "core-bin": { type: "string" },
   },
 })
 
@@ -63,6 +67,7 @@ async function start(staticDir: string, dataDir: string): Promise<number> {
     mode: "desktop",
     legacyClickUpPath: CLICKUP_CONFIG_FILE,
     viteDevUrl: process.env.COGPIT_RENDERER_DEV_URL,
+    coreBin: args["core-bin"],
   })
 
   // Network access pins the well-known port so other devices can find this one.
