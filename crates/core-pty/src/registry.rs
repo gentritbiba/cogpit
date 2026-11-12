@@ -89,6 +89,20 @@ impl Registry {
         }
     }
 
+    /// Kills every running session and waits for the kills to be sent, as
+    /// the server did when it stopped. Blocks.
+    pub fn shutdown(&self) {
+        let sessions = std::mem::take(&mut *lock(&self.sessions));
+        let kills: Vec<_> = sessions
+            .values()
+            .filter_map(|session| lock(&session.state).process.clone())
+            .map(|process| std::thread::spawn(move || process.kill()))
+            .collect();
+        for kill in kills {
+            let _ = kill.join();
+        }
+    }
+
     pub async fn handle(self: &Arc<Self>, client: ClientId, outbox: &Outbox, text: &str) {
         let message = match serde_json::from_str::<Value>(text) {
             Ok(Value::Object(message)) => message,
@@ -195,9 +209,11 @@ impl Registry {
             let mut sessions = lock(&self.sessions);
             if sessions.contains_key(&id) {
                 drop(sessions);
-                spawned.process.kill();
-                // Reap it off the runtime; on Windows this also closes its console.
-                std::thread::spawn(move || (spawned.wait)());
+                // Off the runtime: both the kill and the reaping block.
+                std::thread::spawn(move || {
+                    spawned.process.kill();
+                    (spawned.wait)()
+                });
                 return error("Session ID already exists");
             }
             sessions.insert(id.clone(), Arc::clone(&session));
@@ -321,8 +337,8 @@ impl Registry {
         let Some(session) = lock(&self.sessions).shift_remove(id) else {
             return;
         };
-        if let Some(process) = &lock(&session.state).process {
-            process.kill();
+        if let Some(process) = lock(&session.state).process.clone() {
+            std::thread::spawn(move || process.kill());
         }
         self.broadcast_sessions();
     }

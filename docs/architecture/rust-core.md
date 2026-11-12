@@ -125,12 +125,15 @@ Known differences from the TS routes:
 
 `core-pty` runs processes on `portable-pty` on Unix (the shell leads its own
 session with the PTY as its controlling terminal) and on ConPTY directly on
-Windows, where `cmd.exe` needs its `/c` line verbatim. A job object holds each
-Windows terminal's process tree: a kill ends the tree, and so does the core
-exiting while the terminal runs. A shell that exits on its own releases the job
-without killing it, so programs it started detached (an editor opened with
-`code .`) keep running, as they did under node-pty. That module (`backend/windows.rs`) is the workspace's one exception to
-`unsafe_code = "forbid"`; every unsafe block states its invariant.
+Windows, where `cmd.exe` needs its `/c` line verbatim. Killing a terminal, and
+stopping the core (stdin closed), ends each running shell the way the TS server
+did: SIGHUP on Unix, `taskkill /T /F` on Windows, which ends the shell's tree by
+parent and spares a program whose launcher already exited (an editor opened
+with `code .`). A job object holds each Windows terminal's processes only as
+the backstop for a core that dies without stopping them. The Windows module
+(`backend/windows.rs`) is the workspace's one exception to
+`unsafe_code = "forbid"`; every unsafe block states its invariant, and a test
+keeps unsafe code out of every other file.
 
 ## Not ported in stage A
 

@@ -5,12 +5,15 @@
 //! in a second layer of quotes it cannot read. Here the command line is
 //! exactly what `cmdline::command_line` returns.
 //!
-//! The process starts suspended inside a job object that kills everything in
-//! it when its last handle closes. A kill terminates the job, which ends the
-//! whole tree the way `taskkill /T /F` did, and a core that exits takes its
-//! running terminals with it. When the shell exits on its own the job stops
-//! killing on close, so what it started detached (an editor, `start`) lives on,
-//! as it did before. Programs may still ask to leave the job.
+//! A kill is `taskkill /T /F` on the shell, as it always was: it ends the
+//! shell and its descendants by parent, and spares a program whose launcher
+//! already exited, such as an editor opened with `code .`. Once the shell is
+//! gone, by a kill or on its own, nothing else of the terminal is ended.
+//!
+//! The process also starts suspended inside a job object that kills
+//! everything in it when its last handle closes. That is the backstop for a
+//! core that dies without stopping its terminals: it cannot leave a shell
+//! running. Programs may still ask to leave the job.
 #![allow(unsafe_code)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 
@@ -20,6 +23,8 @@ use std::fs::File;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
+use std::os::windows::process::CommandExt;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr};
 
@@ -34,11 +39,11 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use super::cmdline::command_line;
@@ -101,6 +106,7 @@ impl Drop for PseudoConsole {
 }
 
 struct WindowsProcess {
+    pid: u32,
     console: Arc<Mutex<Option<PseudoConsole>>>,
     job: Arc<OwnedHandle>,
 }
@@ -116,8 +122,20 @@ impl Process for WindowsProcess {
     }
 
     fn kill(&self) {
-        // SAFETY: `job` is an open job handle owned by `self`.
-        unsafe { TerminateJobObject(raw(&self.job), KILLED_EXIT_CODE) };
+        let killed = Command::new("taskkill")
+            .args(["/PID", &self.pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .is_ok_and(|status| status.success());
+        if killed {
+            release(&self.job);
+        } else {
+            // SAFETY: `job` is an open job handle owned by `self`.
+            unsafe { TerminateJobObject(raw(&self.job), KILLED_EXIT_CODE) };
+        }
     }
 }
 
@@ -185,14 +203,16 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     let closer = Arc::clone(&console);
     let exited_job = Arc::clone(&job);
     Ok(Spawned {
-        process: Arc::new(WindowsProcess { console, job }),
+        process: Arc::new(WindowsProcess {
+            pid: info.dwProcessId,
+            console,
+            job,
+        }),
         input: Box::new(File::from(input)),
         output: Box::new(File::from(output)),
         wait: Box::new(move || {
             let code = wait_for_exit(&process);
-            if let Err(err) = set_limits(&exited_job, JOB_OBJECT_LIMIT_BREAKAWAY_OK) {
-                tracing::warn!(%err, "could not release an exited terminal's job");
-            }
+            release(&exited_job);
             // ConPTY holds the output pipe open until the console closes. The
             // registry's reader owns `output` and drains it meanwhile.
             let console = closer.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -231,6 +251,13 @@ fn job_holding(process: &OwnedHandle) -> io::Result<OwnedHandle> {
         return Err(io::Error::last_os_error());
     }
     Ok(job)
+}
+
+/// Stops the job killing what is left in it when it closes.
+fn release(job: &OwnedHandle) {
+    if let Err(err) = set_limits(job, JOB_OBJECT_LIMIT_BREAKAWAY_OK) {
+        tracing::warn!(%err, "could not release a terminal's job");
+    }
 }
 
 fn set_limits(job: &OwnedHandle, flags: JOB_OBJECT_LIMIT) -> io::Result<()> {

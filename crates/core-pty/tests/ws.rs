@@ -14,9 +14,13 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 const WAIT: Duration = Duration::from_secs(20);
 
 async fn start() -> SocketAddr {
+    start_with(PtyState::new()).await
+}
+
+async fn start_with(state: PtyState) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = router(PtyState::new());
+    let app = router(state);
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     addr
 }
@@ -295,6 +299,19 @@ async fn resizes_a_running_terminal() {
     client.send(json!({ "type": "kill", "id": "sz" })).await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_kills_every_running_session() {
+    let state = PtyState::new();
+    let addr = start_with(state.clone()).await;
+    let mut client = Client::connect(addr).await;
+    client.send(shell("long")).await;
+    client.frame("spawned", "long").await;
+    tokio::task::spawn_blocking(move || state.shutdown())
+        .await
+        .unwrap();
+    client.frame("exit", "long").await;
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -332,33 +349,33 @@ mod unix {
             .send(json!({ "type": "input", "id": "jc", "data": "echo sl''eeping; sleep 60\n" }))
             .await;
         client.output_until("jc", "sleeping").await;
-        // A ^C landing before `sleep` runs aborts the line instead, so the
-        // answer still comes back; resending covers a ^C the shell swallowed.
+        // Until `sleep` is the terminal's foreground job a ^C reaches the shell,
+        // which ignores it, so it is resent until the prompt comes back.
         let mut seen = String::new();
-        for _ in 0..5 {
+        for _ in 0..20 {
             client
                 .send(json!({ "type": "input", "id": "jc", "data": "\u{3}" }))
                 .await;
-            client
-                .send(json!({ "type": "input", "id": "jc", "data": answer_line() }))
-                .await;
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-            while !seen.contains("42") {
-                let Ok(frame) =
-                    tokio::time::timeout_at(deadline, client.frame("output", "jc")).await
-                else {
-                    break;
-                };
-                seen.push_str(frame["data"].as_str().unwrap());
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+            while !seen.contains("$ ") {
+                match tokio::time::timeout_at(deadline, client.frame("output", "jc")).await {
+                    Ok(frame) => seen.push_str(frame["data"].as_str().unwrap()),
+                    Err(_) => break,
+                }
             }
-            if seen.contains("42") {
+            if seen.contains("$ ") {
                 break;
             }
         }
         assert!(
-            seen.contains("42"),
+            seen.contains("$ "),
             "Ctrl-C did not interrupt sleep: {seen:?}"
         );
+        // ^C flushed anything typed ahead, so the answer goes after the prompt.
+        client
+            .send(json!({ "type": "input", "id": "jc", "data": answer_line() }))
+            .await;
+        client.output_until("jc", "42").await;
         client.send(json!({ "type": "kill", "id": "jc" })).await;
     }
 
@@ -506,6 +523,29 @@ mod windows {
         client.send(json!({ "type": "kill", "id": "tree" })).await;
         client.frame("exit", "tree").await;
         assert!(!writer.is_writing().await, "the writer outlived the kill");
+    }
+
+    /// A kill ends the shell's tree by parent, as `taskkill /T /F` always did,
+    /// so a program whose launcher already exited (`code .`) keeps running.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn kill_spares_a_program_whose_launcher_exited() {
+        let addr = start().await;
+        let writer = DetachedWriter::new("spared");
+        let launcher = writer.dir.join("launcher.ps1").display().to_string();
+        let mut client = Client::connect(addr).await;
+        client
+            .send(json!({ "type": "spawn", "id": "spared", "command": "cmd.exe",
+                          "args": format!("/d /s /c \"powershell -NoProfile -ExecutionPolicy Bypass -File \"{launcher}\" & ping -n 300 127.0.0.1 > nul\"") }))
+            .await;
+        client.frame("spawned", "spared").await;
+        writer.wait_until_writing().await;
+
+        client.send(json!({ "type": "kill", "id": "spared" })).await;
+        client.frame("exit", "spared").await;
+        assert!(
+            writer.is_writing().await,
+            "the kill reached a program whose launcher had exited"
+        );
     }
 
     /// A shell that exits on its own leaves what it started detached running,

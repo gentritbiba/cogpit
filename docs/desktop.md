@@ -87,7 +87,7 @@ packages (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `librsvg2-dev`,
 `libayatana-appindicator3-dev`, `libssl-dev`).
 
 A built app carries `resources/server/desktop.js` (the server bundled by
-`Bun.build`), `resources/server/instance-worker.js`, node-pty for the platform,
+`Bun.build`), `resources/server/instance-worker.js`,
 `resources/web/` (the renderer) and the Bun runtime as `cogpit-bun` next to the
 app executable. A dev build runs `server/desktop.ts` from source with the `bun`
 on your PATH and the renderer from `bun run desktop:dev`'s Vite (or `dist/`).

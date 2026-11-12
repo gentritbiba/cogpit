@@ -25,9 +25,16 @@ fn only_the_windows_backend_allows_unsafe_code() {
         .filter(|file| **file != allowed)
         .filter(|file| {
             let text = std::fs::read_to_string(file).unwrap();
-            text.contains("allow(unsafe_code)")
-                || text.contains("unsafe {")
-                || text.contains("unsafe fn")
+            [
+                "unsafe_code",
+                "unsafe {",
+                "unsafe fn",
+                "unsafe impl",
+                "unsafe extern",
+                "unsafe trait",
+            ]
+            .iter()
+            .any(|needle| text.contains(needle))
         })
         .collect();
     assert!(

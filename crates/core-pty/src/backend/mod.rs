@@ -39,7 +39,8 @@ pub struct SpawnSpec {
 /// Control over a running terminal process.
 pub trait Process: Send + Sync {
     fn resize(&self, cols: u16, rows: u16) -> io::Result<()>;
-    /// Ends the process and, on Windows, everything it started.
+    /// Ends the process and its descendants. Blocks while `taskkill` runs on
+    /// Windows, so it is called off the async runtime.
     fn kill(&self);
 }
 
