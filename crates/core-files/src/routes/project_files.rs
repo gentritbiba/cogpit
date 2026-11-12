@@ -10,7 +10,7 @@ use axum::http::{StatusCode, Uri};
 use axum::response::Response;
 use serde::Serialize;
 
-use crate::fsx::{locale_compare, lossy, realpath};
+use crate::fsx::{locale_compare, realpath};
 use crate::git::run_git;
 use crate::http::{Failure, error, is_js_whitespace, js_number, json, query_param};
 use crate::paths::native;
@@ -75,7 +75,7 @@ async fn list_git_files(root: &str) -> Option<Vec<String>> {
         ".",
     ];
     let stdout = run_git(root, &args).await.ok()?;
-    let mut files: Vec<String> = lossy(stdout)
+    let mut files: Vec<String> = stdout
         .split('\0')
         .filter(|path| !path.is_empty())
         .take(MAX_FILES)

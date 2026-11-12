@@ -1,5 +1,5 @@
-//! Filesystem helpers with Node's results: `realpath` without the `\\?\`
-//! prefix on Windows, and `Stats.mtimeMs`.
+//! Filesystem helpers with Node's results: `realpath`, `Stats.mtimeMs`,
+//! UTF-8 decoding and `localeCompare`.
 
 use std::cmp::Ordering;
 use std::fs::Metadata;
@@ -12,13 +12,23 @@ use icu_collator::{Collator, CollatorBorrowed};
 /// `fs.promises.realpath`, as a UTF-8 string.
 pub async fn realpath(path: &str) -> io::Result<String> {
     let path = path.to_owned();
-    let resolved = tokio::task::spawn_blocking(move || dunce::canonicalize(path))
+    let resolved = tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
         .await
         .map_err(io::Error::other)??;
     resolved
         .into_os_string()
         .into_string()
+        .map(|path| strip_verbatim(&path))
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "path is not UTF-8"))
+}
+
+/// Drop the `\\?\` prefix Windows' final-path lookup adds, as libuv's
+/// realpath does: `\\?\UNC\server\share` becomes `\\server\share`.
+pub fn strip_verbatim(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix("\\\\?\\UNC\\") {
+        return format!("\\\\{unc}");
+    }
+    path.strip_prefix("\\\\?\\").unwrap_or(path).to_owned()
 }
 
 /// `Stats.mtimeMs`: seconds and nanoseconds combined the way libuv and Node do.
@@ -72,6 +82,18 @@ mod tests {
     use super::locale_compare;
 
     /// The expected order is what `localeCompare` gives in both Node and Bun.
+    #[test]
+    fn verbatim_prefixes_come_off_like_libuv_strips_them() {
+        use super::strip_verbatim;
+        assert_eq!(strip_verbatim(r"\\?\C:\Users\a"), r"C:\Users\a");
+        assert_eq!(
+            strip_verbatim(r"\\?\UNC\server\share\x"),
+            r"\\server\share\x"
+        );
+        assert_eq!(strip_verbatim(r"C:\Users\a"), r"C:\Users\a");
+        assert_eq!(strip_verbatim("/private/tmp"), "/private/tmp");
+    }
+
     #[test]
     fn collation_matches_javascript_locale_compare() {
         let mut names: Vec<&str> = serde_json::from_str(r##"["README.md","readme.md","src","Src","_private.ts",".gitignore",".env","-dash","~tilde","Zeta.ts","alpha.ts","a-b.ts","a_b.ts","a.b.ts","ab.ts","a b.ts","file10.ts","file2.ts","file1.ts","Ärger.md","arger.md","zebra.md","éclair.md","eclair.md","日本.md","123.md","9.md","@scope","#hash","$dollar","(paren)","[bracket]","{brace}","a/b.ts","a/c.ts","a.ts","ä.ts","A.ts","ß.ts","ss.ts","Œuvre.md","oeuvre.md"]"##).unwrap();

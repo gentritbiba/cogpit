@@ -1079,3 +1079,37 @@ async fn git_diff_treats_a_blob_past_the_output_ceiling_as_absent() {
         json!({ "path": "huge.txt", "original": null, "current": null, "binary": false, "tooLarge": true })
     );
 }
+
+#[tokio::test]
+async fn project_file_save_accepts_the_exact_mtime_it_was_given() {
+    let root = project();
+    let path = root.path().join("src/app.ts");
+    // A sub-millisecond mtime whose shortest decimal form a fast float parser
+    // rounds to a neighbouring double.
+    let modified =
+        std::time::UNIX_EPOCH + std::time::Duration::from_nanos(1_794_480_000_000_024_700);
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    let app = app();
+
+    let read = read_file(&app, root.path(), "src/app.ts").await;
+    let text = read.text();
+    let mtime_text = text
+        .split("\"mtimeMs\":")
+        .nth(1)
+        .unwrap()
+        .split(',')
+        .next()
+        .unwrap();
+    let body = format!(
+        r#"{{"cwd":{},"path":"src/app.ts","content":"saved\n","expectedMtimeMs":{mtime_text}}}"#,
+        json!(path_str(root.path()))
+    );
+    let save = put_json(&app, "/project-file", &body).await;
+
+    assert_eq!(save.status, StatusCode::OK, "{} after {text}", save.text());
+}

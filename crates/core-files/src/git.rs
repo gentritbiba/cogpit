@@ -12,7 +12,8 @@ use crate::fsx::{lossy, realpath};
 use crate::http::Failure;
 use crate::paths::native;
 
-/// Per-stream output ceiling (`maxBuffer`).
+/// Per-stream output ceiling (`maxBuffer`), in bytes of decoded UTF-8 as
+/// Node counts it.
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -26,8 +27,10 @@ pub enum GitError {
     Other,
 }
 
-/// Read a whole stream, failing as soon as it passes `MAX_OUTPUT`.
-async fn read_capped(stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, GitError> {
+/// Read and decode a whole stream, failing as soon as it passes
+/// `MAX_OUTPUT`. Replacement characters only ever lengthen the text, so a raw
+/// stream past the ceiling is past it decoded too.
+async fn read_capped(stream: impl AsyncRead + Unpin) -> Result<String, GitError> {
     let mut output = Vec::new();
     let limit = u64::try_from(MAX_OUTPUT).unwrap_or(u64::MAX) + 1;
     stream
@@ -35,14 +38,15 @@ async fn read_capped(stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, GitError
         .read_to_end(&mut output)
         .await
         .map_err(|_| GitError::Other)?;
-    if output.len() > MAX_OUTPUT {
+    let text = lossy(output);
+    if text.len() > MAX_OUTPUT {
         return Err(GitError::Other);
     }
-    Ok(output)
+    Ok(text)
 }
 
-/// `git <args>` in `cwd`; stdout on success.
-pub async fn run_git(cwd: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
+/// `git <args>` in `cwd`; stdout, decoded as UTF-8, on success.
+pub async fn run_git(cwd: &str, args: &[&str]) -> Result<String, GitError> {
     let mut command = Command::new("git");
     command
         .args(args)
@@ -65,7 +69,7 @@ pub async fn run_git(cwd: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
         if status.success() {
             Ok(stdout)
         } else {
-            Err(GitError::Failed(lossy(stderr)))
+            Err(GitError::Failed(stderr))
         }
     };
     tokio::time::timeout(TIMEOUT, run)
@@ -96,7 +100,7 @@ pub async fn resolve_git_project(cwd: &str) -> Result<GitProject, Failure> {
     }
 
     match run_git(&project_path, &["rev-parse", "--show-toplevel"]).await {
-        Ok(stdout) => match realpath(lossy(stdout).trim()).await {
+        Ok(stdout) => match realpath(stdout.trim()).await {
             Ok(root) => Ok(GitProject {
                 project_path,
                 root: Some(root),

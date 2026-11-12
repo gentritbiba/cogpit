@@ -38,20 +38,20 @@ macro_rules! containment {
         }
 
         /// `child` relative to `parent` with `/` separators, or `None` when it
-        /// is not inside `parent`; `""` when they are the same path.
+        /// is not inside `parent`; `""` when they are the same path. Compared
+        /// segment by segment, so a filesystem root (`/`, `D:\`) works as a
+        /// parent the way `path.relative` treats it.
         pub fn relative_inside(parent: &str, child: &str) -> Option<String> {
             let parent = resolve_one(parent);
             let child = resolve_one(child);
-            if !is_within_dir(&parent, &child) {
-                return None;
+            let parent: Vec<&str> = parent.split(SEP).filter(|s| !s.is_empty()).collect();
+            let mut child = child.split(SEP).filter(|s| !s.is_empty());
+            for expected in &parent {
+                if comparable(child.next()?) != comparable(expected) {
+                    return None;
+                }
             }
-            let depth = parent.split(SEP).filter(|s| !s.is_empty()).count();
-            let rest: Vec<&str> = child
-                .split(SEP)
-                .filter(|s| !s.is_empty())
-                .skip(depth)
-                .collect();
-            Some(rest.join("/"))
+            Some(child.collect::<Vec<_>>().join("/"))
         }
     };
 }
@@ -494,5 +494,14 @@ mod tests {
             Some("a/b")
         );
         assert_eq!(win32::relative_inside("C:\\Repo", "D:\\Repo\\x"), None);
+        assert_eq!(
+            posix::relative_inside("/", "/repo/app").as_deref(),
+            Some("repo/app")
+        );
+        assert_eq!(
+            win32::relative_inside("D:\\", "d:\\Project").as_deref(),
+            Some("Project")
+        );
+        assert_eq!(win32::relative_inside("D:\\", "C:\\Project"), None);
     }
 }

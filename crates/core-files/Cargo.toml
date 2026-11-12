@@ -9,10 +9,9 @@ publish.workspace = true
 [dependencies]
 axum.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 tokio = { workspace = true, features = ["fs", "process"] }
 tokio-util = { version = "0.7", features = ["io"] }
-dunce = "1"
 form_urlencoded = "1"
 icu_collator = "2"
 uuid = { version = "1", features = ["v4"] }

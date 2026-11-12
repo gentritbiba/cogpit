@@ -5,7 +5,6 @@ use axum::http::{StatusCode, Uri};
 use axum::response::Response;
 use serde::Serialize;
 
-use crate::fsx::lossy;
 use crate::git::{resolve_git_project, run_git};
 use crate::http::{error, json, query_param};
 use crate::paths::native;
@@ -185,7 +184,7 @@ pub async fn handler(uri: Uri) -> Response {
     let Ok(stdout) = run_git(&root, &args).await else {
         return error(500, "Unable to read git status");
     };
-    let (branch, files) = parse_git_status(&lossy(stdout));
+    let (branch, files) = parse_git_status(&stdout);
     json(
         StatusCode::OK,
         &RepositoryStatus {

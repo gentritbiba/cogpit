@@ -129,7 +129,6 @@ name = "core-files"
 version = "0.1.0"
 dependencies = [
  "axum",
- "dunce",
  "form_urlencoded",
  "http-body-util",
  "icu_collator",
@@ -195,12 +194,6 @@ dependencies = [
  "quote",
  "syn 3.0.10",
 ]
-
-[[package]]
-name = "dunce"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "errno"

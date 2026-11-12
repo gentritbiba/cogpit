@@ -48,13 +48,13 @@ pub fn read_side(bytes: Option<Vec<u8>>) -> DiffSide {
 }
 
 /// The blob at `HEAD`, or `None` for a new file or a repository without
-/// commits. Decoded and re-encoded as UTF-8 first, as the TypeScript route
-/// read it through a string.
+/// commits. It went through UTF-8 decoding, as the TypeScript route read it
+/// through a string.
 async fn read_committed_blob(root: &str, repo_path: &str) -> Option<Vec<u8>> {
     let stdout = run_git(root, &["show", &format!("HEAD:{repo_path}")])
         .await
         .ok()?;
-    Some(lossy(stdout).into_bytes())
+    Some(stdout.into_bytes())
 }
 
 /// The working-tree file, resolved through symlinks so a link inside the
@@ -99,9 +99,10 @@ pub async fn handler(uri: Uri) -> Response {
 
     let head_candidate = native::resolve(&[&project.project_path, &original_path]);
     let absolute_path = native::resolve(&[&project.project_path, &file_path]);
-    let head_repo_path = native::relative_inside(&root, &head_candidate);
+    let contained = native::is_within_dir(&root, &head_candidate)
+        && native::is_within_dir(&root, &absolute_path);
     let Some(head_repo_path) =
-        head_repo_path.filter(|_| native::is_within_dir(&root, &absolute_path))
+        native::relative_inside(&root, &head_candidate).filter(|_| contained)
     else {
         return error(403, "File is outside the project");
     };
