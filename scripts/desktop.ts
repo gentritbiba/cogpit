@@ -11,7 +11,7 @@
  * source on the developer's own Bun.
  */
 import { spawn, spawnSync } from "node:child_process"
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -42,13 +42,24 @@ function stageRuntime(): void {
   chmodSync(target, 0o755)
 }
 
-/** node-pty is loaded from disk: its native addon and helpers cannot live inside the bundle. */
+/** Where node-pty looks for its native addon, in its own order (lib/utils.js). */
+const NODE_PTY_NATIVE = ["build/Release", "build/Debug", `prebuilds/${process.platform}-${process.arch}`]
+
+/**
+ * node-pty is loaded from disk: its native addon and helpers cannot live inside
+ * the bundle. Linux installs compile it into build/Release; macOS and Windows
+ * may use its prebuilds instead. Build intermediates and debug symbols stay out.
+ */
 function stageNodePty(serverDir: string): void {
   const source = join(root, "node_modules/node-pty")
   const target = join(serverDir, "node_modules/node-pty")
   for (const entry of ["package.json", "LICENSE", "lib"]) cpSync(join(source, entry), join(target, entry), { recursive: true })
-  const prebuild = `prebuilds/${process.platform}-${process.arch}`
-  cpSync(join(source, prebuild), join(target, prebuild), { recursive: true })
+  const native = NODE_PTY_NATIVE.find((dir) => existsSync(join(source, dir)))
+  if (!native) throw new Error(`node-pty has no native build for ${process.platform}-${process.arch}; reinstall dependencies.`)
+  cpSync(join(source, native), join(target, native), {
+    recursive: true,
+    filter: (path) => !/(?:^|[\\/])(?:obj\.target|node-addon-api|\.deps)(?:[\\/]|$)|\.(?:pdb|mk|d)$/.test(path),
+  })
 }
 
 async function stageServer(): Promise<void> {

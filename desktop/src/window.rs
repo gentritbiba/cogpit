@@ -6,7 +6,9 @@ use tauri::window::Color;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use url::Url;
 
-use crate::{Shell, navigation, presence_changed};
+use tauri::webview::DownloadEvent;
+
+use crate::{Shell, WindowState, navigation, presence_changed};
 
 pub const MAIN: &str = "main";
 
@@ -48,6 +50,18 @@ pub fn create(app: &AppHandle) -> WebviewWindow {
             }
             NewWindowResponse::Deny
         })
+        // The webview picks a free name in the Downloads folder; without a handler it drops downloads.
+        .on_download(|_webview, event| {
+            if let DownloadEvent::Finished {
+                url,
+                success: false,
+                ..
+            } = event
+            {
+                eprintln!("[shell] The download of {url} failed");
+            }
+            true
+        })
         .on_permission_request(|webview, kind| {
             let on_app = webview
                 .url()
@@ -72,16 +86,12 @@ pub fn create(app: &AppHandle) -> WebviewWindow {
     let window = builder.build().expect("create the app window");
 
     let reporting = app.clone();
-    window.on_window_event(move |event| {
-        // Events after which presence may have changed.
-        if matches!(
-            event,
-            WindowEvent::Focused(_) | WindowEvent::Resized(_) | WindowEvent::Destroyed
-        ) {
-            presence_changed(&reporting);
-        }
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(_) => presence_changed(&reporting, WindowState::Unchanged),
+        WindowEvent::Destroyed => presence_changed(&reporting, WindowState::Closed),
+        _ => {}
     });
-    presence_changed(app);
+    presence_changed(app, WindowState::Unchanged);
     window
 }
 

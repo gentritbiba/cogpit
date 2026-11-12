@@ -18,7 +18,8 @@ mod window;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use std::{env, thread};
 
@@ -41,6 +42,14 @@ pub struct Shell {
     server: Mutex<Option<Arc<Sidecar>>>,
     quitting: AtomicBool,
     zoom_level: Mutex<f64>,
+    presence: OnceLock<mpsc::Sender<WindowState>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WindowState {
+    Unchanged,
+    /// Sent from the window's destroyed event, which fires before the window leaves the app's list.
+    Closed,
 }
 
 impl Shell {
@@ -63,20 +72,39 @@ pub fn send_to_server(app: &AppHandle, message: &ShellMessage) {
     }
 }
 
-/// Tell the server what the shell can see of the user's presence.
-pub fn presence_changed(app: &AppHandle) {
-    let app = app.clone();
-    // Off the event loop: the window must have finished closing to count as gone.
+/// Tell the server what the shell can see of the user's presence, after an event that may have changed it.
+pub fn presence_changed(app: &AppHandle, window: WindowState) {
+    if let Some(reporter) = app.state::<Shell>().presence.get() {
+        let _ = reporter.send(window);
+    }
+}
+
+/// One thread samples presence, off the event loop: when woken by an event, and
+/// every [`PRESENCE_POLL`] because walking away produces no event at all.
+/// A burst of events becomes one sample.
+fn start_presence_reporting(app: AppHandle) {
+    let (sender, events) = mpsc::channel();
+    let _ = app.state::<Shell>().presence.set(sender);
     thread::spawn(move || {
-        let has_window = app.get_webview_window(window::MAIN).is_some();
-        send_to_server(
-            &app,
-            &ShellMessage::DesktopPresence {
-                has_window,
-                locked: presence::screen_locked(),
-                idle_seconds: presence::idle_seconds(),
-            },
-        );
+        loop {
+            let mut closed = match events.recv_timeout(PRESENCE_POLL) {
+                Ok(window) => window == WindowState::Closed,
+                Err(RecvTimeoutError::Timeout) => false,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
+            while let Ok(window) = events.try_recv() {
+                closed |= window == WindowState::Closed;
+            }
+            let has_window = !closed && app.get_webview_window(window::MAIN).is_some();
+            send_to_server(
+                &app,
+                &ShellMessage::DesktopPresence {
+                    has_window,
+                    locked: presence::screen_locked(),
+                    idle_seconds: presence::idle_seconds(),
+                },
+            );
+        }
     });
 }
 
@@ -94,15 +122,9 @@ fn main() {
         .setup(|app| {
             let app = app.handle().clone();
             notifications::init(&app);
+            start_presence_reporting(app.clone());
             // Show the window straight away; the server can take seconds to start.
             window::create(&app);
-            let polling = app.clone();
-            thread::spawn(move || {
-                loop {
-                    thread::sleep(PRESENCE_POLL);
-                    presence_changed(&polling);
-                }
-            });
             thread::spawn(move || start_server(&app));
             Ok(())
         })
@@ -183,7 +205,7 @@ fn start_server(app: &AppHandle) {
     }
     *shell.origin.lock().unwrap() = Some(origin.clone());
     window::open_app(app, &origin);
-    presence_changed(app);
+    presence_changed(app, WindowState::Unchanged);
 }
 
 fn fail_startup(app: &AppHandle, reason: &str, log: Option<&std::path::Path>) {

@@ -33,7 +33,8 @@ pub struct Snapshot {
 #[derive(Default)]
 pub struct Sampler(Mutex<System>);
 
-#[tauri::command]
+/// Async so the system-wide process refresh runs off the main thread.
+#[tauri::command(async)]
 pub fn performance_snapshot(shell: State<'_, Shell>, sampler: State<'_, Sampler>) -> Snapshot {
     let app = sysinfo::get_current_pid().ok();
     let server = shell.server_pid().map(Pid::from_u32);
