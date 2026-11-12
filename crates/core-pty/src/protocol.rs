@@ -1,9 +1,52 @@
 //! Frames the core sends. The server relays them to the terminal panel
 //! unchanged, so their shape is the panel's protocol (`usePtySocket.ts`).
 
+use std::sync::{Arc, OnceLock};
+
 use axum::extract::ws::Utf8Bytes;
 use serde::Serialize;
 use serde_json::Value;
+
+/// A frame on its way to clients. Output is serialized by the first
+/// connection that sends it, so the thread reading terminals never waits on
+/// it and every client shares the one copy.
+#[derive(Clone)]
+pub enum Frame {
+    Text(Utf8Bytes),
+    Output(Arc<OutputFrame>),
+}
+
+pub struct OutputFrame {
+    id: String,
+    data: String,
+    text: OnceLock<Utf8Bytes>,
+}
+
+impl Frame {
+    pub fn output(id: String, data: String) -> Self {
+        Self::Output(Arc::new(OutputFrame {
+            id,
+            data,
+            text: OnceLock::new(),
+        }))
+    }
+
+    pub fn text(&self) -> Utf8Bytes {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Output(output) => output
+                .text
+                .get_or_init(|| {
+                    Outbound::Output {
+                        id: &output.id,
+                        data: &output.data,
+                    }
+                    .frame()
+                })
+                .clone(),
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]

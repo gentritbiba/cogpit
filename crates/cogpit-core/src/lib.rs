@@ -124,6 +124,13 @@ pub async fn run() -> io::Result<()> {
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut server = tokio::spawn(async move {
         let mut stop_rx = stop_rx;
+        // Terminal echo and short output are single small writes that Nagle
+        // would hold back while an earlier one waits for its delayed ACK.
+        let listener = listener.tap_io(|tcp| {
+            if let Err(error) = tcp.set_nodelay(true) {
+                tracing::debug!(%error, "TCP_NODELAY failed");
+            }
+        });
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 let _ = stop_rx.wait_for(|stop| *stop).await;

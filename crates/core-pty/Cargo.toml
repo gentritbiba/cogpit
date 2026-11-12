@@ -17,6 +17,7 @@ tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
+filedescriptor = "0.8"
 portable-pty = "0.9"
 
 [target.'cfg(windows)'.dependencies]
