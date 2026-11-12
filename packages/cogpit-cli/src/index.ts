@@ -3,6 +3,7 @@ import { findExecutableOnPath } from "../../../server/lib/binaryResolver"
 import { CLICKUP_CONFIG_FILE } from "../../../server/lib/clickupConfig"
 import { defaultDataDir } from "../../../server/lib/standalone-bootstrap"
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import type { RunningStandaloneServer } from "../../../server/standalone-runtime"
@@ -176,6 +177,28 @@ export async function openExternalUrl(url: string): Promise<void> {
   })
 }
 
+/**
+ * The cogpit-core this package ships for the computer it runs on
+ * (`dist/core/<platform>-<arch>/`). A run from a checkout has no `core`
+ * folder and uses the checkout's own build.
+ */
+export function packagedCoreBinary(
+  distDir: string,
+  platform: string = process.platform,
+  arch: string = process.arch,
+): string | undefined {
+  const coreDir = join(distDir, "core")
+  if (!existsSync(coreDir)) return undefined
+  const binary = join(coreDir, `${platform}-${arch}`, platform === "win32" ? "cogpit-core.exe" : "cogpit-core")
+  if (!existsSync(binary)) {
+    throw new Error(
+      `Cogpit has no prebuilt core for ${platform}-${arch}. Build it from source `
+      + "(https://github.com/gentritbiba/cogpit) and point COGPIT_CORE_BIN at it.",
+    )
+  }
+  return binary
+}
+
 async function startPackagedServer(
   options: { port: number; dataDir?: string },
 ): Promise<RunningStandaloneServer> {
@@ -187,6 +210,7 @@ async function startPackagedServer(
     host: "127.0.0.1",
     port: options.port,
     publishPort: false,
+    coreBin: process.env.COGPIT_CORE_BIN ? undefined : packagedCoreBinary(import.meta.dirname),
   })
 }
 

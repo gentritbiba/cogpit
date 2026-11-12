@@ -23,10 +23,14 @@ fn main() {
     println!("cargo:rerun-if-changed={APP_MARK}");
     fs::copy(APP_MARK, "loading/cogpit.svg").expect("copy the app mark into the loading page");
 
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["performance_snapshot"])),
-    )
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "performance_snapshot",
+            "update_state",
+            "update_install",
+            "update_dismiss",
+        ]),
+    ))
     .expect("tauri build");
 }
 

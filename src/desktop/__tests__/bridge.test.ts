@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 const tauri = vi.hoisted(() => ({
   isTauri: vi.fn(() => false),
   invoke: vi.fn(),
+  listen: vi.fn(),
   startDragging: vi.fn(() => Promise.resolve()),
   toggleMaximize: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: tauri.isTauri, invoke: tauri.invoke }))
+vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }))
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ startDragging: tauri.startDragging, toggleMaximize: tauri.toggleMaximize }),
 }))
@@ -48,10 +50,46 @@ describe("installDesktopBridge", () => {
 
     const platform = desktopPlatform(navigator.userAgent)
     expect(window.cogpitDesktop?.platform).toBe(platform)
-    expect(window.cogpitDesktop?.updater).toBeUndefined()
     expect(document.documentElement).toHaveClass("desktop", `desktop-${platform}`)
     await expect(window.cogpitDesktop?.performance.getSnapshot()).resolves.toEqual(snapshot)
     expect(tauri.invoke).toHaveBeenCalledWith("performance_snapshot")
+  })
+})
+
+describe("the updater", () => {
+  function install(): DesktopUpdater {
+    tauri.isTauri.mockReturnValue(true)
+    installDesktopBridge()
+    return window.cogpitDesktop!.updater
+  }
+
+  it("reads the state, installs and dismisses through the shell", async () => {
+    const ready: DesktopUpdateState = { status: "ready", version: "4.0.0", asksForPassword: false }
+    tauri.invoke.mockResolvedValue(ready)
+    const updater = install()
+
+    await expect(updater.getState()).resolves.toEqual(ready)
+    expect(tauri.invoke).toHaveBeenLastCalledWith("update_state")
+    await updater.install()
+    expect(tauri.invoke).toHaveBeenLastCalledWith("update_install")
+    updater.dismissVersion("4.0.0")
+    expect(tauri.invoke).toHaveBeenLastCalledWith("update_dismiss", { version: "4.0.0" })
+  })
+
+  it("passes on every state the shell announces until unsubscribed", async () => {
+    const stop = vi.fn()
+    tauri.listen.mockResolvedValue(stop)
+    const states: DesktopUpdateState[] = []
+
+    const unsubscribe = install().onState((state) => states.push(state))
+
+    expect(tauri.listen).toHaveBeenCalledWith("update-state", expect.any(Function))
+    const announced: DesktopUpdateState = { status: "available", version: "4.0.0", url: "https://example.test", via: "download" }
+    tauri.listen.mock.calls[0][1]({ payload: announced })
+    expect(states).toEqual([announced])
+
+    unsubscribe()
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
   })
 })
 

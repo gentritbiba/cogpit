@@ -1,0 +1,1 @@
+Cogpit no longer runs on Electron. This file only lets the updater of an Electron install accept this app as its update.

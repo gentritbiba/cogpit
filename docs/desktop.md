@@ -49,12 +49,12 @@ build passes nothing, and the server finds the checkout's build
 
 `src/desktop/bridge.ts` is the only renderer module that imports
 `@tauri-apps/*` (`check:architecture` enforces it). In the desktop app it sets
-`window.cogpitDesktop` (`platform`, `performance.getSnapshot()`) and the
+`window.cogpitDesktop` (`platform`, `performance.getSnapshot()`, `updater`) and the
 `desktop desktop-<platform>` classes on `<html>`. Everything else reads
 `window.cogpitDesktop`, which a browser leaves undefined. The webview may call
 only the commands granted to the server's origin at runtime
-(`performance_snapshot`, window dragging); sandboxed plugin and view frames get
-nothing.
+(`performance_snapshot`, the three `update_*` commands, window dragging);
+sandboxed plugin and view frames get nothing.
 
 On macOS the title bar is hidden under the traffic lights. `.desktop-drag`
 regions and the `.drag-strip` above the chat pane drag the window, and
@@ -92,5 +92,88 @@ A built app carries `resources/server/desktop.js` (the server bundled by
 app executable. A dev build runs `server/desktop.ts` from source with the `bun`
 on your PATH and the renderer from `bun run desktop:dev`'s Vite (or `dist/`).
 
-Signing, updates, the release workflow and moving existing installs to this
-app are handled with packaging, not here.
+`desktop:build` always ships the same Bun (`BUN_VERSION` in
+`scripts/desktop.ts`, downloaded and checked against its SHA-256 when the Bun
+running the build is another version). `bun run desktop:update` builds this
+checkout and installs it over `/Applications/Cogpit.app` once Cogpit has quit
+(macOS). It refuses a build without `cogpit-bun`, `cogpit-core` or the server
+bundle, and marks the app with `local-build.json` so the updater leaves it alone.
+
+## Updates
+
+The shell checks for a new version five seconds after start and every six
+hours (`desktop/src/updater.rs`), downloads it in the background, and reports
+one state the renderer shows as a banner (`window.cogpitDesktop.updater`,
+`UpdateBanner`). How an install updates depends on what it is:
+
+| Install | Update |
+|---|---|
+| macOS app in a writable folder, Windows installer, Linux AppImage | `tauri-plugin-updater` replaces it on "Restart now" or on the next quit |
+| pacman package | the same signed download, installed with `pkexec pacman -U` on "Restart now" only |
+| macOS app on a read-only or translocated path, deb | a notice with a link to the release, or "update through your package manager" |
+| `bun run desktop:update` build, unbundled binary | nothing |
+
+Every update file is signed with a minisign key. The public half is in
+`desktop/tauri.conf.json` (`plugins.updater.pubkey`); the app installs nothing
+that key did not sign. The manifest is `latest.json` on the latest GitHub
+release. `COGPIT_UPDATE_FEED_URL` points an app at another folder holding
+`latest.json` (https only in a release build).
+
+## Releases
+
+A `v*` tag runs `.github/workflows/release.yml`:
+
+1. `core` builds `cogpit-core` for macOS arm64 and x64, Linux x64 and arm64
+   (static musl binaries, so they run on any distro) and Windows x64.
+2. `desktop` runs `bun run desktop:build` on each platform with that core
+   (`COGPIT_CORE_PREBUILT`), then `scripts/release-artifacts.ts collect` names
+   the files: a dmg and an `.app.tar.gz` per macOS architecture, an AppImage and
+   a pacman package (repacked from the deb, `scripts/lib/pacmanPackage.ts`), and
+   the Windows installer. Linux builds on Ubuntu 22.04 so the app needs no newer
+   glibc.
+3. `assemble` writes `latest.json` and checks the release holds exactly the
+   expected files, each update file signed for this version by the key
+   installed apps trust. `publish` uploads them; `publish-npm` ships the `cogpit`
+   launcher with every platform's core in `dist/core/<platform>-<arch>/`;
+   `update-aur` pushes both AUR packages.
+
+Dispatching the workflow by hand is a dry run that publishes nothing. On a
+branch it builds the public edition and signs with a throwaway key.
+
+The `release` environment needs two secrets, or a tag build stops before it
+builds anything: `TAURI_SIGNING_PRIVATE_KEY` (the contents of the private key
+file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Losing the key means no
+existing install can update again, so keep a copy outside GitHub.
+
+macOS builds are ad-hoc signed (`signingIdentity: "-"`), which is why the first
+open of a downloaded dmg needs right-click → Open. To ship Developer ID builds,
+add `APPLE_SIGNING_IDENTITY` (plus Tauri's `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD` and, for notarization, `APPLE_ID`,
+`APPLE_PASSWORD`, `APPLE_TEAM_ID`) to the `release` environment and pass them
+to the build step; nothing else changes.
+
+## Moving Electron installs
+
+Cogpit up to 3.6.x was an Electron app with its own updater. While
+`COGPIT_ELECTRON_BRIDGE` is `"1"` in `release.yml`, a release also publishes
+what that updater reads, so those installs update themselves to this app and
+keep their data (the data folder never moved):
+
+- **macOS**: `latest-mac.yml` and a zip per architecture. The old updater only
+  accepts a bundle with `Contents/Resources/app.asar`, so the bundle carries a
+  placeholder file of that name (`desktop/electron-bridge/app.asar`).
+- **Windows**: `latest.yml`. The old updater runs the new installer silently;
+  its hooks (`desktop/windows/installer-hooks.nsh`) run the Electron install's
+  uninstaller first, keeping `%APPDATA%\Cogpit`, and start the app afterwards.
+  An all-users Electron install asks for elevation to be removed; if that is
+  declined it stays beside the new per-user install.
+- **Linux**: `latest-linux.yml`. The AppImage is replaced in place (the old
+  updater starts the new file once with `APPIMAGE_EXIT_AFTER_INSTALL`, which
+  the shell answers by exiting). The pacman
+  package keeps the name `cogpit` and the `/opt/Cogpit/cogpit` executable, and
+  makes the `/usr/bin/cogpit` link in its install script, because the old
+  package left an unowned link there that pacman would refuse to overwrite.
+
+An install that never updates while the bridge is on stays on Electron until
+its user downloads the app again. Turning the bridge off removes the zips, the
+three `latest*.yml` files and the placeholder.

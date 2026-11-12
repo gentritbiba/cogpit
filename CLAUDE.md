@@ -102,8 +102,22 @@ in `shared/desktopProtocol.ts`, the Rust side in `desktop/src/protocol.rs`, and
 the two change together. The renderer reaches the shell only through
 `src/desktop/bridge.ts` (`window.cogpitDesktop`), so it runs unchanged in a
 browser. `bun run desktop:dev` runs Vite plus the shell with the server from
-source; `bun run desktop:build` builds the app. `docs/desktop.md` has the
-details.
+source; `bun run desktop:build` builds the app; `bun run desktop:update` builds
+and installs it over `/Applications/Cogpit.app` (macOS). `docs/desktop.md` has
+the details.
+
+## Releases
+
+A `v*` tag runs `.github/workflows/release.yml`: `cogpit-core` for five
+targets, the desktop app per platform (`bun run desktop:build`), the update
+manifest `latest.json`, then GitHub release, npm and AUR. Update files are
+signed with the key in the `release` environment
+(`TAURI_SIGNING_PRIVATE_KEY`); its public half is in `desktop/tauri.conf.json`
+and must never change without a plan for installed apps. The file names and
+manifests come from `scripts/lib/releaseArtifacts.ts`. While
+`COGPIT_ELECTRON_BRIDGE` is on, a release also carries what the Electron
+app's updater needs to move to this app. `docs/desktop.md` ("Updates",
+"Releases", "Moving Electron installs") has the details.
 
 ## Adding New API Routes
 
@@ -158,6 +172,11 @@ so anything landed there is lost on the next sync. The push needs the
 running its tests, package-contract build and `npm publish`. The release commit
 does not need to keep `packages/cogpit-cli/package.json` synchronized with the
 app version. The tag is the source of truth for the published launcher.
+
+The package carries a prebuilt `cogpit-core` per platform in
+`dist/core/<platform>-<arch>/` and starts the server on the one for the
+computer it runs on. `build-npm.mjs` copies them from `COGPIT_CORE_DIST` (the
+release's `core` job artifacts) or, without it, this checkout's own build.
 
 ## External Session API
 

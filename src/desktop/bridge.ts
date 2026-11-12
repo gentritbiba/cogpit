@@ -4,6 +4,7 @@
  * which stays undefined in a browser.
  */
 import { invoke, isTauri } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import type { DesktopPerformanceSnapshot } from "../../shared/contracts/performance"
 
@@ -22,6 +23,15 @@ export function installDesktopBridge(): void {
   window.cogpitDesktop = {
     platform,
     performance: { getSnapshot: () => invoke<DesktopPerformanceSnapshot>("performance_snapshot") },
+    updater: {
+      getState: () => invoke<DesktopUpdateState>("update_state"),
+      onState: (cb) => {
+        const listening = listen<DesktopUpdateState>("update-state", (event) => cb(event.payload))
+        return () => { void listening.then((stop) => stop()) }
+      },
+      install: () => invoke<void>("update_install"),
+      dismissVersion: (version) => { void invoke("update_dismiss", { version }) },
+    },
   }
   document.documentElement.classList.add("desktop", `desktop-${platform}`)
   // Only macOS hides the title bar, under the traffic lights; elsewhere the window keeps its native frame.

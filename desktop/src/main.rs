@@ -14,6 +14,7 @@ mod protocol;
 mod shell_path;
 mod sidecar;
 mod startup_log;
+mod updater;
 mod window;
 
 use std::path::PathBuf;
@@ -109,22 +110,37 @@ fn start_presence_reporting(app: AppHandle) {
 }
 
 fn main() {
+    // The Electron app's AppImage updater, installing on quit, runs the new
+    // AppImage once with this set and waits for it to exit. Goes with the
+    // Electron bridge (docs/desktop.md, "Moving Electron installs").
+    #[cfg(target_os = "linux")]
+    if env::var_os("APPIMAGE_EXIT_AFTER_INSTALL").is_some() {
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             window::show(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Shell::default())
+        .manage(updater::Updates::default())
         .manage(performance::Sampler::default())
         .menu(menu::build)
         .on_menu_event(menu::handle)
-        .invoke_handler(tauri::generate_handler![performance::performance_snapshot])
+        .invoke_handler(tauri::generate_handler![
+            performance::performance_snapshot,
+            updater::update_state,
+            updater::update_install,
+            updater::update_dismiss,
+        ])
         .setup(|app| {
             let app = app.handle().clone();
             notifications::init(&app);
             start_presence_reporting(app.clone());
             // Show the window straight away; the server can take seconds to start.
             window::create(&app);
+            updater::start(&app);
             thread::spawn(move || start_server(&app));
             Ok(())
         })
@@ -146,13 +162,20 @@ fn main() {
                 let shell = app.state::<Shell>();
                 shell.quitting.store(true, Ordering::SeqCst);
                 shell_path::abandon();
-                let server = shell.server.lock().unwrap().take();
-                if let Some(server) = server {
-                    server.shut_down();
-                }
+                stop_server(app, updater::installs_on_exit(app));
+                updater::install_on_exit(app);
             }
             _ => {}
         });
+}
+
+/// Ask the server to finish and wait for it; a no-op once it is gone.
+/// `for_update` also ends what the server left running (see [`Sidecar::shut_down`]).
+pub fn stop_server(app: &AppHandle, for_update: bool) {
+    let server = app.state::<Shell>().server.lock().unwrap().take();
+    if let Some(server) = server {
+        server.shut_down(for_update);
+    }
 }
 
 fn start_server(app: &AppHandle) {
@@ -194,6 +217,11 @@ fn start_server(app: &AppHandle) {
         .remote(origin.origin().ascii_serialization())
         .window(window::MAIN)
         .permission("allow-performance-snapshot")
+        .permission("allow-update-state")
+        .permission("allow-update-install")
+        .permission("allow-update-dismiss")
+        .permission("core:event:allow-listen")
+        .permission("core:event:allow-unlisten")
         .permission("core:window:allow-start-dragging")
         .permission("core:window:allow-toggle-maximize");
     if let Err(error) = app.add_capability(allowed) {
@@ -267,7 +295,7 @@ fn launch(app: &AppHandle, path: Option<String>) -> Result<Launch, String> {
 
 /// The folder Cogpit has always kept its data in: `Cogpit` under the platform's
 /// application-data folder, not one named after the bundle identifier.
-fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .config_dir()
         .map(|dir| dir.join("Cogpit"))
