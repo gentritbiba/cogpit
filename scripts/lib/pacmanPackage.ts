@@ -10,7 +10,7 @@
 import { spawnSync } from "node:child_process"
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 /** The executables the deb puts in /usr/bin; the package keeps them together in /opt/Cogpit. */
 const EXECUTABLES = ["cogpit", "cogpit-bun", "cogpit-core"]
@@ -67,7 +67,7 @@ export function buildPacmanPackage(options: { deb: string; output: string; versi
     const pkgDir = join(work, "pkg")
     mkdirSync(debDir)
     mkdirSync(pkgDir)
-    bsdtar(["-xf", options.deb], debDir)
+    bsdtar(["-xf", resolve(options.deb)], debDir)
     const data = readdirSync(debDir).find((name) => name.startsWith("data.tar"))
     if (!data) throw new Error(`${options.deb} holds no data archive.`)
     bsdtar(["-xf", join(debDir, data)], pkgDir)
@@ -98,7 +98,8 @@ export function buildPacmanPackage(options: { deb: string; output: string; versi
     const owner = ["--uid", "0", "--gid", "0", "--uname", "root", "--gname", "root"]
     const content = [".PKGINFO", ".INSTALL", "opt", "usr"]
     bsdtar(["-czf", ".MTREE", "--format=mtree", "--options=!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link", ...owner, ...content], pkgDir)
-    bsdtar(["--zstd", "-cf", options.output, ...owner, ".PKGINFO", ".INSTALL", ".MTREE", "opt", "usr"], pkgDir)
+    // bsdtar runs inside the package tree, so the output path must not be relative to here.
+    bsdtar(["--zstd", "-cf", resolve(options.output), ...owner, ".PKGINFO", ".INSTALL", ".MTREE", "opt", "usr"], pkgDir)
   } finally {
     rmSync(work, { recursive: true, force: true })
   }

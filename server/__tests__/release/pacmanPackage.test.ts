@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process"
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { buildPacmanPackage, desktopEntry, pacmanDepends, pkginfo } from "../../../scripts/lib/pacmanPackage"
 import { root } from "../../../scripts/lib/sourceFiles"
@@ -92,7 +92,9 @@ describe.skipIf(!hasBsdtar)("buildPacmanPackage", () => {
 
   it("repackages the deb with the executables in /opt/Cogpit and no file at /usr/bin/cogpit", () => {
     const output = join(work, "cogpit-4.0.0.pacman")
-    buildPacmanPackage({ deb: writeDeb(), output, version: "4.0.0", repoRoot: root })
+    // Paths relative to the working directory, as the release workflow passes them.
+    const relativeTo = (path: string) => relative(process.cwd(), path)
+    buildPacmanPackage({ deb: relativeTo(writeDeb()), output: relativeTo(output), version: "4.0.0", repoRoot: root })
 
     const files = tar(["-tf", output], work).split("\n").filter((name) => name && !name.endsWith("/"))
     expect(files.slice(0, 3)).toEqual([".PKGINFO", ".INSTALL", ".MTREE"])

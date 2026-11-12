@@ -80,8 +80,8 @@ async function pinnedBun(): Promise<string> {
   mkdirSync(directory, { recursive: true })
   const zipPath = join(directory, `${archive.name}.zip`)
   writeFileSync(zipPath, zip)
-  // Windows ships bsdtar, which reads zip; Linux tar does not.
-  if (process.platform === "win32") run("tar", ["-xf", zipPath, "-C", directory])
+  // Windows ships bsdtar, which reads zip; a `tar` found on PATH may be Git's GNU tar, which does not.
+  if (process.platform === "win32") run(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", zipPath, "-C", directory])
   else run("unzip", ["-o", "-q", zipPath, "-d", directory])
   rmSync(zipPath)
   return binary
