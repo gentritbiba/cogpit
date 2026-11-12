@@ -1,7 +1,7 @@
 //! `GET project-files` (ranked search) and `GET project-files/tree` (one
 //! directory at a time) over a cached, git-aware listing of the project.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -167,10 +167,26 @@ struct Children {
     files: Vec<String>,
 }
 
-/// Names one level below `prefix`, each group sorted.
+/// Names in first-seen order without repeats, like iterating a JS `Set`.
+#[derive(Default)]
+struct OrderedNames<'a> {
+    seen: HashSet<&'a str>,
+    names: Vec<&'a str>,
+}
+
+impl<'a> OrderedNames<'a> {
+    fn insert(&mut self, name: &'a str) {
+        if self.seen.insert(name) {
+            self.names.push(name);
+        }
+    }
+}
+
+/// Names one level below `prefix`, each group sorted. Names that collate as
+/// equal (`é` and `e\u{301}`) keep listing order, as the stable JS sort does.
 fn direct_children(files: &[String], prefix: &str) -> Children {
-    let mut directories = BTreeSet::new();
-    let mut plain_files = BTreeSet::new();
+    let mut directories = OrderedNames::default();
+    let mut plain_files = OrderedNames::default();
     for file in files {
         let Some(rest) = file.strip_prefix(prefix) else {
             continue;
@@ -178,10 +194,10 @@ fn direct_children(files: &[String], prefix: &str) -> Children {
         match rest.split_once('/') {
             None => plain_files.insert(rest),
             Some((directory, _)) => directories.insert(directory),
-        };
+        }
     }
-    let sorted = |names: BTreeSet<&str>| {
-        let mut names: Vec<String> = names.into_iter().map(str::to_owned).collect();
+    let sorted = |names: OrderedNames| {
+        let mut names: Vec<String> = names.names.into_iter().map(str::to_owned).collect();
         sort_paths(&mut names);
         names
     };
@@ -466,6 +482,11 @@ mod tests {
         assert_eq!(
             list_directory_entries(&owned(&["src/a.ts", "src-legacy/b.ts"]), "src"),
             [entry("a.ts", "file")]
+        );
+        let equal = owned(&["\u{e9}/a.ts", "e\u{301}/z.ts"]);
+        assert_eq!(
+            list_directory_entries(&equal, ""),
+            [entry("\u{e9}", "directory"), entry("e\u{301}", "directory")]
         );
     }
 
