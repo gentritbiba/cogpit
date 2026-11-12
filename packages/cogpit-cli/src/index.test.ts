@@ -1,7 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import {
   agentCliReport,
   buildLaunchUrl,
+  packagedCoreBinary,
   parseArgs,
   run,
   USAGE,
@@ -45,6 +49,45 @@ function testDependencies(fetchImpl: typeof fetch, onPath: string[] = ["claude"]
   }
   return { deps, stdout, stderr, openUrl, startServer, waitForShutdown, dispose }
 }
+
+describe("packagedCoreBinary", () => {
+  function dist(...binaries: string[]): string {
+    const dir = mkdtempSync(join(tmpdir(), "cogpit-cli-core-"))
+    for (const binary of binaries) {
+      mkdirSync(join(dir, "core", binary, ".."), { recursive: true })
+      writeFileSync(join(dir, "core", binary), "")
+    }
+    return dir
+  }
+
+  it("picks the binary shipped for this platform", () => {
+    const dir = dist("linux-arm64/cogpit-core", "win32-x64/cogpit-core.exe")
+    try {
+      expect(packagedCoreBinary(dir, "linux", "arm64")).toBe(join(dir, "core", "linux-arm64", "cogpit-core"))
+      expect(packagedCoreBinary(dir, "win32", "x64")).toBe(join(dir, "core", "win32-x64", "cogpit-core.exe"))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves a checkout, which ships no core, to its own build", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cogpit-cli-core-"))
+    try {
+      expect(packagedCoreBinary(dir, "linux", "x64")).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("says so when the package has no core for this platform", () => {
+    const dir = dist("linux-x64/cogpit-core")
+    try {
+      expect(() => packagedCoreBinary(dir, "freebsd", "x64")).toThrow("no prebuilt core for freebsd-x64")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
 
 describe("Cogpit install-free CLI", () => {
   it("treats no arguments as a full Cogpit launch", () => {

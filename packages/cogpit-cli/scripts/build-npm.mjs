@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
@@ -53,4 +53,27 @@ if (major < 22 || (major === 22 && minor < 16)) {
 await import("./cli-runtime.js")
 `, { mode: 0o755 })
 chmodSync(join(outputDir, "cli.js"), 0o755)
+
+// dist/core/<platform>-<arch>/cogpit-core: every target's binary when a release
+// hands them over in COGPIT_CORE_DIST (same layout), else this checkout's own build.
+const coreDir = join(outputDir, "core")
+const coreName = (platform) => platform.startsWith("win32") ? "cogpit-core.exe" : "cogpit-core"
+function shipCore(platform, binary) {
+  const target = join(coreDir, platform, coreName(platform))
+  mkdirSync(dirname(target), { recursive: true })
+  cpSync(binary, target)
+  chmodSync(target, 0o755)
+}
+const prebuilt = process.env.COGPIT_CORE_DIST?.trim()
+if (prebuilt) {
+  for (const platform of readdirSync(prebuilt)) shipCore(platform, join(prebuilt, platform, coreName(platform)))
+} else {
+  const targetDir = process.env.CARGO_TARGET_DIR?.trim() ? resolve(process.env.CARGO_TARGET_DIR) : join(repoRoot, "target")
+  const [newest] = ["release", "debug"]
+    .map((profile) => join(targetDir, profile, coreName(process.platform)))
+    .filter((binary) => existsSync(binary))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  if (!newest) throw new Error(`No cogpit-core build under ${targetDir}. Run \`bun run build:core\` first.`)
+  shipCore(`${process.platform}-${process.arch}`, newest)
+}
 console.log("Built install-free Cogpit CLI, server, and web app")
