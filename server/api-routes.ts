@@ -39,6 +39,7 @@ import { registerClickUpRoutes } from "./routes/clickup"
 import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
 import { registerMcpRoutes } from "./routes/mcp"
+import { registerMemoryEmbeddingRoutes } from "./routes/memory-embeddings"
 import { registerMissionControlRoutes } from "./routes/mission-control"
 import { registerModelRoutes } from "./routes/models"
 import { registerNotificationRoutes } from "./routes/notifications"
@@ -138,6 +139,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("session-status", registerSessionStatusRoutes),
   apiRoute("session-search", registerSessionSearchRoutes),
+  apiRoute("memory-embeddings", registerMemoryEmbeddingRoutes),
   apiRoute("session-orchestration", registerSessionOrchestrationRoutes),
   apiRoute("crew-chat", registerCrewChatRoutes),
   apiRoute("session-boards", registerSessionBoardRoutes),

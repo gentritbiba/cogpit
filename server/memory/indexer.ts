@@ -56,6 +56,8 @@ export interface MemoryIndexer {
   /** The open store; null before the first pass opens it, after `stop`, or when the store cannot work here. */
   store(): MemoryStore | null
   embedder(): Embedder | null
+  /** Why embedding is stopped: the endpoint's last failure or an unusable configuration. Null while it works or is off. */
+  embeddingError(): string | null
   counts(): SessionSearchIndexing
   /** Resolves once no pass is running; for tests and measurements. */
   settled(): Promise<void>
@@ -111,7 +113,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
   let embedder: Embedder | null = null
   let configStamp: string | null = null
   let pendingEmbeddings = 0
-  let outage: { failures: number; retryAt: number } | null = null
+  let outage: { failures: number; retryAt: number; error: string } | null = null
+  let configError: string | null = null
   let embedMoreSoon = false
 
   function scheduleAt(at: number): void {
@@ -234,11 +237,13 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     if (config.stamp !== configStamp) {
       configStamp = config.stamp
       outage = null
+      configError = null
       try {
         embedder = options.createEmbedder(config.text)
       } catch (error) {
         embedder = null
-        warn(`[memory] the embedding configuration is not usable: ${String(error)}`)
+        configError = error instanceof Error ? error.message : String(error)
+        warn(`[memory] the embedding configuration is not usable: ${configError}`)
       }
     }
     if (!embedder) {
@@ -251,7 +256,7 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     if (result.error) {
       if (!outage) warn(`[memory] the embedding endpoint is unavailable (${result.error}); retrying with back-off`)
       const failureCount = (outage?.failures ?? 0) + 1
-      outage = { failures: failureCount, retryAt: Date.now() + Math.min(MAX_EMBED_RETRY_MS, EMBED_RETRY_MS * 2 ** (failureCount - 1)) }
+      outage = { failures: failureCount, retryAt: Date.now() + Math.min(MAX_EMBED_RETRY_MS, EMBED_RETRY_MS * 2 ** (failureCount - 1)), error: result.error }
       return
     }
     outage = null
@@ -286,6 +291,7 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     },
     store: () => store,
     embedder: () => embedder,
+    embeddingError: () => configError ?? outage?.error ?? null,
     counts: () => ({ pendingFiles, pendingEmbeddings }),
     async settled() {
       while (running) await running

@@ -157,7 +157,9 @@ cogpit-memory index rebuild   # Rebuild the tool index from scratch; never touch
 
 Any OpenAI-compatible `/v1/embeddings` endpoint works; nothing is bundled.
 The configuration lives in `<memory dir>/config.json`, shared with the
-Cogpit app, and is written owner-only:
+Cogpit app, and is written owner-only. In the app it is under Settings →
+Search by meaning (address, model, API key, a test button and indexing
+progress); from a terminal:
 
 ```bash
 cogpit-memory index config --url http://127.0.0.1:8790/v1/embeddings \

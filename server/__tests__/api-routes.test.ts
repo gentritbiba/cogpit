@@ -42,6 +42,7 @@ const CANONICAL_ROUTE_IDS = [
   "session-context",
   "session-status",
   "session-search",
+  "memory-embeddings",
   "session-orchestration",
   "crew-chat",
   "session-boards",

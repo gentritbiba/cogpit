@@ -345,6 +345,15 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
     expect(h.indexer.counts().pendingEmbeddings).toBe(4)
     expect(h.warn).toHaveBeenCalledTimes(1)
     expect(String(h.warn.mock.calls[0][0])).toContain("unavailable")
+    expect(h.indexer.embeddingError()).toContain("503")
+  })
+
+  it("reports no embedding error while the endpoint answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const h = harness({ readEmbeddingConfig: async () => ({ text: EMBEDDINGS_CONFIG, stamp: "1" }), createEmbedder: (text) => embedderFor(text, fakeEndpoint().fetch, {}) })
+    await firstPass(h)
+
+    expect(h.indexer.embeddingError()).toBeNull()
   })
 
   it("leaves texts the endpoint refuses for the backstop pass instead of resending them every second", async () => {
@@ -368,6 +377,7 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
 
     expect(chunkCount(h.store, ROOT.path)).toBe(2)
     expect(h.indexer.embedder()).toBeNull()
+    expect(h.indexer.embeddingError()).toContain("not valid JSON")
     expect(h.warn).toHaveBeenCalledTimes(1)
   })
 })

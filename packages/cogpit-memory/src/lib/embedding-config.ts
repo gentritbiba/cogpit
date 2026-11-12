@@ -10,7 +10,7 @@ import {
   createEmbeddingClient,
   MEMORY_CONFIG_FILE,
   parseEmbeddingConfig,
-  validateEmbeddingConfig,
+  updateEmbeddingConfigText,
   type EmbeddingClient,
   type EmbeddingConfig,
 } from "./memory/embeddings"
@@ -60,24 +60,16 @@ export function describeConfig(config: EmbeddingConfig): Omit<EmbeddingConfig, "
 export function writeEmbeddingConfig(changes: Partial<EmbeddingConfig>, options: { off?: boolean; dir?: string } = {}): { path: string; embeddings: ReturnType<typeof describeConfig> | null } | { error: string } {
   const dir = options.dir ?? memoryDir()
   const path = memoryConfigPath(dir)
-  let file: Record<string, unknown> = {}
+  let text: string | null
   try {
-    const text = readConfigText(path)
-    if (text?.trim()) file = JSON.parse(text) as Record<string, unknown>
+    text = readConfigText(path)
   } catch (error) {
     return { error: `config.json could not be read: ${error instanceof Error ? error.message : String(error)}` }
   }
-  if (options.off) {
-    delete file.embeddings
-  } else {
-    const merged = { ...(file.embeddings as Record<string, unknown> | undefined), ...changes }
-    const { config, error } = validateEmbeddingConfig(merged)
-    if (!config) return { error: error ?? "invalid embedding configuration" }
-    file.embeddings = config
-  }
+  const updated = updateEmbeddingConfigText(text, options.off ? null : changes)
+  if ("error" in updated) return updated
   mkdirSync(dir, { recursive: true, mode: 0o700 })
-  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 })
+  writeFileSync(path, updated.text, { mode: 0o600 })
   chmodSync(path, 0o600)
-  const embeddings = file.embeddings ? describeConfig(file.embeddings as EmbeddingConfig) : null
-  return { path, embeddings }
+  return { path, embeddings: updated.config ? describeConfig(updated.config) : null }
 }

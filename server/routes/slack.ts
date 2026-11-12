@@ -1,10 +1,11 @@
 import type { SlackLinksReport } from "../../shared/contracts/slack"
-import { editionModule, markDecided, mayActHostWide } from "../edition"
+import { editionModule } from "../edition"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import { getSessionMeta, sessionMetaTitle } from "../sessionMetadata"
 import { findJsonlPath } from "../sessionPaths"
 import { slackService } from "../slack"
 import { SlackLinkError } from "../slack/service"
+import { hostAdminRoute } from "./hostAdminRoute"
 
 /** A linked session's title as the transcript gives it; null when the transcript is gone. */
 async function sessionTitle(sessionId: string): Promise<string | null> {
@@ -23,12 +24,7 @@ async function sessionTitle(sessionId: string): Promise<string | null> {
  * cross the browser.
  */
 export function registerSlackRoutes(use: UseFn) {
-  use("/api/slack", async (req, res, next) => {
-    const path = new URL(req.url || "/", "http://localhost").pathname
-    if (path !== "/" && path !== "") return next()
-    if (req.method !== "GET" && req.method !== "POST") return next()
-    markDecided(req)
-    if (!mayActHostWide(req)) return sendJson(res, 403, { error: "Only a host administrator can manage Slack links" })
+  hostAdminRoute(use, "/api/slack", "Only a host administrator can manage Slack links", async (req, res) => {
     if (req.method === "GET") {
       const status = await slackService().status()
       const links = await Promise.all(status.links.map(async (link) => ({ ...link, title: await sessionTitle(link.sessionId) })))

@@ -100,6 +100,34 @@ export function validateEmbeddingConfig(section: Record<string, unknown>): { con
   }
 }
 
+/**
+ * `config.json` with `changes` merged into its `embeddings` section, or with
+ * the section removed when `changes` is null. Other sections are kept.
+ */
+export function updateEmbeddingConfigText(
+  fileText: string | null,
+  changes: Partial<EmbeddingConfig> | null,
+): { text: string; config: EmbeddingConfig | null } | { error: string } {
+  let file: Record<string, unknown> = {}
+  if (fileText?.trim()) {
+    try {
+      file = JSON.parse(fileText) as Record<string, unknown>
+    } catch (error) {
+      return { error: `config.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (typeof file !== "object" || file === null || Array.isArray(file)) return { error: "config.json must hold an object" }
+  }
+  let config: EmbeddingConfig | null = null
+  if (changes === null) {
+    delete file.embeddings
+  } else {
+    const validated = validateEmbeddingConfig({ ...(file.embeddings as Record<string, unknown> | undefined), ...changes })
+    if (!validated.config) return { error: validated.error ?? "invalid embedding configuration" }
+    file.embeddings = config = validated.config
+  }
+  return { text: `${JSON.stringify(file, null, 2)}\n`, config }
+}
+
 /** The subset of `fetch` the client uses, injected so shared code does no I/O of its own. */
 export type FetchLike = (url: string, init: { method: "POST"; headers: Record<string, string>; body: string; signal?: AbortSignal }) =>
   Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>
