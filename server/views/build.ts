@@ -1,20 +1,16 @@
 /**
  * Builds a stored view's source into its finished page on the computer that
  * owns it. Each file is compiled on its own with sucrase (pure JavaScript, so
- * it runs the same under Electron and Bun); imports are resolved here, so a
+ * it runs the same under Node and Bun); imports are resolved here, so a
  * missing file or an unknown package fails the build with its location
  * instead of failing in front of the user.
  */
 import { posix } from "node:path"
-import { createRequire } from "node:module"
 import { transform } from "sucrase"
-import type * as SucraseParser from "sucrase/dist/types/parser"
+import { parse } from "sucrase/dist/parser/index.js"
 import type { ViewSourceFile } from "../../shared/views/stored"
 import { composeStoredViewDocument, type ViewDocumentModule } from "./document"
 import { kitModuleFor, kitSpecifiers, VIEW_KIT, type ViewKitIndex, type ViewKitModule } from "./kit"
-
-/** sucrase's own parser, which it types in declarations shipped apart from the module. */
-const { parse } = createRequire(import.meta.url)("sucrase/dist/parser") as typeof SucraseParser
 
 export interface ViewBuildError {
   file?: string

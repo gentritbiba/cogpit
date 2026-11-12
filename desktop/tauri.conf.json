@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cogpit",
+  "version": "../package.json",
+  "identifier": "com.cogpit.app",
+  "build": {
+    "frontendDist": "loading"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "Copyright © 2026 Gentrit Biba",
+    "icon": [
+      "../build/icon.png",
+      "../build/icon.icns",
+      "../build/icon.ico"
+    ],
+    "macOS": {
+      "entitlements": "../build/entitlements.mac.plist",
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
+  }
+}

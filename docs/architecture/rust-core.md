@@ -51,7 +51,7 @@ with a `[cogpit-core]` prefix; `COGPIT_CORE_LOG` sets the filter (default
 ## Supervisor (`server/core/`)
 
 One process-wide supervisor, like `processRegistry`. Every composition takes a
-lease with `startCore()`: `createServerComposition` (Electron's worker, the
+lease with `startCore()`: `createServerComposition` (the desktop sidecar, the
 standalone server, the npm launcher, test fixtures) and both Vite dev plugins.
 The first lease starts core and the last release stops it, closing stdin and
 killing it two seconds later if it is still there.
@@ -59,8 +59,8 @@ killing it two seconds later if it is still there.
 The binary is, in order: `COGPIT_CORE_BIN`; the shell's packaged path
 (`AppServerEnvironment.coreBin`); the newest of `target/{debug,release}` in the
 Cargo workspace above the server code (or under `CARGO_TARGET_DIR`). Server
-code runs from the source tree, electron-vite's `out/main` and the npm bundle,
-so the workspace is found by walking up from the module rather than by a fixed
+code runs from the source tree and the npm bundle (the desktop app passes its
+bundled binary as `coreBin`), so the workspace is found by walking up from the module rather than by a fixed
 relative path. No binary is a startup error that says how to build one.
 
 After boot it health-checks core. If core exits unexpectedly it restarts with
@@ -117,7 +117,8 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 ## Building and testing
 
 `bun run build:core` builds the debug binary (`--release` for release); `dev`,
-`electron:dev`, `test` and `serve` run it first, and cargo makes repeat builds
+`desktop:dev`, `test` and `serve` run it first (`desktop:build` builds and ships
+the release binary), and cargo makes repeat builds
 nearly free. The Rust gates are `cargo fmt --all --check`,
 `cargo clippy --all-targets -- -D warnings` and `cargo test`. CI runs them in a
 separate Linux job (and `cargo test` on one Windows shard), and builds the core

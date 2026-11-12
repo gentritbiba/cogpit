@@ -19,7 +19,7 @@ async function staleLock() {
   const old = new Date(Date.now() - 60000)
   await utimes(join(root, ".store.lock"), old, old)
 }
-/** The record a killed owner leaves behind: Electron's quit kills the server without releasing its stores. */
+/** The record a killed owner leaves behind: the desktop app's quit kills the server without releasing its stores. */
 async function crashLeftover(options: { lock: boolean }) {
   const lock = await acquirePluginStoreLock(root, () => {})
   const record = await readOwner()

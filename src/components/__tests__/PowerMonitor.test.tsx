@@ -3,18 +3,18 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { PowerMonitor } from "@/components/PowerMonitor"
 import type {
-  ElectronPerformanceSnapshot,
+  DesktopPerformanceSnapshot,
   ServerPerformanceSnapshot,
 } from "../../../shared/contracts/performance"
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
-  getElectronSnapshot: vi.fn(),
+  getDesktopSnapshot: vi.fn(),
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
 
-const electronSnapshot: ElectronPerformanceSnapshot = {
+const desktopSnapshot: DesktopPerformanceSnapshot = {
   capturedAt: 1,
   processes: [
     { pid: 10, name: "Renderer", type: "Tab", cpuPercent: 42, memoryMb: 180 },
@@ -58,12 +58,12 @@ function response(data: unknown): Response {
 describe("PowerMonitor", () => {
   beforeEach(() => {
     mocks.authFetch.mockReset()
-    mocks.getElectronSnapshot.mockReset()
+    mocks.getDesktopSnapshot.mockReset()
     mocks.authFetch.mockResolvedValue(response(serverSnapshot))
-    mocks.getElectronSnapshot.mockResolvedValue(electronSnapshot)
-    Object.defineProperty(window, "electronPerformance", {
+    mocks.getDesktopSnapshot.mockResolvedValue(desktopSnapshot)
+    Object.defineProperty(window, "cogpitDesktop", {
       configurable: true,
-      value: { getSnapshot: mocks.getElectronSnapshot },
+      value: { platform: "macos", performance: { getSnapshot: mocks.getDesktopSnapshot } },
     })
   })
 
@@ -71,7 +71,7 @@ describe("PowerMonitor", () => {
     const view = render(<PowerMonitor open={false} onOpenChange={vi.fn()} />)
 
     expect(mocks.authFetch).not.toHaveBeenCalled()
-    expect(mocks.getElectronSnapshot).not.toHaveBeenCalled()
+    expect(mocks.getDesktopSnapshot).not.toHaveBeenCalled()
 
     view.rerender(<PowerMonitor open onOpenChange={vi.fn()} />)
 

@@ -13,7 +13,7 @@ export type { PermissionDecision }
 export type { PermissionRequest } from "../../shared/contracts/permissions"
 
 // Permission requests need to feel responsive, but this poll must not become a
-// render clock for the entire session tree. Electron also throttles the window
+// render clock for the entire session tree. The desktop webview also throttles the window
 // in the background, and we skip polling entirely while the document is hidden.
 const POLL_INTERVAL = 2_000
 

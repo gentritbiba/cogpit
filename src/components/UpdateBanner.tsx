@@ -7,12 +7,12 @@ const ROW = "grid-cols-[auto_minmax(0,1fr)_auto] rounded-none border-x-0 border-
 const ACTIONS = "static col-start-3 row-span-2 row-start-1 flex items-center gap-2 self-center"
 
 export function UpdateBanner() {
-  const [update, setUpdate] = useState<ElectronUpdateState>({ status: "idle" })
+  const [update, setUpdate] = useState<DesktopUpdateState>({ status: "idle" })
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [restarting, setRestarting] = useState(false)
 
   useEffect(() => {
-    const api = window.electronUpdater
+    const api = window.cogpitDesktop?.updater
     if (!api) return
     let live = true
     void api.getState().then((state) => { if (live) setUpdate(state) })
@@ -51,7 +51,7 @@ export function UpdateBanner() {
             disabled={restarting}
             onClick={() => {
               setRestarting(true)
-              void window.electronUpdater?.install()
+              void window.cogpitDesktop?.updater?.install()
             }}
           >
             <RotateCw data-icon="inline-start" />
@@ -103,7 +103,7 @@ export function UpdateBanner() {
           size="xs"
           onClick={() => {
             dismiss()
-            window.electronUpdater?.dismissVersion(update.version)
+            window.cogpitDesktop?.updater?.dismissVersion(update.version)
           }}
           className="whitespace-nowrap text-muted-foreground"
         >

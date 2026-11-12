@@ -26,7 +26,7 @@ import { getHubPluginRelay, isPluginRelayHeader, isPluginRelayPath } from "./plu
 /**
  * Multi-device hub reverse proxy.
  *
- * Mounted as `use("/hub", handler)` in both shells (Electron Express + Vite
+ * Mounted as `use("/hub", handler)` in both shells (desktop/standalone Express + Vite
  * connect). Both strip the mount prefix, so requests arrive here with
  * `req.url === "/:deviceId/rest..."`. The proxy resolves the device by opaque
  * registry id (never a host from the URL — SSRF guard), injects the device's

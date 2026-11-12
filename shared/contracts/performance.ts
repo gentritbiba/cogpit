@@ -1,4 +1,5 @@
-export interface ElectronProcessMetric {
+/** A desktop app process, as the shell reports it. */
+export interface DesktopProcessMetric {
   pid: number
   name: string
   type: string
@@ -7,9 +8,9 @@ export interface ElectronProcessMetric {
   idleWakeupsPerSecond?: number
 }
 
-export interface ElectronPerformanceSnapshot {
+export interface DesktopPerformanceSnapshot {
   capturedAt: number
-  processes: ElectronProcessMetric[]
+  processes: DesktopProcessMetric[]
 }
 
 export interface ActivityMetric {

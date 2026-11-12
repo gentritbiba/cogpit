@@ -85,7 +85,7 @@ for (const name of ["plain", "react"]) {
     const metadata = JSON.parse(await readFile(join(external, `${name}.meta.json`), "utf8")) as { inputs: Record<string, unknown> }
     for (const input of Object.keys(metadata.inputs)) {
       assert.ok(!input.includes(root) && !/(?:^|\/)\.\.\//.test(input), `Bundle includes a file outside the author directory: ${input}`)
-      assert.ok(!/(?:^|\/)(?:shared\/session|server|electron)\//.test(input), `Bundle imports host source: ${input}`)
+      assert.ok(!/(?:^|\/)(?:shared\/session|server)\//.test(input), `Bundle imports host source: ${input}`)
     }
     assert.ok(code.length > 100)
   }

@@ -1,10 +1,10 @@
 import type { CogpitEdition } from "../../shared/contracts/identity"
 
-export type EditionShell = "electron" | "standalone" | "dev"
+export type EditionShell = "desktop" | "standalone" | "dev"
 
 /**
  * Pure edition resolution. Team is only honored in the standalone shell;
- * electron/dev always run personal. A valid env value ("team"/"personal")
+ * desktop/dev always run personal. A valid env value ("team"/"personal")
  * is authoritative over the config edition; invalid values fall through.
  */
 export function resolveEdition(

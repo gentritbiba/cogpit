@@ -84,7 +84,7 @@ export function WorkspaceActivityBar({
   return (
     <aside
       aria-label="Workspace panels"
-      className="electron-no-drag flex w-11 shrink-0 flex-col items-center gap-1 border-l bg-sidebar py-2 text-sidebar-foreground"
+      className="flex w-11 shrink-0 flex-col items-center gap-1 border-l bg-sidebar py-2 text-sidebar-foreground"
     >
       {actions.map((action) => (
         <ActivityBarButton

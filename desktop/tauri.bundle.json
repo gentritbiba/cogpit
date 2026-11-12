@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/cogpit-bun",
+      "binaries/cogpit-core"
+    ],
+    "resources": {
+      "resources/web/": "web/",
+      "resources/server/": "server/",
+      "resources/package.json": "package.json"
+    }
+  }
+}

@@ -3,7 +3,7 @@
  *
  * Two copies can exist on one machine: the CLI the user installed, and the one
  * the Agent SDK vendors in its platform package. Development and server installs
- * can fall back to the vendored copy; the packaged Electron app omits it and
+ * can fall back to the vendored copy; the packaged desktop app omits it and
  * requires an installed CLI. `auto` prefers the install whenever it is at least
  * as new as the vendored copy, and only accepts installs the OS can launch
  * directly — an npm `claude.cmd` shim is not one, so npm-on-Windows users pick

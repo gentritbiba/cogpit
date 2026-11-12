@@ -112,7 +112,7 @@ Every agent still runs as the same OS user. Separate profiles keep browser state
 
 ### One Cogpit reaps, the rest do not
 
-`run/<session-id>` names a session only the process that started it knows about, so a second Cogpit on the same tree would read every one of them as finished. Reaping is single-owner: `~/.cogpit/browser/sweeper.owner` names the holder by pid and start time, a holder whose process is gone can be taken over, and a non-owner still installs the shim and writes the plugin but never sweeps and never stops a named daemon on the way out. The standard Electron dev flow (Vite plus the app server) runs two instances, which is exactly the case this protects.
+`run/<session-id>` names a session only the process that started it knows about, so a second Cogpit on the same tree would read every one of them as finished. Reaping is single-owner: `~/.cogpit/browser/sweeper.owner` names the holder by pid and start time, a holder whose process is gone can be taken over, and a non-owner still installs the shim and writes the plugin but never sweeps and never stops a named daemon on the way out. The standard desktop dev flow (Vite plus the app server) runs two instances, which is exactly the case this protects.
 
 ## File Layout
 
@@ -222,7 +222,7 @@ Agents launched outside Cogpit, legacy `exec` fallbacks, and other non-SDK integ
 
 Cogpit ships one skill, `cogpit`, and copies it into each agent CLI's global skills directory (`~/.claude/skills`, `~/.codex/skills`, `~/.copilot/skills`) **automatically on every launch**. Sessions Cogpit starts, one-shot runs and agents started outside Cogpit all read that copy. Its `SKILL.md` is a short index; the browser guide is `references/browser.md`, with advanced procedures in `references/browser-advanced.md`, and agents load each only when needed.
 
-The refresh writes into every existing agent config root and is idempotent: an unchanged file is left alone, and one CLI failing does not stop the others. Custom configured homes are respected, including isolated provider accounts when their worker starts; when the Claude home an SDK session inherits (`CLAUDE_CONFIG_DIR`, else `~/.claude`) differs from the configured one, both get the skill. Unrelated skills and files are left alone; linked source files are updated without replacing their symlinks. No network download is needed: the Markdown is embedded in the Electron, npm and headless server bundles by `sync-cogpit-skill`.
+The refresh writes into every existing agent config root and is idempotent: an unchanged file is left alone, and one CLI failing does not stop the others. Custom configured homes are respected, including isolated provider accounts when their worker starts; when the Claude home an SDK session inherits (`CLAUDE_CONFIG_DIR`, else `~/.claude`) differs from the configured one, both get the skill. Unrelated skills and files are left alone; linked source files are updated without replacing their symlinks. No network download is needed: the Markdown is embedded in the desktop, npm and headless server bundles by `sync-cogpit-skill`.
 
 Earlier releases also installed `cogpit-browser`, `cogpit-sessions` and `cogpit-memory` as separate skills and passed a duplicate copy to SDK sessions as a plugin under `~/.cogpit/browser/plugin`. On launch Cogpit deletes those copies only where a file still matches a version it shipped (`server/agents/retiredSkillFiles.ts`), removes the emptied directories and any link that pointed at a directory it just removed, and deletes the old plugin directory.
 

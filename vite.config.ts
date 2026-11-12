@@ -10,7 +10,8 @@ import { VIEW_LIBRARY_IDS, viewLibraryAliases } from './build/viewLibraryAliases
 import { chunkFileNames, editionUiBanner, manualChunks } from './build/manualChunks'
 import { themeBootstrap } from './build/themeBootstrap'
 
-export default defineConfig({
+// `--mode renderer` serves only the renderer, for the desktop shell's server to proxy (`bun run desktop:dev`).
+export default defineConfig(({ mode }) => ({
   worker: { format: "es" },
   optimizeDeps: { exclude: VIEW_LIBRARY_IDS },
   plugins: [
@@ -21,8 +22,7 @@ export default defineConfig({
       },
     }),
     tailwindcss(),
-    sessionApiPlugin(),
-    ptyPlugin(),
+    ...(mode === "renderer" ? [] : [sessionApiPlugin(), ptyPlugin()]),
     bundleBoundary(),
     editionUiBanner(),
   ],
@@ -41,7 +41,7 @@ export default defineConfig({
   },
   server: {
     watch: {
-      ignored: ['**/undo-history/**', '**/session-config/**', '**/.claude/worktrees/**', '**/target/**'],
+      ignored: ['**/undo-history/**', '**/session-config/**', '**/.claude/worktrees/**', '**/target/**', '**/desktop/resources/**'],
     },
   },
-})
+}))

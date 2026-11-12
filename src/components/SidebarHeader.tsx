@@ -23,7 +23,7 @@ export const SidebarHeader = memo(function SidebarHeader({
   commandPaletteShortcut,
 }: SidebarHeaderProps) {
   return (
-    <div className="electron-drag window-inset-start flex h-12 shrink-0 items-center gap-1 px-2">
+    <div className="desktop-drag window-inset-start flex h-12 shrink-0 items-center gap-1 px-2">
       <div className="flex-1" />
       <HeaderIconButton icon={Eye} label="Home" onClick={onGoHome} size="default" />
       <HeaderIconButton

@@ -71,7 +71,7 @@ export function parseLocalFileHref(href: string | undefined): LocalFileTarget | 
 
 /**
  * Opens filesystem links in the configured code editor and web URLs in the
- * default browser (Electron intercepts window.open for external navigation).
+ * default browser (the desktop app opens window.open targets there).
  */
 function ExternalLink({
   href,
@@ -142,7 +142,7 @@ export const markdownComponents: Components = {
     return <>{children}</>
   },
 
-  // ── Links (Electron-aware) ────────────────────────────────────────────────
+  // ── Links (desktop-aware) ─────────────────────────────────────────────────
   a: ExternalLink,
 
   // ── Headings ───────────────────────────────────────────────────────────────

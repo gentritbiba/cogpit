@@ -44,7 +44,7 @@ export function sessionApiPlugin(): Plugin {
 
       // Vite awaits async configureServer hooks. Complete initialization before
       // registering middleware so the first request observes the same ready
-      // config/registry state as Electron and standalone composition.
+      // config/registry state as desktop and standalone composition.
       const legacyHost = await captureLegacyPluginHost(dataDir)
       await Promise.all([
         loadConfig(),

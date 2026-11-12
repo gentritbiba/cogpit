@@ -131,7 +131,7 @@ export async function startStandaloneServer({
     mode: "standalone",
     legacyPluginHost,
     legacyClickUpPath,
-    viteDevUrl: process.env.ELECTRON_RENDERER_URL,
+    viteDevUrl: process.env.COGPIT_RENDERER_DEV_URL,
   })
   startSessionCatalogAfterFirstResponse(composition.httpServer)
   let boundPort: number
