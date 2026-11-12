@@ -21,15 +21,20 @@ import {
   type CatalogDirListing,
   type StoreCatalogSource,
 } from "../sessionCatalog/storeCatalog"
+import { ownTranscripts } from "./transcriptInventory"
 import type {
   AgentStore,
   ProjectSessionFileInfo,
   SessionFileInfo,
   SubagentFileInfo,
+  TranscriptFileInfo,
 } from "./types"
 
 /** Caps the files one freshness check stats; a session can hold hundreds of agent transcripts. */
 const AGENT_TRANSCRIPT_STAT_BUDGET = 1000
+
+/** A sub-agent's own sub-agents sit under `agent-<id>/subagents/`; nothing legitimate nests deeper. */
+const MAX_SUBAGENT_DEPTH = 4
 
 /**
  * Claude Code keeps one directory per project under `~/.claude/projects`, named
@@ -111,6 +116,36 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
   async function listSessionFiles(): Promise<SessionFileInfo[]> {
     const root = sessionsRoot()
     return root ? (await walkStore(catalogSource, root)).files : []
+  }
+
+  /** `<parent>/subagents/agent-<id>.jsonl`, and the same beside each of those, filed under the root session. */
+  async function listSubagentTranscripts(root: string, parentPath: string, sessionId: string, depth: number): Promise<TranscriptFileInfo[]> {
+    if (depth >= MAX_SUBAGENT_DEPTH) return []
+    const dir = join(parentPath.replace(/\.jsonl$/, ""), "subagents")
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const found: TranscriptFileInfo[] = []
+    for (const name of names) {
+      const agentId = /^agent-(.+)\.jsonl$/.exec(name)?.[1]
+      if (!agentId) continue
+      const filePath = join(dir, name)
+      const stats = await statContainedFile(root, filePath)
+      if (stats) found.push({ filePath, ...stats, sessionId, isSubagent: true, parentSessionId: sessionId, agentId })
+      found.push(...await listSubagentTranscripts(root, filePath, sessionId, depth + 1))
+    }
+    return found
+  }
+
+  async function listTranscripts(): Promise<TranscriptFileInfo[]> {
+    const root = sessionsRoot()
+    if (!root) return []
+    const sessions = ownTranscripts(descriptor, await listSessionFiles())
+    const subagents = await Promise.all(sessions.map((session) => listSubagentTranscripts(root, session.filePath, session.sessionId, 0)))
+    return [...sessions, ...subagents.flat()]
   }
 
   async function listProjectSessionFiles(dirName: string): Promise<ProjectSessionFileInfo[] | null> {
@@ -204,6 +239,7 @@ export function createClaudeStore(projectsRoot?: string, configuredDescriptor?: 
     },
 
     listSessionFiles,
+    listTranscripts,
 
     async resolveSessionFile(dirName: string, fileName: string): Promise<string | null> {
       const root = sessionsRoot()

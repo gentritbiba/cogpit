@@ -21,6 +21,8 @@ const orchestrationRoots = new Set<string>()
 const initialOrchestrationRoot = mkdtempSync(join(tmpdir(), "cogpit-vitest-orchestration-"))
 orchestrationRoots.add(initialOrchestrationRoot)
 process.env.COGPIT_ORCHESTRATION_ROOT = initialOrchestrationRoot
+// A server a test boots starts indexing session text; it must never reach the live memory store.
+process.env.COGPIT_MEMORY_DIR = join(initialOrchestrationRoot, "memory")
 beforeEach(() => { const root = mkdtempSync(join(tmpdir(), "cogpit-vitest-orchestration-")); orchestrationRoots.add(root); process.env.COGPIT_ORCHESTRATION_ROOT = root })
 afterAll(async () => {
   if (typeof window === "undefined") {
