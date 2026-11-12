@@ -18,6 +18,17 @@ export interface CoreSocketRelay {
   close(code: number, reason?: string): void
 }
 
+export interface CoreRelayHooks {
+  /**
+   * Runs on every client frame as it arrives, including frames buffered while
+   * the core socket connects. Return the frame to send (a string goes as text),
+   * or null to drop it.
+   */
+  toCore?(data: RawData, isBinary: boolean): RawData | string | null
+  /** Runs on every core frame before it reaches the client; false drops it. */
+  toClient?(data: RawData, isBinary: boolean): boolean
+}
+
 /** A received close code that may also be sent: 1005, 1006 and 1015 never go on the wire. */
 function sendableCode(code: number, fallback: number): number {
   if (code === 1000 || (code >= 1001 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999)) {
@@ -36,12 +47,18 @@ function size(data: RawData): number {
  * `corePath`, frame for frame in both directions. TS stays the endpoint the
  * client sees: it may inspect or refuse frames before calling this, and it
  * ends the conversation with its own close code through the returned handle.
+ * The hooks let TS authorize or rewrite each frame in flight.
  */
-export function relayToCore(client: WebSocket, req: IncomingMessage, corePath: string): CoreSocketRelay {
+export function relayToCore(
+  client: WebSocket,
+  req: IncomingMessage,
+  corePath: string,
+  hooks: CoreRelayHooks = {},
+): CoreSocketRelay {
   let upstream: WebSocket | null = null
   let closing = false
   let pendingBytes = 0
-  const pending: { data: RawData; isBinary: boolean }[] = []
+  const pending: { data: RawData | string; isBinary: boolean }[] = []
 
   const close = (code: number, reason = "") => {
     if (closing) return
@@ -52,13 +69,23 @@ export function relayToCore(client: WebSocket, req: IncomingMessage, corePath: s
     else upstream?.terminate()
   }
 
-  client.on("message", (data, isBinary) => {
+  client.on("message", (received, isBinary) => {
     if (closing) return
+    let data: RawData | string | null
+    try {
+      data = hooks.toCore ? hooks.toCore(received, isBinary) : received
+    } catch {
+      close(CLOSE_INTERNAL_ERROR)
+      return
+    }
+    // A hook may have closed the relay itself, as an authorization failure does.
+    if (data === null || closing) return
+    if (typeof data === "string") isBinary = false
     if (upstream?.readyState === WebSocket.OPEN) {
       upstream.send(data, { binary: isBinary })
       return
     }
-    pendingBytes += size(data)
+    pendingBytes += typeof data === "string" ? Buffer.byteLength(data) : size(data)
     if (pendingBytes > MAX_PENDING_BYTES) {
       close(CLOSE_TOO_BIG, "Too much data before the core connected")
       return
@@ -86,7 +113,15 @@ export function relayToCore(client: WebSocket, req: IncomingMessage, corePath: s
         pendingBytes = 0
       })
       socket.on("message", (data, isBinary) => {
-        if (!closing && client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary })
+        if (closing || client.readyState !== WebSocket.OPEN) return
+        let deliver: boolean
+        try {
+          deliver = hooks.toClient ? hooks.toClient(data, isBinary) : true
+        } catch {
+          close(CLOSE_INTERNAL_ERROR)
+          return
+        }
+        if (deliver && !closing) client.send(data, { binary: isBinary })
       })
       socket.on("close", (code, reason) => {
         if (closing) return

@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { WebSocket, WebSocketServer } from "ws"
 
-import { relayToCore, type CoreSocketRelay } from "../../core/relay"
+import { relayToCore, type CoreRelayHooks, type CoreSocketRelay } from "../../core/relay"
 import { startCore, type CoreLease } from "../../core/supervisor"
 
 let core: CoreLease
@@ -18,7 +18,11 @@ beforeAll(async () => {
   core = await startCore({ dataDir: tmpdir() })
   server = createServer()
   wss = new WebSocketServer({ server })
-  wss.on("connection", (ws, req) => relays.push(relayToCore(ws, req, "/v1/diag/ws")))
+  wss.on("connection", (ws, req) => {
+    const hooked = new URL(req.url ?? "/", "http://localhost").pathname === "/__hooked"
+    const relay: CoreSocketRelay = relayToCore(ws, req, "/v1/diag/ws", hooked ? hooks(() => relay) : {})
+    relays.push(relay)
+  })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   origin = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
@@ -30,8 +34,25 @@ afterAll(async () => {
   await core.release()
 })
 
-function connect(): WebSocket {
-  return new WebSocket(`${origin}/__test`)
+/** Rewrites `spawn`, drops `drop`, denies `forbidden` with 1008; hides core frames saying `hidden`. */
+function hooks(relay: () => CoreSocketRelay): CoreRelayHooks {
+  return {
+    toCore: (data, isBinary) => {
+      if (isBinary) return data
+      const text = data.toString()
+      if (text === "drop") return null
+      if (text === "forbidden") {
+        relay().close(1008, "Not allowed")
+        return null
+      }
+      return text === "spawn" ? "spawn-rewritten" : data
+    },
+    toClient: (data, isBinary) => isBinary || data.toString() !== "hidden",
+  }
+}
+
+function connect(path = "/__test"): WebSocket {
+  return new WebSocket(`${origin}${path}`)
 }
 
 function nextMessage(ws: WebSocket): Promise<{ data: Buffer; isBinary: boolean }> {
@@ -73,4 +94,32 @@ describe("relayToCore", () => {
     relays[relays.length - 1].close(1008, "Session revoked")
     expect(await done).toEqual({ code: 1008, reason: "Session revoked" })
   })
+
+  it("runs the hooks on buffered and live frames in both directions", async () => {
+    const ws = connect("/__hooked")
+    const received: string[] = []
+    ws.on("message", (data) => received.push(data.toString()))
+    // Sent the moment the socket opens, before the relay has reached core.
+    ws.once("open", () => {
+      ws.send("drop")
+      ws.send("spawn")
+    })
+    await new Promise((resolve) => ws.once("open", resolve))
+    await waitFor(() => received.length === 1)
+    ws.send("hidden")
+    ws.send("live")
+    await waitFor(() => received.length === 2)
+    expect(received).toEqual(["spawn-rewritten", "live"])
+    const done = closed(ws)
+    ws.send("forbidden")
+    expect(await done).toEqual({ code: 1008, reason: "Not allowed" })
+  })
 })
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time")
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}

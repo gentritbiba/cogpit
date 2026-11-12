@@ -82,6 +82,9 @@ Forwarded requests wait up to ten seconds for a restart, then answer 503.
   before core connects are buffered (4 MiB at most). Core's close code reaches
   the client; `relay.close(code, reason)` lets TS close the client with its own
   code, such as 1008 when `PtyAuthorizationController` revokes a session.
+  Optional hooks run on every frame in flight: `toCore` may rewrite or drop a
+  client frame (buffered frames included), and `toClient` may drop a core
+  frame. A hook that throws closes the client with 1011.
 
 `attachSocketTransports(httpServer, { fallback })` (`server/socketTransports.ts`)
 is the one upgrade handler: hub proxy, `/__pty`, `/__browser`, then the
