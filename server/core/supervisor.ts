@@ -180,15 +180,22 @@ function settleWaiters(result: { endpoint: CoreEndpoint } | { error: Error }): v
 }
 
 function adopt(next: Running): void {
-  running = next
-  next.child.once("exit", (code, signal) => {
+  const { child } = next
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
     if (running !== next) return
     running = null
     if (leases === 0) return
     console.error(`[cogpit-core] exited unexpectedly (${signal ?? `code ${code}`}); restarting`)
     if (Date.now() - next.startedAt >= STABLE_RUN_MS) restartAttempt = 0
     scheduleRestart()
-  })
+  }
+  running = next
+  // It may have died after answering its health check, before this listener.
+  if (child.exitCode !== null || child.signalCode !== null) {
+    onExit(child.exitCode, child.signalCode)
+    return
+  }
+  child.once("exit", onExit)
   settleWaiters({ endpoint: next.endpoint })
 }
 
