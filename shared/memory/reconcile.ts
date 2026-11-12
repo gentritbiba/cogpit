@@ -57,9 +57,14 @@ export async function reconcileStore(
       break
     }
     try {
+      const parseStarted = Date.now()
       const session = await io.parse(file)
       if (session) {
-        const result = store.syncSession(file, session, { title: io.title?.(file), hasSubagentTranscript: hasTranscript(file.sessionId) })
+        const result = store.syncSession(file, session, {
+          title: io.title?.(file),
+          hasSubagentTranscript: hasTranscript(file.sessionId),
+          elapsedMs: Date.now() - parseStarted,
+        })
         summary.synced++
         summary.chunks.added += result.added
         summary.chunks.updated += result.updated

@@ -13,16 +13,26 @@ export function rrfScore(ranks: Iterable<number | undefined>, k = RRF_K): number
 }
 
 /**
- * Keep the best-ranked item of each group of identical text and count the
- * rest, so a forked session does not fill the results with copies.
+ * One item per group of identical text, at the group's best position, with
+ * the rest counted, so a forked session does not fill the results with
+ * copies. The kept item is the best-ranked one `prefer` accepts, else the
+ * best-ranked one.
  */
-export function collapseDuplicates<T extends { duplicates: number }>(ranked: readonly T[], textKey: (item: T) => string): T[] {
-  const kept = new Map<string, T>()
+export function collapseDuplicates<T extends { duplicates: number }>(
+  ranked: readonly T[],
+  textKey: (item: T) => string,
+  prefer?: (item: T) => boolean,
+): T[] {
+  const groups = new Map<string, T[]>()
   for (const item of ranked) {
     const key = textKey(item)
-    const first = kept.get(key)
-    if (first) first.duplicates++
-    else kept.set(key, item)
+    const group = groups.get(key)
+    if (group) group.push(item)
+    else groups.set(key, [item])
   }
-  return [...kept.values()]
+  return [...groups.values()].map((group) => {
+    const kept = (prefer && group.find(prefer)) || group[0]!
+    kept.duplicates += group.length - 1
+    return kept
+  })
 }

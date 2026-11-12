@@ -19,6 +19,14 @@ export interface ProseFilters {
   sinceMs?: number
   /** Include prompts Cogpit or other agents wrote on someone's behalf. Default true. */
   includeAutomated?: boolean
+  /** Only these sessions, applied before fusion, duplicate collapsing and the limit. Empty means nothing matches. */
+  sessionIds?: readonly string[]
+}
+
+/** The caller's filters plus what search adds itself. */
+export interface ChunkFilters extends ProseFilters {
+  /** Source files to leave out, e.g. transcripts that are gone. */
+  excludeFileIds?: readonly number[]
 }
 
 export interface FtsQuery {
@@ -83,7 +91,7 @@ export function countTermMatches(text: string, terms: readonly string[]): number
   return count
 }
 
-function filterSql(filters: ProseFilters): { sql: string; params: SqlValue[] } {
+export function filterSql(filters: ChunkFilters): { sql: string; params: SqlValue[] } {
   const conditions: string[] = []
   const params: SqlValue[] = []
   const add = (condition: string, value: SqlValue) => {
@@ -96,6 +104,9 @@ function filterSql(filters: ProseFilters): { sql: string; params: SqlValue[] } {
   if (filters.cwd) add("c.cwd = ?", filters.cwd)
   if (filters.sinceMs !== undefined) add("c.ts_ms >= ?", filters.sinceMs)
   if (filters.includeAutomated === false) conditions.push("c.automated = 0")
+  // One JSON parameter, so thousands of ids stay within every driver's bound-variable limit.
+  if (filters.sessionIds) add("c.session_id IN (SELECT value FROM json_each(?))", JSON.stringify(filters.sessionIds))
+  if (filters.excludeFileIds?.length) add("c.file_id NOT IN (SELECT value FROM json_each(?))", JSON.stringify(filters.excludeFileIds))
   return { sql: conditions.map((condition) => ` AND ${condition}`).join(""), params }
 }
 
@@ -103,7 +114,7 @@ const CHUNK_SELECT = `c.id, c.session_id, c.instance_id, c.agent_kind, c.cwd, s.
   c.agent_id, c.inline_agent_id, c.kind, c.text, c.text_hash, c.timestamp, c.automated`
 
 /** The best `limit` chunks for `query`, best first. */
-export function keywordSearch(store: MemoryStore, query: FtsQuery, filters: ProseFilters, limit: number): ChunkRow[] {
+export function keywordSearch(store: MemoryStore, query: FtsQuery, filters: ChunkFilters, limit: number): ChunkRow[] {
   const where = filterSql(filters)
   return store.db.prepare(`
     SELECT ${CHUNK_SELECT}, snippet(chunks_fts, 0, '', '', '...', ${SNIPPET_TOKENS}) AS snippet
@@ -116,11 +127,45 @@ export function keywordSearch(store: MemoryStore, query: FtsQuery, filters: Pros
     LIMIT ?`).all(query.match, ...where.params, limit) as ChunkRow[]
 }
 
-export function keywordCounts(store: MemoryStore, query: FtsQuery, filters: ProseFilters): { hits: number; sessions: number } {
+/** Chunk rows by id, in no particular order; `snippet` is left empty for the caller. */
+export function chunkRows(store: MemoryStore, ids: readonly number[]): ChunkRow[] {
+  if (ids.length === 0) return []
+  return store.db.prepare(`
+    SELECT ${CHUNK_SELECT}, '' AS snippet
+    FROM chunks c
+    JOIN source_files f ON f.id = c.file_id
+    LEFT JOIN sessions s ON s.session_id = c.session_id
+    WHERE c.id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as ChunkRow[]
+}
+
+export function keywordCounts(store: MemoryStore, query: FtsQuery, filters: ChunkFilters): { hits: number; sessions: number } {
   const where = filterSql(filters)
   const row = firstRow<{ hits: number; sessions: number }>(store.db.prepare(`
     SELECT COUNT(*) AS hits, COUNT(DISTINCT c.session_id) AS sessions
     FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
     WHERE chunks_fts MATCH ?${where.sql}`), query.match, ...where.params)
+  return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
+}
+
+/**
+ * Of the chunks `ids`, those `query` does not match (all of them without a
+ * query), and how many of their sessions have no keyword match at all.
+ */
+export function unmatchedCounts(store: MemoryStore, ids: readonly number[], query: FtsQuery | null, filters: ChunkFilters): { hits: number; sessions: number } {
+  if (ids.length === 0) return { hits: 0, sessions: 0 }
+  const json = JSON.stringify(ids)
+  if (!query) {
+    const row = firstRow<{ hits: number; sessions: number }>(store.db.prepare(`
+      SELECT COUNT(*) AS hits, COUNT(DISTINCT session_id) AS sessions FROM chunks WHERE id IN (SELECT value FROM json_each(?))`), json)
+    return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
+  }
+  const where = filterSql(filters)
+  const row = firstRow<{ hits: number; sessions: number }>(store.db.prepare(`
+    SELECT COUNT(*) AS hits, COUNT(DISTINCT CASE WHEN o.session_id NOT IN (
+      SELECT c.session_id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid WHERE chunks_fts MATCH ?${where.sql}
+    ) THEN o.session_id END) AS sessions
+    FROM chunks o
+    WHERE o.id IN (SELECT value FROM json_each(?)) AND o.id NOT IN (SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?)`),
+  query.match, ...where.params, json, query.match)
   return { hits: row?.hits ?? 0, sessions: row?.sessions ?? 0 }
 }

@@ -138,6 +138,70 @@ describe("searchProse", () => {
     expect(result.keywordHits).toBe(2)
   })
 
+  it("keeps only the given sessions before collapsing duplicates and cutting to the limit", async () => {
+    const store = open()
+    const turns = [{ user: "the migration plan for the store" }]
+    store.syncSession(sourceFile({ path: "/t/hidden.jsonl", sessionId: "hidden" }), makeSession([
+      { user: "migration plan, the store migration plan, and the plan for the migration" },
+    ]))
+    store.syncSession(sourceFile({ path: "/t/hidden-fork.jsonl", sessionId: "hidden-fork" }), makeSession(turns))
+    store.syncSession(sourceFile({ path: "/t/visible.jsonl", sessionId: "visible" }), makeSession(turns))
+
+    const visible = await searchProse(store, "migration plan", { sessionIds: ["visible"], limit: 1 })
+    expect(visible.hits).toEqual([expect.objectContaining({ sessionId: "visible", duplicates: 0 })])
+    expect(visible).toMatchObject({ keywordHits: 1, sessionsMatched: 1 })
+
+    const none = await searchProse(store, "migration plan", { sessionIds: [] })
+    expect(none).toMatchObject({ hits: [], keywordHits: 0, sessionsMatched: 0 })
+
+    const many = Array.from({ length: 40_000 }, (_, i) => `other-${i}`).concat("visible")
+    expect((await searchProse(store, "migration plan", { sessionIds: many })).hits.map((hit) => hit.sessionId)).toEqual(["visible"])
+  })
+
+  describe("a subagent whose transcript was deleted after its parent reported it inline", () => {
+    const parent = sourceFile({ mtimeMs: 1_000 })
+    const child = sourceFile({ path: "/transcripts/session-1/subagents/agent-b2.jsonl", isSubagent: true, parentSessionId: "session-1", agentId: "b2" })
+    const reportText = "the deploy stalled on the migration lock"
+
+    function seedDeletedSubagent(store: MemoryStore): void {
+      store.syncSession(child, makeSession([{ assistant: reportText }]))
+      const report = {
+        agentId: "b2", agentName: null, subagentType: null, type: "assistant" as const, content: null, toolCalls: [], thinking: [], text: [reportText],
+        timestamp: "2026-11-01T10:00:00.000Z", tokenUsage: null, model: null, isBackground: false,
+      }
+      const parentSession = makeSession([{ user: "go", blocks: [{ kind: "sub_agent", messages: [report] }] }])
+      store.syncSession(parent, parentSession, { hasSubagentTranscript: (agentId) => agentId === "b2" })
+      store.syncSession({ ...parent, mtimeMs: 2_000 }, parentSession)
+    }
+    const fileExists = (path: string) => path !== child.path
+
+    it("keeps the live copy when folding duplicate text", async () => {
+      const store = open()
+      seedDeletedSubagent(store)
+      const result = await searchProse(store, "deploy stalled migration lock", { fileExists })
+      expect(result.hits).toEqual([expect.objectContaining({ sourceFile: parent.path, archived: false, duplicates: 1 })])
+      expect(result.keywordHits).toBe(2)
+    })
+
+    it("drops archived text before fusion, folding and the limit with liveOnly", async () => {
+      const store = open()
+      seedDeletedSubagent(store)
+      const checked: string[] = []
+      const result = await searchProse(store, "deploy stalled migration lock", {
+        liveOnly: true,
+        limit: 1,
+        fileExists: (path) => {
+          checked.push(path)
+          return fileExists(path)
+        },
+      })
+      expect(result.hits).toEqual([expect.objectContaining({ sourceFile: parent.path, archived: false, duplicates: 0 })])
+      expect(result.keywordHits).toBe(1)
+      expect(checked.filter((path) => path === child.path)).toHaveLength(1)
+      expect((await searchProse(store, "deploy stalled migration lock", { liveOnly: true })).keywordHits).toBe(2)
+    })
+  })
+
   it("returns nothing for a query without words and clamps the limit", async () => {
     const store = open()
     seed(store)

@@ -77,8 +77,11 @@ export class SearchIndex {
       mtime_ms REAL NOT NULL,
       session_id TEXT NOT NULL,
       is_subagent INTEGER NOT NULL DEFAULT 0,
-      parent_session_id TEXT
+      parent_session_id TEXT,
+      indexed_at REAL
     )`)
+    const columns = this.db.prepare("PRAGMA table_info(indexed_files)").all() as Array<{ name: string }>
+    if (!columns.some((column) => column.name === "indexed_at")) this.db.exec("ALTER TABLE indexed_files ADD COLUMN indexed_at REAL")
 
     // Check if FTS table exists before creating (FTS5 doesn't support IF NOT EXISTS)
     const ftsExists = this.db.prepare(
@@ -233,21 +236,24 @@ export class SearchIndex {
     const insert = this.db.prepare(
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
-    const deleteContent = this.db.prepare(
-      "DELETE FROM search_content WHERE source_file = ?"
-    )
+    // `source_file = ?` alone scans every row; the FTS phrase on the file's last two path segments finds its rows through the index.
+    const suffix = filePath.split(/[\\/]/).slice(-2).join("/")
+    const [deleteSql, deleteParams] = /[\p{L}\p{N}]/u.test(suffix)
+      ? ["DELETE FROM search_content WHERE rowid IN (SELECT rowid FROM search_content WHERE search_content MATCH ? AND source_file = ?)", [`source_file : "${suffix.replace(/"/g, '""')}"`, filePath]]
+      : ["DELETE FROM search_content WHERE source_file = ?", [filePath]]
+    const deleteContent = this.db.prepare(deleteSql)
     const deleteFile = this.db.prepare(
       "DELETE FROM indexed_files WHERE file_path = ?"
     )
     const insertFile = this.db.prepare(
-      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id, indexed_at) VALUES (?, ?, ?, ?, ?, ?)"
     )
 
     const txn = this.db.transaction(() => {
-      deleteContent.run(filePath)
+      deleteContent.run(...deleteParams)
       deleteFile.run(filePath)
       this.insertSessionContent(insert, resolvedSessionId, filePath, session)
-      insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId)
+      insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId, Date.now())
     })
 
     txn()
@@ -426,7 +432,8 @@ export class SearchIndex {
    * SQLite transaction with pre-prepared statements. This avoids the overhead
    * of 3000+ individual transactions (each forcing a disk sync).
    */
-  buildFull(onParsed?: (file: SessionFile, session: ReturnType<typeof parseSession>) => void): void {
+  /** `onParsed` gets each file's parse and the ms spent on it so far: reading, parsing and indexing. */
+  buildFull(onParsed?: (file: SessionFile, session: ReturnType<typeof parseSession>, elapsedMs: number) => void): void {
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
     this.db.close()
@@ -455,17 +462,18 @@ export class SearchIndex {
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
     const insertFile = this.db.prepare(
-      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id, indexed_at) VALUES (?, ?, ?, ?, ?, ?)"
     )
 
     const txn = this.db.transaction(() => {
       for (const file of files) {
         try {
+          const started = Date.now()
           const content = readTranscriptTextSync(file.path)
           const session = parseSession(content, { skipStats: true })
           this.insertSessionContent(insert, file.sessionId, file.path, session)
-          insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId)
-          onParsed?.(file, session)
+          insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId, Date.now())
+          onParsed?.(file, session, Date.now() - started)
         } catch {
           // Skip files that fail to parse
         }
@@ -544,6 +552,12 @@ export class SearchIndex {
   indexedFiles(): Map<string, number> {
     const rows = this.db.prepare("SELECT file_path, mtime_ms FROM indexed_files").all() as Array<{ file_path: string; mtime_ms: number }>
     return new Map(rows.map((row) => [row.file_path, row.mtime_ms]))
+  }
+
+  /** When each transcript was last indexed (epoch ms); rows an older version wrote are left out. */
+  indexedAt(): Map<string, number> {
+    const rows = this.db.prepare("SELECT file_path, indexed_at FROM indexed_files WHERE indexed_at IS NOT NULL").all() as Array<{ file_path: string; indexed_at: number }>
+    return new Map(rows.map((row) => [row.file_path, row.indexed_at]))
   }
 
   /** Every transcript from every agent, tagged with the session it belongs to. */

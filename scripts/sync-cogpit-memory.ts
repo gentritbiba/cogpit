@@ -66,6 +66,7 @@ const MEMORY: SyncSet = {
   files: [
     "chunker.ts",
     "database.ts",
+    "embeddings.ts",
     "fusion.ts",
     "hash.ts",
     "keywordSearch.ts",
@@ -75,6 +76,7 @@ const MEMORY: SyncSet = {
     "search.ts",
     "store.ts",
     "types.ts",
+    "vectors.ts",
   ],
   imports: { session: SESSION },
   rewrite: (source) => source.replace(/(\bfrom\s+["'])\.\.\/session\//g, "$1../"),

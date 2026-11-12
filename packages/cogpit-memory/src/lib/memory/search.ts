@@ -1,15 +1,26 @@
 // SHARED MEMORY CORE: edit shared/memory only; cogpit-memory copies are generated.
 import type { AgentKind } from "../types"
+import { DEFAULT_MIN_SCORE, type EmbeddingClient, type QuantizedVector } from "./embeddings"
 import { collapseDuplicates, rrfScore } from "./fusion"
-import { countTermMatches, ftsQuery, keywordCounts, keywordSearch, type ChunkRow, type ProseFilters } from "./keywordSearch"
+import { chunkRows, countTermMatches, ftsQuery, keywordCounts, keywordSearch, unmatchedCounts, type ChunkFilters, type ChunkRow, type ProseFilters } from "./keywordSearch"
 import type { MemoryStore } from "./store"
 import type { ChunkKind, MemoryHit, SemanticStatus } from "./types"
+import { vectorSearch, type VectorMatch } from "./vectors"
+
+export type SearchMode = "hybrid" | "keyword" | "semantic"
+export const SEARCH_MODES: readonly SearchMode[] = ["hybrid", "keyword", "semantic"]
 
 export interface ProseSearchOptions extends ProseFilters {
   /** Hits returned, 1-200. Default 20. */
   limit?: number
-  /** True when the transcript at `path` exists; a hit whose file is gone is `archived`. */
+  /** True when the transcript at `path` exists; a hit whose file is gone is `archived`, and a live copy of the same text is kept over it. */
   fileExists?: (path: string) => boolean
+  /** With `fileExists`, leave out text whose transcript is gone before fusion, duplicate folding and the limit. */
+  liveOnly?: boolean
+  /** Default hybrid: keywords and meaning, fused. */
+  mode?: SearchMode
+  /** Without a client, search is keyword-only and `semantic` says why. */
+  embeddings?: EmbeddingClient | null
 }
 
 export interface ProseSearchResult {
@@ -17,7 +28,9 @@ export interface ProseSearchResult {
   hits: MemoryHit[]
   /** Chunks matching the keywords, before the limit. */
   keywordHits: number
-  /** Sessions with at least one keyword match. */
+  /** Chunks reaching `minScore` that the keywords do not match. */
+  semanticHits: number
+  /** Sessions with at least one keyword or semantic match. */
   sessionsMatched: number
   semantic: SemanticStatus
 }
@@ -42,25 +55,89 @@ export function clampSearchLimit(limit: number | undefined): number {
   return Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_SEARCH_LIMIT)), MAX_SEARCH_LIMIT)
 }
 
-/** Ranked prose hits for `query`. Never throws for lack of embeddings. */
+interface Candidate {
+  row?: ChunkRow
+  keyword?: number
+  semantic?: number
+  similarity?: number
+}
+
+/**
+ * Ranked prose hits for `query`: BM25 over the chunk text and, when an
+ * embedding client is given, cosine similarity over stored vectors, fused by
+ * reciprocal rank. Never throws for lack of embeddings: a missing or failing
+ * endpoint leaves keyword results and says why in `semantic`.
+ */
 export async function searchProse(store: MemoryStore, query: string, options: ProseSearchOptions = {}): Promise<ProseSearchResult> {
   const limit = clampSearchLimit(options.limit)
-  const semantic: SemanticStatus = { state: "unavailable", reason: "no embedding endpoint is configured" }
+  const depth = limit * CANDIDATES_PER_HIT
+  const mode = options.mode ?? "hybrid"
+  const client = mode === "keyword" ? null : options.embeddings ?? null
+  const queryVector = client ? embedQuerySafely(client, query) : null
   const fts = ftsQuery(query)
-  if (!fts) return { hits: [], keywordHits: 0, sessionsMatched: 0, semantic }
-
-  const rows = keywordSearch(store, fts, options, limit * CANDIDATES_PER_HIT)
-  const counts = rows.length < limit * CANDIDATES_PER_HIT
-    ? { hits: rows.length, sessions: new Set(rows.map((row) => row.session_id)).size }
-    : keywordCounts(store, fts, options)
   const archived = archiveCheck(options.fileExists)
-  const ranked = collapseDuplicates(rows.map((row) => toHit(row, countTermMatches(row.text, fts.terms), archived)), (hit) => hit.textHash)
-  const hits = ranked.slice(0, limit).map((hit, index) => {
-    hit.ranks = { keyword: index + 1 }
-    hit.score = rrfScore([hit.ranks.keyword])
-    return hit
+  const filters: ChunkFilters = options.liveOnly && options.fileExists ? { ...options, excludeFileIds: archivedFileIds(store, archived) } : options
+
+  let rows = fts && mode !== "semantic" ? keywordSearch(store, fts, filters, depth) : []
+  let semantic: SemanticStatus = mode === "keyword" ? { state: "off" } : { state: "unavailable", reason: "no embedding endpoint is configured" }
+  let matches: VectorMatch[] = []
+  let aboveFloor: number[] = []
+  if (client && queryVector) {
+    const embedded = await queryVector
+    if ("vector" in embedded) {
+      semantic = { state: "ready" }
+      const found = vectorSearch(store, embedded.vector, client.fingerprint, filters, depth, client.config.minScore ?? DEFAULT_MIN_SCORE)
+      matches = found.matches
+      aboveFloor = found.aboveFloor
+    } else {
+      semantic = { state: "unavailable", reason: embedded.error }
+    }
+  }
+  // Asked for meaning only and none is available: keywords still answer.
+  if (mode === "semantic" && semantic.state !== "ready" && fts) rows = keywordSearch(store, fts, filters, depth)
+
+  const candidates = new Map<number, Candidate>()
+  rows.forEach((row, index) => candidates.set(row.id, { row, keyword: index + 1 }))
+  matches.forEach((match, index) => {
+    const candidate = candidates.get(match.chunkId) ?? {}
+    candidates.set(match.chunkId, { ...candidate, semantic: index + 1, similarity: match.similarity })
   })
-  return { hits, keywordHits: counts.hits, sessionsMatched: counts.sessions, semantic }
+  const missing = [...candidates].filter(([, candidate]) => !candidate.row).map(([id]) => id)
+  for (const row of chunkRows(store, missing)) candidates.get(row.id)!.row = row
+
+  const terms = fts?.terms ?? []
+  const fused = [...candidates.values()]
+    .filter((candidate): candidate is Candidate & { row: ChunkRow } => !!candidate.row)
+    .map((candidate) => toHit(candidate, terms, archived))
+    .sort((a, b) => b.score - a.score || Math.min(a.ranks.keyword ?? Infinity, a.ranks.semantic ?? Infinity) - Math.min(b.ranks.keyword ?? Infinity, b.ranks.semantic ?? Infinity))
+  const hits = collapseDuplicates(fused, (hit) => hit.textHash, (hit) => !hit.archived).slice(0, limit)
+
+  const counts = !fts || rows.length < depth
+    ? { hits: rows.length, sessions: new Set(rows.map((row) => row.session_id)).size }
+    : keywordCounts(store, fts, filters)
+  const keywordsSearched = mode !== "semantic" || semantic.state !== "ready"
+  const semanticOnly = unmatchedCounts(store, aboveFloor, keywordsSearched ? fts : null, filters)
+  return { hits, keywordHits: counts.hits, semanticHits: semanticOnly.hits, sessionsMatched: counts.sessions + semanticOnly.sessions, semantic }
+}
+
+async function embedQuerySafely(client: EmbeddingClient, query: string): Promise<{ vector: QuantizedVector } | { error: string }> {
+  try {
+    return { vector: await client.embedQuery(query) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+const SNIPPET_CHARS = 240
+
+/** A semantic-only hit's snippet: centred on the first query word it shares, else its opening. */
+export function semanticSnippet(text: string, terms: readonly string[]): string {
+  if (text.length <= SNIPPET_CHARS) return text
+  const lower = text.toLowerCase()
+  const at = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0
+  const start = Math.max(0, Math.min(at - SNIPPET_CHARS / 2, text.length - SNIPPET_CHARS))
+  const end = start + SNIPPET_CHARS
+  return `${start > 0 ? "..." : ""}${text.slice(start, end)}${end < text.length ? "..." : ""}`
 }
 
 export function chunkLocation(row: Pick<ChunkRow, "turn" | "kind" | "agent_id" | "inline_agent_id">): string {
@@ -68,6 +145,11 @@ export function chunkLocation(row: Pick<ChunkRow, "turn" | "kind" | "agent_id" |
   if (row.agent_id) return `agent/${row.agent_id}/turn/${row.turn}/${field}`
   if (row.inline_agent_id) return `agent/${row.inline_agent_id}/${field}`
   return `turn/${row.turn}/${field}`
+}
+
+function archivedFileIds(store: MemoryStore, isArchived: (path: string) => boolean): number[] {
+  const files = store.db.prepare("SELECT id, path FROM source_files").all() as Array<{ id: number; path: string }>
+  return files.filter((file) => isArchived(file.path)).map((file) => file.id)
 }
 
 function archiveCheck(fileExists: ((path: string) => boolean) | undefined): (path: string) => boolean {
@@ -80,7 +162,13 @@ function archiveCheck(fileExists: ((path: string) => boolean) | undefined): (pat
   }
 }
 
-function toHit(row: ChunkRow, matchCount: number, isArchived: (path: string) => boolean): MemoryHit {
+function toHit(candidate: Candidate & { row: ChunkRow }, terms: readonly string[], isArchived: (path: string) => boolean): MemoryHit {
+  const { row } = candidate
+  const ranks = {
+    ...(candidate.keyword !== undefined ? { keyword: candidate.keyword } : {}),
+    ...(candidate.semantic !== undefined ? { semantic: candidate.semantic } : {}),
+  }
+  const keyword = candidate.keyword !== undefined
   return {
     chunkId: row.id,
     sessionId: row.session_id,
@@ -95,15 +183,16 @@ function toHit(row: ChunkRow, matchCount: number, isArchived: (path: string) => 
     inlineAgentId: row.inline_agent_id,
     kind: row.kind,
     location: chunkLocation(row),
-    snippet: row.snippet,
+    snippet: keyword ? row.snippet : semanticSnippet(row.text, terms),
     text: row.text,
     textHash: row.text_hash,
     timestamp: row.timestamp,
     automated: row.automated === 1,
-    matchCount: Math.max(1, matchCount),
-    match: "keyword",
-    score: 0,
-    ranks: {},
+    matchCount: keyword ? Math.max(1, countTermMatches(row.text, terms)) : 0,
+    match: keyword && candidate.semantic !== undefined ? "both" : keyword ? "keyword" : "semantic",
+    score: rrfScore([candidate.keyword, candidate.semantic]),
+    ranks,
+    ...(candidate.similarity !== undefined ? { similarity: candidate.similarity } : {}),
     archived: isArchived(row.source_file),
     duplicates: 0,
   }

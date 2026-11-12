@@ -12,7 +12,7 @@
  * prose too, as it did before the memory store existed.
  */
 
-import { existsSync, mkdirSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join, basename, dirname } from "node:path"
 import { SearchIndex, type SearchHit as ToolIndexHit } from "../lib/search-index"
@@ -24,9 +24,11 @@ import { getUserMessageText } from "../lib/parser"
 import { parseTranscript } from "../lib/read-session"
 import { openTranscript, readTranscriptText } from "../lib/transcriptFile"
 import { openMemoryStore, transcriptExists } from "../lib/memory-store"
-import { rebuildToolIndex, syncTranscripts, type SyncSummary } from "../lib/sync"
+import { syncTranscripts, type SyncSummary } from "../lib/sync"
 import { rrfScore } from "../lib/memory/fusion"
-import { clampSearchLimit, searchProse, type ProseSearchResult } from "../lib/memory/search"
+import { clampSearchLimit, searchProse, type ProseSearchResult, type SearchMode } from "../lib/memory/search"
+import type { EmbeddingClient } from "../lib/memory/embeddings"
+import { loadEmbeddings } from "../lib/embedding-config"
 import type { MemoryStore } from "../lib/memory/store"
 import type { ChunkKind, MatchKind, MemoryHit, SemanticStatus } from "../lib/memory/types"
 import type { ParsedSession } from "../lib/types"
@@ -39,6 +41,8 @@ export interface SearchOptions {
   maxAge?: string
   limit?: number
   caseSensitive?: boolean
+  /** Default hybrid. `semantic` skips keyword prose and tool calls; `keyword` skips embeddings. */
+  mode?: SearchMode
 }
 
 export interface SearchHit {
@@ -64,6 +68,8 @@ export interface SearchHit {
   automated?: true
   /** Identical passages in other sessions (forks) folded into this hit. */
   duplicates?: number
+  /** Cosine similarity to the question, for hits found by meaning. */
+  similarity?: number
 }
 
 export interface SessionSearchResult {
@@ -81,11 +87,13 @@ export interface SearchResponse {
   results: SessionSearchResult[]
   semantic?: SemanticStatus["state"]
   semanticReason?: string
+  /** Transcripts with newer content than the stores hold, left for a later sync; their latest turns may be missing. */
+  behind?: number
   warnings?: string[]
 }
 
-/** What a search spends bringing the stores up to date before it answers. */
-export const SEARCH_SYNC_BUDGET_MS = 2000
+/** What a search spends bringing the stores up to date before it answers; `--session` is synced outside it. */
+export const SEARCH_SYNC_BUDGET_MS = 600
 
 /** Each list contributes this many candidates per requested hit before fusion. */
 const CANDIDATES_PER_HIT = 3
@@ -111,6 +119,7 @@ export async function searchSessions(
   opts: SearchOptions,
   searchIndex?: SearchIndex | null,
   memory?: MemoryStore | null,
+  embeddings?: EmbeddingClient | null,
 ): Promise<SearchResponse | { error: string }> {
   if (!query || query.length < 2) {
     return { error: "Query must be at least 2 characters" }
@@ -121,13 +130,20 @@ export async function searchSessions(
   const limit = clampSearchLimit(opts.limit)
   const caseSensitive = opts.caseSensitive ?? false
   const toolMaxAgeMs = maxAge ?? parseMaxAge("5d")!
+  const mode = opts.mode ?? "hybrid"
   const warnings: string[] = []
+  if (embeddings === undefined && mode !== "keyword") {
+    const loaded = loadEmbeddings()
+    if (loaded.error) warnings.push(loaded.error)
+    embeddings = loaded.client
+  }
 
   const opened = openStores(searchIndex, memory, warnings)
   try {
     const { index, memoryStore } = opened
-    const sync = refresh(opened)
-    if (sync?.pending) warnings.push(`${sync.pending} transcripts are not indexed yet; run \`cogpit-memory index sync\` to finish.`)
+    const sync = refresh(opened, opts.sessionId)
+    if (sync?.unindexed) warnings.push(`${sync.unindexed} transcripts are not indexed yet; run \`cogpit-memory index sync\` to include them.`)
+    const behind = sync ? sync.pending - sync.unindexed : 0
 
     const prose = memoryStore
       ? await searchProse(memoryStore, query, {
@@ -137,9 +153,15 @@ export async function searchSessions(
         instanceId: workerInstanceId() ?? undefined,
         sinceMs: maxAge === undefined ? undefined : Date.now() - maxAge,
         fileExists: transcriptExists,
+        mode,
+        embeddings,
       })
       : null
     const proseHits = (prose?.hits ?? []).filter((hit) => !caseSensitive || hit.text.includes(query))
+
+    // Tool calls are matched by phrase only, so a search by meaning leaves them out, unless meaning is unavailable.
+    const wantTools = mode !== "semantic" || prose?.semantic.state !== "ready"
+    if (!wantTools) return withStatus(await fuse(query, limit, proseHits, [], prose, { total: 0, sessions: 0 }), prose, { warnings, behind })
 
     let tools: { hits: ToolIndexHit[]; total: number; sessions: number } | null = null
     if (index) {
@@ -162,10 +184,10 @@ export async function searchSessions(
     const scanned = !tools || (opts.sessionId && tools.hits.length === 0 && proseHits.length === 0)
     if (scanned) {
       const raw = await rawScanSearch(query, opts.sessionId ?? null, toolMaxAgeMs, limit, caseSensitive, opts.excludeSessionId)
-      if (!memoryStore || proseHits.length === 0) return withStatus(raw, prose, warnings)
-      return withStatus(await fuse(query, limit, proseHits, rawToolHits(raw), prose, null), prose, warnings)
+      if (!memoryStore || proseHits.length === 0) return withStatus(raw, prose, { warnings, behind })
+      return withStatus(await fuse(query, limit, proseHits, rawToolHits(raw), prose, null), prose, { warnings, behind })
     }
-    return withStatus(await fuse(query, limit, proseHits, tools!.hits.map(toToolRanked), prose, tools), prose, warnings)
+    return withStatus(await fuse(query, limit, proseHits, tools!.hits.map(toToolRanked), prose, tools), prose, { warnings, behind })
   } finally {
     opened.close()
   }
@@ -179,18 +201,15 @@ interface OpenedStores {
   /** Set when this search opened the index, so it may refresh it. */
   ownIndex: boolean
   ownMemory: boolean
-  indexWasMissing: boolean
   close(): void
 }
 
 function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryStore | null | undefined, warnings: string[]): OpenedStores {
   let index = searchIndex ?? null
   let memoryStore = memory ?? null
-  let indexWasMissing = false
   if (searchIndex === undefined) {
     try {
-      indexWasMissing = !existsSync(DEFAULT_DB_PATH)
-      if (indexWasMissing) mkdirSync(dirname(DEFAULT_DB_PATH), { recursive: true })
+      mkdirSync(dirname(DEFAULT_DB_PATH), { recursive: true })
       index = new SearchIndex(DEFAULT_DB_PATH)
     } catch { /* DB corrupt or locked: the raw scan stands in. */ }
   }
@@ -206,7 +225,6 @@ function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryS
     memoryStore,
     ownIndex: searchIndex === undefined && index !== null,
     ownMemory: memory === undefined && memoryStore !== null,
-    indexWasMissing,
     close() {
       if (this.ownIndex) index?.close()
       if (this.ownMemory) memoryStore?.close()
@@ -214,13 +232,12 @@ function openStores(searchIndex: SearchIndex | null | undefined, memory: MemoryS
   }
 }
 
-function refresh(stores: OpenedStores): SyncSummary | null {
+function refresh(stores: OpenedStores, sessionId: string | undefined): SyncSummary | null {
   const index = stores.ownIndex ? stores.index : null
   const memory = stores.ownMemory ? stores.memoryStore : null
   try {
-    if (index && stores.indexWasMissing) return rebuildToolIndex(index, memory)
     if (!index && !memory) return null
-    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS })
+    return syncTranscripts({ index, memory, budgetMs: SEARCH_SYNC_BUDGET_MS, backOff: true, sessionId })
   } catch {
     // A stale store still answers; the next search tries again.
     return null
@@ -271,6 +288,7 @@ function toProseRanked(hit: MemoryHit): RankedHit {
       ...(hit.archived ? { archived: true as const, text: hit.text } : {}),
       ...(hit.automated ? { automated: true as const } : {}),
       ...(hit.duplicates ? { duplicates: hit.duplicates } : {}),
+      ...(hit.similarity !== undefined ? { similarity: Math.round(hit.similarity * 1000) / 1000 } : {}),
     },
   }
 }
@@ -334,7 +352,7 @@ async function fuse(
     result.hits.push({ ...entry.hit, ...(entry.hit.score !== undefined ? { score: roundScore(entry.hit.score) } : {}) })
   }
 
-  const proseTotal = prose?.keywordHits ?? 0
+  const proseTotal = prose ? prose.keywordHits + prose.semanticHits : 0
   const toolTotal = tools?.total ?? toolHits.length
   const candidateSessions = new Set([...proseHits.map((hit) => hit.sessionId), ...toolHits.map((hit) => hit.sessionId)]).size
   const capped = proseTotal > proseHits.length || toolTotal > toolHits.length
@@ -352,13 +370,14 @@ function roundScore(score: number): number {
   return Math.round(score * 1e6) / 1e6
 }
 
-function withStatus(response: SearchResponse, prose: ProseSearchResult | null, warnings: string[]): SearchResponse {
+function withStatus(response: SearchResponse, prose: ProseSearchResult | null, notes: { warnings: string[]; behind: number }): SearchResponse {
   const semantic: SemanticStatus = prose?.semantic ?? { state: "unavailable", reason: "the memory store is unavailable" }
   return {
     ...response,
     semantic: semantic.state,
     ...(semantic.reason ? { semanticReason: semantic.reason } : {}),
-    ...(warnings.length > 0 ? { warnings } : {}),
+    ...(notes.behind > 0 ? { behind: notes.behind } : {}),
+    ...(notes.warnings.length > 0 ? { warnings: notes.warnings } : {}),
   }
 }
 

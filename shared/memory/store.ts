@@ -17,12 +17,18 @@ export interface SyncedFile {
   chunkerVersion: number
   /** Subagents whose text came from this transcript's inline reports, having no transcript of their own then. */
   inlineAgents: string[]
+  /** When it was last synced (epoch ms). */
+  syncedAtMs: number
+  /** How long that sync took; null when unknown. */
+  syncMs: number | null
 }
 
 export interface SyncSessionOptions extends ChunkOptions {
   /** Session title to snapshot; the first typed prompt when absent. */
   title?: string | null
   now?: number
+  /** Time already spent on this file before the call (reading, parsing, other indexes); the recorded sync duration adds the call's own. */
+  elapsedMs?: number
 }
 
 export interface SyncResult {
@@ -48,6 +54,8 @@ export interface MemoryStatus {
   lastSyncAt: string | null
   /** Source files whose transcript is gone; only when the caller can stat files. */
   archivedFiles?: number
+  /** Vector coverage for one model@dimensions; only when a fingerprint is passed. */
+  embeddings?: EmbeddingCounts
 }
 
 interface StoredChunk {
@@ -76,18 +84,22 @@ export class MemoryStore {
   }
 
   syncedFiles(): Map<string, SyncedFile> {
-    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version, inline_agents FROM source_files").all() as Array<{
+    const rows = this.db.prepare("SELECT path, mtime_ms, size, chunker_version, inline_agents, synced_at, sync_ms FROM source_files").all() as Array<{
       path: string
       mtime_ms: number
       size: number
       chunker_version: number
       inline_agents: string
+      synced_at: number
+      sync_ms: number | null
     }>
     return new Map(rows.map((row) => [row.path, {
       mtimeMs: row.mtime_ms,
       size: row.size,
       chunkerVersion: row.chunker_version,
       inlineAgents: row.inline_agents ? row.inline_agents.split(" ") : [],
+      syncedAtMs: row.synced_at,
+      syncMs: row.sync_ms,
     }]))
   }
 
@@ -108,6 +120,7 @@ export class MemoryStore {
 
   /** Make the stored chunks of `file` match `session`, its fresh parse. */
   syncSession(file: SourceFile, session: ParsedSession, options: SyncSessionOptions = {}): SyncResult {
+    const started = Date.now()
     const chunks = chunkSession(session, options)
     const cwd = session.cwd || ""
     const now = options.now ?? Date.now()
@@ -157,11 +170,12 @@ export class MemoryStore {
         result.removed++
       }
       this.upsertSession(file, session, cwd, chunks, options.title)
+      this.db.prepare("UPDATE source_files SET sync_ms = ? WHERE id = ?").run((options.elapsedMs ?? 0) + Date.now() - started, fileId)
     })
     return result
   }
 
-  status(options: { fileExists?: (path: string) => boolean } = {}): MemoryStatus {
+  status(options: { fileExists?: (path: string) => boolean; fingerprint?: string } = {}): MemoryStatus {
     const count = (sql: string) => firstRow<{ n: number | null }>(this.db.prepare(sql))?.n ?? 0
     const kinds = this.db.prepare("SELECT kind, COUNT(*) AS n FROM chunks GROUP BY kind").all() as Array<{ kind: ChunkKind; n: number }>
     const range = firstRow<{ oldest: string | null; newest: string | null }>(
@@ -185,6 +199,7 @@ export class MemoryStore {
       const paths = this.db.prepare("SELECT path FROM source_files").all() as Array<{ path: string }>
       status.archivedFiles = paths.filter(({ path }) => !options.fileExists!(path)).length
     }
+    if (options.fingerprint) status.embeddings = embeddingCounts(this, options.fingerprint)
     return status
   }
 
@@ -224,6 +239,22 @@ export class MemoryStore {
         first_at = COALESCE(excluded.first_at, sessions.first_at), last_at = COALESCE(excluded.last_at, sessions.last_at)`)
       .run(...values, given, firstPromptTitle(chunks), file.path, timestamps[0] ?? null, timestamps.at(-1) ?? null, given)
   }
+}
+
+export interface EmbeddingCounts {
+  fingerprint: string
+  /** Chunks with a vector for this fingerprint. */
+  embedded: number
+  pending: number
+}
+
+/** True for a chunk `c` without a vector for the fingerprint bound to its `?`. */
+export const MISSING_VECTOR = "NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash AND v.fingerprint = ?)"
+
+export function embeddingCounts(store: MemoryStore, fingerprint: string): EmbeddingCounts {
+  const total = firstRow<{ n: number }>(store.db.prepare("SELECT COUNT(*) AS n FROM chunks"))?.n ?? 0
+  const pending = firstRow<{ n: number }>(store.db.prepare(`SELECT COUNT(*) AS n FROM chunks c WHERE ${MISSING_VECTOR}`), fingerprint)?.n ?? 0
+  return { fingerprint, embedded: total - pending, pending }
 }
 
 /** Which subagents have a transcript of their own, from the same walk, keyed by parent session. */
