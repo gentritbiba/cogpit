@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
 import { act, render } from "@testing-library/react"
 import { TimelineScrollController, type HistoryBytes } from "@/lib/timelineScroll/controller"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
@@ -143,11 +143,13 @@ const NO_BYTES: HistoryBytes = { remaining: 0, loaded: 0 }
 
 function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChangeKey = 1, sessionKey = "s1", historyBytes = NO_BYTES }: Props & { controller: TimelineScrollController }) {
   useEffect(() => controller.setHistoryBytes(historyBytes), [controller, historyBytes])
+  // Stable, as in the app: a new ref each render would detach and re-attach the scroller on every rerender.
+  const scrollerRef = useCallback((el: HTMLDivElement | null) => { scroller = el; controller.setScroller(el) }, [controller])
   const keys = turnKeysOf(turns)
   const rows = turns.map((turn, index) => ({ turn, index, key: keys[index] }))
   return (
     <DisclosureProvider sessionKey={sessionKey}>
-    <div ref={(el) => { scroller = el; controller.setScroller(el as HTMLDivElement | null) }}>
+    <div ref={scrollerRef}>
       <div>
         <TimelineList
           rows={rows}
@@ -597,9 +599,11 @@ describe("TimelineList with the scroll engine", () => {
   it("keeps what the reader sees in place when new byte counts arrive while they read history", () => {
     const turns = makeTurns(ids(0, 200))
     const { rerender } = mount({ turns, hasMore: true, sessionKey: "bytes-reading", historyBytes: { remaining: 4_000_000, loaded: 400_000 } })
-    const anchor = readFrom(`${renderedKeys()[2]}:a`)
+    userScrollTo(scrollTop() - 3000)
+    const anchor = block(`${renderedKeys()[8]}:a`)
     const before = viewportTopOf(anchor)
-    rerender({ turns, hasMore: true, sessionKey: "bytes-reading", historyBytes: { remaining: 100_000, loaded: 400_000 } })
+    // Far under the cap, so the reserve's target really moves.
+    rerender({ turns, hasMore: true, sessionKey: "bytes-reading", historyBytes: { remaining: 20_000, loaded: 400_000 } })
     flushScroll()
     expect(viewportTopOf(anchor)).toBe(before)
   })
