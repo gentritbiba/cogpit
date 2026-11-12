@@ -12,7 +12,15 @@ import {
   type LanguageInput,
   type ThemedToken,
 } from "shiki/core"
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
+import { createJavaScriptRegexEngine, defaultJavaScriptRegexConstructor } from "shiki/engine/javascript"
+
+/**
+ * ES2018 (`u` flag) instead of the newest target (`v` flag): it compiles faster (a little in V8, ~5x in
+ * JavaScriptCore) and is closer to Oniguruma's output, except that it reads `\p{print}` and `\p{graph}`
+ * as ASCII only, which would end YAML comments at the first non-ASCII character.
+ */
+const regexConstructor = (pattern: string): RegExp =>
+  defaultJavaScriptRegexConstructor(pattern, { target: /\\[pP]\{(?:print|graph)\}/i.test(pattern) ? "auto" : "ES2018" })
 
 
 let highlighterPromise: Promise<HighlighterCore> | null = null
@@ -65,7 +73,7 @@ function getHighlighter(): Promise<HighlighterCore> {
       const hl = await createHighlighterCore({
         themes: [themeDark, themeLight],
         langs: defaultLangs as LanguageInput[],
-        engine: createJavaScriptRegexEngine(),
+        engine: createJavaScriptRegexEngine({ regexConstructor }),
       })
       for (const id of DEFAULT_LANG_IDS) loadedLangs.add(id)
       return hl
