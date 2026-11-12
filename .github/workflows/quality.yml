@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - master
+      # The long-lived Rust integration branch; its runs also seed the cargo cache its PRs restore.
+      - rust
   pull_request:
   workflow_dispatch:
 
@@ -47,15 +49,6 @@ jobs:
         run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Check Rust formatting
-        run: cargo fmt --all --check
-
-      - name: Lint Rust
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test Rust
-        run: cargo test --locked
 
       # The server spawns it; every suite that boots a composition needs it.
       - name: Build Rust core
@@ -132,6 +125,31 @@ jobs:
 
       - name: Verify public plugin packages outside the repository
         run: bun run test:contracts:plugins
+
+  # Kept apart from quality, whose Vitest coverage run already sits close to its timeout.
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the version and components.
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Lint Rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --locked
 
   # Windows is a release target, but nothing used to exercise it — the win NSIS
   # config sat unbuilt while POSIX assumptions (/tmp, /bin/zsh, "/" joins, bare

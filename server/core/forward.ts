@@ -77,13 +77,23 @@ export async function forwardToCore(req: IncomingMessage, res: ServerResponse, c
   }
   if (res.writableEnded || req.destroyed) return
 
+  // Transfer-encoding is hop-by-hop, but the body's framing must survive the
+  // hop: Node only chunks POST-style methods unasked, and an unframed body on
+  // a kept-alive connection would read as the next request.
+  const chunked = req.headers["transfer-encoding"] !== undefined
+  const hasBody = chunked || Number(req.headers["content-length"] ?? 0) > 0
+
   await new Promise<void>((done) => {
     const upstream = httpRequest({
       host: "127.0.0.1",
       port: endpoint.port,
       method: req.method,
       path: `${corePath}${originalSearch(req)}`,
-      headers: { ...requestHeaders(req.headers), ...coreHeaders(endpoint, req) },
+      headers: {
+        ...requestHeaders(req.headers),
+        ...(chunked ? { "transfer-encoding": "chunked" } : {}),
+        ...coreHeaders(endpoint, req),
+      },
     })
 
     let abandoned = false
@@ -122,6 +132,11 @@ export async function forwardToCore(req: IncomingMessage, res: ServerResponse, c
       done()
     })
 
-    req.pipe(upstream)
+    if (hasBody) {
+      req.pipe(upstream)
+    } else {
+      req.resume()
+      upstream.end()
+    }
   })
 }

@@ -19,8 +19,9 @@ beforeAll(async () => {
   server = createServer()
   wss = new WebSocketServer({ server })
   wss.on("connection", (ws, req) => {
-    const hooked = new URL(req.url ?? "/", "http://localhost").pathname === "/__hooked"
-    const relay: CoreSocketRelay = relayToCore(ws, req, "/v1/diag/ws", hooked ? hooks(() => relay) : {})
+    const path = new URL(req.url ?? "/", "http://localhost").pathname
+    const corePath = path === "/__badpath" ? "missing-slash" : "/v1/diag/ws"
+    const relay: CoreSocketRelay = relayToCore(ws, req, corePath, path === "/__hooked" ? hooks(() => relay) : {})
     relays.push(relay)
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -93,6 +94,11 @@ describe("relayToCore", () => {
     const done = closed(ws)
     relays[relays.length - 1].close(1008, "Session revoked")
     expect(await done).toEqual({ code: 1008, reason: "Session revoked" })
+  })
+
+  it("closes the client with 1011 when the core URL cannot be built", async () => {
+    const ws = connect("/__badpath")
+    expect((await closed(ws)).code).toBe(1011)
   })
 
   it("runs the hooks on buffered and live frames in both directions", async () => {

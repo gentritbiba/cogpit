@@ -103,10 +103,16 @@ export function relayToCore(
   void whenCoreReady().then(
     (endpoint) => {
       if (closing) return
-      const socket = new WebSocket(`ws://127.0.0.1:${endpoint.port}${corePath}`, {
-        headers: coreHeaders(endpoint, req),
-        perMessageDeflate: false,
-      })
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(`ws://127.0.0.1:${endpoint.port}${corePath}`, {
+          headers: coreHeaders(endpoint, req),
+          perMessageDeflate: false,
+        })
+      } catch {
+        close(CLOSE_INTERNAL_ERROR, "Cogpit core connection failed")
+        return
+      }
       upstream = socket
       socket.on("open", () => {
         for (const frame of pending.splice(0)) socket.send(frame.data, { binary: frame.isBinary })

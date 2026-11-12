@@ -126,3 +126,16 @@ fn refuses_to_start_without_a_boot_message() {
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("boot message"));
 }
+
+#[cfg(unix)]
+#[test]
+fn ignores_ctrl_c_and_keeps_serving() {
+    let (mut core, _) = Core::boot();
+    let status = Command::new("kill")
+        .args(["-INT", &core.child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(!core.wait_for_exit(Duration::from_millis(500)));
+    assert_eq!(core.get("/v1/health", Some(SECRET)).0, 200);
+}

@@ -45,7 +45,14 @@ export function attachSocketTransports(httpServer: Pick<EventEmitter, "on">, { f
   }
 
   httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const url = new URL(req.url || "/", "http://localhost")
+    let url: URL
+    try {
+      url = new URL(req.url || "/", "http://localhost")
+    } catch {
+      // A target such as `//` is not a URL; nobody signed in has been asked yet.
+      socket.destroy()
+      return
+    }
     if (handleHubUpgrade(req, socket, head)) {
       track(socket)
       // Hub transport upgrades bypass the local WebSocketServers and splice raw

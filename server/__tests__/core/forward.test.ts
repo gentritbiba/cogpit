@@ -102,6 +102,14 @@ describe("forwardToCore", () => {
     expect(anonymous.headers["x-core-principal"]).toBe("")
   })
 
+  it("keeps the framing of a chunked body on any method", async () => {
+    const smuggled = Buffer.from("GET /v1/diag/echo?smuggled=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+    const reply = await send("/api/echo", { method: "DELETE", chunks: [smuggled], headers: { "transfer-encoding": "chunked" } })
+    expect(reply.status).toBe(200)
+    expect(reply.headers["x-core-method"]).toBe("DELETE")
+    expect(reply.body.equals(smuggled)).toBe(true)
+  })
+
   it("relays core's status codes", async () => {
     expect((await send("/api/missing", { method: "GET" })).status).toBe(404)
   })

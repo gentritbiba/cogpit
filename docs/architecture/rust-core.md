@@ -38,7 +38,9 @@ sides read.
    `x-cogpit-principal` names the caller TS authorized, for core's logs only.
 4. TS keeps core's stdin open. When it closes, because TS stopped it or died,
    core finishes open requests for up to two seconds and exits. This works the
-   same on Windows, where there is no parent-death signal.
+   same on Windows, where there is no parent-death signal. Core ignores Ctrl+C:
+   a terminal sends it to the whole process group, and TS decides when core
+   stops.
 
 Core always serves `GET /v1/health` and the transport self-test routes under
 `/v1/diag/` (HTTP echo, drain, WebSocket echo). The TS forwarder and relay are
@@ -70,9 +72,11 @@ Forwarded requests wait up to ten seconds for a restart, then answer 503.
 - `forwardToCore(req, res, corePath)` sends the request to `corePath` with the
   client's query string. Express and Vite strip a route's mount prefix from
   `req.url`, so the query comes from `req.originalUrl`. Bodies stream both
-  ways. Hop-by-hop headers, cookies, `authorization` and any client-sent core
+  ways, keeping the body's framing (a chunked body stays chunked on any
+  method; a request without one sends none). Hop-by-hop headers, cookies, `authorization` and any client-sent core
   headers are dropped; the secret and principal are added.
-- `bodySizeLimit` counts the body as it is piped to core. A declared length
+- `bodySizeLimit` applies to every request that carries a body, whatever the
+  method, and counts the body as it is piped to core. A declared length
   over the limit is refused before forwarding. A chunked body that grows past
   it gets the limit's own 413 while core has not answered yet (upload routes
   read the whole body first); if core has already started streaming a
@@ -115,8 +119,9 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 `bun run build:core` builds the debug binary (`--release` for release); `dev`,
 `electron:dev`, `test` and `serve` run it first, and cargo makes repeat builds
 nearly free. The Rust gates are `cargo fmt --all --check`,
-`cargo clippy --all-targets -- -D warnings` and `cargo test`. CI runs them on
-Linux and builds the core before the Vitest suites on Linux and Windows.
+`cargo clippy --all-targets -- -D warnings` and `cargo test`. CI runs them in a
+separate Linux job (and `cargo test` on one Windows shard), and builds the core
+before the Vitest suites on Linux and Windows.
 `check:public-clone` shares this checkout's `CARGO_TARGET_DIR` with its
 temporary worktree.
 

@@ -88,6 +88,10 @@ pub async fn run() -> io::Result<()> {
     stdout.flush().await?;
     tracing::info!(port, "cogpit-core listening");
 
+    // Ctrl+C in a terminal reaches the whole foreground process group. The
+    // parent decides when core stops (by closing stdin), so core ignores it.
+    tokio::spawn(async { while tokio::signal::ctrl_c().await.is_ok() {} });
+
     let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         // The parent holds our stdin open for as long as it wants us alive. EOF
