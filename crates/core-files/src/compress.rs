@@ -2,18 +2,22 @@
 //! server's `compressionMiddleware` applies to `/api`. Forwarded responses are
 //! piped through TS untouched, so the core has to compress them itself.
 
+use std::io::Write;
+
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use libdeflater::{CompressionLvl, Compressor};
+use flate2::Compression;
+use flate2::write::GzEncoder;
 
 /// Bodies smaller than this aren't worth the gzip overhead.
 const MIN_COMPRESS_BYTES: usize = 1024;
-/// Bodies up to this size compress in tens of microseconds, less than a trip
-/// to the blocking pool costs; larger ones move off the async workers.
-const INLINE_COMPRESS_BYTES: usize = 64 * 1024;
+/// Bodies up to this size compress in about 0.1 ms or less (5 KB of source
+/// text: 35 µs), near what a trip to the blocking pool costs; larger ones
+/// move off the async workers.
+const INLINE_COMPRESS_BYTES: usize = 16 * 1024;
 
 /// Whether `Accept-Encoding` lists gzip without `q=0`.
 pub fn accepts_gzip(headers: &HeaderMap) -> bool {
@@ -57,14 +61,12 @@ fn compressible(response: &Response) -> bool {
         })
 }
 
-/// libdeflate at its default level 6: smaller output than zlib's level 6
-/// (Node's default), in less time.
+/// zlib's default level 6, as Node's `zlib.gzip` uses: zlib-rs writes the
+/// same bytes as zlib, at the same speed.
 fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut compressor = Compressor::new(CompressionLvl::default());
-    let mut compressed = vec![0; compressor.gzip_compress_bound(bytes.len())];
-    let written = compressor.gzip_compress(bytes, &mut compressed).ok()?;
-    compressed.truncate(written);
-    Some(compressed)
+    let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 2), Compression::default());
+    encoder.write_all(bytes).ok()?;
+    encoder.finish().ok()
 }
 
 pub async fn layer(request: Request, next: Next) -> Response {

@@ -117,7 +117,7 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 
 | Route ids | Core crate, mount | Notes |
 | --- | --- | --- |
-| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. On macOS, when `git` on PATH is the Xcode shim `/usr/bin/git` (about 6 ms per run spent finding the developer directory), core asks `xcrun --find git` once and runs that git directly. Each request does its filesystem work in one trip to the blocking pool; media ranges up to 1 MiB are read whole, longer ones stream. JSON and text over 1 KiB gzip in core with libdeflate at level 6, since TS pipes forwarded responses through untouched. |
+| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. On macOS, when `git` on PATH is the Xcode shim `/usr/bin/git` (about 6 ms per run spent finding the developer directory), core asks `xcrun --find git` once and runs that git directly. Each request does its filesystem work in one trip to the blocking pool; media ranges up to 1 MiB are read whole, longer ones stream. JSON and text over 1 KiB gzip in core (zlib-rs, level 6, the same bytes Node's zlib writes), since TS pipes forwarded responses through untouched. |
 | `/__pty` (WebSocket) | `crates/core-pty`, `/v1/pty/ws` | `/__pty` still ends at TS. `server/pty-socket.ts` relays each connection with `relayToCore`, checks `PtyAuthorizationController`'s authorizer on every frame both ways (plus a 5 s recheck, closing with 1008), and turns a `spawn` naming an agent's sign-in into a plain `command`/`args`/`env` spawn built by `agentSignInLaunch`. |
 
 Known differences from the TS routes:
@@ -127,8 +127,6 @@ Known differences from the TS routes:
   Electron shell ran it on Node, whose order followed the system language, so
   a user upgrading from it with a tailored locale (Swedish, Danish, Czech, …)
   can see a different order.
-- Gzipped bodies decode to the same bytes, but the compressed bytes differ:
-  libdeflate, not zlib, produces them.
 - A `project-file` save body that `JSON.parse` accepts but serde_json does not
   gets 500 "Unable to access project file", where TS answered 400 or saved
   the file: a number that overflows to Infinity, an escaped lone surrogate or

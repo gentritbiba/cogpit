@@ -145,7 +145,7 @@ pub async fn list_project_files(
         Some(files) => files,
         None => {
             let root = root.to_owned();
-            tokio::task::spawn_blocking(move || walk_files(&root))
+            blocking(move || walk_files(&root))
                 .await
                 .unwrap_or_default()
         }

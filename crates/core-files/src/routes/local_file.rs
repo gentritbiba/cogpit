@@ -75,12 +75,16 @@ pub fn parse_range(header: Option<&str>, size: u64) -> ByteRange {
     ByteRange::Part { start, end }
 }
 
-struct Opened {
-    size: u64,
-    range: ByteRange,
-    length: u64,
-    /// `None` for an unsatisfiable range.
-    body: Option<Body>,
+enum Opened {
+    Unsatisfiable {
+        size: u64,
+    },
+    Serve {
+        size: u64,
+        range: ByteRange,
+        length: u64,
+        body: Body,
+    },
 }
 
 const READ_FAILED: Failure = Failure(500, "Failed to read file");
@@ -91,14 +95,7 @@ fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<O
     let size = validate_readable_file(path, max_size)?;
     let range = parse_range(range_header, size);
     let (start, length) = match range {
-        ByteRange::Unsatisfiable => {
-            return Ok(Opened {
-                size,
-                range,
-                length: 0,
-                body: None,
-            });
-        }
+        ByteRange::Unsatisfiable => return Ok(Opened::Unsatisfiable { size }),
         ByteRange::Part { start, end } => (start, end - start + 1),
         ByteRange::Whole => (0, size),
     };
@@ -109,20 +106,20 @@ fn open_range(path: &str, max_size: u64, range_header: Option<&str>) -> Result<O
         file.seek(SeekFrom::Start(start)).map_err(not_found)?;
     }
     let body = if length <= WHOLE_READ_BYTES {
-        let mut bytes = Vec::with_capacity(usize::try_from(length).unwrap_or_default());
-        file.take(length)
-            .read_to_end(&mut bytes)
-            .map_err(|_| READ_FAILED)?;
+        let mut bytes = vec![0; usize::try_from(length).unwrap_or_default()];
+        // A file that shrank since it was measured fails here rather than
+        // answering with fewer bytes than its Content-Length.
+        file.read_exact(&mut bytes).map_err(|_| READ_FAILED)?;
         Body::from(bytes)
     } else {
         let file = tokio::fs::File::from_std(file).take(length);
         Body::from_stream(ReaderStream::with_capacity(file, STREAM_CHUNK))
     };
-    Ok(Opened {
+    Ok(Opened::Serve {
         size,
         range,
         length,
-        body: Some(body),
+        body,
     })
 }
 
@@ -146,13 +143,13 @@ pub async fn handler(uri: Uri, headers: HeaderMap) -> Response {
         .await
         .unwrap_or(Err(READ_FAILED));
     let (size, range, length, body) = match opened {
-        Ok(Opened {
+        Ok(Opened::Serve {
             size,
             range,
             length,
-            body: Some(body),
+            body,
         }) => (size, range, length, body),
-        Ok(Opened { size, .. }) => {
+        Ok(Opened::Unsatisfiable { size }) => {
             let mut response = error(416, "Range not satisfiable");
             if let Ok(value) = HeaderValue::from_str(&format!("bytes */{size}")) {
                 response.headers_mut().insert(header::CONTENT_RANGE, value);
