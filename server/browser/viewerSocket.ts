@@ -1,6 +1,6 @@
 /**
  * The `/__browser` transport: one CDP viewer per socket client. Shaped like
- * `PtySessionManager` — same authorizer contract, same 5 s recheck, same 1008
+ * `PtySocketRelay` — same authorizer contract, same 5 s recheck, same 1008
  * close, and the same outbound recheck so a revoked session stops receiving
  * video immediately rather than at the next tick.
  *

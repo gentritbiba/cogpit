@@ -7,6 +7,8 @@ mod auth;
 mod diag;
 mod routes;
 
+pub use routes::Features;
+
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +17,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use core_protocol::{AppConfig, BootMessage, Handshake, PROTOCOL_VERSION};
+use core_protocol::{BootMessage, Handshake, PROTOCOL_VERSION};
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -37,11 +39,11 @@ pub fn init_logging() {
 }
 
 /// Every route the core serves, behind the secret check.
-pub fn app(secret: String, config: Arc<AppConfig>) -> Router {
+pub fn app(secret: String, features: &Features) -> Router {
     Router::new()
         .route("/v1/health", get(health))
         .merge(diag::router())
-        .merge(routes::feature_routes(&config))
+        .merge(features.router())
         .fallback(not_found)
         .layer(axum::middleware::from_fn_with_state(
             Arc::new(auth::Secret::new(secret)),
@@ -110,7 +112,8 @@ pub async fn run() -> io::Result<()> {
         let _ = closed_tx.send(());
     });
 
-    let app = app(boot.secret, Arc::new(boot.config));
+    let features = Features::new(&Arc::new(boot.config));
+    let app = app(boot.secret, &features);
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut server = tokio::spawn(async move {
         let mut stop_rx = stop_rx;
@@ -126,6 +129,7 @@ pub async fn run() -> io::Result<()> {
         _ = closed_rx => {}
     }
     tracing::info!("stdin closed, shutting down");
+    let _ = tokio::task::spawn_blocking(move || features.shutdown()).await;
     let _ = stop_tx.send(true);
     let _ = tokio::time::timeout(SHUTDOWN_GRACE, server).await;
     Ok(())

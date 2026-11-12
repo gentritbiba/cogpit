@@ -17,6 +17,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 core-protocol = { path = "crates/core-protocol" }
 core-files = { path = "crates/core-files" }
+core-pty = { path = "crates/core-pty" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

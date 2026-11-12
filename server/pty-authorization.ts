@@ -22,7 +22,7 @@ export type SocketAuthorizer = (touch: boolean) => boolean
 
 /**
  * A socket manager this controller can hand an authorized connection to:
- * `PtySessionManager`, and `BrowserViewerManager` with its upgrade request
+ * `PtySocketRelay` and `BrowserViewerManager`, each with its upgrade request
  * already bound.
  */
 export interface AuthorizableSocketManager {

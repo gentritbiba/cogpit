@@ -6,7 +6,7 @@ import { WebSocketServer } from "ws"
 import { BrowserViewerManager } from "./browser/viewerSocket"
 import { handleHubUpgrade } from "./hub/proxy"
 import { PtyAuthorizationController } from "./pty-authorization"
-import { PtySessionManager } from "./pty-server"
+import { PtySocketRelay } from "./pty-socket"
 import { rejectWebsocketUpgrade } from "./security"
 
 export type UpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void
@@ -33,7 +33,7 @@ const HUB_TRANSPORT_PATH = /^\/hub\/[^/]+\/(__pty|__browser)$/
  */
 export function attachSocketTransports(httpServer: Pick<EventEmitter, "on">, { fallback }: SocketTransportOptions = {}): SocketTransports {
   const ptyWss = new WebSocketServer({ noServer: true })
-  const ptyManager = new PtySessionManager(ptyWss)
+  const ptySockets = new PtySocketRelay()
   const browserWss = new WebSocketServer({ noServer: true })
   const browserManager = new BrowserViewerManager()
   const authorization = new PtyAuthorizationController()
@@ -75,7 +75,7 @@ export function attachSocketTransports(httpServer: Pick<EventEmitter, "on">, { f
     }
   })
 
-  ptyWss.on("connection", (ws, req) => authorization.handleConnection(ws, req, ptyManager))
+  ptyWss.on("connection", (ws, req) => authorization.handleConnection(ws, req, ptySockets.socketFor(req)))
   browserWss.on("connection", (ws, req) => {
     authorization.handleConnection(ws, req, browserManager.socketFor(req))
   })
@@ -84,7 +84,7 @@ export function attachSocketTransports(httpServer: Pick<EventEmitter, "on">, { f
   return {
     close: () => {
       closed ??= (async () => {
-        ptyManager.cleanup()
+        ptySockets.cleanup()
         browserManager.cleanup()
         authorization.cleanup()
         for (const client of ptyWss.clients) client.terminate()
