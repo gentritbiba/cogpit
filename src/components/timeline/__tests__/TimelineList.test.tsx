@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { useCallback, useEffect } from "react"
 import { act, render } from "@testing-library/react"
-import { TimelineScrollController } from "@/lib/timelineScroll/controller"
+import { TimelineScrollController, type HistoryBytes } from "@/lib/timelineScroll/controller"
 import { turnKeysOf } from "@/lib/timelineScroll/turnKeys"
 import { emptyTurn } from "@/__tests__/fixtures"
 import type { Turn } from "../../../../shared/session/types"
@@ -134,14 +135,21 @@ interface Props {
   onLoadMore?: () => void
   sessionChangeKey?: number
   sessionKey?: string
+  /** Handed to the controller in a passive effect, as `useTimelineScroll` does. */
+  historyBytes?: HistoryBytes
 }
 
-function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChangeKey = 1, sessionKey = "s1" }: Props & { controller: TimelineScrollController }) {
+const NO_BYTES: HistoryBytes = { remaining: 0, loaded: 0 }
+
+function Harness({ controller, turns, hasMore = false, onLoadMore, sessionChangeKey = 1, sessionKey = "s1", historyBytes = NO_BYTES }: Props & { controller: TimelineScrollController }) {
+  useEffect(() => controller.setHistoryBytes(historyBytes), [controller, historyBytes])
+  // Stable, as in the app: a new ref each render would detach and re-attach the scroller on every rerender.
+  const scrollerRef = useCallback((el: HTMLDivElement | null) => { scroller = el; controller.setScroller(el) }, [controller])
   const keys = turnKeysOf(turns)
   const rows = turns.map((turn, index) => ({ turn, index, key: keys[index] }))
   return (
     <DisclosureProvider sessionKey={sessionKey}>
-    <div ref={(el) => { scroller = el; controller.setScroller(el as HTMLDivElement | null) }}>
+    <div ref={scrollerRef}>
       <div>
         <TimelineList
           rows={rows}
@@ -552,6 +560,71 @@ describe("TimelineList with the scroll engine", () => {
     act(() => { vi.advanceTimersByTime(200) })
     flushScroll()
     expect(viewportTopOf(anchor)).toBe(before)
+  })
+
+  // RC-O3: the pad grew by the measured history reserve at idle, 150 ms after an open had settled.
+  it("opens at the bottom with the top pad already at its target, leaving idle nothing to move", () => {
+    vi.useFakeTimers()
+    blockSize = 150
+    const turns = makeTurns(ids(0, 200))
+    const { rerender } = mount({ turns, hasMore: true, sessionKey: "open-settled" })
+    // The browser reports the open's own scroll, which arms the idle timer.
+    act(() => { scroller!.dispatchEvent(new Event("scroll")) })
+    // The transcript's bytes arrive after the open's first commit.
+    rerender({ turns, hasMore: true, sessionKey: "open-settled", historyBytes: { remaining: 4_000_000, loaded: 400_000 } })
+    flushScroll()
+    expect(scrollTop()).toBe(maxScroll())
+    const height = heightOf(scroller!)
+    act(() => { vi.advanceTimersByTime(200) })
+    flushScroll()
+    expect(heightOf(scroller!)).toBe(height)
+    expect(scrollTop()).toBe(maxScroll())
+  })
+
+  // Review finding: the bytes' layout pass took the new-plan flag before React rendered that plan.
+  it("places a prepended page the same whether or not new byte counts arrive with it", () => {
+    const run = (bytesChange: boolean) => {
+      const first = { remaining: 4_000_000, loaded: 400_000 }
+      const { rerender } = mount({ turns: makeTurns(ids(20, 120)), hasMore: true, sessionKey: `prepend-${bytesChange}`, historyBytes: first })
+      userScrollTo(2000)
+      rerender({ turns: makeTurns(ids(0, 120)), hasMore: true, sessionKey: `prepend-${bytesChange}`, historyBytes: bytesChange ? { remaining: 3_000_000, loaded: 500_000 } : first })
+      flushScroll()
+      const placed = renderedKeys().map((key) => [key, viewportTopOf(`[data-row-key="${key}"]`)])
+      scroller = null
+      return placed
+    }
+    expect(run(true)).toEqual(run(false))
+  })
+
+  it("keeps what the reader sees in place when new byte counts arrive while they read history", () => {
+    const turns = makeTurns(ids(0, 200))
+    const { rerender } = mount({ turns, hasMore: true, sessionKey: "bytes-reading", historyBytes: { remaining: 4_000_000, loaded: 400_000 } })
+    userScrollTo(scrollTop() - 3000)
+    const anchor = block(`${renderedKeys()[8]}:a`)
+    const before = viewportTopOf(anchor)
+    // Far under the cap, so the reserve's target really moves.
+    rerender({ turns, hasMore: true, sessionKey: "bytes-reading", historyBytes: { remaining: 20_000, loaded: 400_000 } })
+    flushScroll()
+    expect(viewportTopOf(anchor)).toBe(before)
+  })
+
+  it("keeps the top pad at its target and the reader at the bottom while streaming grows an uncapped reserve", () => {
+    vi.useFakeTimers()
+    const turns = makeTurns(ids(0, 50))
+    const { rerender } = mount({ turns, hasMore: true, sessionKey: "stream-reserve" })
+    // A reserve far under its cap scales with every pixel the loaded rows grow.
+    rerender({ turns, hasMore: true, sessionKey: "stream-reserve", historyBytes: { remaining: 20_000, loaded: 400_000 } })
+    flushScroll()
+    for (const height of [200, 400, 800]) {
+      blockHeights.set("t49:b", height)
+      resize()
+      expect(scrollTop()).toBe(maxScroll())
+    }
+    const height = heightOf(scroller!)
+    act(() => { vi.advanceTimersByTime(200) })
+    flushScroll()
+    expect(heightOf(scroller!)).toBe(height)
+    expect(scrollTop()).toBe(maxScroll())
   })
 
   it("stops its idle timer once the reader settles", () => {
