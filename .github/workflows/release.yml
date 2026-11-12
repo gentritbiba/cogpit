@@ -282,7 +282,7 @@ jobs:
           COGPIT_EXPECT_EDITION_UI: ${{ startsWith(github.ref, 'refs/tags/v') && 'present' || 'absent' }}
           COGPIT_CORE_PREBUILT: core-dist/${{ matrix.core }}/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || 'dry-run' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && 'dry-run' || secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Ad-hoc signed unless the owner adds a Developer ID (docs/desktop.md).
           APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -294,7 +294,7 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || 'dry-run' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && 'dry-run' || secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: bun scripts/release-artifacts.ts collect release
 
       # The package is put together by scripts/lib/pacmanPackage.ts, not by

@@ -327,8 +327,8 @@ fn install_with_pacman(package: &[u8]) -> Result<(), InstallError> {
     let output = pkexec.wait_with_output()?;
     match output.status.code() {
         Some(0) => Ok(()),
-        // pkexec: the prompt was dismissed (126) or authentication failed (127).
-        Some(126 | 127) => Err(InstallError::Cancelled),
+        // pkexec's own status for a dismissed prompt.
+        Some(126) => Err(InstallError::Cancelled),
         _ => {
             let reason = String::from_utf8_lossy(&output.stderr);
             let reason = reason.lines().rev().find(|line| !line.trim().is_empty());

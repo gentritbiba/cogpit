@@ -134,14 +134,19 @@ impl Sidecar {
     }
 
     /// Ask the server to save what it needs and exit, then make sure it has.
-    /// On Windows the job object also takes every process the server started.
+    /// A server that exits in time has stopped what it meant to stop, so on
+    /// Windows what it left running on purpose (an editor opened from a
+    /// terminal) is let out of the job. One that does not is killed, and on
+    /// Windows the job takes every process it started with it.
     pub fn shut_down(&self) {
         self.send(&ShellMessage::Shutdown);
         self.stdin.lock().unwrap().take();
         let deadline = Instant::now() + SHUTDOWN_GRACE;
         while Instant::now() < deadline {
             if self.exited() {
-                break;
+                #[cfg(windows)]
+                self.job.release();
+                return;
             }
             thread::sleep(Duration::from_millis(50));
         }
@@ -211,29 +216,41 @@ mod windows_job {
 
     impl Job {
         pub fn containing(child: &Child) -> io::Result<Self> {
-            // SAFETY: plain kernel calls on a handle this function owns, with a
-            // zeroed, correctly sized limits structure.
+            // SAFETY: plain kernel calls on a handle this function owns.
             unsafe {
                 let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if job.is_null() {
                     return Err(io::Error::last_os_error());
                 }
                 let job = Job(job);
-                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                let configured = SetInformationJobObject(
-                    job.0,
-                    JobObjectExtendedLimitInformation,
-                    (&raw const limits).cast(),
-                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                );
-                if configured == 0
+                if !job.kill_on_close(true)
                     || AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) == 0
                 {
                     return Err(io::Error::last_os_error());
                 }
                 Ok(job)
             }
+        }
+
+        fn kill_on_close(&self, kill: bool) -> bool {
+            // SAFETY: a valid handle and a zeroed, correctly sized limits structure.
+            unsafe {
+                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                if kill {
+                    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                }
+                SetInformationJobObject(
+                    self.0,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const limits).cast(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) != 0
+            }
+        }
+
+        /// Let the processes still in the job outlive it.
+        pub fn release(&self) {
+            self.kill_on_close(false);
         }
 
         pub fn terminate(&self) {
@@ -251,5 +268,64 @@ mod windows_job {
                 CloseHandle(self.0);
             }
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::windows_job::Job;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// Something that stays alive for a while, as a process the server left running would.
+    fn long_lived() -> Child {
+        Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .expect("start ping")
+    }
+
+    fn exits_within(child: &mut Child, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if child.try_wait().expect("poll the child").is_some() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    #[test]
+    fn closing_the_job_ends_what_is_in_it() {
+        let mut child = long_lived();
+        drop(Job::containing(&child).expect("create the job"));
+        assert!(exits_within(&mut child, Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_released_job_leaves_its_processes_running() {
+        let mut child = long_lived();
+        let job = Job::containing(&child).expect("create the job");
+        job.release();
+        drop(job);
+        assert!(!exits_within(&mut child, Duration::from_secs(1)));
+        child.kill().expect("end ping");
+        child.wait().expect("reap ping");
+    }
+
+    #[test]
+    fn terminating_the_job_ends_what_is_in_it() {
+        let mut child = long_lived();
+        let job = Job::containing(&child).expect("create the job");
+        job.terminate();
+        assert!(exits_within(&mut child, Duration::from_secs(5)));
     }
 }
