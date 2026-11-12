@@ -89,17 +89,6 @@ impl Registry {
         }
     }
 
-    /// Ends every session; called when the core shuts down.
-    pub fn shutdown(&self) {
-        let sessions = std::mem::take(&mut *lock(&self.sessions));
-        for session in sessions.values() {
-            let state = lock(&session.state);
-            if let Some(process) = &state.process {
-                process.kill();
-            }
-        }
-    }
-
     pub async fn handle(self: &Arc<Self>, client: ClientId, outbox: &Outbox, text: &str) {
         let message = match serde_json::from_str::<Value>(text) {
             Ok(Value::Object(message)) => message,

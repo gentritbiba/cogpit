@@ -13,13 +13,12 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 const WAIT: Duration = Duration::from_secs(20);
 
-async fn start() -> (SocketAddr, PtyState) {
-    let state = PtyState::new();
+async fn start() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = router(state.clone());
+    let app = router(PtyState::new());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (addr, state)
+    addr
 }
 
 struct Client {
@@ -124,7 +123,7 @@ fn answer_line() -> &'static str {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn runs_a_process_and_replays_it_to_a_late_client() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut first = Client::connect(addr).await;
     let mut spawn = print_and_exit("job", "hello-pty", 3);
     spawn["name"] = json!("Build");
@@ -162,7 +161,7 @@ async fn runs_a_process_and_replays_it_to_a_late_client() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_output_to_every_attached_client_and_kills_on_request() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut owner = Client::connect(addr).await;
     let mut viewer = Client::connect(addr).await;
     owner.send(shell("sh")).await;
@@ -186,7 +185,7 @@ async fn sends_output_to_every_attached_client_and_kills_on_request() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn renames_and_names_sessions_for_every_client() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut owner = Client::connect(addr).await;
     let mut other = Client::connect(addr).await;
     let mut unnamed = shell("one");
@@ -207,7 +206,7 @@ async fn renames_and_names_sessions_for_every_client() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_bad_requests_the_way_the_panel_expects() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut client = Client::connect(addr).await;
 
     client.send_raw("{not json").await;
@@ -249,7 +248,7 @@ async fn reports_bad_requests_the_way_the_panel_expects() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn gives_a_spawn_without_an_id_a_fresh_one() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut client = Client::connect(addr).await;
     let mut spawn = shell("");
     spawn.as_object_mut().unwrap().remove("id");
@@ -260,20 +259,10 @@ async fn gives_a_spawn_without_an_id_a_fresh_one() {
     client.send(json!({ "type": "kill", "id": id })).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn shutdown_ends_every_session() {
-    let (addr, state) = start().await;
-    let mut client = Client::connect(addr).await;
-    client.send(shell("long")).await;
-    client.frame("spawned", "long").await;
-    state.shutdown();
-    client.frame("exit", "long").await;
-}
-
 /// Resizes a running terminal; the program inside reads the new size back.
 #[tokio::test(flavor = "multi_thread")]
 async fn resizes_a_running_terminal() {
-    let (addr, _state) = start().await;
+    let addr = start().await;
     let mut client = Client::connect(addr).await;
     client.send(shell("sz")).await;
     client.frame("spawned", "sz").await;
@@ -301,7 +290,7 @@ mod unix {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn keeps_characters_whole_across_reads() {
-        let (addr, _state) = start().await;
+        let addr = start().await;
         let dir = std::env::temp_dir().join(format!("cogpit-pty-utf8-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("euros.txt");
@@ -323,7 +312,7 @@ mod unix {
     /// terminal, so Ctrl-C interrupts the foreground command.
     #[tokio::test(flavor = "multi_thread")]
     async fn delivers_ctrl_c_to_the_foreground_command() {
-        let (addr, _state) = start().await;
+        let addr = start().await;
         let mut client = Client::connect(addr).await;
         client.send(shell("jc")).await;
         client.frame("spawned", "jc").await;
@@ -345,7 +334,7 @@ mod unix {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn layers_env_over_the_core_environment() {
-        let (addr, _state) = start().await;
+        let addr = start().await;
         let mut client = Client::connect(addr).await;
         client
             .send(json!({ "type": "spawn", "id": "env", "command": "/bin/sh",
@@ -376,7 +365,7 @@ mod windows {
     /// the `/c` line must arrive exactly as `resolveAgentCommand` built it.
     #[tokio::test(flavor = "multi_thread")]
     async fn passes_a_cmd_line_through_verbatim() {
-        let (addr, _state) = start().await;
+        let addr = start().await;
         let dir = std::env::temp_dir().join(format!("cogpit-pty-shim-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let shim = dir.join("agent.cmd");
@@ -404,7 +393,7 @@ mod windows {
     /// A kill ends what the shell started too, as `taskkill /T /F` did.
     #[tokio::test(flavor = "multi_thread")]
     async fn kill_ends_the_whole_process_tree() {
-        let (addr, _state) = start().await;
+        let addr = start().await;
         let dir = std::env::temp_dir().join(format!("cogpit-pty-tree-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mark = dir.join("mark.txt");

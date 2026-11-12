@@ -108,6 +108,7 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 | Route ids | Core crate, mount | Notes |
 | --- | --- | --- |
 | `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. |
+| `/__pty` (WebSocket) | `crates/core-pty`, `/v1/pty/ws` | `/__pty` still ends at TS. `server/pty-socket.ts` relays each connection with `relayToCore`, checks `PtyAuthorizationController`'s authorizer on every frame both ways (plus a 5 s recheck, closing with 1008), and turns a `spawn` naming an agent's sign-in into a plain `command`/`args`/`env` spawn built by `agentSignInLaunch`. |
 
 Known differences from the TS routes:
 
@@ -121,6 +122,13 @@ Known differences from the TS routes:
   the file: a number that overflows to Infinity, an escaped lone surrogate or
   invalid UTF-8 bytes (TS saved them as U+FFFD), JSON nested deeper than 128
   levels. The app's editor never sends these.
+
+`core-pty` runs processes on `portable-pty` on Unix (the shell leads its own
+session with the PTY as its controlling terminal) and on ConPTY directly on
+Windows, where `cmd.exe` needs its `/c` line verbatim. A job object holds each
+Windows terminal's process tree: a kill ends the tree, and so does the core
+exiting. That module (`backend/windows.rs`) is the workspace's one exception to
+`unsafe_code = "forbid"`; every unsafe block states its invariant.
 
 ## Not ported in stage A
 

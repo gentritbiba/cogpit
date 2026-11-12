@@ -24,7 +24,9 @@ mod utf8;
 
 use registry::Registry;
 
-/// Every terminal session in the core, shared by all connections.
+/// Every terminal session in the core, shared by all connections. Sessions
+/// end with the core: its exit closes every PTY (SIGHUP to the session leader)
+/// and every job object (Windows kills the tree).
 #[derive(Clone, Default)]
 pub struct PtyState {
     registry: Arc<Registry>,
@@ -33,12 +35,6 @@ pub struct PtyState {
 impl PtyState {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Kills every session. Dropping the state would release them too, but a
-    /// shutdown should not wait for the last connection to close.
-    pub fn shutdown(&self) {
-        self.registry.shutdown();
     }
 }
 

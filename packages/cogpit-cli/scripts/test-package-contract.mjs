@@ -11,7 +11,6 @@ assert.equal(manifest.name, "cogpit")
 assert.deepEqual(manifest.bin, { cogpit: "dist/cli.js" })
 assert.equal(manifest.engines.node, ">=22.16")
 assert.ok(manifest.dependencies.express)
-assert.ok(manifest.dependencies["node-pty"])
 
 // esbuild leaves every package external, so each one the bundle imports has
 // to be declared here — on a machine with nothing else installed, `npx cogpit`

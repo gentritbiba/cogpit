@@ -162,6 +162,7 @@ dependencies = [
  "axum",
  "core-files",
  "core-protocol",
+ "core-pty",
  "serde",
  "serde_json",
  "tokio",

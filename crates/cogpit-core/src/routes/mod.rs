@@ -8,8 +8,10 @@ use axum::Router;
 use core_protocol::AppConfig;
 
 pub fn feature_routes(_config: &Arc<AppConfig>) -> Router {
-    Router::new().nest(
-        "/v1/files",
-        core_files::router(core_files::FilesState::default()),
-    )
+    Router::new()
+        .nest(
+            "/v1/files",
+            core_files::router(core_files::FilesState::default()),
+        )
+        .nest("/v1/pty", core_pty::router(core_pty::PtyState::new()))
 }
