@@ -304,10 +304,12 @@ jobs:
       - name: Install the pacman package on Arch Linux
         if: runner.os == 'Linux'
         run: |
-          docker run --rm -v "$PWD/release:/release:ro" "$ARCHLINUX_IMAGE" bash -euc '
+          # Only the package: pacman would read the updater's .sig beside it as a PGP signature.
+          package=$(ls "$PWD"/release/cogpit-*.pacman)
+          docker run --rm -v "$package:/cogpit.pacman:ro" "$ARCHLINUX_IMAGE" bash -euc '
             ln -s /opt/Cogpit/cogpit /usr/bin/cogpit
             pacman -Syu --noconfirm > /dev/null
-            pacman -U --noconfirm /release/cogpit-*.pacman
+            pacman -U --noconfirm /cogpit.pacman
             test "$(readlink -f /usr/bin/cogpit)" = /opt/Cogpit/cogpit
             pacman -Qkk cogpit
             if ldd /opt/Cogpit/cogpit | grep "not found"; then exit 1; fi
