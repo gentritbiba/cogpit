@@ -257,25 +257,21 @@ jobs:
 
       # The desktop updater only installs files signed with the key whose
       # public half is in desktop/tauri.conf.json. A release without it would
-      # strand every install, so a tag build refuses to go on.
-      - name: Load the update signing key
+      # strand every install, so a tag build refuses to go on. A dry-run signs
+      # with a key made here and thrown away.
+      - name: Check the update signing key
         shell: bash
         env:
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -n "$SIGNING_KEY" ]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY=$SIGNING_KEY" >> "$GITHUB_ENV"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
-          elif [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
+          if [ -n "$SIGNING_KEY" ]; then exit 0; fi
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
             echo "The release environment has no TAURI_SIGNING_PRIVATE_KEY secret." >&2
             exit 1
-          else
-            bunx tauri signer generate --ci -p dry-run -w "$RUNNER_TEMP/dry-run.key" > /dev/null
-            echo "TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/dry-run.key")" >> "$GITHUB_ENV"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=dry-run" >> "$GITHUB_ENV"
           fi
+          bunx tauri signer generate --ci -p dry-run -w "$RUNNER_TEMP/dry-run.key" > /dev/null
+          echo "DRY_RUN_SIGNING_KEY=$(cat "$RUNNER_TEMP/dry-run.key")" >> "$GITHUB_ENV"
 
       - name: Build the desktop app (${{ matrix.name }})
         # windows-latest defaults to pwsh; Git Bash keeps the command shape
@@ -285,6 +281,8 @@ jobs:
           # Fail closed: a release never ships without the edition UI.
           COGPIT_EXPECT_EDITION_UI: ${{ startsWith(github.ref, 'refs/tags/v') && 'present' || 'absent' }}
           COGPIT_CORE_PREBUILT: core-dist/${{ matrix.core }}/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || 'dry-run' }}
           # Ad-hoc signed unless the owner adds a Developer ID (docs/desktop.md).
           APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -294,7 +292,28 @@ jobs:
 
       - name: Collect the release files
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || env.DRY_RUN_SIGNING_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || 'dry-run' }}
         run: bun scripts/release-artifacts.ts collect release
+
+      # The package is put together by scripts/lib/pacmanPackage.ts, not by
+      # makepkg, so pacman itself has the last word: it must install over the
+      # unowned /usr/bin/cogpit link that packages up to 3.6.x left behind,
+      # verify clean, and find every library the app links against.
+      - name: Install the pacman package on Arch Linux
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/release:/release:ro" "$ARCHLINUX_IMAGE" bash -euc '
+            ln -s /opt/Cogpit/cogpit /usr/bin/cogpit
+            pacman -Syu --noconfirm > /dev/null
+            pacman -U --noconfirm /release/cogpit-*.pacman
+            test "$(readlink -f /usr/bin/cogpit)" = /opt/Cogpit/cogpit
+            pacman -Qkk cogpit
+            if ldd /opt/Cogpit/cogpit | grep "not found"; then exit 1; fi
+            pacman -R --noconfirm cogpit
+            test ! -e /usr/bin/cogpit && test ! -L /usr/bin/cogpit
+          '
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -334,8 +353,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: test "${GITHUB_REF_NAME#v}" = "$(jq -r .version package.json)"
 
+      # On a tag every update file must carry the signature of the key
+      # installed apps trust; a dry-run's throwaway key cannot pass that.
       - name: Write the update manifests and verify the release
-        run: bun scripts/release-artifacts.ts manifests artifacts
+        run: bun scripts/release-artifacts.ts manifests artifacts ${{ startsWith(github.ref, 'refs/tags/v') && '--verify' || '' }}
 
       - name: Show the update manifests
         run: cat artifacts/latest*

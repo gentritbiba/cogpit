@@ -10,29 +10,31 @@
 !define ELECTRON_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\aae6629b-529f-5ab6-8d5b-554c8d88d3d4"
 !define ELECTRON_UNINSTALLER "Uninstall Cogpit.exe"
 
-; Runs the Electron install's own uninstaller, which closes the old app, deletes
-; its files, shortcuts and registry keys. `_?=` makes it run in place so ExecWait
-; waits for it; that leaves the uninstaller itself behind, removed afterwards.
-!macro REMOVE_ELECTRON_INSTALL ROOT
+; Runs the Electron install's own uninstaller, which closes the old app and
+; deletes its files, shortcuts and registry keys. It runs from a copy, as
+; electron-builder's own upgrades do: it stops every process started from the
+; install folder, which would include itself. `_?=` makes ExecWait wait for it.
+; A failure (an all-users install whose elevation prompt was declined) leaves
+; the old install beside the new one rather than blocking the update.
+!macro REMOVE_ELECTRON_INSTALL ROOT MODE
   ClearErrors
-  ReadRegStr $R0 ${ROOT} "${ELECTRON_UNINSTALL_KEY}" "QuietUninstallString"
+  ReadRegStr $R0 ${ROOT} "${ELECTRON_UNINSTALL_KEY}" "UninstallString"
   ReadRegStr $R1 ${ROOT} "${ELECTRON_INSTALL_KEY}" "InstallLocation"
   ${If} $R0 != ""
   ${AndIf} $R1 != ""
   ${AndIf} ${FileExists} "$R1\${ELECTRON_UNINSTALLER}"
     DetailPrint "Removing the previous Cogpit from $R1"
-    ExecWait '$R0 /KEEP_APP_DATA _?=$R1' $R2
-    ${If} $R2 = 0
-      Delete "$R1\${ELECTRON_UNINSTALLER}"
-      RMDir "$R1"
-    ${EndIf}
+    InitPluginsDir
+    CopyFiles /SILENT "$R1\${ELECTRON_UNINSTALLER}" "$PLUGINSDIR\old-uninstaller.exe"
+    ExecWait '"$PLUGINSDIR\old-uninstaller.exe" /S /KEEP_APP_DATA ${MODE} _?=$R1' $R2
+    DetailPrint "The previous Cogpit's uninstaller finished with $R2"
   ${EndIf}
   ClearErrors
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro REMOVE_ELECTRON_INSTALL HKCU
-  !insertmacro REMOVE_ELECTRON_INSTALL HKLM
+  !insertmacro REMOVE_ELECTRON_INSTALL HKCU "/currentuser"
+  !insertmacro REMOVE_ELECTRON_INSTALL HKLM "/allusers"
   ; The old install may have been in this folder.
   SetOutPath $INSTDIR
 !macroend

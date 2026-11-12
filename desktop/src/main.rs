@@ -110,6 +110,13 @@ fn start_presence_reporting(app: AppHandle) {
 }
 
 fn main() {
+    // The Electron app's AppImage updater, installing on quit, runs the new
+    // AppImage once with this set and waits for it to exit. Goes with the
+    // Electron bridge (docs/desktop.md, "Moving Electron installs").
+    #[cfg(target_os = "linux")]
+    if env::var_os("APPIMAGE_EXIT_AFTER_INSTALL").is_some() {
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             window::show(app);

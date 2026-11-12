@@ -132,7 +132,8 @@ A `v*` tag runs `.github/workflows/release.yml`:
    the Windows installer. Linux builds on Ubuntu 22.04 so the app needs no newer
    glibc.
 3. `assemble` writes `latest.json` and checks the release holds exactly the
-   expected files. `publish` uploads them; `publish-npm` ships the `cogpit`
+   expected files, each update file signed for this version by the key
+   installed apps trust. `publish` uploads them; `publish-npm` ships the `cogpit`
    launcher with every platform's core in `dist/core/<platform>-<arch>/`;
    `update-aur` pushes both AUR packages.
 
@@ -164,7 +165,11 @@ keep their data (the data folder never moved):
 - **Windows**: `latest.yml`. The old updater runs the new installer silently;
   its hooks (`desktop/windows/installer-hooks.nsh`) run the Electron install's
   uninstaller first, keeping `%APPDATA%\Cogpit`, and start the app afterwards.
-- **Linux**: `latest-linux.yml`. The AppImage is replaced in place. The pacman
+  An all-users Electron install asks for elevation to be removed; if that is
+  declined it stays beside the new per-user install.
+- **Linux**: `latest-linux.yml`. The AppImage is replaced in place (the old
+  updater starts the new file once with `APPIMAGE_EXIT_AFTER_INSTALL`, which
+  the shell answers by exiting). The pacman
   package keeps the name `cogpit` and the `/opt/Cogpit/cogpit` executable, and
   makes the `/usr/bin/cogpit` link in its install script, because the old
   package left an unowned link there that pacman would refuse to overwrite.

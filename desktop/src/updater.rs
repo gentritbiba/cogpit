@@ -28,7 +28,7 @@ const MANIFEST: &str = "latest.json";
 const FIRST_CHECK: Duration = Duration::from_secs(5);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const PREFERENCES_FILE: &str = "update-preferences.json";
-/// Written into the resources of a pacman package (`scripts/build-pacman.ts`).
+/// Written into the resources of a pacman package (`scripts/lib/pacmanPackage.ts`).
 const PACKAGE_TYPE_FILE: &str = "package-type";
 /// Written into the resources of a build installed by `bun run desktop:update`.
 const LOCAL_BUILD_FILE: &str = "local-build.json";
@@ -216,21 +216,47 @@ pub fn update_dismiss(app: AppHandle, version: String) {
     }
 }
 
+enum InstallError {
+    /// The user declined the password prompt; the update stays ready.
+    Cancelled,
+    Failed(String),
+}
+
+impl<E: std::fmt::Display> From<E> for InstallError {
+    fn from(error: E) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
 /// Install the staged update and start the new version. A failure leaves the
 /// app running and shows in the banner.
 #[tauri::command(async)]
 pub fn update_install(app: AppHandle) {
-    let Some(staged) = app.state::<Updates>().staged.lock().unwrap().take() else {
+    let updates = app.state::<Updates>();
+    let Some(staged) = updates.staged.lock().unwrap().take() else {
         return;
     };
     let version = staged.update.version.clone();
+    // Worked out first: installing a package replaces the executable this process runs from.
+    let restart = restart_command();
     match install(&staged, true) {
         Ok(()) => {
             let _ = fs::remove_file(&staged.package);
-            relaunch_after_exit();
+            run_after_exit(&restart);
             app.exit(0);
         }
-        Err(message) => {
+        Err(InstallError::Cancelled) => {
+            let asks_for_password = staged.installer == Installer::Pacman;
+            *updates.staged.lock().unwrap() = Some(staged);
+            set_state(
+                &app,
+                UpdateState::Ready {
+                    version,
+                    asks_for_password,
+                },
+            );
+        }
+        Err(InstallError::Failed(message)) => {
             eprintln!("[updater] Installing {version} failed: {message}");
             let _ = fs::remove_file(&staged.package);
             set_state(
@@ -252,7 +278,7 @@ pub fn install_on_exit(app: &AppHandle) {
         return;
     };
     if staged.installer == Installer::Plugin
-        && let Err(message) = install(&staged, false)
+        && let Err(InstallError::Failed(message)) = install(&staged, false)
     {
         eprintln!(
             "[updater] Installing {} on quit failed: {message}",
@@ -264,40 +290,54 @@ pub fn install_on_exit(app: &AppHandle) {
 
 /// On Windows a successful install does not return: the installer takes over
 /// and the plugin exits the process, restarting the app when `relaunch`.
-fn install(staged: &Staged, relaunch: bool) -> Result<(), String> {
-    let package = fs::read(&staged.package).map_err(|error| error.to_string())?;
+fn install(staged: &Staged, relaunch: bool) -> Result<(), InstallError> {
+    let package = fs::read(&staged.package)?;
     match staged.installer {
         Installer::Pacman => {
-            staged
-                .update
-                .verify(&package)
-                .map_err(|error| error.to_string())?;
-            install_with_pacman(&staged.package)
+            staged.update.verify(&package)?;
+            install_with_pacman(&package)
         }
-        _ => staged
+        _ => Ok(staged
             .update
             .clone()
             .restart_after_install(relaunch)
-            .install(package)
-            .map_err(|error| error.to_string()),
+            .install(package)?),
     }
 }
 
-fn install_with_pacman(package: &Path) -> Result<(), String> {
-    let output = std::process::Command::new("pkexec")
-        .args(["pacman", "-U", "--noconfirm"])
-        .arg(package)
-        .output()
+/// Root reads the package from this process's memory, not from the cache
+/// folder: a file there could be swapped after its signature was checked.
+const PACMAN_INSTALL: &str = r#"package=$(mktemp) && cat > "$package" && pacman -U --noconfirm "$package"
+status=$?; rm -f "$package"; exit $status"#;
+
+fn install_with_pacman(package: &[u8]) -> Result<(), InstallError> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut pkexec = Command::new("pkexec")
+        .args(["/bin/sh", "-c", PACMAN_INSTALL])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("pkexec could not be started: {error}"))?;
-    if output.status.success() {
-        return Ok(());
+    // A declined prompt closes the pipe early; the exit status says what happened.
+    if let Some(mut stdin) = pkexec.stdin.take() {
+        let _ = stdin.write_all(package);
     }
-    let reason = String::from_utf8_lossy(&output.stderr);
-    let reason = reason.lines().rev().find(|line| !line.trim().is_empty());
-    Err(match reason {
-        Some(line) => format!("pacman could not install the update: {}", line.trim()),
-        None => format!("pacman could not install the update ({}).", output.status),
-    })
+    let output = pkexec.wait_with_output()?;
+    match output.status.code() {
+        Some(0) => Ok(()),
+        // pkexec: the prompt was dismissed (126) or authentication failed (127).
+        Some(126 | 127) => Err(InstallError::Cancelled),
+        _ => {
+            let reason = String::from_utf8_lossy(&output.stderr);
+            let reason = reason.lines().rev().find(|line| !line.trim().is_empty());
+            Err(InstallError::Failed(match reason {
+                Some(line) => format!("pacman could not install the update: {}", line.trim()),
+                None => format!("pacman could not install the update ({}).", output.status),
+            }))
+        }
+    }
 }
 
 /// Waits for a process to end, then runs a command in its place.
@@ -308,7 +348,7 @@ exec "$@""#;
 
 /// A detached shell that runs `launch` once process `pid` has exited.
 #[cfg(unix)]
-fn run_after_exit(pid: u32, launch: &[std::ffi::OsString]) -> std::process::Command {
+fn waiter(pid: u32, launch: &[std::ffi::OsString]) -> std::process::Command {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     let mut waiter = Command::new("/bin/sh");
@@ -323,28 +363,34 @@ fn run_after_exit(pid: u32, launch: &[std::ffi::OsString]) -> std::process::Comm
     waiter
 }
 
-/// Start the installed version once this process is gone; the single-instance
-/// lock would turn away a copy started any sooner. Windows needs none of this:
-/// its installer restarts the app.
-fn relaunch_after_exit() {
+/// What starts the installed app again. Empty on Windows, where the installer does it.
+fn restart_command() -> Vec<std::ffi::OsString> {
     #[cfg(unix)]
-    {
-        let Ok(executable) = env::current_exe() else {
-            return;
-        };
-        let launch = match app_bundle(&executable) {
+    if let Ok(executable) = env::current_exe() {
+        return match app_bundle(&executable) {
             Some(bundle) if cfg!(target_os = "macos") => {
                 vec!["/usr/bin/open".into(), bundle.into_os_string()]
             }
             _ => vec![env::var_os("APPIMAGE").unwrap_or(executable.into_os_string())],
         };
-        if let Err(error) = run_after_exit(std::process::id(), &launch).spawn() {
-            eprintln!("[updater] Cogpit could not arrange its restart: {error}");
-        }
     }
+    Vec::new()
 }
 
-fn package_path(app: &AppHandle, installer: Installer) -> Result<PathBuf, String> {
+/// Start the installed version once this process is gone; the single-instance
+/// lock would turn away a copy started any sooner.
+fn run_after_exit(restart: &[std::ffi::OsString]) {
+    #[cfg(unix)]
+    if !restart.is_empty()
+        && let Err(error) = waiter(std::process::id(), restart).spawn()
+    {
+        eprintln!("[updater] Cogpit could not arrange its restart: {error}");
+    }
+    #[cfg(not(unix))]
+    let _ = restart;
+}
+
+fn package_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_cache_dir()
@@ -357,10 +403,7 @@ fn package_path(app: &AppHandle, installer: Installer) -> Result<PathBuf, String
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
     }
-    Ok(dir.join(match installer {
-        Installer::Pacman => "cogpit-update.pkg.tar.zst",
-        _ => "cogpit-update",
-    }))
+    Ok(dir.join("cogpit-update"))
 }
 
 fn feed_override() -> Result<Option<Url>, String> {
@@ -423,7 +466,7 @@ async fn check(app: &AppHandle, installer: Installer) -> Result<(), String> {
             .download(|_, _| {}, || {})
             .await
             .map_err(|error| error.to_string())?;
-        let path = package_path(app, installer)?;
+        let path = package_path(app)?;
         fs::write(&path, package).map_err(|error| error.to_string())?;
         Ok::<_, String>(path)
     }
@@ -601,7 +644,7 @@ mod tests {
         let _ = fs::remove_file(&marker);
         let mut old = Command::new("/bin/sleep").arg("30").spawn().unwrap();
         let launch = ["/usr/bin/touch".into(), marker.clone().into_os_string()];
-        let mut waiter = run_after_exit(old.id(), &launch).spawn().unwrap();
+        let mut waiter = waiter(old.id(), &launch).spawn().unwrap();
 
         thread::sleep(Duration::from_millis(600));
         assert!(!marker.exists(), "started while the old process was alive");

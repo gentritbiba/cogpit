@@ -4,7 +4,9 @@
  *   bun scripts/release-artifacts.ts collect <out>     after `bun run desktop:build`: this platform's
  *                                                      files, under the names the release publishes
  *   bun scripts/release-artifacts.ts manifests <dir>   over every platform's files: writes the update
- *                                                      manifests and checks the release is complete
+ *                                                      manifests and checks the release is complete;
+ *                                                      --verify also checks every update file is signed
+ *                                                      with the key installed apps trust
  *
  * COGPIT_ELECTRON_BRIDGE=1 adds what installs still running the Electron app
  * need to update themselves: the macOS zip and the latest*.yml manifests.
@@ -52,16 +54,18 @@ function collect(output: string): void {
     copyUpdate(onlyFile(join(bundle, "appimage"), ".AppImage"), output, names.update)
     const pacman = join(output, names.pacman!)
     buildPacmanPackage({ deb: onlyFile(join(bundle, "deb"), ".deb"), output: pacman, version, repoRoot: root })
-    if (process.env.TAURI_SIGNING_PRIVATE_KEY) run("bunx", ["tauri", "signer", "sign", pacman])
+    if (process.env.TAURI_SIGNING_PRIVATE_KEY) run("bunx", ["tauri", "signer", "sign", "--app-version", version, pacman])
   } else {
     copyUpdate(onlyFile(join(bundle, "nsis"), "-setup.exe"), output, names.update)
   }
   console.log(`Collected for ${platform}-${process.arch}:\n${readdirSync(output).map((name) => `  ${name}`).join("\n")}`)
 }
 
-async function manifests(directory: string): Promise<void> {
+async function manifests(directory: string, verify: boolean): Promise<void> {
   const publishedAt = new Date()
-  writeFileSync(join(directory, "latest.json"), `${JSON.stringify(updaterManifest(directory, version, publishedAt), null, 2)}\n`)
+  const config = JSON.parse(readFileSync(join(root, "desktop/tauri.conf.json"), "utf8")) as { plugins: { updater: { pubkey: string } } }
+  const manifest = updaterManifest(directory, version, publishedAt, verify ? config.plugins.updater.pubkey : undefined)
+  writeFileSync(join(directory, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
   // The signatures are in latest.json; the release does not carry them twice.
   for (const name of readdirSync(directory)) if (name.endsWith(".sig")) rmSync(join(directory, name))
   if (electronBridge) {
@@ -77,7 +81,7 @@ async function manifests(directory: string): Promise<void> {
   console.log(`Release ${version} is complete:\n${actual.map((name) => `  ${name}`).join("\n")}`)
 }
 
-const [command, directory] = process.argv.slice(2)
-if (command === "collect" && directory) collect(directory)
-else if (command === "manifests" && directory) await manifests(directory)
-else throw new Error("Usage: bun scripts/release-artifacts.ts collect|manifests <directory>")
+const [command, directory, option] = process.argv.slice(2)
+if (command === "collect" && directory && !option) collect(directory)
+else if (command === "manifests" && directory && (!option || option === "--verify")) await manifests(directory, option === "--verify")
+else throw new Error("Usage: bun scripts/release-artifacts.ts collect <directory> | manifests <directory> [--verify]")

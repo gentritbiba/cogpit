@@ -107,6 +107,13 @@ describe("updaterManifest", () => {
   })
 })
 
+describe("updaterManifest with the trusted key", () => {
+  it("refuses a release signed with a key installed apps do not trust", () => {
+    writeRelease()
+    expect(() => updaterManifest(directory, VERSION, PUBLISHED, "bm90IGEga2V5")).toThrow("Cogpit-4.0.0-arm64.app.tar.gz: ")
+  })
+})
+
 describe("electronManifests", () => {
   interface Feed { version: string; path: string; sha512: string; releaseDate: string; files: { url: string; sha512: string; size: number }[] }
 

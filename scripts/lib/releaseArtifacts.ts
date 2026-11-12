@@ -11,6 +11,7 @@ import { createHash } from "node:crypto"
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { dump } from "js-yaml"
+import { verifyUpdateSignature } from "./updateSignature"
 
 export type ReleasePlatform = "darwin" | "linux" | "win32"
 export type ReleaseArch = "arm64" | "x64"
@@ -61,17 +62,28 @@ export interface UpdaterManifest {
   platforms: Record<string, { signature: string; url: string }>
 }
 
-/** `latest.json`, from the signature (`<file>.sig`) beside each update file. */
-export function updaterManifest(directory: string, version: string, publishedAt: Date): UpdaterManifest {
+/**
+ * `latest.json`, from the signature (`<file>.sig`) beside each update file.
+ * With `trustedKey` (the public key installed apps carry) every signature must
+ * also be that key's, over that file, for this version.
+ */
+export function updaterManifest(directory: string, version: string, publishedAt: Date, trustedKey?: string): UpdaterManifest {
   const platforms: UpdaterManifest["platforms"] = {}
   for (const [target, file] of Object.entries(updateFiles(version))) {
-    const signature = join(directory, `${file}.sig`)
+    const signaturePath = join(directory, `${file}.sig`)
     if (!existsSync(join(directory, file))) throw new Error(`The release is missing ${file}.`)
-    if (!existsSync(signature)) throw new Error(`${file} is not signed: ${signature} is missing.`)
-    platforms[target] = {
-      signature: readFileSync(signature, "utf8").trim(),
-      url: `${RELEASE_DOWNLOADS}/v${version}/${file}`,
+    if (!existsSync(signaturePath)) throw new Error(`${file} is not signed: ${signaturePath} is missing.`)
+    const signature = readFileSync(signaturePath, "utf8").trim()
+    if (trustedKey) {
+      let signed
+      try {
+        signed = verifyUpdateSignature(join(directory, file), signature, trustedKey)
+      } catch (error) {
+        throw new Error(`${file}: ${(error as Error).message}`)
+      }
+      if (signed.version !== version) throw new Error(`${file} is signed for version ${signed.version ?? "none"}, not ${version}.`)
     }
+    platforms[target] = { signature, url: `${RELEASE_DOWNLOADS}/v${version}/${file}` }
   }
   return {
     version,
