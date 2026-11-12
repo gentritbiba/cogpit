@@ -14,6 +14,7 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
   const state = { turns: initial.turns, older: [...initial.older], sessionSource: initial.open ?? open() }
   const jumpToTurn = vi.fn(async (_turnKey: string) => true)
   const loadSession = vi.fn()
+  const onNavigate = vi.fn()
   const layoutListeners = new Set<() => void>()
   const subscribeTimeline = (listener: () => void) => {
     layoutListeners.add(listener)
@@ -24,6 +25,7 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
     getSession: () => session(state.turns),
     sessionSource: state.sessionSource,
     loadSession,
+    onNavigate,
     jumpToTurn,
     subscribeTimeline,
     hasMore: state.older.length > 0,
@@ -36,7 +38,7 @@ function harness(initial: { turns: Turn[]; older: Turn[][]; open?: SessionSource
       return page.length
     },
   }))
-  return { view, state, jumpToTurn, loadSession, laidOut }
+  return { view, state, jumpToTurn, loadSession, onNavigate, laidOut }
 }
 
 describe("useQuoteNavigation", () => {
@@ -128,4 +130,37 @@ describe("useQuoteNavigation", () => {
     }
   })
 
+})
+
+
+describe("content search navigation", () => {
+  it("uses the id ahead of the ordinal", async () => {
+    const { view, jumpToTurn } = harness({ turns: [turn("t0"), turn("t1")], older: [] })
+    await act(async () => { await view.result.current(source("t1"), "", 0) })
+    expect(jumpToTurn).toHaveBeenCalledWith("t1")
+  })
+
+  it("pages to the transcript start before applying a zero-based ordinal", async () => {
+    const { view, jumpToTurn, state } = harness({ turns: [turn("t9")], older: [[turn("t7"), turn("t8")], [turn("t0"), turn("t1")]] })
+    let found: boolean | undefined
+    act(() => { void view.result.current(source("missing-id"), "", 1).then((value) => { found = value }) })
+    expect(jumpToTurn).not.toHaveBeenCalled()
+    await waitFor(() => expect(found).toBe(true))
+    expect(state.older).toHaveLength(0)
+    expect(jumpToTurn).toHaveBeenCalledWith("t1")
+  })
+
+  it("does not turn an empty snippet or an out-of-range ordinal into a jump", async () => {
+    const { view, jumpToTurn } = harness({ turns: [turn("t0")], older: [] })
+    await act(async () => { expect(await view.result.current(source("missing-id"), "", 8)).toBe(false) })
+    expect(jumpToTurn).not.toHaveBeenCalled()
+  })
+})
+
+
+it("navigates to the open session even when a content hit's turn no longer exists", async () => {
+  const { view, onNavigate, jumpToTurn } = harness({ turns: [turn("t0")], older: [] })
+  await act(async () => { await view.result.current(source("gone"), "", 99) })
+  expect(onNavigate).toHaveBeenCalledOnce()
+  expect(jumpToTurn).not.toHaveBeenCalled()
 })

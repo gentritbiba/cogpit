@@ -63,6 +63,7 @@ export function useSessionPaging({
   workerParse,
   onOlderTurns,
 }: UseSessionPagingOpts) {
+  const [readyIdentity, setReadyIdentity] = useState("")
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const [historyBytes, setHistoryBytes] = useState<HistoryBytes>(NO_HISTORY)
@@ -92,6 +93,7 @@ export function useSessionPaging({
     // cached byte cursor already sits past those pages, so without this they
     // would be an unreachable gap in the transcript.
     if (cached && cached.olderTurns.length > 0) onOlderTurns(cached.olderTurns)
+    setReadyIdentity(identity)
   }, [identity, dirName, fileName, sessionChangeKey, onOlderTurns])
 
   const loadMore = useCallback(async (): Promise<number> => {
@@ -130,8 +132,8 @@ export function useSessionPaging({
       const data: BeforeResponse = await res.json()
       if (identityRef.current === key) retryRef.current = null
       const hasMorePages = data.lines.length > 0 && data.hasMore
-      if (identityRef.current === key) setHasMore(hasMorePages)
       if (data.lines.length === 0) {
+        if (identityRef.current === key) setHasMore(hasMorePages)
         sessionCache.update(dirName, fileName, cached.source.loadId, {
           hasMore: hasMorePages,
           nextByteOffset: data.byteOffset,
@@ -168,6 +170,7 @@ export function useSessionPaging({
       if (identityRef.current !== key) return 0
       setHistoryBytes(historyBytesOf(sessionCache.get(dirName, fileName)))
       onOlderTurns(history)
+      setHasMore(hasMorePages)
       return olderParsed.turns.length
     } catch {
       failed()
@@ -180,5 +183,5 @@ export function useSessionPaging({
     }
   }, [dirName, fileName, sessionChangeKey, workerParse, onOlderTurns])
 
-  return { loadMore, hasMore, isLoadingOlder, historyBytes }
+  return { loadMore, hasMore, isLoadingOlder, historyBytes, ready: readyIdentity === identity }
 }

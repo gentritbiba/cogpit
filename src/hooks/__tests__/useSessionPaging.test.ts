@@ -404,3 +404,12 @@ describe("useSessionPaging", () => {
     })
   })
 })
+
+
+it("keeps older history available when parsing the final page fails", async () => {
+  mockAuthFetch.mockResolvedValue(beforeResponse({ hasMore: false }))
+  const { result, workerParse } = setup()
+  workerParse.mockRejectedValueOnce(new Error("worker unavailable"))
+  await act(async () => { await result.current.loadMore() })
+  expect(result.current.hasMore).toBe(true)
+})

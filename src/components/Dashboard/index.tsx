@@ -6,6 +6,8 @@ import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
 import { matchesSessionFilter } from "./sessionPresentation"
+import { useSessionContentSearch } from "@/hooks/useSessionContentSearch"
+import type { OpenSearchQuote } from "@/components/session-search/types"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { useEditionUi } from "@/edition/hooks"
 import { listUrl, useSessionListFilter } from "@/lib/sessionListFilter"
@@ -16,6 +18,7 @@ import { readCachedSessionPage, writeCachedSessionPage } from "@/lib/sessionList
 
 interface DashboardProps {
   onSelectSession: (dirName: string, fileName: string) => void
+  onOpenQuoteSource?: OpenSearchQuote
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   selectedProjectDirName?: string | null
@@ -26,6 +29,7 @@ interface DashboardProps {
 
 export const Dashboard = memo(function Dashboard({
   onSelectSession,
+  onOpenQuoteSource,
   onNewSession,
   creatingSession,
   selectedProjectDirName,
@@ -158,6 +162,8 @@ export const Dashboard = memo(function Dashboard({
     }
   }, [selectedProjectDirName, projects, sessionsTotal])
 
+  const conversationSearch = useSessionContentSearch(selectedProject ? searchFilter : "", filter, selectedProject?.path)
+
   const handleBack = useCallback(() => {
     onSelectProject?.(null)
   }, [onSelectProject])
@@ -195,6 +201,8 @@ export const Dashboard = memo(function Dashboard({
         sessionsTotal={sessionsTotal}
         sessionsLoading={sessionsLoading}
         searchLoading={pullRequestResults.loading}
+        conversationSearch={conversationSearch.response}
+        onOpenQuoteSource={onOpenQuoteSource}
         searchFilter={searchFilter}
         setSearchFilter={setSearchFilter}
         filteredSessions={visibleSessions}

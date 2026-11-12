@@ -1,3 +1,7 @@
+import { ConversationSearchResults } from "@/components/session-search/ConversationSearchResults"
+import { handleSearchKeyDown } from "@/components/session-search/searchKeyboard"
+import type { OpenSearchQuote } from "@/components/session-search/types"
+import type { SessionSearchResponse } from "../../../shared/contracts/sessionSearch"
 import { Fragment, type ReactNode } from "react"
 import { MessageSquare, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +41,8 @@ interface SessionsViewProps {
   sessionsTotal: number
   sessionsLoading: boolean
   searchLoading: boolean
+  conversationSearch?: SessionSearchResponse | null
+  onOpenQuoteSource?: OpenSearchQuote
   searchFilter: string
   setSearchFilter: (value: string) => void
   filteredSessions: SessionInfo[]
@@ -59,6 +65,8 @@ export function SessionsView({
   sessionsLoading,
   searchLoading,
   searchFilter,
+  conversationSearch = null,
+  onOpenQuoteSource,
   setSearchFilter,
   filteredSessions,
   fetchError,
@@ -104,7 +112,7 @@ export function SessionsView({
           </p>
         </header>
 
-        <section className="flex flex-col gap-4" aria-label="Sessions">
+        <section className="flex flex-col gap-4" aria-label="Sessions" onKeyDown={searchFilter.trim() ? handleSearchKeyDown : undefined}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <SearchInput
               value={searchFilter}
@@ -133,7 +141,7 @@ export function SessionsView({
           {(sessionsLoading || searchLoading) && filteredSessions.length === 0 ? (
             <SkeletonRows includeMessagePlaceholder />
           ) : filteredSessions.length === 0 ? (
-            <SessionsEmpty searchFilter={searchFilter} filterEmpty={filterEmpty} />
+            conversationSearch?.results.length ? null : <SessionsEmpty searchFilter={searchFilter} filterEmpty={filterEmpty} />
           ) : (
             <>
               <div className="overflow-hidden rounded-lg border bg-card">
@@ -176,6 +184,7 @@ export function SessionsView({
               )}
             </>
           )}
+          <ConversationSearchResults response={conversationSearch} onSelectSession={onSelectSession} onOpenQuoteSource={onOpenQuoteSource} />
         </section>
       </main>
     </ScrollArea>

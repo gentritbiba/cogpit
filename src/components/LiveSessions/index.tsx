@@ -17,6 +17,10 @@ import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
 import { useListedPermissions } from "@/hooks/useListedPermissions"
+import { useSessionContentSearch } from "@/hooks/useSessionContentSearch"
+import { ConversationSearchResults } from "@/components/session-search/ConversationSearchResults"
+import { handleSearchKeyDown } from "@/components/session-search/searchKeyboard"
+import type { OpenSearchQuote } from "@/components/session-search/types"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { useEditionUi } from "@/edition/hooks"
 import { useSessionListFilter } from "@/lib/sessionListFilter"
@@ -41,6 +45,7 @@ export type { ActiveSessionInfo, RunningProcess } from "./types"
 interface LiveSessionsProps {
   activeSessionKey: string | null
   onSelectSession: (dirName: string, fileName: string) => void
+  onOpenQuoteSource?: OpenSearchQuote
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: DeleteSession
   onNewSession?: (dirName: string, cwd?: string) => void
@@ -59,7 +64,7 @@ interface LiveSessionsProps {
 
 const ALL_PROJECTS: OlderSessionsTarget = { key: "all" }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, onNewFolder, defaultAgentKind, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onOpenQuoteSource, onDuplicateSession, onDeleteSession, onNewSession, onNewFolder, defaultAgentKind, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
@@ -207,6 +212,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const focusedProject = projectScope === null
     ? null
     : scopeOptions.find((option) => option.key === projectScope) ?? null
+  const conversationSearch = useSessionContentSearch(searchQuery, listFilter, focusedProject?.cwd)
   const focusedProjectLabel = focusedProject?.customName ?? projectScope
   const older = useOlderSessions(projectScope === null ? ALL_PROJECTS : focusedProject, listArchived, listFilter)
   const scopedSessions = useMemo(
@@ -371,7 +377,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col" onKeyDown={searching ? handleSearchKeyDown : undefined}>
       <LiveSessionsToolbar
         loading={loading}
         isMobile={isMobile}
@@ -418,7 +424,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         <div className="flex flex-col gap-4 p-2">
           <LiveSessionsFeedback
             fetchError={pullRequestResults.error ?? fetchError}
-            showEmpty={filteredSessions.length === 0 && !(pendingSession && showPendingSession)
+            showEmpty={!conversationSearch.response?.results.length && filteredSessions.length === 0 && !(pendingSession && showPendingSession)
               && !loading && !pullRequestResults.loading && !fetchError && !pullRequestResults.error}
             searching={searching}
             loading={loading || pullRequestResults.loading}
@@ -467,6 +473,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             }}
           />
 
+          <ConversationSearchResults response={conversationSearch.response} onSelectSession={onSelectSession} onOpenQuoteSource={onOpenQuoteSource} />
         </div>
       </ScrollArea>
     </div>
