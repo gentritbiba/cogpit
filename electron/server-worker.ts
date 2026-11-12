@@ -20,17 +20,23 @@ interface WorkerConfig {
   staticDir: string
   userDataDir: string
   isDev: boolean
+  /**
+   * The app's own cogpit-core. Passed here rather than as COGPIT_CORE_BIN so
+   * agents and terminals the server starts do not inherit it.
+   */
+  coreBin?: string
 }
 
 let starting = false
 
-async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<void> {
+async function start({ staticDir, userDataDir, isDev, coreBin }: WorkerConfig): Promise<void> {
   try {
     detachFromParentCogpit()
     const { httpServer } = await createServerComposition(staticDir, userDataDir, {
       mode: "electron",
       legacyClickUpPath: CLICKUP_CONFIG_FILE,
       viteDevUrl: process.env.ELECTRON_RENDERER_URL,
+      coreBin,
     })
 
     const config = getConfig()

@@ -3,7 +3,7 @@ import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, read
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { acquireUpdate, applyWhenClosed, resolveAppPath, runningAppProcesses, validateApp, writeJob, type LocalUpdateJob } from "./lib/localUpdate.ts"
+import { acquireUpdate, applyWhenClosed, resolveAppPath, runningAppProcesses, validateApp, validateUpdate, writeJob, type LocalUpdateJob } from "./lib/localUpdate.ts"
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 
@@ -44,8 +44,9 @@ async function main(): Promise<void> {
     // electron:build writes the generated files the typecheck reads.
     await run(process.execPath, ["run", "electron:build"])
     await run(process.execPath, ["run", "typecheck:electron"])
+    await run(process.execPath, ["run", "build:core", "--release", "--stage"])
     await run(join(root, "node_modules/.bin/electron-builder"), ["--dir", "--mac", `--${process.arch}`, "--publish", "never", "--config", config])
-    const version = validateApp(stagedApp)
+    const version = validateUpdate(stagedApp)
     const packageVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version
     if (version !== packageVersion) throw new Error(`Built version ${version} does not match the checkout's ${packageVersion}.`)
     writeFileSync(join(stagedApp, "Contents/Resources/local-build.json"), JSON.stringify({ version, builtAt: new Date().toISOString(), source: root }, null, 2))

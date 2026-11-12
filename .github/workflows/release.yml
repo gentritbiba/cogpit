@@ -6,8 +6,9 @@ on:
       - "v*"
   # Dry-run the release pipeline (quality + all platform builds, timings and
   # artifacts included) without publishing — publish/AUR only run on a v* tag
-  # push. Dispatch it on a v* tag: the jobs that build with the edition package
-  # read its deploy key from the `release` environment, which admits only v* tags.
+  # push. Dispatched on a v* tag it builds what the release would; on a branch
+  # it builds the public edition, because the edition package's deploy key is in
+  # the `release` environment, which admits only v* tags.
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,8 @@ jobs:
   # quality.yml checks the public build; this checks the release build, which
   # carries the edition package, and that a build without it leaks none of it.
   team-quality:
+    # A branch dry-run has no access to the edition package.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -94,10 +97,84 @@ jobs:
       - name: Check the public build carries none of the edition package
         run: bun editions/team/tools/check-public-bundle.ts "$RUNNER_TEMP/public-dist"
 
+  # cogpit-core for every platform Cogpit ships on. The desktop apps carry
+  # their platform's; the npm launcher carries all five. Linux builds are static
+  # (musl), so one binary runs on any distro, however old its glibc.
+  core:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - platform: darwin-x64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - platform: win32-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    name: core (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the version.
+      - name: Install the Rust toolchain
+        shell: bash
+        run: rustup toolchain install && rustup target add "${{ matrix.target }}"
+
+      - name: Install the musl toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build cogpit-core
+        shell: bash
+        run: cargo build --locked --release -p cogpit-core --target "${{ matrix.target }}"
+
+      - name: Require a static Linux binary
+        if: runner.os == 'Linux'
+        run: |
+          file "target/${{ matrix.target }}/release/cogpit-core"
+          file "target/${{ matrix.target }}/release/cogpit-core" | grep -Eq 'static(ally|-pie) linked'
+
+      # core-dist/<platform>-<arch>/, the layout electron-builder and the npm
+      # package take it from (bun run build:core --release --stage locally).
+      - name: Stage the binary
+        shell: bash
+        run: |
+          mkdir -p "core-dist/${{ matrix.platform }}"
+          cp "target/${{ matrix.target }}/release/cogpit-core${{ runner.os == 'Windows' && '.exe' || '' }}" "core-dist/${{ matrix.platform }}/"
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: core-${{ matrix.platform }}
+          path: core-dist
+          if-no-files-found: error
+
   build:
     # Intentionally NOT gated on quality: builds and quality run in parallel
     # (saves the full quality duration off the release critical path).
     # `publish` requires BOTH, so no artifact ships without a green quality run.
+    needs: [core]
     permissions:
       contents: read
     strategy:
@@ -109,9 +186,11 @@ jobs:
           # instead of electron-builder. Invoke electron-builder directly.
           # Each pattern also carries the update manifest (latest*.yml) and the
           # files the in-app updater downloads: the mac zips, the Windows
-          # blockmap for differential downloads.
+          # blockmap for differential downloads. `core` picks the cogpit-core
+          # builds each app carries.
           - os: macos-latest
             name: macOS
+            core: darwin-*
             cmd: bun run electron:build && bunx electron-builder --mac --arm64 --x64 --publish never
             pattern: |
               release/*.dmg
@@ -119,6 +198,7 @@ jobs:
               release/latest-mac.yml
           - os: ubuntu-latest
             name: Linux (AppImage)
+            core: linux-x64
             cmd: bun run electron:build && bunx electron-builder --linux AppImage --x64 --publish never
             manifest: latest-linux-appimage.yml
             pattern: |
@@ -126,6 +206,7 @@ jobs:
               release/latest-linux-appimage.yml
           - os: ubuntu-latest
             name: Linux (pacman)
+            core: linux-x64
             cmd: bun run electron:build && bunx electron-builder --linux pacman --x64 --publish never
             manifest: latest-linux-pacman.yml
             pattern: |
@@ -133,6 +214,7 @@ jobs:
               release/latest-linux-pacman.yml
           - os: windows-latest
             name: Windows
+            core: win32-x64
             cmd: bun run electron:build && bunx electron-builder --win nsis --x64 --publish never
             pattern: |
               release/*-setup.exe
@@ -141,7 +223,9 @@ jobs:
 
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    environment: release
+    # The edition package's deploy key lives in the `release` environment, which
+    # admits only v* tags. A dry-run on a branch builds the public edition.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -149,6 +233,7 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/team-checkout
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           ssh-key: ${{ secrets.COGPIT_TEAM_DEPLOY_KEY }}
 
@@ -180,6 +265,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
+      - name: Download cogpit-core
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: core-${{ matrix.core }}
+          path: core-dist
+          merge-multiple: true
+
+      # Artifacts do not keep file modes.
+      - name: Mark cogpit-core executable
+        if: runner.os != 'Windows'
+        run: chmod 755 core-dist/*/cogpit-core
+
       - name: Build and package (${{ matrix.name }})
         # windows-latest defaults to pwsh; Git Bash keeps the command shape
         # identical across every runner.
@@ -187,7 +284,7 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           # Fail closed: a release never ships without the edition UI.
-          COGPIT_EXPECT_EDITION_UI: present
+          COGPIT_EXPECT_EDITION_UI: ${{ startsWith(github.ref, 'refs/tags/v') && 'present' || 'absent' }}
         run: ${{ matrix.cmd }}
 
       # Both Linux jobs write latest-linux.yml; publish merges the two.
@@ -202,23 +299,25 @@ jobs:
           path: ${{ matrix.pattern }}
           if-no-files-found: error
 
-  publish:
-    needs: [quality, team-quality, build]
-    # Skipped on workflow_dispatch dry-runs, which run on a tag too; update-aur
-    # chains off publish and skips with it.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  # Every platform's files in one place, the two Linux update manifests merged,
+  # and the whole set checked. Runs on dry-runs too, so a broken release shows
+  # before a tag.
+  assemble:
+    needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: release-*
           path: artifacts
           merge-multiple: true
 
       - name: List artifacts
-        run: find artifacts -type f | head -20
+        run: find artifacts -type f
 
       # electron-updater on Linux reads one latest-linux.yml for both the
       # AppImage and the pacman package and picks its file by extension.
@@ -235,6 +334,15 @@ jobs:
           yq eval-all '. as $m ireduce ({}; . *+ $m)' latest-linux-pacman.yml latest-linux-appimage.yml > latest-linux.yml
           rm latest-linux-pacman.yml latest-linux-appimage.yml
           cat latest-linux.yml
+
+      # The installed apps compare the manifests' version with their own.
+      - name: Require the tag to match the built version
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: artifacts
+        run: |
+          for manifest in latest-mac.yml latest-linux.yml latest.yml; do
+            test "${GITHUB_REF_NAME#v}" = "$(yq -N '.version' "$manifest")"
+          done
 
       - name: Verify release artifact manifest
         shell: bash
@@ -282,6 +390,31 @@ jobs:
             fi
           done
 
+      - name: Upload the release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: published-release
+          path: artifacts
+          if-no-files-found: error
+
+  publish:
+    needs: [quality, team-quality, assemble]
+    # Skipped on workflow_dispatch dry-runs, which run on a tag too; update-aur
+    # chains off publish and skips with it.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: published-release
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -293,7 +426,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-npm:
-    needs: [quality, team-quality, build]
+    needs: [quality, team-quality, core, assemble]
     # Same gate as `publish`: dry-runs build but never ship.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -324,6 +457,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # core-dist/<platform>-<arch>/cogpit-core for every target; the package
+      # build copies them into dist/core/ (COGPIT_CORE_DIST).
+      - name: Download cogpit-core for every platform
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: core-*
+          path: core-dist
+          merge-multiple: true
+
       # The tag is the single source of truth for the shipped version, exactly
       # as it is for the two AUR packages. --allow-same-version keeps this a
       # no-op when package.json was already bumped in the release commit.
@@ -332,13 +474,15 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       # `prepublishOnly` runs the unit tests, builds dist/, and verifies the
-      # package contract against the stamped version before anything uploads.
+      # package contract against the stamped version before anything uploads:
+      # every platform's core is in the package and the server starts on this one's.
       - name: Publish cogpit to npm
         working-directory: packages/cogpit-cli
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           COGPIT_EXPECT_EDITION_UI: present
+          COGPIT_CORE_DIST: ${{ github.workspace }}/core-dist
 
       # cogpit-memory's own prepublishOnly build needs this package's deps
       # (esbuild, tsc); the root install does not provide them.
@@ -362,7 +506,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   update-aur:
-    needs: [quality, team-quality, build, publish]
+    needs: [quality, team-quality, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: read

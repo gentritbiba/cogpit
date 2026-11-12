@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { acquireUpdate, appProcessIds, applyWhenClosed, installApp, readJob, resolveAppPath, updateDirectory, validateApp, writeJob, type LocalUpdateJob } from "../../scripts/lib/localUpdate.ts"
+import { acquireUpdate, appProcessIds, applyWhenClosed, installApp, readJob, resolveAppPath, updateDirectory, validateApp, validateUpdate, writeJob, type LocalUpdateJob } from "../../scripts/lib/localUpdate.ts"
 
 let root: string
 let job: LocalUpdateJob
@@ -124,7 +124,7 @@ describe("waiting for a safe install", () => {
       expect(existsSync(join(job.appPath, "old-only"))).toBe(true)
       expect(readJob(job.appPath).status).toBe("waiting")
     })
-    await applyWhenClosed(job, { processes, wait, validate: () => "2.6.6" })
+    await applyWhenClosed(job, { processes, wait, validateStaged: () => "2.6.6", validateInstalled: () => "2.6.5" })
     expect(wait).toHaveBeenCalledTimes(2)
     expect(existsSync(join(job.appPath, "new-only"))).toBe(true)
   })
@@ -132,7 +132,7 @@ describe("waiting for a safe install", () => {
   it("keeps waiting if the app reopens during bundle validation", async () => {
     const processes = vi.fn().mockReturnValueOnce([]).mockReturnValueOnce([20]).mockReturnValueOnce([20]).mockReturnValue([])
     const wait = vi.fn(async () => {})
-    await applyWhenClosed(job, { processes, wait, validate: () => "2.6.6" })
+    await applyWhenClosed(job, { processes, wait, validateStaged: () => "2.6.6", validateInstalled: () => "2.6.5" })
     expect(wait).toHaveBeenCalledTimes(1)
     expect(existsSync(join(job.appPath, "new-only"))).toBe(true)
   })
@@ -143,20 +143,44 @@ describe("waiting for a safe install", () => {
   })
 
   it("leaves the installed app intact when validation fails", async () => {
-    await expect(applyWhenClosed(job, { processes: () => [], validate: () => { throw new Error("bad bundle") } })).rejects.toThrow("bad bundle")
+    await expect(applyWhenClosed(job, { processes: () => [], validateStaged: () => { throw new Error("bad bundle") } })).rejects.toThrow("bad bundle")
     expect(existsSync(join(job.appPath, "old-only"))).toBe(true)
+  })
+
+  it("holds the new build to the update rules and the installed one to any Cogpit's", async () => {
+    const validateStaged = vi.fn(() => "3.7.0")
+    const validateInstalled = vi.fn(() => "3.6.1")
+    await applyWhenClosed(job, { processes: () => [], validateStaged, validateInstalled })
+    expect(validateStaged).toHaveBeenCalledWith(job.stagedApp)
+    expect(validateInstalled).toHaveBeenCalledWith(job.appPath)
   })
 })
 
-it.skipIf(process.platform !== "darwin")("validates the bundle identity, executable and archive on macOS", () => {
-  const contents = join(job.stagedApp, "Contents")
-  mkdirSync(join(contents, "MacOS"), { recursive: true })
-  mkdirSync(join(contents, "Resources"))
-  writeFileSync(join(contents, "MacOS/Cogpit"), "fixture", { mode: 0o755 })
-  writeFileSync(join(contents, "Resources/app.asar"), "fixture")
+describe.skipIf(process.platform !== "darwin")("bundle validation on macOS", () => {
   const plist = (id: string) => `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${id}</string><key>CFBundleExecutable</key><string>Cogpit</string><key>CFBundleShortVersionString</key><string>2.6.6</string></dict></plist>`
-  writeFileSync(join(contents, "Info.plist"), plist("com.cogpit.app"))
-  expect(validateApp(job.stagedApp)).toBe("2.6.6")
-  writeFileSync(join(contents, "Info.plist"), plist("com.other.app"))
-  expect(() => validateApp(job.stagedApp)).toThrow("not Cogpit")
+  let contents: string
+
+  beforeEach(() => {
+    contents = join(job.stagedApp, "Contents")
+    mkdirSync(join(contents, "MacOS"), { recursive: true })
+    mkdirSync(join(contents, "Resources"))
+    writeFileSync(join(contents, "MacOS/Cogpit"), "fixture", { mode: 0o755 })
+    writeFileSync(join(contents, "Resources/app.asar"), "fixture")
+    writeFileSync(join(contents, "Info.plist"), plist("com.cogpit.app"))
+  })
+
+  it("checks the bundle identity, executable and archive", () => {
+    expect(validateApp(job.stagedApp)).toBe("2.6.6")
+    writeFileSync(join(contents, "Info.plist"), plist("com.other.app"))
+    expect(() => validateApp(job.stagedApp)).toThrow("not Cogpit")
+  })
+
+  it("refuses to install a bundle without an executable cogpit-core", () => {
+    expect(() => validateUpdate(job.stagedApp)).toThrow("without an executable cogpit-core")
+    mkdirSync(join(contents, "Resources/bin"))
+    writeFileSync(join(contents, "Resources/bin/cogpit-core"), "fixture", { mode: 0o644 })
+    expect(() => validateUpdate(job.stagedApp)).toThrow("without an executable cogpit-core")
+    chmodSync(join(contents, "Resources/bin/cogpit-core"), 0o755)
+    expect(validateUpdate(job.stagedApp)).toBe("2.6.6")
+  })
 })

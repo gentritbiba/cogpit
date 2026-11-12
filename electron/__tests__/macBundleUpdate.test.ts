@@ -14,9 +14,10 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function makeBundle(appPath: string, version: string): void {
+function makeBundle(appPath: string, version: string, { core = true } = {}): void {
   mkdirSync(join(appPath, "Contents/MacOS"), { recursive: true })
-  mkdirSync(join(appPath, "Contents/Resources"), { recursive: true })
+  mkdirSync(join(appPath, "Contents/Resources/bin"), { recursive: true })
+  if (core) writeFileSync(join(appPath, "Contents/Resources/bin/cogpit-core"), "#!/bin/sh\n", { mode: 0o755 })
   writeFileSync(join(appPath, "Contents/Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.cogpit.app</string>
@@ -77,9 +78,9 @@ describe.skipIf(process.platform === "win32")("bundle swap", () => {
 })
 
 describe.runIf(process.platform === "darwin")("staging a macOS update", () => {
-  function archive(version: string): { bytes: Buffer; file: { url: string; sha512: string; size: number } } {
+  function archive(version: string, bundle = {}): { bytes: Buffer; file: { url: string; sha512: string; size: number } } {
     const source = join(root, `source-${version}`)
-    makeBundle(join(source, "Cogpit.app"), version)
+    makeBundle(join(source, "Cogpit.app"), version, bundle)
     const zip = join(root, `${version}.zip`)
     execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", join(source, "Cogpit.app"), zip])
     const bytes = readFileSync(zip)
@@ -89,12 +90,21 @@ describe.runIf(process.platform === "darwin")("staging a macOS update", () => {
 
   it("downloads, verifies and extracts the bundle beside the installed app", async () => {
     const appPath = join(root, "Cogpit.app")
-    makeBundle(appPath, "3.4.1")
+    // An install from before the Rust core updates like any other.
+    makeBundle(appPath, "3.4.1", { core: false })
     const { bytes, file } = archive("3.5.0")
     const staged = await stageMacUpdate(serve(bytes), appPath, "3.5.0", "https://example.test/Cogpit-mac.zip", file)
     expect(staged.stagedApp).toBe(join(stageDirectory(appPath), "Cogpit.app"))
     expect(readFileSync(join(staged.stagedApp, "Contents/Resources/app.asar"), "utf8")).toBe("3.5.0")
     expect(existsSync(join(stageDirectory(appPath), "update.zip"))).toBe(false)
+  })
+
+  it("discards an update that carries no cogpit-core", async () => {
+    const appPath = join(root, "Cogpit.app")
+    makeBundle(appPath, "3.4.1")
+    const { bytes, file } = archive("3.5.0", { core: false })
+    await expect(stageMacUpdate(serve(bytes), appPath, "3.5.0", "https://example.test/Cogpit-mac.zip", file)).rejects.toThrow("cogpit-core")
+    expect(existsSync(stageDirectory(appPath))).toBe(false)
   })
 
   it("discards an archive that holds a different version than the manifest", async () => {

@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process"
 import { accessSync, constants, existsSync, mkdirSync, rmSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { promisify } from "node:util"
-import { validateApp } from "../scripts/lib/localUpdate.ts"
+import { validateUpdate } from "../scripts/lib/localUpdate.ts"
 import { downloadVerified, type Fetch, type FeedFile } from "./updateFeed.ts"
 
 /**
@@ -75,7 +75,7 @@ export async function stageMacUpdate(fetchImpl: Fetch, appPath: string, version:
     await promisify(execFile)("/usr/bin/ditto", ["-x", "-k", zip, stage])
     rmSync(zip)
     const stagedApp = join(stage, "Cogpit.app")
-    const stagedVersion = plainFiles(() => validateApp(stagedApp))
+    const stagedVersion = plainFiles(() => validateUpdate(stagedApp))
     if (stagedVersion !== version) throw new Error(`Update archive holds ${stagedVersion}, expected ${version}.`)
     return { version, appPath, stagedApp }
   } catch (error) {

@@ -20,9 +20,6 @@ export default defineConfig({
           "instance-worker": "server/agents/instanceWorker.ts",
         },
       },
-      rollupOptions: {
-        external: ["node-pty"],
-      },
     },
   },
   preload: {
