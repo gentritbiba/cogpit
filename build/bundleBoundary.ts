@@ -4,7 +4,7 @@ import { root, TEAM_EDITION_ENTRY, TEAM_EDITION_ROOT } from "../scripts/lib/sour
 import { EDITION_UI_CHUNK, isEditionUiChunk } from "./manualChunks"
 
 /** Code that runs only in Node, which no renderer bundle may hold. */
-const SERVER_ONLY = ["server/", `${TEAM_EDITION_ROOT}/server/`]
+const SERVER_ONLY = ["server/", "electron/", `${TEAM_EDITION_ROOT}/server/`]
 const EDITION_UI_ROOT = `${TEAM_EDITION_ROOT}/ui/`
 
 type Expectation = "present" | "absent"

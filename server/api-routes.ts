@@ -95,7 +95,7 @@ function apiRoute(
 }
 
 /**
- * Canonical API middleware order shared by Vite, desktop, and standalone.
+ * Canonical API middleware order shared by Vite, Electron, and standalone.
  *
  * This preserves the original Vite development order. Order is intentional:
  * public device discovery and the hub proxy precede performance monitoring,

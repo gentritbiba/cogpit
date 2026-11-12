@@ -35,7 +35,7 @@ for (const [name, directory] of Object.entries(publicPackages)) {
   packageDependencies.set(directory, new Set(Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })))
 }
 const sourceRoots = [
-  "shared", "src", "plugins", "server", "packages/cogpit-memory/src",
+  "shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src",
   ...Object.values(publicPackages).map((path) => `${path}/src`),
   ...(hasTeamEdition ? [TEAM_EDITION_ROOT] : []),
 ]
@@ -69,7 +69,7 @@ function resolveLocalImport(source: string, specifier: string, files: Set<string
   return candidates.find((candidate) => files.has(candidate)) ?? null
 }
 
-type Layer = "shared" | "src" | "plugin" | "server" | "package"
+type Layer = "shared" | "src" | "plugin" | "server" | "electron" | "package"
 
 /**
  * The edition's parts sit in the core layer they extend: its UI with the
@@ -83,6 +83,7 @@ function layer(path: string): Layer | null {
   if (path.startsWith("src/")) return "src"
   if (path.startsWith("plugins/")) return "plugin"
   if (path.startsWith("server/")) return "server"
+  if (path.startsWith("electron/")) return "electron"
   if (path.startsWith("packages/")) return "package"
   return null
 }
@@ -110,8 +111,9 @@ function isForbiddenCrossLayerEdge(edge: Edge): boolean {
   if (sourceLayer === "shared" && (edge.target.startsWith("packages/plugin-contracts/") || edge.target.startsWith("packages/plugin-integrations/"))) return false
   if (sourceLayer === "shared") return true
   if (sourceLayer === "package") return targetLayer !== "package"
-  if (sourceLayer === "src") return targetLayer === "server"
-  if (sourceLayer === "server") return targetLayer === "src"
+  if (sourceLayer === "src") return targetLayer === "server" || targetLayer === "electron"
+  if (sourceLayer === "server") return targetLayer === "src" || targetLayer === "electron"
+  if (sourceLayer === "electron") return targetLayer === "src"
   return false
 }
 
@@ -163,9 +165,6 @@ const absoluteFiles = await collectSourceRoots(sourceRoots)
 const fileSet = new Set(absoluteFiles)
 const edges: Edge[] = []
 const violations: string[] = []
-/** The renderer reaches the desktop shell through one module, so it runs unchanged in a browser. */
-const TAURI_ADAPTER_PATH = "src/desktop/bridge.ts"
-const TAURI_ADAPTER = /^src\/desktop\/(?:bridge\.ts|__tests__\/bridge\.test\.ts)$/
 
 for (const source of absoluteFiles) {
   const contents = await readFile(source, "utf8")
@@ -190,9 +189,6 @@ for (const source of absoluteFiles) {
     }
     const editionProblem = editionViolation(localSource, reference, false)
     if (editionProblem) violations.push(editionProblem)
-    if (reference.specifier.startsWith("@tauri-apps/") && !TAURI_ADAPTER.test(localSource)) {
-      violations.push(`${localSource}:${reference.line} imports ${reference.specifier}; only ${TAURI_ADAPTER_PATH} talks to the desktop shell`)
-    }
     const target = resolveLocalImport(source, reference.specifier, fileSet)
     if (!target) continue
     edges.push({ source: relativePath(source), target: relativePath(target), line: reference.line })

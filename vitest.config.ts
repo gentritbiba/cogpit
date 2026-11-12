@@ -31,6 +31,7 @@ export default defineConfig({
       "plugins/**/*.test.ts",
       "plugins/**/*.test.tsx",
       "server/**/*.test.ts",
+      "electron/**/*.test.ts",
       "packages/plugin-contracts/**/*.test.ts",
       "packages/plugin-sdk/**/*.test.ts",
       "packages/plugin-tools/**/*.test.ts",
@@ -40,7 +41,7 @@ export default defineConfig({
       provider: "v8",
       // Ratchet the portable business/security core. Renderer components and
       // hooks use behavior-focused Testing Library suites plus React Doctor;
-      // the desktop shell is Rust, covered by its own cargo tests.
+      // Electron is covered by strict types, integration tests, and its build.
       include: [
         "shared/**/*.{ts,tsx}",
         "src/lib/**/*.{ts,tsx}",

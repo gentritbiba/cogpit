@@ -4,7 +4,7 @@
 //
 // This module is the leaf of the session core: it imports nothing, so it is the
 // only place an identifier can live and still be reachable from the renderer,
-// the server, the desktop app and the standalone cogpit-memory package alike.
+// the server, Electron and the standalone cogpit-memory package alike.
 
 /** The agent CLIs Cogpit can drive. */
 export type AgentKind = "claude" | "codex" | "copilot" | "acp"

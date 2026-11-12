@@ -8,7 +8,7 @@ import { recordNotification } from "./notificationHistory"
  * Fan a notification out to every sink, recording it in history first.
  *
  * The desktop sink always fires — when the window is focused on that very
- * session the desktop shell drops it, and otherwise it is worth having
+ * session the Electron main process drops it, and otherwise it is worth having
  * in Notification Center. Push only fires when the user is *not* at the desktop,
  * so sitting in front of Cogpit never buzzes the phone. A headless server always
  * counts as unattended, which is what makes push the only working channel there.

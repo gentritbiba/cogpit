@@ -175,7 +175,7 @@ export const FloatingChrome = memo(function FloatingChrome({
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-3 px-3 pt-2">
         <div
           className={cn(
-            "pointer-events-auto flex min-w-0 items-center gap-1.5",
+            "electron-no-drag pointer-events-auto flex min-w-0 items-center gap-1.5",
             !sidebarRendered && "window-inset-start",
           )}
         >
@@ -235,7 +235,7 @@ export const FloatingChrome = memo(function FloatingChrome({
           )}
         </div>
 
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+        <div className="electron-no-drag window-inset-end pointer-events-auto flex shrink-0 items-center gap-1.5">
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             {/* The scan sees every agent process on the machine; before any session it can only be another app's. */}
             {(!inventory || inventory.sessions.length > 0) && <LeakIndicator onReview={() => setMonitorOpen(true)} />}

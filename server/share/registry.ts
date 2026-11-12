@@ -10,7 +10,7 @@ import { generatePassphrase } from "./passphrase"
  * Per-session share registry.
  *
  * Persists one record per shared session to `shares.local.json` in the same
- * directory as `config.local.json` (userDataDir in the desktop app, project root in
+ * directory as `config.local.json` (userDataDir in Electron, project root in
  * dev). The file holds a scrypt hash of a passphrase that grants full
  * participation in one session, so it is written with mode 0600 and re-chmodded
  * after every write (writeFile's mode only applies at file *creation*).

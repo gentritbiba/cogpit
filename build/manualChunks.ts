@@ -1,8 +1,8 @@
 /**
  * Shared chunk splitting and naming for Vite/Rollup builds.
  *
- * Used by vite.config.ts for the dev server and the one renderer build that
- * the web server and the desktop app both serve.
+ * Used by both vite.config.ts (dev/web) and electron.vite.config.ts
+ * (Electron renderer) to keep vendor bundles consistent.
  */
 import type { Plugin, Rollup } from "vite"
 import { TEAM_EDITION_UI_ENTRY } from "../scripts/lib/sourceFiles"

@@ -1,8 +1,8 @@
 /**
- * Whether the user is currently at the desktop, as the desktop shell's
- * presence reports say.
+ * Whether the user is currently at the desktop, as reported by the Electron
+ * main process.
  *
- * Defaults to false so that a headless server — or a desktop shell that never
+ * Defaults to false so that a headless server — or an Electron build that never
  * reports — errs toward delivering the notification. Silently withholding one is
  * the worse failure.
  */

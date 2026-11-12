@@ -6,11 +6,13 @@ vi.mock("node:child_process", () => ({
   execFile: (...args: unknown[]) => mockExecFile(...args),
 }))
 
-import { PassThrough } from "node:stream"
 import { showNotification } from "../../lib/desktopNotify"
-import { connectDesktopShell, disconnectDesktopShellForTest } from "../../lib/desktopShell"
 
 const NAV = { sessionId: "abc-123", dirName: "-Users-me-proj" }
+
+interface MutableProcess {
+  parentPort?: { postMessage: (message: unknown) => void }
+}
 
 const realPlatform = process.platform
 
@@ -23,28 +25,35 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  disconnectDesktopShellForTest()
+  delete (process as unknown as MutableProcess).parentPort
   Object.defineProperty(process, "platform", { value: realPlatform, configurable: true })
 })
 
-describe("showNotification inside the desktop app", () => {
-  it("hands it to the shell with the path a click reveals, instead of shelling out", () => {
-    const output = new PassThrough()
-    connectDesktopShell(new PassThrough(), output, { onMessage: vi.fn(), onShutdown: vi.fn() })
+describe("showNotification inside Electron", () => {
+  it("delegates to the main process instead of shelling out", () => {
+    const postMessage = vi.fn()
+    ;(process as unknown as MutableProcess).parentPort = { postMessage }
     setPlatform("darwin")
 
-    showNotification("Claude Code — proj", "Done", NAV, "h1")
+    showNotification("Claude Code — proj", "Done", NAV)
 
-    expect(JSON.parse(output.read().toString())).toEqual({
+    expect(postMessage).toHaveBeenCalledWith({
       type: "notify",
       title: "Claude Code — proj",
       body: "Done",
       nav: NAV,
-      historyId: "h1",
-      path: "/-Users-me-proj/abc-123",
     })
     // The osascript path is what attributes notifications to Script Editor.
     expect(mockExecFile).not.toHaveBeenCalled()
+  })
+
+  it("ignores a parentPort that cannot post", () => {
+    ;(process as unknown as MutableProcess).parentPort = {} as { postMessage: () => void }
+    setPlatform("darwin")
+
+    showNotification("t", "b", NAV)
+
+    expect(mockExecFile).toHaveBeenCalledOnce()
   })
 })
 

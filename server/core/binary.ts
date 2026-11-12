@@ -25,9 +25,9 @@ function isFile(path: string): boolean {
 
 /**
  * The checkout holding this module, found by walking up to the Cargo
- * workspace. Server code runs from the source tree and from the npm bundle
- * in `packages/cogpit-cli/dist`, so no fixed relative path reaches the
- * repository root from both.
+ * workspace. Server code runs from the source tree, from electron-vite's
+ * `out/main` and from the npm bundle in `packages/cogpit-cli/dist`, so no
+ * fixed relative path reaches the repository root from all three.
  */
 function findWorkspaceRoot(start: string): string | null {
   let dir = start

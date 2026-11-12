@@ -1,6 +1,6 @@
 # Tool call rendering
 
-The web timeline shares tool-call components across desktop browsers, the desktop app, and mobile browsers. Agent-specific parsing happens before presentation; normalized calls use the same operation names and disclosure structure. Native iOS uses the same operation meanings with its own SwiftUI controls.
+The web timeline shares tool-call components across desktop, Electron, and mobile browsers. Agent-specific parsing happens before presentation; normalized calls use the same operation names and disclosure structure. Native iOS uses the same operation meanings with its own SwiftUI controls.
 
 ## Shared web structure
 

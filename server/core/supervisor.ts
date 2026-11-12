@@ -7,7 +7,7 @@ import { CORE_SECRET_HEADER, parseHandshake, type CoreConfig } from "./protocol"
 /**
  * The one cogpit-core process this server talks to. Like `processRegistry`,
  * it is module state: every composition in the process (the Vite dev plugins,
- * the desktop sidecar, the standalone server, test fixtures) shares one core.
+ * Electron's worker, the standalone server, test fixtures) shares one core.
  * Each holds a lease; the first lease starts it and the last release stops it.
  */
 

@@ -5,9 +5,6 @@ import { DeviceRoot } from './components/DeviceRoot.tsx'
 import { SharedRoot } from './components/SharedSession/SharedRoot.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx'
 import { isSharedPath } from './lib/sharePath.ts'
-import { installDesktopBridge } from './desktop/bridge.ts'
-
-installDesktopBridge()
 
 const rootEl = document.getElementById('root')
 if (!rootEl) throw new Error('Root element not found')

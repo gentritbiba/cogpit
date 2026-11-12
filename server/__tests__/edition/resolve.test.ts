@@ -9,8 +9,8 @@ describe("resolveEdition", () => {
     expect(resolveEdition({ COGPIT_EDITION: "team" }, undefined, "standalone")).toBe("team")
   })
 
-  it("forces personal in the desktop shell even when env says team", () => {
-    expect(resolveEdition({ COGPIT_EDITION: "team" }, undefined, "desktop")).toBe("personal")
+  it("forces personal in the electron shell even when env says team", () => {
+    expect(resolveEdition({ COGPIT_EDITION: "team" }, undefined, "electron")).toBe("personal")
   })
 
   it("forces personal in the dev shell even when env says team", () => {
@@ -22,7 +22,7 @@ describe("resolveEdition", () => {
   })
 
   it("forces personal for a team config edition outside standalone", () => {
-    expect(resolveEdition({}, "team", "desktop")).toBe("personal")
+    expect(resolveEdition({}, "team", "electron")).toBe("personal")
     expect(resolveEdition({}, "team", "dev")).toBe("personal")
   })
 
@@ -55,14 +55,14 @@ describe("resolveEdition", () => {
 
 describe("describeEditionSuppression", () => {
   it("names the shell when env asks for team outside standalone", () => {
-    expect(describeEditionSuppression({ COGPIT_EDITION: "team" }, undefined, "desktop"))
-      .toContain("desktop")
+    expect(describeEditionSuppression({ COGPIT_EDITION: "team" }, undefined, "electron"))
+      .toContain("electron")
     expect(describeEditionSuppression({ COGPIT_EDITION: "team" }, undefined, "dev"))
       .toContain("dev")
   })
 
   it("names the shell when the config asks for team outside standalone", () => {
-    expect(describeEditionSuppression({}, "team", "desktop")).toContain("desktop")
+    expect(describeEditionSuppression({}, "team", "electron")).toContain("electron")
   })
 
   it("flags an unrecognized COGPIT_EDITION value", () => {
@@ -99,7 +99,7 @@ describe("describeEditionSuppression", () => {
 
   it("is silent when nothing asked for team", () => {
     expect(describeEditionSuppression({}, undefined, "standalone")).toBeNull()
-    expect(describeEditionSuppression({ COGPIT_EDITION: "personal" }, undefined, "desktop")).toBeNull()
+    expect(describeEditionSuppression({ COGPIT_EDITION: "personal" }, undefined, "electron")).toBeNull()
   })
 
   it("is silent for an explicit env personal override of a team config (honored, not suppressed)", () => {

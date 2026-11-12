@@ -12,8 +12,8 @@ import { setConfigPath, setDataRoot } from "../config"
 /** Real server compositions on loopback, for the app-server tests of every edition. */
 
 const compositions = new Map<Server, () => Promise<void>>()
-async function createComposition(staticDir: string, userDataDir: string, mode: "desktop" | "standalone") {
-  const composition = await createServerComposition(staticDir, userDataDir, { mode, viteDevUrl: process.env.COGPIT_RENDERER_DEV_URL })
+async function createComposition(staticDir: string, userDataDir: string, mode: "electron" | "standalone") {
+  const composition = await createServerComposition(staticDir, userDataDir, { mode, viteDevUrl: process.env.ELECTRON_RENDERER_URL })
   const dispose = async () => {
     await composition.dispose()
     compositions.delete(composition.httpServer)
@@ -22,7 +22,7 @@ async function createComposition(staticDir: string, userDataDir: string, mode: "
   compositions.set(composition.httpServer, dispose)
   return { ...composition, dispose }
 }
-export const createAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "desktop")
+export const createAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "electron")
 export const createStandaloneAppServer = (staticDir: string, userDataDir: string) => createComposition(staticDir, userDataDir, "standalone")
 
 /**
@@ -107,7 +107,7 @@ export function useAppServerFixture(): void {
       mkdir(userDataDir, { recursive: true }),
     ])
     await writeFile(join(staticDir, "index.html"), "<main>composition-fixture</main>")
-    delete process.env.COGPIT_RENDERER_DEV_URL
+    delete process.env.ELECTRON_RENDERER_URL
     // Composition installs the browser shim, the plugin and the per-CLI skill;
     // keep all of that inside the fixture rather than the developer's home.
     previousBrowserHome = process.env.COGPIT_BROWSER_HOME
@@ -118,7 +118,7 @@ export function useAppServerFixture(): void {
 
   afterEach(async () => {
     await Promise.all([...new Set([...openServers, ...compositions.keys()])].map(close))
-    delete process.env.COGPIT_RENDERER_DEV_URL
+    delete process.env.ELECTRON_RENDERER_URL
     if (previousBrowserHome === undefined) delete process.env.COGPIT_BROWSER_HOME
     else process.env.COGPIT_BROWSER_HOME = previousBrowserHome
     if (previousSkillHome === undefined) delete process.env.COGPIT_SKILL_HOME

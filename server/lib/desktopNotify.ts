@@ -1,12 +1,24 @@
 import { execFile } from "node:child_process"
-import { sessionPath, type NotificationNav } from "../../shared/notifications"
-import { postToDesktopShell } from "./desktopShell"
+import type { NotificationNav, NotifyMessage } from "../../shared/notifications"
+
+interface ParentMessagePort {
+  postMessage(message: unknown): void
+}
+
+/**
+ * Electron's utilityProcess channel to the main process. Absent in the
+ * standalone server and under test.
+ */
+function parentMessagePort(): ParentMessagePort | null {
+  const { parentPort } = process as NodeJS.Process & { parentPort?: ParentMessagePort }
+  return parentPort && typeof parentPort.postMessage === "function" ? parentPort : null
+}
 
 /**
  * Show a desktop notification.
  *
- * Inside the desktop app this hands it to the shell, which owns the native
- * notification API: that is what gives the notification the Cogpit icon and a
+ * Inside Electron this delegates to the main process, which owns the
+ * Notification API — that is what gives the notification the Cogpit icon and a
  * clickable deep link. Only the standalone server falls back to osascript,
  * whose notifications are attributed to Script Editor and cannot be clicked.
  */
@@ -16,7 +28,12 @@ export function showNotification(
   nav: NotificationNav,
   historyId?: string,
 ): void {
-  if (postToDesktopShell({ type: "notify", title, body, nav, historyId, path: sessionPath(nav) })) return
+  const port = parentMessagePort()
+  if (port) {
+    const message: NotifyMessage = { type: "notify", title, body, nav, historyId }
+    port.postMessage(message)
+    return
+  }
 
   if (process.platform === "darwin") {
     execFile(

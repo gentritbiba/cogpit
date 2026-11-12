@@ -29,9 +29,9 @@ isn't one.
 
 | | What it is | Use when |
 |---|---|---|
-| Desktop app | Tauri, macOS / Linux / Windows | You are at the machine |
+| Desktop app | Electron, macOS / Linux / Windows | You are at the machine |
 | `bun run dev` | Vite dev server | You are hacking on Cogpit itself |
-| `cogpit-server` | Headless, no desktop shell | The machine has no display, or you want it always on |
+| `cogpit-server` | Headless, no Electron | The machine has no display, or you want it always on |
 
 Only the third one needs this page.
 

@@ -6,8 +6,8 @@ import { readJson } from "@/lib/httpJson"
 declare global {
   interface Window {
     /**
-     * Registered by DeviceRoot once the router is mounted. The desktop shell
-     * calls this (with retries) when a desktop notification is clicked,
+     * Registered by DeviceRoot once the router is mounted. The Electron main
+     * process calls this (with retries) when a desktop notification is clicked,
      * instead of blindly injecting a pushState that a booting renderer would
      * drop. Its presence is the readiness ack.
      */

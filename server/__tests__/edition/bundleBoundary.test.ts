@@ -54,7 +54,7 @@ describe("bundleViolations", () => {
     expect(bundleViolations(bundle(publicBuild), "absent")).toEqual([])
   })
 
-  it.each(["server/http.ts", "server/desktop.ts", "editions/team/server/store.ts", "editions/team/index.ts"])(
+  it.each(["server/http.ts", "electron/main.ts", "editions/team/server/store.ts", "editions/team/index.ts"])(
     "fails a chunk that holds server code: %s",
     (module) => {
       const violations = bundleViolations(bundle({ ...TEAM_BUILD, "assets/leak.js": { modules: [module] } }), null)
