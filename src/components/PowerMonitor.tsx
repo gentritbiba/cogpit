@@ -28,8 +28,8 @@ import { cn } from "@/lib/utils"
 import { revealSessionPath, sessionPath } from "@/lib/revealSession"
 import type {
   ActivityMetric,
-  DesktopPerformanceSnapshot,
-  DesktopProcessMetric,
+  ElectronPerformanceSnapshot,
+  ElectronProcessMetric,
   ServerPerformanceSnapshot,
   SystemProcessMetric,
 } from "../../shared/contracts/performance"
@@ -112,14 +112,15 @@ function SystemProcessRow({ metric, onStop, stopping, onNavigate }: { metric: Sy
   )
 }
 
-function processHint(metric: DesktopProcessMetric): string {
+function processHint(metric: ElectronProcessMetric): string {
   if (metric.name === "Server") return "API, file watching, session streams, and agent I/O"
   if (metric.name === "Renderer") return "React rendering, markdown, layout, and animations"
-  if (metric.name === "App") return "Desktop window and application lifecycle"
+  if (metric.name === "GPU") return "Compositing, animation, and visual effects"
+  if (metric.name === "App") return "Electron window and application lifecycle"
   return metric.type
 }
 
-function diagnosis(totalCpu: number, hottest?: DesktopProcessMetric, systemLeaks = 0): string {
+function diagnosis(totalCpu: number, hottest?: ElectronProcessMetric, systemLeaks = 0): string {
   if (systemLeaks > 0) {
     return systemLeaks === 1
       ? '1 process needs review. See "Agent and runtime processes" below.'
@@ -133,10 +134,13 @@ function diagnosis(totalCpu: number, hottest?: DesktopProcessMetric, systemLeaks
   if (hottest.name === "Renderer") {
     return "The renderer is doing the most work, which points to repeated UI rendering, layout, or animation."
   }
+  if (hottest.name === "GPU") {
+    return "The GPU process is doing the most work, which points to continuous compositing or visual effects."
+  }
   return `${hottest.name} is currently the busiest Cogpit process.`
 }
 
-function ProcessRow({ metric }: { metric: DesktopProcessMetric }) {
+function ProcessRow({ metric }: { metric: ElectronProcessMetric }) {
   return (
     <div className="flex items-start gap-3 py-2.5">
       <div className="min-w-0 flex-1">
@@ -227,7 +231,7 @@ interface PowerMonitorProps {
 }
 
 export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
-  const [desktopSnapshot, setDesktopSnapshot] = useState<DesktopPerformanceSnapshot | null>(null)
+  const [electronSnapshot, setElectronSnapshot] = useState<ElectronPerformanceSnapshot | null>(null)
   const [serverSnapshot, setServerSnapshot] = useState<ServerPerformanceSnapshot | null>(null)
   const [history, setHistory] = useState<number[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -246,20 +250,20 @@ export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
       if (!response.ok) throw new Error(`Server monitor returned ${response.status}`)
       return response.json() as Promise<ServerPerformanceSnapshot>
     })
-    const desktopPromise = window.cogpitDesktop?.performance.getSnapshot() ?? Promise.resolve(null)
-    const [serverResult, desktopResult] = await Promise.allSettled([serverPromise, desktopPromise])
+    const electronPromise = window.electronPerformance?.getSnapshot() ?? Promise.resolve(null)
+    const [serverResult, electronResult] = await Promise.allSettled([serverPromise, electronPromise])
 
     const nextServer = serverResult.status === "fulfilled" ? serverResult.value : null
-    const nextDesktop = desktopResult.status === "fulfilled" ? desktopResult.value : null
+    const nextElectron = electronResult.status === "fulfilled" ? electronResult.value : null
     if (nextServer) setServerSnapshot(nextServer)
-    if (nextDesktop) setDesktopSnapshot(nextDesktop)
+    if (nextElectron) setElectronSnapshot(nextElectron)
 
-    if (!nextServer && !nextDesktop) {
+    if (!nextServer && !nextElectron) {
       setError("Performance data is unavailable.")
     } else {
       setError(null)
-      const totalCpu = nextDesktop && nextDesktop.processes.length > 0
-        ? nextDesktop.processes.reduce((sum, metric) => sum + metric.cpuPercent, 0)
+      const totalCpu = nextElectron && nextElectron.processes.length > 0
+        ? nextElectron.processes.reduce((sum, metric) => sum + metric.cpuPercent, 0)
         : nextServer?.cpuPercent ?? 0
       setHistory((current) => [...current.slice(-(MAX_HISTORY_SAMPLES - 1)), totalCpu])
     }
@@ -277,7 +281,7 @@ export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
     return () => { window.clearInterval(interval); document.removeEventListener("visibilitychange", whenVisible) }
   }, [open, refresh])
 
-  const processes = [...(desktopSnapshot?.processes ?? [])]
+  const processes = [...(electronSnapshot?.processes ?? [])]
     .sort((a, b) => b.cpuPercent - a.cpuPercent)
   const totalCpu = processes.length > 0
     ? processes.reduce((sum, metric) => sum + metric.cpuPercent, 0)
@@ -311,7 +315,7 @@ export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
   const handleCopy = () => {
     copy(JSON.stringify({
       capturedAt: new Date().toISOString(),
-      desktop: desktopSnapshot,
+      electron: electronSnapshot,
       server: serverSnapshot,
       cpuHistory: history,
     }, null, 2))
@@ -336,7 +340,7 @@ export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
                 <RefreshCw data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
                 Refresh
               </Button>
-              <Button variant="outline" size="sm" onClick={handleCopy} disabled={!serverSnapshot && !desktopSnapshot}>
+              <Button variant="outline" size="sm" onClick={handleCopy} disabled={!serverSnapshot && !electronSnapshot}>
                 {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
                 {copied ? "Copied" : "Copy data"}
               </Button>

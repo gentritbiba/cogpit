@@ -28,10 +28,10 @@ type AppServerFactory = typeof createAppServer
 
 const adapterCases: ReadonlyArray<readonly [
   name: string,
-  mode: "desktop" | "standalone",
+  mode: "electron" | "standalone",
   factory: AppServerFactory,
 ]> = [
-  ["Desktop", "desktop", createAppServer],
+  ["Electron", "electron", createAppServer],
   ["standalone", "standalone", createStandaloneAppServer],
 ]
 
@@ -147,15 +147,13 @@ describe.each(adapterCases)("%s app-server adapter", (_name, expectedMode, facto
       res.end(JSON.stringify({ method: req.method, url: req.url }))
     })
     const upstreamUrl = await listen(upstream)
-    process.env.COGPIT_RENDERER_DEV_URL = upstreamUrl
+    process.env.ELECTRON_RENDERER_URL = upstreamUrl
 
     const { httpServer } = await factory(staticDir, userDataDir)
     const baseUrl = await listen(httpServer)
     const response = await fetch(`${baseUrl}/vite-probe?source=adapter`)
 
     expect(response.status).toBe(200)
-    // Vite's inline scripts would break under the production script-src.
-    expect(response.headers.get("content-security-policy")).toBe("frame-src 'self' http://localhost:* http://127.0.0.1:*")
     await expect(response.json()).resolves.toEqual({
       method: "GET",
       url: "/vite-probe?source=adapter",
@@ -418,7 +416,7 @@ describe("app-server initialization and proxy failures", () => {
     const unavailable = createServer()
     const unavailableUrl = await listen(unavailable)
     await close(unavailable)
-    process.env.COGPIT_RENDERER_DEV_URL = unavailableUrl
+    process.env.ELECTRON_RENDERER_URL = unavailableUrl
 
     const appServer = await createStandaloneAppServer(staticDir, userDataDir)
     const baseUrl = await listen(appServer.httpServer)
@@ -464,7 +462,7 @@ describe("app-server edition resolution", () => {
     }
   })
 
-  it("forces personal composition for the desktop shell even when env says team", async () => {
+  it("forces personal composition for the electron shell even when env says team", async () => {
     process.env.COGPIT_EDITION = "team"
     const { httpServer, dispose } = await createAppServer(staticDir, userDataDir)
     const baseUrl = await listen(httpServer)

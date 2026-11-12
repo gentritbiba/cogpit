@@ -6,7 +6,7 @@ import { applyTheme, readSavedTheme } from "../../lib/themes"
 describe("layered theme", () => {
   beforeEach(() => {
     localStorage.clear()
-    document.documentElement.className = "desktop"
+    document.documentElement.className = "electron"
   })
   afterEach(() => {
     cleanup()
@@ -44,7 +44,7 @@ describe("layered theme", () => {
     localStorage.setItem("cogpit-theme", theme)
     const { result } = renderHook(useTheme)
     expect(result.current.theme).toBe(theme)
-    expect(document.documentElement).toHaveClass("desktop", "theme-layered")
+    expect(document.documentElement).toHaveClass("electron", "theme-layered")
     expect(document.documentElement.classList.contains("dark")).toBe(theme === "layered")
   })
 
@@ -65,7 +65,7 @@ describe("layered theme", () => {
     act(() => result.current.setTheme("layered"))
     expect(localStorage.getItem("cogpit-theme")).toBe("layered")
     act(() => result.current.setTheme("light"))
-    expect(document.documentElement.className).toBe("desktop")
+    expect(document.documentElement.className).toBe("electron")
     expect(localStorage.getItem("cogpit-theme")).toBe("light")
   })
 
@@ -73,12 +73,12 @@ describe("layered theme", () => {
     const { result } = renderHook(useTheme)
     act(() => result.current.setTheme("layered"))
     act(() => result.current.setTheme("layered-light"))
-    expect(document.documentElement.className).toBe("desktop theme-layered")
+    expect(document.documentElement.className).toBe("electron theme-layered")
     expect(localStorage.getItem("cogpit-theme")).toBe("layered-light")
     act(() => result.current.setPreview("layered"))
     expect(document.documentElement).toHaveClass("dark", "theme-layered")
     act(() => result.current.setPreview(null))
-    expect(document.documentElement.className).toBe("desktop theme-layered")
+    expect(document.documentElement.className).toBe("electron theme-layered")
     expect(localStorage.getItem("cogpit-theme")).toBe("layered-light")
   })
 })

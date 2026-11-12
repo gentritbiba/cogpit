@@ -77,7 +77,7 @@ Enable **Configuration → Open files in Cogpit** to route file links, file-chan
 
 Session analytics show available input, output, cache, and context usage, plus tool counts, errors, and duration. Cost estimates use published model prices. If a GPT model has no published USD price, Cogpit leaves cost unavailable. Account plan, credit, and rate-limit data appears where the provider exposes it.
 
-The header performance monitor shows CPU, memory, event-loop, stream, and API activity. The desktop app also breaks down its own processes: the window, the server and, on Linux and Windows, the webview. It polls while open.
+The header performance monitor shows CPU, memory, event-loop, stream, and API activity. The desktop app also breaks down Electron process usage. It polls while open.
 
 The process leak monitor flags suspected orphaned agents, browsers, and scripts, with CPU usage, age, and severity. It scans every agent process on the machine, so its header badge appears only once you have a session. On macOS and Linux, Cogpit automatically cleans up orphaned agent session trees only after they are at least 30 minutes old and appear in two consecutive sweeps. Review and clean up other suspected leaks from the monitor.
 

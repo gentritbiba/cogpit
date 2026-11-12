@@ -82,7 +82,7 @@ afterEach(async () => {
 })
 
 describe("share registry initialization parity", () => {
-  it("initializes the share registry from the desktop/standalone composition", async () => {
+  it("initializes the share registry from the Electron/standalone composition", async () => {
     const { dispose } = await createServerComposition(staticDir, userDataDir, {
       mode: "standalone",
     })

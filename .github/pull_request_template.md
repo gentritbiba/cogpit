@@ -20,6 +20,6 @@
 - [ ] `bun run check:cogpit-memory-sync`
 - [ ] `bun run typecheck && bun run typecheck:tests`
 - [ ] `bun run test:coverage`
-- [ ] Relevant web, desktop, server, and package contract checks pass.
+- [ ] Relevant web, Electron, server, and package contract checks pass.
 
 <!-- Include focused manual/QA evidence for behavior that automated tests cannot prove. -->

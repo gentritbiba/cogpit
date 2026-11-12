@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve, sep } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
+import { bundledCoreBinary } from "../../electron/bundledCore.ts"
 
 export interface LocalUpdateJob {
   format: 1
@@ -54,7 +55,7 @@ export function runningAppProcesses(appPath: string): number[] {
   return appProcessIds(appPath, execFileSync("/bin/ps", ["-ww", "-axo", "pid=,comm="], { encoding: "utf8" }))
 }
 
-/** Confirms the bundle is Cogpit (whichever generation) and returns its version. */
+/** A Cogpit bundle, as any release installed it: identity, executable and app archive. Returns its version. */
 export function validateApp(appPath: string): string {
   if (!lstatSync(appPath).isDirectory() || !appPath.endsWith(".app")) {
     throw new Error(`Expected a regular application bundle: ${appPath}`)
@@ -65,20 +66,21 @@ export function validateApp(appPath: string): string {
     throw new Error(`Refusing to replace a bundle that is not Cogpit: ${appPath}`)
   }
   accessSync(join(appPath, "Contents/MacOS/Cogpit"), constants.X_OK)
+  accessSync(join(appPath, "Contents/Resources/app.asar"), constants.R_OK)
   return readValue("CFBundleShortVersionString")
 }
 
-/** A build worth installing also carries the server, its runtime and the Rust core. */
-export function validateBuild(appPath: string): string {
+/**
+ * A bundle about to be installed: {@link validateApp} plus the cogpit-core its
+ * server cannot start without. The bundle it replaces may predate the core.
+ */
+export function validateUpdate(appPath: string): string {
   const version = validateApp(appPath)
-  for (const sidecar of ["cogpit-bun", "cogpit-core"]) {
-    try {
-      accessSync(join(appPath, "Contents/MacOS", sidecar), constants.X_OK)
-    } catch {
-      throw new Error(`The built app is missing ${sidecar}; it would not start.`)
-    }
+  try {
+    accessSync(bundledCoreBinary(join(appPath, "Contents/Resources")), constants.X_OK)
+  } catch {
+    throw new Error(`Refusing to install a Cogpit bundle without an executable cogpit-core: ${appPath}`)
   }
-  accessSync(join(appPath, "Contents/Resources/server/desktop.js"), constants.R_OK)
   return version
 }
 
@@ -135,15 +137,16 @@ export async function applyWhenClosed(job: LocalUpdateJob, options: {
   processes?: (appPath: string) => number[]
   wait?: () => Promise<unknown>
   install?: (job: LocalUpdateJob) => void
-  validate?: (appPath: string) => string
+  validateStaged?: (appPath: string) => string
+  validateInstalled?: (appPath: string) => string
 } = {}): Promise<void> {
   const processes = options.processes ?? runningAppProcesses
   const wait = options.wait ?? (() => delay(1000))
   job.status = "waiting"
   writeJob(job)
   while (processes(job.appPath).length > 0) await wait()
-  const validateStaged = options.validate ?? validateBuild
-  const validateInstalled = options.validate ?? validateApp
+  const validateStaged = options.validateStaged ?? validateUpdate
+  const validateInstalled = options.validateInstalled ?? validateApp
   validateStaged(job.stagedApp)
   if (existsSync(job.appPath)) validateInstalled(job.appPath)
   // Check again after validation, including helpers that can outlive the window.

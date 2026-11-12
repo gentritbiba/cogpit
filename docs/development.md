@@ -2,7 +2,7 @@
 
 Cogpit uses Bun for development. Use Bun 1.3.14 to match CI. The npm launcher is a separate package with its own Node.js runtime requirements.
 
-The server also needs its Rust core, `cogpit-core`. Install Rust with [rustup](https://rustup.rs); `rust-toolchain.toml` selects the version. `bun run dev`, `desktop:dev`, `test` and `serve` build the core first with `bun run build:core`, and cargo makes repeat builds quick. See [the Rust core design](architecture/rust-core.md).
+The server also needs its Rust core, `cogpit-core`. Install Rust with [rustup](https://rustup.rs); `rust-toolchain.toml` selects the version. `bun run dev`, `electron:dev`, `test` and `serve` build the core first with `bun run build:core`, and cargo makes repeat builds quick. See [the Rust core design](architecture/rust-core.md).
 
 ## Run locally
 
@@ -14,10 +14,10 @@ cd ../..
 bun run dev
 ```
 
-For the desktop app (needs [Rust](https://rustup.rs) as well):
+For the Electron desktop app:
 
 ```bash
-bun run desktop:dev
+bun run electron:dev
 ```
 
 ## Build and package
@@ -29,11 +29,27 @@ bun run build
 # Build and serve the web app
 bun run serve
 
-# Build the desktop app for this machine (desktop/target/release/bundle)
-bun run desktop:build
+# Build a local unsigned macOS package for this Mac's architecture
+bun run electron:package
 ```
 
-The desktop build is unsigned. [The desktop guide](desktop.md) explains how the app is put together. Signed release artifacts and in-app updates come from the [release workflow](../.github/workflows/release.yml).
+Desktop packages carry a release build of `cogpit-core` in `resources/bin/`. The packaging commands build it and stage it in `core-dist/<platform>-<arch>/` first (`bun run build:core --release --stage`); electron-builder refuses to package an app without it.
+
+`bun run electron:package:signed` uses a local Developer ID and builds the host targets. It requires a paid Apple Developer account and signing credentials. The [release workflow](../.github/workflows/release.yml) builds the distribution artifacts for each supported platform.
+
+### Update your installed Mac app
+
+```bash
+bun run electron:update
+```
+
+This builds the current checkout, including uncommitted changes, and updates `/Applications/Cogpit.app`. It packages an app bundle directly, so there is no DMG to mount or drag into Applications. It uses your current Bun architecture and needs no Apple Developer membership. It does not fetch Git changes, publish a release, or change your app data.
+
+If Cogpit is open, the command stages the build and leaves a detached installer waiting for you to quit with **Cmd+Q**. Closing the window alone does not quit the Mac app. After the app and its helpers exit, the installer replaces the bundle and reopens Cogpit. You can run the command from Cogpit's terminal; the installer survives the app quitting. If Cogpit is already closed, installation completes immediately.
+
+Use `bun run electron:update --app "$HOME/Applications/Cogpit.app"` for a different installation directory. The directory must already exist and be writable without sudo. A second update command refuses to start while one is building or waiting. Installer output is appended to `~/.cogpit/local-update.log`. Temporary build files are removed after success; a failed replacement restores the previous bundle. If interrupted before replacement, rerunning the command clears the abandoned build. An interrupted replacement that leaves two app copies requires inspection before retrying.
+
+Installs from a release update themselves in the app (Cogpit swaps the bundle on macOS). This command installs your own checkout; an app it installed only points to new releases instead of installing them.
 
 ## Check a change
 
@@ -44,7 +60,6 @@ bun run lint
 bun run typecheck
 bun run check:agents
 bun run test
-(cd desktop && cargo test)
 
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings

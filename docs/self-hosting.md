@@ -29,9 +29,9 @@ isn't one.
 
 | | What it is | Use when |
 |---|---|---|
-| Desktop app | Tauri, macOS / Linux / Windows | You are at the machine |
+| Desktop app | Electron, macOS / Linux / Windows | You are at the machine |
 | `bun run dev` | Vite dev server | You are hacking on Cogpit itself |
-| `cogpit-server` | Headless, no desktop shell | The machine has no display, or you want it always on |
+| `cogpit-server` | Headless, no Electron | The machine has no display, or you want it always on |
 
 Only the third one needs this page.
 
@@ -230,6 +230,12 @@ WantedBy=multi-user.target
 ```
 
 Binding loopback and letting Caddy terminate TLS in front is the arrangement I would pick.
+
+Run from a checkout like this, the server finds the core that `bun run build:core --release`
+built. The AUR `cogpit-server` package installs the core outside any checkout, so its unit
+starts `server/standalone.ts --core-bin /opt/cogpit-server/bin/cogpit-core`. Keep that flag
+if you override `ExecStart`, or the server stops at startup with "cogpit-core binary was not
+found".
 
 ---
 

@@ -200,7 +200,7 @@ export function useKeyboardShortcuts({
 
       // Ctrl+Tab / Ctrl+Shift+Tab — MRU session switching (like Firefox tabs).
       // Only Ctrl (not Cmd) since Cmd+Tab is the macOS app switcher, and in
-      // browsers Ctrl+Tab switches browser tabs, so this only works in the desktop app.
+      // browsers Ctrl+Tab switches browser tabs, so this only works in Electron.
       const recentForward = matchesKeybinding("recentSessionForward", e)
       if (recentForward || matchesKeybinding("recentSessionBack", e)) {
         e.preventDefault()

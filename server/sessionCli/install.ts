@@ -11,7 +11,7 @@ import { allDescriptors } from "../../shared/session/agent-descriptors"
  *
  * The script needs a JavaScript runtime, and an agent's machine may have no
  * Node on PATH, so the launcher runs it with the binary serving Cogpit right
- * now: Bun or Node. It is rewritten on every start, so a
+ * now: Electron (as Node), Bun or Node. It is rewritten on every start, so a
  * moved or updated app repoints it.
  */
 
@@ -116,14 +116,14 @@ export function renderPosixLauncher(runtime: string): string {
 runtime=${shellQuoted(runtime)}
 script="$(dirname "$0")/${SCRIPT_NAME}"
 if [ -x "$runtime" ]; then
-  exec "$runtime" "$script" "$@"
+  ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script" "$@"
 fi
 exec node "$script" "$@"
 `
 }
 
 export function renderCmdLauncher(runtime: string): string {
-  return `@echo off\r\nrem ${HEADER}\r\nsetlocal\r\n"${runtime}" "%~dp0${SCRIPT_NAME}" %*\r\n`
+  return `@echo off\r\nrem ${HEADER}\r\nsetlocal\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${runtime}" "%~dp0${SCRIPT_NAME}" %*\r\n`
 }
 
 export function ensureSessionCli(

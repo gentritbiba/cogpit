@@ -1,35 +1,34 @@
 # Cogpit architecture
 
-Cogpit is one product with five runtime surfaces: the React renderer, the HTTP/WebSocket server, the desktop shell (`desktop/`, Tauri), the install-free `cogpit` launcher, and the published `cogpit-memory` CLI. The target structure is a directed dependency graph rather than a collection of mutually importing folders.
+Cogpit is one product with five runtime surfaces: the React renderer, the HTTP/WebSocket server, the Electron host, the install-free `cogpit` launcher, and the published `cogpit-memory` CLI. The target structure is a directed dependency graph rather than a collection of mutually importing folders.
 
 ```text
 React features ───────┐
 HTTP route adapters ──┼──> shared contracts + session core
-desktop server entry ─┤                │
+Electron composition ─┤                │
 install-free CLI ──────┤                │
 cogpit-memory CLI ─────┘                └──> agent-specific adapters
 
 HTTP route adapters -> application services -> filesystem/process infrastructure
-desktop server entry (server/desktop.ts) -> server public composition API
-desktop shell (desktop/, Rust) -> server process over stdin/stdout (shared/desktopProtocol.ts)
+Electron composition -> server public composition API
 ```
 
 ## Dependency rules
 
 1. `shared/` owns browser-safe contracts and may not import any runtime layer. Every runtime layer may depend on it.
-2. `src/` never imports `server/`. Only `src/desktop/bridge.ts` imports `@tauri-apps/*`; everything else reads `window.cogpitDesktop`, which a browser leaves undefined.
-3. `server/` never imports `src/`. Standalone and desktop server entries belong in `server/`.
-4. `desktop/` is a Rust composition shell. It shares no code with the TypeScript layers: it runs the server as a child process and speaks the line protocol in `shared/desktopProtocol.ts`.
+2. `src/` never imports `server/` or `electron/`.
+3. `server/` never imports `src/` or `electron/`. Standalone server composition belongs in `server/`, not the Electron layer.
+4. `electron/` is a composition shell. It may import the server public API, but server code must not depend on Electron.
 5. Published package artifacts are independently consumable. Package build adapters may import a canonical server composition point so the packaged runtime does not fork application logic; the resulting bundle must not depend on repository source files.
 6. Route registration has one canonical manifest. Platform roots supply context; they do not maintain parallel route lists.
 7. Session parsing, turn construction, status, token, and pricing semantics have one governed implementation consumed by the app and CLI.
-8. Root `plugins/` may import plugin peers, `shared/`, and the public `src/plugin-api/` surface. Only `src/plugins/registry.ts` may import root plugins; plugins may not import private renderer or server modules.
+8. Root `plugins/` may import plugin peers, `shared/`, and the public `src/plugin-api/` surface. Only `src/plugins/registry.ts` may import root plugins; plugins may not import private renderer, server, or Electron modules.
 9. Circular imports are not allowed.
 10. The edition package `@cogpit/team` is the submodule `editions/team/`, which a public clone leaves empty; the package is there when `editions/team/index.ts` is. Nothing outside it imports it: `server/edition/load.ts` installs its server side at boot, and only `src/edition/load.ts` imports its UI, through the `@cogpit/edition-ui` alias. It reaches core only through the `@cogpit/core/*` alias, each subtree only as far as this table allows:
 
     | Source | May import from the package | May import from core (only through `@cogpit/core/`) |
     | --- | --- | --- |
-    | `editions/team/ui/**` | `ui/**`, `shared/**` | `src/edition/**`, `src/components/ui/**`, `shared/**`. Never `server/` or `node:*`; bare packages must be declared in the root `package.json`. |
+    | `editions/team/ui/**` | `ui/**`, `shared/**` | `src/edition/**`, `src/components/ui/**`, `shared/**`. Never `server/`, `electron/` or `node:*`; bare packages must be declared in the root `package.json`. |
     | `editions/team/server/**`, `index.ts` | `server/**`, `shared/**` (never `ui/**`) | `server/**`, `shared/**` |
     | `editions/team/shared/**` | `shared/**` | `shared/**`, with no runtime dependencies, like core `shared/` |
     | `editions/team/tests/ui/**` | `ui/**`, `shared/**` | `src/**` including `__tests__` fixtures, and `shared/**` |
@@ -47,17 +46,18 @@ desktop shell (desktop/, Rust) -> server process over stdin/stdout (shared/deskt
 | Agent identity, capabilities and CLI arguments | `shared/session/agent-descriptors.ts` | `server/agents/` owns the stores, runtimes and transports; `src/lib/agents/` adds renderer presentation only. New agent-specific logic belongs in those modules. `bun run check:agents` caps older references outside them and prevents new agent vocabulary. See [`ARCHITECTURE.md`](../../ARCHITECTURE.md). |
 | Session parsing and semantics | `shared/session/` | `src/lib/*` re-exports; `packages/cogpit-memory/src/lib/*` is generated by `scripts/sync-cogpit-memory.ts`. Token totals computed from JSONL; pricing applies LiteLLM rates via `shared/usageCost/pricing.ts` and `server/lib/usageCost/*`. |
 | HTTP middleware types and JSON responses | `server/http.ts` | `server/helpers.ts` re-exports legacy imports. |
-| API route order | `server/api-routes.ts` | Vite, desktop, and standalone pass environment context to the same manifest. |
-| Server composition | `server/app-server.ts` | `createServerComposition` is called directly by `server/desktop.ts` and `server/standalone-runtime.ts`. |
+| API route order | `server/api-routes.ts` | Vite, Electron, and standalone pass environment context to the same manifest. |
+| Server composition | `server/app-server.ts` | `createServerComposition` is called directly by `electron/server-worker.ts` and `server/standalone-runtime.ts`. |
 | WebSocket upgrades | `server/socketTransports.ts` | `attachSocketTransports` is the one upgrade handler; the composition and the Vite plugin install it and add only their fallback. |
-| Rust core sidecar | `crates/` (`cogpit-core`, `core-protocol`), `server/core/` | TS stays the front door and forwards ported routes with `forwardToCore` / `relayToCore`; core owns no auth. One supervisor per process, leased by every composition. See [rust-core.md](rust-core.md). |
+| Rust core sidecar | `crates/` (`cogpit-core`, `core-protocol`; map in [crates/README.md](../../crates/README.md)), `server/core/` | TS stays the front door and forwards ported routes with `forwardToCore` / `relayToCore`; core owns no auth. One supervisor per process, leased by every composition. Packaged apps pass their bundled binary as `coreBin`. See [rust-core.md](rust-core.md). |
+| Files and git routes | `crates/core-files` | `server/routes/core-files.ts` keeps each route id and forwards it, so auth and edition policy still apply in TS. |
 | Terminal sessions | `crates/core-pty` | `/__pty` ends at TS: `server/pty-socket.ts` relays it to core with per-frame authorization and resolves agent sign-ins before relaying. |
 | Process/session infrastructure | `server/processRegistry.ts`, `server/sessionPaths.ts`, `server/pathSafety.ts` | `server/helpers.ts` is a re-export seam and nothing else: it holds no logic, and exists so `vi.mock("../helpers")` can replace node builtins for the handlers under test alone. |
 | Atomic JSON persistence | `server/atomicJsonFile.ts` | Registry/config writers serialize mutations through their owning service; callers never perform parallel read-modify-write cycles. |
 | Undo/redo contracts and mutation | `shared/contracts/undo.ts`, `server/routes/undo/` | The route coordinates one optimistic, rollback-capable transaction; clients carry compact operations rather than archived transcripts. |
 | Network trust boundary | `server/security.ts`, `server/password-utils.ts` | Every server composition installs it before routes; WebSocket upgrades use the same trust policy. |
 | Edition seam | `server/edition/` | Core asks the running edition through it: routes import its named functions (`authorizeSession`, `filterVisible`, `sendTurn`, `reportSessionEvent`, …), composition calls `editionModule()` (auth strategy, authz, boot, flush, `/api/me`, edition routes). `PERSONAL_EDITION` answers every hook without I/O. `loadEdition` imports `@cogpit/team` only for a team boot, and a build without it refuses to boot team edition. In the renderer, `src/edition/` holds the slot registry, the personal defaults and the one loader. |
-| Notification contract and fan-out | `shared/notifications.ts`, `server/lib/notificationDelivery.ts` | The server only *describes* a notification and writes it to the desktop shell over stdout (`shared/desktopProtocol.ts`, `server/lib/desktopShell.ts`); `desktop/src/notifications.rs` owns the native notification API and reports clicks and desktop presence back over stdin. Without a shell the standalone server degrades to `osascript` plus ntfy push. |
+| Notification contract and fan-out | `shared/notifications.ts`, `server/lib/notificationDelivery.ts` | The server only *describes* a notification and posts it over the utilityProcess parent port; `electron/notifications.ts` owns the `Notification` API and reports desktop presence back. Server code never imports Electron, so the standalone server degrades to `osascript` plus ntfy push. |
 | Install-free npm launcher | `packages/cogpit-cli/`, `server/standalone-runtime.ts` | The package bundles the web app and canonical standalone server at publish time; the installed artifact runs on Node.js without repository files or a pre-existing Cogpit process. |
 | Renderer orchestration | feature hooks plus `src/components/AppShell/` | `src/App.tsx` composes state and feature boundaries; feature logic should not move back into it. |
 | Compile-time UI plugins | `plugins/`, `src/plugin-api/`, `src/plugins/registry.ts` | The public API is the only renderer surface available to root plugins. Built-in panels adapt existing UI and services through `src/components/workspace-panels/`. |
@@ -82,8 +82,7 @@ bun run typecheck:tests
 bun run test:coverage
 bun run test:public
 bun run build:web
-bun scripts/desktop.ts stage
-(cd desktop && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
+bun run electron:build
 ```
 
 The canonical run includes the real loopback-listener integration suites in `app-server.test.ts` and `hub/proxy.test.ts`. A restricted sandbox must not turn `listen EPERM` into skipped tests or weaken their assertions; portable results may aid diagnosis but never replace the canonical gate.

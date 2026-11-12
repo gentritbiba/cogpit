@@ -23,7 +23,7 @@ build() {
   bun install --frozen-lockfile
   # not `bun run build`: that also typechecks packages/* which this package neither installs deps for nor ships
   bun run build:web
-  # The Rust core the server runs beside itself (the unit names it in COGPIT_CORE_BIN).
+  # The Rust core the server runs beside itself (the unit passes it with --core-bin).
   cargo build --release --locked -p cogpit-core
 }
 

@@ -10,6 +10,7 @@ import { hostname, networkInterfaces } from "node:os"
 import { removePortFile } from "./lib/portFile"
 import {
   buildBootBanner,
+  resolveCoreBinArgument,
   resolveDataDir,
   resolveDeviceName,
 } from "./lib/standalone-bootstrap"
@@ -32,6 +33,7 @@ try {
     host,
     port,
     publishPort: true,
+    coreBin: resolveCoreBinArgument(process.argv.slice(2)),
   })
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))

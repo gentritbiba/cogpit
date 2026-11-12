@@ -37,7 +37,7 @@ let DATA_ROOT = PROJECT_ROOT
 let CONFIG_PATH = join(PROJECT_ROOT, "config.local.json")
 
 /**
- * Override the writable data root at runtime (desktop and standalone entry
+ * Override the writable data root at runtime (Electron and standalone entry
  * points). Must be called before refreshDirs() so the directories it derives
  * stay writable across later config reloads.
  */
@@ -50,7 +50,7 @@ export function getDataRoot(): string {
 }
 
 /**
- * Override the config file path at runtime (used by the desktop server
+ * Override the config file path at runtime (used by Electron main process
  * to store config in userData instead of the app bundle directory).
  */
 export function setConfigPath(p: string): void {

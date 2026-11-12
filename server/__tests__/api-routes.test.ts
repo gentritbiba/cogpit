@@ -182,17 +182,17 @@ describe("API route registry", () => {
     }
   })
 
-  it("registers identical middleware paths in dev, desktop, and standalone modes", () => {
+  it("registers identical middleware paths in dev, Electron, and standalone modes", () => {
     const pathsFor = (mode: HubMode) =>
       captureRegistrations(mode).map(({ path }) => path)
     const devPaths = pathsFor("dev")
 
-    expect(pathsFor("desktop")).toEqual(devPaths)
+    expect(pathsFor("electron")).toEqual(devPaths)
     expect(pathsFor("standalone")).toEqual(devPaths)
     expect(devPaths.filter((path) => path === "/hub")).toHaveLength(1)
   })
 
-  it.each<HubMode>(["dev", "desktop", "standalone"])(
+  it.each<HubMode>(["dev", "electron", "standalone"])(
     "forwards the %s platform mode to the hello route",
     (mode) => {
       const hello = captureRegistrations(mode).find(

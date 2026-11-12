@@ -48,19 +48,37 @@
   transition: none !important;
 }
 
-/* The macOS desktop app hides its title bar, so `.desktop-drag` regions and
-   this strip along the top of the chat pane drag the window instead
-   (src/desktop/bridge.ts). The strip is inert everywhere else. */
+/* Electron window drag regions. Chromium computes these geometrically, so a
+   no-drag element wins over any drag region it overlaps regardless of z-order. */
+.electron-drag {
+  -webkit-app-region: drag;
+}
+.electron-drag button,
+.electron-drag a,
+.electron-drag input,
+.electron-drag [role="button"],
+.electron-no-drag {
+  -webkit-app-region: no-drag;
+}
+/* Invisible strip along the top of the chat pane that stands in for the
+   removed title bar. Inert outside Electron. */
 .drag-strip {
   pointer-events: none;
 }
-html.desktop-macos .drag-strip {
+html.electron .drag-strip {
   pointer-events: auto;
+  -webkit-app-region: drag;
 }
 
-/* Room for the traffic lights the macOS desktop app draws over the page. */
-html.desktop-macos .window-inset-start {
+/* Native window control insets — only in Electron where the title bar is
+   hidden. src/theme-bootstrap.ts sets "electron"/"electron-win" on <html>
+   from the user agent. */
+html.electron:not(.electron-win) .window-inset-start {
   padding-left: 84px;
+}
+/* Windows draws its Window Controls Overlay (~138px) on the right. */
+html.electron-win .window-inset-end {
+  padding-right: 138px;
 }
 
 /* Desktop scrollbar styling */

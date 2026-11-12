@@ -134,7 +134,7 @@ export async function startStandaloneServer({
     mode: "standalone",
     legacyPluginHost,
     legacyClickUpPath,
-    viteDevUrl: process.env.COGPIT_RENDERER_DEV_URL,
+    viteDevUrl: process.env.ELECTRON_RENDERER_URL,
     coreBin,
   })
   startSessionCatalogAfterFirstResponse(composition.httpServer)

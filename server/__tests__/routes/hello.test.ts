@@ -14,7 +14,7 @@ import { installFakeEdition } from "../edition/fakeEdition"
 
 const mockedGetConfig = vi.mocked(getConfig)
 
-function register(mode: "desktop" | "standalone" | "dev" = "desktop") {
+function register(mode: "electron" | "standalone" | "dev" = "electron") {
   return getRouteHandler(collectRoutes((use) => registerHelloRoutes(use, { mode })), "/api/hello")
 }
 

@@ -12,12 +12,19 @@ import { descriptorFor } from "../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../shared/session/types"
 import { nativeBinaryName } from "../lib/binaryResolver"
 
+/** Separator-agnostic so the packaged Windows app is detected too. */
+const ASAR_SEGMENT = /([\\/])app\.asar([\\/])/
+
 export const resolveModule = (id: string) => createRequire(import.meta.url).resolve(id)
 
 export function findBundledClaude(resolve: (id: string) => string): string | undefined {
   try {
     const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    return resolve(`${platformPkg}/package.json`).replace(/package\.json$/, nativeBinaryName("claude"))
+    // Swapping the file name keeps the resolver's own separators, which the
+    // asar rewrite relies on.
+    return resolve(`${platformPkg}/package.json`)
+      .replace(/package\.json$/, nativeBinaryName("claude"))
+      .replace(ASAR_SEGMENT, "$1app.asar.unpacked$2")
   } catch {
     return undefined
   }

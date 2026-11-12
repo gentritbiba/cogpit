@@ -8,7 +8,7 @@ import { replaceAll, serialQueue } from "../lib/serialQueue"
  *
  * Persists the set of remote Cogpit devices this hub can control to
  * `devices.local.json` in the same directory as `config.local.json`
- * (userDataDir in the desktop app, project root in dev). The file may contain a
+ * (userDataDir in Electron, project root in dev). The file may contain a
  * device password, so it is written with mode 0600 and re-chmodded after
  * every write (writeFile's mode only applies at file *creation*).
  *

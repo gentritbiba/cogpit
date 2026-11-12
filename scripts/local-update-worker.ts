@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
-import { applyWhenClosed, readJob, updateDirectory } from "./lib/localUpdate"
+import { applyWhenClosed, readJob, updateDirectory } from "./lib/localUpdate.ts"
 
 const appPath = process.argv[2]
 const directory = updateDirectory(appPath)

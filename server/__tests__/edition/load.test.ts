@@ -83,7 +83,7 @@ describe("loadEdition", () => {
     expect(getEdition()).toBe("team")
   })
 
-  it.each(["desktop", "dev"] as const)("never asks for the package in the %s shell", async (shell) => {
+  it.each(["electron", "dev"] as const)("never asks for the package in the %s shell", async (shell) => {
     process.env.COGPIT_EDITION = "team"
     const importTeam = teamPackage()
     await expect(loadEdition({ shell }, importTeam)).resolves.toBe("personal")
@@ -106,7 +106,7 @@ describe("loadEdition", () => {
 
   it("refuses to fall back to personal once team is running", async () => {
     await loadEdition({ shell: "standalone", configEdition: "team" }, teamPackage())
-    await expect(loadEdition({ shell: "desktop" }, teamPackage())).rejects.toThrow("already running its team edition")
+    await expect(loadEdition({ shell: "electron" }, teamPackage())).rejects.toThrow("already running its team edition")
     expect(getEdition()).toBe("team")
   })
 

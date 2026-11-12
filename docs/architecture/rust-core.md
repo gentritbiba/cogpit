@@ -1,26 +1,81 @@
-# Rust core (stage A)
+# Rust core
 
-Cogpit's server is moving the parts that port cleanly to Rust, one route group
-at a time. Each port deletes the TypeScript it replaces in the same change, so
-there is never a second implementation to keep in step. Nothing user-visible
-changes.
+Cogpit's server is TypeScript. One part of it runs in Rust: `cogpit-core`, a
+small program the TS server starts beside itself (a *sidecar*) and talks to
+over loopback. The crates are mapped in [crates/README.md](../../crates/README.md).
 
-## Shape
+## In plain words
+
+**What runs in Rust.** Two things the UI uses all the time:
+
+- the terminals in the Terminal panel: starting shells in a pseudo-terminal,
+  streaming their output, scrollback;
+- files and git for the UI: images and video from disk (with byte ranges, so
+  video can seek), file contents, the project file list, reading and saving a
+  project file, git status and git diff.
+
+**Why these.** They hold no agent state, so they move without touching the
+dispatcher, and they are the server's bulk I/O. In Rust they run on their own
+threads: a terminal printing hundreds of megabytes or a large file listing no
+longer competes with the TS event loop that drives the agents. Terminals also
+drop node-pty, a native addon that had to be rebuilt for every runtime
+(Electron, Node, Bun) and could not keep a shell alive under Bun at all.
+
+**What stays TypeScript.** Everything else: authentication and the security
+headers, the route registry, the team edition's policies, the agent runtimes,
+plugins and the UI. The TS server is the only front door. Core listens on
+`127.0.0.1` only, answers only requests that carry the secret TS gave it at
+boot, and never calls back into TS.
+
+Each port deletes the TypeScript it replaces in the same change, so there is
+never a second implementation to keep in step.
+
+## How a request reaches core
 
 ```
 renderer / iOS / hub ──HTTP+WS──> TS server (front door)
                                      │ ported routes and sockets are forwarded
                                      ▼
-                              cogpit-core (Rust sidecar, axum + tokio)
+                              cogpit-core (Rust, axum + tokio)
                               127.0.0.1:<ephemeral>, per-boot secret
 ```
 
-The TS server stays the front door. `server/security.ts`, `authMiddleware`,
-`editionAuthz`, the route registry in `server/api-routes.ts` and the team
-edition's route policies are unchanged by a port: a ported route keeps its id
-and its TS handler shrinks to a forward. Core never authenticates and never
-calls back into TS. Anything it needs from the agent layer or the edition, TS
-resolves before forwarding.
+1. The request arrives at the TS server like any other: security headers,
+   body limit, authentication and edition policy run first.
+2. Its route id in `server/api-routes.ts` points at a handler that only
+   forwards, for example `server/routes/core-files.ts`, which calls
+   `forwardToCore(req, res, "/v1/files/…")`.
+3. `forwardToCore` (`server/core/forward.ts`) sends it to core with the
+   secret and the authenticated principal, and streams the answer back.
+4. Core's router (`crates/cogpit-core/src/routes/mod.rs`) hands it to the
+   feature crate mounted at that path.
+
+A terminal is a WebSocket: `/__pty` ends at the TS server
+(`server/socketTransports.ts` → `server/pty-socket.ts`), which authorizes every
+frame and relays the connection to core's `/v1/pty/ws` with `relayToCore`.
+
+## Where the binary comes from
+
+| How Cogpit runs | Which `cogpit-core` | How the server gets it |
+| --- | --- | --- |
+| From a checkout: `dev`, `test`, `serve`, `electron:dev`, `electron:preview` | the newest of `target/{debug,release}` (or under `CARGO_TARGET_DIR`) | the supervisor finds the Cargo workspace above the server code |
+| The desktop app (Electron) | `resources/bin/cogpit-core` in the installed app | the main process passes it to the server worker as `coreBin` |
+| npm `cogpit` | `dist/core/<platform>-<arch>/cogpit-core` | the launcher passes it as `coreBin` |
+| AUR `cogpit-server` | `/opt/cogpit-server/bin/cogpit-core` | the systemd unit runs `server/standalone.ts --core-bin …` |
+| Team installer (`editions/team/deploy/install.sh`) | `<release>/target/release/cogpit-core`, built on the host | found like a checkout build |
+
+`COGPIT_CORE_BIN` overrides all of them; it is for pointing a run at a
+particular build. Every process the server starts inherits it, agents and
+terminals included, so packages never set it: they pass `coreBin` (or
+`--core-bin`), and a Cogpit an agent runs from source uses its own build.
+
+Packages take the binary from `core-dist/<platform>-<arch>/`: a release
+downloads the `core` job's per-target builds there, and
+`bun run build:core --release --stage` puts this machine's build there for a
+local package. electron-builder copies it into `resources/bin/` outside the
+asar (`extraResources`), and `build/requireCore.mjs` fails a package that
+lacks it. The macOS updater and `electron:update` refuse a new bundle without
+an executable core (`validateUpdate` in `scripts/lib/localUpdate.ts`).
 
 ## The sidecar
 
@@ -51,7 +106,7 @@ with a `[cogpit-core]` prefix; `COGPIT_CORE_LOG` sets the filter (default
 ## Supervisor (`server/core/`)
 
 One process-wide supervisor, like `processRegistry`. Every composition takes a
-lease with `startCore()`: `createServerComposition` (the desktop sidecar, the
+lease with `startCore()`: `createServerComposition` (Electron's worker, the
 standalone server, the npm launcher, test fixtures) and both Vite dev plugins.
 The first lease starts core and the last release stops it, closing stdin and
 killing it two seconds later if it is still there.
@@ -59,9 +114,10 @@ killing it two seconds later if it is still there.
 The binary is, in order: `COGPIT_CORE_BIN`; the shell's packaged path
 (`AppServerEnvironment.coreBin`); the newest of `target/{debug,release}` in the
 Cargo workspace above the server code (or under `CARGO_TARGET_DIR`). Server
-code runs from the source tree and the npm bundle (the desktop app passes its
-bundled binary as `coreBin`), so the workspace is found by walking up from the module rather than by a fixed
-relative path. No binary is a startup error that says how to build one.
+code runs from the source tree, electron-vite's `out/main` and the npm bundle,
+so the workspace is found by walking up from the module rather than by a fixed
+relative path. No binary is a startup error that says how to build one; there
+is no TypeScript fallback.
 
 After boot it health-checks core. If core exits unexpectedly it restarts with
 backoff (200 ms doubling to 10 s, reset after 30 s of stable running).
@@ -105,13 +161,20 @@ is the one upgrade handler: hub proxy, `/__pty`, `/__browser`, then the
 fallback (Vite's HMR proxy in the composition; nothing in the Vite plugin,
 where Vite's own listener answers HMR).
 
-## Adding a feature crate
+## Adding a route
 
-A crate under `crates/` exposes `pub fn router(state) -> axum::Router` with
-its own state type, built from `core_protocol::AppConfig`, and owns no auth.
-Mount it with one line in `crates/cogpit-core/src/routes/mod.rs`, under
-`/v1/<area>`. On the TS side, keep the route's id in `server/api-routes.ts`,
-replace its handler with `forwardToCore`, and delete the TS implementation.
+1. Write the handler in the feature crate it belongs to, or start a crate
+   under `crates/` that exposes `pub fn router(state) -> axum::Router` with
+   its own state type, built from `core_protocol::AppConfig`. It owns no auth.
+2. A new crate mounts with one line in `crates/cogpit-core/src/routes/mod.rs`,
+   under `/v1/<area>`.
+3. On the TS side the route keeps its id in `server/api-routes.ts`; its
+   handler becomes a call to `forwardToCore` (`relayToCore` for a WebSocket).
+4. Delete the TypeScript implementation and its tests in the same change. Test
+   the route in its crate (`crates/<crate>/tests/`) and keep one TS test that
+   goes through the forward on the real binary (see
+   `server/__tests__/routes/core-files.test.ts`).
+5. Add it to the "Ported routes" table below.
 
 ## Ported routes
 
@@ -123,10 +186,10 @@ replace its handler with `forwardToCore`, and delete the TS implementation.
 Known differences from the TS routes:
 
 - File listings always sort with the root collation, which is what Bun's
-  `localeCompare` uses; every shell runs the TS server on Bun. The old
-  Electron shell ran it on Node, whose order followed the system language, so
-  a user upgrading from it with a tailored locale (Swedish, Danish, Czech, …)
-  can see a different order.
+  `localeCompare` uses. The desktop app runs the TS server on Node (Electron's
+  utility process), whose `localeCompare` followed the system language, so a
+  desktop user with a tailored locale (Swedish, Danish, Czech, …) sees file
+  listings in a slightly different order than before the port.
 - A `project-file` save body that `JSON.parse` accepts but serde_json does not
   gets 500 "Unable to access project file", where TS answered 400 or saved
   the file: a number that overflows to Infinity, an escaped lone surrogate or
@@ -169,15 +232,19 @@ keeps unsafe code out of every other file.
 
 ## Building and testing
 
-`bun run build:core` builds the debug binary (`--release` for release); `dev`,
-`desktop:dev`, `test` and `serve` run it first (`desktop:build` builds and ships
-the release binary), and cargo makes repeat builds
-nearly free. The Rust gates are `cargo fmt --all --check`,
-`cargo clippy --all-targets -- -D warnings` and `cargo test`. CI runs them in a
-separate Linux job (and `cargo test` on one Windows shard), and builds the core
-before the Vitest suites on Linux and Windows.
-`check:public-clone` shares this checkout's `CARGO_TARGET_DIR` with its
-temporary worktree.
-
-Packaged desktop builds and the npm launcher do not ship the binary yet; that
-is the packaging step that follows (set `COGPIT_CORE_BIN` to run one today).
+- `bun run build:core` builds the debug binary; `dev`, `electron:dev`,
+  `electron:preview`, `test` and `serve` run it first, and cargo makes repeat
+  builds nearly free. `--release` builds the release binary, and
+  `--release --stage` also copies it to `core-dist/<platform>-<arch>/` for
+  packaging (`electron:package`, `electron:update` do this).
+- The Rust gates: `cargo fmt --all --check`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo test`. CI runs them in
+  a separate Linux job (and `cargo test` on one Windows shard), and builds the
+  core before the Vitest suites on Linux and Windows.
+- `server/__tests__/core/` tests the supervisor, forwarder and relay against
+  the real binary; route tests in `server/__tests__/routes/` go through it too.
+- `check:public-clone` shares this checkout's `CARGO_TARGET_DIR` with its
+  temporary worktree.
+- A release builds the core per target in `release.yml`'s `core` job: macOS
+  arm64 and x64, Linux x64 and arm64 (static musl, so any glibc works) and
+  Windows x64. The desktop builds and the npm package take them from there.
