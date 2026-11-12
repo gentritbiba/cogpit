@@ -11,10 +11,7 @@ import {
 const binName = process.platform === "win32" ? "claude.exe" : "claude"
 const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
 const devResolve = (id: string) => `/Users/me/app/node_modules/${id}`
-const asarResolve = (id: string) =>
-  `/Applications/Cogpit.app/Contents/Resources/app.asar/node_modules/${id}`
 const devBin = `/Users/me/app/node_modules/${platformPkg}/${binName}`
-const unpackedBin = `/Applications/Cogpit.app/Contents/Resources/app.asar.unpacked/node_modules/${platformPkg}/${binName}`
 const installedBin = `/usr/local/bin/${binName}`
 const npmBin = "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"
 
@@ -27,23 +24,6 @@ describe("discoverClaudeExecutables", () => {
       npm: undefined,
       bundled: devBin,
     })
-  })
-
-  it("rewrites app.asar paths to app.asar.unpacked", () => {
-    expect(discoverClaudeExecutables(asarResolve, none).bundled).toBe(unpackedBin)
-  })
-
-  it("rewrites app.asar paths that use Windows separators", () => {
-    // Regression: the rewrite matched "/app.asar/" only, so the packaged
-    // Windows app tried to spawn the CLI from inside the archive.
-    const root = "C:\\Users\\me\\AppData\\Local\\Programs\\Cogpit\\resources"
-    const found = discoverClaudeExecutables(
-      (id) => `${root}\\app.asar\\node_modules\\${id.replace(/\//g, "\\")}`,
-      none,
-    )
-    expect(found.bundled).toBe(
-      `${root}\\app.asar.unpacked\\node_modules\\@anthropic-ai\\${platformPkg.split("/")[1]}\\${binName}`,
-    )
   })
 
   it("has no bundled binary when the platform package cannot be resolved", () => {

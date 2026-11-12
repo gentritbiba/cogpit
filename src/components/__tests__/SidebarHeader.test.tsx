@@ -17,7 +17,7 @@ describe("SidebarHeader", () => {
       />,
     )
 
-    expect(container.firstElementChild).toHaveClass("electron-drag", "window-inset-start")
+    expect(container.firstElementChild).toHaveClass("desktop-drag", "window-inset-start")
 
     // The spacer comes first, so every action sits on the sidebar's right edge
     // and the left inset belongs to the traffic lights alone.

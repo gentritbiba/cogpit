@@ -49,7 +49,9 @@ export {
   verifyPasswordAsync,
   validatePasswordStrength,
   securityHeaders,
+  desktopSecurityHeaders,
   devSecurityHeaders,
+  DEV_DOCUMENT_POLICY,
   bodySizeLimit,
   authMiddleware,
 } from "./security"

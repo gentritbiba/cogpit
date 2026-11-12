@@ -109,7 +109,7 @@ export async function acquirePluginStoreLock(root: string, onCompromised: (reaso
     await durableWrite(ownerPath, documentBytes(owner), { label: "owner", guard: async () => { if (compromised) throw new Error(compromised) } })
   } catch (error) { await releaseLock(); throw error }
   heldTokens.add(token)
-  // Electron's quit terminates the server without closing its stores; proper-lockfile drops the lock directory on exit, and this drops the record.
+  // The desktop app's quit can terminate the server without closing its stores; proper-lockfile drops the lock directory on exit, and this drops the record.
   const removeExitHook = onExit(() => {
     if (compromised) return
     try { if (JSON.parse(readFileSync(ownerPath, "utf8")).token === token) unlinkSync(ownerPath) } catch { /* the next owner recovers the record */ }

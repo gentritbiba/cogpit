@@ -153,7 +153,7 @@ export function slugifyWorktreeName(message: string): string {
     .replace(/-$/, "")
 }
 
-/** Copy text to clipboard with fallback for Electron/sandboxed contexts. */
+/** Copy text to clipboard with fallback for desktop/sandboxed contexts. */
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)

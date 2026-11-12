@@ -804,7 +804,7 @@ export {
 
 // ── Security headers middleware ──────────────────────────────────────
 
-function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
+function setSecurityHeaders(req: IncomingMessage, res: ServerResponse, extraConnectSources = ""): void {
   res.removeHeader?.("X-Powered-By")
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "DENY")
@@ -819,7 +819,7 @@ function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
     : null
   res.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'${socketOrigin ? ` ${socketOrigin}` : ""}; worker-src 'self' blob:; manifest-src 'self'`,
+    `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'${socketOrigin ? ` ${socketOrigin}` : ""}${extraConnectSources}; worker-src 'self' blob:; manifest-src 'self'`,
   )
   if (requestUsesHttps(req)) {
     res.setHeader("Strict-Transport-Security", "max-age=63072000")
@@ -843,14 +843,25 @@ function isStrayFrameNavigation(req: IncomingMessage): boolean {
   return path === null || !FRAMED_DOCUMENTS.has(path)
 }
 
-export function securityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
-  setSecurityHeaders(req, res)
-  if (isStrayFrameNavigation(req)) return sendJson(res, 403, { error: "Not available in a frame" })
-  next()
+function securityHeadersWith(extraConnectSources: string) {
+  return (req: IncomingMessage, res: ServerResponse, next: NextFn): void => {
+    setSecurityHeaders(req, res, extraConnectSources)
+    if (isStrayFrameNavigation(req)) return sendJson(res, 403, { error: "Not available in a frame" })
+    next()
+  }
 }
 
+export const securityHeaders = securityHeadersWith("")
+
+/**
+ * {@link securityHeaders} for the desktop app's server, whose page also calls
+ * the desktop shell: at `ipc://localhost` on macOS and Linux, and at
+ * `http://ipc.localhost` on Windows.
+ */
+export const desktopSecurityHeaders = securityHeadersWith(" ipc://localhost http://ipc.localhost")
+
 /** Vite's documents keep their inline scripts, but a frame may only go where production lets it, or to a local preview. */
-const DEV_DOCUMENT_POLICY = "frame-src 'self' http://localhost:* http://127.0.0.1:*"
+export const DEV_DOCUMENT_POLICY = "frame-src 'self' http://localhost:* http://127.0.0.1:*"
 
 export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   if (isProtectedTransportRequest(req)) setSecurityHeaders(req, res)

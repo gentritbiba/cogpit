@@ -29,7 +29,7 @@ import { join } from "node:path"
 import { collectSourceRoots, hasTeamEdition, relativePath, root, TEAM_EDITION_ROOT } from "./lib/sourceFiles"
 
 const sourceRoots = [
-  "shared", "src", "server", "electron", "packages/cogpit-memory/src",
+  "shared", "src", "server", "packages/cogpit-memory/src",
   ...(hasTeamEdition ? [TEAM_EDITION_ROOT] : []),
 ]
 const budgetFile = join(root, "scripts/agent-vocabulary.json")

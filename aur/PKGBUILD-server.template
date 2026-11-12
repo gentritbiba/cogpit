@@ -36,7 +36,6 @@ package() {
 
   # Copy server sources
   cp -r server "${pkgdir}/opt/${pkgname}/"
-  cp -r electron "${pkgdir}/opt/${pkgname}/"
   cp -r src "${pkgdir}/opt/${pkgname}/"
   cp -r shared "${pkgdir}/opt/${pkgname}/"
   # Built by build:web: the bundled plugin packages the server seeds on first start.

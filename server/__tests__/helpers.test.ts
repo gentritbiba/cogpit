@@ -18,6 +18,7 @@ import {
   setBrowserSessionCookie,
   clearBrowserSessionCookie,
   securityHeaders,
+  desktopSecurityHeaders,
   devSecurityHeaders,
   bodySizeLimit,
   authMiddleware,
@@ -308,6 +309,27 @@ describe("securityHeaders", () => {
       ?.slice(1)
     expect(connectSources).toContain("wss://mb.cogpit.dev")
     expect(connectSources).not.toContain("wss:")
+    expect(connectSources).not.toContain("ipc://localhost")
+  })
+
+  it("lets only the desktop app's page call the desktop shell", () => {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: { host: "127.0.0.1:51234" }, url: "/" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+    const next = vi.fn()
+
+    desktopSecurityHeaders(req, res, next)
+
+    const connectSources = headers["Content-Security-Policy"]
+      .split(";")
+      .map((directive) => directive.trim().split(/\s+/))
+      .find(([name]) => name === "connect-src")
+      ?.slice(1)
+    expect(connectSources).toEqual(["'self'", "ws://127.0.0.1:51234", "ipc://localhost", "http://ipc.localhost"])
+    expect(headers["X-Frame-Options"]).toBe("DENY")
+    expect(next).toHaveBeenCalledOnce()
   })
 })
 

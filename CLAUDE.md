@@ -4,12 +4,12 @@
 
 Any code change MUST account for its impact on existing tests. Before considering a change complete:
 
-1. Run **both** suites and ensure all tests pass — the repo has two, and neither
-   command runs the other's tests:
-   - `bun run test` — Vitest, covering `src/`, `server/`, `electron/` and,
+1. Run **every** suite and ensure all tests pass — the repo has three, and none
+   of the commands runs another's tests:
+   - `bun run test` — Vitest, covering `src/`, `server/` and,
      when its submodule is checked out, the edition package in
      `editions/team/`. Test files follow the pattern `src/**/__tests__/*.test.ts`,
-     `server/__tests__/**/*.test.ts`, `electron/__tests__/*.test.ts`,
+     `server/__tests__/**/*.test.ts`,
      `editions/team/tests/**/*.test.ts` and `editions/team/tests/**/*.test.tsx`.
      `bun run test:public` runs the same suite as a public clone (empty
      `editions/team/`) would; a change to core must pass both.
@@ -25,6 +25,9 @@ Any code change MUST account for its impact on existing tests. Before considerin
      test` builds the `cogpit-core` binary first (`bun run build:core`),
      because every composition the suite boots spawns it; that needs the Rust
      toolchain from https://rustup.rs (`rust-toolchain.toml` pins it).
+   - `cd desktop && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
+     — the Tauri desktop shell (Rust). A change to `desktop/` or to the
+     protocol in `shared/desktopProtocol.ts` is unverified until you run it.
 2. If you changed behavior in a hook or module, check for a corresponding test file in `__tests__/` and update affected tests to match the new behavior
 3. If you added new behavior, add test coverage for it
 4. Never leave tests broken — fixing tests is part of the change, not a separate task
@@ -90,10 +93,22 @@ and `shared/contracts/identity.ts`: no other file may compare an edition with
 `"team"` or name a `/api/team/` path. Core asks the `EditionModule` hooks or
 the renderer's UI slots instead.
 
+## Desktop App
+
+`desktop/` is the Tauri desktop shell (Rust) on macOS, Linux and Windows. It
+runs the API server as a sidecar process (`server/desktop.ts`) and talks to it
+in line-delimited JSON over the sidecar's stdin/stdout; the message types live
+in `shared/desktopProtocol.ts`, the Rust side in `desktop/src/protocol.rs`, and
+the two change together. The renderer reaches the shell only through
+`src/desktop/bridge.ts` (`window.cogpitDesktop`), so it runs unchanged in a
+browser. `bun run desktop:dev` runs Vite plus the shell with the server from
+source; `bun run desktop:build` builds the app. `docs/desktop.md` has the
+details.
+
 ## Adding New API Routes
 
 Define the route module under `server/routes/` and register it once in
-`server/api-routes.ts`. Vite, Electron, and standalone composition consume that
+`server/api-routes.ts`. Vite, desktop, and standalone composition consume that
 canonical ordered registry.
 
 ## Rust Core
@@ -110,7 +125,7 @@ implementation is deleted in the same change. Feature crates mount in
 the raster icons — change the SVG, then run `bun run generate:icons`, which
 re-renders all of them:
 
-- `build/icon.png` / `.icns` / `.ico` — picked up by electron-builder via `directories.buildResources`
+- `build/icon.png` / `.icns` / `.ico` — the desktop app's icons (`bundle.icon` in `desktop/tauri.conf.json`)
 - `public/apple-touch-icon.png` — iOS "Add to Home Screen"
 - `ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png` — native iOS app icon
 

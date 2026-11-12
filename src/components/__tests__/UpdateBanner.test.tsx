@@ -4,23 +4,23 @@ import userEvent from "@testing-library/user-event"
 
 import { UpdateBanner } from "@/components/UpdateBanner"
 
-function installApi(initial: ElectronUpdateState) {
-  let push: (state: ElectronUpdateState) => void = () => {}
+function installApi(initial: DesktopUpdateState) {
+  let push: (state: DesktopUpdateState) => void = () => {}
   const api = {
     getState: vi.fn().mockResolvedValue(initial),
-    onState: vi.fn((cb: (state: ElectronUpdateState) => void) => {
+    onState: vi.fn((cb: (state: DesktopUpdateState) => void) => {
       push = cb
       return vi.fn()
     }),
     install: vi.fn().mockResolvedValue(undefined),
     dismissVersion: vi.fn(),
   }
-  window.electronUpdater = api
-  return { api, push: (state: ElectronUpdateState) => act(() => push(state)) }
+  window.cogpitDesktop = { platform: "macos", performance: { getSnapshot: vi.fn() }, updater: api }
+  return { api, push: (state: DesktopUpdateState) => act(() => push(state)) }
 }
 
 afterEach(() => {
-  delete window.electronUpdater
+  delete window.cogpitDesktop
 })
 
 describe("UpdateBanner", () => {

@@ -8,7 +8,7 @@ import type { SignInMode } from "../../shared/contracts/identity"
 import { getConfig } from "../config"
 import { editionModule } from "../edition"
 
-export type HubMode = "electron" | "standalone" | "dev"
+export type HubMode = "desktop" | "standalone" | "dev"
 
 // ── Module-level identity (computed once per boot) ───────────────────────
 

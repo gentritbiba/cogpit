@@ -27,7 +27,7 @@ const OTHER_SHARE: ShareScope = {
   fileName: "sess-2.jsonl",
 }
 
-const HUB_MODES: readonly HubMode[] = ["dev", "electron", "standalone"]
+const HUB_MODES: readonly HubMode[] = ["dev", "desktop", "standalone"]
 
 /**
  * Every method the allowlist could ever be asked about: the four the API uses,
@@ -50,7 +50,7 @@ const METHODS = [
 /**
  * Every path the server mounts, collected by running the real composition root
  * with a fake `use`. `registerApiRoutes` rather than `API_ROUTE_REGISTRY`,
- * because it is what the Vite, Electron and standalone shells all call: it
+ * because it is what the Vite, desktop and standalone shells all call: it
  * covers the registry plus anything mounted alongside it, and route modules
  * that call `use` several times or mount nested paths are captured by
  * construction. Every hub mode is registered, so a route that only exists in

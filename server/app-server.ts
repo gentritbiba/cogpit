@@ -17,6 +17,8 @@ import {
 } from "./config"
 import {
   authMiddleware,
+  DEV_DOCUMENT_POLICY,
+  desktopSecurityHeaders,
   securityHeaders,
   bodySizeLimit,
 } from "./helpers"
@@ -76,7 +78,7 @@ async function settleThenFlushEdition(steps: readonly Promise<unknown>[]): Promi
 }
 
 export interface AppServerEnvironment {
-  mode: Extract<HubMode, "electron" | "standalone">
+  mode: Extract<HubMode, "desktop" | "standalone">
   viteDevUrl?: string
   legacyPluginHost?: LegacyHostClassification
   legacyClickUpPath?: string
@@ -86,7 +88,7 @@ export interface AppServerEnvironment {
 
 /**
  * Compose the shared HTTP and WebSocket server without depending on an
- * environment-specific entry point. Electron and standalone adapters own the
+ * environment-specific entry point. Desktop and standalone adapters own the
  * process/environment decisions and pass the resulting values in here.
  */
 export async function createServerComposition(
@@ -133,7 +135,7 @@ export async function createServerComposition(
 
   app.use(responses.track)
   // Security middleware must precede every route.
-  app.use(securityHeaders)
+  app.use(environment.mode === "desktop" ? desktopSecurityHeaders : securityHeaders)
   app.use(bodySizeLimit)
   app.use(authMiddleware)
   app.use(editionAuthz)
@@ -158,7 +160,9 @@ export async function createServerComposition(
     : null
   if (viteUrl) {
     // Dev mode: proxy non-API requests to Vite (including live CSS/HMR HTTP).
+    // Vite's documents carry inline scripts, so they get its dev policy.
     app.use((req, res) => {
+      res.setHeader("Content-Security-Policy", DEV_DOCUMENT_POLICY)
       const proxyReq = httpRequest(
         {
           hostname: viteUrl.hostname,

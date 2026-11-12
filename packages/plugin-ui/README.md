@@ -4,6 +4,6 @@ Browser-safe Cogpit UI primitives, shared panel parts, time formatting and stand
 
 Import components from the package root or an exported component subpath, and import `@cogpit/plugin-ui/styles.css` in a plugin's stylesheet. The stylesheet provides Tailwind utilities and system fonts. The host's public theme tokens can override the defaults. `theme.css` exposes shared theme/base styles for application composition.
 
-React and React DOM are peers. A runtime plugin bundles its own React and UI dependencies into its single executable entry. The package has no host authentication, session, Electron, Node or workspace imports. Markdown descriptions render images as text and send HTTPS links through the supplied `openExternal` callback.
+React and React DOM are peers. A runtime plugin bundles its own React and UI dependencies into its single executable entry. The package has no host authentication, session, desktop shell, Node or workspace imports. Markdown descriptions render images as text and send HTTPS links through the supplied `openExternal` callback.
 
 Build JavaScript and self-contained NodeNext declarations with `bun run build`.

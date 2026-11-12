@@ -56,9 +56,9 @@ try {
   run("test", ["bun", "run", "test", ...vitestArgs], checkout)
   const absent = { ...publicEnv, COGPIT_EXPECT_EDITION_UI: "absent" }
   run("build:web", ["bun", "run", "build:web"], checkout, absent)
-  run("electron:build", ["bun", "run", "electron:build"], checkout, absent)
+  run("desktop resources", ["bun", "scripts/desktop.ts", "stage"], checkout, absent)
 
-  const builds = [join(checkout, "dist"), join(checkout, "out/renderer")]
+  const builds = [join(checkout, "dist"), join(checkout, "desktop/resources/web")]
   const leaked = builds.flatMap((build) => editionUiChunks(join(build, "assets")).map((name) => join(build, "assets", name)))
   if (leaked.length > 0) throw new StepFailed(`The public builds emitted the edition UI: ${leaked.join(", ")}`)
 
