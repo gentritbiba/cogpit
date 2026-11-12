@@ -71,8 +71,14 @@ impl Client {
         }
     }
 
+    /// The next `kind` frame for `id`. An error for `id` fails the test at
+    /// once instead of after the timeout.
     async fn frame(&mut self, kind: &str, id: &str) -> Value {
-        self.until(|f| f["type"] == kind && f["id"] == id).await
+        let frame = self
+            .until(|f| (f["type"] == kind || f["type"] == "error") && f["id"] == id)
+            .await;
+        assert_eq!(frame["type"], kind, "{frame}");
+        frame
     }
 
     /// Collects a session's output until it contains `needle`.

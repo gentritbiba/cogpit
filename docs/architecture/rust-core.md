@@ -145,13 +145,14 @@ the backstop for a core that dies without stopping them.
 One thread (`pty-io`) reads and writes every terminal, non-blocking. A blocking
 reader thread per terminal contends in the kernel on macOS: eight terminals
 printing at once cost five times the CPU of one thread reading all eight.
-Output reaches clients in batches, sent when a batch reaches 64 KiB, when a
-read comes back shorter than 1 KiB (so a keystroke's echo goes at once) or
-3 ms after the batch began; each batch is serialized once, on the connection
-that sends it first. Windows pipes have no readiness to wait on, so there a
-thread per terminal reads the output and another writes the input, both
-handing over to `pty-io`. The Windows module
-(`backend/windows.rs`) is the workspace's one exception to
+Output reaches clients in batches: a read of 1 KiB or more starts one, sent
+when it reaches 64 KiB or 3 ms after it began; a shorter read with no batch
+open (a keystroke's echo, a prompt) goes at once. Each batch is serialized
+once, on the connection that sends it first. Windows pipes have no readiness
+to wait on, so there a thread per terminal reads the output and hands it to
+`pty-io`, and another writes the input.
+
+The Windows module (`backend/windows.rs`) is the workspace's one exception to
 `unsafe_code = "forbid"`; every unsafe block states its invariant, and a test
 keeps unsafe code out of every other file.
 

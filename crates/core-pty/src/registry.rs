@@ -30,15 +30,15 @@ const OUTPUT_DRAIN: Duration = Duration::from_millis(500);
 const READ_BUFFER: usize = 16 * 1024;
 
 /// Output goes out in batches: a frame per read costs a wakeup and a socket
-/// write on every hop for each kilobyte a terminal hands over. A batch is sent
-/// when it reaches [`BATCH_BYTES`], when a read comes back short of
-/// [`FULL_READ`], or [`BATCH_AGE`] after it started (within 4 ms: the timer
-/// counts whole milliseconds), whichever is first.
+/// write on every hop for each kilobyte a terminal hands over. A read of at
+/// least [`FULL_READ`] starts a batch, which is sent when it reaches
+/// [`BATCH_BYTES`] or [`BATCH_AGE`] after it started (within 4 ms: the timer
+/// counts whole milliseconds). A shorter read with no batch open, such as a
+/// keystroke's echo or a prompt, is sent at once.
 const BATCH_BYTES: usize = 64 * 1024;
 const BATCH_AGE: Duration = Duration::from_millis(3);
 /// A read this large usually emptied a full terminal buffer (1 KiB on macOS,
-/// 4 KiB on Linux) whose writer is about to refill it. A shorter one means the
-/// writer has paused, as with a keystroke's echo, so its batch goes at once.
+/// 4 KiB on Linux) whose writer is about to refill it.
 const FULL_READ: usize = 1024;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -404,6 +404,8 @@ fn send_batch(session: &Session, state: &mut SessionState) {
     }
     if state.status == Status::Running {
         state.scrollback.push(&state.batch);
+    }
+    if state.status == Status::Running && !state.clients.is_empty() {
         let frame = Frame::output(session.id.clone(), state.batch.clone());
         for outbox in state.clients.values() {
             let _ = outbox.send(frame.clone());
@@ -467,7 +469,7 @@ async fn send_output(session: Arc<Session>, output: Output, drained: std_mpsc::S
         };
         let mut state = lock(&session.state);
         decoder.decode(&buffer[..read], &mut state.batch);
-        if read < FULL_READ || state.batch.len() >= BATCH_BYTES {
+        if state.batch.len() >= BATCH_BYTES || (read < FULL_READ && !batching) {
             batching = false;
             send_batch(&session, &mut state);
         } else if !batching {

@@ -46,10 +46,17 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+/// macOS's `openpty` fails now and then (`-6`) when two threads call it at
+/// once, as two terminals opened together do.
+static OPENING: Mutex<()> = Mutex::new(());
+
 pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
-    let pair = native_pty_system()
-        .openpty(size(spec.cols, spec.rows))
-        .map_err(io::Error::other)?;
+    let pair = {
+        let _opening = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+        native_pty_system()
+            .openpty(size(spec.cols, spec.rows))
+            .map_err(io::Error::other)?
+    };
     let mut command = CommandBuilder::new(&spec.command);
     match spec.args {
         Args::List(args) => command.args(args),
@@ -101,8 +108,12 @@ impl Input {
         runtime.spawn(async move {
             // Tokio's pipe writer takes any non-blocking descriptor; it only
             // writes and waits for room, which a terminal supports the same way.
-            let Ok(mut terminal) = pipe::Sender::from_owned_fd_unchecked(self.0) else {
-                return;
+            let mut terminal = match pipe::Sender::from_owned_fd_unchecked(self.0) {
+                Ok(terminal) => terminal,
+                Err(err) => {
+                    tracing::warn!(%err, "terminal input cannot be written");
+                    return;
+                }
             };
             while let Some(data) = received.recv().await {
                 if terminal.write_all(&data).await.is_err() {
