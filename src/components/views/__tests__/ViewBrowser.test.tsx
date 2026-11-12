@@ -100,8 +100,8 @@ describe("ViewBrowser", () => {
 
   it("names each view's project", async () => {
     serve([
-      summary({ id: "shop-view", title: "Shop view", project: "/Users/me/code/shop" }),
-      summary({ id: "blog-view", title: "Blog view", project: "/Users/me/code/blog" }),
+      summary({ id: "shop-view", title: "Shop view", project: "/Users/me/code/shop", updatedAt: ago(HOUR) }),
+      summary({ id: "blog-view", title: "Blog view", project: "/Users/me/code/blog", updatedAt: ago(2 * HOUR) }),
     ])
     renderBrowser()
     await screen.findByText("Blog view")
