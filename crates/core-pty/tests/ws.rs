@@ -236,6 +236,17 @@ async fn reports_bad_requests_the_way_the_panel_expects() {
             .starts_with("Failed to spawn PTY: ")
     );
 
+    // A folder that is gone fails the spawn rather than starting somewhere else.
+    let gone = std::env::temp_dir().join("cogpit-pty-no-such-folder");
+    let mut spawn = shell("nowhere");
+    spawn["cwd"] = json!(gone.display().to_string());
+    client.send(spawn).await;
+    assert_eq!(
+        client.next().await,
+        json!({ "type": "error", "id": "nowhere",
+                "message": format!("Failed to spawn PTY: the working directory {} is not a folder", gone.display()) })
+    );
+
     client.send(shell("dup")).await;
     client.frame("spawned", "dup").await;
     client.send(shell("dup")).await;
@@ -316,19 +327,38 @@ mod unix {
         let mut client = Client::connect(addr).await;
         client.send(shell("jc")).await;
         client.frame("spawned", "jc").await;
+        // The marker prints right before `sleep` starts, unlike the line's echo.
         client
-            .send(json!({ "type": "input", "id": "jc", "data": "sleep 60\n" }))
+            .send(json!({ "type": "input", "id": "jc", "data": "echo sl''eeping; sleep 60\n" }))
             .await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        client
-            .send(json!({ "type": "input", "id": "jc", "data": "\u{3}" }))
-            .await;
-        client
-            .send(json!({ "type": "input", "id": "jc", "data": answer_line() }))
-            .await;
-        tokio::time::timeout(Duration::from_secs(10), client.output_until("jc", "42"))
-            .await
-            .expect("Ctrl-C did not interrupt sleep");
+        client.output_until("jc", "sleeping").await;
+        // A ^C landing before `sleep` runs aborts the line instead, so the
+        // answer still comes back; resending covers a ^C the shell swallowed.
+        let mut seen = String::new();
+        for _ in 0..5 {
+            client
+                .send(json!({ "type": "input", "id": "jc", "data": "\u{3}" }))
+                .await;
+            client
+                .send(json!({ "type": "input", "id": "jc", "data": answer_line() }))
+                .await;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while !seen.contains("42") {
+                let Ok(frame) =
+                    tokio::time::timeout_at(deadline, client.frame("output", "jc")).await
+                else {
+                    break;
+                };
+                seen.push_str(frame["data"].as_str().unwrap());
+            }
+            if seen.contains("42") {
+                break;
+            }
+        }
+        assert!(
+            seen.contains("42"),
+            "Ctrl-C did not interrupt sleep: {seen:?}"
+        );
         client.send(json!({ "type": "kill", "id": "jc" })).await;
     }
 
@@ -390,38 +420,107 @@ mod windows {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// A kill ends what the shell started too, as `taskkill /T /F` did.
+    /// A launcher that starts a writer in its own hidden console, so only the
+    /// job object (not the terminal's console closing) can end the writer.
+    struct DetachedWriter {
+        dir: std::path::PathBuf,
+    }
+
+    impl DetachedWriter {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("cogpit-pty-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("writer.ps1"),
+                "$PID | Set-Content \"$PSScriptRoot\\pid.txt\"\r\nwhile ($true) { Add-Content \"$PSScriptRoot\\mark.txt\" x; Start-Sleep -Milliseconds 100 }\r\n",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("launcher.ps1"),
+                "param([switch]$Stay)\r\nStart-Process -WindowStyle Hidden -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',\"$PSScriptRoot\\writer.ps1\"\r\nif ($Stay) { Start-Sleep -Seconds 300 }\r\n",
+            )
+            .unwrap();
+            Self { dir }
+        }
+
+        fn spawn(&self, id: &str, stay: bool) -> Value {
+            let mut args = vec![
+                "-NoProfile".to_owned(),
+                "-ExecutionPolicy".to_owned(),
+                "Bypass".to_owned(),
+                "-File".to_owned(),
+                self.dir.join("launcher.ps1").display().to_string(),
+            ];
+            if stay {
+                args.push("-Stay".into());
+            }
+            json!({ "type": "spawn", "id": id, "command": "powershell.exe", "args": args })
+        }
+
+        fn size(&self) -> u64 {
+            std::fs::metadata(self.dir.join("mark.txt")).map_or(0, |m| m.len())
+        }
+
+        async fn wait_until_writing(&self) {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+            while self.size() < 4 {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the writer never started"
+                );
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+
+        async fn is_writing(&self) -> bool {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let before = self.size();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            self.size() != before
+        }
+    }
+
+    impl Drop for DetachedWriter {
+        fn drop(&mut self) {
+            if let Ok(pid) = std::fs::read_to_string(self.dir.join("pid.txt")) {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", pid.trim(), "/T", "/F"])
+                    .output();
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// A kill ends what the shell started too, as `taskkill /T /F` did, even a
+    /// program in a console of its own.
     #[tokio::test(flavor = "multi_thread")]
     async fn kill_ends_the_whole_process_tree() {
         let addr = start().await;
-        let dir = std::env::temp_dir().join(format!("cogpit-pty-tree-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mark = dir.join("mark.txt");
-        let writer = "while($true){ Add-Content -Path $env:COGPIT_TREE_MARK -Value x; Start-Sleep -Milliseconds 100 }";
-
+        let writer = DetachedWriter::new("tree");
         let mut client = Client::connect(addr).await;
-        client
-            .send(json!({ "type": "spawn", "id": "tree", "command": "cmd.exe",
-                          "args": format!("/d /s /c \"start /b powershell -NoProfile -Command \"{writer}\" & ping -n 300 127.0.0.1 > nul\""),
-                          "env": { "COGPIT_TREE_MARK": mark.display().to_string() } }))
-            .await;
+        client.send(writer.spawn("tree", true)).await;
         client.frame("spawned", "tree").await;
-        let size = || std::fs::metadata(&mark).map_or(0, |m| m.len());
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-        while size() < 4 {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the grandchild never started"
-            );
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
+        writer.wait_until_writing().await;
 
         client.send(json!({ "type": "kill", "id": "tree" })).await;
         client.frame("exit", "tree").await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let after_kill = size();
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(size(), after_kill, "the grandchild outlived the kill");
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(!writer.is_writing().await, "the writer outlived the kill");
+    }
+
+    /// A shell that exits on its own leaves what it started detached running,
+    /// as an editor opened from the terminal must keep running.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn natural_exit_leaves_detached_programs_running() {
+        let addr = start().await;
+        let writer = DetachedWriter::new("detached");
+        let mut client = Client::connect(addr).await;
+        client.send(writer.spawn("detached", false)).await;
+        assert_eq!(client.frame("exit", "detached").await["code"], 0);
+        writer.wait_until_writing().await;
+        assert!(
+            writer.is_writing().await,
+            "the writer died with its terminal"
+        );
     }
 }

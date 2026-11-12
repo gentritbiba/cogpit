@@ -136,6 +136,22 @@ describe("PtySocketRelay", () => {
     late.close()
   })
 
+  it("keeps the environment the server's to choose", async () => {
+    const panel = await new Panel().open()
+    panel.send({
+      type: "spawn",
+      id: "client-env",
+      ...(isWindows
+        ? { command: "cmd.exe", args: "/d /s /c \"echo env=[%COGPIT_CLIENT_ENV%]\"" }
+        : { command: "/bin/sh", args: ["-c", "printf 'env=[%s]\\n' \"$COGPIT_CLIENT_ENV\""] }),
+      env: { COGPIT_CLIENT_ENV: "client-chosen" },
+    })
+    await panel.until((f) => f.type === "exit" && f.id === "client-env")
+    expect(await panel.output("client-env", "env=[")).not.toContain("client-chosen")
+    panel.send({ type: "kill", id: "client-env" })
+    panel.close()
+  })
+
   describe("sign-in terminals", () => {
     it("runs the launch the server builds for the agent and account, never the client's command", async () => {
       // cmd.exe takes its `/c` line verbatim; elsewhere the arguments go one by one.

@@ -127,7 +127,9 @@ Known differences from the TS routes:
 session with the PTY as its controlling terminal) and on ConPTY directly on
 Windows, where `cmd.exe` needs its `/c` line verbatim. A job object holds each
 Windows terminal's process tree: a kill ends the tree, and so does the core
-exiting. That module (`backend/windows.rs`) is the workspace's one exception to
+exiting while the terminal runs. A shell that exits on its own releases the job
+without killing it, so programs it started detached (an editor opened with
+`code .`) keep running, as they did under node-pty. That module (`backend/windows.rs`) is the workspace's one exception to
 `unsafe_code = "forbid"`; every unsafe block states its invariant.
 
 ## Not ported in stage A

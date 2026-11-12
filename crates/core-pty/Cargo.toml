@@ -31,7 +31,7 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-tokio-tungstenite = "0.30"
+tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 # The workspace forbids unsafe code. The Windows backend calls ConPTY, job

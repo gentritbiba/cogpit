@@ -7,7 +7,10 @@
 //!
 //! The process starts suspended inside a job object that kills everything in
 //! it when its last handle closes. A kill terminates the job, which ends the
-//! whole tree the way `taskkill /T /F` did, and nothing outlives the core.
+//! whole tree the way `taskkill /T /F` did, and a core that exits takes its
+//! running terminals with it. When the shell exits on its own the job stops
+//! killing on close, so what it started detached (an editor, `start`) lives on,
+//! as it did before. Programs may still ask to leave the job.
 #![allow(unsafe_code)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 
@@ -25,9 +28,9 @@ use windows_sys::Win32::System::Console::{
     COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -39,7 +42,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::cmdline::command_line;
-use super::{Process, SpawnSpec, Spawned};
+use super::{Args, Process, SpawnSpec, Spawned};
 
 /// The exit code a killed tree reports, as `taskkill /F` gave it.
 const KILLED_EXIT_CODE: u32 = 1;
@@ -99,7 +102,7 @@ impl Drop for PseudoConsole {
 
 struct WindowsProcess {
     console: Arc<Mutex<Option<PseudoConsole>>>,
-    job: OwnedHandle,
+    job: Arc<OwnedHandle>,
 }
 
 impl Process for WindowsProcess {
@@ -119,6 +122,7 @@ impl Process for WindowsProcess {
 }
 
 pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
+    reject_nul(&spec)?;
     let (mut console, input) = PseudoConsole::new(spec.cols, spec.rows)?;
     let mut attributes = AttributeList::with_pseudo_console(console.handle)?;
     // SAFETY: STARTUPINFOEXW is plain data; all zeroes is its empty value.
@@ -159,7 +163,7 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     // SAFETY: CreateProcessW succeeded, so both handles are open and ours.
     let (process, thread) = unsafe { (owned(info.hProcess), owned(info.hThread)) };
 
-    let job = match job_holding(&process) {
+    let job = match job_holding(&process).map(Arc::new) {
         Ok(job) => job,
         Err(error) => {
             // SAFETY: `process` is open; the child is suspended and in no job.
@@ -179,12 +183,16 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     let output = console.take_output();
     let console = Arc::new(Mutex::new(Some(console)));
     let closer = Arc::clone(&console);
+    let exited_job = Arc::clone(&job);
     Ok(Spawned {
         process: Arc::new(WindowsProcess { console, job }),
         input: Box::new(File::from(input)),
         output: Box::new(File::from(output)),
         wait: Box::new(move || {
             let code = wait_for_exit(&process);
+            if let Err(err) = set_limits(&exited_job, JOB_OBJECT_LIMIT_BREAKAWAY_OK) {
+                tracing::warn!(%err, "could not release an exited terminal's job");
+            }
             // ConPTY holds the output pipe open until the console closes. The
             // registry's reader owns `output` and drains it meanwhile.
             let console = closer.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -214,23 +222,35 @@ fn job_holding(process: &OwnedHandle) -> io::Result<OwnedHandle> {
     }
     // SAFETY: CreateJobObjectW returned an open handle that nothing else owns.
     let job = unsafe { owned(handle) };
+    set_limits(
+        &job,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+    )?;
+    // SAFETY: `job` and `process` are open handles.
+    if unsafe { AssignProcessToJobObject(raw(&job), raw(process)) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(job)
+}
+
+fn set_limits(job: &OwnedHandle, flags: JOB_OBJECT_LIMIT) -> io::Result<()> {
     // SAFETY: the limits struct is plain data; all zeroes means no limits.
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    // SAFETY: `limits` is the struct this information class names, with its size.
+    limits.BasicLimitInformation.LimitFlags = flags;
+    // SAFETY: `job` is open, and `limits` is the struct this information class
+    // names, passed with its size.
     let set = unsafe {
         SetInformationJobObject(
-            raw(&job),
+            raw(job),
             JobObjectExtendedLimitInformation,
             (&raw const limits).cast::<c_void>(),
             mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         )
     };
-    // SAFETY: `job` and `process` are open handles.
-    if set == 0 || unsafe { AssignProcessToJobObject(raw(&job), raw(process)) } == 0 {
+    if set == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(job)
+    Ok(())
 }
 
 /// `PROC_THREAD_ATTRIBUTE_LIST` carrying the pseudo-console, freed on drop.
@@ -309,12 +329,41 @@ fn raw(handle: &OwnedHandle) -> HANDLE {
     handle.as_raw_handle() as HANDLE
 }
 
+/// An HRESULT as an error that reads well: a wrapped Win32 code becomes
+/// that code's message, anything else its hex value.
 fn check(result: i32) -> io::Result<()> {
-    if result == S_OK {
-        Ok(())
-    } else {
-        Err(io::Error::from_raw_os_error(result))
+    const FACILITY_WIN32: u32 = 0x8007_0000;
+    let bits = result as u32;
+    match result {
+        S_OK => Ok(()),
+        _ if bits & 0xFFFF_0000 == FACILITY_WIN32 => {
+            Err(io::Error::from_raw_os_error((bits & 0xFFFF) as i32))
+        }
+        _ => Err(io::Error::other(format!("HRESULT {bits:#010x}"))),
     }
+}
+
+/// A NUL would cut a string short in the Win32 call, and in the environment
+/// block it would start a variable of its own.
+fn reject_nul(spec: &SpawnSpec) -> io::Result<()> {
+    let args: Vec<&str> = match &spec.args {
+        Args::List(args) => args.iter().map(String::as_str).collect(),
+        Args::CommandLine(line) => vec![line.as_str()],
+    };
+    let cwd = spec.cwd.to_string_lossy();
+    let texts = [spec.command.as_str(), cwd.as_ref()]
+        .into_iter()
+        .chain(args)
+        .chain(spec.env.iter().flat_map(|(k, v)| [k.as_str(), v.as_str()]));
+    for text in texts {
+        if text.contains('\0') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a command, argument, folder or environment entry contains a NUL character",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn coord(cols: u16, rows: u16) -> COORD {

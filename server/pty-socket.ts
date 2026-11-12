@@ -21,7 +21,8 @@ function signInRequest(value: unknown): { agent: AgentKind; instanceId: string |
 /**
  * A spawn naming an agent's sign-in becomes the plain command the core runs:
  * the server picks the binary, its Windows shim handling and the account's
- * environment, never the client. Null when the spawn was answered here.
+ * environment, never the client. The environment is the server's to choose,
+ * so a client's own `env` is dropped. Null when the spawn was answered here.
  */
 function frameForCore(ws: WebSocket, data: RawData): RawData | string | null {
   let message: Record<string, unknown>
@@ -30,8 +31,9 @@ function frameForCore(ws: WebSocket, data: RawData): RawData | string | null {
   } catch {
     return data
   }
-  if (!message || typeof message !== "object" || message.type !== "spawn" || !("signIn" in message)) return data
-  const { signIn: requested, ...spawn } = message
+  if (!message || typeof message !== "object" || message.type !== "spawn") return data
+  const { signIn: requested, env, ...spawn } = message
+  if (requested === undefined && env === undefined) return data
   const signIn = signInRequest(requested)
   if (!signIn) return JSON.stringify(spawn)
   try {

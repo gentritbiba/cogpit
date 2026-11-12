@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -145,6 +145,12 @@ impl Registry {
         let name = non_empty(&message, "name")
             .unwrap_or_else(|| format!("Terminal {}", lock(&self.sessions).len() + 1));
         let cwd = non_empty(&message, "cwd").unwrap_or_else(home_dir);
+        // portable-pty would quietly start in HOME instead.
+        if !Path::new(&cwd).is_dir() {
+            return error(&format!(
+                "Failed to spawn PTY: the working directory {cwd} is not a folder"
+            ));
+        }
         let spec = SpawnSpec {
             command: non_empty(&message, "command").unwrap_or_else(backend::default_shell),
             args: match message.get("args") {
@@ -190,17 +196,20 @@ impl Registry {
             if sessions.contains_key(&id) {
                 drop(sessions);
                 spawned.process.kill();
+                // Reap it off the runtime; on Windows this also closes its console.
+                std::thread::spawn(move || (spawned.wait)());
                 return error("Session ID already exists");
             }
             sessions.insert(id.clone(), Arc::clone(&session));
+            // Under the map lock, so no session list naming it can arrive first.
+            send(
+                outbox,
+                &Outbound::Spawned {
+                    id: &id,
+                    name: &name,
+                },
+            );
         }
-        send(
-            outbox,
-            &Outbound::Spawned {
-                id: &id,
-                name: &name,
-            },
-        );
         self.broadcast_sessions();
         self.run(
             session,
@@ -382,11 +391,16 @@ impl Registry {
     }
 }
 
+/// Output after the exit was reported belongs to whatever the process left
+/// running on its terminal; the session has ended, so it is dropped.
 fn output_to(session: &Session, data: &str) {
     if data.is_empty() {
         return;
     }
     let mut state = lock(&session.state);
+    if state.status == Status::Exited {
+        return;
+    }
     state.scrollback.push(data);
     let frame = Outbound::Output {
         id: &session.id,
