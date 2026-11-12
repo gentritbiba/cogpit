@@ -29,7 +29,7 @@ bun run build
 # Build and serve the web app
 bun run serve
 
-# Build a local unsigned macOS arm64 desktop package
+# Build a local unsigned macOS package for this Mac's architecture
 bun run electron:package
 ```
 
@@ -49,7 +49,7 @@ If Cogpit is open, the command stages the build and leaves a detached installer 
 
 Use `bun run electron:update --app "$HOME/Applications/Cogpit.app"` for a different installation directory. The directory must already exist and be writable without sudo. A second update command refuses to start while one is building or waiting. Installer output is appended to `~/.cogpit/local-update.log`. Temporary build files are removed after success; a failed replacement restores the previous bundle. If interrupted before replacement, rerunning the command clears the abandoned build. An interrupted replacement that leaves two app copies requires inspection before retrying.
 
-Public macOS automatic updates still require the signed release setup. This command updates a trusted local checkout only.
+Installs from a release update themselves in the app (Cogpit swaps the bundle on macOS). This command installs your own checkout; an app it installed only points to new releases instead of installing them.
 
 ## Check a change
 

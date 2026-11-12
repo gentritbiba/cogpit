@@ -52,7 +52,7 @@
     "electron:build": "bun run build:generated && electron-vite build",
     "electron:update": "bun scripts/update-local.ts",
     "electron:preview": "bun run electron:build && bun run build:core && electron .",
-    "electron:package": "bun run electron:build && bun run build:core --release --stage && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 --publish never",
+    "electron:package": "bun run electron:build && bun run build:core --release --stage && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --publish never",
     "electron:package:signed": "bun run electron:build && bun run build:core --release --stage && electron-builder --publish never",
     "postinstall": "bun run build:plugin-api",
     "serve": "bun run build && bun run build:core && bun server/standalone.ts",

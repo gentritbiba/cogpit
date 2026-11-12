@@ -150,7 +150,7 @@ bun install
 bun run dev
 ```
 
-Use `bun run electron:dev` for the desktop app, `bun run build:web` for the web build, or `bun run electron:package` for a local desktop package. See the [development guide](docs/development.md) for checks and packaging details.
+Use `bun run electron:dev` for the desktop app, `bun run build:web` for the web build, or `bun run electron:package` for a local macOS package for your Mac. See the [development guide](docs/development.md) for checks and packaging details.
 
 React, TypeScript, Vite, Electron, Tailwind CSS, Express, and a Rust core (axum). [Architecture](ARCHITECTURE.md) explains how Cogpit connects to each agent.
 

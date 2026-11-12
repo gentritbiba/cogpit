@@ -390,6 +390,20 @@ jobs:
             fi
           done
 
+      # Installs up to 3.6.x update from these zips with an updater that never
+      # checks for cogpit-core, and the app cannot start without it.
+      - name: Require cogpit-core in every macOS update
+        shell: bash
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          for zip in *-mac.zip; do
+            unzip -Z1 "$zip" | grep -x 'Cogpit.app/Contents/Resources/bin/cogpit-core' > /dev/null || {
+              echo "$zip has no Cogpit.app/Contents/Resources/bin/cogpit-core" >&2
+              exit 1
+            }
+          done
+
       - name: Upload the release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

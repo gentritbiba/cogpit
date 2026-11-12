@@ -1,7 +1,7 @@
 /**
  * Server worker — runs the Express API server in an Electron utilityProcess
- * so that heavy child-process work (claude CLI, PTY sessions, search indexing)
- * never blocks the main process event loop or freezes the UI.
+ * so that its work (agent runtimes, child processes, cogpit-core, which runs
+ * the terminals) never blocks the main process event loop or freezes the UI.
  */
 import { CLICKUP_CONFIG_FILE } from "../server/lib/clickupConfig"
 import { createServerComposition } from "../server/app-server"

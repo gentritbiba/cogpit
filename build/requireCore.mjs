@@ -10,7 +10,7 @@ export default function requireCore({ appOutDir, packager, electronPlatformName 
     accessSync(core, windows ? constants.R_OK : constants.X_OK)
   } catch {
     throw new Error(
-      `cogpit-core is missing from the packaged app (${core}). Run \`bun run build:core --release --stage\` `
+      `cogpit-core is missing from the packaged app or cannot run (${core}). Run \`bun run build:core --release --stage\` `
       + "or put the target's build in core-dist/<platform>-<arch>/ first.",
     )
   }
