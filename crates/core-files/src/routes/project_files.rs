@@ -10,7 +10,7 @@ use axum::http::{StatusCode, Uri};
 use axum::response::Response;
 use serde::Serialize;
 
-use crate::fsx::{locale_compare, realpath};
+use crate::fsx::{blocking, locale_compare, realpath};
 use crate::git::run_git;
 use crate::http::{Failure, error, is_js_whitespace, js_number, json, query_param};
 use crate::paths::native;
@@ -311,14 +311,14 @@ async fn resolve_project_root(cwd: &str) -> Result<String, Failure> {
         return Err(Failure(400, "cwd must be an absolute path"));
     }
     let resolved = native::resolve(&[cwd]);
-    match tokio::fs::metadata(&resolved).await {
-        Ok(info) if !info.is_dir() => return Err(Failure(400, "cwd must be a directory")),
-        Ok(_) => {}
-        Err(_) => return Err(Failure(404, "Project directory not found")),
-    }
-    realpath(&resolved)
-        .await
-        .map_err(|_| Failure(404, "Project directory not found"))
+    let not_found = Failure(404, "Project directory not found");
+    blocking(move || match std::fs::metadata(&resolved) {
+        Ok(info) if !info.is_dir() => Err(Failure(400, "cwd must be a directory")),
+        Ok(_) => realpath(&resolved).map_err(|_| not_found),
+        Err(_) => Err(not_found),
+    })
+    .await
+    .unwrap_or(Err(not_found))
 }
 
 /// `Math.min(Math.max(Number(limit) || 30, 1), 100)`, truncated as `slice` does.

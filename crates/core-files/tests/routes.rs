@@ -205,6 +205,35 @@ async fn local_file_serves_byte_ranges_so_videos_seek() {
 }
 
 #[tokio::test]
+async fn local_file_ranges_read_whole_or_stream_with_the_same_bytes() {
+    let dir = TempDir::new().unwrap();
+    let video = dir.path().join("pattern.mp4");
+    #[allow(clippy::cast_possible_truncation)]
+    let bytes: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    write(&video, &bytes);
+    let app = app();
+    let path = [("path", path_str(&video))];
+
+    for (start, end) in [
+        (5, 1024 * 1024 + 4),
+        (7, 1024 * 1024 + 7),
+        (0, bytes.len() - 1),
+    ] {
+        let range = format!("bytes={start}-{end}");
+        let reply = get_with(&app, "/local-file", &path, Some(&range)).await;
+        assert_eq!(reply.status, StatusCode::PARTIAL_CONTENT, "{range}");
+        assert_eq!(
+            reply.header("content-length"),
+            Some((end - start + 1).to_string().as_str())
+        );
+        assert!(reply.body[..] == bytes[start..=end], "{range}");
+    }
+    let whole = get(&app, "/local-file", &path).await;
+    assert_eq!(whole.status, StatusCode::OK);
+    assert!(whole.body[..] == bytes[..]);
+}
+
+#[tokio::test]
 async fn local_file_allows_videos_larger_than_the_image_ceiling() {
     let dir = TempDir::new().unwrap();
     let video = dir.path().join("large.mp4");
@@ -1121,8 +1150,10 @@ async fn json_and_text_over_a_kilobyte_are_gzipped_like_the_typescript_server() 
     use std::io::Read;
     let dir = TempDir::new().unwrap();
     let big = dir.path().join("big.txt");
+    let huge = dir.path().join("huge.txt");
     let small = dir.path().join("small.txt");
     write(&big, "line of text\n".repeat(200));
+    write(&huge, "another line of text\n".repeat(20_000));
     write(&small, "tiny");
     let app = app();
     let request = |path: &Path, encoding: &str| {
@@ -1151,6 +1182,14 @@ async fn json_and_text_over_a_kilobyte_are_gzipped_like_the_typescript_server() 
         .read_to_string(&mut text)
         .unwrap();
     assert_eq!(text, "line of text\n".repeat(200));
+
+    let compressed = send(&app, request(&huge, "gzip")).await;
+    assert_eq!(compressed.header("content-encoding"), Some("gzip"));
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(&compressed.body[..])
+        .read_to_string(&mut text)
+        .unwrap();
+    assert_eq!(text, "another line of text\n".repeat(20_000));
 
     let tiny = send(&app, request(&small, "gzip")).await;
     assert_eq!(

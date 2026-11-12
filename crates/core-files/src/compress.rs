@@ -2,18 +2,18 @@
 //! server's `compressionMiddleware` applies to `/api`. Forwarded responses are
 //! piped through TS untouched, so the core has to compress them itself.
 
-use std::io::Write;
-
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use flate2::Compression;
-use flate2::write::GzEncoder;
+use libdeflater::{CompressionLvl, Compressor};
 
 /// Bodies smaller than this aren't worth the gzip overhead.
 const MIN_COMPRESS_BYTES: usize = 1024;
+/// Bodies up to this size compress in tens of microseconds, less than a trip
+/// to the blocking pool costs; larger ones move off the async workers.
+const INLINE_COMPRESS_BYTES: usize = 64 * 1024;
 
 /// Whether `Accept-Encoding` lists gzip without `q=0`.
 pub fn accepts_gzip(headers: &HeaderMap) -> bool {
@@ -57,10 +57,14 @@ fn compressible(response: &Response) -> bool {
         })
 }
 
+/// libdeflate at its default level 6: smaller output than zlib's level 6
+/// (Node's default), in less time.
 fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(bytes).ok()?;
-    encoder.finish().ok()
+    let mut compressor = Compressor::new(CompressionLvl::default());
+    let mut compressed = vec![0; compressor.gzip_compress_bound(bytes.len())];
+    let written = compressor.gzip_compress(bytes, &mut compressed).ok()?;
+    compressed.truncate(written);
+    Some(compressed)
 }
 
 pub async fn layer(request: Request, next: Next) -> Response {
@@ -76,8 +80,16 @@ pub async fn layer(request: Request, next: Next) -> Response {
     if bytes.len() < MIN_COMPRESS_BYTES {
         return Response::from_parts(parts, Body::from(bytes));
     }
-    let source = bytes.clone();
-    let Ok(Some(compressed)) = tokio::task::spawn_blocking(move || gzip(&source)).await else {
+    let compressed = if bytes.len() <= INLINE_COMPRESS_BYTES {
+        gzip(&bytes)
+    } else {
+        let source = bytes.clone();
+        tokio::task::spawn_blocking(move || gzip(&source))
+            .await
+            .ok()
+            .flatten()
+    };
+    let Some(compressed) = compressed else {
         return Response::from_parts(parts, Body::from(bytes));
     };
     let headers = &mut parts.headers;

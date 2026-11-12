@@ -9,13 +9,16 @@ use std::sync::LazyLock;
 use icu_collator::options::CollatorOptions;
 use icu_collator::{Collator, CollatorBorrowed};
 
-/// `fs.promises.realpath`, as a UTF-8 string.
-pub async fn realpath(path: &str) -> io::Result<String> {
-    let path = path.to_owned();
-    let resolved = tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
-        .await
-        .map_err(io::Error::other)??;
-    resolved
+/// Run a request's blocking filesystem work in one trip to the blocking pool:
+/// each trip costs two thread hand-offs, more than a small file's I/O.
+/// `None` when the work panicked.
+pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    tokio::task::spawn_blocking(work).await.ok()
+}
+
+/// `fs.realpath`, as a UTF-8 string. Blocks: call it inside [`blocking`].
+pub fn realpath(path: &str) -> io::Result<String> {
+    std::fs::canonicalize(path)?
         .into_os_string()
         .into_string()
         .map(|path| strip_verbatim(&path))

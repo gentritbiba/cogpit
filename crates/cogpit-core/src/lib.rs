@@ -16,6 +16,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use axum::serve::ListenerExt;
 use axum::{Json, Router};
 use core_protocol::{BootMessage, Handshake, PROTOCOL_VERSION};
 use serde_json::json;
@@ -91,6 +92,12 @@ pub async fn run() -> io::Result<()> {
     ignore_ctrl_c()?;
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
+    // Like Node's HTTP server: a response written in parts never waits on Nagle.
+    let listener = listener.tap_io(|connection| {
+        if let Err(error) = connection.set_nodelay(true) {
+            tracing::debug!(%error, "could not set TCP_NODELAY");
+        }
+    });
     let handshake = Handshake {
         port,
         version: VERSION.into(),
