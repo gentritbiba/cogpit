@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Duplex } from "node:stream"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-import { requestTargetPath, sendJson, MAX_REQUEST_BODY_BYTES, type NextFn } from "./http"
+import { closeInStages, requestTargetPath, sendJson, MAX_REQUEST_BODY_BYTES, type NextFn } from "./http"
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
@@ -892,16 +892,22 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
       const wrapped = (chunk: Buffer | string) => {
         size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length
         if (size > MAX_REQUEST_BODY_BYTES) {
-          // A handler that streams its answer (a core forward) may have
-          // started it already; then the only refusal left is cutting it.
           if (res.headersSent) {
-            res.destroy()
+            // A handler that streams its answer (a core forward) has started
+            // it already. The only refusal left is cutting it short, and the
+            // client has to see that happen. Until the connection is down the
+            // rest of the body is read and dropped: the handler gets no more
+            // of it, and no `end` that would pass a truncated body off as whole.
+            const emit = req.emit.bind(req)
+            req.emit = ((event: string, ...args: unknown[]) =>
+              event !== "data" && event !== "end" && emit(event, ...args)) as typeof req.emit
+            closeInStages(req.socket)
           } else {
             res.statusCode = 413
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({ error: "Request body too large" }))
+            req.destroy()
           }
-          req.destroy()
           return
         }
         ;(listener as (chunk: Buffer | string) => void)(chunk)

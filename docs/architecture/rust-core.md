@@ -81,6 +81,15 @@ Forwarded requests wait up to ten seconds for a restart, then answer 503.
   it gets the limit's own 413 while core has not answered yet (upload routes
   read the whole body first); if core has already started streaming a
   response, the limit cuts the connection instead of throwing.
+- That cut, and the core request the forwarder abandons after it or after the
+  client leaves, close in stages (`closeInStages`): a FIN first, then destroy
+  once the peer has closed its side or after 2 s. `destroy()` with unread data
+  pending is a TCP reset, and macOS loopback can lose one sent right after our
+  own writes to a peer with nothing left to send, which then waits forever:
+  the client for the rest of its response, core for the rest of the body.
+  While it abandons a request the forwarder also reads and drops what core
+  still sends, because core only looks for the end of a request while it can
+  write.
 - `relayToCore(ws, req, corePath)` relays a WebSocket TS has already accepted
   and authorized, frame for frame, with text and binary preserved. Frames sent
   before core connects are buffered (4 MiB at most). Core's close code reaches

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import type { Socket } from "node:net"
 import { StringDecoder } from "node:string_decoder"
 import { ErrorCodes } from "./lib/routeError"
 
@@ -168,6 +169,24 @@ export function catchAsyncErrors(handler: Middleware): Middleware {
 export function singlePathParam(req: IncomingMessage): string | null {
   const parts = new URL(req.url || "/", "http://localhost").pathname.split("/").filter(Boolean)
   return parts.length === 1 ? decodeURIComponent(parts[0]) : null
+}
+
+const CLOSE_LINGER_MS = 2_000
+
+/**
+ * Closes a connection whose peer may still be sending or waiting. `destroy()`
+ * with unread data pending resets it, and a peer with nothing left to send can
+ * miss that reset and wait forever (macOS loopback, when the reset follows our
+ * own writes). A FIN is ordinary in-sequence data it cannot miss, so the close
+ * is staged (RFC 9112 §9.6): FIN first, then destroy once the peer has closed
+ * its side, or after a short linger for one that never does.
+ */
+export function closeInStages(socket: Socket): void {
+  if (socket.destroyed) return
+  const linger = setTimeout(() => socket.destroy(), CLOSE_LINGER_MS)
+  socket.once("close", () => clearTimeout(linger))
+  socket.once("end", () => socket.destroy())
+  socket.end()
 }
 
 /** Send a JSON response with the supplied HTTP status. */

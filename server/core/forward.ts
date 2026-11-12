@@ -1,6 +1,6 @@
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http"
 
-import { sendJson } from "../http"
+import { closeInStages, sendJson } from "../http"
 import { getRequestPrincipal } from "../requestPrincipal"
 import { CORE_PRINCIPAL_HEADER, CORE_SECRET_HEADER } from "./protocol"
 import { whenCoreReady, type CoreEndpoint } from "./supervisor"
@@ -65,7 +65,7 @@ export function originalSearch(req: IncomingMessage): string {
  *
  * `bodySizeLimit` counts the body as it is piped here. When it refuses one it
  * answers 413 itself (or cuts the response, once core has started one) and
- * destroys `req`; the core request is then abandoned.
+ * closes the connection; the core request is then abandoned.
  */
 export async function forwardToCore(req: IncomingMessage, res: ServerResponse, corePath: string): Promise<void> {
   let endpoint: CoreEndpoint
@@ -97,12 +97,21 @@ export async function forwardToCore(req: IncomingMessage, res: ServerResponse, c
     })
 
     let abandoned = false
+    let answer: IncomingMessage | undefined
     const abandon = () => {
+      if (abandoned) return
       abandoned = true
-      upstream.destroy()
+      // Core notices the request ending only while it can still write, so
+      // what it has left to say is read and dropped.
+      answer?.unpipe(res).resume()
+      // A finished exchange has handed its socket back to the agent; an
+      // unfinished one is closed so that core is certain to see it go.
+      const socket = upstream.socket
+      if (upstream.destroyed || !socket || socket.connecting) upstream.destroy()
+      else closeInStages(socket)
       done()
     }
-    // bodySizeLimit refused the body (it answers 413 and destroys `req`), or the client left.
+    // bodySizeLimit refused the body and closed the connection, or the client left.
     req.once("close", () => {
       if (!req.complete) abandon()
     })
@@ -111,6 +120,7 @@ export async function forwardToCore(req: IncomingMessage, res: ServerResponse, c
     })
 
     upstream.once("response", (upstreamRes) => {
+      answer = upstreamRes
       if (abandoned || res.writableEnded || res.headersSent) {
         upstreamRes.resume()
         abandon()

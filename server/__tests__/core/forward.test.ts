@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import express from "express"
-import { createServer, request, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
+import { createServer, globalAgent, request, type Server } from "node:http"
+import { connect, type AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 
 import { forwardToCore } from "../../core/forward"
@@ -141,6 +141,53 @@ describe("forwardToCore", () => {
     if (!(reply instanceof Error)) expect(reply.body.length).toBeLessThan(MAX_REQUEST_BODY_BYTES + chunk.length)
     const after = await send("/api/echo", { chunks: [Buffer.from("still here")] })
     expect(after.body.toString()).toBe("still here")
+  })
+
+  // A reset can be lost on its way to a client that has nothing left to send,
+  // which then waits forever. A FIN cannot.
+  it("ends a cut response with a FIN, never a reset", async () => {
+    const chunk = Buffer.alloc(512 * 1024, 1)
+    const count = Math.ceil(MAX_REQUEST_BODY_BYTES / chunk.length) + 2
+    const socket = connect((server.address() as AddressInfo).port, "127.0.0.1")
+    const received = new Promise<Buffer>((resolve, reject) => {
+      const parts: Buffer[] = []
+      socket.on("data", (part: Buffer) => parts.push(part))
+      socket.on("end", () => resolve(Buffer.concat(parts)))
+      socket.on("error", reject)
+    })
+    socket.write("POST /api/echo HTTP/1.1\r\nHost: test\r\nTransfer-Encoding: chunked\r\n\r\n")
+    for (let sent = 0; sent < count; sent++) {
+      socket.write(`${chunk.length.toString(16)}\r\n`)
+      socket.write(chunk)
+      socket.write("\r\n")
+    }
+    socket.write("0\r\n\r\n")
+    try {
+      const response = await received
+      expect(response.subarray(0, 15).toString()).toBe("HTTP/1.1 200 OK")
+      // Cut short, not passed off as a whole answer.
+      expect(response.subarray(-5).toString()).not.toBe("0\r\n\r\n")
+    } finally {
+      socket.destroy()
+    }
+  })
+
+  it("has core hang up on a request its client walked away from", async () => {
+    const socketsToCore = () => Object.values(globalAgent.sockets).flatMap((sockets) => sockets ?? [])
+    const earlier = new Set(socketsToCore())
+    const client = request(`${origin}/api/echo`, { method: "POST", agent: false })
+    client.on("error", () => {})
+    // Echoed but never read, so core still has an answer to write when the client leaves.
+    client.write(Buffer.alloc(4 * 1024 * 1024, 1))
+    await new Promise((resolve) => client.once("response", resolve))
+    const [toCore] = socketsToCore().filter((socket) => !earlier.has(socket))
+    const coreHungUp = new Promise<boolean>((resolve) => {
+      let ended = false
+      toCore.once("end", () => { ended = true })
+      toCore.once("close", () => resolve(ended))
+    })
+    client.destroy()
+    expect(await coreHungUp).toBe(true)
   })
 })
 
