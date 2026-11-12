@@ -145,10 +145,10 @@ the backstop for a core that dies without stopping them.
 One thread (`pty-io`) reads and writes every terminal, non-blocking. A blocking
 reader thread per terminal contends in the kernel on macOS: eight terminals
 printing at once cost five times the CPU of one thread reading all eight.
-Output reaches clients in batches: a read of 1 KiB or more starts one, sent
-when it reaches 64 KiB or 3 ms after it began; a shorter read with no batch
-open (a keystroke's echo, a prompt) goes at once. Each batch is serialized
-once, on the connection that sends it first. Windows pipes have no readiness
+Output goes to clients as it is read while a terminal is quiet, so an echo or
+a redraw is never held back. Once a terminal has sent 4 KiB or 8 frames within
+3 ms, its output is batched, each batch sent at 64 KiB or 3 ms after it began.
+Each frame is serialized once, on the connection that sends it first. Windows pipes have no readiness
 to wait on, so there a thread per terminal reads the output and hands it to
 `pty-io`, and another writes the input.
 

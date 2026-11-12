@@ -3,7 +3,7 @@
 //! Locks are taken in one order only: the session map, then a session, then
 //! the client list.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
@@ -29,17 +29,17 @@ pub type Outbox = mpsc::UnboundedSender<Frame>;
 const OUTPUT_DRAIN: Duration = Duration::from_millis(500);
 const READ_BUFFER: usize = 16 * 1024;
 
-/// Output goes out in batches: a frame per read costs a wakeup and a socket
-/// write on every hop for each kilobyte a terminal hands over. A read of at
-/// least [`FULL_READ`] starts a batch, which is sent when it reaches
-/// [`BATCH_BYTES`] or [`BATCH_AGE`] after it started (within 4 ms: the timer
-/// counts whole milliseconds). A shorter read with no batch open, such as a
-/// keystroke's echo or a prompt, is sent at once.
+/// A frame per read would cost a wakeup and a socket write on every hop for
+/// each read: about 1 KiB on macOS, often under 100 bytes on Linux. So output
+/// goes out as it is read only while a terminal is quiet, which keeps a
+/// keystroke's echo or a redraw instant. Once a terminal has sent
+/// [`QUIET_BYTES`] or [`QUIET_FRAMES`] within [`BATCH_AGE`], its output is
+/// batched: a batch is sent when it reaches [`BATCH_BYTES`] or [`BATCH_AGE`]
+/// after it began (within 4 ms: the timer counts whole milliseconds).
 const BATCH_BYTES: usize = 64 * 1024;
 const BATCH_AGE: Duration = Duration::from_millis(3);
-/// A read this large usually emptied a full terminal buffer (1 KiB on macOS,
-/// 4 KiB on Linux) whose writer is about to refill it.
-const FULL_READ: usize = 1024;
+const QUIET_BYTES: usize = 4 * 1024;
+const QUIET_FRAMES: usize = 8;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -398,9 +398,10 @@ impl Registry {
 /// so a client attaching in between sees each part exactly once. Output after
 /// the exit was reported belongs to whatever the process left running on its
 /// terminal; the session has ended, so it is dropped.
-fn send_batch(session: &Session, state: &mut SessionState) {
-    if state.batch.is_empty() {
-        return;
+fn send_batch(session: &Session, state: &mut SessionState) -> usize {
+    let sent = state.batch.len();
+    if sent == 0 {
+        return 0;
     }
     if state.status == Status::Running {
         state.scrollback.push(&state.batch);
@@ -412,6 +413,31 @@ fn send_batch(session: &Session, state: &mut SessionState) {
         }
     }
     state.batch.clear();
+    sent
+}
+
+/// What a terminal sent in the last [`BATCH_AGE`].
+#[derive(Default)]
+struct RecentSends(VecDeque<(Instant, usize)>);
+
+impl RecentSends {
+    fn record(&mut self, bytes: usize) {
+        if bytes > 0 {
+            self.0.push_back((Instant::now(), bytes));
+        }
+    }
+
+    fn quiet(&mut self, now: Instant) -> bool {
+        while self
+            .0
+            .front()
+            .is_some_and(|&(at, _)| now.duration_since(at) >= BATCH_AGE)
+        {
+            self.0.pop_front();
+        }
+        self.0.len() < QUIET_FRAMES
+            && self.0.iter().map(|&(_, bytes)| bytes).sum::<usize>() < QUIET_BYTES
+    }
 }
 
 /// One thread reads and writes every terminal. Readers on threads of their
@@ -450,13 +476,14 @@ async fn send_output(session: Arc<Session>, output: Output, drained: std_mpsc::S
     let batch_due = tokio::time::sleep(BATCH_AGE);
     tokio::pin!(batch_due);
     let mut batching = false;
+    let mut recent = RecentSends::default();
     loop {
         let read = tokio::select! {
             biased;
             read = reader.read(&mut buffer) => read,
             () = &mut batch_due, if batching => {
                 batching = false;
-                send_batch(&session, &mut lock(&session.state));
+                recent.record(send_batch(&session, &mut lock(&session.state)));
                 continue;
             }
         };
@@ -467,14 +494,19 @@ async fn send_output(session: Arc<Session>, output: Output, drained: std_mpsc::S
             // EIO on Linux and a broken pipe on Windows mean the end.
             Err(_) => break,
         };
+        let now = Instant::now();
         let mut state = lock(&session.state);
         decoder.decode(&buffer[..read], &mut state.batch);
-        if state.batch.len() >= BATCH_BYTES || (read < FULL_READ && !batching) {
-            batching = false;
-            send_batch(&session, &mut state);
-        } else if !batching {
+        if batching {
+            if state.batch.len() >= BATCH_BYTES {
+                batching = false;
+                recent.record(send_batch(&session, &mut state));
+            }
+        } else if recent.quiet(now) {
+            recent.record(send_batch(&session, &mut state));
+        } else {
             batching = true;
-            batch_due.as_mut().reset(Instant::now() + BATCH_AGE);
+            batch_due.as_mut().reset(now + BATCH_AGE);
         }
     }
     let mut state = lock(&session.state);
