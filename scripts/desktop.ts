@@ -9,9 +9,17 @@
  * next to the Rust core (`desktop/binaries/`), from the bundle staged in
  * `desktop/resources/` (`desktop/tauri.bundle.json`). A dev build runs
  * `server/desktop.ts` from source on the developer's own Bun.
+ *
+ * Environment a release build sets:
+ *   COGPIT_CORE_PREBUILT     ship this cogpit-core instead of building one
+ *   TAURI_SIGNING_PRIVATE_KEY (and its _PASSWORD)
+ *                            also produce the signed files the app's updater installs
+ *   COGPIT_ELECTRON_BRIDGE   "1": the macOS bundle carries the file the Electron
+ *                            app's updater insists on, so it accepts this app
  */
 import { spawn, spawnSync } from "node:child_process"
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -42,9 +50,48 @@ function stageBinary(name: string, source: string): void {
   chmodSync(target, 0o755)
 }
 
+/**
+ * The Bun release every desktop app ships as `cogpit-bun`, whatever Bun ran the
+ * build. Bump the version and the checksums (SHASUMS256.txt of the release) together.
+ */
+const BUN_VERSION = "1.4.3"
+const BUN_ARCHIVES: Record<string, { name: string; sha256: string }> = {
+  "darwin-arm64": { name: "bun-darwin-aarch64", sha256: "80afd4c069b46a6fa8f3ec520bebc750a7843e4a8d5b9583d29ad436c00a3403" },
+  "darwin-x64": { name: "bun-darwin-x64", sha256: "62660e6438eb872278877acca77e1152d5d031324df368d4a81b428211489d2d" },
+  "linux-arm64": { name: "bun-linux-aarch64", sha256: "efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21" },
+  "linux-x64": { name: "bun-linux-x64", sha256: "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18" },
+  "win32-x64": { name: "bun-windows-x64", sha256: "0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d" },
+}
+
+/** The pinned Bun for this machine: the one running the build when it matches, else the verified release download. */
+async function pinnedBun(): Promise<string> {
+  if (process.versions.bun === BUN_VERSION) return process.execPath
+  const archive = BUN_ARCHIVES[`${process.platform}-${process.arch}`]
+  if (!archive) throw new Error(`No pinned Bun ${BUN_VERSION} for ${process.platform}-${process.arch}.`)
+  const directory = join(desktop, "target", "bun", BUN_VERSION)
+  const binary = join(directory, archive.name, `bun${EXE}`)
+  if (existsSync(binary)) return binary
+  const url = `https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${archive.name}.zip`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Downloading ${url} failed (${response.status}).`)
+  const zip = Buffer.from(await response.arrayBuffer())
+  const sha256 = createHash("sha256").update(zip).digest("hex")
+  if (sha256 !== archive.sha256) throw new Error(`${url} has checksum ${sha256}, expected ${archive.sha256}.`)
+  mkdirSync(directory, { recursive: true })
+  const zipPath = join(directory, `${archive.name}.zip`)
+  writeFileSync(zipPath, zip)
+  // Windows ships bsdtar, which reads zip; Linux tar does not.
+  if (process.platform === "win32") run("tar", ["-xf", zipPath, "-C", directory])
+  else run("unzip", ["-o", "-q", zipPath, "-d", directory])
+  rmSync(zipPath)
+  return binary
+}
+
 /** The Bun runtime the server runs on, and the Rust core the server supervises. */
-function stageBinaries(): void {
-  stageBinary("cogpit-bun", process.execPath)
+async function stageBinaries(): Promise<void> {
+  stageBinary("cogpit-bun", await pinnedBun())
+  const prebuilt = process.env.COGPIT_CORE_PREBUILT?.trim()
+  if (prebuilt) return stageBinary("cogpit-core", prebuilt)
   run("bun", ["run", "build:core", "--release"])
   const targetDir = process.env.CARGO_TARGET_DIR?.trim() || join(root, "target")
   stageBinary("cogpit-core", join(targetDir, "release", `cogpit-core${EXE}`))
@@ -74,10 +121,20 @@ async function stage(): Promise<void> {
   await stageServer()
 }
 
+/**
+ * The Electron app's macOS updater only accepts a bundle holding
+ * `Contents/Resources/app.asar`. Carrying a placeholder lets installs that
+ * still run Electron update themselves to this app.
+ */
+const ELECTRON_BRIDGE = { bundle: { macOS: { files: { "Resources/app.asar": "electron-bridge/app.asar" } } } }
+
 async function build(): Promise<void> {
   await stage()
-  stageBinaries()
-  run("bunx", ["tauri", "build", "--config", join(desktop, "tauri.bundle.json"), ...process.argv.slice(3)])
+  await stageBinaries()
+  const configs = [join(desktop, "tauri.bundle.json")]
+  if (process.env.TAURI_SIGNING_PRIVATE_KEY) configs.push(join(desktop, "tauri.release.json"))
+  if (process.env.COGPIT_ELECTRON_BRIDGE === "1" && process.platform === "darwin") configs.push(JSON.stringify(ELECTRON_BRIDGE))
+  run("bunx", ["tauri", "build", ...configs.flatMap((config) => ["--config", config]), ...process.argv.slice(3)])
 }
 
 function dev(): void {

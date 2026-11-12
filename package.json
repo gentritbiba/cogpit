@@ -48,6 +48,7 @@
     "typecheck:tests:cli": "tsc --noEmit --pretty false -p packages/cogpit-cli/tsconfig.json",
     "desktop:dev": "bun scripts/desktop.ts dev",
     "desktop:build": "bun scripts/desktop.ts build",
+    "desktop:update": "bun scripts/desktop-update.ts",
     "postinstall": "bun run build:plugin-api",
     "serve": "bun run build && bun run build:core && bun server/standalone.ts",
     "serve:start": "bun server/standalone.ts",
