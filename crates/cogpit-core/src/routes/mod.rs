@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use axum::Router;
-use core_pty::PtyState;
 use core_protocol::AppConfig;
+use core_pty::PtyState;
 
 /// The feature crates' state, kept for the core's lifetime.
 #[derive(Clone)]

@@ -26,6 +26,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{mem, ptr};
 
 use windows_sys::Win32::Foundation::{HANDLE, S_OK, WAIT_OBJECT_0};
@@ -51,6 +52,37 @@ use super::{Args, Process, SpawnSpec, Spawned};
 
 /// The exit code a killed tree reports, as `taskkill /F` gave it.
 const KILLED_EXIT_CODE: u32 = 1;
+/// Kill and shutdown stay inside the server's two-second stop grace.
+const TASKKILL_TIMEOUT: Duration = Duration::from_millis(1_200);
+const SHELL_EXIT_WAIT_MS: u32 = 500;
+
+/// `taskkill /T /F` on `pid`: the process and its descendants by parent.
+fn taskkill(pid: u32) {
+    let child = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+    let Ok(mut child) = child else {
+        return;
+    };
+    let deadline = Instant::now() + TASKKILL_TIMEOUT;
+    while matches!(child.try_wait(), Ok(None)) {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn exited_within(process: &OwnedHandle, milliseconds: u32) -> bool {
+    // SAFETY: `process` is an open process handle.
+    unsafe { WaitForSingleObject(raw(process), milliseconds) == WAIT_OBJECT_0 }
+}
 
 /// A pseudo-console and, until a reader takes it, the read end of its output.
 ///
@@ -107,6 +139,8 @@ impl Drop for PseudoConsole {
 
 struct WindowsProcess {
     pid: u32,
+    /// Held for the session's life so `pid` cannot name another process.
+    shell: Arc<OwnedHandle>,
     console: Arc<Mutex<Option<PseudoConsole>>>,
     job: Arc<OwnedHandle>,
 }
@@ -121,16 +155,14 @@ impl Process for WindowsProcess {
         check(unsafe { ResizePseudoConsole(console.handle, coord(cols, rows)) })
     }
 
+    /// Whether the shell died decides what follows, not taskkill's status:
+    /// it fails whenever any process in the tree slipped away first.
     fn kill(&self) {
-        let killed = Command::new("taskkill")
-            .args(["/PID", &self.pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .is_ok_and(|status| status.success());
-        if killed {
+        if exited_within(&self.shell, 0) {
+            return;
+        }
+        taskkill(self.pid);
+        if exited_within(&self.shell, SHELL_EXIT_WAIT_MS) {
             release(&self.job);
         } else {
             // SAFETY: `job` is an open job handle owned by `self`.
@@ -180,6 +212,7 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     drop(attributes);
     // SAFETY: CreateProcessW succeeded, so both handles are open and ours.
     let (process, thread) = unsafe { (owned(info.hProcess), owned(info.hThread)) };
+    let process = Arc::new(process);
 
     let job = match job_holding(&process).map(Arc::new) {
         Ok(job) => job,
@@ -205,6 +238,7 @@ pub fn spawn(spec: SpawnSpec) -> io::Result<Spawned> {
     Ok(Spawned {
         process: Arc::new(WindowsProcess {
             pid: info.dwProcessId,
+            shell: Arc::clone(&process),
             console,
             job,
         }),

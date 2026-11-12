@@ -342,7 +342,10 @@ mod unix {
     async fn delivers_ctrl_c_to_the_foreground_command() {
         let addr = start().await;
         let mut client = Client::connect(addr).await;
-        client.send(shell("jc")).await;
+        // A known prompt, whoever runs the tests and whatever their PS1.
+        let mut spawn = shell("jc");
+        spawn["env"] = json!({ "PS1": "cogpit-ready> ", "ENV": "" });
+        client.send(spawn).await;
         client.frame("spawned", "jc").await;
         // The marker prints right before `sleep` starts, unlike the line's echo.
         client
@@ -357,18 +360,18 @@ mod unix {
                 .send(json!({ "type": "input", "id": "jc", "data": "\u{3}" }))
                 .await;
             let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
-            while !seen.contains("$ ") {
+            while !seen.contains("cogpit-ready> ") {
                 match tokio::time::timeout_at(deadline, client.frame("output", "jc")).await {
                     Ok(frame) => seen.push_str(frame["data"].as_str().unwrap()),
                     Err(_) => break,
                 }
             }
-            if seen.contains("$ ") {
+            if seen.contains("cogpit-ready> ") {
                 break;
             }
         }
         assert!(
-            seen.contains("$ "),
+            seen.contains("cogpit-ready> "),
             "Ctrl-C did not interrupt sleep: {seen:?}"
         );
         // ^C flushed anything typed ahead, so the answer goes after the prompt.
