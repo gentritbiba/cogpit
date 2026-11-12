@@ -103,6 +103,18 @@ Mount it with one line in `crates/cogpit-core/src/routes/mod.rs`, under
 `/v1/<area>`. On the TS side, keep the route's id in `server/api-routes.ts`,
 replace its handler with `forwardToCore`, and delete the TS implementation.
 
+## Ported routes
+
+| Route ids | Core crate, mount | Notes |
+| --- | --- | --- |
+| `local-file`, `file-content`, `project-files` (and `/tree`), `project-file`, `git-status`, `git-diff` | `crates/core-files`, `/v1/files` | Shell out to `git`. Node's `path` rules (posix and win32), `realpath` shape and `localeCompare` order are reproduced so responses match the old TS routes byte for byte. `server/lib/gitProject.ts` (`resolveGitProject`, `runGit`) stays in TS for the GitHub and Cloudflare plugins, PR review and `projectRoot.ts`; the core has its own copy in `crates/core-files/src/git.rs`, an accepted duplication until those callers port. |
+
+Known differences from the TS routes, both unreachable from the app: a
+`project-file` save whose JSON has a number that overflows to Infinity or an
+escaped lone surrogate gets 500 instead of 400, and file listings always sort
+with the root collation (what Bun's `localeCompare` uses), where Node followed
+`LANG`.
+
 ## Not ported in stage A
 
 | What | Why |

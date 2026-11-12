@@ -116,6 +116,7 @@ name = "cogpit-core"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "core-files",
  "core-protocol",
  "serde",
  "serde_json",

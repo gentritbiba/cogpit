@@ -8,5 +8,8 @@ use axum::Router;
 use core_protocol::AppConfig;
 
 pub fn feature_routes(_config: &Arc<AppConfig>) -> Router {
-    Router::new()
+    Router::new().nest(
+        "/v1/files",
+        core_files::router(core_files::FilesState::default()),
+    )
 }

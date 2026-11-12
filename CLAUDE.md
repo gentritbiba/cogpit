@@ -235,9 +235,10 @@ The timeline renders markdown image syntax inline, and the same syntax plays
 videos: `![alt](/absolute/path.png)` or `![alt](/absolute/path.webm)`.
 Images (`png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`, `ico`, `avif`) open
 in the zoomable viewer; videos (`mp4`, `m4v`, `webm`, `mov`) play with controls
-and seeking. Local paths go through `/api/local-file`, which serves byte ranges
-for video. `shared/mediaTypes.ts` is the one list of extensions and MIME
-types both sides use. Remote `https://` media is blocked by the app's CSP.
+and seeking. Local paths go through `/api/local-file`, which the Rust core
+serves with byte ranges for video. `shared/mediaTypes.json` is the one list of
+extensions and MIME types: the renderer reads it through
+`shared/mediaTypes.ts` and the core compiles it in. Remote `https://` media is blocked by the app's CSP.
 When you have a screenshot or recording to show, put the `![alt](src)` line in
 the message you write. A tool result that displays it to you does not display it
 to the user. Show milestones and evidence, not every step.
