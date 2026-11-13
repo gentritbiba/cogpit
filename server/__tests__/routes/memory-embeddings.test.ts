@@ -18,7 +18,7 @@ import type { Middleware, UseFn } from "../../http"
 import { registerMemoryEmbeddingRoutes } from "../../routes/memory-embeddings"
 import { asIncomingMessage, asServerResponse } from "../http-fixtures"
 
-const REPORT = { settings: null, progress: null, error: null, defaults: { dimensions: 256, minScore: 0.55 }, overrides: [] }
+const REPORT = { settings: null, active: false, progress: null, error: null, defaults: { dimensions: 256, minScore: 0.55 }, overrides: [] }
 const SETTINGS = { url: "https://embed.test/v1/embeddings", model: "fake" }
 
 function handler(): Middleware {

@@ -123,6 +123,8 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
   let embedMoreSoon = false
   /** Cancels the embedding run under way, which belongs to the embedder it started with. */
   let embedRun: AbortController | null = null
+  /** Counts reads of the configuration, so one that finishes after a newer read began is dropped. */
+  let configReads = 0
 
   function scheduleAt(at: number): void {
     if (stopped || at >= timerAt) return
@@ -240,8 +242,9 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
 
   /** Read the embedding configuration again; a change replaces the embedder and cancels a run made for the old one. */
   async function refreshEmbedder(): Promise<void> {
+    const read = ++configReads
     const config = await options.readEmbeddingConfig()
-    if (config.stamp === configStamp) return
+    if (read !== configReads || config.stamp === configStamp) return
     configStamp = config.stamp
     outage = null
     configError = null

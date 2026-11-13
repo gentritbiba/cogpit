@@ -16,7 +16,9 @@ export interface EmbeddingSettingsView {
 export interface EmbeddingSettingsReport {
   /** What `config.json` holds; null when it configures no endpoint. */
   settings: EmbeddingSettingsView | null
-  /** How much stored session text has a vector for the saved model; null when off or the store is not open yet. */
+  /** An endpoint is in use: the saved one, or one environment variables supply. */
+  active: boolean
+  /** How much stored session text has a vector for the model in use; null when off or the store is not open yet. */
   progress: { passages: number; embedded: number } | null
   /** Why embedding is stopped: an unusable `config.json` or the endpoint's last failure. */
   error: string | null

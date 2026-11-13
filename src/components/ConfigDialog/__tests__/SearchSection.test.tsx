@@ -22,6 +22,7 @@ const SAVED: EmbeddingSettingsView = {
 
 const report = (overrides: Partial<EmbeddingSettingsReport> = {}): EmbeddingSettingsReport => ({
   settings: null,
+  active: !!overrides.settings,
   progress: null,
   error: null,
   defaults: { dimensions: 256, minScore: 0.55 },
@@ -206,6 +207,29 @@ describe("SearchSection", () => {
 
     expect(await screen.findByText("Embeddings: model is required")).toBeInTheDocument()
     expect(screen.getByLabelText("Model")).toHaveValue("some-model-v2")
+  })
+
+  it("drops a test's answer when the fields changed while it ran", async () => {
+    let answer = (_value: unknown) => {}
+    serve([report({ settings: SAVED })], () => new Promise((resolve) => { answer = resolve }))
+    render(<SearchSection disabled={false} />)
+    await openSection()
+
+    await userEvent.click(screen.getByRole("button", { name: "Test" }))
+    await userEvent.type(screen.getByLabelText("Endpoint address"), "/v2")
+    await act(async () => answer(await ok({ ok: false, error: "the embedding endpoint could not be reached" })))
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test" })).toBeEnabled())
+    expect(screen.queryByText(/could not be reached/)).not.toBeInTheDocument()
+  })
+
+  it("counts as on when environment variables alone supply the endpoint", async () => {
+    serve([report({ active: true, progress: { passages: 4, embedded: 2 }, overrides: ["COGPIT_EMBED_URL", "COGPIT_EMBED_MODEL"] })])
+    render(<SearchSection disabled={false} />)
+    expect(await screen.findByText("Indexing 50%")).toBeInTheDocument()
+    await openSection()
+
+    expect(screen.getByText("2 of 4 passages indexed")).toBeInTheDocument()
   })
 
   it("names the environment variables that replace the saved settings", async () => {

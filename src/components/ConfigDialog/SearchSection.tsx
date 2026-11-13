@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CheckCircle, Loader2, Sparkles, XCircle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ const PROGRESS_POLL_MS = 5_000
 function summarize(report: EmbeddingSettingsReport | null): string {
   if (!report) return "Unavailable"
   if (report.error) return "Not working"
-  if (!report.settings) return "Off"
+  if (!report.active) return "Off"
   const { progress } = report
   if (progress && progress.embedded < progress.passages) return `Indexing ${Math.floor((progress.embedded / progress.passages) * 100)}%`
   return "On"
@@ -83,6 +83,12 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
   const [minScore, setMinScore] = useState(String(saved?.minScore ?? defaults.minScore))
   const [advanced, setAdvanced] = useState(false)
   const [testResult, setTestResult] = useState<EmbeddingTestResult | null>(null)
+  // Counts edits, so a test's answer is dropped when the fields changed while it ran.
+  const edits = useRef(0)
+  const edited = () => {
+    edits.current++
+    setTestResult(null)
+  }
 
   // A saved key goes only to the origin it was saved for, so it is on offer only while the address stays there.
   const savedKeyApplies = !!saved?.hasApiKey && sameOrigin(saved.url, url.trim())
@@ -122,7 +128,7 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
     <form
       className="flex flex-col gap-3"
       // A result describes the fields as they were when Test was pressed.
-      onChange={() => setTestResult(null)}
+      onChange={edited}
       onSubmit={(event) => {
         event.preventDefault()
         if (valid && changed && !disabled) onSave(settings())
@@ -158,7 +164,7 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
             className="h-auto self-start px-0"
             onClick={() => {
               setRemovesKey(!removesKey)
-              setTestResult(null)
+              edited()
             }}
           >
             {removesKey ? "Keep the saved key" : "Remove the saved key"}
@@ -213,7 +219,9 @@ function EndpointForm({ saved, defaults, disabled, busy, onSave, onTest, onTurnO
             disabled={!valid || busy !== null}
             onClick={async () => {
               setTestResult(null)
-              setTestResult(await onTest(settings()))
+              const tested = edits.current
+              const result = await onTest(settings())
+              if (tested === edits.current) setTestResult(result)
             }}
           >
             {busy === "test" && <Loader2 data-icon="inline-start" className="size-3.5 animate-spin" />}
@@ -246,7 +254,7 @@ export function SearchSection({ disabled }: SearchSectionProps) {
 
   const report = state.status === "ok" ? state.report : null
   // Not during a change: a read begun then could land instead of the change's own answer.
-  const polling = open && busy === null && !!report?.settings
+  const polling = open && busy === null && !!report?.active
   useEffect(() => {
     if (!polling) return
     const timer = setInterval(() => void refresh(), PROGRESS_POLL_MS)
@@ -275,7 +283,7 @@ export function SearchSection({ disabled }: SearchSectionProps) {
 
           {report && (
             <>
-              {report.settings && report.progress && <ProgressLine progress={report.progress} />}
+              {report.progress && <ProgressLine progress={report.progress} />}
               {report.error && <p className="text-xs text-destructive" role="alert">{sentence(report.error)}</p>}
               {report.overrides.length > 0 && (
                 <p className="text-xs text-muted-foreground">

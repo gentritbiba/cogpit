@@ -81,6 +81,7 @@ export async function embeddingSettingsReport(
       minScore: saved.config.minScore ?? DEFAULT_MIN_SCORE,
       hasApiKey: !!saved.config.apiKey,
     },
+    active: effective.config !== null,
     progress: counts && { passages: counts.embedded + counts.pending, embedded: counts.embedded },
     error: saved.error ?? effective.error ?? (effective.config ? indexer?.embeddingError() ?? null : null),
     defaults: { dimensions: DEFAULT_DIMENSIONS, minScore: DEFAULT_MIN_SCORE },

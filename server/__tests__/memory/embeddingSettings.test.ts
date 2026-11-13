@@ -116,7 +116,7 @@ describe("testEmbeddingSettings", () => {
 
 describe("embeddingSettingsReport", () => {
   it("reports nothing configured for a missing file", async () => {
-    expect(await embeddingSettingsReport(dir, null, {})).toEqual({ settings: null, progress: null, error: null, defaults: DEFAULTS, overrides: [] })
+    expect(await embeddingSettingsReport(dir, null, {})).toEqual({ settings: null, active: false, progress: null, error: null, defaults: DEFAULTS, overrides: [] })
   })
 
   it("shows the saved endpoint without its key, and how much text has a vector", async () => {
@@ -130,6 +130,7 @@ describe("embeddingSettingsReport", () => {
 
     expect(report).toEqual({
       settings: { url: URL_A, model: "fake", dimensions: FAKE_DIMENSIONS, queryPrefix: "Query: ", minScore: 0.55, hasApiKey: true },
+      active: true,
       progress: { passages: 2, embedded: 1 },
       error: null,
       defaults: DEFAULTS,
@@ -167,5 +168,11 @@ describe("embeddingSettingsReport", () => {
 
     expect(report.settings).toBeNull()
     expect(report.error).toContain("not valid JSON")
+  })
+
+  it("is active without a saved endpoint when environment variables supply one", async () => {
+    const report = await embeddingSettingsReport(dir, null, { COGPIT_EMBED_URL: URL_A, COGPIT_EMBED_MODEL: "fake" })
+
+    expect(report).toMatchObject({ settings: null, active: true, overrides: ["COGPIT_EMBED_URL", "COGPIT_EMBED_MODEL"] })
   })
 })

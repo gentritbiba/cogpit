@@ -6,7 +6,7 @@ import type { MemoryStore } from "../../../shared/memory/store"
 import type { SourceFile } from "../../../shared/memory/types"
 import type { ParsedSession } from "../../../shared/session/types"
 import { embedderFor } from "../../memory"
-import { createMemoryIndexer, type Embedder, type MemoryIndexer, type MemoryIndexerOptions } from "../../memory/indexer"
+import { createMemoryIndexer, type Embedder, type EmbeddingConfigFile, type MemoryIndexer, type MemoryIndexerOptions } from "../../memory/indexer"
 import { FAKE_DIMENSIONS, fakeEndpoint } from "./fakeEmbeddings"
 import { makeSession, openMemoryStore, sourceFile } from "./helpers"
 
@@ -372,7 +372,7 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
   it("uses a changed configuration at once, before the next pass", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
     const endpoint = fakeEndpoint(() => 503)
-    let config = { text: EMBEDDINGS_CONFIG, stamp: "1" }
+    let config: EmbeddingConfigFile = { text: EMBEDDINGS_CONFIG, stamp: "1" }
     const h = harness({ readEmbeddingConfig: async () => config, createEmbedder: (text) => embedderFor(text, endpoint.fetch, {}) })
     h.indexer.start()
     await vi.advanceTimersByTimeAsync(10_000)
@@ -414,6 +414,24 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
     // A cancelled run is not an outage: nothing is reported and no back-off holds the new endpoint up.
     expect(h.warn).not.toHaveBeenCalled()
     expect(h.indexer.embeddingError()).toBeNull()
+  })
+
+  it("keeps the newest configuration when an older read of the file finishes last", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const off: EmbeddingConfigFile = { text: null, stamp: "" }
+    let releaseOldRead = (_config: EmbeddingConfigFile) => {}
+    const reads: Array<Promise<EmbeddingConfigFile>> = [
+      new Promise((resolve) => { releaseOldRead = resolve }),
+      Promise.resolve(off),
+    ]
+    const h = harness({ readEmbeddingConfig: () => reads.shift() ?? Promise.resolve(off), createEmbedder: (text) => embedderFor(text, fakeEndpoint().fetch, {}) })
+
+    const olderRead = h.indexer.reloadEmbeddings()
+    await h.indexer.reloadEmbeddings()
+    releaseOldRead({ text: EMBEDDINGS_CONFIG, stamp: "1" })
+    await olderRead
+
+    expect(h.indexer.embedder()).toBeNull()
   })
 
   it("says once that config.json is not usable, and indexes text without embeddings", async () => {
