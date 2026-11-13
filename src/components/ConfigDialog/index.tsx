@@ -30,6 +30,7 @@ import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 import { ExecutableSection } from "./ExecutableSection"
 import { AccountSection } from "./AccountSection"
+import { SearchSection } from "./SearchSection"
 import { SlackSection } from "./SlackSection"
 import { AgentsSection } from "./AgentsSection"
 import {
@@ -336,6 +337,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           {ACCOUNT_SWITCHING_KINDS.map((kind) => (
             <AccountSection key={kind} kind={kind} disabled={!canWriteConfig} />
           ))}
+
+          <SearchSection disabled={!canWriteConfig} />
 
           <SlackSection disabled={!canWriteConfig} />
 

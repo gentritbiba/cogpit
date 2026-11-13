@@ -157,7 +157,9 @@ cogpit-memory index rebuild   # Rebuild the tool index from scratch; never touch
 
 Any OpenAI-compatible `/v1/embeddings` endpoint works; nothing is bundled.
 The configuration lives in `<memory dir>/config.json`, shared with the
-Cogpit app, and is written owner-only:
+Cogpit app, and is written owner-only. In the app it is under Settings →
+Search by meaning (address, model, API key, a test button and indexing
+progress); from a terminal:
 
 ```bash
 cogpit-memory index config --url http://127.0.0.1:8790/v1/embeddings \
@@ -170,7 +172,7 @@ cogpit-memory index config --off
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `url`, `model` | — | Endpoint and model name |
-| `apiKey` | none | Sent as a bearer token |
+| `apiKey` | none | Sent as a bearer token. Moving `url` to another server drops the saved key unless a new one is given |
 | `dimensions` | `256` | Leading dimensions kept per vector (Matryoshka models) |
 | `queryPrefix` | none | Prepended to queries only, for instruction-tuned models |
 | `minScore` | `0.55` | Similarity a hit by meaning must reach; depends on the model (see below) |

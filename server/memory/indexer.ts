@@ -52,10 +52,17 @@ export interface MemoryIndexer {
   start(): void
   /** A transcript was written: run the next pass sooner. */
   hint(): void
+  /**
+   * The embedding configuration was changed: use it from now on. A run still
+   * embedding for the endpoint it replaced is cancelled, and a pass follows.
+   */
+  reloadEmbeddings(): Promise<void>
   stop(): Promise<void>
   /** The open store; null before the first pass opens it, after `stop`, or when the store cannot work here. */
   store(): MemoryStore | null
   embedder(): Embedder | null
+  /** Why embedding is stopped: the endpoint's last failure or an unusable configuration. Null while it works or is off. */
+  embeddingError(): string | null
   counts(): SessionSearchIndexing
   /** Resolves once no pass is running; for tests and measurements. */
   settled(): Promise<void>
@@ -111,8 +118,13 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
   let embedder: Embedder | null = null
   let configStamp: string | null = null
   let pendingEmbeddings = 0
-  let outage: { failures: number; retryAt: number } | null = null
+  let outage: { failures: number; retryAt: number; error: string } | null = null
+  let configError: string | null = null
   let embedMoreSoon = false
+  /** Cancels the embedding run under way, which belongs to the embedder it started with. */
+  let embedRun: AbortController | null = null
+  /** Counts reads of the configuration, so one that finishes after a newer read began is dropped. */
+  let configReads = 0
 
   function scheduleAt(at: number): void {
     if (stopped || at >= timerAt) return
@@ -228,30 +240,45 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     await embed(memory)
   }
 
+  /** Read the embedding configuration again; a change replaces the embedder and cancels a run made for the old one. */
+  async function refreshEmbedder(): Promise<void> {
+    const read = ++configReads
+    const config = await options.readEmbeddingConfig()
+    if (read !== configReads || config.stamp === configStamp) return
+    configStamp = config.stamp
+    outage = null
+    configError = null
+    try {
+      embedder = options.createEmbedder(config.text)
+    } catch (error) {
+      embedder = null
+      configError = error instanceof Error ? error.message : String(error)
+      warn(`[memory] the embedding configuration is not usable: ${configError}`)
+    }
+    embedRun?.abort()
+  }
+
   async function embed(memory: MemoryStore): Promise<void> {
     embedMoreSoon = false
-    const config = await options.readEmbeddingConfig()
-    if (config.stamp !== configStamp) {
-      configStamp = config.stamp
-      outage = null
-      try {
-        embedder = options.createEmbedder(config.text)
-      } catch (error) {
-        embedder = null
-        warn(`[memory] the embedding configuration is not usable: ${String(error)}`)
-      }
-    }
+    await refreshEmbedder()
     if (!embedder) {
       pendingEmbeddings = 0
       return
     }
     if (outage && Date.now() < outage.retryAt) return
-    const result = await embedder.embedPending(memory, controller.signal)
+    const run = embedRun = new AbortController()
+    const result = await embedder.embedPending(memory, AbortSignal.any([controller.signal, run.signal]))
+    embedRun = null
+    if (run.signal.aborted) {
+      // Cancelled for a new configuration, not a failure of the old endpoint: the next pass embeds with the new one.
+      embedMoreSoon = !stopped
+      return
+    }
     pendingEmbeddings = result.remaining
     if (result.error) {
       if (!outage) warn(`[memory] the embedding endpoint is unavailable (${result.error}); retrying with back-off`)
       const failureCount = (outage?.failures ?? 0) + 1
-      outage = { failures: failureCount, retryAt: Date.now() + Math.min(MAX_EMBED_RETRY_MS, EMBED_RETRY_MS * 2 ** (failureCount - 1)) }
+      outage = { failures: failureCount, retryAt: Date.now() + Math.min(MAX_EMBED_RETRY_MS, EMBED_RETRY_MS * 2 ** (failureCount - 1)), error: result.error }
       return
     }
     outage = null
@@ -274,6 +301,12 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
       // Before the first pass the start timer is already due.
       if (lastPassEnd) scheduleAt(Math.max(Date.now(), lastPassEnd + hintDelay()))
     },
+    async reloadEmbeddings() {
+      if (stopped || unavailable) return
+      await refreshEmbedder()
+      if (running) rerun = true
+      else scheduleAt(Date.now())
+    },
     async stop() {
       if (stopped) return
       stopped = true
@@ -286,6 +319,7 @@ export function createMemoryIndexer(options: MemoryIndexerOptions): MemoryIndexe
     },
     store: () => store,
     embedder: () => embedder,
+    embeddingError: () => configError ?? outage?.error ?? null,
     counts: () => ({ pendingFiles, pendingEmbeddings }),
     async settled() {
       while (running) await running

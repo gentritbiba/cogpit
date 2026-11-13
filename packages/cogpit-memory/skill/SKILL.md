@@ -32,7 +32,8 @@ Each hit has `turn` and `agent` for `context`, `kind`, `score`, `timestamp`
 and `match`: `keyword`, `semantic` (same meaning, no shared words, with a
 `similarity`; check it with `context` before relying on it) or `both`.
 `semantic: unavailable` with `semanticReason` means meaning search is off or
-failed; keyword results are still complete. `archived: true` means the
+failed; keyword results are still complete. The user turns it on in Cogpit's
+Settings → Search by meaning, or with `cogpit-memory index config`. `archived: true` means the
 transcript is gone: the hit's `text` is all that is left and `context` cannot
 open it. `automated: true` marks prompts other agents or Cogpit wrote.
 `behind: N` means N transcripts that are still being written have turns newer

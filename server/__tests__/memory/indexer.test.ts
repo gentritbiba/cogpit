@@ -6,7 +6,7 @@ import type { MemoryStore } from "../../../shared/memory/store"
 import type { SourceFile } from "../../../shared/memory/types"
 import type { ParsedSession } from "../../../shared/session/types"
 import { embedderFor } from "../../memory"
-import { createMemoryIndexer, type Embedder, type MemoryIndexer, type MemoryIndexerOptions } from "../../memory/indexer"
+import { createMemoryIndexer, type Embedder, type EmbeddingConfigFile, type MemoryIndexer, type MemoryIndexerOptions } from "../../memory/indexer"
 import { FAKE_DIMENSIONS, fakeEndpoint } from "./fakeEmbeddings"
 import { makeSession, openMemoryStore, sourceFile } from "./helpers"
 
@@ -345,6 +345,15 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
     expect(h.indexer.counts().pendingEmbeddings).toBe(4)
     expect(h.warn).toHaveBeenCalledTimes(1)
     expect(String(h.warn.mock.calls[0][0])).toContain("unavailable")
+    expect(h.indexer.embeddingError()).toContain("503")
+  })
+
+  it("reports no embedding error while the endpoint answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const h = harness({ readEmbeddingConfig: async () => ({ text: EMBEDDINGS_CONFIG, stamp: "1" }), createEmbedder: (text) => embedderFor(text, fakeEndpoint().fetch, {}) })
+    await firstPass(h)
+
+    expect(h.indexer.embeddingError()).toBeNull()
   })
 
   it("leaves texts the endpoint refuses for the backstop pass instead of resending them every second", async () => {
@@ -360,6 +369,71 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
     expect(h.warn).not.toHaveBeenCalled()
   })
 
+  it("uses a changed configuration at once, before the next pass", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const endpoint = fakeEndpoint(() => 503)
+    let config: EmbeddingConfigFile = { text: EMBEDDINGS_CONFIG, stamp: "1" }
+    const h = harness({ readEmbeddingConfig: async () => config, createEmbedder: (text) => embedderFor(text, endpoint.fetch, {}) })
+    h.indexer.start()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(h.indexer.embeddingError()).toContain("503")
+
+    config = { text: JSON.stringify({ embeddings: { url: "http://other.test/v1/embeddings", model: "other", dimensions: FAKE_DIMENSIONS } }), stamp: "2" }
+    await h.indexer.reloadEmbeddings()
+
+    expect(h.indexer.embedder()?.client.fingerprint).toBe(`other@${FAKE_DIMENSIONS}`)
+    expect(h.indexer.embeddingError()).toBeNull()
+
+    config = { text: null, stamp: "" }
+    await h.indexer.reloadEmbeddings()
+    expect(h.indexer.embedder()).toBeNull()
+  })
+
+  it("cancels a run still embedding for the endpoint a new configuration replaces", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const old = fakeEndpoint(() => "hang")
+    const next = fakeEndpoint()
+    let config = { text: EMBEDDINGS_CONFIG, stamp: "1" }
+    const h = harness({
+      readEmbeddingConfig: async () => config,
+      createEmbedder: (text) => embedderFor(text, text === EMBEDDINGS_CONFIG ? old.fetch : next.fetch, {}),
+    })
+    h.indexer.start()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(old.requests).toHaveLength(1))
+
+    config = { text: JSON.stringify({ embeddings: { url: "http://next.test/v1/embeddings", model: "fake", dimensions: FAKE_DIMENSIONS } }), stamp: "2" }
+    await h.indexer.reloadEmbeddings()
+    await vi.advanceTimersByTimeAsync(5_000)
+    await h.indexer.settled()
+
+    expect(old.requests).toHaveLength(1)
+    expect(next.requests.length).toBeGreaterThan(0)
+    expect(next.requests[0].url).toBe("http://next.test/v1/embeddings")
+    expect(vectorCount(h.store)).toBe(4)
+    // A cancelled run is not an outage: nothing is reported and no back-off holds the new endpoint up.
+    expect(h.warn).not.toHaveBeenCalled()
+    expect(h.indexer.embeddingError()).toBeNull()
+  })
+
+  it("keeps the newest configuration when an older read of the file finishes last", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const off: EmbeddingConfigFile = { text: null, stamp: "" }
+    let releaseOldRead = (_config: EmbeddingConfigFile) => {}
+    const reads: Array<Promise<EmbeddingConfigFile>> = [
+      new Promise((resolve) => { releaseOldRead = resolve }),
+      Promise.resolve(off),
+    ]
+    const h = harness({ readEmbeddingConfig: () => reads.shift() ?? Promise.resolve(off), createEmbedder: (text) => embedderFor(text, fakeEndpoint().fetch, {}) })
+
+    const olderRead = h.indexer.reloadEmbeddings()
+    await h.indexer.reloadEmbeddings()
+    releaseOldRead({ text: EMBEDDINGS_CONFIG, stamp: "1" })
+    await olderRead
+
+    expect(h.indexer.embedder()).toBeNull()
+  })
+
   it("says once that config.json is not usable, and indexes text without embeddings", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
     const h = harness({ readEmbeddingConfig: async () => ({ text: "{not json", stamp: "1" }), createEmbedder: (text) => embedderFor(text, fakeEndpoint().fetch, {}), backstopMs: 1_000 })
@@ -368,6 +442,7 @@ describe("memory indexer with an OpenAI-compatible endpoint", () => {
 
     expect(chunkCount(h.store, ROOT.path)).toBe(2)
     expect(h.indexer.embedder()).toBeNull()
+    expect(h.indexer.embeddingError()).toContain("not valid JSON")
     expect(h.warn).toHaveBeenCalledTimes(1)
   })
 })

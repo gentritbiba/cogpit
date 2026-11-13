@@ -100,6 +100,54 @@ export function validateEmbeddingConfig(section: Record<string, unknown>): { con
   }
 }
 
+/** The `COGPIT_EMBED_*` variables set in `env`, which replace what `config.json` says while they are. */
+export function embeddingEnvOverrides(env: Readonly<Record<string, string | undefined>>): string[] {
+  return Object.values(ENV).filter((name) => env[name]?.trim())
+}
+
+/** Whether two endpoint addresses are on one origin; false when either is not a URL. */
+export function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return false
+  }
+}
+
+/**
+ * `config.json` with `changes` merged into its `embeddings` section, or with
+ * the section removed when `changes` is null. Other sections are kept. A saved
+ * API key stays with the origin it was saved for: moving the endpoint to
+ * another origin without giving a key drops it.
+ */
+export function updateEmbeddingConfigText(
+  fileText: string | null,
+  changes: Partial<EmbeddingConfig> | null,
+): { text: string; config: EmbeddingConfig | null } | { error: string } {
+  let file: Record<string, unknown> = {}
+  if (fileText?.trim()) {
+    try {
+      file = JSON.parse(fileText) as Record<string, unknown>
+    } catch (error) {
+      return { error: `config.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (typeof file !== "object" || file === null || Array.isArray(file)) return { error: "config.json must hold an object" }
+  }
+  let config: EmbeddingConfig | null = null
+  if (changes === null) {
+    delete file.embeddings
+  } else {
+    const saved = file.embeddings as Record<string, unknown> | undefined
+    const merged: Record<string, unknown> = { ...saved, ...changes }
+    const moved = typeof saved?.url === "string" && typeof changes.url === "string" && !sameOrigin(saved.url, changes.url)
+    if (moved && changes.apiKey === undefined) delete merged.apiKey
+    const validated = validateEmbeddingConfig(merged)
+    if (!validated.config) return { error: validated.error ?? "invalid embedding configuration" }
+    file.embeddings = config = validated.config
+  }
+  return { text: `${JSON.stringify(file, null, 2)}\n`, config }
+}
+
 /** The subset of `fetch` the client uses, injected so shared code does no I/O of its own. */
 export type FetchLike = (url: string, init: { method: "POST"; headers: Record<string, string>; body: string; signal?: AbortSignal }) =>
   Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>
